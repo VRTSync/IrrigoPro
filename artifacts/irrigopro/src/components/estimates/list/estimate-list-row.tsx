@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,6 +10,8 @@ import {
 import type { Estimate } from "@workspace/db/schema";
 import type { LifecycleStatus } from "@/lib/lifecycle";
 import { EstimateListStatusBadge } from "./estimate-list-status-badge";
+import { authedPdfUrl } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 interface Props {
   estimate: Estimate;
@@ -34,6 +37,45 @@ function ageLabel(date: string | Date | null | undefined): string {
 
 export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit, onResendClick }: Props) {
   const isExpired = lifecycle === "expired";
+  const { toast } = useToast();
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+
+  const handleViewPdf = () => {
+    window.open(
+      authedPdfUrl(`/api/estimates/${estimate.id}/pdf`),
+      "_blank",
+      "noopener,noreferrer",
+    );
+  };
+
+  const handleDownloadPdf = async () => {
+    if (isDownloadingPdf) return;
+    setIsDownloadingPdf(true);
+    try {
+      const res = await fetch(
+        authedPdfUrl(`/api/estimates/${estimate.id}/pdf`, { download: "1" }),
+        { credentials: "include" },
+      );
+      if (!res.ok) throw new Error(`Failed (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `estimate-${estimate.estimateNumber}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      toast({
+        title: "Couldn't download PDF",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
   return (
     <div
       role="button"
@@ -71,6 +113,18 @@ export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit, onResendC
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => onOpen(estimate.id)}>Open</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onEdit(estimate.id)}>Edit</DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={handleViewPdf}
+              data-testid={`list-row-view-pdf-${estimate.id}`}
+            >
+              View PDF
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={handleDownloadPdf}
+              data-testid={`list-row-download-pdf-${estimate.id}`}
+            >
+              Download PDF
+            </DropdownMenuItem>
             <DropdownMenuItem
               disabled={!isExpired || !onResendClick}
               title={isExpired ? "Resend to customer" : "Only available for expired estimates"}

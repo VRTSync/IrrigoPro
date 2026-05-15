@@ -227,6 +227,29 @@ export function authedPhotoSrc(
   return `/api/photos/${encodeURIComponent(photoId)}${qs ? `?${qs}` : ""}`;
 }
 
+// Task #605 — build an authenticated URL for opening a PDF in a new tab
+// or as a download. Browsers don't attach `x-user-*` headers to top-level
+// navigations / anchor clicks, so we mirror them as query params (the
+// server's `requireAuthentication` middleware accepts the same identifiers
+// from the URL when `ALLOW_HEADER_AUTH` is set, same fallback as
+// `authedPhotoSrc` above).
+export function authedPdfUrl(path: string, extraParams?: Record<string, string>): string {
+  const raw = safeGet("user");
+  let user: { id?: number | string; role?: string; companyId?: number | string } | null = null;
+  if (raw) {
+    try { user = JSON.parse(raw); } catch { user = null; }
+  }
+  const params = new URLSearchParams();
+  if (user?.id != null) params.set("x-user-id", String(user.id));
+  if (user?.role) params.set("x-user-role", user.role);
+  if (user?.companyId != null) params.set("x-user-company-id", String(user.companyId));
+  if (extraParams) {
+    for (const [k, v] of Object.entries(extraParams)) params.set(k, v);
+  }
+  const qs = params.toString();
+  return `${path}${qs ? `?${qs}` : ""}`;
+}
+
 // Task #540 — null-safe array helper for list payloads.
 //
 // `getQueryFn` above returns `null` on a 401 in `returnNull` mode, and

@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
-import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink, Send } from "lucide-react";
+import { queryClient, apiRequest, authedPdfUrl } from "@/lib/queryClient";
+import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink, Send, Eye, Download } from "lucide-react";
 import { buildMapsUrl } from "@/lib/maps-url";
 import type { Estimate } from "@workspace/db/schema";
 import { ResendConfirmDialog } from "@/components/estimates/resend-confirm-dialog";
@@ -24,11 +24,74 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   const [isConverting, setIsConverting] = useState(false);
   const [showResendDialog, setShowResendDialog] = useState(false);
   const { resendEstimate, isResending } = useEstimateResend();
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [isViewingPdf, setIsViewingPdf] = useState(false);
 
   const { data: estimate, isLoading } = useQuery<any>({
     queryKey: ["/api/estimates", estimateId],
     enabled: !!estimateId && open,
   });
+
+  // Open the PDF as a blob URL in a new tab so we can surface a loading
+  // state while puppeteer renders, and so we can show a toast if the
+  // server returns an error (a direct anchor would silently render an
+  // error page in the new tab).
+  const handleViewPdf = async () => {
+    if (!estimateId || isViewingPdf) return;
+    setIsViewingPdf(true);
+    try {
+      const url = authedPdfUrl(`/api/estimates/${estimateId}/pdf`);
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error(`Failed (${res.status})`);
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const win = window.open(objUrl, "_blank", "noopener,noreferrer");
+      if (!win) {
+        toast({
+          title: "Pop-up blocked",
+          description: "Allow pop-ups for this site or use Download PDF instead.",
+          variant: "destructive",
+        });
+      }
+      setTimeout(() => URL.revokeObjectURL(objUrl), 60_000);
+    } catch (err) {
+      toast({
+        title: "Couldn't open PDF",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsViewingPdf(false);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!estimateId) return;
+    setIsDownloadingPdf(true);
+    try {
+      const url = authedPdfUrl(`/api/estimates/${estimateId}/pdf`, { download: "1" });
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error(`Failed (${res.status})`);
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objUrl;
+      const num = estimate?.estimateNumber as string | undefined;
+      a.download = num ? `estimate-${num}.pdf` : "estimate.pdf";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
+    } catch (err) {
+      toast({
+        title: "Couldn't download PDF",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
 
   const handleConfirmResend = async () => {
     if (!estimate || !estimateId) return;
@@ -478,6 +541,26 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                   className="w-full sm:w-auto"
                 >
                   Close
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleViewPdf}
+                  disabled={isViewingPdf}
+                  className="w-full sm:w-auto"
+                  data-testid="detail-modal-view-pdf"
+                >
+                  <Eye className="w-4 h-4 mr-2" />
+                  {isViewingPdf ? "Opening..." : "View PDF"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleDownloadPdf}
+                  disabled={isDownloadingPdf}
+                  className="w-full sm:w-auto"
+                  data-testid="detail-modal-download-pdf"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  {isDownloadingPdf ? "Preparing..." : "Download PDF"}
                 </Button>
                 {estimate.lifecycleStatus === 'expired' && (
                   <Button

@@ -11655,7 +11655,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // Task #348: produces a real PDF (puppeteer) that includes the project
   // address, the pinned work-location coordinates, and a Google Maps link
   // so customers and dispatch can confirm the exact work area.
-  app.post("/api/estimates/:id/pdf", requireAuthentication, requireEstimateApprovalAccess, async (req: any, res) => {
+  // Task #605 — shared handler for the polished estimate PDF. The legacy
+  // POST route stays for back-compat; a new GET route powers View/Download
+  // from the UI (?download=1 switches to attachment disposition).
+  const handleEstimatePdf = async (req: any, res: any) => {
     try {
       const id = parseInt(req.params.id);
       const estimate = await storage.getEstimate(id);
@@ -11668,20 +11671,28 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
-      const { renderEstimatePdf } = await import('../estimate-pdf');
-      const pdf = await renderEstimatePdf(estimate);
+      const company = estimate.companyId
+        ? await storage.getCompanyProfile(estimate.companyId)
+        : undefined;
 
+      const { renderEstimatePdf } = await import('../estimate-pdf');
+      const pdf = await renderEstimatePdf(estimate, { company: company ?? null });
+
+      const wantsDownload = String(req.query?.download ?? '') === '1';
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
         'Content-Disposition',
-        `inline; filename="estimate-${estimate.estimateNumber}.pdf"`,
+        `${wantsDownload ? 'attachment' : 'inline'}; filename="estimate-${estimate.estimateNumber}.pdf"`,
       );
       res.send(pdf);
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to generate PDF" });
     }
-  });
+  };
+
+  app.post("/api/estimates/:id/pdf", requireAuthentication, requireEstimateApprovalAccess, handleEstimatePdf);
+  app.get("/api/estimates/:id/pdf", requireAuthentication, requireEstimateApprovalAccess, handleEstimatePdf);
 
   // Work Order routes - Enhanced
   // Note: Pricing fields are stripped for field_tech role via applyPricingVisibility
