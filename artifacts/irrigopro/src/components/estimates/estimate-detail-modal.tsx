@@ -24,6 +24,32 @@ interface EstimateDetailModalProps {
   onEdit?: (estimateId: number) => void;
 }
 
+// Task #630 — keep this in lockstep with the server-side
+// `ESTIMATE_PDF_READ_ROLES` set in routes.ts. If a role isn't in this
+// list the View/Download PDF buttons don't render at all, so the user
+// never sees an action that would 403 against the PDF endpoint. The
+// server still enforces the gate authoritatively — this is just
+// UI hygiene.
+const PDF_READ_ROLES = new Set<string>([
+  "super_admin",
+  "company_admin",
+  "billing_manager",
+  "manager",
+  "irrigation_manager",
+]);
+
+function readCurrentUserRole(): string | null {
+  try {
+    if (typeof window === "undefined") return null;
+    const raw = window.localStorage.getItem("user");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { role?: string };
+    return typeof parsed?.role === "string" ? parsed.role : null;
+  } catch {
+    return null;
+  }
+}
+
 export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: EstimateDetailModalProps) {
   const { toast } = useToast();
   const [isConverting, setIsConverting] = useState(false);
@@ -32,6 +58,11 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isViewingPdf, setIsViewingPdf] = useState(false);
   const [showSendDialog, setShowSendDialog] = useState(false);
+
+  // Compute once per mount — the user's role rarely changes during a
+  // session and we don't want this gate to flicker as React re-renders.
+  const currentRole = readCurrentUserRole();
+  const canSeeEstimatePdf = currentRole != null && PDF_READ_ROLES.has(currentRole);
 
   const { data: estimate, isLoading } = useQuery<any>({
     queryKey: ["/api/estimates", estimateId],
@@ -42,13 +73,34 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   // state while puppeteer renders, and so we can show a toast if the
   // server returns an error (a direct anchor would silently render an
   // error page in the new tab).
+  // Task #630 — extract the server's `{ message }` when the PDF
+  // endpoint returns a JSON error. Previously this only surfaced
+  // "Failed (403)" style strings, which hid the real cause (typically
+  // "Access denied. Estimate approval and customer delivery are
+  // restricted to billing managers and administrators.") from the user.
+  const extractPdfError = async (res: Response): Promise<string> => {
+    try {
+      const ct = res.headers.get("content-type") ?? "";
+      if (ct.includes("application/json")) {
+        const body = (await res.json()) as { message?: string };
+        if (body?.message) return body.message;
+      } else {
+        const text = await res.text();
+        if (text) return text;
+      }
+    } catch {
+      // fall through to status-only message
+    }
+    return `Failed (${res.status})`;
+  };
+
   const handleViewPdf = async () => {
     if (!estimateId || isViewingPdf) return;
     setIsViewingPdf(true);
     try {
       const url = authedPdfUrl(`/api/estimates/${estimateId}/pdf`);
       const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) throw new Error(`Failed (${res.status})`);
+      if (!res.ok) throw new Error(await extractPdfError(res));
       const blob = await res.blob();
       const objUrl = URL.createObjectURL(blob);
       const win = window.open(objUrl, "_blank", "noopener,noreferrer");
@@ -72,18 +124,19 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   };
 
   const handleDownloadPdf = async () => {
-    if (!estimateId) return;
+    if (!estimateId || isDownloadingPdf) return;
     setIsDownloadingPdf(true);
     try {
       const url = authedPdfUrl(`/api/estimates/${estimateId}/pdf`, { download: "1" });
       const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) throw new Error(`Failed (${res.status})`);
+      if (!res.ok) throw new Error(await extractPdfError(res));
       const blob = await res.blob();
       const objUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = objUrl;
       const num = estimate?.estimateNumber as string | undefined;
       a.download = num ? `estimate-${num}.pdf` : "estimate.pdf";
+      a.rel = "noopener";
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -540,105 +593,131 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
               </div>
             </div>
 
-            {/* Fixed Footer with Actions */}
-            <div className="flex-shrink-0 p-4 sm:p-6 border-t border-gray-200 bg-gray-50">
-              <div className="flex flex-col sm:flex-row justify-end gap-3">
-                <Button 
-                  variant="outline" 
-                  onClick={() => onOpenChange(false)}
-                  className="w-full sm:w-auto"
-                >
-                  Close
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={handleViewPdf}
-                  disabled={isViewingPdf}
-                  className="w-full sm:w-auto"
-                  data-testid="detail-modal-view-pdf"
-                >
-                  <Eye className="w-4 h-4 mr-2" />
-                  {isViewingPdf ? "Opening..." : "View PDF"}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={handleDownloadPdf}
-                  disabled={isDownloadingPdf}
-                  className="w-full sm:w-auto"
-                  data-testid="detail-modal-download-pdf"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  {isDownloadingPdf ? "Preparing..." : "Download PDF"}
-                </Button>
-                {estimate.lifecycleStatus === 'expired' && (
+            {/* Fixed Footer with Actions — Task #630.
+                Wraps cleanly on small viewports (375px phone, 768px
+                tablet, 1024×600 laptop). Secondary actions (Close,
+                View, Download, Resend, Edit) live in a wrap-capable
+                group on the left; primary actions (Email, Approve,
+                Reject, Convert to Work Order) stay anchored to the
+                right and also wrap if necessary. The footer itself
+                is flex-shrink-0 so the scrollable body above it
+                takes the overflow instead of pushing the footer off
+                screen. */}
+            <div
+              className="flex-shrink-0 p-4 sm:p-6 border-t border-gray-200 bg-gray-50"
+              data-testid="detail-modal-footer"
+            >
+              <div className="flex flex-col-reverse sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-3">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-3">
                   <Button
-                    onClick={() => setShowResendDialog(true)}
                     variant="outline"
-                    className="border-orange-200 text-orange-700 hover:bg-orange-50 w-full sm:w-auto"
-                    data-testid="detail-modal-resend"
+                    onClick={() => onOpenChange(false)}
+                    className="w-full sm:w-auto"
+                    data-testid="detail-modal-close"
                   >
-                    <Send className="w-4 h-4 mr-2" />
-                    Resend
+                    Close
                   </Button>
-                )}
-                {estimate.status !== 'converted_to_work_order' && onEdit && (
-                  <Button
-                    onClick={() => {
-                      onEdit(estimateId!);
-                      onOpenChange(false);
-                    }}
-                    variant="outline"
-                    className="border-blue-200 text-blue-600 hover:bg-blue-50 w-full sm:w-auto"
-                  >
-                    <Edit2 className="w-4 h-4 mr-2" />
-                    {estimate.lifecycleStatus === 'draft' || estimate.internalStatus === 'draft'
-                      ? 'Continue editing'
-                      : 'Edit Estimate'}
-                  </Button>
-                )}
-                {/* Approval Actions for Pending Estimates */}
-                {estimate.status === 'pending' && (
-                  <>
+                  {canSeeEstimatePdf && (
+                    <>
+                      <Button
+                        variant="outline"
+                        onClick={handleViewPdf}
+                        disabled={isViewingPdf}
+                        className="w-full sm:w-auto"
+                        data-testid="detail-modal-view-pdf"
+                      >
+                        <Eye className="w-4 h-4 mr-2" />
+                        {isViewingPdf ? "Opening..." : "View PDF"}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={handleDownloadPdf}
+                        disabled={isDownloadingPdf}
+                        className="w-full sm:w-auto"
+                        data-testid="detail-modal-download-pdf"
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        {isDownloadingPdf ? "Preparing..." : "Download PDF"}
+                      </Button>
+                    </>
+                  )}
+                  {estimate.lifecycleStatus === 'expired' && (
                     <Button
-                      onClick={() => setShowSendDialog(true)}
-                      disabled={sendApprovalEmailMutation?.isPending}
-                      className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
-                      data-testid="detail-modal-send-email"
+                      onClick={() => setShowResendDialog(true)}
+                      variant="outline"
+                      className="border-orange-200 text-orange-700 hover:bg-orange-50 w-full sm:w-auto"
+                      data-testid="detail-modal-resend"
                     >
-                      <Mail className="w-4 h-4 mr-2" />
-                      {sendApprovalEmailMutation?.isPending ? 'Sending...' : 'Email Customer'}
+                      <Send className="w-4 h-4 mr-2" />
+                      Resend
                     </Button>
-                    <Button 
-                      onClick={() => approveEstimateMutation.mutate()}
-                      disabled={approveEstimateMutation.isPending}
-                      className="bg-green-600 hover:bg-green-700 w-full sm:w-auto"
+                  )}
+                  {estimate.status !== 'converted_to_work_order' && onEdit && (
+                    <Button
+                      onClick={() => {
+                        onEdit(estimateId!);
+                        onOpenChange(false);
+                      }}
+                      variant="outline"
+                      className="border-blue-200 text-blue-600 hover:bg-blue-50 w-full sm:w-auto"
+                      data-testid="detail-modal-edit"
                     >
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      {approveEstimateMutation.isPending ? 'Approving...' : 'Approve'}
+                      <Edit2 className="w-4 h-4 mr-2" />
+                      {estimate.lifecycleStatus === 'draft' || estimate.internalStatus === 'draft'
+                        ? 'Continue editing'
+                        : 'Edit Estimate'}
                     </Button>
-                    <Button 
-                      onClick={() => rejectEstimateMutation.mutate()}
-                      disabled={rejectEstimateMutation.isPending}
-                      variant="destructive"
-                      className="w-full sm:w-auto"
-                    >
-                      <XCircle className="w-4 h-4 mr-2" />
-                      {rejectEstimateMutation.isPending ? 'Rejecting...' : 'Reject'}
-                    </Button>
-                  </>
-                )}
+                  )}
+                </div>
 
-                {/* Convert to Work Order for Approved Estimates */}
-                {estimate.status === 'approved' && (
-                  <Button 
-                    onClick={handleConvertToWorkOrder}
-                    disabled={isConverting}
-                    className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
-                  >
-                    <Wrench className="w-4 h-4 mr-2" />
-                    {isConverting ? 'Converting...' : 'Convert to Work Order'}
-                  </Button>
-                )}
+                <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-3 sm:justify-end">
+                  {/* Approval Actions for Pending Estimates */}
+                  {estimate.status === 'pending' && (
+                    <>
+                      <Button
+                        onClick={() => setShowSendDialog(true)}
+                        disabled={sendApprovalEmailMutation?.isPending}
+                        className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
+                        data-testid="detail-modal-send-email"
+                      >
+                        <Mail className="w-4 h-4 mr-2" />
+                        {sendApprovalEmailMutation?.isPending ? 'Sending...' : 'Email Customer'}
+                      </Button>
+                      <Button
+                        onClick={() => approveEstimateMutation.mutate()}
+                        disabled={approveEstimateMutation.isPending}
+                        className="bg-green-600 hover:bg-green-700 w-full sm:w-auto"
+                        data-testid="detail-modal-approve"
+                      >
+                        <CheckCircle className="w-4 h-4 mr-2" />
+                        {approveEstimateMutation.isPending ? 'Approving...' : 'Approve'}
+                      </Button>
+                      <Button
+                        onClick={() => rejectEstimateMutation.mutate()}
+                        disabled={rejectEstimateMutation.isPending}
+                        variant="destructive"
+                        className="w-full sm:w-auto"
+                        data-testid="detail-modal-reject"
+                      >
+                        <XCircle className="w-4 h-4 mr-2" />
+                        {rejectEstimateMutation.isPending ? 'Rejecting...' : 'Reject'}
+                      </Button>
+                    </>
+                  )}
+
+                  {/* Convert to Work Order for Approved Estimates */}
+                  {estimate.status === 'approved' && (
+                    <Button
+                      onClick={handleConvertToWorkOrder}
+                      disabled={isConverting}
+                      className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
+                      data-testid="detail-modal-convert"
+                    >
+                      <Wrench className="w-4 h-4 mr-2" />
+                      {isConverting ? 'Converting...' : 'Convert to Work Order'}
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           </>

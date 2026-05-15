@@ -149,6 +149,17 @@ export default function AdminDashboard() {
   const zeroPriceAuditQ = useQuery<CountResp>({ queryKey: ["/api/admin/billing-sheets/zero-price-audit"], enabled: !!user?.companyId });
   const laborRateAuditQ = useQuery<CountResp>({ queryKey: ["/api/admin/labor-rate-audit"], enabled: !!user?.companyId });
   const wetCheckPendingQ = useArrayQuery<unknown>({ queryKey: ["/api/wet-checks/pending-review"], enabled: !!user?.companyId });
+  // Task #630 — read the same endpoint the /estimates/pending-approval
+  // page reads, so the tile count and the list length cannot drift.
+  // Previously this number was derived by filtering /api/estimates
+  // client-side on `status === pending|sent`, which used a different
+  // filter (customer-facing status) than the server's pending-approval
+  // query (internalStatus in pending_approval, approved_internal) and
+  // produced different numbers (e.g. 6 in the list vs 4 in the tile).
+  const estimatesPendingApprovalQ = useArrayQuery<unknown>({
+    queryKey: ["/api/estimates/pending-approval"],
+    enabled: !!user?.companyId,
+  });
 
   // ----- Derived metrics -----
 
@@ -242,9 +253,11 @@ export default function AdminDashboard() {
     const pendingMgrReview = (billingSheetsQ.data ?? []).filter(
       (b) => b.status === "submitted" || b.status === "pending_manager_review"
     ).length;
-    const estimatesPending = (estimatesQ.data ?? []).filter(
-      (e) => e.status === "pending" || e.status === "sent"
-    ).length;
+    // Task #630 — equals the row count on /estimates/pending-approval
+    // (same endpoint, same role/company scope). Use the wrapper's
+    // resolved `.data` (always an array) directly so a 401 collapses
+    // to 0 instead of crashing on `.length`.
+    const estimatesPending = (estimatesPendingApprovalQ.data ?? []).length;
     const wetChecksPending = Array.isArray(wetCheckPendingQ.data) ? wetCheckPendingQ.data.length : 0;
 
     // Customer rollups derived from billing-preview (same definitions used by /billing-dashboard)
@@ -268,22 +281,26 @@ export default function AdminDashboard() {
       { key: "missing-photos",  label: "Missing photos (billing sheets)",count: bsMissing,            href: "/billing-sheets/missing-photos",  icon: AttentionIcons.Camera,      tone: "amber" },
       { key: "missing-photos-wo",label: "Missing photos (work orders)",  count: woMissing,            href: "/work-orders/missing-photos",     icon: AttentionIcons.Camera,      tone: "amber" },
       { key: "parts-approval",  label: "Parts pending approval",         count: partsCount,           href: "/parts-pending-approval",         icon: AttentionIcons.Package,     tone: "blue" },
-      { key: "estimates-pend",  label: "Estimates awaiting customer",    count: estimatesPending,     href: "/operations",                     icon: AttentionIcons.FileWarning, tone: "blue" },
+      { key: "estimates-pend",  label: "Estimates pending approval",     count: estimatesPending,     href: "/estimates/pending-approval",     icon: AttentionIcons.FileWarning, tone: "blue" },
       { key: "zero-price",      label: "Zero-price catalog items",       count: zeroPrice,            href: "/billing-sheets/zero-price-audit",icon: AttentionIcons.DollarSign,  tone: "red" },
       { key: "labor-rate",      label: "Labor-rate mismatches",          count: laborMismatch,        href: "/billing-sheets/labor-rate-audit",icon: AttentionIcons.Wrench,      tone: "red" },
       { key: "wet-checks",      label: "Wet checks pending review",      count: wetChecksPending,     href: "/wet-checks/pending-review",      icon: AttentionIcons.Droplets,    tone: "amber" },
     ];
   }, [
+    // Task #630 — `estimatesQ.data` is intentionally NOT in this list:
+    // the estimates tile now derives from `estimatesPendingApprovalQ`,
+    // and the full estimates list still feeds other panels below
+    // (charts / drill-ins), which have their own memos/effects.
     partsApprovalQ.data, manualPartReviewsQ.data, bsMissingPhotosQ.data, woMissingPhotosQ.data,
-    zeroPriceAuditQ.data, laborRateAuditQ.data, billingSheetsQ.data, estimatesQ.data, wetCheckPendingQ.data,
-    workOrdersQ.data, billingPreviewQ.data,
+    zeroPriceAuditQ.data, laborRateAuditQ.data, billingSheetsQ.data, wetCheckPendingQ.data,
+    workOrdersQ.data, billingPreviewQ.data, estimatesPendingApprovalQ.data,
   ]);
 
   // System health
   const attentionLoading =
     partsApprovalQ.isLoading || manualPartReviewsQ.isLoading || bsMissingPhotosQ.isLoading ||
     woMissingPhotosQ.isLoading || zeroPriceAuditQ.isLoading || laborRateAuditQ.isLoading ||
-    billingSheetsQ.isLoading || estimatesQ.isLoading || wetCheckPendingQ.isLoading;
+    billingSheetsQ.isLoading || estimatesPendingApprovalQ.isLoading || wetCheckPendingQ.isLoading;
 
   const { health, healthLabel } = useMemo<{ health: Health; healthLabel: string }>(() => {
     const visible = attentionRows.filter((r) => r.count > 0);

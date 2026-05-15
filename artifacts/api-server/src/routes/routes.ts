@@ -543,6 +543,33 @@ const requireEstimateApprovalAccess = (req: any, res: any, next: any) => {
   next();
 };
 
+// Task #630 — read-only access guard for the estimate PDF endpoint.
+// Rendering or downloading the PDF is not a mutation (approve / reject /
+// send-to-customer), so the role list is wider than
+// requireEstimateApprovalAccess: managers (both `manager` and the
+// legacy `irrigation_manager` alias) are operationally responsible for
+// estimate review and need to see the document. field_tech is the only
+// role explicitly excluded — techs see a pricing-stripped view in the
+// app and should not be able to pull the full priced PDF.
+const ESTIMATE_PDF_READ_ROLES = new Set<string>([
+  'super_admin',
+  'company_admin',
+  'billing_manager',
+  'manager',
+  'irrigation_manager',
+]);
+const requireEstimatePdfAccess = (req: any, res: any, next: any) => {
+  const userRole = req.authenticatedUserRole;
+  if (!ESTIMATE_PDF_READ_ROLES.has(userRole)) {
+    res.status(403).json({
+      message:
+        "Access denied. The estimate PDF is restricted to managers and administrators.",
+    });
+    return;
+  }
+  next();
+};
+
 // Cross-company ownership guard for estimate approval routes. Returns
 // 404 (not 403) when an estimate belongs to a different company so callers
 // cannot probe for existence. super_admin bypasses the check.
@@ -11867,8 +11894,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   };
 
-  app.post("/api/estimates/:id/pdf", requireAuthentication, requireEstimateApprovalAccess, handleEstimatePdf);
-  app.get("/api/estimates/:id/pdf", requireAuthentication, requireEstimateApprovalAccess, handleEstimatePdf);
+  app.post("/api/estimates/:id/pdf", requireAuthentication, requireEstimatePdfAccess, handleEstimatePdf);
+  app.get("/api/estimates/:id/pdf", requireAuthentication, requireEstimatePdfAccess, handleEstimatePdf);
 
   // Work Order routes - Enhanced
   // Note: Pricing fields are stripped for field_tech role via applyPricingVisibility
