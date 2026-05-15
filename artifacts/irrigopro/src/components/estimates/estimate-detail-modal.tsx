@@ -314,7 +314,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       case 'expired':
         return 'Expired';
       case 'converted_to_work_order':
-        return 'Approved (converted)';
+        return 'Approved';
       default:
         return '—';
     }
@@ -413,32 +413,24 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                   </div>
                   <div>
                     <span className="font-medium text-gray-700">Status:</span>
-                    {/* Task #637 — the headline badge is now the
-                        computed lifecycle bucket, matching the list
-                        rows and board columns so all three surfaces
-                        agree. The accent line under it (Customer
-                        Approved! / Work Order Active!) is kept for
-                        the two terminal-success cases so the screen
-                        still reads as celebratory. The two axes
-                        below expose what moved last. */}
-                    <div className="mt-1 flex items-center space-x-2">
-                      <EstimateListStatusBadge
-                        status={
-                          (estimate.lifecycleStatus as LifecycleStatus | undefined) ??
-                          computeLifecycleStatus({
-                            status: estimate.status,
-                            internalStatus: estimate.internalStatus,
-                            estimateDate: estimate.estimateDate ?? null,
-                          })
-                        }
-                      />
-                      {estimate.status === 'approved' && (
-                        <span className="text-green-600 text-sm font-medium">Customer Approved!</span>
-                      )}
-                      {estimate.status === 'converted_to_work_order' && (
-                        <span className="text-purple-600 text-sm font-medium">Work Order Active!</span>
-                      )}
-                    </div>
+                    {/* Task #637 — the headline lifecycle badge lives
+                        in the DialogHeader as the single source of
+                        truth. Here we keep only the celebratory
+                        accent line for the two terminal-success
+                        cases plus the two axis-specific labels
+                        ("Review stage" + "Customer response") so the
+                        screen exposes what moved last without
+                        duplicating the badge itself. */}
+                    {(estimate.status === 'approved' ||
+                      estimate.status === 'converted_to_work_order') && (
+                      <div className="mt-1 text-sm font-medium">
+                        {estimate.status === 'approved' ? (
+                          <span className="text-green-600">Customer Approved!</span>
+                        ) : (
+                          <span className="text-purple-600">Work Order Active!</span>
+                        )}
+                      </div>
+                    )}
                     <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs text-gray-600">
                       <div>
                         <span className="font-medium text-gray-500">Review stage:</span>{' '}
