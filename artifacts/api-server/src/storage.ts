@@ -420,6 +420,22 @@ export interface IStorage {
   getEstimate(id: number): Promise<EstimateWithItems | undefined>;
   createEstimate(estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems>;
   updateEstimate(id: number, estimate: Partial<InsertEstimate>): Promise<Estimate | undefined>;
+  // Task #611 — conditional lifecycle transitions. Each one pins the
+  // current status / internalStatus in the WHERE clause so concurrent
+  // requests can't both succeed. Return undefined when the
+  // precondition is not met (or the row is missing).
+  rejectEstimateIfPending(id: number): Promise<Estimate | undefined>;
+  internallyApproveEstimateIfPending(id: number): Promise<Estimate | undefined>;
+  markEstimateSentToCustomer(
+    id: number,
+    args: {
+      approvalToken: string;
+      tokenExpiresAt: Date;
+      approvalSentAt: Date;
+      newEstimateDate: Date | null;
+      isResend: boolean;
+    },
+  ): Promise<Estimate | undefined>;
   updateEstimateWithItems(id: number, estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems>;
   deleteEstimate(id: number): Promise<boolean>;
 
@@ -485,6 +501,17 @@ export interface IStorage {
   getWorkOrder(id: number): Promise<WorkOrder | undefined>;
   createWorkOrder(workOrder: InsertWorkOrder, estimateItems?: EstimateItem[]): Promise<WorkOrder>;
   createWorkOrderFromEstimate(estimateId: number): Promise<WorkOrder>;
+  // Task #611 — atomic "approve estimate" lifecycle action. Flips the
+  // estimate to `approved`, auto-creates the work order (with items),
+  // auto-assigns to the company's irrigation manager, and writes the
+  // assignment notification — all in a single DB transaction so the
+  // estimate cannot end up approved-without-a-work-order if any
+  // downstream step fails.
+  approveEstimateAndCreateWorkOrder(estimateId: number): Promise<{
+    estimate: Estimate;
+    workOrder: WorkOrder | null;
+    assignedTechnician: User | null;
+  }>;
   updateWorkOrder(id: number, workOrder: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined>;
   deleteWorkOrder(id: number): Promise<boolean>;
   hasInvoiceItems(workOrderId: number): Promise<boolean>;
@@ -1979,6 +2006,77 @@ export class DatabaseStorage implements IStorage {
     return { ...updatedEstimate, lifecycleStatus: computeLifecycleStatus(updatedEstimate) } as Estimate;
   }
 
+  // Task #611 — conditional reject. The WHERE clause pins
+  // `status='pending'` so two concurrent reject (or approve+reject)
+  // requests can't both succeed: the second writer's UPDATE matches
+  // zero rows and returns undefined, which the route turns into a 400.
+  async rejectEstimateIfPending(id: number): Promise<Estimate | undefined> {
+    const [updated] = await db.update(estimates)
+      .set({ status: "rejected", rejectedAt: new Date() })
+      .where(and(eq(estimates.id, id), eq(estimates.status, "pending")))
+      .returning();
+    if (!updated) return undefined;
+    return { ...updated, lifecycleStatus: computeLifecycleStatus(updated) } as Estimate;
+  }
+
+  // Task #611 — conditional internal-approve. Same idea as
+  // rejectEstimateIfPending but on the internal-review track.
+  async internallyApproveEstimateIfPending(id: number): Promise<Estimate | undefined> {
+    const [updated] = await db.update(estimates)
+      .set({ internalStatus: "approved_internal" })
+      .where(and(eq(estimates.id, id), eq(estimates.internalStatus, "pending_approval")))
+      .returning();
+    if (!updated) return undefined;
+    return { ...updated, lifecycleStatus: computeLifecycleStatus(updated) } as Estimate;
+  }
+
+  // Task #611 — CAS-style "mark estimate sent to customer". A single
+  // conditional UPDATE: only flips the row if it's still in one of
+  // the two valid pre-send states (or, for the `resend` flow, if the
+  // estimate's `status='expired'`). Two concurrent send requests
+  // therefore can't both stamp tokens — the loser sees zero rows
+  // updated and the caller surfaces a 409. Returns undefined on
+  // conflict.
+  async markEstimateSentToCustomer(
+    id: number,
+    args: {
+      approvalToken: string;
+      tokenExpiresAt: Date;
+      approvalSentAt: Date;
+      newEstimateDate: Date | null;
+      isResend: boolean;
+    },
+  ): Promise<Estimate | undefined> {
+    const setClause: Partial<InsertEstimate> = {
+      approvalToken: args.approvalToken,
+      tokenExpiresAt: args.tokenExpiresAt,
+      approvalSentAt: args.approvalSentAt,
+      internalStatus: "sent_to_customer",
+    };
+    if (args.newEstimateDate) {
+      (setClause as { estimateDate?: Date }).estimateDate = args.newEstimateDate;
+    }
+    // The `resend` flow is the only legitimate path that can re-stamp
+    // a row whose internalStatus is already `sent_to_customer` (the
+    // customer-facing `status` is `expired`). For the normal send,
+    // gate on internalStatus being a pre-send value.
+    const whereClause = args.isResend
+      ? and(eq(estimates.id, id), eq(estimates.status, "expired"))
+      : and(
+          eq(estimates.id, id),
+          or(
+            eq(estimates.internalStatus, "pending_approval"),
+            eq(estimates.internalStatus, "approved_internal"),
+          ),
+        );
+    const [updated] = await db.update(estimates)
+      .set(setClause)
+      .where(whereClause)
+      .returning();
+    if (!updated) return undefined;
+    return { ...updated, lifecycleStatus: computeLifecycleStatus(updated) } as Estimate;
+  }
+
   async updateEstimateWithItems(id: number, estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems> {
     return await db.transaction(async (tx) => {
       const [updatedEstimate] = await tx.update(estimates).set(estimate).where(eq(estimates.id, id)).returning();
@@ -2784,6 +2882,172 @@ export class DatabaseStorage implements IStorage {
       .where(eq(estimates.id, estimateId));
 
     return newWorkOrder;
+  }
+
+  // Task #611 — atomic estimate-approval lifecycle. Wraps the four
+  // sequential writes the route used to do (set status=approved → insert
+  // work order → insert work-order items → update estimate.workOrderId
+  // → assign work order to the irrigation manager → write the
+  // assignment notification) in a single `db.transaction` so a failure
+  // anywhere along the chain rolls the whole thing back. Previously the
+  // PATCH /api/estimates/:id/approve route ran these as separate
+  // top-level `db.` calls and explicitly tolerated a partial
+  // application (the estimate could go approved with no work order if
+  // `createWorkOrderFromEstimate` threw). That left a half-applied
+  // state behind the single "Approve" button — exactly the pattern
+  // Task #611 sweeps out.
+  async approveEstimateAndCreateWorkOrder(estimateId: number): Promise<{
+    estimate: Estimate;
+    workOrder: WorkOrder | null;
+    assignedTechnician: User | null;
+  }> {
+    return await db.transaction(async (tx) => {
+      // Re-read the estimate inside the transaction *with a row lock*
+      // (`SELECT ... FOR UPDATE`) so two concurrent approve requests
+      // serialize on this row instead of both passing the
+      // `status === 'pending'` precheck and racing into two work-order
+      // inserts. The second waiter sees `status === 'approved'` once
+      // the first commits and is rejected by the precondition below.
+      const [existing] = await tx.select().from(estimates)
+        .where(eq(estimates.id, estimateId))
+        .for("update");
+      if (!existing) {
+        throw new Error(`Estimate ${estimateId} not found`);
+      }
+      if (existing.status !== "pending") {
+        throw new Error("Only pending estimates can be approved");
+      }
+
+      // Reject if a work order already exists — mirrors the guard in
+      // `createWorkOrderFromEstimate` but checked atomically here.
+      const priorWorkOrders = await tx.select({ id: workOrders.id })
+        .from(workOrders)
+        .where(eq(workOrders.estimateId, estimateId));
+      if (priorWorkOrders.length > 0) {
+        throw new Error(`Work order already exists for estimate ${estimateId}`);
+      }
+
+      // 1. Flip the estimate to approved. The `status='pending'` guard
+      // in the WHERE clause is belt-and-braces: combined with the row
+      // lock above it makes the transition idempotent under
+      // concurrency — the second writer's UPDATE matches zero rows
+      // and we abort.
+      const [approvedEstimate] = await tx.update(estimates)
+        .set({
+          status: "approved",
+          approvalSource: "manual",
+          approvedAt: new Date(),
+        })
+        .where(and(eq(estimates.id, estimateId), eq(estimates.status, "pending")))
+        .returning();
+      if (!approvedEstimate) {
+        throw new Error("Only pending estimates can be approved");
+      }
+
+      // Load full estimate (with items) for the work-order snapshot.
+      const items = await tx.select().from(estimateItems)
+        .where(eq(estimateItems.estimateId, estimateId))
+        .orderBy(estimateItems.sortOrder);
+
+      // 2. Insert the work order, snapshotting the estimate's pricing
+      // and location context exactly like createWorkOrderFromEstimate
+      // does (the two paths must stay equivalent).
+      const workOrderNumber = `WO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const workOrderData: InsertWorkOrder & { workOrderNumber: string } = {
+        workOrderNumber,
+        estimateId,
+        customerId: approvedEstimate.customerId!,
+        customerName: approvedEstimate.customerName,
+        customerEmail: approvedEstimate.customerEmail,
+        customerPhone: approvedEstimate.customerPhone,
+        projectName: approvedEstimate.projectName,
+        projectAddress: approvedEstimate.projectAddress,
+        locationNotes: approvedEstimate.locationNotes,
+        accessInstructions: approvedEstimate.accessInstructions,
+        ...(approvedEstimate.workDescription
+          ? { description: approvedEstimate.workDescription }
+          : {}),
+        workLocationLat: approvedEstimate.workLocationLat,
+        workLocationLng: approvedEstimate.workLocationLng,
+        workLocationAddress: approvedEstimate.workLocationAddress,
+        controllerLetter: approvedEstimate.controllerLetter,
+        zoneNumber: approvedEstimate.zoneNumber,
+        workType: "estimate_based",
+        status: "pending",
+        priority: "medium",
+        laborRate: approvedEstimate.laborRate,
+        laborSubtotal: approvedEstimate.laborSubtotal,
+        partsSubtotal: approvedEstimate.partsSubtotal,
+        estimatedTotal: approvedEstimate.totalAmount,
+        totalAmount: approvedEstimate.totalAmount,
+        totalItems: items.length,
+        laborMode: (approvedEstimate as unknown as { laborMode?: string }).laborMode ?? "flat",
+        totalHours: (approvedEstimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? null,
+      };
+
+      const [newWorkOrder] = await tx.insert(workOrders)
+        .values(toDrizzleInsert<DrizzleWorkOrderInsert>(workOrderData))
+        .returning();
+
+      // 3. Insert work-order items.
+      for (const item of items) {
+        await tx.insert(workOrderItems).values({
+          workOrderId: newWorkOrder.id,
+          partId: item.partId,
+          partName: item.partName,
+          partPrice: item.partPrice,
+          quantity: item.quantity,
+          laborHours: item.laborHours,
+          totalPrice: item.totalPrice,
+        });
+      }
+
+      // 4. Back-link the estimate to the work order.
+      const [linkedEstimate] = await tx.update(estimates)
+        .set({ workOrderId: newWorkOrder.id })
+        .where(eq(estimates.id, estimateId))
+        .returning();
+
+      // 5. Auto-assign to the company's irrigation manager (if any) and
+      // notify them. Skipped silently if no irrigation manager is on
+      // the company — same as the previous route behavior.
+      let assignedTechnician: User | null = null;
+      let assignedWorkOrder: WorkOrder = newWorkOrder;
+      if (linkedEstimate.companyId != null) {
+        const [manager] = await tx.select().from(users)
+          .where(and(
+            eq(users.companyId, linkedEstimate.companyId),
+            eq(users.role, "irrigation_manager"),
+            eq(users.isActive, true),
+          ))
+          .limit(1);
+        if (manager) {
+          assignedTechnician = manager;
+          const [reassigned] = await tx.update(workOrders)
+            .set({
+              assignedTechnicianId: manager.id,
+              assignedTechnicianName: manager.name,
+              status: "assigned",
+            })
+            .where(eq(workOrders.id, newWorkOrder.id))
+            .returning();
+          if (reassigned) assignedWorkOrder = reassigned;
+          await tx.insert(notifications).values({
+            userId: manager.id,
+            type: "work_order_assigned",
+            title: "New Work Order Assigned",
+            message: `Work order ${newWorkOrder.workOrderNumber} for ${linkedEstimate.customerName} has been auto-assigned to you from approved estimate.`,
+            isRead: false,
+          });
+        }
+      }
+
+      const estimateOut: Estimate = {
+        ...linkedEstimate,
+        lifecycleStatus: computeLifecycleStatus(linkedEstimate),
+      } as Estimate;
+      return { estimate: estimateOut, workOrder: assignedWorkOrder, assignedTechnician };
+    });
   }
 
   async updateWorkOrder(id: number, workOrder: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined> {

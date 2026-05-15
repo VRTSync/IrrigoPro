@@ -8878,15 +8878,21 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(404).json({ message: "Estimate not found" });
         return;
       }
-      const estimate = await storage.updateEstimate(id, { 
-        status: "approved", 
-        approvedAt: new Date() 
-      });
-      if (!estimate) {
-        res.status(404).json({ message: "Estimate not found" });
+      // Task #611 — conditional update; loses to a concurrent
+      // approve/reject without clobbering the winner.
+      if (existing.status !== "pending") {
+        res.status(409).json({ message: "Estimate is no longer pending" });
         return;
       }
-      res.json({ message: "Estimate approved successfully", estimate });
+      const [updated] = await db.update(estimates)
+        .set({ status: "approved", approvedAt: new Date() })
+        .where(and(eq(estimates.id, id), eq(estimates.status, "pending")))
+        .returning();
+      if (!updated) {
+        res.status(409).json({ message: "Estimate is no longer pending" });
+        return;
+      }
+      res.json({ message: "Estimate approved successfully", estimate: updated });
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to approve estimate" });
@@ -8911,15 +8917,21 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(404).json({ message: "Estimate not found" });
         return;
       }
-      const estimate = await storage.updateEstimate(id, { 
-        status: "rejected", 
-        rejectedAt: new Date() 
-      });
-      if (!estimate) {
-        res.status(404).json({ message: "Estimate not found" });
+      // Task #611 — conditional update; loses to a concurrent
+      // approve/reject without clobbering the winner.
+      if (existing.status !== "pending") {
+        res.status(409).json({ message: "Estimate is no longer pending" });
         return;
       }
-      res.json({ message: "Estimate rejected successfully", estimate });
+      const [updated] = await db.update(estimates)
+        .set({ status: "rejected", rejectedAt: new Date() })
+        .where(and(eq(estimates.id, id), eq(estimates.status, "pending")))
+        .returning();
+      if (!updated) {
+        res.status(409).json({ message: "Estimate is no longer pending" });
+        return;
+      }
+      res.json({ message: "Estimate rejected successfully", estimate: updated });
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to reject estimate" });
@@ -8949,7 +8961,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(400).json({ message: "Only estimates pending internal review can be internally approved" });
         return;
       }
-      const updated = await storage.updateEstimate(id, { internalStatus: "approved_internal" });
+      // Task #611 — conditional update pins `internalStatus =
+      // pending_approval` in the WHERE so concurrent requests can't
+      // both flip the row. If the precondition no longer holds (e.g.
+      // a parallel call already approved or rejected), we return 409.
+      const updated = await storage.internallyApproveEstimateIfPending(id);
+      if (!updated) {
+        res.status(409).json({ message: "Estimate is no longer pending internal review" });
+        return;
+      }
       res.json({ message: "Estimate internally approved", estimate: updated });
     } catch (error) {
       console.error('Internal approve error:', error);
@@ -8980,45 +9000,38 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(400).json({ message: "Only pending estimates can be approved" });
         return;
       }
-      
-      const updatedEstimate = await storage.updateEstimate(id, { 
-        status: "approved", 
-        approvalSource: "manual",
-        approvedAt: new Date() 
-      });
-      
-      // Auto-convert to work order (per business rule: estimates auto-create work orders when approved)
-      let workOrder = null;
-      try {
-        workOrder = await storage.createWorkOrderFromEstimate(id);
-        
-        // Auto-assign to the company's irrigation manager
-        const irrigationManager = await storage.getIrrigationManagerForCompany(estimate.companyId!);
-        if (irrigationManager && workOrder) {
-          await storage.assignWorkOrder(workOrder.id, irrigationManager.id, irrigationManager.name);
-          
-          // Create notification for the assigned manager
-          await storage.createNotification({
-            userId: irrigationManager.id,
-            type: 'work_order_assigned',
-            title: 'New Work Order Assigned',
-            message: `Work order ${workOrder.workOrderNumber} for ${estimate.customerName} has been auto-assigned to you from approved estimate.`,
-            isRead: false,
-          });
-        }
-      } catch (workOrderError) {
-        console.error('Auto work order creation failed:', workOrderError);
-        // Continue even if work order creation fails - estimate is still approved
-      }
-      
-      res.json({ 
-        message: "Estimate approved successfully", 
-        estimate: updatedEstimate,
-        workOrderCreated: !!workOrder,
-        workOrderNumber: workOrder?.workOrderNumber
+
+      // Task #611 — single atomic call. Previously this route ran the
+      // status update, the work-order creation, the manager auto-assign,
+      // and the assignment notification as four separate top-level DB
+      // calls (with the WO branch wrapped in try/catch that explicitly
+      // tolerated a half-applied state). The new storage method wraps
+      // all of it in one transaction: either the user sees a fully
+      // approved estimate with a work order and a notified manager, or
+      // nothing changed and they can safely retry.
+      const result = await storage.approveEstimateAndCreateWorkOrder(id);
+
+      res.json({
+        message: "Estimate approved successfully",
+        estimate: result.estimate,
+        workOrderCreated: !!result.workOrder,
+        workOrderNumber: result.workOrder?.workOrderNumber,
       });
     } catch (error) {
       console.error(error);
+      const msg = error instanceof Error ? error.message : "";
+      if (msg.includes("Only pending estimates")) {
+        res.status(400).json({ message: msg });
+        return;
+      }
+      if (msg.includes("not found")) {
+        res.status(404).json({ message: msg });
+        return;
+      }
+      if (msg.includes("already exists")) {
+        res.status(409).json({ message: msg });
+        return;
+      }
       res.status(500).json({ message: "Failed to approve estimate" });
     }
   });
@@ -9046,11 +9059,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(400).json({ message: "Only pending estimates can be rejected" });
         return;
       }
-      
-      const updatedEstimate = await storage.updateEstimate(id, { status: "rejected" });
-      
-      res.json({ 
-        message: "Estimate rejected successfully", 
+
+      // Task #611 — conditional update guards against a concurrent
+      // approve+reject race: the WHERE pins status='pending', so the
+      // loser of the race sees zero rows updated and gets 409.
+      const updatedEstimate = await storage.rejectEstimateIfPending(id);
+      if (!updatedEstimate) {
+        res.status(409).json({ message: "Estimate is no longer pending and cannot be rejected" });
+        return;
+      }
+
+      res.json({
+        message: "Estimate rejected successfully",
         estimate: updatedEstimate
       });
     } catch (error) {
@@ -9059,6 +9079,19 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // Task #611 — typed error thrown by `_sendEstimateApprovalEmailFlow`
+  // when the CAS-style "mark sent to customer" update matches zero
+  // rows (i.e. someone else won a concurrent send-to-customer race
+  // or the estimate moved out of a sendable state between the
+  // route's precheck and the DB write). The route layer catches it
+  // and returns 409 instead of the generic 500.
+  class EstimateSendConflictError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "EstimateSendConflictError";
+    }
+  }
+
   // Send approval email to customer
   // Shared helper for sending an estimate's approval email. Used by both
   // POST /api/estimates/:id/send-approval-email and the new transition
@@ -9066,6 +9099,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // `approvalSentAt` / `internalStatus = sent_to_customer` write, and the
   // Postmark send all live in one place. Optionally also resets
   // `estimateDate` (used by `resend` to clear the expired bucket).
+  //
+  // Task #611 — the flow is now email-first: the token is generated in
+  // memory, the customer email is sent, and only then is the DB row
+  // marked `sent_to_customer` / stamped with the token. Previously the
+  // DB write committed first, so a Postmark failure left the estimate
+  // marked sent with a token the customer never saw. With the order
+  // reversed, a transient send failure leaves the estimate in its
+  // pre-send internal status and the user can retry the single
+  // "Send to customer" action cleanly.
   async function _sendEstimateApprovalEmailFlow(
     estimateId: number,
     opts: {
@@ -9077,22 +9119,21 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       req?: any;
     } = {},
   ) {
+    const estimateWithItems = await storage.getEstimate(estimateId);
+    if (!estimateWithItems) throw new Error(`Estimate ${estimateId} not found`);
+
     const crypto = await import('crypto');
     const approvalToken = crypto.randomBytes(32).toString('hex');
     const tokenExpiresAt = new Date();
     tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 30);
 
-    const updates: Partial<InsertEstimate> = {
-      approvalToken,
-      tokenExpiresAt,
-      approvalSentAt: new Date(),
-      internalStatus: "sent_to_customer",
-      ...(opts.resetEstimateDate ? { estimateDate: new Date() } : {}),
-    };
-    await storage.updateEstimate(estimateId, updates);
+    // If we're going to reset `estimateDate` (the `resend` flow), use the
+    // new value in the email body so the customer sees today's date
+    // matching what we're about to persist.
+    const effectiveEstimateDate = opts.resetEstimateDate
+      ? new Date()
+      : new Date(estimateWithItems.estimateDate);
 
-    const estimateWithItems = await storage.getEstimate(estimateId);
-    if (!estimateWithItems) throw new Error(`Estimate ${estimateId} not found after update`);
     const items = estimateWithItems.items ?? [];
     const laborRate = parseFloat(estimateWithItems.laborRate);
 
@@ -9115,7 +9156,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       zoneNumber: estimateWithItems.zoneNumber ?? null,
       totalAmount: `$${parseFloat(estimateWithItems.totalAmount).toFixed(2)}`,
       approvalToken,
-      estimateDate: new Date(estimateWithItems.estimateDate).toLocaleDateString(),
+      estimateDate: effectiveEstimateDate.toLocaleDateString(),
       createdBy: estimateWithItems.createdBy,
       companyId: estimateWithItems.companyId!,
       workDescription: estimateWithItems.workDescription ?? null,
@@ -9134,6 +9175,29 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         lineTotal: parseFloat(item.totalPrice) + parseFloat(item.laborHours) * laborRate,
       })),
     });
+
+    // Email send succeeded — persist the transition via a single
+    // conditional UPDATE (Task #611). The WHERE clause pins
+    // internalStatus to a pre-send value (or `status='expired'` for
+    // resend), so two concurrent send-to-customer requests can't
+    // both stamp tokens: the second writer matches zero rows and we
+    // throw EstimateSendConflictError, which the route layer maps
+    // to 409. The cost is a redundant email going out for the loser
+    // of the race — preferable to burying a stale token in the DB.
+    const persisted = await storage.markEstimateSentToCustomer(estimateId, {
+      approvalToken,
+      tokenExpiresAt,
+      approvalSentAt: new Date(),
+      newEstimateDate: opts.resetEstimateDate ? effectiveEstimateDate : null,
+      isResend: !!opts.resetEstimateDate,
+    });
+    if (!persisted) {
+      throw new EstimateSendConflictError(
+        opts.resetEstimateDate
+          ? "Estimate is no longer in an expired state and cannot be resent"
+          : "Estimate has already been sent to the customer",
+      );
+    }
 
     // Task #616 — record a single audit row per send so managers can
     // see in the estimate's history exactly who sent it, to which
@@ -9162,7 +9226,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       });
     }
 
-    return estimateWithItems;
+    return persisted;
   }
 
   app.post("/api/estimates/:id/send-approval-email", requireAuthentication, requireEstimateApprovalAccess, async (req: any, res) => {
@@ -9203,6 +9267,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         sentAt: new Date()
       });
     } catch (error) {
+      if (error instanceof EstimateSendConflictError) {
+        res.status(409).json({ message: error.message });
+        return;
+      }
       console.error('Error sending approval email:', error);
       res.status(500).json({ message: "Failed to send approval email" });
     }
@@ -9297,6 +9365,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       res.status(400).json({ message: "Unknown transition action" });
       return;
     } catch (error) {
+      if (error instanceof EstimateSendConflictError) {
+        res.status(409).json({ message: error.message });
+        return;
+      }
       console.error('Estimate transition error:', error);
       res.status(500).json({ message: "Failed to transition estimate" });
     }
