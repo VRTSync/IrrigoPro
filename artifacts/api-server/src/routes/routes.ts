@@ -9437,7 +9437,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const q = req.query.companyId;
         if (q != null && q !== "") {
           const parsed = parseInt(String(q), 10);
-          scopeCompanyId = Number.isFinite(parsed) ? parsed : null;
+          if (!Number.isFinite(parsed) || parsed <= 0) {
+            res.status(400).json({ message: "Invalid companyId" });
+            return;
+          }
+          scopeCompanyId = parsed;
         } else {
           scopeCompanyId = null;
         }

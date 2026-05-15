@@ -99,7 +99,8 @@ function resolveScope(
   if (role === "super_admin") {
     if (queryCompanyId != null && queryCompanyId !== "") {
       const n = parseInt(queryCompanyId, 10);
-      return { status: 200, scopeCompanyId: Number.isFinite(n) ? n : null };
+      if (!Number.isFinite(n) || n <= 0) return { status: 400, scopeCompanyId: -1 };
+      return { status: 200, scopeCompanyId: n };
     }
     return { status: 200, scopeCompanyId: null };
   }
@@ -128,6 +129,11 @@ describe('Task #662 — /api/dashboard/this-month-billed authorization', () => {
   it('super_admin defaults to global and honors ?companyId', () => {
     assert.deepEqual(resolveScope("super_admin", null, undefined), { status: 200, scopeCompanyId: null });
     assert.deepEqual(resolveScope("super_admin", null, "7"), { status: 200, scopeCompanyId: 7 });
+  });
+  it('super_admin gets 400 for invalid ?companyId (instead of silently going global)', () => {
+    assert.equal(resolveScope("super_admin", null, "abc").status, 400);
+    assert.equal(resolveScope("super_admin", null, "0").status, 400);
+    assert.equal(resolveScope("super_admin", null, "-3").status, 400);
   });
   it('billing_manager and irrigation_manager are allowed (scoped to own company)', () => {
     assert.deepEqual(resolveScope("billing_manager", 5, "9"), { status: 200, scopeCompanyId: 5 });
