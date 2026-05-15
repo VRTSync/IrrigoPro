@@ -536,20 +536,11 @@ export function registerEstimateRoutes(
       }
       (parsed.estimate as { laborRate: string }).laborRate = resolvedRate;
       (parsed.estimate as { appliedLaborRate?: string | null }).appliedLaborRate = resolvedRate;
-      // Task #396 — preserve persisted laborMode when the client omits it.
-      // processEstimatePayload defaults to 'flat' when laborMode is missing,
-      // which would silently flip a legacy per_part estimate to flat (and
-      // zero its per-line labor) on any update from a caller that doesn't
-      // explicitly send the mode.
-      const incomingLaborMode = (parsed.estimate as { laborMode?: "flat" | "per_part" | null })
-        .laborMode;
-      if (incomingLaborMode !== "flat" && incomingLaborMode !== "per_part") {
-        const persistedMode: "flat" | "per_part" =
-          (existing as { laborMode?: "flat" | "per_part" | null }).laborMode === "per_part"
-            ? "per_part"
-            : "flat";
-        (parsed.estimate as { laborMode?: "flat" | "per_part" | null }).laborMode = persistedMode;
-      }
+      // Task #657 — Labor entry is flat-only for new/edited estimates;
+      // `processEstimatePayload` forces `laborMode='flat'` regardless of
+      // the incoming value, so the legacy preserve-persisted-mode branch
+      // that lived here is gone. Existing per_part rows are migrated to
+      // flat by the backfill-estimate-labor-mode.ts script.
       // Task #606 — submit-for-review pins internalStatus inside the
       // same payload that drives updateEstimateWithItems, so the
       // content write and the status transition share a single

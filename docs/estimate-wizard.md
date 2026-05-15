@@ -32,9 +32,16 @@ estimate. They serve different jobs and must not be conflated.
 
 ### 2.1 Live working copy — `useState`
 
-Driven by `setCustomerStep`, `setItems`, `setLaborRate`, `setLaborMode`,
+Driven by `setCustomerStep`, `setItems`, `setLaborRate`,
 `setFlatTotalHours`, `setPhotos`, `setAttachments`. This is what the
 user is editing right now. Every keystroke updates these.
+
+Labor is **flat-only** (Task #657): there is no per-row labor input
+and no labor-mode toggle. The wizard owns a single estimate-level
+"Total labor hours" value (`flatTotalHours`) which is what gets sent
+to the server. When editing a legacy `per_part` estimate, the
+hydration step sums the stored per-line labor hours into
+`flatTotalHours` so no hours are lost on the first save.
 
 ### 2.2 Dirty-check baseline — `initialSnapshotRef.current`
 

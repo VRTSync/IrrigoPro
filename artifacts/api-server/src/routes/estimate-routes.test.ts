@@ -226,11 +226,11 @@ describe("POST /api/estimates — customer master labor rate is authoritative", 
     assert.equal(body.totalAmount, "380.00");
   });
 
-  // Task #228 — regression. Per-unit laborHours must be multiplied by
-  // quantity at the API boundary so the labor subtotal counts every unit
-  // of every line. Acceptance example from the task: 4 × 0.5h + 1 × 1.0h
-  // @ $75/h = $225 (parts $0 here for clarity).
-  it("multiplies per-line laborHours by quantity when computing the labor subtotal (per_part mode)", async () => {
+  // Task #657 — Labor entry is flat-only on the write path. Even if a
+  // legacy client sends `laborMode: "per_part"` plus per-row laborHours,
+  // the server forces flat: per-row labor is zeroed and the labor
+  // subtotal comes from the estimate-level `totalLaborHours` field.
+  it("forces flat labor mode and zeroes per-row labor, regardless of incoming laborMode", async () => {
     stub.customers.set(50, makeCustomer(50, "75.00"));
     const body = {
       estimate: {
@@ -239,12 +239,12 @@ describe("POST /api/estimates — customer master labor rate is authoritative", 
         customerEmail: "q@example.com",
         projectName: "P",
         laborRate: 75,
+        // Legacy client still sends per_part — server must ignore it.
         laborMode: "per_part",
+        totalLaborHours: "3",
       },
       items: [
-        // 4 units, 0.5h per unit = 2.0h
         { partId: 1, partName: "A", partPrice: 0, quantity: 4, laborHours: 0.5 },
-        // 1 unit, 1.0h per unit = 1.0h
         { partId: 2, partName: "B", partPrice: 0, quantity: 1, laborHours: 1.0 },
       ],
     };
@@ -255,17 +255,16 @@ describe("POST /api/estimates — customer master labor rate is authoritative", 
     });
     assert.equal(res.status, 201);
     const created = (await res.json()) as Record<string, unknown>;
-    // Quantity-aware total: 3.0h * $75 = $225.00.
+    // 3.0h flat × $75 = $225.00, parts $0.
+    assert.equal(created.laborMode, "flat");
+    assert.equal(created.totalLaborHours, "3.00");
     assert.equal(created.laborSubtotal, "225.00");
     assert.equal(created.partsSubtotal, "0.00");
     assert.equal(created.totalAmount, "225.00");
 
-    // The items persisted to storage carry the per-line total (per-unit ×
-    // quantity), so the read-time recompute (sum(item.laborHours) * rate)
-    // matches the write-time total — they cannot drift.
     const items = (created.items as Array<Record<string, unknown>>) ?? [];
-    assert.equal(items[0]?.laborHours, "2.00");
-    assert.equal(items[1]?.laborHours, "1.00");
+    assert.equal(items[0]?.laborHours, "0.00");
+    assert.equal(items[1]?.laborHours, "0.00");
   });
 
   it("returns 400 when the referenced customer does not exist", async () => {

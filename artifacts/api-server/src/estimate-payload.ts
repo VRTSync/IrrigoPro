@@ -21,8 +21,10 @@ export interface EstimatePayloadInput {
   estimate: Omit<InsertEstimate, "partsSubtotal" | "laborSubtotal" | "totalAmount" | "laborRate" | "estimateDate" | "totalLaborHours"> & {
     estimateDate?: Date | string | null;
     laborRate: string | number;
-    // Task #396 — labor entry mode. 'flat' uses totalLaborHours; 'per_part'
-    // sums per-line laborHours.
+    // Task #657 — Labor entry is flat-only for new/edited estimates. The
+    // field is still accepted on the input shape for back-compat with any
+    // legacy clients, but its value is ignored — `processEstimatePayload`
+    // always forces `flat`.
     laborMode?: "flat" | "per_part" | null;
     totalLaborHours?: string | number | null;
   };
@@ -44,21 +46,16 @@ export interface EstimatePayloadOutput {
 // undercounted labor by a factor of `quantity` whenever a non-wizard caller
 // (e.g. the wet-check conversion engine) submitted per-unit hours.
 export function processEstimatePayload(input: EstimatePayloadInput): EstimatePayloadOutput {
-  // Task #396 — Labor mode. 'flat' is the new default; per-line laborHours are
-  // forced to 0 and the estimate's totalLaborHours field is the source of
-  // truth for laborSubtotal. 'per_part' preserves today's behavior of summing
-  // per-line laborHours.
-  const laborMode: "flat" | "per_part" =
-    input.estimate.laborMode === "per_part" ? "per_part" : "flat";
+  // Task #657 — Labor is flat-only on the write path. Per-line laborHours
+  // are always normalized to 0; the estimate's `totalLaborHours` field is
+  // the single source of truth for `laborSubtotal`. Any incoming
+  // `laborMode` value is ignored — the persisted column is forced to
+  // 'flat' so reads and writes can't drift.
+  const laborMode: "flat" = "flat";
 
   const items: InsertEstimateItem[] = input.items.map((item, idx) => {
     const quantity = item.quantity ?? 1;
     const partPrice = parseFloat(String(item.partPrice ?? 0));
-    const perUnitLaborHours = parseFloat(String(item.laborHours ?? 0)) || 0;
-    // Flat mode normalizes per-line labor to 0 — totals come from totalLaborHours.
-    // Per-part mode stores the per-line total (per-unit × quantity) so the
-    // sum of stored item.laborHours is the quantity-aware total in hours.
-    const laborHours = laborMode === "flat" ? 0 : perUnitLaborHours * quantity;
     const totalPrice = item.totalPrice !== undefined && item.totalPrice !== null
       ? parseFloat(String(item.totalPrice))
       : partPrice * quantity;
@@ -68,22 +65,20 @@ export function processEstimatePayload(input: EstimatePayloadInput): EstimatePay
       partName: item.partName ?? null,
       partPrice: String(partPrice),
       quantity,
-      laborHours: laborHours.toFixed(2),
+      // Task #657 — flat-only: per-row labor is always zero on disk.
+      laborHours: "0.00",
       totalPrice: totalPrice.toFixed(2),
       sortOrder: item.sortOrder ?? idx,
     } as InsertEstimateItem;
   });
 
   let partsSubtotal = 0;
-  let perPartLaborHoursSum = 0;
   for (const item of items) {
     partsSubtotal += parseFloat(String(item.totalPrice));
-    perPartLaborHoursSum += parseFloat(String(item.laborHours));
   }
 
   const laborRate = parseFloat(String(input.estimate.laborRate));
-  const flatHoursRaw = parseFloat(String(input.estimate.totalLaborHours ?? 0)) || 0;
-  const totalLaborHours = laborMode === "flat" ? flatHoursRaw : perPartLaborHoursSum;
+  const totalLaborHours = parseFloat(String(input.estimate.totalLaborHours ?? 0)) || 0;
   const laborSubtotal = totalLaborHours * laborRate;
   const totalAmount = partsSubtotal + laborSubtotal;
 

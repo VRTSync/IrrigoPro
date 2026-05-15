@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import type { Part } from "@workspace/db/schema";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
-import { LaborModeToggle, type LaborMode } from "@/components/wizard-shared/labor-mode-toggle";
 
 // Task #399 — shared default so the helper text in this file, the review
 // step, and the parent wizard's `deriveCustomerLaborRate` can never drift
@@ -38,7 +37,11 @@ export interface WizardLineItem {
   partName: string;
   partPrice: number;
   quantity: number;
-  // per-unit labor hours
+  // Task #657 — Per-row labor entry is gone from the estimate wizard;
+  // labor is captured as a single flat "Total labor hours" value at the
+  // estimate level. The field is kept on the shape so the autosave
+  // draft + edit-mode hydration paths can ferry a zero through without
+  // diff churn; nothing in the UI reads or writes it anymore.
   laborHours: number;
   description: string;
 }
@@ -67,9 +70,8 @@ interface EstimateWizardLineItemsStepProps {
   onBack: () => void;
   onContinue: () => void;
   onChangeCustomer?: () => void;
-  // Task #396 — labor mode + flat-mode aggregate hours.
-  laborMode: LaborMode;
-  onLaborModeChange: (mode: LaborMode) => void;
+  // Task #657 — Flat-only labor: a single "Total labor hours" field at
+  // the estimate level. Per-row labor entry has been removed.
   flatTotalHours: number;
   onFlatTotalHoursChange: (hours: number) => void;
 }
@@ -77,18 +79,18 @@ interface EstimateWizardLineItemsStepProps {
 const fmt = (n: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
 
-// Task #396 — totals are mode-aware. In flat mode, labor comes from the
-// single totalLaborHours field; in per_part mode, labor sums per-line
-// laborHours × quantity (legacy behavior).
+// Task #657 — Flat labor only. Per-row labor entry is gone from the
+// wizard; labor is computed from the single estimate-level
+// `flatTotalHours` field × the customer labor rate. The signature
+// keeps `flatTotalHours` as a trailing optional so existing callers
+// don't need to pass it when they only care about parts totals.
 export function computeTotals(
   items: WizardLineItem[],
   laborRate: number,
-  laborMode: LaborMode = "per_part",
   flatTotalHours = 0,
 ): RunningTotals {
   const partsSubtotal = items.reduce((s, it) => s + it.partPrice * it.quantity, 0);
-  const perPartHours = items.reduce((s, it) => s + it.laborHours * it.quantity, 0);
-  const totalLaborHours = laborMode === "flat" ? Math.max(0, flatTotalHours) : perPartHours;
+  const totalLaborHours = Math.max(0, flatTotalHours);
   const laborSubtotal = totalLaborHours * laborRate;
   return {
     partsSubtotal,
@@ -113,8 +115,6 @@ export function EstimateWizardLineItemsStep({
   onBack,
   onContinue,
   onChangeCustomer,
-  laborMode,
-  onLaborModeChange,
   flatTotalHours,
   onFlatTotalHoursChange,
 }: EstimateWizardLineItemsStepProps) {
@@ -123,8 +123,7 @@ export function EstimateWizardLineItemsStep({
   const [changeRowId, setChangeRowId] = useState<string | null>(null);
   const [dragRowId, setDragRowId] = useState<string | null>(null);
 
-  const totals = computeTotals(items, laborRate, laborMode, flatTotalHours);
-  const isFlat = laborMode === "flat";
+  const totals = computeTotals(items, laborRate, flatTotalHours);
 
   const updateItem = (rowId: string, patch: Partial<WizardLineItem>) =>
     onItemsChange(items.map((it) => (it.rowId === rowId ? { ...it, ...patch } : it)));
@@ -256,14 +255,9 @@ export function EstimateWizardLineItemsStep({
         </div>
       </div>
 
-      {/* Task #396 — labor mode toggle + flat hours field */}
+      {/* Task #657 — Flat-only labor: single Total labor hours field. */}
       <Card>
         <CardContent className="p-3 sm:p-4 space-y-3">
-          <LaborModeToggle
-            value={laborMode}
-            onChange={onLaborModeChange}
-            testIdPrefix="estimate-labor-mode"
-          />
           {/* Task #399 — surface where the labor rate comes from so managers
               don't try to override a value that the server will reset to the
               customer's master labor rate on save. */}
@@ -307,32 +301,30 @@ export function EstimateWizardLineItemsStep({
               )}
             </span>
           </div>
-          {isFlat && (
-            <div className="flex items-end gap-3 flex-wrap">
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
-                  Total labor hours
-                </div>
-                <Input
-                  type="number"
-                  min={0}
-                  step={0.25}
-                  value={flatTotalHours}
-                  onChange={(e) =>
-                    onFlatTotalHoursChange(Math.max(0, parseFloat(e.target.value || "0") || 0))
-                  }
-                  className="h-9 w-32 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                  data-testid="estimate-flat-total-hours"
-                />
+          <div className="flex items-end gap-3 flex-wrap pt-1">
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                Total labor hours
               </div>
-              <div className="text-xs text-gray-600 mb-1">
-                × {fmt(laborRate)}/hr ={" "}
-                <span className="font-semibold text-gray-900">
-                  {fmt(totals.laborSubtotal)}
-                </span>
-              </div>
+              <Input
+                type="number"
+                min={0}
+                step={0.25}
+                value={flatTotalHours}
+                onChange={(e) =>
+                  onFlatTotalHoursChange(Math.max(0, parseFloat(e.target.value || "0") || 0))
+                }
+                className="h-9 w-32 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                data-testid="estimate-flat-total-hours"
+              />
             </div>
-          )}
+            <div className="text-xs text-gray-600 mb-1">
+              × {fmt(laborRate)}/hr ={" "}
+              <span className="font-semibold text-gray-900">
+                {fmt(totals.laborSubtotal)}
+              </span>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -390,18 +382,15 @@ export function EstimateWizardLineItemsStep({
                     <th className="py-2 pl-2">Part</th>
                     <th className="py-2 px-2 w-28">Qty</th>
                     <th className="py-2 px-2 w-28 text-right">Unit Price</th>
-                    {!isFlat && <th className="py-2 px-2 w-32">Labor Hrs</th>}
                     <th className="py-2 px-2 w-28 text-right">Line Total</th>
                     <th className="py-2 pr-2 w-12"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {items.map((it, idx) => {
-                    // In flat mode line totals exclude per-row labor —
-                    // labor is owned by the single Total labor hours field.
-                    const lineTotal = isFlat
-                      ? it.partPrice * it.quantity
-                      : it.partPrice * it.quantity + it.laborHours * it.quantity * laborRate;
+                    // Task #657 — line totals are parts-only; labor is
+                    // owned by the single Total labor hours field.
+                    const lineTotal = it.partPrice * it.quantity;
                     return (
                       <tr
                         key={it.rowId}
@@ -464,24 +453,6 @@ export function EstimateWizardLineItemsStep({
                           </div>
                         </td>
                         <td className="py-3 px-2 text-right text-gray-700">{fmt(it.partPrice)}</td>
-                        {!isFlat && (
-                          <td className="py-3 px-2">
-                            <Input
-                              type="number"
-                              min={0}
-                              step={0.25}
-                              value={it.laborHours}
-                              onChange={(e) =>
-                                updateItem(it.rowId, { laborHours: Math.max(0, parseFloat(e.target.value || "0") || 0) })
-                              }
-                              className="h-8 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                              data-testid={`wizard-row-labor-${it.rowId}`}
-                            />
-                            <div className="text-[10px] text-gray-500 mt-1">
-                              × {fmt(laborRate)}/hr = {fmt(it.laborHours * it.quantity * laborRate)}
-                            </div>
-                          </td>
-                        )}
                         <td
                           className="py-3 px-2 text-right font-semibold text-gray-900"
                           data-testid={`wizard-row-total-${it.rowId}`}
@@ -514,9 +485,7 @@ export function EstimateWizardLineItemsStep({
       {!empty && (
         <div className="md:hidden space-y-3">
           {items.map((it, idx) => {
-            const lineTotal = isFlat
-              ? it.partPrice * it.quantity
-              : it.partPrice * it.quantity + it.laborHours * it.quantity * laborRate;
+            const lineTotal = it.partPrice * it.quantity;
             return (
               <Card key={it.rowId} data-testid={`wizard-card-${it.rowId}`}>
                 <CardContent className="p-3 space-y-3">
@@ -597,24 +566,6 @@ export function EstimateWizardLineItemsStep({
                         {fmt(it.partPrice)}
                       </div>
                     </div>
-                    {!isFlat && (
-                      <div>
-                        <div className="text-[10px] text-gray-500 uppercase mb-1">Labor hrs</div>
-                        <Input
-                          type="number"
-                          min={0}
-                          step={0.25}
-                          value={it.laborHours}
-                          onChange={(e) =>
-                            updateItem(it.rowId, { laborHours: Math.max(0, parseFloat(e.target.value || "0") || 0) })
-                          }
-                          className="h-9 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                        />
-                        <div className="text-[10px] text-gray-500 mt-1">
-                          × {fmt(laborRate)}/hr = {fmt(it.laborHours * it.quantity * laborRate)}
-                        </div>
-                      </div>
-                    )}
                     <div>
                       <div className="text-[10px] text-gray-500 uppercase mb-1">Line total</div>
                       <div className="h-9 px-3 flex items-center text-sm font-semibold text-gray-900 bg-gray-50 border rounded-md">

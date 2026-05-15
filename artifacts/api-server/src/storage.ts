@@ -7107,6 +7107,18 @@ export class DatabaseStorage implements IStorage {
           const existingItems = await tx.select().from(estimateItems)
             .where(eq(estimateItems.estimateId, priorEstId));
           let nextSort = existingItems.reduce((m, it) => Math.max(m, it.sortOrder ?? 0), -1) + 1;
+          // Task #657 — append path is flat-only. Sum the labor from the
+          // new findings, add it to the persisted estimate-level
+          // `totalLaborHours` (or fall back to the sum of existing
+          // per-row totals for legacy per_part rows that haven't been
+          // backfilled yet), and write the combined total back to
+          // `estimates.totalLaborHours`. Per-row `laborHours` on new
+          // inserts is set to "0.00" so flat is the only source of
+          // truth going forward.
+          const newFindingsLaborHours = sentEst.reduce(
+            (s, f) => s + calc(f).laborHours,
+            0,
+          );
           for (const f of sentEst) {
             const c = calc(f);
             await tx.insert(estimateItems).values({
@@ -7115,7 +7127,7 @@ export class DatabaseStorage implements IStorage {
               partId: f.partId as number,
               partName: f.partName ?? f.issueType,
               partPrice: c.partPrice.toFixed(2),
-              laborHours: c.laborHours.toFixed(2),
+              laborHours: "0.00",
               quantity: c.qty,
               totalPrice: c.partsTotal.toFixed(2),
               sortOrder: nextSort++,
@@ -7125,21 +7137,51 @@ export class DatabaseStorage implements IStorage {
             .where(eq(estimateItems.estimateId, priorEstId));
           const partsSubtotal = allItems.reduce(
             (s, it) => s + parseFloat(String(it.totalPrice ?? "0")), 0);
-          const totalLaborHours = allItems.reduce(
-            (s, it) => s + parseFloat(String(it.laborHours ?? "0")), 0);
+          const priorEstAny = priorEst as { totalLaborHours?: string | null; laborMode?: string | null } | undefined;
+          const persistedFlatHours = parseFloat(String(priorEstAny?.totalLaborHours ?? "0")) || 0;
+          const legacyPerPartHours = existingItems.reduce(
+            (s, it) => s + (parseFloat(String(it.laborHours ?? "0")) || 0),
+            0,
+          );
+          const priorTotalLaborHours =
+            priorEstAny?.laborMode === "per_part" && legacyPerPartHours > 0
+              ? legacyPerPartHours
+              : persistedFlatHours;
+          const totalLaborHours = priorTotalLaborHours + newFindingsLaborHours;
           const laborSubtotal = totalLaborHours * snapshotRate;
           const total = partsSubtotal + laborSubtotal;
           await tx.update(estimates).set({
             partsSubtotal: partsSubtotal.toFixed(2),
             laborSubtotal: laborSubtotal.toFixed(2),
             totalAmount: total.toFixed(2),
+            // Task #657 — collapse to flat on append so the row's storage
+            // matches the new write contract; per-line legacy labor has
+            // been folded into totalLaborHours above.
+            laborMode: "flat",
+            totalLaborHours: totalLaborHours.toFixed(2),
             updatedAt: now,
           }).where(eq(estimates.id, priorEstId));
+          // Zero any pre-existing per-row labor on legacy per_part rows so
+          // the flat total is the only source of truth from now on.
+          if (legacyPerPartHours > 0) {
+            await tx.update(estimateItems)
+              .set({ laborHours: "0.00" })
+              .where(eq(estimateItems.estimateId, priorEstId));
+          }
           estId = priorEstId;
         } else {
           // First-time creation goes through the SAME service POST
           // /api/estimates uses, keeping any side effects in lock-step.
           const estimateNumber = `EST-WC-${id}-${Date.now()}`;
+          // Task #657 — `processEstimatePayload` is flat-only and ignores
+          // per-item laborHours when computing the labor subtotal; the
+          // single source of truth is `estimate.totalLaborHours`. Pre-sum
+          // each finding's line-level labor so wet-check conversion still
+          // captures the originally calculated labor.
+          const totalLaborHours = sentEst.reduce(
+            (s, f) => s + calc(f).laborHours,
+            0,
+          );
           const est = await this.createEstimateFromPayload({
             estimate: {
               companyId,
@@ -7155,6 +7197,8 @@ export class DatabaseStorage implements IStorage {
               status: "pending",
               laborRate: laborRate.toFixed(2),
               appliedLaborRate: laborRate.toFixed(2),
+              laborMode: "flat",
+              totalLaborHours: totalLaborHours.toFixed(2),
             } as EstimatePayloadInput["estimate"],
             items: sentEst.map((f, idx) => {
               const c = calc(f);
@@ -7163,8 +7207,9 @@ export class DatabaseStorage implements IStorage {
                 partId: f.partId as number,
                 partName: f.partName ?? f.issueType,
                 partPrice: c.partPrice.toFixed(2),
-                // Finding labor is line-level (calc does not multiply by qty);
-                // estimate-item convention is also line-level.
+                // Per-row labor is ignored at the boundary (flat-only) but
+                // we still emit it so any pre-flat reader sees the same
+                // value the finding calc produced.
                 laborHours: c.laborHours.toFixed(2),
                 quantity: c.qty,
                 sortOrder: idx,

@@ -15,7 +15,6 @@ import {
   type LaborRateSource,
   type WizardLineItem,
 } from "./estimate-wizard-line-items-step";
-import type { LaborMode } from "@/components/wizard-shared/labor-mode-toggle";
 
 interface EstimateWizardReviewStepProps {
   customer: Customer | null;
@@ -37,7 +36,8 @@ interface EstimateWizardReviewStepProps {
   // When `laborRateSource === "stored"`, this is the customer's current
   // master rate the server will snap back to on save.
   customerMasterRate?: number;
-  laborMode?: LaborMode;
+  // Task #657 — Flat-only labor: a single Total labor hours value at the
+  // estimate level. Per-row labor entry has been removed.
   flatTotalHours?: number;
   items: WizardLineItem[];
   photos: UploadedFile[];
@@ -74,7 +74,6 @@ export function EstimateWizardReviewStep({
   laborRate,
   laborRateSource,
   customerMasterRate,
-  laborMode = "per_part",
   flatTotalHours = 0,
   items,
   photos,
@@ -87,7 +86,7 @@ export function EstimateWizardReviewStep({
   isEdit,
   isDraftEdit,
 }: EstimateWizardReviewStepProps) {
-  const totals = computeTotals(items, laborRate, laborMode, flatTotalHours);
+  const totals = computeTotals(items, laborRate, flatTotalHours);
   const [attachOpen, setAttachOpen] = useState(false);
   const total = photos.length + attachments.length;
 
@@ -169,25 +168,20 @@ export function EstimateWizardReviewStep({
       {/* Line items + totals */}
       <Card>
         <CardContent className="p-0">
-          {(() => {
-            const isFlat = laborMode === "flat";
-            const colCount = isFlat ? 3 : 4;
-            return (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
                 <th className="py-2 pl-3">Part</th>
                 <th className="py-2 px-2 w-16 text-right">Qty</th>
                 <th className="py-2 px-2 w-24 text-right">Unit</th>
-                {!isFlat && <th className="py-2 px-2 w-24 text-right">Labor h</th>}
                 <th className="py-2 pr-3 w-28 text-right">Line Total</th>
               </tr>
             </thead>
             <tbody>
               {items.map((it) => {
-                const lineTotal = isFlat
-                  ? it.partPrice * it.quantity
-                  : it.partPrice * it.quantity + it.laborHours * it.quantity * laborRate;
+                // Task #657 — line totals are parts-only; labor is the
+                // single estimate-level Total labor hours field.
+                const lineTotal = it.partPrice * it.quantity;
                 return (
                   <tr key={it.rowId} className="border-b last:border-b-0 align-top">
                     <td className="py-2 pl-3">
@@ -196,9 +190,6 @@ export function EstimateWizardReviewStep({
                     </td>
                     <td className="py-2 px-2 text-right">{it.quantity}</td>
                     <td className="py-2 px-2 text-right">{fmt(it.partPrice)}</td>
-                    {!isFlat && (
-                      <td className="py-2 px-2 text-right">{(it.laborHours * it.quantity).toFixed(2)}</td>
-                    )}
                     <td className="py-2 pr-3 text-right font-semibold">{fmt(lineTotal)}</td>
                   </tr>
                 );
@@ -206,13 +197,13 @@ export function EstimateWizardReviewStep({
             </tbody>
             <tfoot>
               <tr className="border-t bg-gray-50">
-                <td colSpan={colCount} className="py-2 pl-3 text-sm text-gray-600 text-right">Parts</td>
+                <td colSpan={3} className="py-2 pl-3 text-sm text-gray-600 text-right">Parts</td>
                 <td className="py-2 pr-3 text-right text-sm font-medium">{fmt(totals.partsSubtotal)}</td>
               </tr>
               <tr className="bg-gray-50">
-                <td colSpan={colCount} className="py-2 pl-3 text-sm text-gray-600 text-right">
+                <td colSpan={3} className="py-2 pl-3 text-sm text-gray-600 text-right">
                   <div>
-                    Labor {isFlat ? "(flat) " : ""}({totals.totalLaborHours.toFixed(2)} h × {fmt(laborRate)}/hr)
+                    Labor ({totals.totalLaborHours.toFixed(2)} h × {fmt(laborRate)}/hr)
                   </div>
                   {/* Task #399 — explain the source of the labor rate so
                       reviewers know it's locked to the customer's master
@@ -237,7 +228,7 @@ export function EstimateWizardReviewStep({
                 <td className="py-2 pr-3 text-right text-sm font-medium">{fmt(totals.laborSubtotal)}</td>
               </tr>
               <tr className="border-t border-green-200 bg-green-50">
-                <td colSpan={colCount} className="py-3 pl-3 text-base font-semibold text-green-800 text-right">Total</td>
+                <td colSpan={3} className="py-3 pl-3 text-base font-semibold text-green-800 text-right">Total</td>
                 <td
                   className="py-3 pr-3 text-right text-lg font-bold text-green-700"
                   data-testid="wizard-review-total"
@@ -247,8 +238,6 @@ export function EstimateWizardReviewStep({
               </tr>
             </tfoot>
           </table>
-            );
-          })()}
         </CardContent>
       </Card>
 

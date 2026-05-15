@@ -352,6 +352,51 @@ without a write.
   verification that all writes are dual-stamping and all reads agree
   with the column. Track as a separate follow-up.
 
+## Flat-only estimate labor (Task #657)
+
+The estimate wizard now captures labor as a **single estimate-level
+`totalLaborHours` value** — there is no per-row labor input and no
+labor-mode toggle. The labor-mode column on `estimates` is still
+present for back-compat reads but every new write forces it to
+`'flat'`.
+
+- **Server boundary**: `artifacts/api-server/src/estimate-payload.ts`
+  — `processEstimatePayload` ignores the incoming `laborMode` field
+  and always persists `laborMode='flat'` with per-row
+  `estimate_items.labor_hours = '0.00'`. `laborSubtotal` is derived
+  from `estimates.totalLaborHours * laborRate`. The wire field is
+  kept on the input shape so legacy clients that still send
+  `laborMode` don't 400.
+- **Routes**: `routes/estimate-routes.ts` dropped the
+  preserve-persisted-mode block on PUT; the payload helper is now
+  the single source of truth.
+- **Wizard**:
+  `artifacts/irrigopro/src/components/estimates/estimate-wizard.tsx`
+  removed `laborMode` state and the `LaborModeToggle` import. The
+  line-items step has no per-row Labor Hrs column or input; the
+  review step renders a single Labor row driven by
+  `Total labor hours × rate`. On edit, legacy `per_part` rows
+  hydrate by summing `item.laborHours` into `flatTotalHours` so the
+  first save consolidates them with no data loss.
+- **Backfill**: one-time migration
+  `artifacts/api-server/src/scripts/backfill-estimate-labor-mode.ts`
+  — idempotent; for every `laborMode='per_part'` row it sums
+  `estimate_items.labor_hours`, writes that to
+  `estimates.total_labor_hours`, zeroes the per-line values, and
+  flips `labor_mode` to `'flat'` in a single transaction. Run:
+  `node --import tsx/esm artifacts/api-server/src/scripts/backfill-estimate-labor-mode.ts [--dry-run] [--batch=N]`.
+  Resumable: persists processed ids to
+  `app_settings.estimateLaborMode.done` and any failures to
+  `app_settings.estimateLaborMode.failed`. Dev DB run (May 15, 2026):
+  365 scanned, **2 updated** (4 items zeroed, 6.00 total hours
+  consolidated, 0 failures). The first dev pass executed before the
+  resume-tracking refactor — the follow-up run with the persistent
+  marker reported `updated=0` as expected, confirming idempotence.
+- **Out of scope**: shared
+  `components/wizard-shared/labor-mode-toggle.tsx` /
+  `labor-mode-switch.ts` are still used by the billing-sheet wizard
+  and work-order completion flows — left untouched.
+
 ## Estimate system
 
 The estimate flow has two independent status axes (`status` =

@@ -29,8 +29,6 @@ import {
   type LaborRateSource,
   type WizardLineItem,
 } from "./wizard/estimate-wizard-line-items-step";
-import type { LaborMode } from "@/components/wizard-shared/labor-mode-toggle";
-import { nextFlatTotalHoursForModeSwitch } from "@/components/wizard-shared/labor-mode-switch";
 import { EstimateWizardReviewStep } from "./wizard/estimate-wizard-review-step";
 import { submitEstimate, type SubmitMode } from "./estimate-wizard-submit";
 import { isDraft, estimateSubmitStatusFields } from "@/lib/lifecycle";
@@ -50,8 +48,10 @@ interface EstimateApiPayloadEstimate {
   laborSubtotal: string;
   totalAmount: string;
   laborRate: string;
-  // Task #396 — labor mode + flat-mode aggregate hours.
-  laborMode: LaborMode;
+  // Task #657 — Labor is flat-only on the write path. The field is kept
+  // on the wire for back-compat with the server's Zod input schema but
+  // the wizard always sends `flat`.
+  laborMode: "flat";
   totalLaborHours: string;
   photos: string[];
   attachments: string[];
@@ -103,7 +103,12 @@ function urlToUploadedFile(url: string): UploadedFile {
   return { url, fileName, originalName: fileName };
 }
 
-const DRAFT_STORAGE_VERSION = 1;
+// Task #657 — draft shape bumped to v2 to add `flatTotalHours`. The
+// on-disk key prefix remains `…:v1:` so existing autosaved drafts are
+// preserved across the upgrade; `loadDraft` migrates v1 payloads to v2
+// in-memory by collapsing any per-row labor hours into a single
+// `flatTotalHours` (Σ qty × per-unit hours) and zeroing per-row labor.
+const DRAFT_STORAGE_VERSION = 2;
 const DRAFT_KEY_PREFIX = "irrigopro:estimate-wizard-draft:v1:";
 
 function draftKey(estimateId?: number | null): string {
@@ -117,6 +122,9 @@ interface PersistedDraft {
   customerStep: CustomerStepValue;
   items: WizardLineItem[];
   laborRate: number;
+  // Task #657 — flat-only labor: a single estimate-level "Total labor
+  // hours" value persisted in the draft so a reload doesn't lose hours.
+  flatTotalHours: number;
   photos: UploadedFile[];
   attachments: UploadedFile[];
 }
@@ -126,14 +134,46 @@ function loadDraft(estimateId?: number | null): PersistedDraft | null {
   try {
     const raw = window.localStorage.getItem(draftKey(estimateId));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedDraft;
-    if (!parsed || parsed.version !== DRAFT_STORAGE_VERSION) return null;
+    const parsed = JSON.parse(raw) as Partial<PersistedDraft> & {
+      version?: number;
+      items?: WizardLineItem[];
+    };
+    if (!parsed) return null;
     // Re-assign rowIds defensively in case of collisions on hydration.
-    parsed.items = (parsed.items ?? []).map((it) => ({
+    const rawItems = (parsed.items ?? []).map((it) => ({
       ...it,
       rowId: it.rowId || makeRowId(),
     }));
-    return parsed;
+    // Task #657 — Migrate v1 drafts to v2 in-memory: collapse the
+    // sum of per-row labor (Σ qty × per-unit hours) into a single
+    // `flatTotalHours` and zero the per-row values so the restored
+    // wizard renders the new flat-only contract without losing the
+    // user's pending hours.
+    if (parsed.version === 1) {
+      const collapsedHours = rawItems.reduce((sum, it) => {
+        const perUnit = parseFloat(String(it.laborHours ?? 0)) || 0;
+        const qty = Number(it.quantity ?? 1) || 1;
+        return sum + perUnit * qty;
+      }, 0);
+      const migrated: PersistedDraft = {
+        version: DRAFT_STORAGE_VERSION,
+        savedAt: Number(parsed.savedAt ?? Date.now()),
+        step: (parsed.step ?? 1) as Step,
+        customerStep: parsed.customerStep as CustomerStepValue,
+        items: rawItems.map((it) => ({ ...it, laborHours: 0 })),
+        laborRate: Number(parsed.laborRate ?? 45),
+        flatTotalHours: collapsedHours,
+        photos: parsed.photos ?? [],
+        attachments: parsed.attachments ?? [],
+      };
+      return migrated;
+    }
+    if (parsed.version !== DRAFT_STORAGE_VERSION) return null;
+    return {
+      ...(parsed as PersistedDraft),
+      items: rawItems,
+      flatTotalHours: Number(parsed.flatTotalHours ?? 0),
+    };
   } catch {
     return null;
   }
@@ -172,6 +212,9 @@ interface DraftSnapshot {
   accessInstructions: string;
   workDescription: string;
   laborRate: number;
+  // Task #657 — flat-only labor; dirty-check must catch changes to the
+  // single Total labor hours value.
+  flatTotalHours: number;
   items: Array<Pick<WizardLineItem, "partId" | "partName" | "partPrice" | "quantity" | "laborHours" | "description">>;
   photos: string[];
   attachments: string[];
@@ -205,6 +248,7 @@ function snapshot(
   cs: CustomerStepValue,
   items: WizardLineItem[],
   laborRate: number,
+  flatTotalHours: number,
   photos: UploadedFile[],
   attachments: UploadedFile[],
 ): DraftSnapshot {
@@ -218,6 +262,7 @@ function snapshot(
     accessInstructions: cs.accessInstructions.trim(),
     workDescription: cs.workDescription.trim(),
     laborRate,
+    flatTotalHours,
     items: items.map((it) => ({
       partId: it.partId,
       partName: it.partName,
@@ -260,8 +305,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
   });
   const [items, setItems] = useState<WizardLineItem[]>([]);
   const [laborRate, setLaborRate] = useState<number>(45);
-  // Task #396 — labor mode defaults to 'flat' for new estimates.
-  const [laborMode, setLaborMode] = useState<LaborMode>("flat");
+  // Task #657 — Labor is flat-only; the wizard owns a single
+  // "Total labor hours" value at the estimate level.
   const [flatTotalHours, setFlatTotalHours] = useState<number>(0);
   const [photos, setPhotos] = useState<UploadedFile[]>([]);
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
@@ -298,13 +343,11 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
         setCustomerStep(blank);
         setItems([]);
         setLaborRate(45);
-        // Task #396 — new wizard sessions always start in flat mode with
-        // 0 hours so a prior session can't leak labor settings forward.
-        setLaborMode("flat");
+        // Task #657 — flat-only labor; new sessions start at 0 hours.
         setFlatTotalHours(0);
         setPhotos([]);
         setAttachments([]);
-        initialSnapshotRef.current = snapshot(blank, [], 45, [], []);
+        initialSnapshotRef.current = snapshot(blank, [], 45, 0, [], []);
       }
     } else {
       // When the dialog fully closes, also dismiss any open restore prompt
@@ -354,16 +397,27 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     // laborRate, then the schema default.
     const lr = parseFloat(String(existing.appliedLaborRate ?? existing.laborRate ?? "45")) || 45;
     setLaborRate(lr);
-    // Task #396 — hydrate labor mode + flat hours from persisted estimate.
-    const existingMode: LaborMode =
-      (existing as unknown as { laborMode?: string }).laborMode === "flat"
-        ? "flat"
-        : "per_part";
-    setLaborMode(existingMode);
+    // Task #657 — Labor is flat-only. Hydrate the single
+    // "Total labor hours" value from the persisted estimate. For legacy
+    // `per_part` rows (pre-backfill / in-flight), fall back to summing
+    // the stored per-line totals so the user doesn't lose hours on an
+    // edit before the backfill consolidates them.
+    const existingMode =
+      (existing as unknown as { laborMode?: string }).laborMode === "per_part"
+        ? "per_part"
+        : "flat";
     const persistedFlatHours = parseFloat(
       String((existing as unknown as { totalLaborHours?: string }).totalLaborHours ?? "0"),
     ) || 0;
-    setFlatTotalHours(persistedFlatHours);
+    const legacyPerPartHours = (existing.items ?? []).reduce((sum, it: EstimateItem) => {
+      const v = parseFloat(String(it.laborHours ?? "0")) || 0;
+      return sum + v;
+    }, 0);
+    setFlatTotalHours(
+      existingMode === "per_part" && legacyPerPartHours > 0
+        ? legacyPerPartHours
+        : persistedFlatHours,
+    );
     const cust: Customer = realCustomer ?? ({
       id: existing.customerId,
       name: existing.customerName,
@@ -409,12 +463,41 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
         description: it.description ?? "",
       };
     });
-    setItems(loaded);
+    // Task #657 — flat-only: zero in-memory per-row labor after edit
+    // hydration so the wizard state is fully aligned with the new
+    // write contract. Any legacy labor was already folded into
+    // `flatTotalHours` by `setFlatTotalHours` above.
+    const loadedFlat = loaded.map((it) => ({ ...it, laborHours: 0 }));
+    setItems(loadedFlat);
     const ph = (existing.photos ?? []).map(urlToUploadedFile);
     const at = (existing.attachments ?? []).map(urlToUploadedFile);
     setPhotos(ph);
     setAttachments(at);
-    initialSnapshotRef.current = snapshot(cs, loaded, lr, ph, at);
+    // Task #657 — pass the hydrated flatTotalHours into the dirty-check
+    // baseline so a legacy per_part edit that collapses into flat hours
+    // doesn't show as dirty before the user touches anything. Note the
+    // baseline must match what `setFlatTotalHours` was just called with
+    // above; we re-derive the same value here to keep them in lock-step.
+    const baselineFlatHours = (() => {
+      const existingMode =
+        (existing as unknown as { laborMode?: string }).laborMode === "per_part"
+          ? "per_part"
+          : "flat";
+      const persistedFlat = parseFloat(
+        String((existing as unknown as { totalLaborHours?: string }).totalLaborHours ?? "0"),
+      ) || 0;
+      // For legacy per_part rows we hydrate by summing the stored per-line
+      // labor totals (stored value = per-unit × quantity, per Task #228),
+      // which is equivalent to Σ(quantity × per-unit hours).
+      const legacyPerPartHours = (existing.items ?? []).reduce((sum, it: EstimateItem) => {
+        const v = parseFloat(String(it.laborHours ?? "0")) || 0;
+        return sum + v;
+      }, 0);
+      return existingMode === "per_part" && legacyPerPartHours > 0
+        ? legacyPerPartHours
+        : persistedFlat;
+    })();
+    initialSnapshotRef.current = snapshot(cs, loadedFlat, lr, baselineFlatHours, ph, at);
     hydratedRef.current = true;
   }, [isEdit, existing, open, realCustomer, realCustomerFetched]);
 
@@ -435,9 +518,9 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
   const isDirty = useMemo(() => {
     const baseline = initialSnapshotRef.current;
     if (!baseline) return false;
-    const current = snapshot(customerStep, items, laborRate, photos, attachments);
+    const current = snapshot(customerStep, items, laborRate, flatTotalHours, photos, attachments);
     return JSON.stringify(baseline) !== JSON.stringify(current);
-  }, [customerStep, items, laborRate, photos, attachments]);
+  }, [customerStep, items, laborRate, flatTotalHours, photos, attachments]);
 
   // Task #399 — single derivation of where the active labor rate came from.
   // Uses the same `deriveCustomerLaborRate` helper as `setLaborRate`, then
@@ -486,6 +569,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       draft.customerStep,
       draft.items,
       draft.laborRate,
+      draft.flatTotalHours ?? 0,
       draft.photos,
       draft.attachments,
     );
@@ -513,17 +597,23 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
         customerStep,
         items,
         laborRate,
+        flatTotalHours,
         photos,
         attachments,
       });
     }, 600);
     return () => window.clearTimeout(handle);
-  }, [open, isDirty, step, customerStep, items, laborRate, photos, attachments, estimateId]);
+  }, [open, isDirty, step, customerStep, items, laborRate, flatTotalHours, photos, attachments, estimateId]);
 
   const applyDraft = (draft: PersistedDraft) => {
     setCustomerStep(draft.customerStep);
     setItems(draft.items);
     setLaborRate(draft.laborRate);
+    // Task #657 — restore the persisted estimate-level Total labor hours.
+    // Falls back to 0 defensively so a partially-corrupted draft doesn't
+    // crash the wizard (the version check on `loadDraft` should have
+    // already discarded pre-v2 drafts that lack this field).
+    setFlatTotalHours(draft.flatTotalHours ?? 0);
     setPhotos(draft.photos);
     setAttachments(draft.attachments);
     setStep(draft.step);
@@ -608,7 +698,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       setStep(2);
       return;
     }
-    const totals = computeTotals(items, laborRate, laborMode, flatTotalHours);
+    const totals = computeTotals(items, laborRate, flatTotalHours);
     const estimate: EstimateApiPayloadEstimate = {
       customerId: customerStep.customer.id,
       customerName: customerStep.customer.name,
@@ -635,7 +725,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       laborSubtotal: totals.laborSubtotal.toFixed(2),
       totalAmount: totals.totalAmount.toFixed(2),
       laborRate: laborRate.toFixed(2),
-      laborMode,
+      // Task #657 — Labor is flat-only on the write path.
+      laborMode: "flat",
       totalLaborHours: totals.totalLaborHours.toFixed(2),
       photos: photos.map((p) => p.url),
       attachments: attachments.map((a) => a.url),
@@ -650,14 +741,10 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       partName: it.partName,
       partPrice: it.partPrice.toFixed(2),
       quantity: it.quantity,
-      // Task #396 — In flat mode, per-line labor hours are zeroed at the
-      // payload boundary so the estimate's totalLaborHours is the single
-      // source of truth on the wire as well as on disk.
-      // Task #228 — In per-part mode, the API expects per-unit hours and
-      // multiplies by quantity itself (see processEstimatePayload). Sending
-      // the pre-multiplied value here would double-count by a factor of qty.
-      laborHours:
-        laborMode === "flat" ? "0.00" : it.laborHours.toFixed(2),
+      // Task #657 — Per-line labor is always zeroed at the payload
+      // boundary; the estimate-level totalLaborHours is the single
+      // source of truth.
+      laborHours: "0.00",
       totalPrice: (it.partPrice * it.quantity).toFixed(2),
       description: it.description,
       sortOrder: index,
@@ -695,7 +782,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     if (customerStep.customer?.name) parts.push(customerStep.customer.name);
     if (customerStep.projectName.trim()) parts.push(customerStep.projectName.trim());
     if (step >= 2 && items.length > 0) {
-      const totals = computeTotals(items, laborRate, laborMode, flatTotalHours);
+      const totals = computeTotals(items, laborRate, flatTotalHours);
       parts.push(
         new Intl.NumberFormat("en-US", {
           style: "currency",
@@ -705,7 +792,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       );
     }
     return parts.length ? parts.join(" · ") : null;
-  }, [customerStep.customer?.name, customerStep.projectName, items, laborRate, laborMode, flatTotalHours, step]);
+  }, [customerStep.customer?.name, customerStep.projectName, items, laborRate, flatTotalHours, step]);
 
   const stickyMobileFooter = (
     <div className="sm:hidden sticky bottom-0 -mx-4 px-4 py-2 bg-white border-t z-10 flex flex-col gap-1.5">
@@ -862,13 +949,6 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                 onBack={() => setStep(1)}
                 onContinue={() => setStep(3)}
                 onChangeCustomer={() => setStep(1)}
-                laborMode={laborMode}
-                onLaborModeChange={(next) => {
-                  setFlatTotalHours((prev) =>
-                    nextFlatTotalHoursForModeSwitch(laborMode, next, prev, items),
-                  );
-                  setLaborMode(next);
-                }}
                 flatTotalHours={flatTotalHours}
                 onFlatTotalHoursChange={setFlatTotalHours}
               />
@@ -888,7 +968,6 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                 laborRate={laborRate}
                 laborRateSource={laborRateSource}
                 customerMasterRate={customerMasterRateForUi}
-                laborMode={laborMode}
                 flatTotalHours={flatTotalHours}
                 items={items}
                 photos={photos}
