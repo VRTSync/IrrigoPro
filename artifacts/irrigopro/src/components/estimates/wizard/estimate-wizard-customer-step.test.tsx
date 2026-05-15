@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -184,6 +184,87 @@ describe("EstimateWizardCustomerStep — one-click customer selection", () => {
       .slice(onChangeCalls.findIndex((v) => v.customer?.id === FIXTURE_CUSTOMER.id))
       .some((v) => v.customer === null);
     expect(sawNullAfterPick).toBe(false);
+  });
+
+  it("lands on the read-only customer card (not the picker) when edit-mode hydrates the customer after first render", async () => {
+    // Regression for Task #624: in edit mode the parent passes
+    // value.customer=null on first render and then populates it via an
+    // effect once the estimate query resolves. The previous
+    // `useState(!value.customer)` captured `true` at mount, so the
+    // picker stayed visible even after the customer hydrated. The fix
+    // initializes to `false` and relies on the render-time check
+    // (`!value.customer || showCustomerPicker`) to keep the picker
+    // open while customer is genuinely missing.
+    function EditModeHarness() {
+      const [value, setValue] = useState<CustomerStepValue>(EMPTY_VALUE);
+      // Simulate a parent effect (e.g. an estimate fetch resolving)
+      // that hydrates the customer after first paint.
+      useEffect(() => {
+        setValue((prev) => ({
+          ...prev,
+          customer: FIXTURE_CUSTOMER,
+          customerEmail: FIXTURE_CUSTOMER.email ?? "",
+          customerPhone: FIXTURE_CUSTOMER.phone ?? "",
+          projectAddress: FIXTURE_CUSTOMER.address ?? "",
+          projectName: "Existing project",
+        }));
+      }, []);
+      return (
+        <EstimateWizardCustomerStep
+          value={value}
+          onChange={setValue}
+          onContinue={() => {}}
+          onCancel={() => {}}
+        />
+      );
+    }
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, staleTime: Infinity, queryFn: async () => [] },
+      },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <EditModeHarness />
+      </QueryClientProvider>,
+    );
+
+    // After hydration, the read-only customer summary is shown…
+    expect(await screen.findByTestId("wizard-customer-name")).toHaveTextContent(
+      FIXTURE_CUSTOMER.name,
+    );
+    // …and the picker is NOT in the tree (no leftover open picker).
+    expect(screen.queryByTestId("mock-customer-row")).not.toBeInTheDocument();
+    // "Change customer" is the explicit way to swap.
+    expect(screen.getByTestId("wizard-change-customer")).toBeInTheDocument();
+  });
+
+  it("still shows the picker when there is genuinely no customer", async () => {
+    // Sanity guard: the change above must not regress the new-estimate
+    // case where the picker should appear on mount.
+    renderHarness();
+    expect(await screen.findByTestId("mock-customer-row")).toBeInTheDocument();
+    expect(screen.queryByTestId("wizard-customer-name")).not.toBeInTheDocument();
+  });
+
+  it("re-opens the picker when 'Change customer' is clicked, then closes it after a pick", async () => {
+    const user = userEvent.setup();
+    renderHarness();
+
+    // Pick a customer first to get to the read-only summary state.
+    await user.click(await screen.findByTestId("mock-customer-row"));
+    await screen.findByTestId("wizard-customer-name");
+    expect(screen.queryByTestId("mock-customer-row")).not.toBeInTheDocument();
+
+    // Click "Change customer" — picker re-appears.
+    await user.click(screen.getByTestId("wizard-change-customer"));
+    expect(await screen.findByTestId("mock-customer-row")).toBeInTheDocument();
+
+    // Picking again closes the picker.
+    await user.click(screen.getByTestId("mock-customer-row"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("mock-customer-row")).not.toBeInTheDocument();
+    });
   });
 
   it("toggles to a custom address and back to the customer address without a stale clobber", async () => {

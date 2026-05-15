@@ -76,7 +76,13 @@ export function EstimateWizardCustomerStep({
   customerLocked,
 }: EstimateWizardCustomerStepProps) {
   const projectNameRef = useRef<HTMLInputElement | null>(null);
-  const [showCustomerPicker, setShowCustomerPicker] = useState(!value.customer);
+  // Initialize to false so edit-mode (where the parent's hydration effect
+  // populates `value.customer` *after* this step first mounts) lands on the
+  // read-only customer card instead of being stuck showing the picker.
+  // When there's genuinely no customer, the render condition below
+  // (`!value.customer || showCustomerPicker`) still shows the picker.
+  // "Change customer" flips this to true to re-open the picker explicitly.
+  const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(!!value.workLocation);
   // valueRef avoids stale closures inside the form `watch` subscription.
   const valueRef = useRef(value);
