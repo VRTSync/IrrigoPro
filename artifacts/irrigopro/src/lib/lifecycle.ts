@@ -66,6 +66,7 @@ export function computeLifecycleStatus(
 // `estimate.status` or `estimate.internalStatus` directly.
 type EstimateLike = EstimateLifecycleInput & {
   lifecycleStatus?: string | null;
+  lifecycle?: string | null;
 };
 
 export function lifecycleOf(
@@ -73,6 +74,27 @@ export function lifecycleOf(
   now?: Date,
 ): LifecycleStatus {
   if (!estimate) return "pending_review";
+  // Task #683 / #642 — prefer the canonical server-stamped lifecycle
+  // column over the legacy computed `lifecycleStatus` so the kanban,
+  // table, and summary tiles all read the same source of truth.
+  const stored = estimate.lifecycle;
+  if (
+    typeof stored === "string" &&
+    (LIFECYCLE_STATUSES as readonly string[]).includes(stored)
+  ) {
+    // `sent` rows still need view-time expiry computation.
+    if (stored === "sent") {
+      return computeLifecycleStatus(
+        {
+          status: estimate.status,
+          internalStatus: estimate.internalStatus,
+          estimateDate: estimate.estimateDate,
+        },
+        now,
+      );
+    }
+    return stored as LifecycleStatus;
+  }
   const stamped = estimate.lifecycleStatus;
   if (
     typeof stamped === "string" &&

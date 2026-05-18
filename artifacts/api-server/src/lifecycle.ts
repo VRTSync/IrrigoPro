@@ -22,6 +22,15 @@ export type LifecycleStatus = (typeof LIFECYCLE_STATUSES)[number];
 // the lower end: exactly 30 days old still counts as `sent`.
 export const ESTIMATE_EXPIRATION_DAYS = 30;
 
+// Task #683 — Estimate Command Center thresholds. A pending_review
+// estimate older than this many days is flagged as stuck. A `sent`
+// estimate at or above this $ amount and not responded to within a
+// week is flagged as high-value silent. Centralized here so the
+// summary aggregator, attention strip, and any future surface read
+// from the same source.
+export const ESTIMATE_STUCK_REVIEW_DAYS = 3;
+export const ESTIMATE_HIGH_VALUE_USD = 5000;
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 type EstimateLifecycleInput = {

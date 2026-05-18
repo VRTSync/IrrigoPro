@@ -33,6 +33,7 @@ import {
   type Company,
   type Customer,
   type Estimate,
+  type EstimateSummary,
   type EstimateWithItems,
   type InsertEstimate,
   type InsertEstimateItem,
@@ -87,6 +88,7 @@ export interface EstimateRoutesStorage {
   // not exercise these routes and so does not stub them.
   getEstimates?(opts?: { includeDeleted?: boolean }): Promise<Estimate[]>;
   getEstimatesPendingApproval?(companyId: number | null): Promise<Estimate[]>;
+  getEstimateSummary?(companyId: number | null): Promise<EstimateSummary>;
   softDeleteEstimate?(id: number, userId: number): Promise<boolean>;
   updateEstimate?(
     id: number,
@@ -357,6 +359,41 @@ export function registerEstimateRoutes(
       } catch (error) {
         console.error("Error fetching pending estimates:", error);
         res.status(500).json({ message: "Failed to fetch pending estimates" });
+      }
+    },
+  );
+
+  // ── GET /api/estimates/summary ────────────────────────────────────────
+  // Task #683 — aggregate summary for the Estimate Command Center.
+  // IMPORTANT: register before "/api/estimates/:id" so Express does not
+  // route "summary" through the :id handler.
+  app.get(
+    "/api/estimates/summary",
+    requireAuthentication,
+    requireEstimateApprovalAccess,
+    async (req: any, res) => {
+      try {
+        const userRole = req.authenticatedUserRole;
+        const userCompanyId = req.authenticatedUserCompanyId;
+        let scopeCompanyId: number | null;
+        if (userRole === "super_admin") {
+          scopeCompanyId = null;
+        } else {
+          if (!userCompanyId) {
+            res.status(400).json({ message: "Missing company context" });
+            return;
+          }
+          scopeCompanyId = Number(userCompanyId);
+        }
+        if (!storage.getEstimateSummary) {
+          res.status(500).json({ message: "Summary not available" });
+          return;
+        }
+        const summary = await storage.getEstimateSummary(scopeCompanyId);
+        res.json(summary);
+      } catch (error) {
+        console.error("Error computing estimate summary:", error);
+        res.status(500).json({ message: "Failed to compute estimate summary" });
       }
     },
   );

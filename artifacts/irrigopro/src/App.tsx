@@ -58,6 +58,8 @@ const EstimateApproval = lazyPage(() => import("@/pages/estimate-approval"));
 const PartsSettings = lazyPage(() => import("@/pages/parts-settings"));
 const PartsPendingApproval = lazyPage(() => import("@/pages/parts-pending-approval"));
 const EstimatesPendingApproval = lazyPage(() => import("@/pages/estimates-pending-approval"));
+const EstimateCommandCenter = lazyPage(() => import("@/pages/estimate-command-center"));
+const RedirectPendingApprovalToCC = lazy(() => import("@/components/estimates/redirect-to-command-center"));
 const InvoicesPage = lazyPage(() => import("@/pages/invoices"));
 const WetChecksPage = lazyPage(() => import("@/pages/wet-checks"));
 const AdminWetChecksPage = lazyPage(() => import("@/pages/admin-wet-checks"));
@@ -468,7 +470,8 @@ function Router() {
                 <Route path="/login" component={Login} />
                 <Route path="/field-portal" component={FieldPortal} />
                 {/* Redirect estimates and work-orders to operations page */}
-                <Route path="/estimates/pending-approval" component={EstimatesPendingApproval} />
+                <Route path="/estimates/command-center" component={EstimateCommandCenter} />
+                <Route path="/estimates/pending-approval" component={RedirectPendingApprovalToCC} />
                 <Route path="/estimates" component={Operations} />
                 <Route path="/work-orders" component={Operations} />
                 <Route component={NotFound} />

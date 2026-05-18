@@ -1,3 +1,4 @@
+import { LayoutDashboard } from "lucide-react";
 import {
   Home,
   Briefcase,
@@ -199,9 +200,9 @@ export const companyAdminNav: NavConfig = {
         { type: "leaf", label: "Billing Sheets", path: "/billing-sheets", icon: ClipboardList },
         {
           type: "leaf",
-          label: "Estimates Pending Approval",
-          path: "/estimates/pending-approval",
-          icon: ShieldCheck,
+          label: "Estimate Command Center",
+          path: "/estimates/command-center",
+          icon: LayoutDashboard,
           badgeKey: "estimatesPendingApproval",
         },
         { type: "leaf", label: "Wet Checks", path: "/wet-checks/admin", icon: Droplets },

@@ -141,7 +141,14 @@ import { sql, eq, like, ilike, desc, and, gte, lte, or, isNull, inArray, gt } fr
 import bcrypt from "bcrypt";
 import { processEstimatePayload, type EstimatePayloadInput } from "./estimate-payload";
 import { applyNoPartNeededInvariant } from "./storage/wet-check-finding-invariants";
-import { computeLifecycleStatus, deriveLifecycleForWrite } from "./lifecycle";
+import {
+  computeLifecycleStatus,
+  deriveLifecycleForWrite,
+  ESTIMATE_EXPIRATION_DAYS,
+  type LifecycleStatus,
+} from "./lifecycle";
+import { computeEstimateSummary } from "./estimate-summary";
+import type { EstimateSummary } from "@workspace/db";
 import { ObjectStorageService } from "./objectStorage";
 
 // Executor accepted by storage helpers that may run inside a caller's
@@ -417,6 +424,10 @@ export interface IStorage {
   // Estimates
   getEstimates(opts?: { includeDeleted?: boolean }): Promise<Estimate[]>;
   getEstimatesPendingApproval(companyId: number | null): Promise<Estimate[]>;
+  // Task #683 — aggregate summary for the Estimate Command Center.
+  // Same company scoping as getEstimatesPendingApproval; `null` for
+  // super_admin global access.
+  getEstimateSummary(companyId: number | null): Promise<EstimateSummary>;
   getEstimate(id: number, opts?: { includeDeleted?: boolean }): Promise<EstimateWithItems | undefined>;
   createEstimate(estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems>;
   updateEstimate(id: number, estimate: Partial<InsertEstimate>): Promise<Estimate | undefined>;
@@ -1955,6 +1966,54 @@ export class DatabaseStorage implements IStorage {
     );
 
     return estimatesWithCalculatedTotals;
+  }
+
+  // Task #683 — aggregate summary for the Estimate Command Center.
+  // Runs ONE company-scoped query, then delegates to the pure
+  // computeEstimateSummary helper so the windows/attention math can
+  // be unit-tested without a database.
+  async getEstimateSummary(companyId: number | null): Promise<EstimateSummary> {
+    // Scope at the SQL layer (matches `getEstimatesPendingApproval`
+    // scoping semantics — no unscoped fetch-then-filter), then
+    // recompute per-row totals (parts/labor + flat-mode labor)
+    // exactly the way `getEstimates()` does so the aggregated
+    // numbers match what the kanban / table / detail views show.
+    const notDeleted = isNull(estimates.deletedAt);
+    const whereClause =
+      companyId === null
+        ? notDeleted
+        : and(notDeleted, eq(estimates.companyId, companyId));
+    const estimatesList = await db
+      .select()
+      .from(estimates)
+      .where(whereClause)
+      .orderBy(desc(estimates.createdAt));
+
+    const recomputed = await Promise.all(
+      estimatesList.map(async (estimate) => {
+        const items = await db
+          .select()
+          .from(estimateItems)
+          .where(eq(estimateItems.estimateId, estimate.id));
+        let partsSubtotal = 0;
+        let perPartLaborHours = 0;
+        for (const item of items) {
+          partsSubtotal += parseFloat(String(item.totalPrice)) || 0;
+          perPartLaborHours += parseFloat(String(item.laborHours)) || 0;
+        }
+        const laborRate =
+          parseFloat(String(estimate.appliedLaborRate ?? estimate.laborRate)) || 0;
+        const totalLaborHours =
+          estimate.laborMode === "flat"
+            ? parseFloat(String(estimate.totalLaborHours ?? 0)) || 0
+            : perPartLaborHours;
+        const laborSubtotal = totalLaborHours * laborRate;
+        const totalAmount = partsSubtotal + laborSubtotal;
+        return { ...estimate, totalAmount: totalAmount.toFixed(2) };
+      }),
+    );
+
+    return computeEstimateSummary(recomputed, new Date());
   }
 
   async getEstimate(id: number, opts?: { includeDeleted?: boolean }): Promise<EstimateWithItems | undefined> {
