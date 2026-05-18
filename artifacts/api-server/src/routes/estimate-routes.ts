@@ -1395,6 +1395,111 @@ export function registerEstimateRoutes(
     }
   });
 
+  // ── GET /api/estimates/view-by-token/:token ───────────────────────────
+  // Task #666 — public, read-only fetch of an estimate by approval
+  // token. Returns everything the customer-facing approval page needs
+  // to render before deciding to approve or reject: estimate header,
+  // line items, totals, signed photo URLs, and the attachment list.
+  // **Does not mutate the estimate** — the actual approve/reject calls
+  // still go through `approve-via-token` / `reject-via-token`.
+  app.get("/api/estimates/view-by-token/:token", async (req, res) => {
+    try {
+      const token = String(req.params.token);
+      const list = await storage.getEstimates!();
+      const summary = list.find((e) => e.approvalToken === token);
+
+      if (!summary) {
+        res.status(404).json({ error: "not_found", message: "Invalid or expired link." });
+        return;
+      }
+      if (summary.tokenExpiresAt && new Date() > new Date(summary.tokenExpiresAt)) {
+        res.status(410).json({
+          error: "expired",
+          message: "This approval link has expired.",
+          estimateNumber: summary.estimateNumber,
+        });
+        return;
+      }
+      const alreadyResponded = summary.status !== "pending";
+
+      const full = await storage.getEstimate(summary.id);
+      if (!full) {
+        res.status(404).json({ error: "not_found", message: "Estimate no longer available." });
+        return;
+      }
+
+      // Pre-sign site photos so the unauthenticated customer can render
+      // them without hitting the auth-gated `/api/photos/signed-urls`
+      // batch endpoint.
+      let photoSignedUrls: Array<{ photoId: string; url: string | null }> = [];
+      try {
+        const photos = (full.photos ?? []).filter(
+          (p): p is string => typeof p === "string" && p.length > 0,
+        );
+        if (photos.length > 0) {
+          const { ObjectStorageService } = await import("../objectStorage");
+          const photoService = new ObjectStorageService();
+          photoSignedUrls = await Promise.all(
+            photos.map(async (raw) => {
+              const photoId = raw.replace(/^\//, "").replace(/^api\/photos\//, "");
+              try {
+                const signed = await photoService.getPhotoDownloadURL(
+                  photoId,
+                  900,
+                  "medium",
+                );
+                return { photoId, url: signed ?? null };
+              } catch {
+                return { photoId, url: null };
+              }
+            }),
+          );
+        }
+      } catch (photoErr) {
+        console.error("Failed to sign estimate photos for view-by-token:", photoErr);
+      }
+
+      const attachmentsResp = (full.attachments ?? []).filter(
+        (a): a is string => typeof a === "string" && a.length > 0,
+      );
+
+      res.json({
+        alreadyResponded,
+        status: full.status,
+        estimate: {
+          id: full.id,
+          estimateNumber: full.estimateNumber,
+          projectName: full.projectName,
+          projectAddress: full.projectAddress,
+          customerName: full.customerName,
+          customerEmail: full.customerEmail,
+          customerPhone: full.customerPhone,
+          estimateDate: full.estimateDate,
+          workDescription: full.workDescription,
+          locationNotes: full.locationNotes,
+          accessInstructions: full.accessInstructions,
+          totalAmount: full.totalAmount,
+          totalLaborHours: full.totalLaborHours,
+          laborRate: full.laborRate,
+          items: (full.items ?? []).map((it) => ({
+            id: it.id,
+            partName: it.partName,
+            description: it.description,
+            quantity: it.quantity,
+            partPrice: it.partPrice,
+            laborHours: it.laborHours,
+            totalPrice: it.totalPrice,
+          })),
+        },
+        photos: photoSignedUrls,
+        attachments: attachmentsResp,
+      });
+    } catch (error) {
+      console.error("Error in view-by-token:", error);
+      res.status(500).json({ error: "server_error", message: "Failed to load estimate." });
+    }
+  });
+
   // ── GET /api/estimates/approve-via-token/:token ───────────────────────
   // Approve estimate via token (customer clicks link). Public unauth path;
   // response shape (HTML for the error/already-responded branches, JSON
@@ -1521,6 +1626,45 @@ export function registerEstimateRoutes(
         true,
       );
 
+      // Task #666 — surface the estimate's photos and attachments on
+      // the customer-facing confirmation page. Photos are pre-signed
+      // here because the customer is unauthenticated and can't call
+      // the `/api/photos/signed-urls` batch endpoint themselves.
+      // Attachments are returned verbatim; the page only shows the
+      // filename portion so we don't expose internal storage keys
+      // as clickable URLs.
+      let photoSignedUrls: Array<{ photoId: string; url: string | null }> = [];
+      try {
+        const photos = (estimate.photos ?? []).filter(
+          (p): p is string => typeof p === "string" && p.length > 0,
+        );
+        if (photos.length > 0) {
+          const { ObjectStorageService } = await import("../objectStorage");
+          const photoService = new ObjectStorageService();
+          photoSignedUrls = await Promise.all(
+            photos.map(async (raw) => {
+              const photoId = raw.replace(/^\//, "").replace(/^api\/photos\//, "");
+              try {
+                const signed = await photoService.getPhotoDownloadURL(
+                  photoId,
+                  900,
+                  "medium",
+                );
+                return { photoId, url: signed ?? null };
+              } catch {
+                return { photoId, url: null };
+              }
+            }),
+          );
+        }
+      } catch (photoErr) {
+        console.error("Failed to sign estimate photos for approval page:", photoErr);
+      }
+
+      const attachmentsResp = (estimate.attachments ?? []).filter(
+        (a): a is string => typeof a === "string" && a.length > 0,
+      );
+
       // Return JSON response for the approval page
       res.json({
         success: true,
@@ -1529,6 +1673,8 @@ export function registerEstimateRoutes(
         customerEmail: estimate.customerEmail,
         workOrderCreated: !!workOrder,
         workOrderNumber: workOrder?.workOrderNumber,
+        photos: photoSignedUrls,
+        attachments: attachmentsResp,
       });
     } catch (error) {
       console.error("Error approving estimate via token:", error);

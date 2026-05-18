@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CheckCircle, ClipboardList, Eye, Mail, ShieldCheck } from "lucide-react";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
+import { EstimateMediaBlock } from "@/components/estimates/estimate-media-block";
 import {
   SendEstimateDialog,
   type SendEstimatePayload,
@@ -34,7 +35,17 @@ export default function EstimatesPendingApproval() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [sendDialogEstimate, setSendDialogEstimate] = useState<Estimate | null>(null);
 
-  const { data: pending = [], isLoading } = useArrayQuery<Estimate>({
+  // Task #666 — the pending list endpoint returns full `estimates`
+  // rows including the `photos` / `attachments` text[] columns, but
+  // `Estimate` in the shared schema types them as `string[] | null`.
+  // The inline media block below needs the narrowed shape; we treat
+  // both fields as optional arrays here and validate with
+  // `Array.isArray` at the read site.
+  type PendingEstimate = Estimate & {
+    photos?: string[] | null;
+    attachments?: string[] | null;
+  };
+  const { data: pending = [], isLoading } = useArrayQuery<PendingEstimate>({
     queryKey: ["/api/estimates/pending-approval"],
     refetchInterval: 60000,
   });
@@ -152,8 +163,13 @@ export default function EstimatesPendingApproval() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pending.map((est) => (
-                    <tr key={est.id} className="border-b border-gray-100 hover:bg-gray-50/50">
+                  {pending.map((est) => {
+                    const photos = Array.isArray(est.photos) ? est.photos : [];
+                    const attachments = Array.isArray(est.attachments) ? est.attachments : [];
+                    const hasMedia = photos.length > 0 || attachments.length > 0;
+                    return (
+                    <React.Fragment key={est.id}>
+                    <tr className={`border-b ${hasMedia ? "border-transparent" : "border-gray-100"} hover:bg-gray-50/50`}>
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-900">{est.estimateNumber}</div>
                         <div className="text-xs text-gray-500">by {est.createdBy}</div>
@@ -218,7 +234,21 @@ export default function EstimatesPendingApproval() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    {hasMedia && (
+                      <tr className="border-b border-gray-100 bg-gray-50/30">
+                        <td colSpan={6} className="px-4 py-3">
+                          <EstimateMediaBlock
+                            photos={photos}
+                            attachments={attachments}
+                            variant="inline"
+                            testIdPrefix={`pending-${est.id}`}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

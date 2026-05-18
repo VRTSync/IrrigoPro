@@ -1,7 +1,8 @@
 import puppeteer from 'puppeteer-core';
 import type { EstimateWithItems, EstimateItem, Company } from '@workspace/db';
 import { resolveChromiumExecutable } from './chromium-resolver';
-import { fetchLogoAsBase64 } from './pdf-generator';
+import { fetchLogoAsBase64, preloadPhotos } from './pdf-generator';
+import { FAILED_PHOTO_SENTINEL } from './pdf-helpers';
 
 const DEFAULT_BRAND_COLOR = '#1E5A99';
 const DEFAULT_BRAND_DARK = '#143F6B';
@@ -125,6 +126,24 @@ export interface RenderEstimatePdfOptions {
   logoDataUri?: string | null;
   accentColor?: string;
   accentDark?: string;
+  // Task #666 — preloaded data URIs for `estimate.photos` (same order
+  // as the source array). Failed loads are represented by
+  // `FAILED_PHOTO_SENTINEL` and skipped at render time so a broken
+  // image doesn't crater the PDF.
+  photoDataUris?: string[];
+}
+
+function attachmentDisplayName(url: string): string {
+  if (!url) return 'attachment';
+  try {
+    const u = new URL(url, 'http://placeholder.local');
+    const last = u.pathname.split('/').filter(Boolean).pop();
+    if (last) return decodeURIComponent(last);
+  } catch {
+    // fall through
+  }
+  const last = url.split('/').filter(Boolean).pop();
+  return last ? decodeURIComponent(last) : url;
 }
 
 export function buildEstimateHtml(
@@ -255,6 +274,18 @@ export function buildEstimateHtml(
   .totals .grand { background: ${accentDark}; color: white; padding: 10px 12px; font-size: 13.5px; font-weight: 700; }
   .totals .grand .label { letter-spacing: 0.03em; }
 
+  /* Photo grid (Task #666) */
+  .photo-grid { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+  .photo-row { display: flex; gap: 6px; }
+  .photo-cell { flex: 1; aspect-ratio: 1 / 1; border: 1px solid #e5e7eb; border-radius: 4px; overflow: hidden; background: #f8fafc; display: flex; align-items: center; justify-content: center; }
+  .photo-cell.empty { border-style: dashed; background: transparent; }
+  .photo-cell img { width: 100%; height: 100%; object-fit: cover; }
+
+  /* Attachments list (Task #666) */
+  .att-list { margin: 0; padding-left: 18px; }
+  .att-list li { margin: 2px 0; }
+  .att-name { color: #111827; word-break: break-all; }
+
   /* Signature */
   .sig { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 22px; }
   .sig .block { border-top: 1px solid #9ca3af; padding-top: 4px; }
@@ -332,6 +363,44 @@ export function buildEstimateHtml(
     </div>
   </section>
 
+  ${(() => {
+    const photoUris = (opts.photoDataUris ?? []).filter(
+      (u) => u && u !== FAILED_PHOTO_SENTINEL,
+    );
+    if (photoUris.length === 0) return '';
+    const COLS = 3;
+    const cells = photoUris.map(
+      (uri) => `<div class="photo-cell"><img src="${uri}" alt="Site photo" /></div>`,
+    );
+    const rows: string[] = [];
+    for (let i = 0; i < cells.length; i += COLS) {
+      const slice = cells.slice(i, i + COLS);
+      while (slice.length < COLS) slice.push('<div class="photo-cell empty"></div>');
+      rows.push(`<div class="photo-row">${slice.join('')}</div>`);
+    }
+    return `
+  <section style="margin-top: 14px;">
+    <h2>Site Photos</h2>
+    <div class="photo-grid">${rows.join('')}</div>
+  </section>`;
+  })()}
+
+  ${(() => {
+    const atts = estimate.attachments ?? [];
+    if (!atts || atts.length === 0) return '';
+    const rows = atts
+      .map((url) => {
+        const name = attachmentDisplayName(url);
+        return `<li><span class="att-name">${escapeHtml(name)}</span></li>`;
+      })
+      .join('');
+    return `
+  <section class="card" style="margin-top: 14px;">
+    <h2>Attachments</h2>
+    <ul class="att-list">${rows}</ul>
+  </section>`;
+  })()}
+
   ${termsBlock}
 
   <div class="sig">
@@ -380,11 +449,33 @@ export async function renderEstimatePdf(
     accentDark = accentDark || extracted.accentDark;
   }
 
+  // Task #666 — preload site photos into the PDF as base64 data URIs so
+  // the embedded image grid renders without making outbound requests
+  // from headless chromium. Mirrors the work-order / billing-sheet PDF
+  // pipeline.
+  let photoDataUris = opts.photoDataUris;
+  if (!photoDataUris) {
+    const photoSrc = (estimate.photos ?? []).filter(
+      (p): p is string => typeof p === 'string' && p.length > 0,
+    );
+    if (photoSrc.length > 0) {
+      const port = parseInt(process.env.PORT || '5000', 10);
+      try {
+        photoDataUris = await preloadPhotos(photoSrc, port);
+      } catch {
+        photoDataUris = [];
+      }
+    } else {
+      photoDataUris = [];
+    }
+  }
+
   const html = buildEstimateHtml(estimate, {
     ...opts,
     logoDataUri,
     accentColor: accentColor || DEFAULT_BRAND_COLOR,
     accentDark: accentDark || DEFAULT_BRAND_DARK,
+    photoDataUris,
   });
 
   const browser = await puppeteer.launch({

@@ -117,7 +117,7 @@ async function fetchPhotoAsDataUri(photoPath: string, _port: number): Promise<st
 
 const PHOTO_BATCH_CONCURRENCY = 5;
 
-async function preloadPhotos(urls: string[], port: number): Promise<string[]> {
+export async function preloadPhotos(urls: string[], port: number): Promise<string[]> {
   const results: string[] = new Array(urls.length);
   for (let i = 0; i < urls.length; i += PHOTO_BATCH_CONCURRENCY) {
     const batch = urls.slice(i, i + PHOTO_BATCH_CONCURRENCY);

@@ -17,6 +17,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, authedPdfUrl } from "@/lib/queryClient";
 import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink, Send, Eye, Download, Trash2 } from "lucide-react";
+import { EstimateMediaBlock } from "@/components/estimates/estimate-media-block";
 import { buildMapsUrl } from "@/lib/maps-url";
 import type { Estimate } from "@workspace/db/schema";
 import { ResendConfirmDialog } from "@/components/estimates/resend-confirm-dialog";
@@ -667,6 +668,13 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
               </CardContent>
             </Card>
 
+            {/* Site Photos & Attachments — Task #666 */}
+            <EstimateMediaBlock
+              photos={Array.isArray(estimate.photos) ? estimate.photos : []}
+              attachments={Array.isArray(estimate.attachments) ? estimate.attachments : []}
+              testIdPrefix="estimate"
+            />
+
             {/* Line Items */}
             {estimate.items && estimate.items.length > 0 && (
               <Card>
@@ -946,3 +954,4 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     </Dialog>
   );
 }
+
