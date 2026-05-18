@@ -358,6 +358,23 @@ without a write.
   `internalStatus` columns is deferred until after production
   verification that all writes are dual-stamping and all reads agree
   with the column. Track as a separate follow-up.
+- **Task #671 follow-up**: Two inline POST handlers in
+  `estimate-routes.ts` (`POST /api/estimates/:id/approve` and
+  `POST /api/estimates/:id/reject`) write a raw
+  `db.update(estimates).set(...)` bypassing the storage helpers, and
+  previously only set `status` — leaving `lifecycle` stale. Both now
+  dual-stamp via `deriveLifecycleForWrite`. Regression guard:
+  `routes/estimate-inline-lifecycle.test.ts` parses the source and
+  asserts every raw `db.update(estimates)` block that writes
+  `status:` or `internalStatus:` also writes `lifecycle:`. Backfill
+  re-run on dev (May 18, 2026): 365 scanned, **65 updated** (the dev
+  DB had drifted again since the May 15 run — most likely a reseed),
+  idempotent rerun reports 0 updates. **Production still needs the
+  backfill run** — the May 15 dev numbers were never replayed
+  against prod, so EST-…6081 (id 2) and any siblings are still
+  stale until ops runs
+  `node --import tsx/esm artifacts/api-server/src/scripts/backfill-estimate-lifecycle.ts`
+  against the deploy DB.
 
 ## Flat-only estimate labor (Task #657)
 

@@ -958,9 +958,21 @@ export function registerEstimateRoutes(
           res.status(409).json({ message: "Estimate is no longer pending" });
           return;
         }
+        // Task #671 — dual-write the canonical lifecycle column. The
+        // legacy contract (Task #642) requires every write that mutates
+        // `status` or `internalStatus` to re-stamp `lifecycle`; this
+        // inline POST handler historically only set `status`, which
+        // left `lifecycle` stale at whatever the row had before.
         const [updated] = await db
           .update(estimates)
-          .set({ status: "approved", approvedAt: new Date() })
+          .set({
+            status: "approved",
+            approvedAt: new Date(),
+            lifecycle: deriveLifecycleForWrite({
+              status: "approved",
+              internalStatus: existing.internalStatus,
+            }),
+          })
           .where(and(eq(estimates.id, id), eq(estimates.status, "pending")))
           .returning();
         if (!updated) {
@@ -1003,9 +1015,18 @@ export function registerEstimateRoutes(
           res.status(409).json({ message: "Estimate is no longer pending" });
           return;
         }
+        // Task #671 — dual-write the canonical lifecycle column (see
+        // matching comment on the approve handler above).
         const [updated] = await db
           .update(estimates)
-          .set({ status: "rejected", rejectedAt: new Date() })
+          .set({
+            status: "rejected",
+            rejectedAt: new Date(),
+            lifecycle: deriveLifecycleForWrite({
+              status: "rejected",
+              internalStatus: existing.internalStatus,
+            }),
+          })
           .where(and(eq(estimates.id, id), eq(estimates.status, "pending")))
           .returning();
         if (!updated) {
