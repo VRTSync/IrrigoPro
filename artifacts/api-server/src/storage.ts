@@ -1002,12 +1002,43 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createCompany(company: InsertCompany): Promise<Company> {
-    const result = await db.insert(companies).values(company).returning();
+    // Task #669 — keep the counter in lock-step with the configured
+    // seed at create time. If the super-admin provided a custom
+    // `startingEstimateNumber` and didn't also specify
+    // `nextEstimateNumber`, mirror starting → next so the very first
+    // allocation lands at the configured seed (never the schema
+    // default of 50000).
+    const start = (company as { startingEstimateNumber?: number | null }).startingEstimateNumber;
+    const nextProvided = (company as { nextEstimateNumber?: number | null }).nextEstimateNumber;
+    const payload: InsertCompany =
+      typeof start === "number" && nextProvided == null
+        ? ({ ...company, nextEstimateNumber: start } as InsertCompany)
+        : company;
+    const result = await db.insert(companies).values(payload).returning();
     return result[0];
   }
 
   async updateCompany(id: number, company: Partial<InsertCompany>): Promise<Company | undefined> {
-    const result = await db.update(companies).set(company).where(eq(companies.id, id)).returning();
+    // Task #669 — when the super-admin raises `startingEstimateNumber`
+    // we also bump `nextEstimateNumber` to keep the configured seed
+    // and the live allocator in sync. Policy: `nextEstimateNumber`
+    // is monotonically non-decreasing (we never reissue a number
+    // already handed out), so we pin it to MAX(currentNext, newStart).
+    // If the caller passed an explicit `nextEstimateNumber` we honor
+    // it verbatim and skip the auto-sync — that's the explicit override
+    // path super-admin uses on the edit form.
+    const patch: Partial<InsertCompany> = { ...company };
+    const newStart = patch.startingEstimateNumber;
+    const explicitNext = patch.nextEstimateNumber;
+    if (typeof newStart === "number" && explicitNext == null) {
+      const [existing] = await db
+        .select({ next: companies.nextEstimateNumber })
+        .from(companies)
+        .where(eq(companies.id, id));
+      const currentNext = existing?.next ?? newStart;
+      patch.nextEstimateNumber = Math.max(currentNext, newStart);
+    }
+    const result = await db.update(companies).set(patch).where(eq(companies.id, id)).returning();
     return result[0];
   }
 
@@ -1995,6 +2026,46 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  // Task #669 — atomically allocate the next 5-digit estimate number
+  // for a given company. Uses an UPDATE … RETURNING so concurrent
+  // estimate inserts never collide. Must be called inside the same
+  // executor (tx) that inserts the estimate row so the counter bump
+  // rolls back with the estimate on error. If `companyId` is null
+  // (legacy / test paths without a company context), falls back to
+  // the timestamp-based scheme so we never block an insert.
+  async allocateNextEstimateNumber(
+    executor: DbExecutor,
+    companyId: number | null | undefined,
+  ): Promise<string> {
+    if (companyId == null) {
+      return `EST-${Date.now()}`;
+    }
+    type ExecResult =
+      | { allocated: string }[]
+      | { rows: { allocated: string }[] };
+    const execute = (executor as { execute: (q: ReturnType<typeof sql>) => Promise<unknown> }).execute;
+    const result = (await execute.call(
+      executor,
+      sql`UPDATE companies
+          SET next_estimate_number = next_estimate_number + 1,
+              updated_at = NOW()
+          WHERE id = ${companyId}
+          RETURNING (next_estimate_number - 1)::text AS allocated`,
+    )) as ExecResult;
+    // pg / drizzle execute may return either an array or { rows: [...] }
+    // depending on driver path; both shapes are normalized here.
+    const rows: { allocated: string }[] = Array.isArray(result)
+      ? result
+      : (result.rows ?? []);
+    const allocated = rows[0]?.allocated;
+    if (!allocated) {
+      throw new Error(
+        `Failed to allocate estimate number for company ${companyId}`,
+      );
+    }
+    return String(allocated);
+  }
+
   // Single sanctioned write path for an estimate + its items. Both the
   // public createEstimate (with its own tx) and the wet-check conversion
   // engine (which runs inside its own tx) call this so they share insert
@@ -2005,9 +2076,25 @@ export class DatabaseStorage implements IStorage {
     items: InsertEstimateItem[],
     explicitEstimateNumber?: string,
   ): Promise<EstimateWithItems> {
-    const estimateNumber = explicitEstimateNumber
-      ?? (estimate as { estimateNumber?: string }).estimateNumber
-      ?? `EST-${Date.now()}`;
+    // Task #669 — every new estimate gets a 5-digit per-company
+    // number from the `companies.next_estimate_number` counter,
+    // allocated atomically inside this transaction. An explicit
+    // value (only ever passed by internal callers like the wet-check
+    // conversion engine, where the number has already been allocated
+    // from the same sequence) still wins. **A client-supplied value
+    // on the payload is deliberately ignored on create** — the
+    // sequence is the only sanctioned source for new estimate
+    // numbers; renames go through the admin-gated PUT path.
+    const clientSuppliedNumber = (estimate as { estimateNumber?: string }).estimateNumber;
+    if (clientSuppliedNumber) {
+      delete (estimate as { estimateNumber?: string }).estimateNumber;
+    }
+    const estimateNumber =
+      explicitEstimateNumber
+      ?? (await this.allocateNextEstimateNumber(
+          executor,
+          (estimate as { companyId?: number | null }).companyId ?? null,
+        ));
     // Task #642 — dual-write the canonical lifecycle column alongside
     // the legacy (status, internalStatus) pair. Derived from whatever
     // the caller passed; defaults to `pending_review` if neither axis
@@ -7225,7 +7312,13 @@ export class DatabaseStorage implements IStorage {
         } else {
           // First-time creation goes through the SAME service POST
           // /api/estimates uses, keeping any side effects in lock-step.
-          const estimateNumber = `EST-WC-${id}-${Date.now()}`;
+          // Task #669 — wet-check conversions allocate a number from
+          // the same per-company sequence as regular estimates instead
+          // of the legacy `EST-WC-…` ad-hoc string.
+          const estimateNumber = await this.allocateNextEstimateNumber(
+            tx,
+            companyId,
+          );
           // Task #657 — `processEstimatePayload` is flat-only and ignores
           // per-item laborHours when computing the labor subtotal; the
           // single source of truth is `estimate.totalLaborHours`. Pre-sum

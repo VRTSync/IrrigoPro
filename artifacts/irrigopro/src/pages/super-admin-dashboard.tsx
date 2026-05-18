@@ -19,6 +19,13 @@ import { useToast } from "@/hooks/use-toast";
 const companyAdminFormSchema = z.object({
   adminEmail: z.string().email("Valid admin email is required"),
   adminPassword: z.string().min(6, "Password must be at least 6 characters"),
+  // Task #669 — super-admin can configure the per-company estimate
+  // sequence seed at onboarding time. Optional; defaults to 50000.
+  startingEstimateNumber: z.coerce
+    .number()
+    .int("Must be a whole number")
+    .min(10000, "Must be at least 5 digits")
+    .optional(),
 });
 
 // Schema for editing existing companies
@@ -29,6 +36,23 @@ const companyFormSchema = z.object({
   email: z.string().email().optional().or(z.literal("")),
   website: z.string().optional(),
   subscription: z.string().default("basic"),
+  // Task #669 — onboarding-time configurable estimate sequence seed.
+  // Coerce from the number input value. Optional on edit so leaving
+  // it blank means "no change".
+  startingEstimateNumber: z.coerce
+    .number()
+    .int("Must be a whole number")
+    .min(10000, "Must be at least 5 digits")
+    .optional(),
+  // Task #669 — explicit override for the live allocator pointer.
+  // When set, the very next estimate created for this company will
+  // be allocated at this value. Super-admin "break-glass" control
+  // for fixing a drifted counter.
+  nextEstimateNumber: z.coerce
+    .number()
+    .int("Must be a whole number")
+    .min(10000, "Must be at least 5 digits")
+    .optional(),
 });
 
 type CompanyAdminFormData = z.infer<typeof companyAdminFormSchema>;
@@ -70,9 +94,12 @@ export default function SuperAdminDashboard() {
       email: "",
       website: "",
       subscription: "basic",
+      startingEstimateNumber: undefined,
+      nextEstimateNumber: undefined,
     } : {
       adminEmail: "",
       adminPassword: "",
+      startingEstimateNumber: undefined,
     },
   });
 
@@ -117,6 +144,8 @@ export default function SuperAdminDashboard() {
       email: company.email || "",
       website: company.website || "",
       subscription: company.subscription || "basic",
+      startingEstimateNumber: company.startingEstimateNumber ?? 50000,
+      nextEstimateNumber: company.nextEstimateNumber ?? undefined,
     });
     setIsCreateDialogOpen(true);
   };
@@ -226,6 +255,71 @@ export default function SuperAdminDashboard() {
                       )}
                     />
 
+                    {/* Task #669 — super_admin can set the per-company
+                        starting estimate number. Defaults to 50000.
+                        Changing this only affects future allocations;
+                        existing estimates are renumbered via the
+                        `renumber-estimates.ts` migration script. */}
+                    <FormField
+                      control={form.control}
+                      name="startingEstimateNumber"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Starting Estimate Number</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              inputMode="numeric"
+                              placeholder="50000"
+                              data-testid="input-starting-estimate-number"
+                              {...field}
+                              value={field.value ?? ""}
+                              onChange={(e) =>
+                                field.onChange(
+                                  e.target.value === "" ? undefined : Number(e.target.value),
+                                )
+                              }
+                            />
+                          </FormControl>
+                          <p className="text-xs text-muted-foreground">
+                            Seed value for this company&apos;s estimate sequence (5+ digits).
+                            Raising it bumps the next allocation too; lowering it never reissues used numbers.
+                          </p>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    {/* Task #669 — explicit override for the live
+                        allocator pointer (break-glass control). */}
+                    <FormField
+                      control={form.control}
+                      name="nextEstimateNumber"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Next Estimate Number (override)</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              inputMode="numeric"
+                              placeholder="Leave blank to keep current"
+                              data-testid="input-next-estimate-number"
+                              {...field}
+                              value={field.value ?? ""}
+                              onChange={(e) =>
+                                field.onChange(
+                                  e.target.value === "" ? undefined : Number(e.target.value),
+                                )
+                              }
+                            />
+                          </FormControl>
+                          <p className="text-xs text-muted-foreground">
+                            The very next estimate created for this company will be allocated at this value.
+                          </p>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
 
                   </div>
                 ) : (
@@ -254,6 +348,38 @@ export default function SuperAdminDashboard() {
                           <FormControl>
                             <Input type="password" placeholder="Enter password (min 6 characters)" {...field} />
                           </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    {/* Task #669 — let super-admin set the starting
+                        estimate number during onboarding. Optional;
+                        defaults to 50000 when blank. */}
+                    <FormField
+                      control={form.control}
+                      name="startingEstimateNumber"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Starting Estimate Number</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              inputMode="numeric"
+                              placeholder="50000"
+                              data-testid="input-create-starting-estimate-number"
+                              {...field}
+                              value={field.value ?? ""}
+                              onChange={(e) =>
+                                field.onChange(
+                                  e.target.value === "" ? undefined : Number(e.target.value),
+                                )
+                              }
+                            />
+                          </FormControl>
+                          <p className="text-xs text-muted-foreground">
+                            First estimate this company creates will be numbered with this value (5+ digits).
+                          </p>
                           <FormMessage />
                         </FormItem>
                       )}

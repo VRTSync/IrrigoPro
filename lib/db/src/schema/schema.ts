@@ -15,6 +15,13 @@ export const companies = pgTable("companies", {
   subscription: text("subscription").notNull().default("basic"), // basic, pro, enterprise
   subscriptionExpiry: timestamp("subscription_expiry"),
   isActive: boolean("is_active").notNull().default(true),
+  // Task #669 — per-company 5-digit estimate number sequence.
+  // `startingEstimateNumber` is the seed value (configurable by
+  // super_admin); `nextEstimateNumber` is the next value to be
+  // allocated (atomically incremented inside the estimate-insert
+  // transaction). Default 50000.
+  startingEstimateNumber: integer("starting_estimate_number").notNull().default(50000),
+  nextEstimateNumber: integer("next_estimate_number").notNull().default(50000),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -386,7 +393,12 @@ export const partUsage = pgTable("part_usage", {
 
 export const estimates = pgTable("estimates", {
   id: serial("id").primaryKey(),
-  estimateNumber: text("estimate_number").notNull().unique(),
+  // Task #669 — estimate numbers are scoped per-company (5-digit
+  // sequence allocated from `companies.next_estimate_number`). The
+  // global UNIQUE was relaxed to a composite UNIQUE on
+  // (companyId, estimateNumber) — see `estimatesCompanyNumberIdx`
+  // below.
+  estimateNumber: text("estimate_number").notNull(),
   companyId: integer("company_id").references(() => companies.id), // Company ownership
   customerId: integer("customer_id").references(() => customers.id),
   customerName: text("customer_name").notNull(),
@@ -467,6 +479,10 @@ export const estimates = pgTable("estimates", {
   activeCompanyStatusIdx: index("estimates_active_company_status_idx")
     .on(table.companyId, table.status)
     .where(sql`${table.deletedAt} IS NULL`),
+  // Task #669 — estimate numbers are unique within a company (not
+  // globally). Replaces the legacy global UNIQUE on `estimate_number`.
+  companyNumberIdx: uniqueIndex("estimates_company_number_unique_idx")
+    .on(table.companyId, table.estimateNumber),
 }));
 
 export const estimateItems = pgTable("estimate_items", {

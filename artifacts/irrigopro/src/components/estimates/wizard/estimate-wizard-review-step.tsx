@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Collapsible,
   CollapsibleContent,
@@ -54,6 +56,16 @@ interface EstimateWizardReviewStepProps {
    * Approval" (PUT + transition). Pass `true` to enable.
    */
   isDraftEdit?: boolean;
+  // Task #669 — optional editable estimate number. When `canEditNumber`
+  // is true (super_admin / company_admin on an existing estimate) an
+  // input is rendered above the summary so the number can be renamed.
+  // Uniqueness is enforced on the server.
+  estimateNumber?: string;
+  canEditNumber?: boolean;
+  onEstimateNumberChange?: (next: string) => void;
+  // Server-side conflict (HTTP 409, e.g. number already in use for
+  // this company). Rendered as an inline error under the input.
+  estimateNumberError?: string | null;
 }
 
 const fmt = (n: number) =>
@@ -85,6 +97,10 @@ export function EstimateWizardReviewStep({
   submitting,
   isEdit,
   isDraftEdit,
+  estimateNumber,
+  canEditNumber,
+  onEstimateNumberChange,
+  estimateNumberError,
 }: EstimateWizardReviewStepProps) {
   const totals = computeTotals(items, laborRate, flatTotalHours);
   const [attachOpen, setAttachOpen] = useState(false);
@@ -92,6 +108,44 @@ export function EstimateWizardReviewStep({
 
   return (
     <div className="space-y-4">
+      {canEditNumber && (
+        <Card className={`border-l-4 ${estimateNumberError ? "border-l-red-500" : "border-l-amber-500"}`}>
+          <CardContent className="p-4 sm:p-5 space-y-2">
+            <Label htmlFor="estimate-number-input" className="text-sm font-semibold text-gray-900">
+              Estimate number
+            </Label>
+            <Input
+              id="estimate-number-input"
+              data-testid="input-estimate-number"
+              inputMode="numeric"
+              pattern="\d*"
+              value={estimateNumber ?? ""}
+              onChange={(e) =>
+                onEstimateNumberChange?.(e.target.value.replace(/\D/g, ""))
+              }
+              className={`max-w-[200px] ${estimateNumberError ? "border-red-500 focus-visible:ring-red-500" : ""}`}
+              aria-invalid={estimateNumberError ? true : undefined}
+              aria-describedby={
+                estimateNumberError ? "estimate-number-error" : undefined
+              }
+            />
+            {estimateNumberError ? (
+              <p
+                id="estimate-number-error"
+                role="alert"
+                data-testid="error-estimate-number"
+                className="text-xs text-red-600 font-medium"
+              >
+                {estimateNumberError}
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500">
+                Per-company sequence. Must be at least 5 digits and unique within your company.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
       {/* Customer */}
       <Card className="border-l-4 border-l-blue-500">
         <CardContent className="p-4 sm:p-5 space-y-2">

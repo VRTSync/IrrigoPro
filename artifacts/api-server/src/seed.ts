@@ -1,5 +1,6 @@
 import { db } from "./db";
-import { customers, parts, estimates, estimateItems, propertyZones, zones, users, workOrders, workOrderItems, billingSheets, billingSheetItems } from "@workspace/db";
+import { customers, parts, estimates, estimateItems, propertyZones, zones, users, workOrders, workOrderItems, billingSheets, billingSheetItems, companies } from "@workspace/db";
+import { eq } from "drizzle-orm";
 
 type UserInsert = typeof users.$inferInsert;
 type CustomerInsert = typeof customers.$inferInsert;
@@ -141,10 +142,17 @@ export async function seedDatabase() {
     const insertedZones = await db.insert(zones).values(sampleZones).returning();
     console.log(`Inserted ${insertedZones.length} zones`);
 
-    // Seed estimates
+    // Seed estimates.
+    // Task #669 — every seeded estimate is scoped to a `companyId`
+    // (the per-company `(companyId, estimateNumber)` uniqueness index
+    // requires it), and after the bulk insert we advance the company's
+    // `nextEstimateNumber` past the highest seeded value so the very
+    // next live allocation can't collide with seeded rows.
+    const seedCompanyId = insertedUsers[0].companyId ?? 1;
     const sampleEstimates = [
       {
-        estimateNumber: "EST-2024-001",
+        companyId: seedCompanyId,
+        estimateNumber: "50000",
         customerId: insertedCustomers[0].id,
         customerName: insertedCustomers[0].name,
         customerEmail: insertedCustomers[0].email,
@@ -158,7 +166,8 @@ export async function seedDatabase() {
         laborRate: "75.00",
       },
       {
-        estimateNumber: "EST-2024-002",
+        companyId: seedCompanyId,
+        estimateNumber: "50001",
         customerId: insertedCustomers[1].id,
         customerName: insertedCustomers[1].name,
         customerEmail: insertedCustomers[1].email,
@@ -175,6 +184,23 @@ export async function seedDatabase() {
 
     const insertedEstimates = await db.insert(estimates).values(sampleEstimates).returning();
     console.log(`Inserted ${insertedEstimates.length} estimates`);
+
+    // Bump the per-company allocator past the highest seeded value so
+    // live allocations can't collide with seeded rows on the
+    // (companyId, estimateNumber) uniqueness index.
+    const highestSeeded = sampleEstimates.reduce(
+      (max, e) => Math.max(max, parseInt(e.estimateNumber, 10) || 0),
+      0,
+    );
+    if (highestSeeded > 0) {
+      await db
+        .update(companies)
+        .set({ nextEstimateNumber: highestSeeded + 1 })
+        .where(eq(companies.id, seedCompanyId));
+      console.log(
+        `Advanced companies(${seedCompanyId}).nextEstimateNumber to ${highestSeeded + 1}`,
+      );
+    }
 
     // Seed estimate items
     const sampleEstimateItems = [

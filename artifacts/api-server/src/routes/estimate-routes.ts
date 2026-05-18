@@ -133,6 +133,15 @@ export interface EstimateRoutesStorage {
 
 export const createEstimateWithItemsSchema = z.object({
   estimate: insertEstimateSchema.extend({
+    // Task #669 — optional override of the estimate number on edit.
+    // company_admin / super_admin can rename an estimate; uniqueness
+    // is enforced per-company in `handleEstimateUpdate`. Ignored on
+    // create — the per-company counter always wins there.
+    estimateNumber: z
+      .string()
+      .trim()
+      .regex(/^\d{5,}$/, "Estimate number must be at least 5 digits")
+      .optional(),
     estimateDate: z.union([z.date(), z.string()]).optional(),
     partsSubtotal: z.union([z.string(), z.number()]).optional(),
     laborSubtotal: z.union([z.string(), z.number()]).optional(),
@@ -548,8 +557,83 @@ export function registerEstimateRoutes(
       if (opts.submitForReview) {
         (parsed.estimate as { internalStatus?: string }).internalStatus = "pending_approval";
       }
+      // Task #669 — handle optional estimate-number rename. Only
+      // company_admin / super_admin can rename; for every other role
+      // (including billing_manager) we silently drop the field so the
+      // payload doesn't accidentally rewrite the persisted number on
+      // a normal edit. When the field is present and valid, we
+      // uniqueness-check it within the estimate's company and emit an
+      // `estimate.number_changed` audit row on the actual change.
+      const role = (req.authenticatedUserRole as string | undefined) ?? null;
+      const canRenameNumber = role === "super_admin" || role === "company_admin";
+      const requestedNumberRaw = (parsed.estimate as { estimateNumber?: string }).estimateNumber;
+      const requestedNumber = canRenameNumber && requestedNumberRaw
+        ? String(requestedNumberRaw).trim()
+        : undefined;
+      if (requestedNumber !== undefined && requestedNumber !== existing.estimateNumber) {
+        const ownerCompanyId = existing.companyId ?? null;
+        if (ownerCompanyId != null) {
+          const collision = await db
+            .select({ id: estimates.id })
+            .from(estimates)
+            .where(
+              and(
+                eq(estimates.companyId, ownerCompanyId),
+                eq(estimates.estimateNumber, requestedNumber),
+              ),
+            )
+            .limit(1);
+          if (collision.length > 0 && collision[0].id !== estimateId) {
+            res.status(409).json({
+              message: "Estimate number already in use for this company",
+              field: "estimateNumber",
+            });
+            return null;
+          }
+        }
+        (parsed.estimate as { estimateNumber?: string }).estimateNumber = requestedNumber;
+      } else {
+        // Always strip — either the role can't rename or the value is
+        // unchanged. updateEstimateWithItems must not see a stale
+        // estimateNumber in the payload.
+        delete (parsed.estimate as { estimateNumber?: string }).estimateNumber;
+      }
       const { estimate, items } = processEstimatePayload(parsed);
+      // processEstimatePayload spreads `input.estimate` so it carries
+      // the (validated) renamed number through into the InsertEstimate.
+      if (requestedNumber !== undefined && requestedNumber !== existing.estimateNumber) {
+        (estimate as { estimateNumber?: string }).estimateNumber = requestedNumber;
+      }
       const updatedEstimate = await storage.updateEstimateWithItems(estimateId, estimate, items);
+      if (
+        requestedNumber !== undefined &&
+        requestedNumber !== existing.estimateNumber
+      ) {
+        try {
+          await recordAuditEvent(req as any, {
+            actorUserId:
+              typeof (req as any).authenticatedUserId === "number"
+                ? (req as any).authenticatedUserId
+                : null,
+            actorRole: role,
+            actorCompanyId:
+              typeof (req as any).authenticatedUserCompanyId === "number"
+                ? (req as any).authenticatedUserCompanyId
+                : null,
+            actionType: "estimate",
+            action: "estimate.number_changed",
+            targetType: "estimate",
+            targetId: String(estimateId),
+            summary: `Estimate number changed from ${existing.estimateNumber} to ${requestedNumber}`,
+            details: {
+              from: existing.estimateNumber,
+              to: requestedNumber,
+            },
+          });
+        } catch {
+          // best-effort audit; route already succeeded
+        }
+      }
       return updatedEstimate;
     } catch (error) {
       console.error("Estimate update error:", error);

@@ -4736,12 +4736,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
-      const { adminEmail, adminPassword } = req.body;
+      const { adminEmail, adminPassword, startingEstimateNumber } = req.body;
 
       // Check if user already exists
       const existingUser = await storage.getUserByUsername(adminEmail);
       if (existingUser) {
         res.status(400).json({ message: "A user with this email already exists" });
+        return;
+      }
+
+      // Task #669 — super-admin can configure the starting estimate
+      // number at onboarding time. `storage.createCompany` mirrors the
+      // value into `nextEstimateNumber` so the very first allocation
+      // for this company lands at the configured seed.
+      const startNum =
+        typeof startingEstimateNumber === "number" && Number.isFinite(startingEstimateNumber)
+          ? Math.trunc(startingEstimateNumber)
+          : undefined;
+      if (startNum !== undefined && startNum < 10000) {
+        res.status(400).json({ message: "Starting estimate number must be at least 5 digits" });
         return;
       }
 
@@ -4752,7 +4765,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         phone: '',
         email: '',
         website: '',
-        subscription: 'basic'
+        subscription: 'basic',
+        ...(startNum !== undefined ? { startingEstimateNumber: startNum } : {}),
       };
 
       const company = await storage.createCompany(companyData);

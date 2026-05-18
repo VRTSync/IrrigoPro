@@ -457,7 +457,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                 </div>
                 {workOrder.estimateId && (
                   <Badge className="bg-green-100 text-green-800 border-green-200">
-                    From EST-{workOrder.estimateId}
+                    From estimate #{workOrder.estimateId}
                   </Badge>
                 )}
                 {workOrder.noPhotosNeeded && (

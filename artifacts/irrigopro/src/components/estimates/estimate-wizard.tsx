@@ -32,6 +32,7 @@ import {
 import { EstimateWizardReviewStep } from "./wizard/estimate-wizard-review-step";
 import { submitEstimate, type SubmitMode } from "./estimate-wizard-submit";
 import { isDraft, estimateSubmitStatusFields } from "@/lib/lifecycle";
+import { getCurrentUser } from "@/lib/impersonation";
 
 interface EstimateApiPayloadEstimate {
   customerId: number;
@@ -61,6 +62,10 @@ interface EstimateApiPayloadEstimate {
   controllerLetter: string | null;
   zoneNumber: number | null;
   internalStatus?: string;
+  // Task #669 — present only when an admin renames an existing
+  // estimate. Server validates uniqueness per company and ignores it
+  // for non-admin roles.
+  estimateNumber?: string;
 }
 
 interface EstimateApiPayloadItem {
@@ -310,6 +315,23 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
   const [flatTotalHours, setFlatTotalHours] = useState<number>(0);
   const [photos, setPhotos] = useState<UploadedFile[]>([]);
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
+  // Task #669 — editable estimate number on edit (admin only). Empty
+  // string in create mode; the server allocates the number from the
+  // per-company sequence on insert.
+  const [estimateNumber, setEstimateNumber] = useState<string>("");
+  const [originalEstimateNumber, setOriginalEstimateNumber] = useState<string>("");
+  // Task #669 — server-side uniqueness conflict for the estimate
+  // number rename. Surfaced as an inline error under the input on
+  // the review step; cleared as soon as the user edits the field.
+  const [estimateNumberError, setEstimateNumberError] = useState<string | null>(null);
+  // Task #669 — only company_admin / super_admin can rename. Computed
+  // once at mount from the cached session user — role doesn't change
+  // mid-edit so re-reading on every render is unnecessary.
+  const canEditEstimateNumber = useMemo(() => {
+    if (!isEdit) return false;
+    const role = getCurrentUser()?.role ?? null;
+    return role === "super_admin" || role === "company_admin";
+  }, [isEdit]);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<PersistedDraft | null>(null);
@@ -498,6 +520,11 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
         : persistedFlat;
     })();
     initialSnapshotRef.current = snapshot(cs, loadedFlat, lr, baselineFlatHours, ph, at);
+    // Task #669 — hydrate the editable estimate number from the
+    // persisted estimate (read-only on the wire for non-admin roles).
+    const persistedNumber = String(existing.estimateNumber ?? "");
+    setEstimateNumber(persistedNumber);
+    setOriginalEstimateNumber(persistedNumber);
     hydratedRef.current = true;
   }, [isEdit, existing, open, realCustomer, realCustomerFetched]);
 
@@ -673,6 +700,29 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       // "Save as draft" failure on an existing draft doesn't get
       // misreported as a failed submit.
       const submitting = variables.mode === "submit" && isDraftEdit;
+      // Task #669 — surface the estimate-number uniqueness conflict
+      // (HTTP 409 with `field: "estimateNumber"`) as an inline error
+      // on the review step input. apiRequest packs the response into
+      // `Error("<status>: <body>")`, so we parse both halves here.
+      const raw = String(err.message ?? "");
+      const m = raw.match(/^(\d{3}):\s*(.*)$/s);
+      if (m && m[1] === "409") {
+        try {
+          const body = JSON.parse(m[2]);
+          if (body && body.field === "estimateNumber") {
+            setEstimateNumberError(
+              typeof body.message === "string"
+                ? body.message
+                : "Estimate number already in use for this company",
+            );
+            // Stop here — the inline error is the user-facing signal;
+            // a competing toast would just be noise.
+            return;
+          }
+        } catch {
+          // Fall through to the generic toast below.
+        }
+      }
       toast({
         title: submitting
           ? "Couldn't submit for review"
@@ -735,6 +785,14 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       workLocationAddress: customerStep.workLocation?.address ?? null,
       controllerLetter: customerStep.controllerLetter,
       zoneNumber: customerStep.zoneNumber,
+      // Task #669 — only include the estimate number in the payload
+      // when the admin actually changed it. The server uniqueness check
+      // and `estimate.number_changed` audit row fire on the rename.
+      ...(canEditEstimateNumber &&
+      estimateNumber &&
+      estimateNumber !== originalEstimateNumber
+        ? { estimateNumber }
+        : {}),
     };
     const itemsPayload: EstimateApiPayloadItem[] = items.map((it, index) => ({
       partId: it.partId,
@@ -979,6 +1037,15 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                 submitting={saveMutation.isPending}
                 isEdit={isEdit}
                 isDraftEdit={isDraftEdit}
+                estimateNumber={estimateNumber}
+                canEditNumber={canEditEstimateNumber}
+                onEstimateNumberChange={(next) => {
+                  setEstimateNumber(next);
+                  // Clear the server-side conflict the moment the user
+                  // edits the value so the inline error doesn't linger.
+                  if (estimateNumberError) setEstimateNumberError(null);
+                }}
+                estimateNumberError={estimateNumberError}
               />
             )}
           </div>
