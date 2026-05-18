@@ -13,6 +13,7 @@ import { EstimateWizard } from "@/components/estimates/estimate-wizard";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { WorkOrderWizard } from "@/components/work-orders/work-order-wizard";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
+import { formatEstimateNumber } from "@/lib/estimate-number";
 
 interface Estimate {
   id: number;
@@ -304,7 +305,7 @@ export default function Operations() {
                       {item.type === 'workorder' && <Wrench className="h-5 w-5 text-green-600" />}
                       {item.type === 'billingsheet' && <ClipboardList className="h-5 w-5 text-purple-600" />}
                       <h3 className="font-semibold text-lg">
-                        {item.type === 'estimate' && (item as any).estimateNumber}
+                        {item.type === 'estimate' && formatEstimateNumber((item as any).estimateNumber)}
                         {item.type === 'workorder' && (item as any).workOrderNumber}
                         {item.type === 'billingsheet' && (
                           (item as any).billingSheetNumber || `Billing Sheet #${(item as any).id}`

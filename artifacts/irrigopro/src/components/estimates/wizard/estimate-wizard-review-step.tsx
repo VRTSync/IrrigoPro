@@ -114,21 +114,34 @@ export function EstimateWizardReviewStep({
             <Label htmlFor="estimate-number-input" className="text-sm font-semibold text-gray-900">
               Estimate number
             </Label>
-            <Input
-              id="estimate-number-input"
-              data-testid="input-estimate-number"
-              inputMode="numeric"
-              pattern="\d*"
-              value={estimateNumber ?? ""}
-              onChange={(e) =>
-                onEstimateNumberChange?.(e.target.value.replace(/\D/g, ""))
-              }
-              className={`max-w-[200px] ${estimateNumberError ? "border-red-500 focus-visible:ring-red-500" : ""}`}
-              aria-invalid={estimateNumberError ? true : undefined}
-              aria-describedby={
-                estimateNumberError ? "estimate-number-error" : undefined
-              }
-            />
+            {/* Task #678 — "EST-" is a non-editable visual adornment.
+                The input still accepts/submits digits only. */}
+            <div className="flex items-stretch max-w-[240px]">
+              <span
+                aria-hidden="true"
+                className={`inline-flex items-center px-2 rounded-l-md border border-r-0 bg-gray-50 text-sm font-medium text-gray-600 ${
+                  estimateNumberError ? "border-red-500" : "border-input"
+                }`}
+                data-testid="estimate-number-prefix"
+              >
+                EST-
+              </span>
+              <Input
+                id="estimate-number-input"
+                data-testid="input-estimate-number"
+                inputMode="numeric"
+                pattern="\d*"
+                value={estimateNumber ?? ""}
+                onChange={(e) =>
+                  onEstimateNumberChange?.(e.target.value.replace(/\D/g, ""))
+                }
+                className={`rounded-l-none ${estimateNumberError ? "border-red-500 focus-visible:ring-red-500" : ""}`}
+                aria-invalid={estimateNumberError ? true : undefined}
+                aria-describedby={
+                  estimateNumberError ? "estimate-number-error" : undefined
+                }
+              />
+            </div>
             {estimateNumberError ? (
               <p
                 id="estimate-number-error"

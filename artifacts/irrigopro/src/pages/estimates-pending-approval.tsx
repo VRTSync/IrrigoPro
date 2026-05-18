@@ -17,6 +17,7 @@ import {
 import { sendEstimateEmail } from "@/lib/email";
 import type { Estimate } from "@workspace/db/schema";
 import { isReadyToSend } from "@/lib/lifecycle";
+import { formatEstimateNumber } from "@/lib/estimate-number";
 
 function formatCurrency(amount: string | number) {
   const n = typeof amount === "string" ? parseFloat(amount) : amount;
@@ -167,7 +168,7 @@ export default function EstimatesPendingApproval() {
                       className="odd:bg-white even:bg-gray-50/60 hover:bg-blue-50/40 transition-colors"
                     >
                       <td className="px-4 py-4">
-                        <div className="font-medium text-gray-900">{est.estimateNumber}</div>
+                        <div className="font-medium text-gray-900">{formatEstimateNumber(est.estimateNumber)}</div>
                         <div className="text-xs text-gray-500">by {est.createdBy}</div>
                       </td>
                       <td className="px-4 py-4">
@@ -271,7 +272,7 @@ export default function EstimatesPendingApproval() {
         onOpenChange={(open) => {
           if (!open) setSendDialogEstimate(null);
         }}
-        estimateNumber={sendDialogEstimate?.estimateNumber ?? null}
+        estimateNumber={sendDialogEstimate?.estimateNumber ? formatEstimateNumber(sendDialogEstimate.estimateNumber) : null}
         customerName={sendDialogEstimate?.customerName ?? null}
         customerEmail={sendDialogEstimate?.customerEmail ?? null}
         isSending={sendToCustomer.isPending}

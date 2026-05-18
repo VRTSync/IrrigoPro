@@ -9,6 +9,7 @@ import {
   ImageOff,
   Loader2,
 } from "lucide-react";
+import { formatEstimateNumber } from "@/lib/estimate-number";
 
 // Task #666 — derive a human-readable filename from an attachment URL.
 // Used both to label list rows and to decide whether the URL is safe
@@ -188,7 +189,7 @@ export default function EstimateApproval() {
           <h1 className="text-3xl font-bold text-green-600 mb-4">Estimate Approved!</h1>
           {action.estimateNumber && (
             <p className="text-lg text-gray-700 mb-3">
-              Thank you for approving estimate <strong>{action.estimateNumber}</strong>.
+              Thank you for approving estimate <strong>{formatEstimateNumber(action.estimateNumber)}</strong>.
             </p>
           )}
           <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
@@ -214,7 +215,7 @@ export default function EstimateApproval() {
           <h1 className="text-3xl font-bold text-gray-700 mb-4">Estimate Declined</h1>
           {action.estimateNumber && (
             <p className="text-lg text-gray-700 mb-3">
-              You declined estimate <strong>{action.estimateNumber}</strong>. We have
+              You declined estimate <strong>{formatEstimateNumber(action.estimateNumber)}</strong>. We have
               notified our team.
             </p>
           )}
@@ -262,7 +263,7 @@ export default function EstimateApproval() {
           <h1 className="text-3xl font-bold text-yellow-600 mb-4">Link Expired</h1>
           <p className="text-gray-700">
             {load.estimateNumber
-              ? `Estimate ${load.estimateNumber} is no longer available for approval. `
+              ? `Estimate ${formatEstimateNumber(load.estimateNumber)} is no longer available for approval. `
               : ""}
             Please contact us to request a new estimate.
           </p>
@@ -294,7 +295,7 @@ export default function EstimateApproval() {
       <div className="space-y-6">
         <div className="text-center">
           <h1 className="text-2xl font-bold text-gray-900 mb-1">
-            Estimate {estimate.estimateNumber}
+            Estimate {formatEstimateNumber(estimate.estimateNumber)}
           </h1>
           <p className="text-gray-600">
             for {estimate.customerName} · {fmtDate(estimate.estimateDate)}

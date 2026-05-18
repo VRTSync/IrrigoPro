@@ -25,6 +25,7 @@
 
 import type { Express, Request, RequestHandler, Response } from "express";
 import { and, eq } from "drizzle-orm";
+import { formatEstimateNumber } from "../estimate-number";
 import { z } from "zod/v4";
 import {
   estimates,
@@ -624,7 +625,7 @@ export function registerEstimateRoutes(
             action: "estimate.number_changed",
             targetType: "estimate",
             targetId: String(estimateId),
-            summary: `Estimate number changed from ${existing.estimateNumber} to ${requestedNumber}`,
+            summary: `Estimate number changed from ${formatEstimateNumber(existing.estimateNumber)} to ${formatEstimateNumber(requestedNumber)}`,
             details: {
               from: existing.estimateNumber,
               to: requestedNumber,
@@ -801,7 +802,7 @@ export function registerEstimateRoutes(
           severity: "info",
           targetType: "estimate",
           targetId: String(id),
-          summary: `Estimate ${existing.estimateNumber ?? id} deleted`,
+          summary: `Estimate ${existing.estimateNumber ? formatEstimateNumber(existing.estimateNumber) : id} deleted`,
           details: {
             estimateId: id,
             estimateNumber: existing.estimateNumber ?? null,
@@ -1088,7 +1089,7 @@ export function registerEstimateRoutes(
           companyId: estimate.companyId ?? null,
           before: { internalStatus: estimate.internalStatus },
           after: { internalStatus: (updated as any).internalStatus },
-          summary: `Estimate ${estimate.estimateNumber ?? id} internally approved`,
+          summary: `Estimate ${estimate.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : id} internally approved`,
         });
         res.json({ message: "Estimate internally approved", estimate: updated });
       } catch (error) {
@@ -1147,7 +1148,7 @@ export function registerEstimateRoutes(
             internalStatus: result.estimate.internalStatus,
           },
           summary:
-            `Estimate ${estimate.estimateNumber ?? id} approved` +
+            `Estimate ${estimate.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : id} approved` +
             (result.workOrder
               ? `; work order ${result.workOrder.workOrderNumber} created`
               : ""),
@@ -1231,7 +1232,7 @@ export function registerEstimateRoutes(
           companyId: estimate.companyId ?? null,
           before: { status: estimate.status },
           after: { status: updatedEstimate.status },
-          summary: `Estimate ${estimate.estimateNumber ?? id} rejected`,
+          summary: `Estimate ${estimate.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : id} rejected`,
         });
 
         res.json({
@@ -1367,7 +1368,7 @@ export function registerEstimateRoutes(
         severity: "info",
         targetType: "estimate",
         targetId: String(estimateId),
-        summary: `Estimate ${estimateWithItems.estimateNumber} sent to ${resolvedTo}`,
+        summary: `Estimate ${formatEstimateNumber(estimateWithItems.estimateNumber)} sent to ${resolvedTo}`,
         details: {
           estimateId,
           estimateNumber: estimateWithItems.estimateNumber,
@@ -1487,7 +1488,7 @@ export function registerEstimateRoutes(
         companyId: estimate.companyId ?? null,
         before: { status: estimate.status, internalStatus: estimate.internalStatus },
         after: { status: fresh?.status, internalStatus: fresh?.internalStatus },
-        summary: `Estimate ${estimate.estimateNumber ?? id} resent after expiration`,
+        summary: `Estimate ${estimate.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : id} resent after expiration`,
       });
       res.json({ message: "Estimate resent to customer", estimate: fresh });
     } catch (error) {
@@ -1668,7 +1669,7 @@ export function registerEstimateRoutes(
         },
         before: { status: estimate.status },
         after: { status: "approved" },
-        summary: `Customer approved estimate ${estimate.estimateNumber}`,
+        summary: `Customer approved estimate ${formatEstimateNumber(estimate.estimateNumber)}`,
         extra: { approvalSource: "email_link" },
       });
 
@@ -1713,7 +1714,7 @@ export function registerEstimateRoutes(
             userId: admin.id,
             type: "estimate_approved",
             title: "Estimate Approved by Customer",
-            message: `Customer approved estimate ${estimate.estimateNumber} for ${estimate.customerName}.${workOrder ? ` Work order ${workOrder.workOrderNumber} has been created.` : ""}`,
+            message: `Customer approved estimate ${formatEstimateNumber(estimate.estimateNumber)} for ${estimate.customerName}.${workOrder ? ` Work order ${workOrder.workOrderNumber} has been created.` : ""}`,
             relatedEntityType: "estimate",
             relatedEntityId: estimate.id,
             isRead: false,
@@ -1840,7 +1841,7 @@ export function registerEstimateRoutes(
         },
         before: { status: estimate.status },
         after: { status: "rejected" },
-        summary: `Customer rejected estimate ${estimate.estimateNumber}`,
+        summary: `Customer rejected estimate ${formatEstimateNumber(estimate.estimateNumber)}`,
         extra: { approvalSource: "email_link" },
       });
 
@@ -1857,7 +1858,7 @@ export function registerEstimateRoutes(
             userId: user.id,
             type: "estimate_rejected",
             title: "Estimate Rejected by Customer",
-            message: `Customer declined estimate ${estimate.estimateNumber} for ${estimate.customerName}.`,
+            message: `Customer declined estimate ${formatEstimateNumber(estimate.estimateNumber)} for ${estimate.customerName}.`,
             relatedEntityType: "estimate",
             relatedEntityId: estimate.id,
             isRead: false,
@@ -1880,7 +1881,7 @@ export function registerEstimateRoutes(
           <div style="max-width: 600px; margin: 0 auto; background: #fef2f2; border: 1px solid #dc2626; border-radius: 12px; padding: 40px;">
             <h1 style="color: #dc2626; margin-bottom: 20px;">Estimate Declined</h1>
             <p style="font-size: 18px; color: #374151; margin-bottom: 20px;">
-              Thank you for your response regarding estimate ${estimate.estimateNumber}.
+              Thank you for your response regarding estimate ${formatEstimateNumber(estimate.estimateNumber)}.
             </p>
             <p style="color: #6b7280;">
               We understand this estimate doesn't meet your needs at this time. Please feel free to contact us if you'd like to discuss alternatives or have any questions.
@@ -2013,7 +2014,7 @@ export function registerEstimateRoutes(
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader(
         "Content-Disposition",
-        `${wantsDownload ? "attachment" : "inline"}; filename="estimate-${estimate.estimateNumber}.pdf"`,
+        `${wantsDownload ? "attachment" : "inline"}; filename="estimate-${formatEstimateNumber(estimate.estimateNumber)}.pdf"`,
       );
       res.send(pdf);
     } catch (error) {

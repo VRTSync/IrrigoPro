@@ -3,6 +3,7 @@ import type { EstimateWithItems, EstimateItem, Company } from '@workspace/db';
 import { resolveChromiumExecutable } from './chromium-resolver';
 import { fetchLogoAsBase64, preloadPhotos } from './pdf-generator';
 import { FAILED_PHOTO_SENTINEL } from './pdf-helpers';
+import { formatEstimateNumber } from './estimate-number';
 
 const DEFAULT_BRAND_COLOR = '#1E5A99';
 const DEFAULT_BRAND_DARK = '#143F6B';
@@ -221,7 +222,7 @@ export function buildEstimateHtml(
 <html>
 <head>
 <meta charset="utf-8" />
-<title>Estimate ${escapeHtml(estimate.estimateNumber)}</title>
+<title>Estimate ${escapeHtml(formatEstimateNumber(estimate.estimateNumber))}</title>
 <style>
   @page { margin: 0.6in 0.5in 0.85in 0.5in; }
   * { box-sizing: border-box; }
@@ -304,7 +305,7 @@ export function buildEstimateHtml(
     </div>
     <div class="doc-meta">
       <div class="doc-label">ESTIMATE</div>
-      <div class="doc-number">#${escapeHtml(estimate.estimateNumber)}</div>
+      <div class="doc-number">${escapeHtml(formatEstimateNumber(estimate.estimateNumber))}</div>
       <div class="doc-status">${escapeHtml(statusLabel(estimate.status))}</div>
     </div>
   </div>
@@ -421,7 +422,7 @@ function footerTemplate(companyName: string, estimateNumber: string): string {
   return `
 <div style="width:100%; font-size:8.5px; color:#6b7280; padding:0 0.5in; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; display:flex; justify-content:space-between;">
   <span>${escapeHtml(companyName)}</span>
-  <span>Estimate #${escapeHtml(estimateNumber)}</span>
+  <span>Estimate ${escapeHtml(formatEstimateNumber(estimateNumber))}</span>
   <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
 </div>`;
 }

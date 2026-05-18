@@ -33,6 +33,7 @@ import { PropertyBoundarySection } from "./property-boundary";
 import { BillingNotes } from "./billing-notes";
 import { CustomerSiteMaps } from "./customer-site-maps";
 import { displayCustomerAddress } from "@/lib/customer-address";
+import { formatEstimateNumber } from "@/lib/estimate-number";
 
 interface CustomerProfileProps {
   customer: Customer;
@@ -383,7 +384,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                                 <FileText className="w-5 h-5 text-white" />
                               </div>
                               <div className="flex-1 min-w-0">
-                                <h3 className="font-bold text-gray-900 text-lg group-hover:text-blue-700 transition-colors">{estimate.estimateNumber}</h3>
+                                <h3 className="font-bold text-gray-900 text-lg group-hover:text-blue-700 transition-colors">{formatEstimateNumber(estimate.estimateNumber)}</h3>
                                 <p className="text-gray-600 font-medium text-sm">{estimate.projectName}</p>
                               </div>
                               <div className="flex-shrink-0">

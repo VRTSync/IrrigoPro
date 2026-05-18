@@ -11,6 +11,7 @@ import { lifecycleOf, LIFECYCLE_TINTS } from "@/lib/lifecycle";
 import { Plus, Settings, Clock, CheckCircle, DollarSign, Package, FileText, TrendingUp, Wrench, Users, UserCheck, FolderOpen } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Link } from "wouter";
+import { formatEstimateNumber } from "@/lib/estimate-number";
 
 interface DashboardStats {
   pendingEstimates: number;
@@ -261,7 +262,7 @@ export default function Dashboard() {
                           <FileText className="w-5 h-5 text-blue-600" />
                         </div>
                         <div>
-                          <p className="font-medium text-gray-900">{estimate.estimateNumber}</p>
+                          <p className="font-medium text-gray-900">{formatEstimateNumber(estimate.estimateNumber)}</p>
                           <p className="text-sm text-gray-600">{estimate.customerName}</p>
                           <p className="text-xs text-gray-500">Created {getTimeAgo(estimate.createdAt)}</p>
                         </div>

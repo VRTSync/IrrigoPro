@@ -1,6 +1,7 @@
 import { Client } from 'postmark';
 import { ObjectStorageService } from './objectStorage';
 import { storage } from './storage';
+import { formatEstimateNumber } from './estimate-number';
 
 // Initialize Postmark client
 const client = new Client(process.env.POSTMARK_API_TOKEN || '');
@@ -98,7 +99,7 @@ export class EmailService {
         To: toAddr,
         ...(ccList.length ? { Cc: ccList.join(', ') } : {}),
         ...(bccList.length ? { Bcc: bccList.join(', ') } : {}),
-        Subject: `Estimate Approval Required - ${data.estimateNumber}`,
+        Subject: `Estimate Approval Required - ${formatEstimateNumber(data.estimateNumber)}`,
         HtmlBody: htmlContent,
         TextBody: textContent,
         Tag: 'estimate-approval',
@@ -216,7 +217,7 @@ export class EmailService {
       <table style="width: 100%; border-collapse: collapse;">
         <tr>
           <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Estimate #:</td>
-          <td style="padding: 8px 0; color: #1f2937;">${data.estimateNumber}</td>
+          <td style="padding: 8px 0; color: #1f2937;">${formatEstimateNumber(data.estimateNumber)}</td>
         </tr>
         <tr>
           <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Project:</td>
@@ -333,7 +334,7 @@ NOTE FROM ${companyInfo.name.toUpperCase()}:
 ${data.note}
 ` : ''}
 ESTIMATE DETAILS:
-- Estimate #: ${data.estimateNumber}
+- Estimate: ${formatEstimateNumber(data.estimateNumber)}
 - Project: ${data.projectName}
 ${data.projectAddress ? `- Location: ${data.projectAddress}` : ''}
 ${data.workLocationLat && data.workLocationLng ? `- Pinned spot: ${data.workLocationAddress ? `${data.workLocationAddress} ` : ''}(${parseFloat(String(data.workLocationLat)).toFixed(6)}, ${parseFloat(String(data.workLocationLng)).toFixed(6)}) — https://www.google.com/maps/search/?api=1&query=${data.workLocationLat},${data.workLocationLng}` : ''}
@@ -465,13 +466,13 @@ Questions? Reply to this email or call us directly.
       await client.sendEmail({
         From: process.env.FROM_EMAIL || 'estimates@irrigationcompany.com',
         To: customerEmail,
-        Subject: `Estimate ${approved ? 'Approved' : 'Declined'} - ${estimateNumber}`,
+        Subject: `Estimate ${approved ? 'Approved' : 'Declined'} - ${formatEstimateNumber(estimateNumber)}`,
         HtmlBody: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <h2 style="color: ${approved ? '#10b981' : '#6b7280'};">
               Estimate ${approved ? 'Approved' : 'Declined'}
             </h2>
-            <p>Thank you for your response regarding estimate ${estimateNumber}.</p>
+            <p>Thank you for your response regarding estimate ${formatEstimateNumber(estimateNumber)}.</p>
             <p>We have recorded that you have <strong>${action}</strong> this estimate.</p>
             <p>${nextSteps}</p>
             <p>If you have any questions, please don't hesitate to contact us.</p>
@@ -479,9 +480,9 @@ Questions? Reply to this email or call us directly.
           </div>
         `,
         TextBody: `
-Estimate ${approved ? 'Approved' : 'Declined'} - ${estimateNumber}
+Estimate ${approved ? 'Approved' : 'Declined'} - ${formatEstimateNumber(estimateNumber)}
 
-Thank you for your response regarding estimate ${estimateNumber}.
+Thank you for your response regarding estimate ${formatEstimateNumber(estimateNumber)}.
 
 We have recorded that you have ${action} this estimate.
 

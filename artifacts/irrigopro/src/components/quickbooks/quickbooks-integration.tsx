@@ -21,6 +21,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, adaptiveRefetchInterval, useArrayQuery } from "@/lib/queryClient";
 import { format, formatDistanceToNow } from "date-fns";
+import { formatEstimateNumber } from "@/lib/estimate-number";
 
 interface QuickBooksConnectionProps {
   className?: string;
@@ -470,7 +471,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                     <div className="flex items-center gap-3">
                       {getStatusIcon("not-synced")}
                       <div>
-                        <p className="font-medium">{estimate.estimateNumber}</p>
+                        <p className="font-medium">{formatEstimateNumber(estimate.estimateNumber)}</p>
                         <p className="text-sm text-muted-foreground">
                           {estimate.customerName} - ${estimate.totalAmount}
                         </p>

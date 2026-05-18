@@ -41,6 +41,7 @@ import {
   type LifecycleStatus,
 } from "@/lib/lifecycle";
 import { EstimateListStatusBadge } from "@/components/estimates/list/estimate-list-status-badge";
+import { formatEstimateNumber } from "@/lib/estimate-number";
 
 interface EstimateDetailModalProps {
   open: boolean;
@@ -165,7 +166,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       const a = document.createElement("a");
       a.href = objUrl;
       const num = estimate?.estimateNumber as string | undefined;
-      a.download = num ? `estimate-${num}.pdf` : "estimate.pdf";
+      a.download = num ? `estimate-${formatEstimateNumber(num)}.pdf` : "estimate.pdf";
       a.rel = "noopener";
       document.body.appendChild(a);
       a.click();
@@ -288,7 +289,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     onSuccess: () => {
       toast({
         title: "Estimate deleted",
-        description: `Estimate ${estimate?.estimateNumber ?? ""} was deleted.`.trim(),
+        description: `Estimate ${formatEstimateNumber(estimate?.estimateNumber)} was deleted.`.trim(),
       });
       setShowDeleteDialog(false);
       // Task #634 — invalidate every cache surface that could be
@@ -459,7 +460,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                 <CardContent className="space-y-3">
                   <div>
                     <span className="font-medium text-gray-700">Estimate Number:</span>
-                    <p className="text-lg font-semibold text-gray-900">{estimate.estimateNumber}</p>
+                    <p className="text-lg font-semibold text-gray-900">{formatEstimateNumber(estimate.estimateNumber)}</p>
                   </div>
                   <div>
                     <span className="font-medium text-gray-700">Project Name:</span>
@@ -896,7 +897,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       <SendEstimateDialog
         open={showSendDialog}
         onOpenChange={setShowSendDialog}
-        estimateNumber={estimate?.estimateNumber ?? null}
+        estimateNumber={estimate?.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : null}
         customerName={estimate?.customerName ?? null}
         customerEmail={estimate?.customerEmail ?? null}
         isSending={sendApprovalEmailMutation.isPending}
@@ -914,7 +915,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
               {isPendingDelete ? (
                 <>
                   Estimate{" "}
-                  <span className="font-medium">{estimate?.estimateNumber}</span>{" "}
+                  <span className="font-medium">{formatEstimateNumber(estimate?.estimateNumber)}</span>{" "}
                   for{" "}
                   <span className="font-medium">{estimate?.customerName}</span>{" "}
                   has been submitted for approval. Deleting it will hide it
@@ -923,7 +924,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
               ) : (
                 <>
                   Estimate{" "}
-                  <span className="font-medium">{estimate?.estimateNumber}</span>{" "}
+                  <span className="font-medium">{formatEstimateNumber(estimate?.estimateNumber)}</span>{" "}
                   for{" "}
                   <span className="font-medium">{estimate?.customerName}</span>{" "}
                   will be removed from lists and dashboards. The row is

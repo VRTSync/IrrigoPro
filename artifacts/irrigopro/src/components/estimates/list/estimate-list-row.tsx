@@ -26,6 +26,7 @@ import {
   isPendingReview,
   type LifecycleStatus,
 } from "@/lib/lifecycle";
+import { formatEstimateNumber } from "@/lib/estimate-number";
 import { EstimateListStatusBadge } from "./estimate-list-status-badge";
 import { useToast } from "@/hooks/use-toast";
 
@@ -106,7 +107,7 @@ export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit, onResendC
     onSuccess: () => {
       toast({
         title: "Estimate deleted",
-        description: `Estimate ${estimate.estimateNumber} was deleted.`,
+        description: `Estimate ${formatEstimateNumber(estimate.estimateNumber)} was deleted.`,
       });
       setShowDeleteDialog(false);
       // Task #634 — the deleted estimate may sit in any of these query
@@ -154,7 +155,7 @@ export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit, onResendC
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `estimate-${estimate.estimateNumber}.pdf`;
+      a.download = `estimate-${formatEstimateNumber(estimate.estimateNumber)}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -195,7 +196,7 @@ export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit, onResendC
     >
       <div className="min-w-0">
         <div className="text-sm font-medium text-gray-900 truncate">{estimate.customerName}</div>
-        <div className="text-xs text-gray-500 truncate">{estimate.estimateNumber}</div>
+        <div className="text-xs text-gray-500 truncate">{formatEstimateNumber(estimate.estimateNumber)}</div>
       </div>
       <div className="text-sm font-semibold text-gray-900">
         {fmt(parseFloat(estimate.totalAmount))}
@@ -282,14 +283,14 @@ export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit, onResendC
                 {isPendingDelete ? (
                   <>
                     Estimate{" "}
-                    <span className="font-medium">{estimate.estimateNumber}</span>{" "}
+                    <span className="font-medium">{formatEstimateNumber(estimate.estimateNumber)}</span>{" "}
                     for <span className="font-medium">{estimate.customerName}</span>{" "}
                     has been submitted for approval. Deleting it will hide it
                     from every list; admins can still see it for audit.
                   </>
                 ) : (
                   <>
-                    Estimate <span className="font-medium">{estimate.estimateNumber}</span> for{" "}
+                    Estimate <span className="font-medium">{formatEstimateNumber(estimate.estimateNumber)}</span> for{" "}
                     <span className="font-medium">{estimate.customerName}</span> will be removed
                     from lists and dashboards. The row is preserved for audit and can be restored
                     by a super admin if needed.
