@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CheckCircle, ClipboardList, Eye, Mail, ShieldCheck } from "lucide-react";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
+import { EstimateWizard } from "@/components/estimates/estimate-wizard";
 import { EstimateMediaBlock } from "@/components/estimates/estimate-media-block";
 import {
   SendEstimateDialog,
@@ -33,6 +34,8 @@ export default function EstimatesPendingApproval() {
   const { toast } = useToast();
   const [detailId, setDetailId] = useState<number | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [editEstimateId, setEditEstimateId] = useState<number | null>(null);
+  const [showEstimateWizard, setShowEstimateWizard] = useState(false);
   const [sendDialogEstimate, setSendDialogEstimate] = useState<Estimate | null>(null);
 
   // Task #666 — the pending list endpoint returns full `estimates`
@@ -53,6 +56,11 @@ export default function EstimatesPendingApproval() {
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/estimates/pending-approval"] });
     queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
+  };
+
+  const handleEditEstimate = (id: number) => {
+    setEditEstimateId(id);
+    setShowEstimateWizard(true);
   };
 
   const internalApprove = useMutation({
@@ -257,16 +265,30 @@ export default function EstimatesPendingApproval() {
       </Card>
 
       <p className="text-xs text-gray-500">
-        Need to edit? Open the full <Link href="/estimates" className="underline">estimates page</Link>.
+        Looking for the full pipeline? Open the{" "}
+        <Link href="/estimates" className="underline">estimates page</Link>.
       </p>
 
       <EstimateDetailModal
         open={detailOpen}
         onOpenChange={setDetailOpen}
         estimateId={detailId}
-        onEdit={() => {
+        onEdit={(estimateId) => {
           setDetailOpen(false);
+          handleEditEstimate(estimateId);
         }}
+      />
+
+      <EstimateWizard
+        open={showEstimateWizard}
+        onOpenChange={(open) => {
+          setShowEstimateWizard(open);
+          if (!open) {
+            setEditEstimateId(null);
+            invalidate();
+          }
+        }}
+        estimateId={editEstimateId}
       />
 
       <SendEstimateDialog
