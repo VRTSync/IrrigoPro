@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, authedPdfUrl } from "@/lib/queryClient";
-import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink, Send, Eye, Download, Trash2 } from "lucide-react";
+import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink, Send, Eye, Download, Trash2, Link as LinkIcon, Copy } from "lucide-react";
 import { EstimateMediaBlock } from "@/components/estimates/estimate-media-block";
 import { buildMapsUrl } from "@/lib/maps-url";
 import type { Estimate } from "@workspace/db/schema";
@@ -36,6 +36,7 @@ import {
   isDraft,
   isExpired,
   isPendingReview,
+  isSent,
   lifecycleOf,
   reviewStageLabelOf,
   type LifecycleStatus,
@@ -89,11 +90,60 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   const [isViewingPdf, setIsViewingPdf] = useState(false);
   const [showSendDialog, setShowSendDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  // Task #680 — Mark as Sent dialog state. `markSentResult` holds the
+  // freshly minted customer approval URL after a successful mark so
+  // the same dialog can flip to "Done — copy this link".
+  const [showMarkSentDialog, setShowMarkSentDialog] = useState(false);
+  const [markSentResult, setMarkSentResult] = useState<{
+    approvalToken: string;
+    url: string;
+  } | null>(null);
 
   // Compute once per mount — the user's role rarely changes during a
   // session and we don't want this gate to flicker as React re-renders.
   const currentRole = readCurrentUserRole();
   const canSeeEstimatePdf = currentRole != null && PDF_READ_ROLES.has(currentRole);
+  // Task #680 — same gate as the server's `requireEstimateApprovalAccess`.
+  // Field techs and irrigation managers do not see Email / Mark as Sent.
+  const SEND_ROLES = new Set<string>([
+    "super_admin",
+    "company_admin",
+    "billing_manager",
+  ]);
+  const canSendEstimate = currentRole != null && SEND_ROLES.has(currentRole);
+
+  const buildApprovalUrl = (token: string) => {
+    const origin =
+      typeof window !== "undefined" ? window.location.origin : "";
+    return `${origin}/estimate-approval/${token}`;
+  };
+
+  const copyApprovalUrl = async (url: string) => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = url;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      toast({
+        title: "Link copied",
+        description: "Customer approval link copied to clipboard.",
+      });
+    } catch {
+      toast({
+        title: "Couldn't copy",
+        description: "Select the link and copy it manually.",
+        variant: "destructive",
+      });
+    }
+  };
 
   const { data: estimate, isLoading } = useQuery<any>({
     queryKey: ["/api/estimates", estimateId],
@@ -233,6 +283,41 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       toast({
         title: "Couldn't send estimate",
         description: error?.message || "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Task #680 — Mark as Sent (no email). The endpoint mints the
+  // approval token and flips internalStatus → sent_to_customer; we
+  // stash the resulting URL so the dialog can offer "Copy link".
+  const markSentMutation = useMutation({
+    mutationFn: async () => {
+      if (!estimateId) throw new Error("Missing estimate id");
+      return apiRequest(`/api/estimates/${estimateId}/mark-sent`, "POST");
+    },
+    onSuccess: (data: any) => {
+      const token = data?.approvalToken as string | undefined;
+      // Prefer the server-built URL so the link matches what the
+      // email flow would have used (APP_BASE_URL/production domain).
+      // Fall back to constructing from the current origin if the
+      // server didn't include it.
+      const url = (data?.approvalUrl as string | undefined) ||
+        (token ? buildApprovalUrl(token) : "");
+      if (token && url) {
+        setMarkSentResult({ approvalToken: token, url });
+      }
+      toast({
+        title: "Estimate marked as sent",
+        description: "No email was sent. Copy the customer link to share it.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Couldn't mark as sent",
+        description: err?.message || "Please try again.",
         variant: "destructive",
       });
     },
@@ -823,15 +908,58 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                       customer has already responded. */}
                   {isAwaitingCustomerReply(estimate) && !isEstimateDeleted && (
                     <>
-                      <Button
-                        onClick={() => setShowSendDialog(true)}
-                        disabled={sendApprovalEmailMutation?.isPending}
-                        className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
-                        data-testid="detail-modal-send-email"
-                      >
-                        <Mail className="w-4 h-4 mr-2" />
-                        {sendApprovalEmailMutation?.isPending ? 'Sending...' : 'Email Customer'}
-                      </Button>
+                      {/* Task #680 — Copy approval link for any sent
+                          estimate with a non-expired token, so users
+                          can re-share the existing link without
+                          re-sending or re-marking. */}
+                      {canSendEstimate && isSent(estimate) && estimate.approvalToken && (() => {
+                        const expiresAt = estimate.tokenExpiresAt ? new Date(estimate.tokenExpiresAt) : null;
+                        const tokenValid = !expiresAt || expiresAt.getTime() > Date.now();
+                        if (!tokenValid) return null;
+                        return (
+                          <Button
+                            variant="outline"
+                            onClick={() => copyApprovalUrl(buildApprovalUrl(estimate.approvalToken))}
+                            className="w-full sm:w-auto"
+                            data-testid="detail-modal-copy-approval-link"
+                          >
+                            <LinkIcon className="w-4 h-4 mr-2" />
+                            Copy approval link
+                          </Button>
+                        );
+                      })()}
+                      {/* Email + Mark-as-Sent are only valid when the
+                          estimate is in `pending_review` lifecycle
+                          (internal pending_approval / approved_internal).
+                          Explicitly excludes sent / expired / approved /
+                          rejected / draft so we never show an action
+                          the server will reject with a 400. */}
+                      {canSendEstimate && isPendingReview(estimate) && (
+                        <Button
+                          onClick={() => setShowSendDialog(true)}
+                          disabled={sendApprovalEmailMutation?.isPending}
+                          className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
+                          data-testid="detail-modal-send-email"
+                        >
+                          <Mail className="w-4 h-4 mr-2" />
+                          {sendApprovalEmailMutation?.isPending ? 'Sending...' : 'Email Customer'}
+                        </Button>
+                      )}
+                      {canSendEstimate && isPendingReview(estimate) && (
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            setMarkSentResult(null);
+                            setShowMarkSentDialog(true);
+                          }}
+                          disabled={markSentMutation.isPending}
+                          className="w-full sm:w-auto"
+                          data-testid="detail-modal-mark-sent"
+                        >
+                          <LinkIcon className="w-4 h-4 mr-2" />
+                          Mark as Sent
+                        </Button>
+                      )}
                       <Button
                         onClick={() => approveEstimateMutation.mutate()}
                         disabled={approveEstimateMutation.isPending}
@@ -903,6 +1031,87 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
         isSending={sendApprovalEmailMutation.isPending}
         onSend={(payload) => sendApprovalEmailMutation.mutate(payload)}
       />
+      {/* Task #680 — Mark as Sent confirm + result dialog. Pre-confirm
+          shows the warning copy; on success the same dialog flips to
+          show the freshly minted customer approval URL with a Copy
+          button. */}
+      <AlertDialog
+        open={showMarkSentDialog}
+        onOpenChange={(open) => {
+          setShowMarkSentDialog(open);
+          if (!open) setMarkSentResult(null);
+        }}
+      >
+        <AlertDialogContent data-testid="mark-sent-dialog">
+          {markSentResult ? (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Estimate marked as sent</AlertDialogTitle>
+                <AlertDialogDescription>
+                  No email was sent. Share this approval link with the customer
+                  however you like — it expires in 30 days.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <div className="space-y-2">
+                <div
+                  className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-mono break-all"
+                  data-testid="mark-sent-approval-url"
+                >
+                  {markSentResult.url}
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => copyApprovalUrl(markSentResult.url)}
+                  className="w-full"
+                  data-testid="mark-sent-copy-url"
+                >
+                  <Copy className="w-4 h-4 mr-2" />
+                  Copy link
+                </Button>
+              </div>
+              <AlertDialogFooter>
+                <AlertDialogAction
+                  onClick={() => {
+                    setShowMarkSentDialog(false);
+                    setMarkSentResult(null);
+                  }}
+                  data-testid="mark-sent-done"
+                >
+                  Done
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          ) : (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Mark this estimate as sent?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will advance the estimate to Sent and generate a customer
+                  approval link, but will <span className="font-semibold">NOT</span>{" "}
+                  send an email. Use this when you've delivered the estimate
+                  outside IrrigoPro (printed, hand-delivered, or sent from a
+                  personal email).
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={markSentMutation.isPending}>
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  disabled={markSentMutation.isPending}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    markSentMutation.mutate();
+                  }}
+                  data-testid="mark-sent-confirm"
+                >
+                  {markSentMutation.isPending ? "Marking…" : "Mark as Sent"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          )}
+        </AlertDialogContent>
+      </AlertDialog>
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent data-testid="detail-modal-delete-dialog">
           <AlertDialogHeader>

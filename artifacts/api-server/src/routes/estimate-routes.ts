@@ -1501,6 +1501,128 @@ export function registerEstimateRoutes(
     }
   });
 
+  // ── POST /api/estimates/:id/mark-sent ─────────────────────────────────
+  // Task #680 — Mark an estimate as sent **without** sending an email.
+  // Mirrors the preconditions and side effects of
+  // `_sendEstimateApprovalEmailFlow` (mints a 32-byte approval token
+  // with a 30-day expiry, flips internalStatus → sent_to_customer,
+  // dual-stamps the lifecycle column via `markEstimateSentToCustomer`),
+  // but intentionally skips the Postmark send. Used when the estimate
+  // is delivered out-of-band (printed, hand-delivered, personal email).
+  // Role gate matches the email-send path (billing_manager /
+  // company_admin / super_admin); field_tech and irrigation_manager
+  // get 403 via `requireEstimateApprovalAccess`.
+  app.post(
+    "/api/estimates/:id/mark-sent",
+    requireAuthentication,
+    requireEstimateApprovalAccess,
+    async (req: any, res) => {
+      try {
+        const id = parseInt(String(req.params.id));
+        if (isNaN(id) || id <= 0) {
+          res.status(400).json({ message: "Invalid estimate ID" });
+          return;
+        }
+        const estimate = await storage.getEstimate(id);
+        if (!estimate) {
+          res.status(404).json({ message: "Estimate not found" });
+          return;
+        }
+        if (!estimateOwnershipMatches(req, estimate.companyId)) {
+          res.status(404).json({ message: "Estimate not found" });
+          return;
+        }
+        if (estimate.status !== "pending") {
+          res
+            .status(400)
+            .json({ message: "Only pending estimates can be marked as sent" });
+          return;
+        }
+        if (estimate.internalStatus === "sent_to_customer") {
+          res
+            .status(400)
+            .json({ message: "Estimate has already been sent to the customer" });
+          return;
+        }
+        if (
+          estimate.internalStatus !== "pending_approval" &&
+          estimate.internalStatus !== "approved_internal"
+        ) {
+          res
+            .status(400)
+            .json({ message: "Estimate is not in a sendable internal state" });
+          return;
+        }
+
+        const crypto = await import("crypto");
+        const approvalToken = crypto.randomBytes(32).toString("hex");
+        const tokenExpiresAt = new Date();
+        tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 30);
+
+        const persisted = await storage.markEstimateSentToCustomer!(id, {
+          approvalToken,
+          tokenExpiresAt,
+          approvalSentAt: new Date(),
+          newEstimateDate: null,
+          isResend: false,
+        });
+        if (!persisted) {
+          res.status(409).json({
+            message: "Estimate has already been sent to the customer",
+          });
+          return;
+        }
+
+        // Build the customer-facing approval URL server-side so the
+        // response carries the canonical link (matches the URL the
+        // email flow would have generated). Mirrors `EmailService.baseUrl`.
+        const baseUrl = (() => {
+          if (process.env.APP_BASE_URL) {
+            return process.env.APP_BASE_URL.replace(/\/$/, "");
+          }
+          if (process.env.NODE_ENV === "production") {
+            return "https://irrigopro.com";
+          }
+          const replitDomain = process.env.REPLIT_DOMAINS?.split(",")[0];
+          if (replitDomain) return `https://${replitDomain}`;
+          return `https://${process.env.REPL_ID}.${process.env.REPL_OWNER}.replit.dev`;
+        })();
+        const approvalUrl = `${baseUrl}/estimate-approval/${approvalToken}`;
+
+        // Task #680 — lifecycle audit so finance can later distinguish
+        // a manual mark-sent from an emailed send. Same shape used by
+        // the resend audit row above.
+        await recordLifecycleAudit(req, {
+          resource: "estimate",
+          action: "estimate.mark_sent",
+          targetId: id,
+          companyId: estimate.companyId ?? null,
+          before: {
+            status: estimate.status,
+            internalStatus: estimate.internalStatus,
+          },
+          after: {
+            status: persisted.status,
+            internalStatus: persisted.internalStatus,
+          },
+          summary: `Estimate ${estimate.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : id} marked as sent without email`,
+          extra: { emailSent: false },
+        });
+
+        res.json({
+          message: "Estimate marked as sent",
+          estimate: persisted,
+          approvalToken,
+          approvalUrl,
+          tokenExpiresAt,
+        });
+      } catch (error) {
+        console.error("Estimate mark-sent error:", error);
+        res.status(500).json({ message: "Failed to mark estimate as sent" });
+      }
+    },
+  );
+
   // ── GET /api/estimates/view-by-token/:token ───────────────────────────
   // Task #666 — public, read-only fetch of an estimate by approval
   // token. Returns everything the customer-facing approval page needs
