@@ -18,6 +18,7 @@ import {
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { LocationFields } from "@/components/location/location-fields";
 import { LocationPicker } from "@/components/ui/location-picker";
+import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
 import { composeCustomerAddress } from "@/lib/customer-address";
 import { customerToBoundary } from "@/hooks/use-customer-boundary";
 import {
@@ -84,6 +85,7 @@ export function EstimateWizardCustomerStep({
   // "Change customer" flips this to true to re-open the picker explicitly.
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(!!value.workLocation);
+  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   // valueRef avoids stale closures inside the form `watch` subscription.
   const valueRef = useRef(value);
   valueRef.current = value;
@@ -333,11 +335,17 @@ export function EstimateWizardCustomerStep({
       {value.customer && (
         <Card>
           <CardContent className="p-4 sm:p-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="bg-blue-50 p-2 rounded-md">
-                <ClipboardList className="w-4 h-4 text-blue-600" />
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="bg-blue-50 p-2 rounded-md">
+                  <ClipboardList className="w-4 h-4 text-blue-600" />
+                </div>
+                <h2 className="text-base font-semibold text-gray-900">Scope of Work</h2>
               </div>
-              <h2 className="text-base font-semibold text-gray-900">Scope of Work</h2>
+              <AiExpandButton
+                getValue={() => value.workDescription}
+                onSuggestion={setAiSuggestion}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="wizard-work-description" className="sr-only">
@@ -351,6 +359,14 @@ export function EstimateWizardCustomerStep({
                 rows={8}
                 className="min-h-[160px] focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
                 data-testid="wizard-work-description"
+              />
+              <AiSuggestionCard
+                suggestion={aiSuggestion}
+                onAccept={() => {
+                  onChange({ ...value, workDescription: aiSuggestion! });
+                  setAiSuggestion(null);
+                }}
+                onDismiss={() => setAiSuggestion(null)}
               />
               <p className="text-xs text-gray-500">
                 This is the description the customer will see on their estimate.
