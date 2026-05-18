@@ -86,6 +86,17 @@ export function EstimateWizardCustomerStep({
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(!!value.workLocation);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  // Clear any pending AI suggestion when the wizard switches to a
+  // different customer — prevents a suggestion generated for one
+  // estimate from showing up on the next.
+  const lastCustomerIdRef = useRef<number | null>(value.customer?.id ?? null);
+  useEffect(() => {
+    const currentId = value.customer?.id ?? null;
+    if (currentId !== lastCustomerIdRef.current) {
+      lastCustomerIdRef.current = currentId;
+      setAiSuggestion(null);
+    }
+  }, [value.customer?.id]);
   // valueRef avoids stale closures inside the form `watch` subscription.
   const valueRef = useRef(value);
   valueRef.current = value;
