@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
@@ -10,7 +10,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { CheckCircle, ClipboardList, Eye, Mail, ShieldCheck } from "lucide-react";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
-import { EstimateMediaBlock } from "@/components/estimates/estimate-media-block";
 import {
   SendEstimateDialog,
   type SendEstimatePayload,
@@ -38,17 +37,7 @@ export default function EstimatesPendingApproval() {
   const [showEstimateWizard, setShowEstimateWizard] = useState(false);
   const [sendDialogEstimate, setSendDialogEstimate] = useState<Estimate | null>(null);
 
-  // Task #666 — the pending list endpoint returns full `estimates`
-  // rows including the `photos` / `attachments` text[] columns, but
-  // `Estimate` in the shared schema types them as `string[] | null`.
-  // The inline media block below needs the narrowed shape; we treat
-  // both fields as optional arrays here and validate with
-  // `Array.isArray` at the read site.
-  type PendingEstimate = Estimate & {
-    photos?: string[] | null;
-    attachments?: string[] | null;
-  };
-  const { data: pending = [], isLoading } = useArrayQuery<PendingEstimate>({
+  const { data: pending = [], isLoading } = useArrayQuery<Estimate>({
     queryKey: ["/api/estimates/pending-approval"],
     refetchInterval: 60000,
   });
@@ -170,28 +159,27 @@ export default function EstimatesPendingApproval() {
                     <th className="px-4 py-2.5 font-medium text-gray-600 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-gray-200">
                   {pending.map((est) => {
-                    const photos = Array.isArray(est.photos) ? est.photos : [];
-                    const attachments = Array.isArray(est.attachments) ? est.attachments : [];
-                    const hasMedia = photos.length > 0 || attachments.length > 0;
                     return (
-                    <React.Fragment key={est.id}>
-                    <tr className={`border-b ${hasMedia ? "border-transparent" : "border-gray-100"} hover:bg-gray-50/50`}>
-                      <td className="px-4 py-3">
+                    <tr
+                      key={est.id}
+                      className="odd:bg-white even:bg-gray-50/60 hover:bg-blue-50/40 transition-colors"
+                    >
+                      <td className="px-4 py-4">
                         <div className="font-medium text-gray-900">{est.estimateNumber}</div>
                         <div className="text-xs text-gray-500">by {est.createdBy}</div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-4">
                         <div className="text-gray-900">{est.customerName}</div>
                         <div className="text-xs text-gray-500">{est.customerEmail}</div>
                       </td>
-                      <td className="px-4 py-3 text-gray-700">{est.projectName}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900">
+                      <td className="px-4 py-4 text-gray-700">{est.projectName}</td>
+                      <td className="px-4 py-4 font-medium text-gray-900">
                         {formatCurrency(est.totalAmount)}
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{formatDate(est.createdAt)}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-4 text-gray-600">{formatDate(est.createdAt)}</td>
+                      <td className="px-4 py-4">
                         <div className="flex items-center gap-1.5 justify-end flex-wrap">
                           <Button
                             variant="outline"
@@ -242,19 +230,6 @@ export default function EstimatesPendingApproval() {
                         </div>
                       </td>
                     </tr>
-                    {hasMedia && (
-                      <tr className="border-b border-gray-100 bg-gray-50/30">
-                        <td colSpan={6} className="px-4 py-3">
-                          <EstimateMediaBlock
-                            photos={photos}
-                            attachments={attachments}
-                            variant="inline"
-                            testIdPrefix={`pending-${est.id}`}
-                          />
-                        </td>
-                      </tr>
-                    )}
-                    </React.Fragment>
                     );
                   })}
                 </tbody>
