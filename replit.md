@@ -440,6 +440,53 @@ in [`docs/estimate-wizard.md`](docs/estimate-wizard.md). The deep
 audit of known gaps is in
 [`docs/audits/estimate-handoffs-2026-05.md`](docs/audits/estimate-handoffs-2026-05.md).
 
+## Financial Pulse Slice 3 (Task #692)
+
+Drill-downs + Forward Look on `/financial-pulse`. Five new endpoints,
+all `company_admin | billing_manager | super_admin` only:
+
+- `GET /api/financial-pulse/top-customers?period=mtd|ytd&sort=revenue|budget_risk&limit=N`
+  — per-customer revenue, monthly/annual cap usage with status
+  (`unset|healthy|approaching|over`), avg days to pay, 7-month
+  sparkline. `sort=budget_risk` ranks `over → approaching →
+  healthy → unset`, then by `monthlyUsedPct` desc (see
+  `sortTopCustomers` in `financial-pulse-math.ts`).
+- `GET /api/financial-pulse/by-technician?period=…` — hours, revenue,
+  labor cost, margin %, avg ticket, BS / WO counts. `laborCost` /
+  `marginPct` are `null` when the tech has no `hourlyWage`.
+- `GET /api/financial-pulse/by-service-type?period=…` — revenue,
+  pct-of-total, invoice count, avg ticket per service type bucket
+  (emergency / standard / contract / adhoc).
+- `GET /api/financial-pulse/ar-aging` — Current / 1-30 / 31-60 / 60+
+  buckets. Sum of `bucket.amount` equals
+  `computeOutstandingAr(invoices)` (the Outstanding A/R KPI) within
+  rounding — covered by `financial-pulse-slice3.test.ts`.
+- `GET /api/financial-pulse/projections` — `mtd`, run-rate
+  `projectedMonthEnd = mtd / daysElapsed * daysInMonth`,
+  `prevMonthActual`, `prevMonthSameDay`.
+
+Every endpoint supports CSV via `Accept: text/csv` *or* `?format=csv`.
+Filenames: `financial-pulse-<tab>-YYYY-MM.csv` for `mtd`,
+`-YYYY.csv` for `ytd`. Formula-injection guarded by prefixing any
+field starting with `=+-@` with a single quote (`sendCsv` in
+`financial-pulse.ts`).
+
+Frontend (`pages/financial-pulse.tsx`):
+- **Drill-downs band** — single `Card` with Tabs (By Customer / By
+  Technician / By Service Type). Customers tab has client-side
+  pagination (25/page from a 500-row fetch), `sort=budget_risk`
+  toggle, per-row kebab menu, row click → `/customers/:id`.
+- **Forward Look band** — A/R aging strip (4 color-coded buckets,
+  click navigates to `/invoices?aging=<key>` — the invoices page
+  doesn't yet support that query param, so it's a best-effort link
+  pending follow-up) and Month-End Projection card with a stacked
+  MTD-vs-projection bar.
+
+Server tests: `routes/financial-pulse-slice3.test.ts` — 31 tests
+covering the full role matrix (5 endpoints × 5 roles), CSV content
+type / disposition on all three tab endpoints, aging-vs-KPI parity,
+`sort=budget_risk` ordering, and `sort=revenue` regression.
+
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details

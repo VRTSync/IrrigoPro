@@ -19,25 +19,35 @@ import {
 } from "@workspace/db/schema";
 import {
   bucketMonthlyRevenue,
+  computeArAging,
   computeAvgDaysToPay,
   computeBilled,
+  computeByServiceType,
+  computeByTechnician,
   computeCollected,
   computeGrossMargin,
   computeOutstandingAr,
   computeProjectedMonthEnd,
   computeRevenueMix,
+  computeTopCustomers,
   getMonthStarts,
   getMtdWindow,
   getPrevMonthWindow,
   getPrevYearYtdWindow,
   getYtdWindow,
   pctDelta,
+  sortTopCustomers,
+  type CustomerWithBudget,
   type InvoiceLike,
   type UserLike,
+  type UserWithName,
   type WorkOrderLike,
   type BillingSheetLike,
   type CustomerLike,
   type InvoiceItemLike,
+  type TopCustomerRow,
+  type TechnicianRow,
+  type ServiceTypeRow,
 } from "../financial-pulse-math";
 
 const ALLOWED_ROLES = new Set([
@@ -128,7 +138,7 @@ export function resolveFinancialPulseScope(
 
 async function loadCustomers(
   companyId: number | null,
-): Promise<CustomerLike[]> {
+): Promise<CustomerWithBudget[]> {
   const rows = companyId == null
     ? await db.select().from(customers)
     : await db.select().from(customers).where(eq(customers.companyId, companyId));
@@ -137,6 +147,12 @@ async function loadCustomers(
     companyId: c.companyId,
     contractType: c.contractType ?? null,
     emergencyLaborRate: c.emergencyLaborRate ?? null,
+    name: c.name ?? null,
+    hiddenFromBilling: c.hiddenFromBilling ?? false,
+    monthlyBudgetCap: c.monthlyBudgetCap ?? null,
+    annualBudgetCap: c.annualBudgetCap ?? null,
+    budgetSoftThresholdPercent: c.budgetSoftThresholdPercent ?? null,
+    budgetHardThresholdPercent: c.budgetHardThresholdPercent ?? null,
   }));
 }
 
@@ -209,11 +225,16 @@ async function loadBillingSheetsForInvoices(
   }));
 }
 
-async function loadTechs(companyId: number | null): Promise<UserLike[]> {
+async function loadTechs(companyId: number | null): Promise<UserWithName[]> {
   const rows = companyId == null
     ? await db.select().from(users)
     : await db.select().from(users).where(eq(users.companyId, companyId));
-  return rows.map((u) => ({ id: u.id, hourlyWage: u.hourlyWage ?? null }));
+  return rows.map((u) => ({
+    id: u.id,
+    hourlyWage: u.hourlyWage ?? null,
+    name: u.name ?? null,
+    role: u.role ?? null,
+  }));
 }
 
 // Unbilled exposure — mirrors the billing-preview rollup
@@ -574,8 +595,477 @@ export function registerFinancialPulseRoutes(
     },
   );
 
+  // ─── Slice 3: top-customers ─────────────────────────────────────────────
+  app.get(
+    "/api/financial-pulse/top-customers",
+    requireAuthentication,
+    async (req: Request, res) => {
+      try {
+        const scope = resolveFinancialPulseScope(
+          (req as any).authenticatedUserRole,
+          (req as any).authenticatedUserCompanyId,
+          req.query.companyId as string | undefined,
+        );
+        if (scope.status !== 200) {
+          res.status(scope.status).json(scope.body);
+          return;
+        }
+        const asOf = parseAsOfParam(req.query.asOf as string | undefined);
+        if (!asOf.ok) {
+          res.status(400).json({ message: asOf.message });
+          return;
+        }
+        const periodParsed = parsePeriodParam(
+          req.query.period as string | undefined,
+        );
+        if (!periodParsed.ok) {
+          res.status(400).json({ message: periodParsed.message });
+          return;
+        }
+        const period = periodParsed.value;
+        const sort: "revenue" | "budget_risk" =
+          req.query.sort === "budget_risk" ? "budget_risk" : "revenue";
+        const limit = Math.max(
+          1,
+          Math.min(500, parseInt(String(req.query.limit ?? "25"), 10) || 25),
+        );
+        const now = new Date();
+        const window = period === "ytd" ? getYtdWindow(now) : getMtdWindow(now);
+
+        const cust = await loadCustomers(scope.companyId);
+        const customerIds = cust.map((c) => c.id);
+        const allInvoices = await loadInvoicesForCustomers(customerIds);
+        const rows = computeTopCustomers({
+          customers: cust,
+          invoices: allInvoices,
+          window,
+          now,
+        });
+        const sorted = sortTopCustomers(rows, sort).slice(0, limit);
+
+        if (wantsCsv(req)) {
+          const filename = `financial-pulse-customers-${csvDateSuffix(period, now)}.csv`;
+          sendCsv(res, filename, customersCsv(sorted));
+          return;
+        }
+        res.json({
+          rows: sorted,
+          total: rows.length,
+          period,
+          sort,
+          asOf: now.toISOString(),
+        });
+      } catch (err) {
+        req.log?.error?.({ err }, "financial-pulse/top-customers error");
+        res.status(500).json({ message: "Failed to compute top customers" });
+      }
+    },
+  );
+
+  // ─── Slice 3: by-technician ─────────────────────────────────────────────
+  app.get(
+    "/api/financial-pulse/by-technician",
+    requireAuthentication,
+    async (req: Request, res) => {
+      try {
+        const scope = resolveFinancialPulseScope(
+          (req as any).authenticatedUserRole,
+          (req as any).authenticatedUserCompanyId,
+          req.query.companyId as string | undefined,
+        );
+        if (scope.status !== 200) {
+          res.status(scope.status).json(scope.body);
+          return;
+        }
+        const asOf = parseAsOfParam(req.query.asOf as string | undefined);
+        if (!asOf.ok) {
+          res.status(400).json({ message: asOf.message });
+          return;
+        }
+        const periodParsed = parsePeriodParam(
+          req.query.period as string | undefined,
+        );
+        if (!periodParsed.ok) {
+          res.status(400).json({ message: periodParsed.message });
+          return;
+        }
+        const period = periodParsed.value;
+        const now = new Date();
+        const window = period === "ytd" ? getYtdWindow(now) : getMtdWindow(now);
+
+        const cust = await loadCustomers(scope.companyId);
+        const customerIds = cust.map((c) => c.id);
+        const allInvoices = await loadInvoicesForCustomers(customerIds);
+        const invoiceIdsInWindow = allInvoices
+          .filter((inv) => {
+            if (inv.status === "draft" || inv.status === "cancelled")
+              return false;
+            const d = inv.createdAt instanceof Date
+              ? inv.createdAt
+              : new Date(inv.createdAt as unknown as string);
+            return d >= window.start && d < window.end;
+          })
+          .map((i) => i.id);
+        const wos = await loadWorkOrdersForInvoices(invoiceIdsInWindow);
+        const bss = await loadBillingSheetsForInvoices(invoiceIdsInWindow);
+        const techs = await loadTechs(scope.companyId);
+        const rows = computeByTechnician({
+          techs,
+          invoices: allInvoices,
+          workOrders: wos,
+          billingSheets: bss,
+          window,
+        });
+
+        if (wantsCsv(req)) {
+          const filename = `financial-pulse-technicians-${csvDateSuffix(period, now)}.csv`;
+          sendCsv(res, filename, techniciansCsv(rows));
+          return;
+        }
+        res.json({
+          rows,
+          period,
+          asOf: now.toISOString(),
+        });
+      } catch (err) {
+        req.log?.error?.({ err }, "financial-pulse/by-technician error");
+        res.status(500).json({ message: "Failed to compute by-technician" });
+      }
+    },
+  );
+
+  // ─── Slice 3: by-service-type ───────────────────────────────────────────
+  app.get(
+    "/api/financial-pulse/by-service-type",
+    requireAuthentication,
+    async (req: Request, res) => {
+      try {
+        const scope = resolveFinancialPulseScope(
+          (req as any).authenticatedUserRole,
+          (req as any).authenticatedUserCompanyId,
+          req.query.companyId as string | undefined,
+        );
+        if (scope.status !== 200) {
+          res.status(scope.status).json(scope.body);
+          return;
+        }
+        const asOf = parseAsOfParam(req.query.asOf as string | undefined);
+        if (!asOf.ok) {
+          res.status(400).json({ message: asOf.message });
+          return;
+        }
+        const periodParsed = parsePeriodParam(
+          req.query.period as string | undefined,
+        );
+        if (!periodParsed.ok) {
+          res.status(400).json({ message: periodParsed.message });
+          return;
+        }
+        const period = periodParsed.value;
+        const now = new Date();
+        const window = period === "ytd" ? getYtdWindow(now) : getMtdWindow(now);
+
+        const cust = await loadCustomers(scope.companyId);
+        const customersById = new Map(cust.map((c) => [c.id, c]));
+        const customerIds = cust.map((c) => c.id);
+        const allInvoices = await loadInvoicesForCustomers(customerIds);
+        const invoiceIdsInWindow = allInvoices
+          .filter((inv) => {
+            if (inv.status === "draft" || inv.status === "cancelled")
+              return false;
+            const d = inv.createdAt instanceof Date
+              ? inv.createdAt
+              : new Date(inv.createdAt as unknown as string);
+            return d >= window.start && d < window.end;
+          })
+          .map((i) => i.id);
+        const items = await loadInvoiceItemsForInvoices(invoiceIdsInWindow);
+        const rows = computeByServiceType({
+          invoices: allInvoices,
+          items,
+          customersById,
+          window,
+        });
+
+        if (wantsCsv(req)) {
+          const filename = `financial-pulse-service-type-${csvDateSuffix(period, now)}.csv`;
+          sendCsv(res, filename, serviceTypeCsv(rows));
+          return;
+        }
+        res.json({
+          rows,
+          period,
+          asOf: now.toISOString(),
+        });
+      } catch (err) {
+        req.log?.error?.({ err }, "financial-pulse/by-service-type error");
+        res.status(500).json({ message: "Failed to compute by-service-type" });
+      }
+    },
+  );
+
+  // ─── Slice 3: A/R aging ─────────────────────────────────────────────────
+  app.get(
+    "/api/financial-pulse/ar-aging",
+    requireAuthentication,
+    async (req: Request, res) => {
+      try {
+        const scope = resolveFinancialPulseScope(
+          (req as any).authenticatedUserRole,
+          (req as any).authenticatedUserCompanyId,
+          req.query.companyId as string | undefined,
+        );
+        if (scope.status !== 200) {
+          res.status(scope.status).json(scope.body);
+          return;
+        }
+        const asOf = parseAsOfParam(req.query.asOf as string | undefined);
+        if (!asOf.ok) {
+          res.status(400).json({ message: asOf.message });
+          return;
+        }
+        // A/R aging is intrinsically a snapshot ("everything currently
+        // outstanding"), so `period` doesn't change the math — but we
+        // validate and echo it so the Slice 2 period toggle can drive
+        // a consistent URL/query key across all five endpoints.
+        const periodParsed = parsePeriodParam(
+          req.query.period as string | undefined,
+        );
+        if (!periodParsed.ok) {
+          res.status(400).json({ message: periodParsed.message });
+          return;
+        }
+        const now = new Date();
+        const cust = await loadCustomers(scope.companyId);
+        const customerIds = cust.map((c) => c.id);
+        const allInvoices = await loadInvoicesForCustomers(customerIds);
+        const buckets = computeArAging(allInvoices, now);
+        const total = buckets.reduce((s, b) => s + b.amount, 0);
+        res.json({
+          buckets,
+          total,
+          asOf: now.toISOString(),
+          period: periodParsed.value,
+        });
+      } catch (err) {
+        req.log?.error?.({ err }, "financial-pulse/ar-aging error");
+        res.status(500).json({ message: "Failed to compute A/R aging" });
+      }
+    },
+  );
+
+  // ─── Slice 3: projections ───────────────────────────────────────────────
+  app.get(
+    "/api/financial-pulse/projections",
+    requireAuthentication,
+    async (req: Request, res) => {
+      try {
+        const scope = resolveFinancialPulseScope(
+          (req as any).authenticatedUserRole,
+          (req as any).authenticatedUserCompanyId,
+          req.query.companyId as string | undefined,
+        );
+        if (scope.status !== 200) {
+          res.status(scope.status).json(scope.body);
+          return;
+        }
+        const asOf = parseAsOfParam(req.query.asOf as string | undefined);
+        if (!asOf.ok) {
+          res.status(400).json({ message: asOf.message });
+          return;
+        }
+        // Projection math anchors on the current month (run-rate vs prev
+        // month at the same day). `period=ytd` additionally surfaces a
+        // year-end projection. We still parse and validate the param so
+        // the Slice 2 period toggle threads through consistently.
+        const periodParsed = parsePeriodParam(
+          req.query.period as string | undefined,
+        );
+        if (!periodParsed.ok) {
+          res.status(400).json({ message: periodParsed.message });
+          return;
+        }
+        const now = new Date();
+        const cust = await loadCustomers(scope.companyId);
+        const customerIds = cust.map((c) => c.id);
+        const allInvoices = await loadInvoicesForCustomers(customerIds);
+        const mtd = getMtdWindow(now);
+        const prevMonth = getPrevMonthWindow(now);
+        // Prev month full actual = the entire previous calendar month.
+        const prevMonthFullStart = new Date(
+          now.getFullYear(),
+          now.getMonth() - 1,
+          1,
+        );
+        const prevMonthFullEnd = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          1,
+        );
+        const billedMtd = computeBilled(allInvoices, mtd.start, mtd.end);
+        const prevMonthActual = computeBilled(
+          allInvoices,
+          prevMonthFullStart,
+          prevMonthFullEnd,
+        );
+        const prevMonthSameDay = computeBilled(
+          allInvoices,
+          prevMonth.start,
+          prevMonth.end,
+        );
+        const projected = computeProjectedMonthEnd(billedMtd, now);
+        const daysElapsed = now.getDate();
+        const daysInMonth = new Date(
+          now.getFullYear(),
+          now.getMonth() + 1,
+          0,
+        ).getDate();
+        res.json({
+          mtd: billedMtd,
+          projectedMonthEnd: projected,
+          prevMonthActual,
+          prevMonthSameDay,
+          daysElapsed,
+          daysInMonth,
+          method: "runRate",
+          asOf: now.toISOString(),
+        });
+      } catch (err) {
+        req.log?.error?.({ err }, "financial-pulse/projections error");
+        res.status(500).json({ message: "Failed to compute projections" });
+      }
+    },
+  );
+
   // Mark sql import as used to keep the strict-mode lint happy in
   // environments that whine about unused named imports.
   void sql;
   void and;
+}
+
+// ─── CSV helpers (Slice 3) ────────────────────────────────────────────────
+
+function wantsCsv(req: Request): boolean {
+  const accept = String(req.headers["accept"] ?? "");
+  return accept.includes("text/csv") || req.query.format === "csv";
+}
+
+function csvDateSuffix(period: "mtd" | "ytd", now: Date): string {
+  const y = now.getFullYear();
+  if (period === "ytd") return String(y);
+  return `${y}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function csvCell(v: unknown): string {
+  if (v == null) return "";
+  let s = String(v);
+  // Guard against CSV formula injection.
+  if (/^[=+\-@]/.test(s)) s = "'" + s;
+  if (/[",\n\r]/.test(s)) s = `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function csvRow(cells: unknown[]): string {
+  return cells.map(csvCell).join(",");
+}
+
+function sendCsv(res: import("express").Response, filename: string, body: string): void {
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.send(body);
+}
+
+function fmtNum(n: number | null | undefined, digits = 2): string {
+  if (n == null || !Number.isFinite(n)) return "";
+  return n.toFixed(digits);
+}
+
+function customersCsv(rows: TopCustomerRow[]): string {
+  const header = csvRow([
+    "Customer ID",
+    "Name",
+    "Revenue",
+    "Monthly Cap",
+    "Monthly Spend",
+    "Monthly Used %",
+    "Monthly Status",
+    "Annual Cap",
+    "Annual Spend",
+    "Annual Used %",
+    "Annual Status",
+    "Avg Days to Pay",
+    "Last Invoice At",
+  ]);
+  const body = rows.map((r) =>
+    csvRow([
+      r.customerId,
+      r.name,
+      fmtNum(r.revenue),
+      fmtNum(r.monthlyCap),
+      fmtNum(r.monthlySpend),
+      r.monthlyUsedPct == null ? "" : fmtNum(r.monthlyUsedPct * 100, 1),
+      r.monthlyStatus,
+      fmtNum(r.annualCap),
+      fmtNum(r.annualSpend),
+      r.annualUsedPct == null ? "" : fmtNum(r.annualUsedPct * 100, 1),
+      r.annualStatus,
+      fmtNum(r.avgDaysToPay, 1),
+      r.lastInvoiceAt ?? "",
+    ]),
+  );
+  return [header, ...body].join("\n") + "\n";
+}
+
+function techniciansCsv(rows: TechnicianRow[]): string {
+  const header = csvRow([
+    "Technician ID",
+    "Name",
+    "Hours Billed",
+    "Revenue",
+    "Labor Cost",
+    "Margin %",
+    "Avg Ticket",
+    "# Billing Sheets",
+    "# Work Orders",
+    "Parts Revenue",
+    "Has Wage Set",
+  ]);
+  const body = rows.map((r) =>
+    csvRow([
+      r.technicianId,
+      r.name,
+      fmtNum(r.hoursBilled),
+      fmtNum(r.revenue),
+      r.laborCost == null ? "" : fmtNum(r.laborCost),
+      r.marginPct == null ? "" : fmtNum(r.marginPct, 1),
+      r.avgTicket == null ? "" : fmtNum(r.avgTicket),
+      r.billingSheetCount,
+      r.workOrderCount,
+      fmtNum(r.partsRevenue),
+      r.hasWageSet ? "true" : "false",
+    ]),
+  );
+  return [header, ...body].join("\n") + "\n";
+}
+
+function serviceTypeCsv(rows: ServiceTypeRow[]): string {
+  const header = csvRow([
+    "Key",
+    "Label",
+    "Revenue",
+    "% of Total",
+    "# Invoices",
+    "Avg Ticket",
+  ]);
+  const body = rows.map((r) =>
+    csvRow([
+      r.key,
+      r.label,
+      fmtNum(r.revenue),
+      r.pctOfTotal == null ? "" : fmtNum(r.pctOfTotal, 1),
+      r.invoiceCount,
+      r.avgTicket == null ? "" : fmtNum(r.avgTicket),
+    ]),
+  );
+  return [header, ...body].join("\n") + "\n";
 }
