@@ -94,6 +94,7 @@ export const billingManagerNav: NavConfig = {
       defaultOpen: true,
       items: [
         { type: "leaf", label: "Billing Dashboard", path: "/billing/dashboard", icon: Home },
+        { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
         { type: "leaf", label: "Command Center", path: "/billing/command-center", icon: ClipboardList },
         { type: "leaf", label: "Billing Sheets", path: "/billing-sheets", icon: ClipboardList },
         { type: "leaf", label: "Invoices", path: "/invoices", icon: Receipt },
@@ -181,6 +182,7 @@ export const superAdminNav: NavConfig = {
       icon: Settings,
       items: [
         { type: "leaf", label: "App Health", path: "/super-admin/app-health", icon: Activity },
+        { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
         { type: "leaf", label: "Client Errors", path: "/admin/client-errors", icon: AlertTriangle },
       ],
     },
@@ -232,6 +234,7 @@ export const companyAdminNav: NavConfig = {
       icon: DollarSign,
       items: [
         { type: "leaf", label: "Billing Dashboard", path: "/billing/dashboard", icon: Home },
+        { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
         { type: "leaf", label: "Command Center", path: "/billing/command-center", icon: ClipboardList },
         { type: "leaf", label: "Invoices", path: "/invoices", icon: Receipt },
         reportsGroup,

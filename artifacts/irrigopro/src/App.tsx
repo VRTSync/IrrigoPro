@@ -39,6 +39,7 @@ const WorkOrdersMissingPhotosReport = lazyPage(() => import("@/pages/work-orders
 const BillingZeroPriceAuditPage = lazyPage(() => import("@/pages/billing-zero-price-audit"));
 const AdminIssueTypesPage = lazyPage(() => import("@/pages/admin-issue-types"));
 const AdminClientErrorsPage = lazyPage(() => import("@/pages/admin-client-errors"));
+const FinancialPulsePage = lazyPage(() => import("@/pages/financial-pulse"));
 const SuperAdminAppHealthPage = lazyPage(() => import("@/pages/super-admin-app-health"));
 const LaborRateAuditPage = lazyPage(() => import("@/pages/labor-rate-audit"));
 const CustomerBilling = lazyPage(() => import("@/pages/customer-billing"));
@@ -254,6 +255,7 @@ function Router() {
                   <Route path="/customers/:id/profile" component={CustomerProfile} />
                   <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />
                   <Route path="/site-maps" component={FieldTechMaps} />
+                  <Route path="/financial-pulse" component={FinancialPulsePage} />
                   <Route path="/switch-user" component={SwitchUser} />
                   <Route path="/user-profile" component={UserProfile} />
                   <Route path="/license-agreement" component={LicenseAgreement} />
@@ -308,6 +310,7 @@ function Router() {
                   </Route>
                   <Route path="/manager/wet-checks/:id" component={WetCheckReviewPage} />
                   <Route path="/wet-checks/admin" component={AdminWetChecksPage} />
+                  <Route path="/financial-pulse" component={FinancialPulsePage} />
                   <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                   <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
                   <Route path="/wet-checks" component={WetChecksPage} />
@@ -343,6 +346,7 @@ function Router() {
                   <Route path="/billing" component={BillingDashboard} />
                   <Route path="/billing/dashboard" component={BillingDashboard} />
                   <Route path="/billing/command-center" component={CustomerBilling} />
+                  <Route path="/financial-pulse" component={FinancialPulsePage} />
                   <Route path="/customer-billing" component={RedirectToCommandCenter} />
                   <Route path="/customers" component={Customers} />
                   <Route path="/customers/:id/profile" component={CustomerProfile} />
@@ -408,6 +412,7 @@ function Router() {
                   <Route path="/admin/controllers" component={AdminControllers} />
                   <Route path="/admin/client-errors" component={AdminClientErrorsPage} />
                   <Route path="/super-admin/app-health" component={SuperAdminAppHealthPage} />
+                  <Route path="/financial-pulse" component={FinancialPulsePage} />
                   <Route path="/user-manager" component={UserManager} />
                   <Route path="/switch-user" component={SwitchUser} />
                   <Route path="/user-profile" component={UserProfile} />

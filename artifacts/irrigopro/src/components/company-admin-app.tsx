@@ -17,6 +17,7 @@ import CustomerSiteMapsPage from "@/pages/customer-site-maps-page";
 import CustomerProfile from "@/pages/customer-profile";
 import CustomerBilling from "@/pages/customer-billing";
 import BillingDashboard from "@/pages/billing-dashboard";
+import FinancialPulsePage from "@/pages/financial-pulse";
 import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
 import WorkOrders from "@/pages/work-orders";
@@ -154,6 +155,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/site-maps" component={SiteMapsPage} />
           <Route path="/billing" component={BillingDashboard} />
           <Route path="/billing/dashboard" component={BillingDashboard} />
+          <Route path="/financial-pulse" component={FinancialPulsePage} />
           <Route path="/billing/command-center" component={CustomerBilling} />
           <Route path="/customer-billing" component={RedirectToCommandCenter} />
           <Route path="/field-tech" component={FieldTech} />
