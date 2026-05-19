@@ -153,7 +153,17 @@ describe("Task #708 — /api/financial-pulse/customer/:id/summary", () => {
     const { base } = await spin("billing_manager", 10);
     const r = await fetch(`${base}${PATH}`);
     assert.equal(r.status, 200);
-    const body = await r.json();
+    const body = (await r.json()) as {
+      customerId: number;
+      name: string;
+      billedMtd: number;
+      billedYtd: number;
+      outstandingAr: number;
+      unbilledExposure: number;
+      lastInvoiceAt: string | null;
+      monthly: { cap: number | null; spend: number; status: string };
+      annual: { cap: number | null; spend: number; status: string };
+    };
     assert.equal(body.customerId, 42);
     assert.equal(body.name, "Acme Co");
     assert.equal(body.billedMtd, 0);

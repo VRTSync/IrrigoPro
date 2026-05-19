@@ -43,16 +43,16 @@ function daysAgo(d: number): Date {
 const INVOICES: InvoiceLike[] = [
   // Customer 1 — paid in window, in-A/R outstanding, and one draft
   // (excluded everywhere).
-  { id: 1, customerId: 1, totalAmount: "500.00", status: "paid",   createdAt: daysAgo(10), paidAt: daysAgo(2), sentAt: daysAgo(8) },
-  { id: 2, customerId: 1, totalAmount: "300.00", status: "sent",   createdAt: daysAgo(15), paidAt: null,        sentAt: daysAgo(15) },
-  { id: 3, customerId: 1, totalAmount: "999.99", status: "draft",  createdAt: daysAgo(5),  paidAt: null,        sentAt: null },
+  { id: 1, customerId: 1, totalAmount: "500.00", status: "paid",   createdAt: daysAgo(10), paidAt: daysAgo(2) },
+  { id: 2, customerId: 1, totalAmount: "300.00", status: "sent",   createdAt: daysAgo(15), paidAt: null },
+  { id: 3, customerId: 1, totalAmount: "999.99", status: "draft",  createdAt: daysAgo(5),  paidAt: null },
   // Customer 2 — three open invoices in different aging buckets.
-  { id: 4, customerId: 2, totalAmount: "100.00", status: "sent",      createdAt: daysAgo(5),   paidAt: null, sentAt: daysAgo(5) },
-  { id: 5, customerId: 2, totalAmount: "200.00", status: "sent",      createdAt: daysAgo(45),  paidAt: null, sentAt: daysAgo(45) },
-  { id: 6, customerId: 2, totalAmount: "400.00", status: "overdue",   createdAt: daysAgo(120), paidAt: null, sentAt: daysAgo(120) },
+  { id: 4, customerId: 2, totalAmount: "100.00", status: "sent",      createdAt: daysAgo(5),   paidAt: null },
+  { id: 5, customerId: 2, totalAmount: "200.00", status: "sent",      createdAt: daysAgo(45),  paidAt: null },
+  { id: 6, customerId: 2, totalAmount: "400.00", status: "overdue",   createdAt: daysAgo(120), paidAt: null },
   // Customer 3 — paid invoice this year, one cancelled (excluded).
-  { id: 7, customerId: 3, totalAmount: "800.00", status: "paid",      createdAt: daysAgo(60),  paidAt: daysAgo(30), sentAt: daysAgo(58) },
-  { id: 8, customerId: 3, totalAmount: "150.00", status: "cancelled", createdAt: daysAgo(20),  paidAt: null,        sentAt: null },
+  { id: 7, customerId: 3, totalAmount: "800.00", status: "paid",      createdAt: daysAgo(60),  paidAt: daysAgo(30) },
+  { id: 8, customerId: 3, totalAmount: "150.00", status: "cancelled", createdAt: daysAgo(20),  paidAt: null },
 ];
 
 describe("Task #708 — FP cross-surface math invariants", () => {
