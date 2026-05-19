@@ -1,0 +1,218 @@
+# Replit Slice 6 — Billing Workspace (Billing Dashboard Redesign)
+
+**Goal:** Reshape `/billing-dashboard` from a generic dashboard into a focused **Billing Workspace** — the billing manager's daily approval queue for individual billing sheets, work orders, and parts, plus a clear path to the monthly invoicing run. Financial Pulse now owns the overview/dashboard role, so this page can specialize on workflow.
+
+**Audience:** `billing_manager`, `company_admin`, `super_admin`.
+
+**Depends on:** Slices 1–5 (especially Slice 5's data unification — this page should use the same canonical endpoints).
+
+**Recommended rename:** `Billing Dashboard` → `Billing Workspace`. Cleaner mental model now that it's not a dashboard. New route: `/billing-workspace`. Old route should 301 to the new one. (Open to keeping the current name if the team prefers — it's a small change either way.)
+
+---
+
+## 1. Page shape
+
+Three zones, top to bottom:
+
+### Zone A — Status strip (slim)
+
+A single horizontal strip with 4 small indicators (not full KPI tiles — these are status, not metrics):
+
+- **Awaiting your approval** — count of BS + WO + parts pending review, color-coded if any item is >7 days old.
+- **Approved this week** — count, helps the user see their own throughput.
+- **Drafts from techs in last 24h** — count, gives heads-up on incoming volume.
+- **QuickBooks sync** — green/yellow/red status badge. If red, click → existing QB reconnect flow.
+
+Right side of the strip: a primary button — **"Run Monthly Billing"** — that launches the monthly wizard (see Zone C). The button is enabled only when at least one customer has approved-but-unbilled work.
+
+### Zone B — Approval Queue (primary work area)
+
+A single unified list combining billing sheets, work orders, and pending part approvals. This is the page's main canvas.
+
+**Columns:**
+- Type icon (BS / WO / Part) + a small tag pill
+- Customer name
+- Technician
+- Description (truncated, e.g., the first line of the AI-generated description if present)
+- Submitted (relative time: "2h ago", "Yesterday", "5 days ago")
+- Dollar value (parts + labor subtotal)
+- Status pill (`Pending Review`, `Needs Photos`, `Flagged`, etc.)
+- Quick actions (3-dot menu)
+
+**Filters along the top:**
+- Type: All / Billing Sheets / Work Orders / Parts
+- Customer (searchable dropdown)
+- Technician (searchable dropdown)
+- Age: All / Today / This week / >7 days old
+- Status
+
+**Sort:** Default is oldest first (drives FIFO behavior). Toggle for newest first, highest dollar value first, customer A→Z.
+
+**Saved views:** Lightweight — three preset buttons above the filter row: `All Pending`, `Just Parts`, `>$1,000`. v1 ships these three hard-coded; user-defined saved views is a future enhancement.
+
+**Pagination:** 50 rows per page. Sticky header. Keyboard-friendly (see Zone D below).
+
+### Zone C — Detail Panel (right-side drawer or modal)
+
+When a row is clicked, the full record opens in a right-side drawer that overlays ~40% of the screen. Two reasons for a drawer over a modal:
+1. The user can still see the queue context behind it.
+2. After approving, the drawer closes and the next row auto-selects (smooth pipeline).
+
+**Drawer contents (same shape for BS, WO, and parts — just hides irrelevant sections):**
+- Header: customer, tech, date, dollar value, status
+- AI-generated description (collapsible, with "Regenerate" if the user has access)
+- Parts table (name, qty, unit price, line total) with inline edit
+- Labor section (hours, rate, total) with inline edit
+- Photos (grid, click to lightbox; flag if any item is missing required photos)
+- Notes (tech notes + space for billing manager notes)
+- Activity log (who approved/edited/flagged, when)
+
+**Actions footer (sticky):**
+- **Approve** (primary button) — keyboard `A`
+- **Kick back** (secondary, opens a small text input for reason) — keyboard `K`
+- **Flag** (for review by manager) — keyboard `F`
+- **Save edits without approving** — keyboard `Ctrl+S`
+- **Close** — keyboard `Esc`
+
+After approval, the drawer transitions: row drops out of queue, next row in the current sort opens. If queue is empty, drawer closes and a small "All caught up" celebration message appears in the queue area.
+
+### Zone D — Keyboard navigation
+
+This is what makes the page feel fast. Implement:
+- `J` / `K` — next / previous row in queue (open the drawer for that row)
+- `Enter` — open currently focused row
+- `A` — approve current item
+- `K` — kick back (only when drawer is open; conflicts with previous nav binding so use `K` for kickback only when drawer is open and item is focused)
+- `F` — flag
+- `/` — focus the search/filter input
+- `?` — show keyboard shortcuts cheat sheet
+
+Document the shortcuts in a small `?` button in the corner of the page.
+
+---
+
+## 2. Monthly billing run (wizard)
+
+A multi-step modal launched from the "Run Monthly Billing" button. Also launchable from Financial Pulse (see section 4).
+
+**Steps:**
+
+1. **Select month** — defaults to the previous calendar month. Show "X customers have Y approved-but-unbilled items totaling $Z" as a confirmation.
+2. **Review groupings** — table showing each customer about to be invoiced, the items being grouped, the subtotals, and any warnings (missing photos, missing pricing, customer marked `hiddenFromBilling`, etc.). User can deselect specific customers or items.
+3. **Confirm and generate** — single button "Generate N Invoices." A progress indicator runs (since this could create dozens of invoices) and on completion shows a summary: N invoices created, M failed (with reason), total amount invoiced.
+4. **Batch send to QuickBooks** — final step, only appears if QB is connected. Shows "M invoices ready to push to QuickBooks" and a button "Push All to QB." Progress indicator. On completion, summary with any failures linked to the QB error.
+
+**Recovery:** Step 4 can be re-run later if some pushes fail. Failed pushes stay in a "QB sync pending" state on the invoice and surface in the Zone A status strip until resolved.
+
+**Auditability:** Every monthly run creates a row in a new `monthly_billing_runs` table:
+
+```ts
+export const monthlyBillingRuns = pgTable("monthly_billing_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  runForMonth: text("run_for_month").notNull(),   // 'YYYY-MM'
+  runByUserId: uuid("run_by_user_id").notNull().references(() => users.id),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+  invoicesCreated: integer("invoices_created").default(0),
+  invoicesFailed: integer("invoices_failed").default(0),
+  qbPushesSucceeded: integer("qb_pushes_succeeded").default(0),
+  qbPushesFailed: integer("qb_pushes_failed").default(0),
+  notes: text("notes"),
+});
+```
+
+This is the "well documented" piece the user asked for — a permanent record of every monthly run, who did it, and what happened.
+
+---
+
+## 3. Collections — recommendation
+
+You mentioned collections is tracked in QuickBooks, not in Irrigo. **Recommendation: don't duplicate QuickBooks here.** Rebuilding collections workflows inside Irrigo would create a competing source of truth and double the workload to keep it accurate.
+
+What to do instead:
+
+- **Status indicator** in Zone A (and optionally on Financial Pulse) showing "X invoices overdue in QuickBooks" — sourced from a small new endpoint `GET /api/quickbooks/overdue-summary` that calls QB and caches for ~15 minutes.
+- **Deep link** from that indicator into the QuickBooks A/R aging report (QB has a stable URL pattern for this).
+- **Optional later:** a `lastReminderSentAt` field on invoices so Irrigo can show "reminder sent 4 days ago via QB" without owning the workflow.
+
+That gives billing managers awareness without forcing them to maintain two systems. If collections later becomes a real product surface (e.g., you want to send reminders from inside Irrigo), spin it out as its own slice — but I'd avoid that bet until you know QB's tools aren't enough.
+
+---
+
+## 4. Cross-link from Financial Pulse
+
+Add two small touchpoints to Financial Pulse:
+
+1. **A "Run Monthly Billing" button** in the page header — same wizard as Zone A's button. Discoverable from the financial hub.
+2. **A "Last monthly run" indicator** below the projection panel: "Last run: April 30, 2026 — 87 invoices created, 85 pushed to QB. [View runs →]" linking to a small `/billing-runs` history page (just a table of `monthly_billing_runs` rows).
+
+This satisfies the "well documented and easily accessible in the Pulse page" requirement.
+
+---
+
+## 5. Data sources
+
+Reuse what exists. Where current Billing Dashboard logic exists:
+
+- Customer billing-preview list → still useful for the monthly run's step 2 (which customers have approved items).
+- Pending parts approval endpoint → folded into the unified approval queue.
+- Any client-side aggregation of totals → replaced with calls to `/api/financial-pulse/customer/:id/summary` (the endpoint from Slice 5).
+
+**New endpoints to add:**
+
+- `GET /api/billing-workspace/queue?type=&customer=&tech=&age=&status=&sort=&page=` — returns the unified approval queue.
+- `POST /api/billing-workspace/monthly-run` — kicks off the monthly wizard's invoice generation (idempotent — accepts a `runId` so retries don't duplicate).
+- `POST /api/billing-workspace/monthly-run/:runId/push-to-qb` — second-phase QB push.
+- `GET /api/billing-workspace/monthly-runs?limit=20` — history for the cross-link page.
+- `GET /api/quickbooks/overdue-summary` — cached overdue count + dollar total.
+
+All under the same `billing_manager | company_admin | super_admin` guard.
+
+---
+
+## 6. Acceptance criteria
+
+1. `/billing-workspace` (or kept-name) loads in under 1.5s on a fixture with 200 pending items.
+2. A billing manager can navigate the queue with `J/K`, approve with `A`, and kick back with `K` (while drawer is open). After approval, the next item auto-opens.
+3. The approval queue shows BS, WO, and parts in one list; type-filtering correctly isolates each.
+4. Running the monthly billing wizard end-to-end on a fixture creates the expected number of invoices and pushes them to a QB sandbox (or no-op stub in test environment).
+5. The `monthly_billing_runs` table records every run with start/end timestamps and counts.
+6. Financial Pulse shows the "Run Monthly Billing" button and the "Last run" indicator.
+7. The QuickBooks overdue indicator in Zone A reflects the QB sandbox's overdue count and links to the correct QB URL.
+8. Old `/billing-dashboard` route redirects to `/billing-workspace` (or kept-name).
+9. Tests: keyboard shortcuts, queue filter combinations, monthly run idempotency (re-running step 3 doesn't double-create invoices), QB push partial-failure recovery.
+
+---
+
+## 7. Explicitly out of scope
+
+- User-defined saved queue views (only 3 hard-coded presets in v1).
+- Customer-facing invoice preview before sending (assumed to be QB's job).
+- Reminder/dunning workflows inside Irrigo — defer to QB.
+- A separate per-tech approvals queue. (The Technician filter handles this for now.)
+- Mobile-optimized layout (desktop-first, mobile is best-effort responsive but not designed-for).
+- AI-suggested approvals ("this looks normal, auto-approve?") — future slice.
+
+---
+
+## 8. Implementation order
+
+1. New endpoints (`/queue`, `/monthly-run`, `/monthly-run/:id/push-to-qb`, `/monthly-runs`, `/quickbooks/overdue-summary`) + migration for `monthly_billing_runs`.
+2. Page shell + Zone A status strip + route + redirect from old path.
+3. Approval queue (Zone B) with filters and sorting.
+4. Detail drawer (Zone C) with all sections and the keyboard shortcuts (Zone D).
+5. Monthly billing wizard (the multi-step modal).
+6. Financial Pulse cross-links (button + last-run indicator + `/billing-runs` history page).
+7. QuickBooks overdue indicator + deep link.
+8. Tests across all the above.
+9. Delete legacy Billing Dashboard sections that are no longer relevant; clean up dead imports.
+
+Ship 1–4 first as the core workflow. 5 lands next as a meaningful expansion. 6–7 can land independently after.
+
+---
+
+## 9. Open questions worth flagging
+
+- **Page rename** — `Billing Workspace` vs. keep `Billing Dashboard`? My recommendation is rename, but a no-rename version of this slice still works.
+- **Where exactly does monthly billing live in the current codebase?** The slice assumes a new wizard that calls into the existing invoice creation paths. If there's already a monthly batch endpoint, the wizard becomes a UI over it rather than new logic. A code dive during implementation will tell.
+- **Photos required check** — the wizard's Step 2 should warn on missing required photos. The existing `latePhotoAudits` infrastructure suggests this is already tracked; verify before assuming.
