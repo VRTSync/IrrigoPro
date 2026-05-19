@@ -132,7 +132,7 @@ interface QueueItem {
 // ---------------------------------------------------------------
 interface OverdueCacheEntry {
   expiresAt: number;
-  body: { overdueCount: number; overdueAmount: number; agingReportUrl: string };
+  body: { overdueCount: number; overdueAmount: number; agingReportUrl: string; asOf: string };
 }
 const OVERDUE_CACHE = new Map<string, OverdueCacheEntry>();
 const OVERDUE_TTL_MS = 15 * 60 * 1000;
@@ -861,6 +861,7 @@ async function overdueSummary(req: any): Promise<{
   overdueCount: number;
   overdueAmount: number;
   agingReportUrl: string;
+  asOf: string;
 }> {
   const role = req.authenticatedUserRole;
   const cid: number | null = req.authenticatedUserCompanyId ?? null;
@@ -897,10 +898,15 @@ async function overdueSummary(req: any): Promise<{
     overdueCount += 1;
     overdueAmount += numOr0(inv.totalAmount);
   }
+  // Task #720 — surface the snapshot freshness so the UI can render
+  // "as of HH:MM" beside the overdue tile (this endpoint is cached
+  // for 15 minutes per role+companyId, so the displayed number can
+  // legitimately lag wall-clock).
   const body = {
     overdueCount,
     overdueAmount,
     agingReportUrl: "/financial-pulse/ar-aging",
+    asOf: new Date(now).toISOString(),
   };
   OVERDUE_CACHE.set(cacheKey, { expiresAt: now + OVERDUE_TTL_MS, body });
   return body;

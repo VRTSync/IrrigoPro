@@ -81,11 +81,25 @@ interface KpiTile {
 interface KpisResponse {
   billedMtd: KpiTile;
   billedYtd: KpiTile;
-  collectedMtd: KpiTile;
+  // Task #720 — preferred source for the Collected MTD tile. Older
+  // server responses without this field fall back to the derive helper
+  // below so we don't regress existing fixtures.
+  collectedMtd?: KpiTile;
   outstandingAr: KpiTile;
   unbilledExposure: KpiTile;
   projectedMonthEnd: KpiTile & { method: string };
 }
+
+// Task #720 — canonical per-tile captions (matches
+// `docs/financial-metrics.md` and the FP page's INFO_TIPS).
+const BILLING_HEADER_TIPS = {
+  billedMtd:
+    "From invoices · month-to-date by createdAt · excludes draft, cancelled · includes tax and markup.",
+  collectedMtd:
+    "From invoices · month-to-date by paidAt · excludes draft, cancelled · includes tax and markup.",
+  outstandingAr:
+    "From invoices · point-in-time · excludes draft, cancelled, paid · live from this app, not QuickBooks.",
+} as const;
 
 interface CustomerSummary {
   customerId: number;
@@ -309,16 +323,22 @@ function BillingHeaderVariant({ className }: { className?: string }) {
   // 403 → render nothing (field tech / irrigation manager).
   if (!isLoading && data == null && !error) return null;
 
-  const collectedMtdValue =
-    data &&
-    data.billedMtd?.value != null &&
-    data.outstandingAr?.value != null
+  // Task #720 — prefer the server's authoritative `collectedMtd` value
+  // when present (the canonical source per docs/financial-metrics.md);
+  // fall back to billed − A/R only when older responses omit the field.
+  const serverCollected = data?.collectedMtd?.value;
+  const hasServerCollected =
+    typeof serverCollected === "number" && Number.isFinite(serverCollected);
+  const collectedMtdValue = hasServerCollected
+    ? serverCollected
+    : data &&
+        data.billedMtd?.value != null &&
+        data.outstandingAr?.value != null
       ? Math.max(0, data.billedMtd.value - data.outstandingAr.value)
       : null;
-  const collectedMtdDeltaPct = deriveCollectedMtdDeltaPct(
-    data ?? null,
-    collectedMtdValue,
-  );
+  const collectedMtdDeltaPct = hasServerCollected
+    ? (data?.collectedMtd?.deltaPct ?? null)
+    : deriveCollectedMtdDeltaPct(data ?? null, collectedMtdValue);
 
   return (
     <div
@@ -389,6 +409,8 @@ function BillingHeaderVariant({ className }: { className?: string }) {
             deltaLabel="vs prev month"
             isLoading={isLoading}
             testId="fp-tile-billing-header-billed-mtd"
+            windowBadge="MTD"
+            infoTip={BILLING_HEADER_TIPS.billedMtd}
           />
           <MetricTile
             label="Collected MTD"
@@ -398,6 +420,8 @@ function BillingHeaderVariant({ className }: { className?: string }) {
             deltaLabel="vs prev month"
             isLoading={isLoading}
             testId="fp-tile-billing-header-collected-mtd"
+            windowBadge="MTD"
+            infoTip={BILLING_HEADER_TIPS.collectedMtd}
           />
           <MetricTile
             label="Outstanding A/R"
@@ -408,6 +432,7 @@ function BillingHeaderVariant({ className }: { className?: string }) {
             deltaGoodDirection="down"
             isLoading={isLoading}
             testId="fp-tile-billing-header-outstanding-ar"
+            infoTip={BILLING_HEADER_TIPS.outstandingAr}
           />
         </div>
       )}

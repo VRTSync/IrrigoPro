@@ -137,8 +137,13 @@ export function computeCollected(
   start: Date,
   end: Date,
 ): number {
+  // Task #720 — defend the tile against stale status: a row with a
+  // non-null `paidAt` inside the window but still marked `draft` or
+  // `cancelled` is a data bug, and must not inflate Collected MTD.
+  // Reconciliation contract is in docs/financial-metrics.md.
   let sum = 0;
   for (const inv of invoices) {
+    if (inv.status === "draft" || inv.status === "cancelled") continue;
     const d = toDate(inv.paidAt ?? null);
     if (!inWindow(d, start, end)) continue;
     sum += toNum(inv.totalAmount);

@@ -9,8 +9,9 @@
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowDown, ArrowUp, AlertTriangle } from "lucide-react";
+import { ArrowDown, ArrowUp, AlertTriangle, Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 export type MetricFormat = "currency" | "percent" | "days" | "number";
@@ -29,6 +30,19 @@ export interface MetricTileProps {
   isError?: boolean;
   testId?: string;
   helper?: string;
+  /**
+   * Task #720 — small "where does this number come from" tooltip.
+   * Rendered as an Info icon next to the label. Keep the wording
+   * aligned with `docs/financial-metrics.md` so the page and the
+   * doc stay in lockstep.
+   */
+  infoTip?: string;
+  /**
+   * Compact window badge ("7d", "24h", "MTD", "YTD") rendered
+   * inline next to the label so rolling tiles aren't confused
+   * with MTD/YTD tiles.
+   */
+  windowBadge?: string;
 }
 
 const CURRENCY = new Intl.NumberFormat("en-US", {
@@ -69,6 +83,8 @@ export function MetricTile({
   isError,
   testId,
   helper,
+  infoTip,
+  windowBadge,
 }: MetricTileProps) {
   const formatted = formatMetricValue(value, format);
   const hasDelta = deltaPct != null && Number.isFinite(deltaPct);
@@ -89,9 +105,34 @@ export function MetricTile({
     <Card className="h-full" data-testid={testId}>
       <CardContent className="pt-5 pb-4">
         <div className="flex items-start justify-between gap-2">
-          <p className="text-xs sm:text-sm font-medium text-gray-500 truncate">
-            {label}
-          </p>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <p className="text-xs sm:text-sm font-medium text-gray-500 truncate">
+              {label}
+            </p>
+            {windowBadge ? (
+              <Badge
+                variant="outline"
+                className="h-4 px-1 text-[10px] font-medium text-gray-500 border-gray-200 bg-gray-50 shrink-0"
+                data-testid={testId ? `${testId}-window-badge` : undefined}
+              >
+                {windowBadge}
+              </Badge>
+            ) : null}
+            {infoTip ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info
+                    className="w-3.5 h-3.5 text-gray-400 shrink-0 cursor-help"
+                    data-testid={testId ? `${testId}-info` : undefined}
+                    aria-label="About this metric"
+                  />
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs text-xs whitespace-pre-line">
+                  {infoTip}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
+          </div>
           {warning ? (
             <Tooltip>
               <TooltipTrigger asChild>

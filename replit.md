@@ -477,6 +477,33 @@ swallow. The test inserts real `customers` rows in `before()`
 (scratch ids 70001-70010, companyId=2) because the
 `customer_budget_alert_events.customer_id` FK is hard.
 
+## Financial metrics reconciliation (Task #720)
+
+Single source of truth for Billed MTD / Collected MTD / Outstanding
+A/R / QuickBooks Overdue lives in
+[`docs/financial-metrics.md`](docs/financial-metrics.md). Wording on
+every KPI tile (Financial Pulse `KpiBand` and the
+`FinancialPulseWidget` billing-header variant) matches the doc via
+`INFO_TIPS` / `BILLING_HEADER_TIPS`. If you change a formula in
+`artifacts/api-server/src/financial-pulse-math.ts`, update the doc
+AND the tooltips in lockstep — they are checked by hand, not by a
+type. Key invariants:
+
+- The Billing Workspace embeds `FinancialPulseWidget` variant
+  `billing-header` and does **not** recompute Billed / Collected /
+  A/R locally in `billing-workspace-routes.ts`.
+- `computeCollected` excludes `draft` and `cancelled` rows even when
+  `paidAt` is in the window (Task #720 fix; covered by
+  `financial-pulse.test.ts`).
+- Outstanding A/R (from invoices, point-in-time, excludes paid) and
+  QuickBooks Overdue (from invoices, `dueDate` past, distinct tile)
+  are intentionally two separate numbers — never collapse them.
+- `GET /api/quickbooks/overdue-summary` returns `asOf` for the
+  cached snapshot (15 min TTL); the BW page renders "as of HH:MM"
+  beside the overdue pill.
+- Rolling-window tiles ("Approved This Week" 7d, "Drafts Last 24h"
+  24h) carry an explicit window badge so they don't read as MTD.
+
 ## Estimate system
 
 The estimate flow has two independent status axes (`status` =

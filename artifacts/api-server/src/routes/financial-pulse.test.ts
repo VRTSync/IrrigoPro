@@ -136,6 +136,54 @@ describe("Task #688 — KPI math", () => {
     assert.equal(computeCollected(invoices, win.start, win.end), 500);
   });
 
+  // Task #720 — reconciliation contract: Collected MTD must exclude
+  // draft and cancelled even when paidAt is inside the window, so the
+  // tile cannot be inflated by a stale-status data bug. Matches the
+  // canonical rule in docs/financial-metrics.md.
+  it("computeCollected excludes draft and cancelled even with paidAt in window", () => {
+    const invoices = [
+      inv({ id: 1, totalAmount: "200", status: "paid", paidAt: new Date(2026, 4, 3) }),
+      inv({ id: 2, totalAmount: "999", status: "draft", paidAt: new Date(2026, 4, 4) }),
+      inv({ id: 3, totalAmount: "777", status: "cancelled", paidAt: new Date(2026, 4, 5) }),
+      inv({ id: 4, totalAmount: "300", status: "partial", paidAt: new Date(2026, 4, 6) }),
+    ];
+    const win = getMtdWindow(NOW);
+    assert.equal(computeCollected(invoices, win.start, win.end), 500);
+  });
+
+  // Task #720 — Billed MTD, Collected MTD, and Outstanding A/R on
+  // Financial Pulse and on the Billing Workspace billing-header
+  // widget MUST come from the same helpers + the same endpoint.
+  // This test pins that contract on the math side: given a single
+  // fixture, the three numbers agree with the per-doc formulas.
+  it("Financial Pulse and Billing Workspace agree on shared KPIs (reconciliation)", () => {
+    const invoices = [
+      inv({ id: 1, totalAmount: "1000", status: "sent", createdAt: new Date(2026, 4, 2) }),
+      inv({ id: 2, totalAmount: "500", status: "paid", createdAt: new Date(2026, 4, 5), paidAt: new Date(2026, 4, 10) }),
+      inv({ id: 3, totalAmount: "300", status: "overdue", createdAt: new Date(2026, 4, 6) }),
+      inv({ id: 4, totalAmount: "999", status: "draft", createdAt: new Date(2026, 4, 8) }),
+      inv({ id: 5, totalAmount: "777", status: "cancelled", createdAt: new Date(2026, 4, 9) }),
+    ];
+    const win = getMtdWindow(NOW);
+    const billed = computeBilled(invoices, win.start, win.end);
+    const collected = computeCollected(invoices, win.start, win.end);
+    const ar = computeOutstandingAr(invoices);
+    // Billed = 1000 + 500 + 300 = 1800 (draft + cancelled excluded).
+    assert.equal(billed, 1800);
+    // Collected = 500 (only the paid row with paidAt in window).
+    assert.equal(collected, 500);
+    // A/R = 1000 (sent) + 300 (overdue) = 1300 (paid excluded by paidAt
+    // null check, draft and cancelled excluded by status).
+    assert.equal(ar, 1300);
+    // The widget's fallback derivation (billed − A/R) only matches when
+    // every billed row that wasn't collected is still in A/R AND no
+    // collected dollars come from prior-period invoices. That's why
+    // the widget now prefers the server's authoritative collectedMtd
+    // value: in this fixture, billed − A/R = 500 by coincidence, but
+    // the contract is "use the server number when present".
+    assert.equal(billed - ar, 500);
+  });
+
   it("computeOutstandingAr sums unpaid non-draft/non-cancelled invoices", () => {
     const invoices = [
       inv({ id: 1, totalAmount: "1000", status: "sent" }),

@@ -23,6 +23,7 @@ import {
   ClipboardList,
   DollarSign,
   Flag,
+  Info,
   Keyboard,
   Loader2,
   Package,
@@ -47,6 +48,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   adaptiveRefetchInterval,
   apiRequest,
@@ -121,6 +127,20 @@ interface OverdueSummary {
   overdueCount: number;
   overdueAmount: number;
   agingReportUrl: string;
+  // Task #720 — snapshot freshness for the QuickBooks-overdue tile.
+  // Server caches the rollup for 15 minutes per role+companyId.
+  asOf?: string;
+}
+
+// Task #720 — short "HH:MM" label for the overdue tile freshness pill.
+function formatAsOfTime(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return null;
+  return new Date(t).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 const CURRENCY = new Intl.NumberFormat("en-US", {
@@ -176,6 +196,8 @@ function StatusTile({
   testId,
   pill,
   onClick,
+  windowBadge,
+  infoTip,
 }: {
   label: string;
   value: React.ReactNode;
@@ -184,6 +206,10 @@ function StatusTile({
   testId: string;
   pill?: React.ReactNode;
   onClick?: () => void;
+  /** Task #720 — small "7d" / "24h" badge for rolling-window tiles. */
+  windowBadge?: string;
+  /** Task #720 — info tooltip mirroring docs/financial-metrics.md. */
+  infoTip?: string;
 }) {
   const border =
     intent === "ok"
@@ -220,9 +246,34 @@ function StatusTile({
       <CardContent className="pt-4 pb-3">
         <div className="flex items-start justify-between">
           <div>
-            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">
-              {label}
-            </p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">
+                {label}
+              </p>
+              {windowBadge ? (
+                <Badge
+                  variant="outline"
+                  className="h-4 px-1 text-[10px] font-medium text-gray-500 border-gray-200 bg-gray-50"
+                  data-testid={`${testId}-window-badge`}
+                >
+                  {windowBadge}
+                </Badge>
+              ) : null}
+              {infoTip ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info
+                      className="w-3.5 h-3.5 text-gray-400 cursor-help"
+                      data-testid={`${testId}-info`}
+                      aria-label="About this metric"
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs text-xs">
+                    {infoTip}
+                  </TooltipContent>
+                </Tooltip>
+              ) : null}
+            </div>
             <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
             {pill}
           </div>
@@ -733,6 +784,7 @@ export default function BillingWorkspacePage() {
           }
           icon={<ClipboardList className="w-5 h-5" />}
           testId="status-awaiting-approval"
+          infoTip="Open billing sheets and work orders awaiting manager review (point-in-time)."
         />
         <StatusTile
           label="Approved This Week"
@@ -740,6 +792,8 @@ export default function BillingWorkspacePage() {
           intent="ok"
           icon={<CheckCircle2 className="w-5 h-5" />}
           testId="status-approved-this-week"
+          windowBadge="7d"
+          infoTip="Billing sheets and work orders approved in the last 7 days (rolling window)."
         />
         <StatusTile
           label="Drafts Last 24h"
@@ -747,6 +801,8 @@ export default function BillingWorkspacePage() {
           intent={!strip ? "neutral" : strip.draftsLast24h === 0 ? "neutral" : "warn"}
           icon={<Tag className="w-5 h-5" />}
           testId="status-drafts-24h"
+          windowBadge="24h"
+          infoTip="Billing sheets and work orders created in the last 24 hours (rolling window)."
         />
         <StatusTile
           label="QuickBooks"
@@ -777,16 +833,26 @@ export default function BillingWorkspacePage() {
                 </span>
               ) : null}
               {overdueCount > 0 ? (
-                <Link href={overdue?.agingReportUrl ?? "/financial-pulse/ar-aging"}>
-                  <Badge
-                    variant="outline"
-                    className="border-red-300 text-red-700 cursor-pointer"
-                    data-testid="qb-overdue-pill"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {overdueCount} overdue · {fmt(overdueAmount)}
-                  </Badge>
-                </Link>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <Link href={overdue?.agingReportUrl ?? "/financial-pulse/ar-aging"}>
+                    <Badge
+                      variant="outline"
+                      className="border-red-300 text-red-700 cursor-pointer"
+                      data-testid="qb-overdue-pill"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {overdueCount} overdue in QuickBooks · {fmt(overdueAmount)}
+                    </Badge>
+                  </Link>
+                  {formatAsOfTime(overdue?.asOf) ? (
+                    <span
+                      className="text-[10px] text-gray-400"
+                      data-testid="qb-overdue-asof"
+                    >
+                      as of {formatAsOfTime(overdue?.asOf)}
+                    </span>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           }

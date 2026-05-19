@@ -245,6 +245,27 @@ const ALLOWED_ROLES = new Set([
   "billing_manager",
 ]);
 
+// Task #720 — canonical per-tile captions. Source wording lives in
+// `docs/financial-metrics.md`; if you change one, change the doc.
+export const INFO_TIPS = {
+  billedMtd:
+    "From invoices · current month-to-date by createdAt · excludes draft, cancelled · includes tax and markup.",
+  collectedMtd:
+    "From invoices · current month-to-date by paidAt · excludes draft, cancelled · includes tax and markup.",
+  outstandingAr:
+    "From invoices · point-in-time snapshot · excludes draft, cancelled, paid · live from this app (not QuickBooks).",
+  billedYtd:
+    "From invoices · year-to-date by createdAt · excludes draft, cancelled · includes tax and markup.",
+  unbilledExposure:
+    "From work orders + billing sheets without an invoice yet · excludes customers hidden from billing.",
+  projectedMonthEnd:
+    "Billed MTD × (days in month ÷ days elapsed) — simple run-rate.",
+  avgDaysToPay:
+    "Average (paidAt − createdAt) across invoices paid in the last 90 days.",
+  grossMargin:
+    "(Revenue − parts cost − labor cost) ÷ revenue for invoices created this period.",
+} as const;
+
 function useUserRole(): string | null {
   try {
     const raw = localStorage.getItem("user");
@@ -1279,6 +1300,8 @@ function KpiBand({
         deltaGoodDirection="up"
         isLoading={isLoading}
         isError={isError}
+        windowBadge="MTD"
+        infoTip={INFO_TIPS.billedMtd}
       />
       <MetricTile
         testId="kpi-collected-mtd"
@@ -1290,6 +1313,8 @@ function KpiBand({
         deltaGoodDirection="up"
         isLoading={isLoading}
         isError={isError}
+        windowBadge="MTD"
+        infoTip={INFO_TIPS.collectedMtd}
       />
       <MetricTile
         testId="kpi-outstanding-ar"
@@ -1299,6 +1324,7 @@ function KpiBand({
         deltaGoodDirection="down"
         isLoading={isLoading}
         isError={isError}
+        infoTip={INFO_TIPS.outstandingAr}
       />
       <MetricTile
         testId="kpi-projected-month-end"
@@ -1309,6 +1335,7 @@ function KpiBand({
         deltaGoodDirection="up"
         isLoading={isLoading}
         isError={isError}
+        infoTip={INFO_TIPS.projectedMonthEnd}
       />
       <MetricTile
         testId="kpi-billed-ytd"
@@ -1320,6 +1347,8 @@ function KpiBand({
         deltaGoodDirection="up"
         isLoading={isLoading}
         isError={isError}
+        windowBadge="YTD"
+        infoTip={INFO_TIPS.billedYtd}
       />
       <MetricTile
         testId="kpi-unbilled-exposure"
@@ -1329,6 +1358,7 @@ function KpiBand({
         deltaGoodDirection="down"
         isLoading={isLoading}
         isError={isError}
+        infoTip={INFO_TIPS.unbilledExposure}
       />
       <MetricTile
         testId="kpi-avg-days-to-pay"
@@ -1338,6 +1368,7 @@ function KpiBand({
         deltaGoodDirection="down"
         isLoading={isLoading}
         isError={isError}
+        infoTip={INFO_TIPS.avgDaysToPay}
       />
       <MetricTile
         testId="kpi-gross-margin"
@@ -1347,6 +1378,7 @@ function KpiBand({
         deltaGoodDirection="up"
         isLoading={isLoading}
         isError={isError}
+        infoTip={INFO_TIPS.grossMargin}
         warning={
           data?.grossMarginPct.missingWageTechCount &&
           data.grossMarginPct.missingWageTechCount > 0
