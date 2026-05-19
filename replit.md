@@ -9,7 +9,7 @@ Production irrigation company management app: estimates → work orders → wet 
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `DATABASE_URL` — Postgres connection string; `SENDGRID_API_KEY` — transactional email (estimate sends, password reset, verification, marketing-lead, etc.); optional `SENDGRID_FROM_EMAIL` overrides the default From address (`estimates@highplainsprop.com`)
 
 ## Stack
 

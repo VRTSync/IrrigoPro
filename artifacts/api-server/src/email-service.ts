@@ -1,10 +1,26 @@
-import { Client } from 'postmark';
+import sgMail from '@sendgrid/mail';
 import { ObjectStorageService } from './objectStorage';
 import { storage } from './storage';
 import { formatEstimateNumber } from './estimate-number';
 
-// Initialize Postmark client
-const client = new Client(process.env.POSTMARK_API_TOKEN || '');
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+const DEFAULT_FROM_EMAIL =
+  process.env.SENDGRID_FROM_EMAIL ||
+  process.env.FROM_EMAIL ||
+  process.env.POSTMARK_FROM_EMAIL ||
+  'estimates@highplainsprop.com';
+
+if (SENDGRID_API_KEY) {
+  sgMail.setApiKey(SENDGRID_API_KEY);
+} else {
+  console.warn(
+    'SENDGRID_API_KEY not configured — transactional emails will not be sent.',
+  );
+}
+
+function isEmailConfigured(): boolean {
+  return Boolean(SENDGRID_API_KEY);
+}
 
 export interface EstimateEmailData {
   estimateId: number;
@@ -36,7 +52,7 @@ export interface EstimateEmailData {
   }>;
   // Task #616 — optional recipient overrides + manager note. When `to`
   // is omitted the email goes to `customerEmail` on file. `cc`/`bcc`
-  // are forwarded straight to Postmark. `note` renders above the
+  // are forwarded straight to SendGrid. `note` renders above the
   // estimate summary in both HTML and text bodies (HTML-escaped).
   to?: string;
   cc?: string[];
@@ -67,8 +83,8 @@ export class EmailService {
   }
 
   static async sendEstimateApprovalEmail(data: EstimateEmailData): Promise<void> {
-    if (!process.env.POSTMARK_API_TOKEN) {
-      console.error('POSTMARK_API_TOKEN not configured');
+    if (!isEmailConfigured()) {
+      console.error('SENDGRID_API_KEY not configured');
       return;
     }
 
@@ -81,7 +97,7 @@ export class EmailService {
     const companyInfo = {
       name: company?.name || 'IrrigoPro',
       logo: company?.logo ? this.getCompanyLogoUrl(company.logo) : null,
-      email: company?.email || process.env.FROM_EMAIL || 'estimates@irrigopro.com',
+      email: company?.email || DEFAULT_FROM_EMAIL,
       phone: company?.phone || '',
       website: company?.website || ''
     };
@@ -94,16 +110,16 @@ export class EmailService {
     const bccList = (data.bcc ?? []).filter((s) => s && s.trim().length > 0);
 
     try {
-      await client.sendEmail({
-        From: companyInfo.email,
-        To: toAddr,
-        ...(ccList.length ? { Cc: ccList.join(', ') } : {}),
-        ...(bccList.length ? { Bcc: bccList.join(', ') } : {}),
-        Subject: `Estimate Approval Required - ${formatEstimateNumber(data.estimateNumber)}`,
-        HtmlBody: htmlContent,
-        TextBody: textContent,
-        Tag: 'estimate-approval',
-        Metadata: {
+      await sgMail.send({
+        from: companyInfo.email,
+        to: toAddr,
+        ...(ccList.length ? { cc: ccList } : {}),
+        ...(bccList.length ? { bcc: bccList } : {}),
+        subject: `Estimate Approval Required - ${formatEstimateNumber(data.estimateNumber)}`,
+        html: htmlContent,
+        text: textContent,
+        categories: ['estimate-approval'],
+        customArgs: {
           estimateId: data.estimateId.toString(),
           estimateNumber: data.estimateNumber,
           companyId: data.companyId.toString()
@@ -375,8 +391,8 @@ Questions? Reply to this email or call us directly.
     numTechnicians?: number | null;
     message?: string | null;
   }): Promise<void> {
-    if (!process.env.POSTMARK_API_TOKEN) {
-      console.error('POSTMARK_API_TOKEN not configured — marketing lead email skipped');
+    if (!isEmailConfigured()) {
+      console.error('SENDGRID_API_KEY not configured — marketing lead email skipped');
       return;
     }
     const toAddr =
@@ -385,9 +401,7 @@ Questions? Reply to this email or call us directly.
       process.env.FROM_EMAIL;
     const fromAddr =
       process.env.MARKETING_LEAD_FROM_EMAIL ||
-      process.env.POSTMARK_FROM_EMAIL ||
-      process.env.FROM_EMAIL ||
-      'noreply@irrigopro.com';
+      DEFAULT_FROM_EMAIL;
     if (!toAddr) {
       console.error(
         'No recipient address for marketing lead email (set MARKETING_LEAD_TO_EMAIL, LEADS_NOTIFY_EMAIL, or FROM_EMAIL)',
@@ -435,15 +449,14 @@ Questions? Reply to this email or call us directly.
       </div>`;
 
     try {
-      await client.sendEmail({
-        From: fromAddr,
-        To: toAddr,
-        ReplyTo: data.email,
-        Subject: `New IrrigoPro demo request — ${data.companyName}`,
-        HtmlBody: htmlBody,
-        TextBody: lines.join('\n'),
-        Tag: 'marketing-lead',
-        MessageStream: 'outbound',
+      await sgMail.send({
+        from: fromAddr,
+        to: toAddr,
+        replyTo: data.email,
+        subject: `New IrrigoPro demo request — ${data.companyName}`,
+        html: htmlBody,
+        text: lines.join('\n'),
+        categories: ['marketing-lead'],
       });
       console.log(`Marketing lead notification sent to ${toAddr}`);
     } catch (error) {
@@ -452,8 +465,8 @@ Questions? Reply to this email or call us directly.
   }
 
   static async sendApprovalConfirmation(customerEmail: string, estimateNumber: string, approved: boolean): Promise<void> {
-    if (!process.env.POSTMARK_API_TOKEN) {
-      console.error('POSTMARK_API_TOKEN not configured');
+    if (!isEmailConfigured()) {
+      console.error('SENDGRID_API_KEY not configured');
       return;
     }
 
@@ -463,11 +476,11 @@ Questions? Reply to this email or call us directly.
       : 'Thank you for your time. Please feel free to contact us if you have any questions or would like to discuss alternatives.';
 
     try {
-      await client.sendEmail({
-        From: process.env.FROM_EMAIL || 'estimates@irrigationcompany.com',
-        To: customerEmail,
-        Subject: `Estimate ${approved ? 'Approved' : 'Declined'} - ${formatEstimateNumber(estimateNumber)}`,
-        HtmlBody: `
+      await sgMail.send({
+        from: DEFAULT_FROM_EMAIL,
+        to: customerEmail,
+        subject: `Estimate ${approved ? 'Approved' : 'Declined'} - ${formatEstimateNumber(estimateNumber)}`,
+        html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <h2 style="color: ${approved ? '#10b981' : '#6b7280'};">
               Estimate ${approved ? 'Approved' : 'Declined'}
@@ -479,7 +492,7 @@ Questions? Reply to this email or call us directly.
             <p>Best regards,<br>Your Irrigation Team</p>
           </div>
         `,
-        TextBody: `
+        text: `
 Estimate ${approved ? 'Approved' : 'Declined'} - ${formatEstimateNumber(estimateNumber)}
 
 Thank you for your response regarding estimate ${formatEstimateNumber(estimateNumber)}.
@@ -493,7 +506,7 @@ If you have any questions, please don't hesitate to contact us.
 Best regards,
 Your Irrigation Team
         `,
-        Tag: 'estimate-confirmation'
+        categories: ['estimate-confirmation'],
       });
 
       console.log(`Approval confirmation sent to ${customerEmail}`);
@@ -505,19 +518,19 @@ Your Irrigation Team
 
   // Email verification functionality
   static async sendEmailVerification(email: string, verificationToken: string, userName: string): Promise<void> {
-    if (!process.env.POSTMARK_API_TOKEN) {
-      console.error('POSTMARK_API_TOKEN not configured');
+    if (!isEmailConfigured()) {
+      console.error('SENDGRID_API_KEY not configured');
       return;
     }
 
     const verifyUrl = `${this.baseUrl}/api/auth/verify-email/${verificationToken}`;
 
     try {
-      await client.sendEmail({
-        From: process.env.FROM_EMAIL || 'noreply@irrigopro.com',
-        To: email,
-        Subject: 'Verify Your IrrigoPro Account',
-        HtmlBody: `
+      await sgMail.send({
+        from: DEFAULT_FROM_EMAIL,
+        to: email,
+        subject: 'Verify Your IrrigoPro Account',
+        html: `
           <!DOCTYPE html>
           <html>
           <head>
@@ -562,7 +575,7 @@ Your Irrigation Team
           </body>
           </html>
         `,
-        TextBody: `
+        text: `
 Welcome to IrrigoPro - Verify Your Account
 
 Hello ${userName},
@@ -578,7 +591,7 @@ If you didn't create this account, please ignore this email.
 Best regards,
 The IrrigoPro Team
         `,
-        Tag: 'email-verification'
+        categories: ['email-verification'],
       });
 
       console.log(`Email verification sent to ${email}`);
@@ -590,19 +603,19 @@ The IrrigoPro Team
 
   // Password reset functionality
   static async sendPasswordReset(email: string, resetToken: string, userName: string): Promise<void> {
-    if (!process.env.POSTMARK_API_TOKEN) {
-      console.error('POSTMARK_API_TOKEN not configured');
+    if (!isEmailConfigured()) {
+      console.error('SENDGRID_API_KEY not configured');
       return;
     }
 
     const resetUrl = `${this.baseUrl}/reset-password?token=${resetToken}`;
 
     try {
-      await client.sendEmail({
-        From: process.env.FROM_EMAIL || 'noreply@irrigopro.com',
-        To: email,
-        Subject: 'Reset Your IrrigoPro Password',
-        HtmlBody: `
+      await sgMail.send({
+        from: DEFAULT_FROM_EMAIL,
+        to: email,
+        subject: 'Reset Your IrrigoPro Password',
+        html: `
           <!DOCTYPE html>
           <html>
           <head>
@@ -650,7 +663,7 @@ The IrrigoPro Team
           </body>
           </html>
         `,
-        TextBody: `
+        text: `
 Reset Your IrrigoPro Password
 
 Hello ${userName},
@@ -668,7 +681,7 @@ For security reasons, we recommend using a strong, unique password.
 Best regards,
 The IrrigoPro Team
         `,
-        Tag: 'password-reset'
+        categories: ['password-reset'],
       });
 
       console.log(`Password reset email sent to ${email}`);
@@ -691,8 +704,8 @@ The IrrigoPro Team
     }>;
     companyName?: string;
   }): Promise<{ success: boolean; error?: string }> {
-    if (!process.env.POSTMARK_API_TOKEN) {
-      console.error('POSTMARK_API_TOKEN not configured');
+    if (!isEmailConfigured()) {
+      console.error('SENDGRID_API_KEY not configured');
       return { success: false, error: 'Email service not configured' };
     }
 
@@ -751,13 +764,13 @@ ${companyName}
 `;
 
     try {
-      await client.sendEmail({
-        From: process.env.FROM_EMAIL || 'noreply@irrigopro.com',
-        To: args.to,
-        Subject: subject,
-        HtmlBody: html,
-        TextBody: text,
-        Tag: 'missing-photos-tech',
+      await sgMail.send({
+        from: DEFAULT_FROM_EMAIL,
+        to: args.to,
+        subject,
+        html,
+        text,
+        categories: ['missing-photos-tech'],
       });
       return { success: true };
     } catch (error) {
@@ -773,8 +786,8 @@ ${companyName}
     invoiceNumber: string,
     pdfUrl: string
   ): Promise<{ success: boolean; error?: string }> {
-    if (!process.env.POSTMARK_API_TOKEN) {
-      console.error('POSTMARK_API_TOKEN not configured');
+    if (!isEmailConfigured()) {
+      console.error('SENDGRID_API_KEY not configured');
       return { success: false, error: 'Email service not configured' };
     }
 
@@ -799,11 +812,11 @@ ${companyName}
       const pdfBase64 = pdfBuffer.toString('base64');
 
       // Send email with PDF attachment
-      await client.sendEmail({
-        From: process.env.FROM_EMAIL || 'billing@irrigopro.com',
-        To: customerEmail,
-        Subject: `Invoice Detail Report - ${invoiceNumber}`,
-        HtmlBody: `
+      await sgMail.send({
+        from: DEFAULT_FROM_EMAIL,
+        to: customerEmail,
+        subject: `Invoice Detail Report - ${invoiceNumber}`,
+        html: `
           <!DOCTYPE html>
           <html>
           <head>
@@ -852,7 +865,7 @@ ${companyName}
           </body>
           </html>
         `,
-        TextBody: `
+        text: `
 Invoice Detail Report - ${invoiceNumber}
 
 Hello ${customerName},
@@ -868,15 +881,15 @@ Thank you for your business!
 ---
 This is an automated email from IrrigoPro
         `,
-        Attachments: [
+        attachments: [
           {
-            Name: `Invoice_${invoiceNumber}_Detail.pdf`,
-            Content: pdfBase64,
-            ContentType: 'application/pdf',
-            ContentID: '',
+            filename: `Invoice_${invoiceNumber}_Detail.pdf`,
+            content: pdfBase64,
+            type: 'application/pdf',
+            disposition: 'attachment',
           },
         ],
-        Tag: 'invoice-detail-pdf',
+        categories: ['invoice-detail-pdf'],
       });
 
       console.log(`Invoice detail PDF sent to ${customerEmail} for invoice ${invoiceNumber}`);

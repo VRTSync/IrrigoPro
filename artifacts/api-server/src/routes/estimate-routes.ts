@@ -880,7 +880,7 @@ export function registerEstimateRoutes(
   // Previously a stub that returned success without sending. Now funnels
   // through the same `_sendEstimateApprovalEmailFlow` helper as
   // `/send-approval-email` and `/transition` so token generation,
-  // status transitions, and Postmark delivery all live in one place.
+  // status transitions, and SendGrid delivery all live in one place.
   app.post(
     "/api/estimates/:id/email",
     requireAuthentication,
@@ -1288,13 +1288,13 @@ export function registerEstimateRoutes(
   // POST /api/estimates/:id/send-approval-email and the new transition
   // endpoint (`send_to_customer` and `resend`) so token generation, the
   // `approvalSentAt` / `internalStatus = sent_to_customer` write, and the
-  // Postmark send all live in one place. Optionally also resets
+  // SendGrid send all live in one place. Optionally also resets
   // `estimateDate` (used by `resend` to clear the expired bucket).
   //
   // Task #611 — the flow is now email-first: the token is generated in
   // memory, the customer email is sent, and only then is the DB row
   // marked `sent_to_customer` / stamped with the token. Previously the
-  // DB write committed first, so a Postmark failure left the estimate
+  // DB write committed first, so a SendGrid failure left the estimate
   // marked sent with a token the customer never saw. With the order
   // reversed, a transient send failure leaves the estimate in its
   // pre-send internal status and the user can retry the single
@@ -1544,7 +1544,7 @@ export function registerEstimateRoutes(
   // `_sendEstimateApprovalEmailFlow` (mints a 32-byte approval token
   // with a 30-day expiry, flips internalStatus → sent_to_customer,
   // dual-stamps the lifecycle column via `markEstimateSentToCustomer`),
-  // but intentionally skips the Postmark send. Used when the estimate
+  // but intentionally skips the SendGrid send. Used when the estimate
   // is delivered out-of-band (printed, hand-delivered, personal email).
   // Role gate matches the email-send path (billing_manager /
   // company_admin / super_admin); field_tech and irrigation_manager

@@ -84,7 +84,7 @@ router.post("/marketing-leads", marketingLeadsCors, async (req, res) => {
       })
       .returning();
 
-    // Reuse the existing Postmark client/EmailService rather than spinning up
+    // Reuse the existing SendGrid client/EmailService rather than spinning up
     // a second client inline. Failures here are logged but don't fail the
     // request — we already saved the lead in the database.
     void EmailService.sendMarketingLeadNotification({
