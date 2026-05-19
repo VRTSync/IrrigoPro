@@ -341,7 +341,7 @@ export default function EstimateCommandCenter() {
     <div className="py-6 max-w-[1400px] mx-auto space-y-6" data-testid="estimate-command-center">
       <header className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Estimate Command Center</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Estimates</h1>
           <p className="text-sm text-gray-500">
             Pipeline, attention, and lifecycle for every estimate.
           </p>

@@ -202,7 +202,7 @@ export const companyAdminNav: NavConfig = {
         { type: "leaf", label: "Billing Sheets", path: "/billing-sheets", icon: ClipboardList },
         {
           type: "leaf",
-          label: "Estimate Command Center",
+          label: "Estimates",
           path: "/estimates/command-center",
           icon: LayoutDashboard,
           badgeKey: "estimatesPendingApproval",
