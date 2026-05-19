@@ -10,6 +10,15 @@
 // company id (super_admin gets the global view).
 
 import type { Express, RequestHandler } from "express";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import {
+  customers,
+  estimates,
+  invoices,
+  quickbooksIntegration,
+  quickbooksSync,
+} from "@workspace/db/schema";
+import { db } from "../db";
 import { storage } from "../storage";
 
 export interface RegisterBillingWorkspaceRoutesDeps {
@@ -142,6 +151,247 @@ export function _resetFlagsForTests(): void { BW_FLAGS.clear(); }
 
 export function _resetOverdueCacheForTests(): void {
   OVERDUE_CACHE.clear();
+}
+
+// ---------------------------------------------------------------
+// QuickBooks sync status — Task #715
+//
+// Pulls the real picture from the integration tables instead of
+// inferring from billing-sheet fields that don't exist:
+//   - last successful sync time  ← max(quickbooks_integration.lastRefreshSuccess,
+//                                       quickbooks_sync.syncedAt)
+//   - pending queue depth        ← invoices in scope without a
+//                                  quickbooksInvoiceId + pending
+//                                  quickbooks_sync rows in scope
+//   - recent sync errors         ← latest quickbooks_sync rows with
+//                                  status='failed' in scope (+ the
+//                                  integration's reconnect reason)
+// Tenant scoping: super_admin sees all integrations. For everyone
+// else, we match quickbooks_integration.company_id (text) against
+// the caller's numeric companyId stringified.
+// ---------------------------------------------------------------
+export interface QbSyncError {
+  id: number;
+  estimateId: number | null;
+  errorMessage: string;
+  occurredAt: string | null;
+  source: "estimate_sync" | "integration";
+}
+
+export interface QbSyncStatus {
+  state: "ok" | "degraded" | "down" | "unknown";
+  connectionStatus: string | null;
+  reconnectRequiredReason: string | null;
+  lastSyncAt: string | null;
+  pendingSync: number;
+  recentErrors: QbSyncError[];
+}
+
+async function getScopedQbIntegrations(
+  req: any,
+): Promise<Array<typeof quickbooksIntegration.$inferSelect>> {
+  if (req.authenticatedUserRole === "super_admin") {
+    return await db.select().from(quickbooksIntegration);
+  }
+  const cid: number | null = req.authenticatedUserCompanyId ?? null;
+  if (cid == null) return [];
+  return await db
+    .select()
+    .from(quickbooksIntegration)
+    .where(eq(quickbooksIntegration.companyId, String(cid)));
+}
+
+async function countQueuedInvoices(req: any): Promise<number> {
+  const role = req.authenticatedUserRole;
+  const cid: number | null = req.authenticatedUserCompanyId ?? null;
+  // "Queued" = finalized invoice in scope that has not yet been
+  // pushed to QuickBooks. We exclude draft/cancelled/paid because
+  // those don't belong on the queue.
+  const FINAL_STATUSES = ["sent", "pending", "overdue", "partial"];
+  if (role === "super_admin") {
+    const rows = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(invoices)
+      .where(
+        and(
+          isNull(invoices.quickbooksInvoiceId),
+          inArray(invoices.status, FINAL_STATUSES),
+        ),
+      );
+    return Number(rows[0]?.n ?? 0);
+  }
+  if (cid == null) return 0;
+  const rows = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(invoices)
+    .innerJoin(customers, eq(invoices.customerId, customers.id))
+    .where(
+      and(
+        eq(customers.companyId, cid),
+        isNull(invoices.quickbooksInvoiceId),
+        inArray(invoices.status, FINAL_STATUSES),
+      ),
+    );
+  return Number(rows[0]?.n ?? 0);
+}
+
+async function getScopedSyncRows(
+  req: any,
+  syncStatus: "failed" | "pending",
+  limit?: number,
+): Promise<Array<typeof quickbooksSync.$inferSelect>> {
+  const role = req.authenticatedUserRole;
+  const cid: number | null = req.authenticatedUserCompanyId ?? null;
+  if (role === "super_admin") {
+    const q = db
+      .select()
+      .from(quickbooksSync)
+      .where(eq(quickbooksSync.syncStatus, syncStatus))
+      .orderBy(desc(quickbooksSync.createdAt));
+    return limit ? await q.limit(limit) : await q;
+  }
+  if (cid == null) return [];
+  const q = db
+    .select({
+      id: quickbooksSync.id,
+      estimateId: quickbooksSync.estimateId,
+      quickbooksEstimateId: quickbooksSync.quickbooksEstimateId,
+      quickbooksCustomerId: quickbooksSync.quickbooksCustomerId,
+      syncStatus: quickbooksSync.syncStatus,
+      syncedAt: quickbooksSync.syncedAt,
+      errorMessage: quickbooksSync.errorMessage,
+      createdAt: quickbooksSync.createdAt,
+    })
+    .from(quickbooksSync)
+    .innerJoin(estimates, eq(quickbooksSync.estimateId, estimates.id))
+    .where(
+      and(
+        eq(quickbooksSync.syncStatus, syncStatus),
+        eq(estimates.companyId, cid),
+      ),
+    )
+    .orderBy(desc(quickbooksSync.createdAt));
+  const rows = limit ? await q.limit(limit) : await q;
+  return rows as Array<typeof quickbooksSync.$inferSelect>;
+}
+
+async function loadQbSyncStatus(req: any): Promise<QbSyncStatus> {
+  const integrations = await getScopedQbIntegrations(req);
+
+  // Determine the most recent successful sync across integrations
+  // (token refresh) and per-estimate sync rows.
+  let lastSyncMs: number | null = null;
+  const considerTs = (v: any): void => {
+    if (!v) return;
+    const t = new Date(v).getTime();
+    if (!Number.isFinite(t)) return;
+    if (lastSyncMs == null || t > lastSyncMs) lastSyncMs = t;
+  };
+  let connectionStatus: string | null = null;
+  let reconnectRequiredReason: string | null = null;
+  if (integrations.length > 0) {
+    // Pick the worst connection status (reconnect_required > error >
+    // disconnected > connected) so a single broken tenant is
+    // surfaced to the super_admin view.
+    const RANK: Record<string, number> = {
+      connected: 0,
+      disconnected: 1,
+      error: 2,
+      reconnect_required: 3,
+    };
+    let worst = integrations[0];
+    for (const intg of integrations) {
+      considerTs(intg.lastRefreshSuccess);
+      if ((RANK[intg.connectionStatus] ?? 0) > (RANK[worst.connectionStatus] ?? 0)) {
+        worst = intg;
+      }
+    }
+    connectionStatus = worst.connectionStatus ?? null;
+    reconnectRequiredReason = worst.reconnectRequiredReason ?? null;
+  }
+
+  const [failedRows, pendingSyncRows, queuedInvoices] = await Promise.all([
+    getScopedSyncRows(req, "failed", 10),
+    getScopedSyncRows(req, "pending"),
+    countQueuedInvoices(req),
+  ]);
+  for (const r of failedRows) considerTs(r.createdAt);
+  // syncedAt is set when a row eventually flips to synced, but we
+  // still surface the most recent createdAt for the failed/pending
+  // rows so the timeline isn't blank on a brand-new tenant.
+  const role = req.authenticatedUserRole;
+  const cid: number | null = req.authenticatedUserCompanyId ?? null;
+  let syncedRows: Array<{ syncedAt: Date | null }> = [];
+  if (role === "super_admin") {
+    syncedRows = await db
+      .select({ syncedAt: quickbooksSync.syncedAt })
+      .from(quickbooksSync)
+      .where(eq(quickbooksSync.syncStatus, "synced"))
+      .orderBy(desc(quickbooksSync.syncedAt))
+      .limit(1);
+  } else if (cid != null) {
+    syncedRows = await db
+      .select({ syncedAt: quickbooksSync.syncedAt })
+      .from(quickbooksSync)
+      .innerJoin(estimates, eq(quickbooksSync.estimateId, estimates.id))
+      .where(
+        and(
+          eq(quickbooksSync.syncStatus, "synced"),
+          eq(estimates.companyId, cid),
+        ),
+      )
+      .orderBy(desc(quickbooksSync.syncedAt))
+      .limit(1);
+  }
+  if (syncedRows.length > 0) considerTs(syncedRows[0].syncedAt);
+
+  const pendingSync = queuedInvoices + pendingSyncRows.length;
+
+  const recentErrors: QbSyncError[] = failedRows.map((r) => ({
+    id: r.id,
+    estimateId: r.estimateId,
+    errorMessage: r.errorMessage ?? "Unknown sync error",
+    occurredAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
+    source: "estimate_sync",
+  }));
+  if (reconnectRequiredReason) {
+    recentErrors.unshift({
+      id: -1,
+      estimateId: null,
+      errorMessage: reconnectRequiredReason,
+      occurredAt: null,
+      source: "integration",
+    });
+  }
+
+  let state: QbSyncStatus["state"];
+  if (integrations.length === 0) {
+    state = "unknown";
+  } else if (
+    connectionStatus === "reconnect_required" ||
+    connectionStatus === "disconnected"
+  ) {
+    state = "down";
+  } else if (
+    connectionStatus === "error" ||
+    failedRows.length > 0 ||
+    pendingSync >= 5
+  ) {
+    state = "degraded";
+  } else if (pendingSync > 0) {
+    state = "degraded";
+  } else {
+    state = "ok";
+  }
+
+  return {
+    state,
+    connectionStatus,
+    reconnectRequiredReason,
+    lastSyncAt: lastSyncMs ? new Date(lastSyncMs).toISOString() : null,
+    pendingSync,
+    recentErrors,
+  };
 }
 
 export function registerBillingWorkspaceRoutes(
@@ -435,30 +685,21 @@ export function registerBillingWorkspaceRoutes(
             DRAFT_WO.has(w.status) && tsOf(w.createdAt) >= dayAgo,
           ).length;
 
-        // QuickBooks indicator — synthesizes the most useful signal
-        // we can derive without a connector-status table: last sync
-        // attempt, count of finalized BS/WO not yet pushed, and the
-        // current overdue invoice count piped through the cached
-        // summary helper (so the tile shows the overdue pill).
-        const billed = sheets.filter((s: any) => s.status === "billed");
-        const pendingSync = billed.filter(
-          (s: any) => !s.quickbooksInvoiceId && s.invoiceId,
-        ).length;
-        const lastSyncAt = sheets.reduce<number | null>((acc, s: any) => {
-          const t = tsOf(s.quickbooksSyncedAt);
-          if (!Number.isFinite(t)) return acc;
-          if (acc == null || t > acc) return t;
-          return acc;
-        }, null);
-        let qbState: "ok" | "degraded" | "down" | "unknown" = "unknown";
-        if (lastSyncAt != null) {
-          if (pendingSync === 0) qbState = "ok";
-          else if (pendingSync < 5) qbState = "degraded";
-          else qbState = "down";
-        } else if (pendingSync > 0) {
-          qbState = "degraded";
-        } else {
-          qbState = "ok";
+        // QuickBooks indicator — Task #715 reads real integration
+        // state (quickbooks_integration + quickbooks_sync + invoices)
+        // instead of synthesizing from billing-sheet fields.
+        let qbStatus: QbSyncStatus = {
+          state: "unknown",
+          connectionStatus: null,
+          reconnectRequiredReason: null,
+          lastSyncAt: null,
+          pendingSync: 0,
+          recentErrors: [],
+        };
+        try {
+          qbStatus = await loadQbSyncStatus(req);
+        } catch (err) {
+          req.log?.error?.({ err }, "loadQbSyncStatus failed");
         }
         let overdueCount = 0;
         try {
@@ -473,10 +714,12 @@ export function registerBillingWorkspaceRoutes(
           approvedThisWeek,
           draftsLast24h,
           quickbooks: {
-            state: qbState,
-            lastSyncAt: lastSyncAt ? new Date(lastSyncAt).toISOString() : null,
-            pendingSync,
+            state: qbStatus.state,
+            lastSyncAt: qbStatus.lastSyncAt,
+            pendingSync: qbStatus.pendingSync,
             overdueCount,
+            connectionStatus: qbStatus.connectionStatus,
+            recentErrorCount: qbStatus.recentErrors.length,
           },
         });
       } catch (error) {
@@ -522,6 +765,66 @@ export function registerBillingWorkspaceRoutes(
       } catch (error) {
         req.log?.error?.({ err: error }, "billing-workspace flag failed");
         res.status(500).json({ message: "Failed to flag item" });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------
+  // GET /api/billing-workspace/quickbooks-sync
+  //
+  // Detail payload for the QB status tile drawer (Task #715).
+  // Returns the same shape as the tile's nested quickbooks block
+  // plus the full recentErrors[] array.
+  // -------------------------------------------------------------
+  app.get(
+    "/api/billing-workspace/quickbooks-sync",
+    requireAuthentication,
+    async (req: any, res) => {
+      try {
+        if (!isAllowed(req)) {
+          res.status(403).json({ message: "Access denied." });
+          return;
+        }
+        const status = await loadQbSyncStatus(req);
+        res.json(status);
+      } catch (error) {
+        req.log?.error?.({ err: error }, "quickbooks-sync detail failed");
+        res.status(500).json({ message: "Failed to load QuickBooks sync status" });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------
+  // POST /api/billing-workspace/quickbooks-sync/retry
+  //
+  // Flips every failed quickbooks_sync row in scope back to
+  // 'pending' so the next sync run picks them up. The actual
+  // re-push is handled by the existing QuickBooks worker — this
+  // route is the "Retry sync" button on the tile drawer.
+  // -------------------------------------------------------------
+  app.post(
+    "/api/billing-workspace/quickbooks-sync/retry",
+    requireAuthentication,
+    async (req: any, res) => {
+      try {
+        if (!isAllowed(req)) {
+          res.status(403).json({ message: "Access denied." });
+          return;
+        }
+        const failed = await getScopedSyncRows(req, "failed");
+        if (failed.length === 0) {
+          res.json({ requeued: 0 });
+          return;
+        }
+        const ids = failed.map((r) => r.id);
+        await db
+          .update(quickbooksSync)
+          .set({ syncStatus: "pending", errorMessage: null })
+          .where(inArray(quickbooksSync.id, ids));
+        res.json({ requeued: ids.length });
+      } catch (error) {
+        req.log?.error?.({ err: error }, "quickbooks-sync retry failed");
+        res.status(500).json({ message: "Failed to retry QuickBooks sync" });
       }
     },
   );

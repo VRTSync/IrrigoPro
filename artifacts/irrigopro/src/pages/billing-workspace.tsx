@@ -95,7 +95,26 @@ interface StatusStrip {
     lastSyncAt: string | null;
     pendingSync: number;
     overdueCount: number;
+    connectionStatus: string | null;
+    recentErrorCount: number;
   };
+}
+
+interface QbSyncError {
+  id: number;
+  estimateId: number | null;
+  errorMessage: string;
+  occurredAt: string | null;
+  source: "estimate_sync" | "integration";
+}
+
+interface QbSyncDetail {
+  state: "ok" | "degraded" | "down" | "unknown";
+  connectionStatus: string | null;
+  reconnectRequiredReason: string | null;
+  lastSyncAt: string | null;
+  pendingSync: number;
+  recentErrors: QbSyncError[];
 }
 
 interface OverdueSummary {
@@ -156,6 +175,7 @@ function StatusTile({
   icon,
   testId,
   pill,
+  onClick,
 }: {
   label: string;
   value: React.ReactNode;
@@ -163,6 +183,7 @@ function StatusTile({
   icon: React.ReactNode;
   testId: string;
   pill?: React.ReactNode;
+  onClick?: () => void;
 }) {
   const border =
     intent === "ok"
@@ -180,8 +201,22 @@ function StatusTile({
         : intent === "bad"
           ? "bg-red-100 text-red-600"
           : "bg-gray-100 text-gray-500";
+  const interactive = !!onClick;
   return (
-    <Card className={`border-l-4 ${border}`} data-testid={testId}>
+    <Card
+      className={`border-l-4 ${border} ${interactive ? "cursor-pointer hover:bg-gray-50 transition-colors" : ""}`}
+      data-testid={testId}
+      onClick={onClick}
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onKeyDown={(e) => {
+        if (!interactive) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick?.();
+        }
+      }}
+    >
       <CardContent className="pt-4 pb-3">
         <div className="flex items-start justify-between">
           <div>
@@ -307,6 +342,8 @@ export default function BillingWorkspacePage() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
+  const [qbDrawerOpen, setQbDrawerOpen] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [approving, setApproving] = useState(false);
   const [kickingBack, setKickingBack] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -357,6 +394,39 @@ export default function BillingWorkspacePage() {
     queryKey: ["/api/quickbooks/overdue-summary"],
     refetchInterval: adaptiveRefetchInterval(60_000),
   });
+
+  const { data: qbDetail, isLoading: qbDetailLoading } = useQuery<QbSyncDetail | null>({
+    queryKey: ["/api/billing-workspace/quickbooks-sync"],
+    enabled: qbDrawerOpen,
+    refetchInterval: qbDrawerOpen ? adaptiveRefetchInterval(30_000) : false,
+  });
+
+  const retrySync = useCallback(async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      const data = (await apiRequest(
+        "/api/billing-workspace/quickbooks-sync/retry",
+        "POST",
+        {},
+      )) as { requeued?: number };
+      const n = data?.requeued ?? 0;
+      toast({
+        title: "Sync requeued",
+        description: n > 0 ? `${n} item${n === 1 ? "" : "s"} queued for retry.` : "No failed syncs to retry.",
+      });
+      qc.invalidateQueries({ queryKey: ["/api/billing-workspace/quickbooks-sync"] });
+      qc.invalidateQueries({ queryKey: ["/api/billing-workspace/status-strip"] });
+    } catch (err) {
+      toast({
+        title: "Retry failed",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setRetrying(false);
+    }
+  }, [retrying, toast, qc]);
 
   const items = (queue?.items ?? []).filter((it) =>
     minTotal > 0 ? Number(it.total ?? 0) > minTotal : true,
@@ -686,25 +756,44 @@ export default function BillingWorkspacePage() {
             </span>
           }
           pill={
-            overdueCount > 0 ? (
-              <Link href={overdue?.agingReportUrl ?? "/financial-pulse/ar-aging"}>
-                <Badge
-                  variant="outline"
-                  className="mt-1 border-red-300 text-red-700 cursor-pointer"
-                  data-testid="qb-overdue-pill"
-                >
-                  {overdueCount} overdue · {fmt(overdueAmount)}
-                </Badge>
-              </Link>
-            ) : strip?.quickbooks?.lastSyncAt ? (
-              <span className="block text-xs font-normal text-gray-500 mt-1">
-                Synced {new Date(strip.quickbooks.lastSyncAt).toLocaleString()}
-              </span>
-            ) : null
+            <div className="mt-1 space-y-0.5">
+              {strip?.quickbooks?.lastSyncAt ? (
+                <span className="block text-xs font-normal text-gray-500" data-testid="qb-last-sync">
+                  Synced {new Date(strip.quickbooks.lastSyncAt).toLocaleString()}
+                </span>
+              ) : strip?.quickbooks ? (
+                <span className="block text-xs font-normal text-gray-400" data-testid="qb-last-sync">
+                  Never synced
+                </span>
+              ) : null}
+              {strip?.quickbooks && strip.quickbooks.pendingSync > 0 ? (
+                <span className="block text-xs font-normal text-amber-700" data-testid="qb-pending-count">
+                  {strip.quickbooks.pendingSync} queued
+                </span>
+              ) : null}
+              {strip?.quickbooks && strip.quickbooks.recentErrorCount > 0 ? (
+                <span className="block text-xs font-normal text-red-700" data-testid="qb-error-count">
+                  {strip.quickbooks.recentErrorCount} sync error{strip.quickbooks.recentErrorCount === 1 ? "" : "s"}
+                </span>
+              ) : null}
+              {overdueCount > 0 ? (
+                <Link href={overdue?.agingReportUrl ?? "/financial-pulse/ar-aging"}>
+                  <Badge
+                    variant="outline"
+                    className="border-red-300 text-red-700 cursor-pointer"
+                    data-testid="qb-overdue-pill"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {overdueCount} overdue · {fmt(overdueAmount)}
+                  </Badge>
+                </Link>
+              ) : null}
+            </div>
           }
           intent={qbIntent}
           icon={<DollarSign className="w-5 h-5" />}
           testId="status-quickbooks"
+          onClick={() => setQbDrawerOpen(true)}
         />
       </div>
 
@@ -941,6 +1030,109 @@ export default function BillingWorkspacePage() {
           ) : null}
           <SheetFooter className="mt-6">
             <Button variant="outline" onClick={() => setDrawerOpen(false)}>Close</Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+
+      {/* QuickBooks sync details drawer */}
+      <Sheet open={qbDrawerOpen} onOpenChange={setQbDrawerOpen}>
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-[40%] sm:min-w-[420px] overflow-y-auto"
+          data-testid="qb-sync-drawer"
+        >
+          <SheetHeader>
+            <SheetTitle>QuickBooks sync</SheetTitle>
+            <SheetDescription>
+              Last sync, queue depth, and recent sync errors.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-4 space-y-4">
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+              <dt className="text-gray-500">Connection</dt>
+              <dd className="text-right capitalize" data-testid="qb-drawer-connection">
+                {qbDetail?.connectionStatus
+                  ? qbDetail.connectionStatus.replace(/_/g, " ")
+                  : "—"}
+              </dd>
+              <dt className="text-gray-500">State</dt>
+              <dd className="text-right capitalize">{qbDetail?.state ?? "—"}</dd>
+              <dt className="text-gray-500">Last sync</dt>
+              <dd className="text-right" data-testid="qb-drawer-last-sync">
+                {qbDetail?.lastSyncAt
+                  ? new Date(qbDetail.lastSyncAt).toLocaleString()
+                  : "Never"}
+              </dd>
+              <dt className="text-gray-500">Queued</dt>
+              <dd className="text-right tabular-nums" data-testid="qb-drawer-pending">
+                {qbDetail?.pendingSync ?? 0}
+              </dd>
+            </dl>
+
+            {qbDetail?.reconnectRequiredReason ? (
+              <div className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-800">
+                <strong className="block mb-1">Reconnect required</strong>
+                {qbDetail.reconnectRequiredReason}
+              </div>
+            ) : null}
+
+            <div>
+              <p className="text-xs font-medium text-gray-600 mb-2">
+                Recent sync errors
+              </p>
+              {qbDetailLoading ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-10" />
+                  <Skeleton className="h-10" />
+                </div>
+              ) : (qbDetail?.recentErrors?.length ?? 0) === 0 ? (
+                <p className="text-xs text-gray-400" data-testid="qb-drawer-empty">
+                  No recent sync errors.
+                </p>
+              ) : (
+                <ul className="space-y-2" data-testid="qb-drawer-errors">
+                  {qbDetail!.recentErrors.map((e) => (
+                    <li
+                      key={`${e.source}-${e.id}`}
+                      className="rounded border border-gray-200 p-2 text-xs"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-medium text-gray-800 capitalize">
+                          {e.source.replace(/_/g, " ")}
+                          {e.estimateId ? ` · estimate #${e.estimateId}` : ""}
+                        </span>
+                        {e.occurredAt ? (
+                          <span className="text-gray-400 shrink-0">
+                            {new Date(e.occurredAt).toLocaleString()}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="mt-1 text-gray-700 break-words">
+                        {e.errorMessage}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+          <SheetFooter className="mt-6 gap-2">
+            <Button
+              size="sm"
+              onClick={retrySync}
+              disabled={retrying}
+              data-testid="qb-retry-button"
+            >
+              {retrying ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-1" />
+              ) : (
+                <RotateCcw className="w-4 h-4 mr-1" />
+              )}
+              Retry sync
+            </Button>
+            <Button variant="outline" onClick={() => setQbDrawerOpen(false)}>
+              Close
+            </Button>
           </SheetFooter>
         </SheetContent>
       </Sheet>
