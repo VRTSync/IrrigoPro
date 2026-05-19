@@ -26,7 +26,7 @@ import {
   isPendingReview,
   type LifecycleStatus,
 } from "@/lib/lifecycle";
-import { formatEstimateNumber } from "@/lib/estimate-number";
+import { formatEstimateNumber, buildEstimatePdfFilename } from "@/lib/estimate-number";
 import { EstimateListStatusBadge } from "./estimate-list-status-badge";
 import { useToast } from "@/hooks/use-toast";
 
@@ -155,7 +155,10 @@ export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit, onResendC
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `estimate-${formatEstimateNumber(estimate.estimateNumber)}.pdf`;
+      a.download = buildEstimatePdfFilename(
+        estimate.estimateNumber,
+        (estimate as { customerName?: string | null }).customerName ?? null,
+      );
       document.body.appendChild(a);
       a.click();
       a.remove();

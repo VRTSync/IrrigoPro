@@ -162,6 +162,11 @@ export function buildEstimateHtml(
   const partsSubtotal = parseFloat(estimate.partsSubtotal) || 0;
   const laborSubtotal = parseFloat(estimate.laborSubtotal) || 0;
   const grandTotal = parseFloat(estimate.totalAmount) || (partsSubtotal + laborSubtotal);
+  // Task #691 — Surface the labor math on the PDF so customers can see
+  // how the labor charge was derived (totalLaborHours × laborRate).
+  // Labor is flat-only post-Task #657, so these fields are authoritative.
+  const totalLaborHours = parseFloat(estimate.totalLaborHours) || 0;
+  const laborRateLabel = `Labor (${totalLaborHours.toFixed(2)}h × ${fmtMoney(laborRate)}/hr)`;
 
   const lat = estimate.workLocationLat;
   const lng = estimate.workLocationLng;
@@ -358,7 +363,7 @@ export function buildEstimateHtml(
     <div class="totals-wrap">
       <div class="totals">
         <div class="row"><span>Parts Subtotal</span><span>${fmtMoney(partsSubtotal)}</span></div>
-        <div class="row"><span>Labor Subtotal</span><span>${fmtMoney(laborSubtotal)}</span></div>
+        <div class="row"><span>${escapeHtml(laborRateLabel)}</span><span>${fmtMoney(laborSubtotal)}</span></div>
         <div class="grand row"><span class="label">Grand Total</span><span>${fmtMoney(grandTotal)}</span></div>
       </div>
     </div>

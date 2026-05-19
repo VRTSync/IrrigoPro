@@ -183,7 +183,8 @@ describe("Estimate PDF download — behavioral (Task #630, bug #1)", () => {
 
     const a = clicked[0];
     expect(a.href).toContain("blob:test-1");
-    expect(a.download).toBe("estimate-EST-42.pdf");
+    // Task #691 — download filename is now "{Customer Name} - EST-{Number}.pdf".
+    expect(a.download).toBe("Acme - EST-42.pdf");
     expect(a.rel).toBe("noopener");
 
     // The revoke is on a setTimeout(…, 1000) — wait it out so we
@@ -223,6 +224,39 @@ describe("Estimate PDF download — behavioral (Task #630, bug #1)", () => {
       }),
     );
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+  });
+
+  it("Download PDF: sanitizes filesystem-reserved characters in the customer name (Task #691)", async () => {
+    const { createSpy } = installBlobUrlStubs();
+    const { clicked } = trackAnchorClicks();
+    const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    fetchSpy.mockResolvedValueOnce(
+      new Response(pdfBytes, {
+        status: 200,
+        headers: { "content-type": "application/pdf" },
+      }),
+    );
+
+    // Override the fixture's customerName for this test only — the
+    // queryFn pulls from ESTIMATE_FIXTURE so we patch it in place,
+    // then restore.
+    const original = ESTIMATE_FIXTURE.customerName;
+    (ESTIMATE_FIXTURE as { customerName: string }).customerName =
+      'Acme / Foo: "Bar" <Baz>';
+    try {
+      const client = makeQueryClient();
+      renderModal(client);
+      const button = await screen.findByTestId("detail-modal-download-pdf");
+      await userEvent.click(button);
+
+      await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(clicked.length).toBe(1));
+
+      // Reserved chars (/ : " < >) collapse to single spaces and trim.
+      expect(clicked[0].download).toBe("Acme Foo Bar Baz - EST-42.pdf");
+    } finally {
+      (ESTIMATE_FIXTURE as { customerName: string }).customerName = original;
+    }
   });
 
   it("Download PDF: surfaces the server's `{ message }` from a JSON 403 (not the bare status string)", async () => {

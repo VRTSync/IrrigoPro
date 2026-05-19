@@ -42,7 +42,7 @@ import {
   type LifecycleStatus,
 } from "@/lib/lifecycle";
 import { EstimateListStatusBadge } from "@/components/estimates/list/estimate-list-status-badge";
-import { formatEstimateNumber } from "@/lib/estimate-number";
+import { formatEstimateNumber, buildEstimatePdfFilename } from "@/lib/estimate-number";
 
 interface EstimateDetailModalProps {
   open: boolean;
@@ -216,7 +216,8 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       const a = document.createElement("a");
       a.href = objUrl;
       const num = estimate?.estimateNumber as string | undefined;
-      a.download = num ? `estimate-${formatEstimateNumber(num)}.pdf` : "estimate.pdf";
+      const customerName = (estimate as { customerName?: string } | undefined)?.customerName;
+      a.download = num ? buildEstimatePdfFilename(num, customerName) : "estimate.pdf";
       a.rel = "noopener";
       document.body.appendChild(a);
       a.click();

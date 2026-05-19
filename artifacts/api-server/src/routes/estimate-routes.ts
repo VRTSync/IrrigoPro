@@ -2171,9 +2171,32 @@ export function registerEstimateRoutes(
 
       const wantsDownload = String(req.query?.download ?? "") === "1";
       res.setHeader("Content-Type", "application/pdf");
+      // Task #691 — Filename is "{Customer Name} - EST-{Number}.pdf" so
+      // saved files sort and identify by customer. Sanitize the customer
+      // name by replacing Windows/macOS-reserved characters
+      // (/ \ : * ? " < > |) and ASCII control chars with a space.
+      // Fall back to "estimate-EST-{Number}.pdf" if the customer name
+      // is empty after sanitization. Emit both the RFC 5987
+      // `filename*=UTF-8''…` form and an ASCII `filename="…"` fallback
+      // so non-ASCII customer names survive.
+      const formattedNumber = formatEstimateNumber(estimate.estimateNumber);
+      const safeCustomer = (estimate.customerName ?? "")
+        // eslint-disable-next-line no-control-regex
+        .replace(/[\/\\:*?"<>|\x00-\x1f]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const filename = safeCustomer
+        ? `${safeCustomer} - ${formattedNumber}.pdf`
+        : `estimate-${formattedNumber}.pdf`;
+      // ASCII fallback: replace any non-ASCII byte with `_` so older
+      // clients that don't understand `filename*` still get something
+      // sane.
+      // eslint-disable-next-line no-control-regex
+      const asciiFilename = filename.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
+      const utf8Filename = encodeURIComponent(filename);
       res.setHeader(
         "Content-Disposition",
-        `${wantsDownload ? "attachment" : "inline"}; filename="estimate-${formatEstimateNumber(estimate.estimateNumber)}.pdf"`,
+        `${wantsDownload ? "attachment" : "inline"}; filename="${asciiFilename}"; filename*=UTF-8''${utf8Filename}`,
       );
       res.send(pdf);
     } catch (error) {
