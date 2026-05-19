@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 
 export type FinancialPulseVariant =
   | "admin-dashboard"
+  | "billing-header"
   | "customer-detail"
   | "ar-aging"
   | "top-customers-compact"
@@ -34,6 +35,9 @@ interface BaseProps {
 }
 interface AdminDashboardProps extends BaseProps {
   variant: "admin-dashboard";
+}
+interface BillingHeaderProps extends BaseProps {
+  variant: "billing-header";
 }
 interface CustomerDetailProps extends BaseProps {
   variant: "customer-detail";
@@ -51,6 +55,7 @@ interface BillingHeaderProps extends BaseProps {
 }
 export type FinancialPulseWidgetProps =
   | AdminDashboardProps
+  | BillingHeaderProps
   | CustomerDetailProps
   | ArAgingProps
   | TopCustomersCompactProps
@@ -76,6 +81,7 @@ interface KpiTile {
 interface KpisResponse {
   billedMtd: KpiTile;
   billedYtd: KpiTile;
+  collectedMtd: KpiTile;
   outstandingAr: KpiTile;
   unbilledExposure: KpiTile;
   projectedMonthEnd: KpiTile & { method: string };
@@ -685,12 +691,75 @@ function TopCustomersCompactVariant({ limit = 5 }: { limit?: number }) {
   );
 }
 
+// ─── Variant: billing-header (Task #709) ──────────────────────────────────
+//
+// Slim 3-tile header for the Billing Workspace page. Reads the
+// same `/api/financial-pulse/kpis` endpoint as `admin-dashboard`
+// but renders only Billed MTD / Collected MTD / Outstanding A/R
+// plus a deep link back to Financial Pulse. Designed to slot in
+// above the workspace status strip without competing for vertical
+// space.
+
+function BillingHeaderVariant() {
+  const url = "/api/financial-pulse/kpis?period=mtd";
+  const { data, isLoading, error } = useFinancialPulseData<KpisResponse>(
+    "billing-header",
+    url,
+  );
+  if (!isLoading && data == null && !error) return null;
+  return (
+    <div
+      className="rounded-lg border border-gray-200 bg-white px-4 py-3"
+      data-testid="fp-widget-billing-header"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="grid grid-cols-3 gap-4 flex-1">
+          <MetricTile
+            label="Billed MTD"
+            value={data?.billedMtd.value ?? null}
+            format="currency"
+            deltaPct={data?.billedMtd.deltaPct ?? null}
+            isLoading={isLoading}
+            testId="fp-billing-header-billed-mtd"
+          />
+          <MetricTile
+            label="Collected MTD"
+            value={data?.collectedMtd.value ?? null}
+            format="currency"
+            deltaPct={data?.collectedMtd.deltaPct ?? null}
+            isLoading={isLoading}
+            testId="fp-billing-header-collected-mtd"
+          />
+          <MetricTile
+            label="Outstanding A/R"
+            value={data?.outstandingAr.value ?? null}
+            format="currency"
+            isLoading={isLoading}
+            testId="fp-billing-header-outstanding-ar"
+          />
+        </div>
+        <Link href="/financial-pulse">
+          <a
+            className="text-xs text-blue-600 hover:underline whitespace-nowrap flex items-center gap-0.5"
+            data-testid="fp-billing-header-link"
+          >
+            Financial Pulse <ChevronRight className="w-3.5 h-3.5" />
+          </a>
+        </Link>
+      </div>
+      {error ? <ErrorState testId="fp-widget-billing-header" /> : null}
+    </div>
+  );
+}
+
 // ─── Public component ────────────────────────────────────────────────────
 
 export function FinancialPulseWidget(props: FinancialPulseWidgetProps) {
   switch (props.variant) {
     case "admin-dashboard":
       return <AdminDashboardVariant />;
+    case "billing-header":
+      return <BillingHeaderVariant />;
     case "customer-detail":
       return <CustomerDetailVariant customerId={props.customerId} />;
     case "ar-aging":

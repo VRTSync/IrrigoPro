@@ -16,7 +16,13 @@ import SiteMapsPage from "@/pages/site-maps";
 import CustomerSiteMapsPage from "@/pages/customer-site-maps-page";
 import CustomerProfile from "@/pages/customer-profile";
 import CustomerBilling from "@/pages/customer-billing";
-import BillingDashboard from "@/pages/billing-dashboard";
+import BillingWorkspace from "@/pages/billing-workspace";
+
+function RedirectToBillingWorkspace() {
+  const [, navigate] = useLocation();
+  useEffect(() => { navigate("/billing-workspace", { replace: true }); }, [navigate]);
+  return null;
+}
 import FinancialPulsePage from "@/pages/financial-pulse";
 import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
@@ -153,8 +159,10 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/customers/:id/profile" component={CustomerProfile} />
           <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />
           <Route path="/site-maps" component={SiteMapsPage} />
-          <Route path="/billing" component={BillingDashboard} />
-          <Route path="/billing/dashboard" component={BillingDashboard} />
+          <Route path="/billing-workspace" component={BillingWorkspace} />
+          <Route path="/billing" component={RedirectToBillingWorkspace} />
+          <Route path="/billing/dashboard" component={RedirectToBillingWorkspace} />
+          <Route path="/billing-dashboard" component={RedirectToBillingWorkspace} />
           <Route path="/financial-pulse" component={FinancialPulsePage} />
           <Route path="/billing/command-center" component={CustomerBilling} />
           <Route path="/customer-billing" component={RedirectToCommandCenter} />

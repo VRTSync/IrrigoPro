@@ -543,6 +543,49 @@ covering the full role matrix (5 endpoints × 5 roles), CSV content
 type / disposition on all three tab endpoints, aging-vs-KPI parity,
 `sort=budget_risk` ordering, and `sort=revenue` regression.
 
+## Billing Workspace (Task #709)
+
+Focused "one screen for everything I have to act on" view for
+billing managers, at `/billing-workspace`. Replaces the legacy
+billing dashboard — `/billing-dashboard`, `/billing`, and
+`/billing/dashboard` now redirect to the workspace.
+
+- **Backend** — `artifacts/api-server/src/routes/billing-workspace-routes.ts`:
+  - `GET /api/billing-workspace/queue?type=all|bs|wo|part|review&q=…`
+    — unified approval queue (billing sheets + work orders + parts +
+    manual reviews), tenant-scoped via `technician.companyId` (BS/WO
+    have no direct `companyId`).
+  - `GET /api/billing-workspace/status-strip` — 4 indicators:
+    awaitingApproval, readyToInvoice, overdueInvoices, quickbooksSync.
+  - `GET /api/quickbooks/overdue-summary` — light wrapper for the
+    overdue tile.
+  - Role-gated to `billing_manager | company_admin | super_admin`.
+  - Wired from `routes.ts` after `registerPartRoutes`.
+- **Frontend** — `pages/billing-workspace.tsx` lays out four zones:
+  Zone 0 = FP `billing-header` widget variant (Billed MTD / Collected
+  MTD / Outstanding A/R + link to `/financial-pulse`); Zone A = 4-tile
+  status strip; Zone B = unified queue with filter chips; Zone C = a
+  right-side detail drawer (~40% width) with inline preview on `lg+`;
+  Zone D = keyboard nav (J/K to move, A to approve, F to open,
+  Esc to close, ? for help, Ctrl+S to save). Approvals POST to the
+  existing `/api/billing-sheets/:id/approve` and
+  `/api/work-orders/:id/approve` — no new mutation endpoints.
+- **FP widget** — `financial-pulse-widget.tsx` gains a `billing-header`
+  variant (slim card with the three tiles + a "View full Financial
+  Pulse →" link).
+- **Routing** — `App.tsx` (billing_manager Switch) and
+  `company-admin-app.tsx` both wire `/billing-workspace` to
+  `BillingWorkspace` and add `RedirectToBillingWorkspace` for the three
+  legacy paths. `nav-config.ts` swaps "Billing Dashboard" →
+  "Billing Workspace" in both `billingManagerNav` and
+  `companyAdminNav`. The monthly billing flow (`customer-billing.tsx`
+  at `/billing/command-center`) is untouched.
+- **Removed**: `pages/billing-dashboard.tsx` (the old dashboard page).
+- **Test**: `routes/billing-workspace-routes.test.ts` smoke-covers
+  role gating (403 for `field_tech`), tenant scoping by
+  `technician.companyId`, super-admin global view, and the
+  status-strip indicator shape.
+
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details

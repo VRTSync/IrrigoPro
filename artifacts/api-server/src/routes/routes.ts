@@ -338,6 +338,7 @@ import { recordAuditEvent } from "./audit-log";
 import { paginate } from "./pagination";
 import { registerSiteMapRoutes } from "./site-map-routes";
 import { registerPartRoutes } from "./parts-routes";
+import { registerBillingWorkspaceRoutes } from "./billing-workspace-routes";
 import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
 import { registerBudgetRoutes } from "./budget-routes";
@@ -7387,6 +7388,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Parts + Part Settings + Manual Part Reviews — extracted to ./parts-routes.ts
   registerPartRoutes(app, { requireAuthentication, applyPricingVisibility });
+
+  // Task #709 — Billing Workspace endpoints.
+  registerBillingWorkspaceRoutes(app, { requireAuthentication });
 
   // Assembly routes — extracted to ./assembly-routes.ts
   registerAssemblyRoutes(app, { requireAuthentication });

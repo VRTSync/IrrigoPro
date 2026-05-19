@@ -15,7 +15,7 @@ import FieldTechDashboard from "@/pages/field-tech-dashboard";
 import ManagerDashboard from "@/pages/manager-dashboard";
 import AdminDashboard from "@/pages/admin-dashboard";
 import SuperAdminDashboard from "@/pages/super-admin-dashboard";
-import BillingDashboard from "@/pages/billing-dashboard";
+import BillingWorkspace from "@/pages/billing-workspace";
 
 // Task #532 — every other page is route-split via React.lazy. Vite emits
 // per-route chunks; shared deps (React, React Query, Wouter, Tailwind
@@ -85,6 +85,15 @@ import { SessionExpiredBanner } from "@/components/auth/session-expired-banner";
 function RedirectToCommandCenter() {
   const [, navigate] = useLocation();
   useEffect(() => { navigate("/billing/command-center"); }, [navigate]);
+  return null;
+}
+
+// Task #709 — legacy billing-dashboard URLs redirect to the new
+// /billing-workspace. We use a `replace` navigation (no history
+// entry) so back-button still works, mirroring a 301.
+function RedirectToBillingWorkspace() {
+  const [, navigate] = useLocation();
+  useEffect(() => { navigate("/billing-workspace", { replace: true }); }, [navigate]);
   return null;
 }
 
@@ -342,9 +351,11 @@ function Router() {
             <div className="px-4">
               <Suspense fallback={<RouteSuspenseFallback />}>
                 <Switch>
-                  <Route path="/" component={BillingDashboard} />
-                  <Route path="/billing" component={BillingDashboard} />
-                  <Route path="/billing/dashboard" component={BillingDashboard} />
+                  <Route path="/" component={BillingWorkspace} />
+                  <Route path="/billing-workspace" component={BillingWorkspace} />
+                  <Route path="/billing" component={RedirectToBillingWorkspace} />
+                  <Route path="/billing/dashboard" component={RedirectToBillingWorkspace} />
+                  <Route path="/billing-dashboard" component={RedirectToBillingWorkspace} />
                   <Route path="/billing/command-center" component={CustomerBilling} />
                   <Route path="/financial-pulse" component={FinancialPulsePage} />
                   <Route path="/customer-billing" component={RedirectToCommandCenter} />
