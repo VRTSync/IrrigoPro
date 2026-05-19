@@ -340,6 +340,7 @@ import { registerSiteMapRoutes } from "./site-map-routes";
 import { registerPartRoutes } from "./parts-routes";
 import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
+import { registerBudgetRoutes } from "./budget-routes";
 import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
 import { scrubEvent, setScrubCustomerNames } from "../lib/scrubEvent";
 import { setTelemetrySink, withTelemetry, type TelemetryEvent } from "../lib/withTelemetry";
@@ -7043,6 +7044,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireCustomerEditAccess,
     applyBillingNotesVisibility,
   });
+  // Task #687 — Financial Pulse Slice 1: per-customer budget usage.
+  registerBudgetRoutes(app, { requireAuthentication });
   // ── Property Boundary (GIS) ────────────────────────────────────────────────
   // NOTE: Express 5 / path-to-regexp v8 — do NOT use inline regex param syntax
   // like `:id(\\d+)`. Validate manually below.

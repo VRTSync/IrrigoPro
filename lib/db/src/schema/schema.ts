@@ -51,6 +51,10 @@ export const users = pgTable("users", {
   mfaSecret: text("mfa_secret"),
   mfaBackupCodes: text("mfa_backup_codes"), // JSON array of backup codes
   mfaLastUsed: timestamp("mfa_last_used"),
+  // Task #687 — per-user hourly wage used for labor margin computations in
+  // Slice 2 of the Financial Pulse feature. Nullable; never returned to
+  // field_tech callers (stripped via PRICING_FIELDS_TO_STRIP).
+  hourlyWage: decimal("hourly_wage", { precision: 10, scale: 2 }),
   // Timestamps
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -100,6 +104,17 @@ export const customers = pgTable("customers", {
   propertyBoundaryZoom: integer("property_boundary_zoom").default(18),
   propertyBoundaryAreaAcres: decimal("property_boundary_area_acres", { precision: 12, scale: 4 }),
   propertyBoundaryUpdatedAt: timestamp("property_boundary_updated_at"),
+  // Task #687 — Financial Pulse Slice 1. Per-customer monthly/annual budget
+  // caps with soft/hard thresholds, alert routing, and an opt-in customer
+  // notification toggle. All seven fields are nullable or defaulted so the
+  // migration is a no-op against existing rows.
+  monthlyBudgetCap: decimal("monthly_budget_cap", { precision: 12, scale: 2 }),
+  annualBudgetCap: decimal("annual_budget_cap", { precision: 12, scale: 2 }),
+  budgetSoftThresholdPercent: integer("budget_soft_threshold_percent").default(75),
+  budgetHardThresholdPercent: integer("budget_hard_threshold_percent").default(100),
+  budgetAlertRecipientUserIds: jsonb("budget_alert_recipient_user_ids").$type<number[]>().default(sql`'[]'::jsonb`),
+  budgetAlertChannels: jsonb("budget_alert_channels").$type<{ inApp: boolean; push: boolean; email: boolean }>().default(sql`'{"inApp":true,"push":true,"email":false}'::jsonb`),
+  budgetNotifyCustomerContact: boolean("budget_notify_customer_contact").default(false),
 }, (table) => ({
   // Task #532 — index company-scoped lookups (the customers list endpoint
   // and almost every join coming off a customer is filtered by companyId).
@@ -797,6 +812,30 @@ export const notifications = pgTable("notifications", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Task #687 — Financial Pulse Slice 1. Idempotency table for per-period
+// budget alerts. The (customer_id, period, threshold, period_key) unique
+// index is what guarantees we only fire one warning + one exceeded per
+// month/year per customer. `period` is 'monthly' | 'annual', `threshold`
+// is 'soft' | 'hard', `period_key` is 'YYYY-MM' for monthly and 'YYYY'
+// for annual.
+export const customerBudgetAlertEvents = pgTable("customer_budget_alert_events", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").references(() => customers.id).notNull(),
+  period: text("period").notNull(),
+  threshold: text("threshold").notNull(),
+  periodKey: text("period_key").notNull(),
+  triggeringInvoiceId: integer("triggering_invoice_id").references(() => invoices.id),
+  firedAt: timestamp("fired_at").defaultNow().notNull(),
+}, (table) => ({
+  uniq: uniqueIndex("customer_budget_alert_events_unique_idx").on(
+    table.customerId,
+    table.period,
+    table.threshold,
+    table.periodKey,
+  ),
+  customerIdx: index("customer_budget_alert_events_customer_idx").on(table.customerId),
+}));
+
 // Parts reference list tables - per-company, database-backed
 export const partCategories = pgTable("part_categories", {
   id: serial("id").primaryKey(),
@@ -1005,6 +1044,8 @@ export type ManualPartReview = typeof manualPartReviews.$inferSelect;
 export type AiGenerationLog = typeof aiGenerationLogs.$inferSelect;
 export type PartUsage = typeof partUsage.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
+export type CustomerBudgetAlertEvent = typeof customerBudgetAlertEvents.$inferSelect;
+export type InsertCustomerBudgetAlertEvent = typeof customerBudgetAlertEvents.$inferInsert;
 export type MissingPhotosNotification = typeof missingPhotosNotifications.$inferSelect;
 
 export type InsertCompany = z.infer<typeof insertCompanySchema>;

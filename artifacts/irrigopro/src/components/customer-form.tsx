@@ -11,13 +11,21 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { CalendarIcon, DollarSign, Percent, FileText, Tag, Plus, X, Building2 } from "lucide-react";
+import { CalendarIcon, DollarSign, Percent, FileText, Tag, Plus, X, Building2, Bell } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { insertCustomerSchema } from "@workspace/db/schema";
 import type { Customer, User } from "@workspace/db/schema";
 import { composeStructuredAddress } from "@/lib/customer-address";
+
+const moneyOrBlank = z
+  .string()
+  .regex(/^(\d+(\.\d{1,2})?)?$/u, "Must be a valid amount")
+  .optional();
 
 const customerFormSchema = insertCustomerSchema.extend({
   companyId: z.number().min(1, "Company ID is required"),
@@ -37,6 +45,36 @@ const customerFormSchema = insertCustomerSchema.extend({
   state: z.string().optional(),
   zip: z.string().optional(),
   country: z.string().optional(),
+  // Task #687 — budget caps + alert routing. Caps are strings on the wire
+  // (matches laborRate convention so the existing apiRequest path passes
+  // them through unchanged); thresholds are integers; channels is a
+  // plain object so it round-trips as JSON; recipient ids are numbers.
+  monthlyBudgetCap: moneyOrBlank,
+  annualBudgetCap: moneyOrBlank,
+  // Spec: soft is a warning percent (1..99), hard is exceed percent
+  // (2..200, must be strictly greater than soft when caps are set).
+  budgetSoftThresholdPercent: z.coerce.number().int().min(1).max(99).default(75),
+  budgetHardThresholdPercent: z.coerce.number().int().min(2).max(200).default(100),
+  budgetAlertRecipientUserIds: z.array(z.number()).default([]),
+  budgetAlertChannels: z
+    .object({ inApp: z.boolean(), push: z.boolean(), email: z.boolean() })
+    .default({ inApp: true, push: true, email: false }),
+  budgetNotifyCustomerContact: z.boolean().default(false),
+}).superRefine((data, ctx) => {
+  // Only enforce soft < hard when at least one cap is actually set.
+  // Otherwise the thresholds are inert and we don't want to block the form.
+  const monthly = (data.monthlyBudgetCap ?? "").trim();
+  const annual = (data.annualBudgetCap ?? "").trim();
+  const capSet =
+    (monthly !== "" && parseFloat(monthly) > 0) ||
+    (annual !== "" && parseFloat(annual) > 0);
+  if (capSet && data.budgetSoftThresholdPercent >= data.budgetHardThresholdPercent) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Warning % must be lower than the exceeded %.",
+      path: ["budgetSoftThresholdPercent"],
+    });
+  }
 });
 
 type CustomerFormData = z.infer<typeof customerFormSchema>;
@@ -97,16 +135,33 @@ function customerToFormValues(customer: Customer): CustomerFormData {
     contractEndDate: customer.contractEndDate ? new Date(customer.contractEndDate).toISOString().split('T')[0] : "",
     notes: customer.notes || "",
     branches: (customer as any).branches || [],
+    monthlyBudgetCap: customer.monthlyBudgetCap ?? "",
+    annualBudgetCap: customer.annualBudgetCap ?? "",
+    budgetSoftThresholdPercent: customer.budgetSoftThresholdPercent ?? 75,
+    budgetHardThresholdPercent: customer.budgetHardThresholdPercent ?? 100,
+    budgetAlertRecipientUserIds: (customer.budgetAlertRecipientUserIds as number[] | null) ?? [],
+    budgetAlertChannels: (customer.budgetAlertChannels as { inApp: boolean; push: boolean; email: boolean } | null) ?? {
+      inApp: true,
+      push: true,
+      email: false,
+    },
+    budgetNotifyCustomerContact: customer.budgetNotifyCustomerContact ?? false,
   };
 }
 
 interface CustomerFormProps {
   customer?: Customer;
   trigger: React.ReactNode;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function CustomerForm({ customer, trigger }: CustomerFormProps) {
-  const [open, setOpen] = useState(false);
+export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenChange }: CustomerFormProps) {
+  const [open, setOpenState] = useState(defaultOpen);
+  const setOpen = (next: boolean) => {
+    setOpenState(next);
+    onOpenChange?.(next);
+  };
   const { toast } = useToast();
   const queryClient = useQueryClient();
   // Tracks form values saved in the most recent successful mutation so the
@@ -157,6 +212,13 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       contractEndDate: "",
       notes: "",
       branches: [],
+      monthlyBudgetCap: "",
+      annualBudgetCap: "",
+      budgetSoftThresholdPercent: 75,
+      budgetHardThresholdPercent: 100,
+      budgetAlertRecipientUserIds: [],
+      budgetAlertChannels: { inApp: true, push: true, email: false },
+      budgetNotifyCustomerContact: false,
     },
   });
 
@@ -210,6 +272,15 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
     },
     onSuccess: (_result, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
+      // Task #687: the budget-usage snapshot depends on cap/threshold
+      // values we just persisted — bust the per-customer cache so the
+      // LiveBudgetPreview and the customer-profile Budget card pick up
+      // the new server-side classification on the next render.
+      if (customer) {
+        queryClient.invalidateQueries({
+          queryKey: [`/api/customers/${customer.id}/budget-usage`],
+        });
+      }
       justSavedValues.current = variables;
       form.reset(variables);
       setOpen(false);
@@ -616,6 +687,16 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
               </CardContent>
             </Card>
 
+            {/* Budget & Alerts — Task #687 (Financial Pulse Slice 1).
+                Only company_admin / billing_manager / super_admin can edit
+                budget configuration; everyone else sees a read-only stub
+                on the customer profile. */}
+            {(currentUser?.role === "company_admin" ||
+              currentUser?.role === "billing_manager" ||
+              currentUser?.role === "super_admin") && (
+              <BudgetAndAlertsCard form={form} customer={customer} />
+            )}
+
             {/* Branch Management */}
             <Card>
               <CardHeader>
@@ -736,5 +817,402 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── Task #687 — Budget & Alerts section ─────────────────────────────────────
+// Lives in the same file as the form so it can share the typed form
+// instance. Renders the cap inputs, the soft/hard thresholds, the alert
+// channel toggles, the recipients picker, and a live usage preview that
+// re-queries when caps or thresholds change. The preview is only shown
+// when editing an existing customer (we need an id to ask the server).
+
+interface BudgetSectionProps {
+  form: ReturnType<typeof useForm<CustomerFormData>>;
+  customer?: Customer;
+}
+
+type BudgetStatus = "unset" | "healthy" | "approaching" | "over";
+
+interface BudgetUsageResponse {
+  customerId: number;
+  softThresholdPercent: number;
+  hardThresholdPercent: number;
+  currentMonthKey: string;
+  currentYearKey: string;
+  monthlyCap: number | null;
+  monthlySpend: number;
+  monthlyPercent: number | null;
+  monthlyStatus: BudgetStatus;
+  annualCap: number | null;
+  annualSpend: number;
+  annualPercent: number | null;
+  annualStatus: BudgetStatus;
+}
+
+function statusTone(status: BudgetStatus): string {
+  switch (status) {
+    case "over":
+      return "bg-red-50 text-red-800 border-red-200";
+    case "approaching":
+      return "bg-amber-50 text-amber-800 border-amber-200";
+    case "healthy":
+      return "bg-emerald-50 text-emerald-800 border-emerald-200";
+    default:
+      return "bg-gray-50 text-gray-600 border-gray-200";
+  }
+}
+
+function statusLabel(status: BudgetStatus): string {
+  if (status === "over") return "Over cap";
+  if (status === "approaching") return "Approaching cap";
+  if (status === "healthy") return "On track";
+  return "No cap set";
+}
+
+function formatCurrency(n: number): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+}
+
+function BudgetAndAlertsCard({ form, customer }: BudgetSectionProps) {
+  const companyId = form.watch("companyId");
+  // Pool of users that can be added as alert recipients. Filter to
+  // non-field_tech users in the same company.
+  const { data: users } = useQuery<User[]>({
+    queryKey: ["/api/users"],
+  });
+  const recipientOptions = (users || []).filter(
+    (u) => u.companyId === companyId && u.role !== "field_tech" && u.isActive,
+  );
+
+  // Default recipients on NEW customers (no `customer` prop) to every
+  // billing_manager in the company — they're the typical owner of cap
+  // alerts and admins can still deselect them.
+  const currentRecipients = form.watch("budgetAlertRecipientUserIds") || [];
+  useEffect(() => {
+    if (customer) return;
+    if (currentRecipients.length > 0) return;
+    if (!recipientOptions.length) return;
+    const bms = recipientOptions
+      .filter((u) => u.role === "billing_manager")
+      .map((u) => u.id);
+    if (bms.length > 0) form.setValue("budgetAlertRecipientUserIds", bms);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer, recipientOptions.length]);
+
+  return (
+    <Card id="budget-and-alerts">
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center">
+          <Bell className="w-5 h-5 mr-2" />
+          Budget &amp; Alerts
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <FormField
+            control={form.control}
+            name="monthlyBudgetCap"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Monthly Budget Cap</FormLabel>
+                <FormControl>
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    <Input
+                      placeholder="No cap"
+                      {...field}
+                      value={field.value ?? ""}
+                      className="pl-10"
+                      data-testid="monthly-budget-cap-input"
+                    />
+                  </div>
+                </FormControl>
+                <FormDescription>Leave blank for no monthly cap.</FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="annualBudgetCap"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Annual Budget Cap</FormLabel>
+                <FormControl>
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    <Input
+                      placeholder="No cap"
+                      {...field}
+                      value={field.value ?? ""}
+                      className="pl-10"
+                      data-testid="annual-budget-cap-input"
+                    />
+                  </div>
+                </FormControl>
+                <FormDescription>Leave blank for no annual cap.</FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <FormField
+            control={form.control}
+            name="budgetSoftThresholdPercent"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Warning Threshold (%)</FormLabel>
+                <FormControl>
+                  <div className="relative">
+                    <Percent className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    <Input
+                      type="number"
+                      min={1}
+                      max={100}
+                      {...field}
+                      value={field.value ?? 75}
+                      onChange={(e) => field.onChange(parseInt(e.target.value || "0", 10))}
+                      className="pl-10"
+                    />
+                  </div>
+                </FormControl>
+                <FormDescription>Fire a warning at this % of the cap.</FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="budgetHardThresholdPercent"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Exceeded Threshold (%)</FormLabel>
+                <FormControl>
+                  <div className="relative">
+                    <Percent className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    <Input
+                      type="number"
+                      min={1}
+                      max={200}
+                      {...field}
+                      value={field.value ?? 100}
+                      onChange={(e) => field.onChange(parseInt(e.target.value || "0", 10))}
+                      className="pl-10"
+                    />
+                  </div>
+                </FormControl>
+                <FormDescription>Fire an exceeded alert at this % of the cap.</FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+
+        <FormField
+          control={form.control}
+          name="budgetAlertChannels"
+          render={({ field }) => {
+            const value = field.value || { inApp: true, push: true, email: false };
+            const toggle = (key: "inApp" | "push" | "email") => (next: boolean) =>
+              field.onChange({ ...value, [key]: next });
+            return (
+              <FormItem>
+                <FormLabel>Alert Channels</FormLabel>
+                <div className="flex flex-wrap gap-4 mt-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox checked={value.inApp} onCheckedChange={(v) => toggle("inApp")(!!v)} />
+                    In-app
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox checked={value.push} onCheckedChange={(v) => toggle("push")(!!v)} />
+                    Push
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox checked={value.email} onCheckedChange={(v) => toggle("email")(!!v)} />
+                    Email
+                  </label>
+                </div>
+                <FormDescription>
+                  Channels used to deliver budget warning and exceeded alerts.
+                </FormDescription>
+              </FormItem>
+            );
+          }}
+        />
+
+        <FormField
+          control={form.control}
+          name="budgetAlertRecipientUserIds"
+          render={({ field }) => {
+            const selected = new Set<number>((field.value || []) as number[]);
+            const toggle = (id: number) => {
+              const next = new Set(selected);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              field.onChange(Array.from(next));
+            };
+            return (
+              <FormItem>
+                <FormLabel>Alert Recipients</FormLabel>
+                <div className="rounded-md border bg-white p-3 max-h-40 overflow-y-auto space-y-1">
+                  {recipientOptions.length === 0 && (
+                    <p className="text-xs text-gray-500 italic">
+                      No eligible users in this company yet.
+                    </p>
+                  )}
+                  {recipientOptions.map((u) => (
+                    <label key={u.id} className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={selected.has(u.id)}
+                        onCheckedChange={() => toggle(u.id)}
+                      />
+                      <span>
+                        {u.name}{" "}
+                        <span className="text-gray-500 text-xs">({u.role})</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <FormDescription>
+                  Only company admins, billing managers, and irrigation managers are eligible.
+                </FormDescription>
+              </FormItem>
+            );
+          }}
+        />
+
+        <FormField
+          control={form.control}
+          name="budgetNotifyCustomerContact"
+          render={({ field }) => (
+            <FormItem className="flex items-center justify-between rounded-md border p-3">
+              <div className="space-y-0.5">
+                <FormLabel className="text-sm">Also notify customer contact</FormLabel>
+                <FormDescription className="text-xs">
+                  When enabled, the customer's email on file is also notified when this customer's
+                  budget is approaching or exceeds the cap.
+                </FormDescription>
+              </div>
+              <FormControl>
+                <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+              </FormControl>
+            </FormItem>
+          )}
+        />
+
+        {customer && <LiveBudgetPreview customer={customer} form={form} />}
+      </CardContent>
+    </Card>
+  );
+}
+
+function LiveBudgetPreview({ customer, form }: { customer: Customer; form: BudgetSectionProps["form"] }) {
+  // Watch cap/threshold values so the preview re-classifies as the user
+  // types. The server endpoint is the source of truth for the spend
+  // numbers; on every cap/threshold change we also re-fetch /budget-usage
+  // so a freshly invalidated snapshot (e.g. after save) reflects the new
+  // server-side calculation.
+  const monthlyCap = form.watch("monthlyBudgetCap");
+  const annualCap = form.watch("annualBudgetCap");
+  const softPct = form.watch("budgetSoftThresholdPercent");
+  const hardPct = form.watch("budgetHardThresholdPercent");
+
+  const { data, isLoading, refetch } = useQuery<BudgetUsageResponse>({
+    queryKey: [`/api/customers/${customer.id}/budget-usage`],
+  });
+
+  // Re-fetch the live spend whenever caps/thresholds change so the
+  // preview never shows stale data after an in-form edit or a save.
+  useEffect(() => {
+    refetch();
+  }, [monthlyCap, annualCap, softPct, hardPct, refetch]);
+
+  if (isLoading || !data) {
+    return (
+      <div
+        className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-3 text-xs text-gray-500"
+        data-testid="budget-preview-loading"
+      >
+        Loading current spend…
+      </div>
+    );
+  }
+
+  // Re-classify locally using the in-progress form values so the user
+  // sees the impact of edits before saving. The spend totals come from
+  // the server (we don't try to recompute those client-side).
+  const previewStatus = (cap: string | undefined, spend: number) => {
+    const capNum = cap && cap !== "" ? parseFloat(cap) : NaN;
+    if (!Number.isFinite(capNum) || capNum <= 0) return { status: "unset" as const, percent: null };
+    const pct = spend / capNum;
+    const soft = Number(softPct) || 75;
+    const hard = Number(hardPct) || 100;
+    if (pct * 100 >= hard) return { status: "over" as const, percent: pct };
+    if (pct * 100 >= soft) return { status: "approaching" as const, percent: pct };
+    return { status: "healthy" as const, percent: pct };
+  };
+
+  const monthly = previewStatus(monthlyCap, data.monthlySpend);
+  const annual = previewStatus(annualCap, data.annualSpend);
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" data-testid="budget-preview">
+      <PreviewRow
+        label={`This month (${data.currentMonthKey})`}
+        spend={data.monthlySpend}
+        cap={monthlyCap && monthlyCap !== "" ? parseFloat(monthlyCap) : null}
+        status={monthly.status}
+        percent={monthly.percent}
+      />
+      <PreviewRow
+        label={`This year (${data.currentYearKey})`}
+        spend={data.annualSpend}
+        cap={annualCap && annualCap !== "" ? parseFloat(annualCap) : null}
+        status={annual.status}
+        percent={annual.percent}
+      />
+    </div>
+  );
+}
+
+function PreviewRow({
+  label,
+  spend,
+  cap,
+  status,
+  percent,
+}: {
+  label: string;
+  spend: number;
+  cap: number | null;
+  status: "unset" | "healthy" | "approaching" | "over";
+  percent: number | null;
+}) {
+  return (
+    <div className={`rounded-md border p-3 text-sm ${statusTone(status)}`}>
+      <div className="flex items-center justify-between">
+        <span className="font-medium">{label}</span>
+        <Badge variant="outline" className="bg-white">{statusLabel(status)}</Badge>
+      </div>
+      <div className="mt-1 text-xs">
+        {cap == null ? (
+          <span>Spent {formatCurrency(spend)} — no cap set</span>
+        ) : (
+          <>
+            <Progress
+              value={percent != null ? Math.min(100, Math.round(percent * 100)) : 0}
+              className="mt-1"
+            />
+            <span className="block mt-1">
+              {formatCurrency(spend)} of {formatCurrency(cap)}
+              {percent != null && ` (${Math.round(percent * 100)}%)`}
+            </span>
+          </>
+        )}
+      </div>
+    </div>
   );
 }

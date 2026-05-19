@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt, DollarSign } from "lucide-react";
+import { ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt, DollarSign, Bell } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 import { Customer } from "@workspace/db/schema";
 import { InvoiceList } from "@/components/billing/invoice-list";
 import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
@@ -237,6 +238,15 @@ export default function CustomerProfile() {
         </Card>
       )}
 
+      {/* Budget & Alerts — Task #687 (Slice 1). Visibility limited to
+          super_admin / company_admin / billing_manager. irrigation_manager
+          and field_tech do NOT see budget signals in Slice 1. */}
+      {(userRole === "company_admin" ||
+        userRole === "super_admin" ||
+        userRole === "billing_manager") && (
+        <BudgetCard customerId={parseInt(id!, 10)} />
+      )}
+
       {/* Property Notes */}
       <Card>
         <CardHeader>
@@ -297,3 +307,135 @@ export default function CustomerProfile() {
     </div>
   );
 }
+
+// ─── Task #687 — Budget & Alerts visibility card ────────────────────────────
+type BudgetStatus = "unset" | "healthy" | "approaching" | "over";
+interface BudgetUsage {
+  customerId: number;
+  softThresholdPercent: number;
+  hardThresholdPercent: number;
+  currentMonthKey: string;
+  currentYearKey: string;
+  monthlyCap: number | null;
+  monthlySpend: number;
+  monthlyPercent: number | null;
+  monthlyStatus: BudgetStatus;
+  annualCap: number | null;
+  annualSpend: number;
+  annualPercent: number | null;
+  annualStatus: BudgetStatus;
+}
+
+function statusBadge(status: BudgetStatus) {
+  switch (status) {
+    case "over":
+      return <Badge className="bg-red-600 text-white">Over cap</Badge>;
+    case "approaching":
+      return <Badge className="bg-amber-500 text-white">Approaching cap</Badge>;
+    case "healthy":
+      return <Badge className="bg-emerald-600 text-white">On track</Badge>;
+    default:
+      return <Badge variant="outline">No cap set</Badge>;
+  }
+}
+
+function fmtCurrency(n: number): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+}
+
+interface BudgetBucket {
+  cap: number | null;
+  spend: number;
+  percent: number | null;
+  status: BudgetStatus;
+  periodKey: string;
+}
+
+function BudgetBucketRow({ label, bucket }: { label: string; bucket: BudgetBucket }) {
+  const pct = bucket.percent != null ? Math.min(100, Math.round(bucket.percent * 100)) : 0;
+  return (
+    <div className="rounded-md border p-3 bg-white" data-testid={`budget-bucket-${label.toLowerCase().replace(/\s+/g, "-")}`}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="font-medium text-sm text-gray-700">
+          {label} <span className="text-xs text-gray-400">({bucket.periodKey})</span>
+        </span>
+        {statusBadge(bucket.status)}
+      </div>
+      {bucket.cap == null ? (
+        <p className="text-xs text-gray-500">
+          Spent {fmtCurrency(bucket.spend)} — no cap configured.
+        </p>
+      ) : (
+        <>
+          <Progress value={pct} />
+          <p className="text-xs text-gray-600 mt-1">
+            {fmtCurrency(bucket.spend)} of {fmtCurrency(bucket.cap)}
+            {bucket.percent != null && ` (${Math.round(bucket.percent * 100)}%)`}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BudgetCard({ customerId }: { customerId: number }) {
+  const [, setLocation] = useLocation();
+  const { data, isLoading } = useQuery<BudgetUsage>({
+    queryKey: [`/api/customers/${customerId}/budget-usage`],
+  });
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Bell className="w-5 h-5" /> Budget &amp; Alerts
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-16 bg-gray-100 rounded animate-pulse" />
+        </CardContent>
+      </Card>
+    );
+  }
+  if (!data) return null;
+  const monthlyBucket: BudgetBucket = {
+    cap: data.monthlyCap, spend: data.monthlySpend, percent: data.monthlyPercent,
+    status: data.monthlyStatus, periodKey: data.currentMonthKey,
+  };
+  const annualBucket: BudgetBucket = {
+    cap: data.annualCap, spend: data.annualSpend, percent: data.annualPercent,
+    status: data.annualStatus, periodKey: data.currentYearKey,
+  };
+  const bothUnset = data.monthlyStatus === "unset" && data.annualStatus === "unset";
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Bell className="w-5 h-5" /> Budget &amp; Alerts
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {bothUnset ? (
+          <div className="text-sm text-gray-600" data-testid="budget-card-unset">
+            <p className="mb-2">No budget caps set for this customer yet.</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setLocation(`/customers?edit=${customerId}#budget-and-alerts`)}
+              data-testid="budget-card-set-cta"
+            >
+              Set a budget
+            </Button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <BudgetBucketRow label="This month" bucket={monthlyBucket} />
+            <BudgetBucketRow label="This year" bucket={annualBucket} />
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+

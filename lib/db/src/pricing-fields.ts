@@ -11,8 +11,23 @@
 // itself has been renamed/dropped.
 
 export const PRICING_FIELDS_BY_TABLE = {
-  // customers.laborRate — the per-customer master rate.
-  customers: ["laborRate"],
+  // customers.laborRate — the per-customer master rate. Budget caps and
+  // thresholds added by Task #687 are also pricing-sensitive (they only
+  // make sense alongside the invoiced totals they gate against) so they
+  // are stripped on the same field_tech boundary.
+  customers: [
+    "laborRate",
+    "monthlyBudgetCap",
+    "annualBudgetCap",
+    "budgetSoftThresholdPercent",
+    "budgetHardThresholdPercent",
+    "budgetAlertRecipientUserIds",
+    "budgetAlertChannels",
+    "budgetNotifyCustomerContact",
+  ],
+  // Task #687 — users.hourlyWage is wage data; never expose it to
+  // field_tech responses.
+  users: ["hourlyWage"],
   // billing_sheets — money-bearing columns on the sheet itself.
   billingSheets: ["laborRate", "laborSubtotal", "partsSubtotal", "totalAmount"],
   // billing_sheet_items — per-line money.
