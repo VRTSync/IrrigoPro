@@ -421,6 +421,62 @@ present for back-compat reads but every new write forces it to
   `labor-mode-switch.ts` are still used by the billing-sheet wizard
   and work-order completion flows — left untouched.
 
+## Financial Pulse Slice 4 — budget alerts (Task #693)
+
+When the monthly invoice route flips a customer's `invoices.status` to a
+finalized state, the route fires a fire-and-forget call to
+`services/budget-alert-service.ts#checkBudgetThresholds(invoice)`. The
+service computes month-to-date and year-to-date spend (createdAt
+bucketing, draft/cancelled excluded — same convention as
+`/api/customers/:id/budget-usage`), and for each of monthly × annual ×
+soft × hard, attempts a single dedup-by-unique-index insert into
+`customer_budget_alert_events (customerId, period, threshold,
+periodKey)`. If — and only if — the insert returns a row (i.e. this
+threshold has not already fired this period), it dispatches:
+
+- **in-app** — `storage.createNotification` with type
+  `budget_warning` / `budget_exceeded`, `relatedEntityType='customer'`
+- **push** — through an injectable `pushDispatcher` seam (default
+  no-op; the existing client polling pipeline picks up the in-app
+  row and shows the OS notification — server-side web-push is
+  deferred until a `push_subscriptions` table exists)
+- **email** — Postmark via `EmailService.sendBudgetAlertEmail`,
+  rendered inline by `renderTemplate(audience, threshold)`. The
+  four canonical layouts also live as static `.html` references
+  under `artifacts/api-server/src/templates/budget-alerts/`
+  (`warning-internal.html`, `exceeded-internal.html`,
+  `warning-customer.html`, `exceeded-customer.html`).
+
+Channels are gated by `customers.budgetAlertChannels` (`inApp`,
+`push`, `email` — defaults `true/true/false`). Recipients come from
+`customers.budgetAlertRecipientUserIds`. A separate
+`customers.budgetNotifyCustomerContact` toggle (default `false`)
+also sends a customer-facing courtesy email to `customers.email`.
+
+**Failure isolation contract**: every channel call is in its own
+try/catch and the top-level `checkBudgetThresholds` swallows
+everything. Invoice finalization MUST NOT fail because the alert
+pipeline threw — the route invokes the service via a
+`void (async () => { ... })()` wrapper on top of the service's own
+catch-all.
+
+**Read API**: `GET /api/customers/:id/budget-alert-events?limit=20`
+(in `routes/budget-routes.ts`) returns the most recent rows joined
+to `invoices` so each event carries `triggeringInvoiceNumber`. Same
+visibility roles as `/budget-usage`
+(super_admin / company_admin / billing_manager) plus a multi-tenant
+guard. Powers the **Recent Budget Alerts** card on the customer
+profile (`pages/customer-profile.tsx#RecentBudgetAlertsCard`),
+rendered directly beneath `BudgetCard`.
+
+Tests: `services/budget-alert-service.test.ts` — 9 scenarios:
+single soft cross, idempotency, soft+hard on one invoice, period
+rollover, no-cap no-op, customer-notify toggle (both states),
+email-channel disabled, push failure isolation, top-level
+swallow. The test inserts real `customers` rows in `before()`
+(scratch ids 70001-70010, companyId=2) because the
+`customer_budget_alert_events.customer_id` FK is hard.
+
 ## Estimate system
 
 The estimate flow has two independent status axes (`status` =

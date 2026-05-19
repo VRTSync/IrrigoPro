@@ -244,7 +244,10 @@ export default function CustomerProfile() {
       {(userRole === "company_admin" ||
         userRole === "super_admin" ||
         userRole === "billing_manager") && (
-        <BudgetCard customerId={parseInt(id!, 10)} />
+        <>
+          <BudgetCard customerId={parseInt(id!, 10)} />
+          <RecentBudgetAlertsCard customerId={parseInt(id!, 10)} />
+        </>
       )}
 
       {/* Property Notes */}
@@ -375,6 +378,132 @@ function BudgetBucketRow({ label, bucket }: { label: string; bucket: BudgetBucke
         </>
       )}
     </div>
+  );
+}
+
+// Task #693 — Financial Pulse Slice 4. "Recent Budget Alerts" feed,
+// rendered beneath BudgetCard on the customer profile. Same visibility
+// gate as BudgetCard (super_admin / company_admin / billing_manager).
+interface BudgetAlertEvent {
+  id: number;
+  customerId: number;
+  period: "monthly" | "annual";
+  threshold: "soft" | "hard";
+  periodKey: string;
+  firedAt: string;
+  triggeringInvoiceId: number | null;
+  triggeringInvoiceNumber: string | null;
+}
+
+function RecentBudgetAlertsCard({ customerId }: { customerId: number }) {
+  const [, setLocation] = useLocation();
+  const { data, isLoading } = useQuery<{
+    customerId: number;
+    events: BudgetAlertEvent[];
+  }>({
+    queryKey: [`/api/customers/${customerId}/budget-alert-events`],
+  });
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Bell className="w-5 h-5" /> Recent Budget Alerts
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-12 bg-gray-100 rounded animate-pulse" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const events = Array.isArray(data?.events) ? data!.events : [];
+  if (events.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Bell className="w-5 h-5" /> Recent Budget Alerts
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-gray-500" data-testid="budget-alerts-empty">
+            No budget alerts have fired for this customer yet.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Bell className="w-5 h-5" /> Recent Budget Alerts
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ul
+          className="divide-y divide-gray-100"
+          data-testid="budget-alerts-list"
+        >
+          {events.map((ev) => {
+            const periodLabel = ev.period === "monthly" ? "Monthly" : "Annual";
+            const thresholdLabel =
+              ev.threshold === "hard" ? "Exceeded" : "Warning";
+            const thresholdClass =
+              ev.threshold === "hard"
+                ? "bg-red-100 text-red-800"
+                : "bg-amber-100 text-amber-800";
+            const firedAt = new Date(ev.firedAt);
+            const firedLabel = isNaN(firedAt.getTime())
+              ? ev.firedAt
+              : firedAt.toLocaleString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                });
+            return (
+              <li
+                key={ev.id}
+                className="py-2 flex items-center justify-between gap-3"
+                data-testid={`budget-alert-row-${ev.id}`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded ${thresholdClass}`}
+                  >
+                    {thresholdLabel}
+                  </span>
+                  <span className="text-sm font-medium text-gray-800 truncate">
+                    {periodLabel} · {ev.periodKey}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-gray-500 shrink-0">
+                  {ev.triggeringInvoiceId && ev.triggeringInvoiceNumber ? (
+                    <button
+                      type="button"
+                      className="underline hover:text-gray-700"
+                      onClick={() =>
+                        setLocation(`/invoices/${ev.triggeringInvoiceId}`)
+                      }
+                      data-testid={`budget-alert-invoice-${ev.id}`}
+                    >
+                      {ev.triggeringInvoiceNumber}
+                    </button>
+                  ) : null}
+                  <span>{firedLabel}</span>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }
 

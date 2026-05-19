@@ -7009,6 +7009,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error('Error during billing sheet reconciliation:', reconcileError);
       }
 
+      // Task #693 — Financial Pulse Slice 4. Fire budget threshold
+      // alerts (in-app + push + email) idempotently. Fire-and-forget:
+      // invoice finalization MUST NOT fail if the alert pipeline
+      // throws (the service has its own top-level catch-all too).
+      void (async () => {
+        try {
+          const { checkBudgetThresholds } = await import("../services/budget-alert-service");
+          await checkBudgetThresholds(invoice);
+        } catch (alertError) {
+          console.error(`Budget alerts failed for invoice ${invoice.id}:`, alertError);
+        }
+      })();
+
       // Generate invoice detail PDF automatically in background
       const pdfService = new InvoicePdfService(storage);
       pdfService.generateAndSaveInvoicePdf(invoice.id).then(result => {

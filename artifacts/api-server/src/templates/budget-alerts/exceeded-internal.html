@@ -1,0 +1,22 @@
+<!doctype html>
+<!--
+  Task #693 — Budget alert: HARD (exceeded) threshold crossed, INTERNAL recipient.
+  Subject/body rendered inline by services/budget-alert-service.ts
+  (renderTemplate, audience="internal", threshold="hard"). See
+  warning-internal.html for the rationale on inline rendering.
+-->
+<html>
+  <body style="font-family: Arial, sans-serif; color: #333;">
+    <h2>{{customerName}} has crossed the {{periodLabel}} hard budget threshold ({{percent}}%).</h2>
+    <table cellpadding="6" style="border-collapse: collapse;">
+      <tr><td><strong>Customer:</strong></td><td><a href="{{customerUrl}}">{{customerName}}</a></td></tr>
+      <tr><td><strong>Period:</strong></td><td>{{periodLabel}} ({{periodKey}})</td></tr>
+      <tr><td><strong>Budget cap:</strong></td><td>${{cap}}</td></tr>
+      <tr><td><strong>Current spend:</strong></td><td>${{spend}}</td></tr>
+      <tr><td><strong>Percent of cap:</strong></td><td>{{percent}}%</td></tr>
+      <tr><td><strong>Triggering invoice:</strong></td><td><a href="{{invoiceUrl}}">{{invoiceNumber}}</a></td></tr>
+    </table>
+    <p>Open the customer profile to review the budget configuration and recent invoices.</p>
+    <p style="color:#888;font-size:12px;">— {{companyName}}</p>
+  </body>
+</html>

@@ -941,4 +941,30 @@ This is an automated email from IrrigoPro
       };
     }
   }
+
+  // Task #693 — Financial Pulse Slice 4. Generic budget-alert email
+  // hook used by services/budget-alert-service.ts. The dispatcher
+  // pre-renders the HTML/text payload (template lives next to the
+  // service); this method just forwards to SendGrid. Throws on
+  // configuration / send failure so the service can record a per-
+  // recipient error in its own try/catch.
+  static async sendBudgetAlertEmail(args: {
+    to: string;
+    subject: string;
+    html: string;
+    text: string;
+    tag?: string;
+  }): Promise<void> {
+    if (!isEmailConfigured()) {
+      throw new Error('Email service not configured (SENDGRID_API_KEY missing)');
+    }
+    await sgMail.send({
+      from: DEFAULT_FROM_EMAIL,
+      to: args.to,
+      subject: args.subject,
+      html: args.html,
+      text: args.text,
+      categories: [args.tag || 'budget-alert'],
+    });
+  }
 }

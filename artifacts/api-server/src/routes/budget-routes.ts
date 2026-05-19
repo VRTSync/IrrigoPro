@@ -13,6 +13,7 @@ import {
   getYearWindow,
 } from "../budget-status";
 import { storage } from "../storage";
+import { getRecentBudgetAlertEvents } from "../services/budget-alert-service";
 
 export interface RegisterBudgetRoutesDeps {
   requireAuthentication: RequestHandler;
@@ -140,6 +141,55 @@ export function registerBudgetRoutes(
       } catch (error) {
         console.error("Error computing budget usage:", error);
         res.status(500).json({ message: "Failed to compute budget usage" });
+      }
+    },
+  );
+
+  // Task #693 — Financial Pulse Slice 4.
+  // Recent budget alert events for the "Recent Budget Alerts" section
+  // on the customer profile. Same visibility roles + multi-tenant
+  // guard as /budget-usage above.
+  app.get(
+    "/api/customers/:id/budget-alert-events",
+    requireAuthentication,
+    async (req: any, res) => {
+      try {
+        const id = parseInt(String(req.params.id), 10);
+        if (!Number.isFinite(id) || id <= 0) {
+          res.status(400).json({ message: "Invalid customer id" });
+          return;
+        }
+
+        const role = req.authenticatedUserRole as string | undefined;
+        if (!role || !VISIBILITY_ROLES.has(role)) {
+          res.status(403).json({ message: "Forbidden" });
+          return;
+        }
+
+        const customer = await storage.getCustomer(id);
+        if (!customer) {
+          res.status(404).json({ message: "Customer not found" });
+          return;
+        }
+
+        const callerCompanyId = req.authenticatedUserCompanyId as
+          | number
+          | null
+          | undefined;
+        if (role !== "super_admin" && callerCompanyId !== customer.companyId) {
+          res.status(403).json({ message: "Forbidden" });
+          return;
+        }
+
+        const rawLimit = parseInt(String(req.query.limit ?? "20"), 10);
+        const limit = Number.isFinite(rawLimit) ? rawLimit : 20;
+        const events = await getRecentBudgetAlertEvents(id, limit);
+        res.json({ customerId: id, events });
+      } catch (error) {
+        console.error("Error loading budget alert events:", error);
+        res
+          .status(500)
+          .json({ message: "Failed to load budget alert events" });
       }
     },
   );
