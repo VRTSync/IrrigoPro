@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import type { Part, ManualPartReview } from "@workspace/db/schema";
+import { FinancialPulseWidget } from "@/components/financial-pulse/financial-pulse-widget";
 
 interface CustomerPreview {
   id: number;
@@ -183,6 +184,9 @@ export default function BillingDashboard() {
 
   return (
     <div className="max-w-6xl mx-auto py-6 px-4 space-y-6">
+      {/* Task #711 — Financial Pulse Slice 5.1 status strip. */}
+      <FinancialPulseWidget variant="billing-header" className="mb-4" />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

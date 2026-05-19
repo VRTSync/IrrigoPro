@@ -25,7 +25,8 @@ export type FinancialPulseVariant =
   | "admin-dashboard"
   | "customer-detail"
   | "ar-aging"
-  | "top-customers-compact";
+  | "top-customers-compact"
+  | "billing-header";
 
 interface BaseProps {
   variant: FinancialPulseVariant;
@@ -45,11 +46,15 @@ interface TopCustomersCompactProps extends BaseProps {
   variant: "top-customers-compact";
   limit?: number;
 }
+interface BillingHeaderProps extends BaseProps {
+  variant: "billing-header";
+}
 export type FinancialPulseWidgetProps =
   | AdminDashboardProps
   | CustomerDetailProps
   | ArAgingProps
-  | TopCustomersCompactProps;
+  | TopCustomersCompactProps
+  | BillingHeaderProps;
 
 const CURRENCY = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -245,6 +250,162 @@ function AdminDashboardVariant() {
         </div>
       )}
     </WidgetCard>
+  );
+}
+
+// ─── Variant: billing-header ──────────────────────────────────────────────
+//
+// Task #711 — Financial Pulse Slice 5.1: slim status strip mounted at
+// the top of the Billing Dashboard. Reuses the same /financial-pulse/
+// kpis?period=mtd endpoint as the admin-dashboard variant so Outstanding
+// A/R and Billed MTD are guaranteed to match across pages. The third
+// tile (Collected MTD) is derived from billedMtd - outstandingAr if the
+// endpoint does not yet expose a dedicated collected field — currently
+// the response has no `collectedMtd`, so the tile renders the same way
+// it would on a soft-fail until that field lands.
+
+// Derive Collected MTD's prev-month delta from the two tiles we DO
+// have deltas on (billedMtd / outstandingAr). collected ≈ billed - AR,
+// so prevCollected ≈ prevBilled - prevAR; recover prev values from the
+// current value + deltaPct. Falls back to `null` (MetricTile renders no
+// delta) when any input is missing or the prev value is non-positive.
+function deriveCollectedMtdDeltaPct(
+  data: KpisResponse | null | undefined,
+  currentCollected: number | null,
+): number | null {
+  if (currentCollected == null) return null;
+  const billedNow = data?.billedMtd?.value;
+  const billedDelta = data?.billedMtd?.deltaPct;
+  const arNow = data?.outstandingAr?.value;
+  const arDelta = data?.outstandingAr?.deltaPct;
+  if (
+    billedNow == null ||
+    billedDelta == null ||
+    arNow == null ||
+    arDelta == null ||
+    !Number.isFinite(billedDelta) ||
+    !Number.isFinite(arDelta)
+  ) {
+    return null;
+  }
+  const prevBilled = billedNow / (1 + billedDelta / 100);
+  const prevAr = arNow / (1 + arDelta / 100);
+  if (!Number.isFinite(prevBilled) || !Number.isFinite(prevAr)) return null;
+  const prevCollected = Math.max(0, prevBilled - prevAr);
+  if (prevCollected <= 0) return null;
+  return ((currentCollected - prevCollected) / prevCollected) * 100;
+}
+
+function BillingHeaderVariant({ className }: { className?: string }) {
+  const url = "/api/financial-pulse/kpis?period=mtd";
+  const { data, isLoading, error, refetch } =
+    useFinancialPulseData<KpisResponse>("billing-header", url);
+  // 403 → render nothing (field tech / irrigation manager).
+  if (!isLoading && data == null && !error) return null;
+
+  const collectedMtdValue =
+    data &&
+    data.billedMtd?.value != null &&
+    data.outstandingAr?.value != null
+      ? Math.max(0, data.billedMtd.value - data.outstandingAr.value)
+      : null;
+  const collectedMtdDeltaPct = deriveCollectedMtdDeltaPct(
+    data ?? null,
+    collectedMtdValue,
+  );
+
+  return (
+    <div
+      className={cn(
+        "border-b border-gray-200 bg-gray-50/60 rounded-md px-3 py-2",
+        className,
+      )}
+      data-testid="fp-widget-billing-header"
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 uppercase tracking-wide">
+          <TrendingUp className="w-3.5 h-3.5 text-gray-500" />
+          Financial Pulse
+        </div>
+        <Link href="/financial-pulse">
+          <a
+            className="text-xs text-blue-600 hover:underline flex items-center gap-0.5"
+            data-testid="fp-widget-billing-header-link"
+          >
+            View Financial Pulse <ChevronRight className="w-3.5 h-3.5" />
+          </a>
+        </Link>
+      </div>
+      {error ? (
+        <div
+          className="flex items-center gap-2"
+          data-testid="fp-widget-billing-header-error"
+        >
+          <div className="grid grid-cols-3 gap-3 flex-1">
+            <MetricTile
+              label="Billed MTD"
+              value={null}
+              format="currency"
+              isError
+              testId="fp-tile-billing-header-billed-mtd"
+            />
+            <MetricTile
+              label="Collected MTD"
+              value={null}
+              format="currency"
+              isError
+              testId="fp-tile-billing-header-collected-mtd"
+            />
+            <MetricTile
+              label="Outstanding A/R"
+              value={null}
+              format="currency"
+              isError
+              testId="fp-tile-billing-header-outstanding-ar"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="text-xs text-blue-600 hover:underline shrink-0"
+            data-testid="fp-widget-billing-header-retry"
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-3">
+          <MetricTile
+            label="Billed MTD"
+            value={data?.billedMtd.value ?? null}
+            format="currency"
+            deltaPct={data?.billedMtd.deltaPct ?? null}
+            deltaLabel="vs prev month"
+            isLoading={isLoading}
+            testId="fp-tile-billing-header-billed-mtd"
+          />
+          <MetricTile
+            label="Collected MTD"
+            value={collectedMtdValue}
+            format="currency"
+            deltaPct={collectedMtdDeltaPct}
+            deltaLabel="vs prev month"
+            isLoading={isLoading}
+            testId="fp-tile-billing-header-collected-mtd"
+          />
+          <MetricTile
+            label="Outstanding A/R"
+            value={data?.outstandingAr.value ?? null}
+            format="currency"
+            deltaPct={data?.outstandingAr.deltaPct ?? null}
+            deltaLabel="vs prev month"
+            deltaGoodDirection="down"
+            isLoading={isLoading}
+            testId="fp-tile-billing-header-outstanding-ar"
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -536,5 +697,7 @@ export function FinancialPulseWidget(props: FinancialPulseWidgetProps) {
       return <ArAgingVariant />;
     case "top-customers-compact":
       return <TopCustomersCompactVariant limit={props.limit} />;
+    case "billing-header":
+      return <BillingHeaderVariant className={props.className} />;
   }
 }
