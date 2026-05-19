@@ -9442,6 +9442,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // customer-bounded callers); using it for a dashboard rollup
   // leaked totals across tenants. This endpoint is the canonical
   // source for the tile.
+  // @deprecated Task #708 — superseded by GET /api/financial-pulse/kpis
+  // (`billedMtd.value`), which is now the single source of truth for the
+  // Admin Dashboard "Billed MTD" tile via <FinancialPulseWidget
+  // variant="admin-dashboard" />. Kept for back-compat with any external
+  // consumers; the in-app frontend no longer reads it. Slated for removal
+  // in a follow-up task after a production cycle confirms no stragglers.
   app.get("/api/dashboard/this-month-billed", requireAuthentication, async (req: any, res) => {
     try {
       const role = req.authenticatedUserRole as string | undefined;

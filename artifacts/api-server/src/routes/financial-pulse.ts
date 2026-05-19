@@ -937,6 +937,192 @@ export function registerFinancialPulseRoutes(
     },
   );
 
+  // ─── Slice 5: per-customer summary (Task #708) ──────────────────────────
+  //
+  // Single per-customer slice of Financial Pulse, used by the
+  // <FinancialPulseWidget variant="customer-detail" /> on Customer
+  // Profile and Customer Billing. Numbers are computed by reusing the
+  // existing By Customer logic filtered to a single id — no parallel
+  // math. Role guard matches the rest of FP (super_admin /
+  // company_admin / billing_manager); company scoping happens through
+  // customers.companyId so a non-super-admin cannot pull a customer
+  // outside their own tenant.
+  app.get(
+    "/api/financial-pulse/customer/:id/summary",
+    requireAuthentication,
+    async (req: Request, res) => {
+      try {
+        const scope = resolveFinancialPulseScope(
+          (req as any).authenticatedUserRole,
+          (req as any).authenticatedUserCompanyId,
+          undefined,
+        );
+        if (scope.status !== 200) {
+          res.status(scope.status).json(scope.body);
+          return;
+        }
+        const customerId = parseInt(String(req.params.id), 10);
+        if (!Number.isFinite(customerId) || customerId <= 0) {
+          res.status(400).json({ message: "Invalid customer id" });
+          return;
+        }
+        const custRow = await db
+          .select()
+          .from(customers)
+          .where(eq(customers.id, customerId))
+          .limit(1);
+        const c = custRow[0];
+        if (!c) {
+          res.status(404).json({ message: "Customer not found" });
+          return;
+        }
+        // Non-super-admin must own the customer's tenant.
+        if (scope.companyId != null && c.companyId !== scope.companyId) {
+          res.status(403).json({ message: "Forbidden" });
+          return;
+        }
+
+        const now = new Date();
+        const mtd = getMtdWindow(now);
+        const ytd = getYtdWindow(now);
+        const allInvoices = await loadInvoicesForCustomers([customerId]);
+
+        const billedMtd = computeBilled(allInvoices, mtd.start, mtd.end);
+        const billedYtd = computeBilled(allInvoices, ytd.start, ytd.end);
+        const outstandingAr = computeOutstandingAr(allInvoices);
+        const avgDaysToPay = computeAvgDaysToPay(allInvoices, now);
+
+        // Unbilled exposure scoped to this customer only — same
+        // status sets as `computeUnbilledExposure` above.
+        const woRows = await db
+          .select({
+            total: workOrders.totalAmount,
+            status: workOrders.status,
+            invoiceId: workOrders.invoiceId,
+          })
+          .from(workOrders)
+          .where(eq(workOrders.customerId, customerId));
+        const bsRows = await db
+          .select({
+            total: billingSheets.totalAmount,
+            status: billingSheets.status,
+            invoiceId: billingSheets.invoiceId,
+          })
+          .from(billingSheets)
+          .where(eq(billingSheets.customerId, customerId));
+        const unbilledWoStatuses = new Set([
+          "approved_passed_to_billing",
+          "pending_manager_review",
+          "work_completed",
+        ]);
+        const unbilledBsStatuses = new Set([
+          "approved_passed_to_billing",
+          "pending_manager_review",
+          "completed",
+          "submitted",
+        ]);
+        const toN = (v: unknown) => {
+          if (v == null) return 0;
+          const n = typeof v === "number" ? v : parseFloat(String(v));
+          return Number.isFinite(n) ? n : 0;
+        };
+        let unbilledExposure = 0;
+        if (!c.hiddenFromBilling) {
+          for (const w of woRows) {
+            if (w.invoiceId != null) continue;
+            if (!unbilledWoStatuses.has(w.status)) continue;
+            unbilledExposure += toN(w.total);
+          }
+          for (const b of bsRows) {
+            if (b.invoiceId != null) continue;
+            if (!unbilledBsStatuses.has(b.status)) continue;
+            unbilledExposure += toN(b.total);
+          }
+        }
+
+        // Last invoice date — most recent createdAt across any
+        // non-draft/cancelled invoice for this customer.
+        let lastInvoiceAt: string | null = null;
+        for (const inv of allInvoices) {
+          if (inv.status === "draft" || inv.status === "cancelled") continue;
+          const d = inv.createdAt instanceof Date
+            ? inv.createdAt
+            : new Date(inv.createdAt as unknown as string);
+          if (Number.isNaN(d.getTime())) continue;
+          if (!lastInvoiceAt || d > new Date(lastInvoiceAt)) {
+            lastInvoiceAt = d.toISOString();
+          }
+        }
+
+        // Budget objects — mirror /api/customers/:id/budget-usage
+        // shape (monthlyCap/monthlySpend/monthlyPercent/monthlyStatus,
+        // same annual). spend is current-month/current-year, same as
+        // the Slice 1 BudgetCard.
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const yearStart = new Date(now.getFullYear(), 0, 1);
+        let monthSpend = 0;
+        let yearSpend = 0;
+        for (const inv of allInvoices) {
+          if (inv.status === "draft" || inv.status === "cancelled") continue;
+          const d = inv.createdAt instanceof Date
+            ? inv.createdAt
+            : new Date(inv.createdAt as unknown as string);
+          if (Number.isNaN(d.getTime())) continue;
+          const total = typeof inv.totalAmount === "number"
+            ? inv.totalAmount
+            : parseFloat(String(inv.totalAmount));
+          if (!Number.isFinite(total)) continue;
+          if (d >= monthStart) monthSpend += total;
+          if (d >= yearStart) yearSpend += total;
+        }
+        const parseCap = (v: unknown): number | null => {
+          if (v == null || v === "") return null;
+          const n = typeof v === "number" ? v : parseFloat(String(v));
+          return Number.isFinite(n) && n > 0 ? n : null;
+        };
+        const monthlyCap = parseCap(c.monthlyBudgetCap);
+        const annualCap = parseCap(c.annualBudgetCap);
+        const soft = c.budgetSoftThresholdPercent ?? 75;
+        const hard = c.budgetHardThresholdPercent ?? 100;
+        const classify = (
+          cap: number | null,
+          spend: number,
+        ): {
+          cap: number | null;
+          spend: number;
+          percent: number | null;
+          status: "unset" | "healthy" | "approaching" | "over";
+        } => {
+          if (cap == null) {
+            return { cap: null, spend, percent: null, status: "unset" };
+          }
+          const pct = spend / cap;
+          const p = pct * 100;
+          const status: "healthy" | "approaching" | "over" =
+            p >= hard ? "over" : p >= soft ? "approaching" : "healthy";
+          return { cap, spend, percent: pct, status };
+        };
+
+        res.json({
+          customerId,
+          name: c.name,
+          billedMtd,
+          billedYtd,
+          outstandingAr,
+          unbilledExposure,
+          avgDaysToPay,
+          lastInvoiceAt,
+          monthly: classify(monthlyCap, monthSpend),
+          annual: classify(annualCap, yearSpend),
+          asOf: now.toISOString(),
+        });
+      } catch (err) {
+        req.log?.error?.({ err }, "financial-pulse/customer-summary error");
+        res.status(500).json({ message: "Failed to compute customer summary" });
+      }
+    },
+  );
+
   // Mark sql import as used to keep the strict-mode lint happy in
   // environments that whine about unused named imports.
   void sql;

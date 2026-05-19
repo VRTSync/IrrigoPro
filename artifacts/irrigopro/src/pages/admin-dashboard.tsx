@@ -9,9 +9,8 @@ import { QuickActions } from "@/components/admin-dashboard/quick-actions";
 import { KpiTile } from "@/components/admin-dashboard/kpi-tile";
 import { AttentionPanel, AttentionIcons, type AttentionRow } from "@/components/admin-dashboard/attention-panel";
 import { OperationsPipeline } from "@/components/admin-dashboard/operations-pipeline";
-import { FinancialExposure } from "@/components/admin-dashboard/financial-exposure";
 import { ActivityFeed, ActivityIcons, type ActivityItem } from "@/components/admin-dashboard/activity-feed";
-import { TopLists, type TopCustomer, type TopTechnician } from "@/components/admin-dashboard/top-lists";
+import { FinancialPulseWidget, useFinancialPulseData } from "@/components/financial-pulse/financial-pulse-widget";
 
 import {
   Users, UserCheck, Wrench, FileText, Receipt, DollarSign,
@@ -127,18 +126,11 @@ export default function AdminDashboard() {
     },
     enabled: !!user?.companyId,
   });
-  // Task #662 — company-scoped "This Month Billed" rollup. The
-  // legacy approach of summing /api/invoices client-side leaked
-  // totals across tenants (that endpoint is intentionally unscoped).
-  const thisMonthBilledQ = useQuery<{ amount: number; invoiceCount: number; month: string }>({
-    queryKey: ["/api/dashboard/this-month-billed"],
-    queryFn: async () => {
-      const res = await fetch("/api/dashboard/this-month-billed", { credentials: "include" });
-      if (!res.ok) throw new Error("this-month-billed failed");
-      return res.json();
-    },
-    enabled: !!user?.companyId,
-  });
+  // Task #708 — `/api/dashboard/this-month-billed` was retired here.
+  // The Billed MTD figure now comes from <FinancialPulseWidget
+  // variant="admin-dashboard" /> (server endpoint
+  // /api/financial-pulse/kpis), keeping every billed-this-month tile
+  // across the app on a single rollup.
   const techsQ = useArrayQuery<FieldTech>({ queryKey: ["/api/users/field-techs"], enabled: !!user?.companyId });
 
   // Company profile (for logo + name in header)
@@ -232,24 +224,15 @@ export default function AdminDashboard() {
     return { estimatesOpen, woOpen, woInProgress, woCompleted, billingActive, invoicesThisMonth };
   }, [workOrdersQ.data, billingSheetsQ.data, estimatesQ.data, invoicesQ.data]);
 
-  // Financial exposure rollup from billing-preview
-  const financial = useMemo(() => {
-    const rows = billingPreviewQ.data ?? [];
-    let approved = 0, unapproved = 0, totalUnbilled = 0, currentMonth = 0;
-    for (const r of rows) {
-      approved += toNumber(r.approvedTotal);
-      unapproved += toNumber(r.unapprovedTotal);
-      totalUnbilled += toNumber(r.totalUnbilled);
-      currentMonth += toNumber(r.currentMonthUnbilled);
-    }
-    // Task #662 — "This Month Billed" comes from a company-scoped
-    // server rollup (see /api/dashboard/this-month-billed). The
-    // legacy approach of summing /api/invoices client-side leaked
-    // totals across tenants (that endpoint is intentionally unscoped
-    // and only safe for customer-bounded callers).
-    const thisMonthBilled = toNumber(thisMonthBilledQ.data?.amount ?? 0);
-    return { approved, unapproved, totalUnbilled, currentMonth, thisMonthBilled };
-  }, [billingPreviewQ.data, thisMonthBilledQ.data]);
+  // Task #708 — Unbilled Revenue KPI tile is now sourced from FP
+  // (`/api/financial-pulse/kpis` → `unbilledExposure.value`) so the
+  // admin dashboard agrees with every other surface. Returns `null`
+  // for roles outside FP's allow-list (the hook collapses 401/403 to
+  // null), in which case we hide the tile entirely.
+  const fpKpisQ = useFinancialPulseData<{
+    unbilledExposure: { value: number | null };
+  }>("admin-dashboard", "/api/financial-pulse/kpis?period=mtd");
+  const fpUnbilledExposure = fpKpisQ.data?.unbilledExposure?.value ?? null;
 
   // Attention rows
   const attentionRows: AttentionRow[] = useMemo(() => {
@@ -322,39 +305,12 @@ export default function AdminDashboard() {
     return { health: "green", healthLabel: "All systems clear" };
   }, [attentionRows]);
 
-  // Top lists
-  const topCustomers: TopCustomer[] = useMemo(() => {
-    const rows = billingPreviewQ.data ?? [];
-    return rows
-      .map((r) => ({ id: r.id, name: r.name, unbilledTotal: toNumber(r.totalUnbilled) }))
-      .filter((r) => r.unbilledTotal > 0)
-      .sort((a, b) => b.unbilledTotal - a.unbilledTotal)
-      .slice(0, 5);
-  }, [billingPreviewQ.data]);
-
-  const topTechnicians: TopTechnician[] = useMemo(() => {
-    const techs = techsQ.data ?? [];
-    const wos = workOrdersQ.data ?? [];
-    const bss = billingSheetsQ.data ?? [];
-    const counts = new Map<number, number>();
-    for (const wo of wos) {
-      if (wo.status === "pending" || wo.status === "assigned" || wo.status === "in_progress") {
-        const t = wo.assignedTechnicianId ?? wo.technicianId;
-        if (t) counts.set(t, (counts.get(t) ?? 0) + 1);
-      }
-    }
-    for (const bs of bss) {
-      if (bs.status === "draft" || bs.status === "submitted" || bs.status === "pending_manager_review") {
-        const t = bs.technicianId;
-        if (t) counts.set(t, (counts.get(t) ?? 0) + 1);
-      }
-    }
-    return techs
-      .map((t) => ({ id: t.id, name: t.name, openTickets: counts.get(t.id) ?? 0 }))
-      .filter((t) => t.openTickets > 0)
-      .sort((a, b) => b.openTickets - a.openTickets)
-      .slice(0, 5);
-  }, [techsQ.data, workOrdersQ.data, billingSheetsQ.data]);
+  // Task #708 — top-customer / top-technician derivations were
+  // retired in favor of <FinancialPulseWidget
+  // variant="top-customers-compact" /> (revenue-driven, with budget
+  // status). Field-tech open-ticket leaderboard remains TBD and is
+  // tracked separately.
+  void techsQ;
 
   // Activity feed
   const activityItems: ActivityItem[] = useMemo(() => {
@@ -488,21 +444,29 @@ export default function AdminDashboard() {
           isError={invoicesQ.isError}
           testId="kpi-invoices-month"
         />
-        <KpiTile
-          label="Unbilled Revenue"
-          value={
-            new Intl.NumberFormat("en-US", {
-              style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0,
-            }).format(financial.totalUnbilled)
-          }
-          icon={DollarSign}
-          accent="rose"
-          href="/billing/dashboard"
-          isLoading={billingPreviewQ.isLoading}
-          isError={billingPreviewQ.isError}
-          helper="Approved + unapproved"
-          testId="kpi-unbilled-revenue"
-        />
+        {/* Task #708 — sourced from FP (`unbilledExposure`) so this tile
+            agrees with the FP page, Customer Profile, and Customer
+            Billing widgets. Hidden when FP responds 401/403 for the
+            caller (e.g. field_tech / irrigation_manager). */}
+        {(fpKpisQ.isLoading || fpKpisQ.data != null) && (
+          <KpiTile
+            label="Unbilled Revenue"
+            value={
+              fpUnbilledExposure == null
+                ? "—"
+                : new Intl.NumberFormat("en-US", {
+                    style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0,
+                  }).format(fpUnbilledExposure)
+            }
+            icon={DollarSign}
+            accent="rose"
+            href="/financial-pulse"
+            isLoading={fpKpisQ.isLoading}
+            isError={fpKpisQ.isError}
+            helper="From Financial Pulse"
+            testId="kpi-unbilled-revenue"
+          />
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -516,18 +480,8 @@ export default function AdminDashboard() {
             invoicesThisMonth={pipeline.invoicesThisMonth}
             isLoading={workOrdersQ.isLoading || billingSheetsQ.isLoading || estimatesQ.isLoading || invoicesQ.isLoading}
           />
-          <FinancialExposure
-            approvedUnbilled={financial.approved}
-            unapprovedUnbilled={financial.unapproved}
-            totalUnbilled={financial.totalUnbilled}
-            thisMonthBilled={financial.thisMonthBilled}
-            isLoading={billingPreviewQ.isLoading || thisMonthBilledQ.isLoading}
-          />
-          <TopLists
-            customers={topCustomers}
-            technicians={topTechnicians}
-            isLoading={billingPreviewQ.isLoading || techsQ.isLoading}
-          />
+          <FinancialPulseWidget variant="admin-dashboard" />
+          <FinancialPulseWidget variant="top-customers-compact" />
         </div>
 
         <div className="space-y-5">

@@ -44,6 +44,7 @@ import { LIFECYCLE_TINTS, lifecycleOf } from "@/lib/lifecycle";
 import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
 import { InvoiceList } from "@/components/billing/invoice-list";
 import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
+import { FinancialPulseWidget } from "@/components/financial-pulse/financial-pulse-widget";
 
 // Extended interfaces for billing data with transformed fields
 interface BillingWorkOrder extends WorkOrder {
@@ -1016,6 +1017,14 @@ export default function CustomerBilling() {
                 </div>
               ) : customerBillingData ? (
                 <div className="space-y-3 p-4">
+                  {/* Task #708 — Financial Pulse widget at the top of the
+                      customer detail. Renders nothing for roles outside
+                      FP's allow-list (super_admin / company_admin /
+                      billing_manager). */}
+                  <FinancialPulseWidget
+                    variant="customer-detail"
+                    customerId={customerBillingData.customer.id}
+                  />
                   {/* Billing Summary Card - Mobile optimized */}
                   <div className="grid grid-cols-1 gap-3">
                     {/* Unbilled Work Summary */}
@@ -1693,6 +1702,13 @@ export default function CustomerBilling() {
                   </div>
                 </CardHeader>
               </Card>
+
+              {/* Task #708 — Financial Pulse widget at the top of the
+                  desktop customer detail. */}
+              <FinancialPulseWidget
+                variant="customer-detail"
+                customerId={customerBillingData.customer.id}
+              />
 
               {/* Billing Summary Card - Mobile responsive */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 md:gap-3">

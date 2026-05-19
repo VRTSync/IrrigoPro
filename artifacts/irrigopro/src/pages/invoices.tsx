@@ -1,6 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useSearch } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
 import { InvoiceAuditModal } from "@/components/billing/invoice-audit-modal";
+import { FinancialPulseWidget } from "@/components/financial-pulse/financial-pulse-widget";
 import { exportSingleInvoiceCsv } from "@/lib/invoice-csv";
 import { safeGet } from "@/utils/safeStorage";
 
@@ -181,10 +182,86 @@ function groupByBillingPeriod(invoices: Invoice[]) {
   });
 }
 
+// Task #708 — A/R aging filter values mirror the
+// `/api/financial-pulse/ar-aging` bucket keys (with `days90Plus`
+// matching the inclusive 90+ bucket). The mapping lives here so the
+// widget can deep-link via `?aging=`.
+type AgingFilter = "all" | "current" | "days30" | "days60" | "days90Plus";
+const AGING_OPTIONS: { value: AgingFilter; label: string }[] = [
+  { value: "all", label: "All ages" },
+  { value: "current", label: "Current (0–29 days)" },
+  { value: "days30", label: "30–59 days" },
+  { value: "days60", label: "60–89 days" },
+  { value: "days90Plus", label: "90+ days" },
+];
+
+function parseAging(search: string): AgingFilter {
+  const v = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("aging");
+  if (v === "current" || v === "days30" || v === "days60" || v === "days90Plus") {
+    return v;
+  }
+  return "all";
+}
+
+function readAgingFromUrl(): AgingFilter {
+  if (typeof window === "undefined") return "all";
+  return parseAging(window.location.search);
+}
+
+// Same exclusion set as `computeOutstandingAr` — paid / draft /
+// cancelled invoices are not part of A/R aging.
+function isOpenAr(inv: Invoice): boolean {
+  if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "paid") {
+    return false;
+  }
+  // The server's `computeOutstandingAr` also excludes any invoice
+  // with a non-null paidAt. We mirror that here.
+  return !inv.sentAt || true; // keep all non-terminal statuses; paidAt check below
+}
+
+function ageInDays(inv: Invoice, now: Date): number {
+  const d = new Date(inv.createdAt);
+  if (Number.isNaN(d.getTime())) return 0;
+  return Math.floor((now.getTime() - d.getTime()) / 86_400_000);
+}
+
+function matchesAging(inv: Invoice, filter: AgingFilter, now: Date): boolean {
+  if (filter === "all") return true;
+  if (!isOpenAr(inv)) return false;
+  // `paidAt` may or may not be on the wire — guard it.
+  if ((inv as unknown as { paidAt?: string | null }).paidAt) return false;
+  const days = ageInDays(inv, now);
+  switch (filter) {
+    case "current":
+      return days < 30;
+    case "days30":
+      return days >= 30 && days < 60;
+    case "days60":
+      return days >= 60 && days < 90;
+    case "days90Plus":
+      return days >= 90;
+  }
+}
+
 export default function InvoicesPage() {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [monthFilter, setMonthFilter] = useState("all");
+  // Task #708 — deep-linked A/R aging filter, driven by `?aging=` in
+  // the URL when arriving from the FP A/R Aging widget. The
+  // `useSearch()` hook from wouter is reactive to query-string
+  // changes (including `setLocation('/invoices?aging=…')` from the
+  // FP widget on the same mounted page), so an in-page bucket click
+  // re-applies the filter immediately. We still keep local state so
+  // the `<Select>` control can override the URL without triggering a
+  // navigation. The effect below resyncs state whenever the URL
+  // changes underneath us.
+  const search = useSearch();
+  const [agingFilter, setAgingFilter] = useState<AgingFilter>(() => readAgingFromUrl());
+  useEffect(() => {
+    const next = parseAging(search ?? "");
+    setAgingFilter((prev) => (prev === next ? prev : next));
+  }, [search]);
   const [pdfModal, setPdfModal] = useState<{ id: number; number: string; email: string } | null>(null);
   const [auditInvoice, setAuditInvoice] = useState<{ id: number; label: string; total: string } | null>(null);
   const [exportingInvoiceId, setExportingInvoiceId] = useState<number | null>(null);
@@ -268,8 +345,13 @@ export default function InvoicesPage() {
       );
     }
 
+    if (agingFilter !== "all") {
+      const now = new Date();
+      result = result.filter((inv) => matchesAging(inv, agingFilter, now));
+    }
+
     return result;
-  }, [invoices, searchTerm, monthFilter]);
+  }, [invoices, searchTerm, monthFilter, agingFilter]);
 
   const groups = useMemo(() => groupByBillingPeriod(filteredInvoices), [filteredInvoices]);
 
@@ -369,6 +451,13 @@ export default function InvoicesPage() {
           </div>
         </div>
 
+        {/* Task #708 — A/R Aging widget. Bucket clicks deep-link
+            back to this page with `?aging=<key>`, which hydrates the
+            aging filter below. */}
+        <div className="mb-6">
+          <FinancialPulseWidget variant="ar-aging" />
+        </div>
+
         {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-3 mb-6">
           <div className="relative flex-1">
@@ -390,6 +479,25 @@ export default function InvoicesPage() {
               {monthOptions.map((m) => (
                 <SelectItem key={m.value} value={m.value}>
                   {m.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={agingFilter}
+            onValueChange={(v) => setAgingFilter(v as AgingFilter)}
+          >
+            <SelectTrigger
+              className="w-full sm:w-52"
+              data-testid="invoices-aging-filter"
+            >
+              <AlertCircle className="w-4 h-4 mr-2 text-gray-400" />
+              <SelectValue placeholder="All ages" />
+            </SelectTrigger>
+            <SelectContent>
+              {AGING_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
                 </SelectItem>
               ))}
             </SelectContent>

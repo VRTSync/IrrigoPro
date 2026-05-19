@@ -12,6 +12,7 @@ import { Customer } from "@workspace/db/schema";
 import { InvoiceList } from "@/components/billing/invoice-list";
 import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
 import { IrrigationSystemCard } from "@/components/customers/irrigation-system-card";
+import { FinancialPulseWidget } from "@/components/financial-pulse/financial-pulse-widget";
 
 export default function CustomerProfile() {
   const { id } = useParams();
@@ -245,6 +246,13 @@ export default function CustomerProfile() {
         userRole === "super_admin" ||
         userRole === "billing_manager") && (
         <>
+          {/* Task #708 — FP widget rendered above BudgetCard. The
+              widget's monthly meter agrees with BudgetCard exactly
+              (both read the same underlying customer + invoice data). */}
+          <FinancialPulseWidget
+            variant="customer-detail"
+            customerId={parseInt(id!, 10)}
+          />
           <BudgetCard customerId={parseInt(id!, 10)} />
           <RecentBudgetAlertsCard customerId={parseInt(id!, 10)} />
         </>
