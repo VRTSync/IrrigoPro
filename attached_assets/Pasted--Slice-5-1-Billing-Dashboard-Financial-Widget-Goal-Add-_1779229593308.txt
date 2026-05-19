@@ -1,0 +1,107 @@
+# Slice 5.1 — Billing Dashboard Financial Widget
+
+**Goal:** Add a short Financial Pulse widget at the top of the current Billing Dashboard with three tiles and a link to the full Financial Pulse page. Small, self-contained, ships independently of the Slice 6 Workspace redesign — the billing manager gets immediate visibility without waiting for the bigger redesign.
+
+**Depends on:** Slices 1–5. (Slice 5's `FinancialPulseWidget` component must exist before this slice adds a variant to it.)
+
+**Scope is intentionally narrow.** This slice does two things: extend the existing widget with a fifth variant, and mount that variant on `/billing-dashboard`. Nothing else on the Billing Dashboard changes here — the broader rework lives in Slice 6.
+
+---
+
+## 1. Add the `billing-header` variant to `FinancialPulseWidget`
+
+**File:** `artifacts/irrigopro/src/components/financial-pulse/financial-pulse-widget.tsx` (or wherever Slice 5 ultimately placed it).
+
+Extend the `Variant` union:
+
+```ts
+type Variant =
+  | "admin-dashboard"
+  | "customer-detail"
+  | "ar-aging"
+  | "top-customers-compact"
+  | "billing-header";   // new
+```
+
+### Variant spec
+
+**`billing-header`** — 3 tiles in a single slim row.
+
+- **Source:** `/api/financial-pulse/kpis?period=mtd` (same endpoint as `admin-dashboard` variant — no new endpoint).
+- **Tiles, in this order:**
+  1. **Billed MTD** — currency, with delta vs prev month.
+  2. **Collected MTD** — currency, with delta vs prev month.
+  3. **Outstanding A/R** — currency, with delta vs prev month.
+- **Header link:** "View Financial Pulse →" linking to `/financial-pulse`.
+- **Loading:** same skeleton pattern as the other variants.
+- **Soft-fail:** if the endpoint errors, render the widget with "—" tiles and a small "Retry" button, same as other variants.
+- **Role-aware:** returns `null` for users who can't access FP endpoints (field tech, irrigation manager). No broken layout.
+
+### Visual notes
+
+The widget is intentionally short — single row, smaller-than-default tile height. Visually distinct from the page content below (a thin bottom border or subtle background tint works). It's a status check, not a competing dashboard.
+
+---
+
+## 2. Mount on the current Billing Dashboard
+
+**File:** `artifacts/irrigopro/src/pages/billing-dashboard.tsx`.
+
+Insert the widget at the very top of the page, above the existing "Financial Exposure" row (line ~106 / ~199 today). Example placement:
+
+```tsx
+<PageHeader title="Billing Dashboard" subtitle="..." />
+
+<FinancialPulseWidget variant="billing-header" className="mb-4" />
+
+{/* existing content (Financial Exposure row, etc.) continues unchanged */}
+```
+
+**Don't touch anything else on this page in this slice.** The current "Financial Exposure" row, customer preview cards, and pending parts panel all stay exactly as they are. Slice 6 is the one that reorganizes the page.
+
+---
+
+## 3. Acceptance criteria
+
+1. Loading `/billing-dashboard` as a `billing_manager` or `company_admin` shows the new widget with three populated tiles and a working "View Financial Pulse →" link.
+2. The widget's values match the same numbers shown on `/financial-pulse` for Billed MTD, Collected MTD, and Outstanding A/R (same endpoint = same answer, by construction).
+3. Loading `/billing-dashboard` as a `field_tech` shows no widget — and no broken layout, no error message, no empty card.
+4. The widget renders a skeleton during load and a soft-fail state with a Retry button if the endpoint errors.
+5. Nothing else on the Billing Dashboard has visibly changed.
+6. The `FinancialPulseWidget` component continues to render the four pre-existing variants correctly (no regression).
+
+---
+
+## 4. Tests
+
+- Snapshot or component test for the `billing-header` variant in isolation: three tiles, link, skeleton, soft-fail, null for unauthorized roles.
+- Integration test for the Billing Dashboard page: widget mounts, calls `/api/financial-pulse/kpis`, displays values.
+- Cross-page consistency test: assert that on the same fixture, `billing-header`'s "Outstanding A/R" tile matches `admin-dashboard`'s "Outstanding A/R" tile (since they share an endpoint).
+
+---
+
+## 5. Out of scope
+
+- Any change to the existing Financial Exposure row on the Billing Dashboard.
+- Any change to the customer preview cards or pending parts panel.
+- Page rename, route change, or layout reorganization — that's Slice 6.
+- Data-source unification work on the Billing Dashboard's other elements — also Slice 6.
+
+---
+
+## 6. Implementation checklist
+
+- [ ] Extend `Variant` union with `billing-header`
+- [ ] Implement `billing-header` renderer (3 tiles + header link)
+- [ ] Skeleton + soft-fail state for the new variant
+- [ ] Mount `<FinancialPulseWidget variant="billing-header" />` at the top of `billing-dashboard.tsx`
+- [ ] Component test for the variant
+- [ ] Integration test on the page
+- [ ] Cross-page consistency assertion
+- [ ] Smoke check that the four existing variants still render
+
+---
+
+## 7. Why this is its own slice rather than rolled into Slice 6
+
+Slice 6 is a sizable redesign (approval queue, drawer, keyboard nav, QB integration touches). Waiting for that to ship means the billing manager has no FP-grounded financial visibility on their daily page until then. Splitting this out as 5.1 means the value lands now, and Slice 6 inherits a widget that's already proven in production rather than introducing a new component as part of a bigger change.

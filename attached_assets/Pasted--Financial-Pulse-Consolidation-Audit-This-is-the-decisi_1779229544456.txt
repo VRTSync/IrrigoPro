@@ -1,0 +1,134 @@
+# Financial Pulse — Consolidation Audit
+
+This is the decision document. It captures what's currently displayed across the app, where Financial Pulse now overlaps, and the verdict for each.
+
+**Status: verdicts approved.** Slice 5 implements them, with two amendments:
+
+- Billing Dashboard changes deferred to Slice 6 (full redesign rather than a stopgap widget).
+- Technician detail variant dropped — no tech profile page exists in the codebase to host it. Park until one is built.
+
+---
+
+## Shipped status (Slices 1–4)
+
+All four slices are live in the pulled code:
+
+- `/financial-pulse` page exists at `artifacts/irrigopro/src/pages/financial-pulse.tsx` and calls the 8 expected endpoints.
+- Customer budget columns + `users.hourlyWage` + `customer_budget_alert_events` table all present (`lib/db/migrations/0002_financial_pulse_foundation.sql`).
+- Budget & Alerts UI in `customer-form.tsx` and the Budget card + Recent Budget Alerts in `customer-profile.tsx`.
+- `budget-alert-service.ts` is wired into invoice finalization with failure isolation.
+- `BUDGET_WARNING` and `BUDGET_EXCEEDED` notification types are registered.
+
+One thing worth knowing: the missing-wage fallback uses a hard-coded `DEFAULT_FALLBACK_HOURLY_WAGE = 25` in `financial-pulse.ts` (line 59). Fine for now, but it should become a company setting before this is trusted for margin reporting at scale. Noted as a follow-up — not part of Slice 5.
+
+---
+
+## Data-source disagreement risks (the bugs hiding in plain sight)
+
+Before consolidating UI, fix the data layer. Three places currently compute the same metric multiple different ways. Until these are unified, any "Financial Pulse widget" that pulls from one source while a legacy display pulls from another will visibly disagree — and the legacy ones are what users have trusted longest, so the widget will look wrong even when it's right.
+
+| Metric | Today's situation | Fix |
+|---|---|---|
+| **"This Month Billed"** | Admin dashboard sums `/api/customers/billing-preview` client-side **and** calls `/api/dashboard/this-month-billed` separately. Both render on the same page; nothing guarantees they agree. (Task #662 already moved one path to the dedicated endpoint, but the client-side sum was left in.) | Delete the client-side sum. Route everything to `/api/financial-pulse/kpis` (the new canonical source) and deprecate `/api/dashboard/this-month-billed`. |
+| **"Total Unbilled" / "Unbilled Exposure"** | Three code paths: admin dashboard derives from `/api/customers/billing-preview`; Financial Pulse computes its own via invoice/billing-sheet queries; Customer Billing page sums work-orders + billing-sheets client-side. | Define "unbilled" once in the Financial Pulse service. Replace the other two with calls to `/api/financial-pulse/kpis` (admin) and a new `/api/financial-pulse/customer/:id/summary` (per-customer). |
+| **Per-customer unbilled & A/R** | Customer Billing page rebuilds totals client-side from work-order + billing-sheet + invoice lists. | New per-customer summary endpoint that returns the same numbers FP shows in its By Customer row, scoped to one customer. |
+
+These three fixes are the real win. The widget rollout below is mostly visual cleanup riding on top.
+
+---
+
+## Page-by-page verdicts
+
+Legend: **Replace** = swap legacy display for FinancialPulseWidget; **Add** = no current financial display but should have one; **Keep** = leave alone (operational or already-canonical); **Delete** = remove with no replacement.
+
+### Admin Dashboard (`admin-dashboard.tsx`)
+
+| Element | Verdict | Reasoning |
+|---|---|---|
+| `FinancialExposure` 4-tile component | **Replace** with `<FinancialPulseWidget variant="admin-dashboard" />` rendering 4 tiles: Outstanding A/R, Unbilled Exposure, Billed MTD, Projected Month-End. | Three of the existing four tiles map directly to FP KPIs. Adding "Outstanding A/R" gives admins the missing receivables view at a glance. |
+| Top Customers list (top 5 by unbilled) | **Replace** with `<FinancialPulseWidget variant="top-customers-compact" limit={5} />` driven by `/api/financial-pulse/top-customers?sort=revenue&limit=5`. | Same data, but routed through the canonical endpoint. Adds budget meters from FP to flag customers at risk. |
+| Attention Panel (counts of customers ready to bill, pending approval) | **Keep** | Operational, not financial. Counts only, no aggregate dollars. |
+| KPI Tile (active users, open WOs, active customers) | **Keep** | Operational counts. |
+
+### Billing Dashboard (`billing-dashboard.tsx`)
+
+Handled in two stages:
+
+- **Slice 5.1** — add a slim `<FinancialPulseWidget variant="billing-header" />` at the top of the current Billing Dashboard. Three tiles (**Billed MTD**, **Collected MTD**, **Outstanding A/R**) plus a "View Financial Pulse →" link. Self-contained; doesn't require waiting on the broader redesign.
+- **Slice 6** — full page redesign as the Billing Workspace (approval queue + drawer + keyboard nav). The widget mounted in 5.1 carries forward unchanged into the new design.
+
+### Customer Billing (`customer-billing.tsx`)
+
+| Element | Verdict | Reasoning |
+|---|---|---|
+| Per-customer unbilled WOs, billing sheets, invoice list | **Keep** (transactional drill-down). | Rewrite client-side aggregation to use `/api/financial-pulse/customer/:id/summary` for the totals. |
+| Page header (currently just customer name) | **Add** `<FinancialPulseWidget variant="customer-detail" customerId={id} />` with 4 tiles: Billed MTD, Billed YTD, Outstanding A/R, Avg Days to Pay + the Budget meter inline. | Gives a financial-snapshot frame around the transactional list below. |
+
+### Customer Profile (`customer-profile.tsx`)
+
+| Element | Verdict | Reasoning |
+|---|---|---|
+| Budget Card (from Slice 1) | **Keep** | Already canonical. |
+| Recent Budget Alerts (from Slice 4) | **Keep** | Already canonical. |
+| Billing Settings card (labor rate, emergency rate, discount %) | **Keep** | Settings, not metrics. |
+| Invoices list (last 10) | **Keep** | Transactional. |
+| Top of page, above Budget Card | **Add** `<FinancialPulseWidget variant="customer-detail" customerId={id} />` (same component used on Customer Billing — single instance, two contexts). | Customer profile and customer billing should show the same financial summary. One widget, two homes. |
+
+### Invoices Page (`invoices.tsx`)
+
+| Element | Verdict | Reasoning |
+|---|---|---|
+| Invoice list table | **Keep** | Transactional. |
+| Page header (no current financial summary) | **Add** `<FinancialPulseWidget variant="ar-aging" />` showing the 4 aging buckets compactly. Each bucket clicks through to filter the list. | This is the natural home for A/R drill-down. The same data appears on FP's forward-look band, but here it's the operational workspace. |
+
+### Technician / User Detail Page
+
+**Parked.** No dedicated technician profile page exists in the codebase (`users-tab.tsx` under `app-health` is an admin list, not a per-tech profile). When a tech profile page is built, a future slice can add a `technician-detail` widget variant with tiles like Hours MTD, Revenue Produced MTD, Margin %, and Avg Ticket — all sourced from the existing `/api/financial-pulse/by-technician` endpoint.
+
+### Notifications drawer
+
+| Element | Verdict | Reasoning |
+|---|---|---|
+| Budget alert messages with $ amounts | **Keep** | Contextual, not aggregate. |
+
+### Work order / billing sheet modals
+
+| Element | Verdict | Reasoning |
+|---|---|---|
+| Line-item totals (parts subtotal, labor cost, total) | **Keep** | Per-entity, not aggregate. |
+
+---
+
+## The widget
+
+A single shared component used everywhere:
+
+```tsx
+<FinancialPulseWidget
+  variant="admin-dashboard"
+    | "customer-detail"
+    | "ar-aging"
+    | "top-customers-compact"
+    | "billing-header"          // added in Slice 5.1
+  customerId?: string           // required for customer-detail
+  limit?: number                // for top-customers-compact
+/>
+```
+
+Variants are thin presentational wrappers over a small set of tile/list configurations. All variants:
+
+- Pull from `/api/financial-pulse/*` only (no new business logic).
+- Include a "View on Financial Pulse →" link in the header, pre-filtered to the relevant entity or section.
+- Show a compact skeleton during loading; fail soft (render a small "—" tile with retry) if the endpoint errors.
+- Respect role guards: render nothing for users who can't access Financial Pulse endpoints.
+
+This means five variants total (four in Slice 5, fifth in Slice 5.1) but exactly one component, one data path, one set of caching rules.
+
+---
+
+## Decisions (approved)
+
+1. **Data-source fixes approved.** Both "This Month Billed" and "Total Unbilled" unify on Financial Pulse endpoints.
+2. **Billing Dashboard handled in two stages:** Slice 5.1 adds a slim `billing-header` Financial Pulse widget at the top of the current page (Billed MTD, Collected MTD, Outstanding A/R + link to FP); Slice 6 then performs the full Workspace redesign with the widget carried forward.
+3. **A/R aging buckets on Invoices page are clickable filters.** Each bucket navigates to the invoices list filtered by aging.
+4. **Technician detail variant dropped.** No tech profile page exists. Park until one is built.
