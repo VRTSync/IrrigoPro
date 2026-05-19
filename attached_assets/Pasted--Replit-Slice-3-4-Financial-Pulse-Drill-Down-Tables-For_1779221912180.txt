@@ -1,0 +1,196 @@
+# Replit Slice 3 / 4 — Financial Pulse: Drill-Down Tables + Forward Look
+
+**Goal:** Add analytical depth to the Financial Pulse page — three tabbed tables (By Customer, By Technician, By Service Type) plus an A/R aging panel and a month-end projection panel. Fills the two empty placeholder cards left by Slice 2.
+
+**Audience:** Same as Slice 2 (`company_admin`, `billing_manager`, `super_admin`).
+
+**Depends on:** Slice 1 (budget caps on customers, used in the By Customer table) and Slice 2 (page shell, role guard, period selector).
+
+---
+
+## 1. New API endpoints
+
+All `/api/financial-pulse/*`, same role guard as Slice 2.
+
+### `GET /api/financial-pulse/top-customers?period=mtd|ytd&limit=20&sort=revenue|budget_risk`
+
+```json
+{
+  "rows": [
+    {
+      "customerId": "uuid",
+      "customerName": "Westfield HOA",
+      "revenuePeriod": 8420.00,
+      "monthlySpark": [3200, 4100, 2900, 5100, 3800, 4500, 8420],
+      "monthlyBudgetCap": 7500.00,
+      "monthlyBudgetUsedPct": 112,
+      "monthlyBudgetStatus": "over",
+      "ytdRevenue": 41200.00,
+      "annualBudgetCap": 75000.00,
+      "annualBudgetUsedPct": 55,
+      "annualBudgetStatus": "healthy",
+      "avgDaysToPay": 28,
+      "lastInvoiceDate": "2026-05-14"
+    }
+  ]
+}
+```
+
+- `monthlySpark` — last 7 months of revenue for the customer (used for the inline sparkline).
+- Status mapping mirrors Slice 1: `< soft = healthy`, `soft ≤ pct < hard = approaching`, `>= hard = over`, `cap null = unset`.
+- `sort=budget_risk` orders by `monthlyBudgetUsedPct` desc, putting customers about to blow their cap at the top.
+
+### `GET /api/financial-pulse/by-technician?period=mtd|ytd`
+
+```json
+{
+  "rows": [
+    {
+      "technicianId": "uuid",
+      "technicianName": "Sam Rivera",
+      "hoursBilled": 142.5,
+      "revenueProduced": 11400.00,
+      "laborCost": 5700.00,
+      "laborMarginPct": 50.0,
+      "avgTicketSize": 380.00,
+      "billingSheetCount": 28,
+      "workOrderCount": 12,
+      "partsRevenue": 2100.00,
+      "hasWageSet": true
+    }
+  ]
+}
+```
+
+- `revenueProduced` — sum of `laborSubtotal + partsSubtotal` from invoices originating from this tech's billing sheets and work orders in the window.
+- `laborCost` — `hoursBilled × hourlyWage`. If `hasWageSet === false`, return `null` for `laborCost` and `laborMarginPct` and let the UI show "—" rather than a misleading number.
+
+### `GET /api/financial-pulse/by-service-type?period=mtd|ytd`
+
+```json
+{
+  "rows": [
+    { "type": "emergency", "revenue": 18500, "pctOfTotal": 16.5, "invoiceCount": 24, "avgTicketSize": 770 },
+    { "type": "standard",  "revenue": 93730, "pctOfTotal": 83.5, "invoiceCount": 118, "avgTicketSize": 794 },
+    { "type": "contract",  "revenue": 62000, "pctOfTotal": 55.3, "invoiceCount": 80, "avgTicketSize": 775 },
+    { "type": "adhoc",     "revenue": 50230, "pctOfTotal": 44.7, "invoiceCount": 62, "avgTicketSize": 810 }
+  ]
+}
+```
+
+### `GET /api/financial-pulse/ar-aging`
+
+```json
+{
+  "current":    { "amount": 41200, "invoiceCount": 18 },
+  "days30":     { "amount": 22100, "invoiceCount":  9 },
+  "days60":     { "amount": 14200, "invoiceCount":  4 },
+  "days90Plus": { "amount":  9920, "invoiceCount":  3 },
+  "total":      87420
+}
+```
+
+Buckets are computed against `invoices.invoiceDate` for unpaid invoices (today − invoiceDate, in days).
+
+### `GET /api/financial-pulse/projections`
+
+```json
+{
+  "runRate": {
+    "billedMtd": 48230,
+    "daysElapsed": 19,
+    "daysInMonth": 31,
+    "projectedMonthEnd": 78670
+  },
+  "prevMonthActual": 71200
+}
+```
+
+Pipeline-weighted forecast (approved estimates × close rate, recurring contract value) is **out of scope** — that's a future slice.
+
+---
+
+## 2. Page composition (additions)
+
+Replace the two placeholder cards from Slice 2 with the new bands below.
+
+### Band 3 — Drill-down tables (Tabs)
+
+Wrap in a `Tabs` component with three tabs:
+
+**Tab: By Customer**
+- Sortable columns: Customer, Revenue (period), Monthly Used %, Annual Used %, Sparkline, Status, Avg Days to Pay, Last Invoice.
+- Sparkline: a tiny Recharts `LineChart` or hand-rolled SVG, ~80px wide, no axes.
+- Budget meter: a thin progress bar in the Monthly Used % column with the same color rules as Slice 1 (green / amber / red / gray).
+- Status pill: matches the meter color.
+- Action menu (kebab): "View customer," "View invoices," "Send statement" (the last is optional if a statement flow exists).
+- Row click → `/customers/:id`.
+- Default sort: revenue desc. A "Sort by budget risk" toggle pre-fills `sort=budget_risk`.
+- Pagination: 25 rows. Sticky header.
+
+**Tab: By Technician**
+- Columns: Technician, Hours, Revenue Produced, Labor Cost, Margin %, Avg Ticket, # Billing Sheets, # Work Orders, Parts Revenue.
+- If `hasWageSet === false`, show "—" for cost/margin and a small tooltip "No hourly wage set."
+- Default sort: revenue desc.
+- 25 rows per page, sticky header.
+
+**Tab: By Service Type**
+- Columns: Type, Revenue, % of Total, # Invoices, Avg Ticket.
+- This tab effectively renders four rows (the four entries returned by the endpoint).
+- No pagination needed.
+
+CSV export button per tab (small icon in the tab header). Endpoints can return CSV when `Accept: text/csv` is set, or you can add `/financial-pulse/{tab}.csv` variants. If tight on time, ship the UI button but keep the CSV format itself simple (header + rows).
+
+### Band 4 — Forward look
+
+Two `Card`s side by side (stacking on mobile):
+
+**Left — A/R aging**
+- Four colored buckets shown as horizontal stacked bars or as four mini-cards: Current (green), 30 (yellow), 60 (orange), 90+ (red). Each shows $ amount and invoice count.
+- Click a bucket → navigate to the existing invoices page with a filter applied (e.g., `?aging=days30`). If filter support doesn't exist yet, leave the click as a no-op and add a TODO.
+
+**Right — Month-end projection**
+- Big number: projected month-end revenue.
+- Below it, the formula spelled out in small text: e.g., `$48,230 billed over 19 days × 31 days = $78,670`.
+- A thin horizontal bar at the bottom comparing three values for visual context: prior-month-actual (gray), MTD (primary), projected (primary, dashed extension). Helps the eye see whether you're tracking ahead or behind.
+
+---
+
+## 3. Acceptance criteria
+
+1. All three tabs load with at least one row visible on a seeded dataset.
+2. Sorting By Customer by "budget risk" surfaces customers with the highest `monthlyBudgetUsedPct` at the top.
+3. A customer with no cap set displays "—" for budget columns and a gray "Unset" pill.
+4. A technician with no `hourlyWage` shows "—" for Labor Cost and Margin %.
+5. The A/R aging buckets sum to the total displayed on the Outstanding A/R KPI tile in Band 1 (within rounding).
+6. The projection card's three numbers (prior-month-actual, MTD, projected) all render and the visual bar reflects their relative magnitudes.
+7. All new endpoints return 403 for field-tech and irrigation-manager tokens.
+8. CSV export from each tab downloads a file with a sensible filename like `financial-pulse-customers-2026-05.csv`.
+
+---
+
+## 4. Explicitly out of scope for this slice
+
+- Pipeline-weighted forecasting (approved estimates × historical close rate).
+- Tech utilization % (billable ÷ scheduled hours).
+- Customer churn signal.
+- Custom date range picker.
+- Any notification firing — that's Slice 4.
+
+---
+
+## 5. Implementation checklist
+
+- [ ] `GET /api/financial-pulse/top-customers`
+- [ ] `GET /api/financial-pulse/by-technician`
+- [ ] `GET /api/financial-pulse/by-service-type`
+- [ ] `GET /api/financial-pulse/ar-aging`
+- [ ] `GET /api/financial-pulse/projections`
+- [ ] Tabs component on the page with three tabs
+- [ ] By Customer table + sparkline + budget meter + status pill + action menu
+- [ ] By Technician table with wage-missing handling
+- [ ] By Service Type table
+- [ ] A/R aging panel with click-through filtering (or TODO if filtering UI doesn't exist)
+- [ ] Projection panel with formula + comparison bar
+- [ ] CSV exports per tab
+- [ ] Tests: endpoint role guards, A/R aging sum matches Outstanding A/R KPI, budget-risk sort ordering

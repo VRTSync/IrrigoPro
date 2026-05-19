@@ -1,0 +1,195 @@
+# Replit Slice 2 / 4 — Financial Pulse: Page Shell + KPIs + Charts
+
+**Goal:** Stand up the `/financial-pulse` route with the 8-tile snapshot row, the 13-month revenue trend (with year-over-year overlay), and the revenue-mix donut. This is the first visible payoff — it should look like a finished dashboard the moment it lands, even though the drill-down tables come in Slice 3.
+
+**Audience:** `company_admin`, `billing_manager`, `super_admin`.
+
+**Depends on:** Slice 1 (needs `users.hourlyWage` for the margin tile).
+
+---
+
+## 1. Routing & page shell
+
+**Route:** `/financial-pulse`
+**File:** `artifacts/irrigopro/src/pages/financial-pulse.tsx`
+**Nav label:** `Financial Pulse` — add to wherever the admin / billing nav links live (look near where `Billing Dashboard` is registered).
+
+Page header:
+- Title: **Financial Pulse**
+- Subtitle: small, e.g. "Live financial picture across all customers and techs"
+- Period selector: `MTD` / `YTD` toggle. Wire MTD/YTD now; leave a custom-range hook in the component but disabled.
+- "Last refreshed Xs ago" indicator + Refresh button (invalidates all `financial-pulse` queries).
+
+TanStack Query config for all financial-pulse queries:
+```ts
+{ staleTime: 60_000, refetchOnWindowFocus: false }
+```
+
+Role guard: if the current user is not in the allowed set, redirect to `/` or show a "Not authorized" card. Mirror whatever pattern other restricted pages use.
+
+If QuickBooks sync is unhealthy, render a yellow banner at the top of the page using the existing QB health hook (same pattern as anywhere else it's shown).
+
+---
+
+## 2. New API endpoints
+
+All under `/api/financial-pulse/*`, all guarded by `company_admin | billing_manager | super_admin`. Add to `artifacts/api-server/src/routes/routes.ts`. Reserve an optional `?asOf=YYYY-MM-DD` query param on every endpoint (ignored for v1, used later for historical snapshots).
+
+### `GET /api/financial-pulse/kpis?period=mtd|ytd`
+
+Returns the 8 snapshot tiles plus deltas.
+
+```json
+{
+  "billedMtd":         { "value": 48230.50, "deltaPct": 12.3, "comparedTo": "prevMonth" },
+  "billedYtd":         { "value": 412300.00, "deltaPct": 8.1, "comparedTo": "prevYearYtd" },
+  "collectedMtd":      { "value": 39100.00, "deltaPct": -4.2, "comparedTo": "prevMonth" },
+  "outstandingAr":     { "value": 87420.00, "deltaPct": 3.0, "comparedTo": "prevMonth" },
+  "unbilledExposure":  { "value": 22150.00, "deltaPct": -10.5, "comparedTo": "prevMonth" },
+  "projectedMonthEnd": { "value": 71400.00, "method": "runRate" },
+  "avgDaysToPay":      { "value": 34.2, "deltaPct": 2.1, "comparedTo": "prev90Days" },
+  "grossMarginPct":    { "value": 42.7, "deltaPct": 1.4, "comparedTo": "prevMonth" }
+}
+```
+
+How to compute each:
+- `billed*` — sum `invoices.totalAmount` within the window.
+- `collected*` — sum `invoices.totalAmount` where `paidAt` falls in the window.
+- `outstandingAr` — sum of unpaid invoice totals.
+- `unbilledExposure` — reuse the query behind the existing `FinancialExposure` admin-dashboard component (approved + unapproved unbilled).
+- `projectedMonthEnd` — `(billedMtd / daysElapsedThisMonth) * daysInMonth`.
+- `avgDaysToPay` — average `paidAt − invoiceDate` across invoices paid in the last 90 days.
+- `grossMarginPct` — `(revenue − partsCost − laborCost) / revenue × 100`.
+  - `partsCost` comes from `workOrders.totalPartsCost` and the parts-cost rollup on `billingSheets`.
+  - `laborCost` = `Σ (totalHours × tech.hourlyWage)` for invoiced work in the window.
+  - If a tech has no `hourlyWage`, fall back to a configurable default (env var or company setting) and include a `missingWageTechCount` field in the response so the UI can show a small warning indicator.
+
+### `GET /api/financial-pulse/revenue-trend?months=13`
+
+```json
+{
+  "series": [
+    { "month": "2025-05", "revenue": 38200, "prevYearRevenue": 31100, "partsRevenue": 12400, "laborRevenue": 25800 },
+    ...
+  ]
+}
+```
+
+13 entries by default. The `prevYearRevenue` field powers the YoY overlay.
+
+### `GET /api/financial-pulse/revenue-mix?period=mtd|ytd`
+
+```json
+{
+  "partsVsLabor":         { "parts": 31200, "labor": 81030 },
+  "emergencyVsStandard":  { "emergency": 18500, "standard": 93730 },
+  "contractVsAdhoc":      { "contract": 62000, "adhoc": 50230 }
+}
+```
+
+Detection:
+- **Emergency vs standard:** `invoiceItems.laborRate === customer.emergencyLaborRate` → emergency; otherwise standard. If an invoice spans both, split proportionally.
+- **Contract vs ad-hoc:** invoices for customers with a non-null `contractType` at invoice time → contract; rest → ad-hoc.
+
+---
+
+## 3. Page composition (this slice)
+
+The page renders **two bands** in this slice. The remaining two bands (drill-down tabs + forward look) are added in Slice 3 — leave clearly marked empty placeholder slots so Slice 3 plugs in without restructuring.
+
+### Band 1 — KPI snapshot
+
+Reuse `components/admin-dashboard/kpi-tile.tsx`. If it's too coupled to the admin dashboard, extract a shared `MetricTile` component that takes:
+
+```ts
+{
+  label: string;
+  value: number | string;
+  format: "currency" | "percent" | "days" | "number";
+  deltaPct?: number;
+  deltaLabel?: string;       // e.g. "vs last month"
+  intent?: "neutral" | "good" | "bad";
+}
+```
+
+Layout: 4 columns wide on desktop, 2 columns on tablet, 1 column on mobile. Two rows of four tiles.
+
+The 8 tiles, in order:
+1. Billed MTD
+2. Collected MTD
+3. Outstanding A/R
+4. Projected Month-End
+5. Billed YTD
+6. Unbilled Exposure
+7. Avg Days to Pay
+8. Gross Margin
+
+Delta colors: green for "good direction" (e.g., billed up, A/R down, days-to-pay down, margin up), red for the opposite, gray for neutral.
+
+If `grossMarginPct` response includes `missingWageTechCount > 0`, show a small warning icon on that tile with tooltip: "N technicians have no hourly wage set — margin uses fallback rate."
+
+### Band 2 — Revenue trends
+
+A single `Card` containing two charts side by side (stacking on mobile):
+
+**Left — Revenue trend (13 mo):** Recharts `LineChart`. Two lines: current year (solid, primary color) and previous year (dashed, muted). Y axis formatted as currency. Tooltip shows both values and the YoY %.
+
+**Right — Parts vs labor by month:** Recharts `BarChart`, stacked, last 13 months. Two stack segments: parts revenue (one color) and labor revenue (another). Legend at top.
+
+Below those, a small **revenue mix donut** in its own `Card`:
+- A `Tabs` control toggles the donut data between "Parts vs Labor," "Emergency vs Standard," and "Contract vs Ad-hoc."
+- Use Recharts `PieChart` with `innerRadius` to make it a donut. Center label shows total revenue for the period.
+
+### Empty placeholders for Slice 3
+
+Below Band 2, insert two empty `Card`s with placeholder text — these become Bands 3 and 4 in Slice 3:
+
+```
+[ Empty Card: "Drill-down tables coming in next release" ]
+[ Empty Card: "A/R aging and projections coming in next release" ]
+```
+
+This keeps the page from looking visually unfinished while Slice 3 is in flight.
+
+---
+
+## 4. Acceptance criteria
+
+1. `/financial-pulse` loads in under 1.5 seconds on a seeded dataset of ~1,000 invoices.
+2. Field-tech and irrigation-manager tokens hitting `/api/financial-pulse/*` get 403.
+3. All 8 KPI tiles render non-null values on a seeded demo dataset; "Gross Margin" displays a number even when some techs lack `hourlyWage` (using the fallback).
+4. The 13-month revenue chart renders both lines and the YoY % is visible on hover.
+5. The stacked bar chart renders 13 bars, each visibly split into parts/labor.
+6. The revenue-mix donut tabs switch the data without re-fetching (one request returns all three breakdowns).
+7. The "Last refreshed" timestamp updates after pressing Refresh.
+8. The page looks complete on desktop and mobile — no broken layout, no overflowing cards.
+
+---
+
+## 5. Explicitly out of scope for this slice
+
+- Drill-down tables (By Customer / By Tech / By Service Type) — Slice 3.
+- A/R aging panel — Slice 3.
+- Pipeline / forecast — Slice 3.
+- Custom date range picker (hook exists, leave disabled).
+- CSV exports — Slice 3 at earliest.
+- Any notification firing — Slice 4.
+
+---
+
+## 6. Implementation checklist
+
+- [ ] Page file + route registration + nav link
+- [ ] Role guard at the route level
+- [ ] `GET /api/financial-pulse/kpis` endpoint
+- [ ] `GET /api/financial-pulse/revenue-trend` endpoint
+- [ ] `GET /api/financial-pulse/revenue-mix` endpoint
+- [ ] `MetricTile` (extract or reuse)
+- [ ] KPI band with all 8 tiles
+- [ ] Revenue trend `LineChart`
+- [ ] Parts vs labor stacked `BarChart`
+- [ ] Revenue mix donut with Tabs control
+- [ ] Empty placeholder cards for Slice 3
+- [ ] QB sync banner integration
+- [ ] Refresh button + last-refreshed indicator
+- [ ] Tests: each endpoint (200 for admin/billing, 403 otherwise), KPI math against fixture data, margin fallback when wage missing
