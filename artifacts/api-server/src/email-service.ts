@@ -83,9 +83,14 @@ export class EmailService {
   }
 
   static async sendEstimateApprovalEmail(data: EstimateEmailData): Promise<void> {
+    // Task #703 — make a missing API key a hard failure on the
+    // estimate path so the route helper's try/catch rolls back the
+    // DB write and the frontend surfaces a real error instead of a
+    // misleading "Sent." toast.
     if (!isEmailConfigured()) {
-      console.error('SENDGRID_API_KEY not configured');
-      return;
+      throw new Error(
+        'Email is not configured: SENDGRID_API_KEY is missing. Estimate was not sent.',
+      );
     }
 
     const approveUrl = `${this.baseUrl}/estimate-approval/${data.approvalToken}`;
@@ -109,9 +114,20 @@ export class EmailService {
     const ccList = (data.cc ?? []).filter((s) => s && s.trim().length > 0);
     const bccList = (data.bcc ?? []).filter((s) => s && s.trim().length > 0);
 
+    // Task #703 — SendGrid rejects any send whose `from` is not a
+    // verified sender identity. Use the verified DEFAULT_FROM_EMAIL
+    // as the envelope From and set the company's profile email as
+    // Reply-To so customer replies still route to the company
+    // (mirrors `sendMarketingLeadNotification`).
+    const replyToAddr =
+      companyInfo.email && companyInfo.email.trim().length > 0
+        ? companyInfo.email
+        : undefined;
+
     try {
       await sgMail.send({
-        from: companyInfo.email,
+        from: DEFAULT_FROM_EMAIL,
+        ...(replyToAddr ? { replyTo: replyToAddr } : {}),
         to: toAddr,
         ...(ccList.length ? { cc: ccList } : {}),
         ...(bccList.length ? { bcc: bccList } : {}),
@@ -127,9 +143,32 @@ export class EmailService {
       });
 
       console.log(`Estimate approval email sent to ${toAddr}${ccList.length ? ` (cc ${ccList.join(', ')})` : ''}${bccList.length ? ` (bcc ${bccList.join(', ')})` : ''}`);
-    } catch (error) {
-      console.error('Failed to send estimate approval email:', error);
-      throw error;
+    } catch (error: any) {
+      // Task #703 — SendGrid puts the actionable reason on
+      // error.response.body.errors[*].message (e.g. "The from
+      // address does not match a verified Sender Identity"). Log
+      // the structured payload and re-throw an Error whose message
+      // includes that reason so the route handler returns it in
+      // the JSON response and the frontend toast is actionable.
+      const sgErrors = error?.response?.body?.errors;
+      const sgReason = Array.isArray(sgErrors)
+        ? sgErrors
+            .map((e: any) => e?.message)
+            .filter((m: unknown): m is string => typeof m === 'string' && m.length > 0)
+            .join('; ')
+        : '';
+      console.error('Failed to send estimate approval email:', {
+        statusCode: error?.code ?? error?.response?.statusCode,
+        body: error?.response?.body,
+        message: error?.message,
+      });
+      const baseMsg =
+        (error instanceof Error && error.message) || 'Unknown SendGrid error';
+      throw new Error(
+        sgReason
+          ? `SendGrid rejected the estimate email: ${sgReason}`
+          : `Failed to send estimate email: ${baseMsg}`,
+      );
     }
   }
 

@@ -962,7 +962,15 @@ export function registerEstimateRoutes(
       } catch (error) {
         req.log?.error?.({ err: error }, "Failed to send estimate email");
         console.error("Error sending estimate email:", error);
-        res.status(500).json({ message: "Failed to send estimate email" });
+        // Task #703 — surface the underlying SendGrid / config
+        // reason (e.g. "SendGrid rejected the estimate email: The
+        // from address does not match a verified Sender Identity")
+        // so the frontend toast is actionable.
+        const msg =
+          error instanceof Error && error.message
+            ? error.message
+            : "Failed to send estimate email";
+        res.status(500).json({ message: msg });
       }
     },
   );
@@ -1473,7 +1481,14 @@ export function registerEstimateRoutes(
           return;
         }
         console.error("Error sending approval email:", error);
-        res.status(500).json({ message: "Failed to send approval email" });
+        // Task #703 — surface the underlying SendGrid / config
+        // reason so the frontend toast is actionable instead of a
+        // generic "Failed to send approval email".
+        const msg =
+          error instanceof Error && error.message
+            ? error.message
+            : "Failed to send approval email";
+        res.status(500).json({ message: msg });
       }
     },
   );
