@@ -2743,18 +2743,101 @@ export class DatabaseStorage implements IStorage {
   }
 
   async markQuickBooksReconnectRequired(realmId: string, reason: string): Promise<void> {
+    // Task #743 — email admins on reconnect_required, 24h throttle,
+    // feature-flagged by DISABLE_QB_RECONNECT_EMAILS.
+    const now = new Date();
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const emailsEnabled = !process.env.DISABLE_QB_RECONNECT_EMAILS;
+
+    // Single transaction: update connection status AND atomically claim the
+    // 24h email send slot. Using a conditional UPDATE (WHERE on
+    // lastReconnectEmailAt) means only one concurrent caller can stamp the
+    // timestamp; callers that lose the race get 0 RETURNING rows and skip
+    // the send. This eliminates the TOCTOU window of a separate read → write.
+    let emailCompanyId: string | null = null;
     try {
-      await db.update(quickbooksIntegration)
-        .set({
-          connectionStatus: 'reconnect_required',
-          reconnectRequiredReason: reason,
-          lastRefreshFailure: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(quickbooksIntegration.realmId, realmId));
+      await db.transaction(async (tx) => {
+        // Always update the connection status regardless of email eligibility.
+        await tx.update(quickbooksIntegration)
+          .set({
+            connectionStatus: 'reconnect_required',
+            reconnectRequiredReason: reason,
+            lastRefreshFailure: now,
+            updatedAt: now,
+          })
+          .where(eq(quickbooksIntegration.realmId, realmId));
+
+        if (emailsEnabled) {
+          // Atomically stamp lastReconnectEmailAt only when 24h has elapsed.
+          // RETURNING companyId lets us know (a) we won the race, and
+          // (b) which company to look up recipients for — without a
+          // separate SELECT round-trip.
+          const stamped = await tx.update(quickbooksIntegration)
+            .set({ lastReconnectEmailAt: now })
+            .where(
+              and(
+                eq(quickbooksIntegration.realmId, realmId),
+                or(
+                  isNull(quickbooksIntegration.lastReconnectEmailAt),
+                  lte(quickbooksIntegration.lastReconnectEmailAt, twentyFourHoursAgo),
+                ),
+              ),
+            )
+            .returning({ companyId: quickbooksIntegration.companyId });
+          if (stamped.length > 0) {
+            emailCompanyId = stamped[0].companyId;
+          }
+        }
+      });
     } catch (error) {
       console.error('Error marking QuickBooks reconnect required:', error);
       throw error;
+    }
+
+    // Send emails AFTER the transaction commits. Failures here must not
+    // roll back the status update, so the entire block is try/catch isolated.
+    if (emailCompanyId !== null) {
+      try {
+        const companyIdInt = parseInt(emailCompanyId, 10);
+        if (isNaN(companyIdInt)) return;
+
+        const [companyResult, adminUsers] = await Promise.all([
+          db.select({ name: companies.name }).from(companies).where(eq(companies.id, companyIdInt)).limit(1),
+          db.select({ email: users.email }).from(users).where(
+            and(
+              eq(users.companyId, companyIdInt),
+              eq(users.isActive, true),
+              or(
+                eq(users.role, 'company_admin'),
+                eq(users.role, 'billing_manager'),
+              ),
+            ),
+          ),
+        ]);
+
+        const companyName = companyResult[0]?.name ?? `Company ${emailCompanyId}`;
+        const { EmailService } = await import('./email-service.js');
+        const { getIntegrationMeta } = await import('./lib/integration-catalog.js');
+        const qbMeta = getIntegrationMeta('qb');
+        const dashboardUrl = `${process.env.APP_BASE_URL ?? 'https://irrigopro.com'}/quickbooks`;
+
+        for (const user of adminUsers) {
+          if (!user.email) continue;
+          try {
+            await EmailService.sendQuickBooksReconnectRequiredEmail({
+              to: user.email,
+              companyName,
+              reason,
+              dashboardUrl,
+              runbookUrl: qbMeta.runbookUrl,
+            });
+          } catch {
+            // Per-recipient failure — log suppressed, continue with next recipient
+          }
+        }
+      } catch {
+        // Outer catch — email pipeline error must never surface to the caller
+      }
     }
   }
 

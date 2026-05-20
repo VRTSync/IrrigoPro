@@ -942,6 +942,41 @@ This is an automated email from IrrigoPro
     }
   }
 
+  // Task #743 — notify company admins and billing managers when
+  // QuickBooks flips to reconnect_required. Throws on configuration /
+  // send failure so the caller's per-recipient try/catch can skip
+  // without rolling back the status update.
+  static async sendQuickBooksReconnectRequiredEmail(args: {
+    to: string;
+    companyName: string;
+    reason: string;
+    dashboardUrl: string;
+    runbookUrl: string;
+  }): Promise<void> {
+    if (!isEmailConfigured()) {
+      throw new Error('Email service not configured (SENDGRID_API_KEY missing)');
+    }
+    const subject = `Action required: QuickBooks reconnection needed for ${args.companyName}`;
+    const html = `
+<p>Hello,</p>
+<p>The QuickBooks integration for <strong>${args.companyName}</strong> requires reconnection.</p>
+<p><strong>Reason:</strong> ${args.reason || 'Token refresh failed or token has expired.'}</p>
+<p>Please reconnect QuickBooks to restore invoice syncing:</p>
+<p><a href="${args.dashboardUrl}">Go to QuickBooks Settings</a></p>
+<p>If you need help, refer to the <a href="${args.runbookUrl}">QuickBooks integration runbook</a>.</p>
+<p>This email was sent because your account has the company admin or billing manager role. You will receive at most one notification per 24 hours.</p>
+`.trim();
+    const text = `Action required: QuickBooks reconnection needed for ${args.companyName}\n\nReason: ${args.reason || 'Token refresh failed or token has expired.'}\n\nReconnect here: ${args.dashboardUrl}\n\nRunbook: ${args.runbookUrl}`;
+    await sgMail.send({
+      from: DEFAULT_FROM_EMAIL,
+      to: args.to,
+      subject,
+      html,
+      text,
+      categories: ['qb-reconnect-required'],
+    });
+  }
+
   // Task #693 — Financial Pulse Slice 4. Generic budget-alert email
   // hook used by services/budget-alert-service.ts. The dispatcher
   // pre-renders the HTML/text payload (template lives next to the

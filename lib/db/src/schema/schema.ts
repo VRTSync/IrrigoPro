@@ -572,6 +572,7 @@ export const quickbooksIntegration = pgTable("quickbooks_integration", {
   connectionStatus: text("connection_status").notNull().default("connected"), // connected, disconnected, error, reconnect_required
   reconnectRequiredReason: text("reconnect_required_reason"),
   tokenEnvironment: text("token_environment").notNull().default("sandbox"), // sandbox, production
+  lastReconnectEmailAt: timestamp("last_reconnect_email_at", { withTimezone: true }), // Task #743 — throttle guard for reconnect_required admin emails
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 }, (table) => ({
