@@ -1,11 +1,12 @@
 // Task #688 — Financial Pulse Slice 2.
+// Task #692, #693, #708, #720, #731 — subsequent slices.
 //
-// /financial-pulse page for company_admin, billing_manager, super_admin.
-// Two bands in this slice (KPI snapshot, Revenue trends + mix donut)
-// plus two placeholder cards for Slice 3 (drill-downs and forward look).
+// /financial-pulse page — two-tab layout (Task #731):
+//   Pulse tab:      daily-ops KPI tiles, revenue trend, in-flight by customer/tech
+//   Accounting tab: existing KPI snapshot, charts, drill-downs, forward look
 
-import { useMemo, useState } from "react";
-import { useLocation } from "wouter";
+import { useMemo, useRef, useState } from "react";
+import { useLocation, useSearch } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Card,
@@ -14,6 +15,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   ToggleGroup,
   ToggleGroupItem,
@@ -51,6 +53,7 @@ import {
   Download,
   MoreHorizontal,
   ArrowUpDown,
+  Search,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { MetricTile } from "@/components/financial-pulse/metric-tile";
@@ -193,6 +196,45 @@ interface ProjectionsResponse {
   method: string;
 }
 
+// ─── Slice 5.3: Pulse tab types (Task #731) ──────────────────────────────
+type PulseTabKey = "pulse" | "accounting";
+type PulseSortKey = "name" | "inFlight" | "ytd";
+
+interface PulseLastCycle {
+  value: number;
+  monthLabel: string;
+  monthIso: string;
+  invoiceCount: number;
+}
+interface PulseInFlight {
+  value: number;
+  customerCount: number;
+  techCount: number;
+}
+interface PulseCustomerRow {
+  customerId: number;
+  name: string;
+  inFlight: number;
+  ytd: number;
+  budgetStatus: BudgetStatus;
+  monthlyCap: number | null;
+  monthlySpend: number;
+}
+interface PulseTechRow {
+  technicianId: number;
+  name: string;
+  inFlight: number;
+  ytd: number;
+}
+interface PulseSummaryResponse {
+  lastCycle: PulseLastCycle;
+  inFlight: PulseInFlight;
+  yearToDate: { value: number };
+  customers: PulseCustomerRow[];
+  technicians: PulseTechRow[];
+  asOf: string;
+}
+
 // QuickBooks connection-status payload shape. Matches the existing
 // `/api/quickbooks/connection-status` contract used by
 // `components/quickbooks/quickbooks-integration.tsx` — see
@@ -288,13 +330,14 @@ function useUserRole(): string | null {
 export default function FinancialPulsePage() {
   const role = useUserRole();
   const [, navigate] = useLocation();
-  const queryClient = useQueryClient();
-  const [period, setPeriod] = useState<Period>("mtd");
-  // Slice-3 custom date-range scaffold. Held here so the wiring exists
-  // in-component; the input is disabled until Slice 3 enables it.
-  const [customRange, setCustomRange] = useState<{ asOf: string | null }>({
-    asOf: null,
-  });
+  const search = useSearch();
+  const params = new URLSearchParams(search);
+  const activeTab: PulseTabKey =
+    params.get("tab") === "accounting" ? "accounting" : "pulse";
+
+  const setTab = (t: PulseTabKey) => {
+    navigate(`/financial-pulse?tab=${t}`);
+  };
 
   if (!role || !ALLOWED_ROLES.has(role)) {
     return (
@@ -317,6 +360,70 @@ export default function FinancialPulsePage() {
     );
   }
 
+  return (
+    <div className="py-6 space-y-6" data-testid="financial-pulse-page">
+      {/* Page header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Financial Pulse</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {activeTab === "pulse"
+              ? "Daily operations view — in-flight pipeline and revenue trend."
+              : "Accounting metrics — KPIs, drill-downs, and forward look."}
+          </p>
+        </div>
+        {/* Tab switcher */}
+        <div className="flex rounded-md border border-gray-200 overflow-hidden self-start">
+          <button
+            type="button"
+            onClick={() => setTab("pulse")}
+            data-testid="tab-pulse"
+            className={`px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === "pulse"
+                ? "bg-white text-gray-900 shadow-sm"
+                : "bg-gray-50 text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+            }`}
+          >
+            Pulse
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("accounting")}
+            data-testid="tab-accounting"
+            className={`px-4 py-2 text-sm font-medium transition-colors border-l border-gray-200 ${
+              activeTab === "accounting"
+                ? "bg-white text-gray-900 shadow-sm"
+                : "bg-gray-50 text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+            }`}
+          >
+            Accounting
+          </button>
+        </div>
+      </div>
+
+      {/* Tab content */}
+      {activeTab === "pulse" ? (
+        <PulseTab setTab={setTab} navigate={navigate} />
+      ) : (
+        <AccountingTab navigate={navigate} />
+      )}
+    </div>
+  );
+}
+
+// ─── Accounting Tab ───────────────────────────────────────────────────────
+//
+// Contains all existing Financial Pulse content: KPI tiles, stacked bar
+// chart, revenue-mix donut, drill-down tables, A/R aging, projections.
+// The revenue trend line chart has moved to PulseTab (Task #731).
+
+function AccountingTab({ navigate }: { navigate: (path: string) => void }) {
+  const queryClient = useQueryClient();
+  const [period, setPeriod] = useState<Period>("mtd");
+  const [customRange, setCustomRange] = useState<{ asOf: string | null }>({
+    asOf: null,
+  });
+
   const kpis = useQuery<KpisResponse>({
     queryKey: ["/api/financial-pulse/kpis", period],
     queryFn: () =>
@@ -328,7 +435,7 @@ export default function FinancialPulsePage() {
   const trend = useQuery<TrendResponse>({
     queryKey: ["/api/financial-pulse/revenue-trend", 13],
     queryFn: () =>
-      apiRequest(`/api/financial-pulse/revenue-trend?months=13`, "GET"),
+      apiRequest("/api/financial-pulse/revenue-trend?months=13", "GET"),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
@@ -371,61 +478,45 @@ export default function FinancialPulsePage() {
   const qbUnhealthy = isQbUnhealthy(qb.data);
 
   return (
-    <div className="py-6 space-y-6" data-testid="financial-pulse-page">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Financial Pulse</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Live financial picture across all customers and techs.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <ToggleGroup
-            type="single"
-            value={period}
-            onValueChange={(v) => v && setPeriod(v as Period)}
-            data-testid="period-toggle"
-          >
-            <ToggleGroupItem value="mtd" data-testid="period-mtd">
-              MTD
-            </ToggleGroupItem>
-            <ToggleGroupItem value="ytd" data-testid="period-ytd">
-              YTD
-            </ToggleGroupItem>
-          </ToggleGroup>
-          {/*
-            Slice-3 placeholder: custom date-range hook lives here but is
-            intentionally disabled in this slice. The endpoints already
-            accept an optional ?asOf=YYYY-MM-DD parameter; wiring this
-            control to it is a future slice. Rendered as a disabled input
-            so the affordance is visible (and the hook stays in-component)
-            without being interactive.
-          */}
-          <input
-            type="date"
-            value={customRange.asOf ?? ""}
-            onChange={(e) =>
-              setCustomRange((r) => ({ ...r, asOf: e.target.value }))
-            }
-            disabled
-            aria-label="Custom date range (coming soon)"
-            title="Custom date range — coming in Slice 3"
-            className="hidden sm:inline-block h-9 rounded-md border border-gray-200 bg-gray-50 px-2 text-xs text-gray-400 cursor-not-allowed"
-            data-testid="custom-range-asof"
-          />
-          <span className="text-xs text-gray-500 hidden sm:inline">
-            Last refreshed {formatRelative(lastRefreshed)}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={refresh}
-            data-testid="refresh-button"
-          >
-            <RefreshCw className="w-4 h-4 mr-1" /> Refresh
-          </Button>
-        </div>
+    <div className="space-y-6" data-testid="accounting-tab">
+      {/* Controls */}
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <ToggleGroup
+          type="single"
+          value={period}
+          onValueChange={(v) => v && setPeriod(v as Period)}
+          data-testid="period-toggle"
+        >
+          <ToggleGroupItem value="mtd" data-testid="period-mtd">
+            MTD
+          </ToggleGroupItem>
+          <ToggleGroupItem value="ytd" data-testid="period-ytd">
+            YTD
+          </ToggleGroupItem>
+        </ToggleGroup>
+        <input
+          type="date"
+          value={customRange.asOf ?? ""}
+          onChange={(e) =>
+            setCustomRange((r) => ({ ...r, asOf: e.target.value }))
+          }
+          disabled
+          aria-label="Custom date range (coming soon)"
+          title="Custom date range — coming in Slice 3"
+          className="hidden sm:inline-block h-9 rounded-md border border-gray-200 bg-gray-50 px-2 text-xs text-gray-400 cursor-not-allowed"
+          data-testid="custom-range-asof"
+        />
+        <span className="text-xs text-gray-500 hidden sm:inline">
+          Last refreshed {formatRelative(lastRefreshed)}
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={refresh}
+          data-testid="refresh-button"
+        >
+          <RefreshCw className="w-4 h-4 mr-1" /> Refresh
+        </Button>
       </div>
 
       {/* QB health banner */}
@@ -442,27 +533,463 @@ export default function FinancialPulsePage() {
       {/* Band 1 — KPI snapshot */}
       <KpiBand data={kpis.data} isLoading={kpis.isLoading} isError={kpis.isError} />
 
-      {/* Band 2 — Revenue trends */}
+      {/* Band 2 — Parts vs labor stacked bar (revenue trend line moved to Pulse tab) */}
       <Card>
         <CardHeader>
           <CardTitle>Revenue trends</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <RevenueTrendChart data={trend.data?.series ?? []} isLoading={trend.isLoading} />
-            <PartsVsLaborChart data={trend.data?.series ?? []} isLoading={trend.isLoading} />
-          </div>
+          <PartsVsLaborChart
+            data={trend.data?.series ?? []}
+            isLoading={trend.isLoading}
+          />
         </CardContent>
       </Card>
 
       {/* Revenue mix donut */}
       <RevenueMixCard data={mix.data} isLoading={mix.isLoading} />
 
-      {/* Band 3 — Drill-downs (Slice 3) */}
+      {/* Band 3 — Drill-downs */}
       <DrillDownBand period={period} />
 
-      {/* Band 4 — Forward look (Slice 3) */}
+      {/* Band 4 — Forward look */}
       <ForwardLookBand period={period} navigate={navigate} />
+    </div>
+  );
+}
+
+// ─── Pulse Tab ────────────────────────────────────────────────────────────
+//
+// Daily-ops view: three KPI tiles (Last Cycle, In-Flight, Year-to-Date),
+// the 13-month revenue trend line chart, and simplified per-customer and
+// per-tech in-flight / YTD tables.
+
+function PulseTab({
+  setTab,
+  navigate,
+}: {
+  setTab: (t: PulseTabKey) => void;
+  navigate: (path: string) => void;
+}) {
+  const tableRef = useRef<HTMLDivElement>(null);
+
+  const pulse = useQuery<PulseSummaryResponse>({
+    queryKey: ["/api/financial-pulse/pulse-summary"],
+    queryFn: () => apiRequest("/api/financial-pulse/pulse-summary", "GET"),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const trend = useQuery<TrendResponse>({
+    queryKey: ["/api/financial-pulse/revenue-trend", 13],
+    queryFn: () =>
+      apiRequest("/api/financial-pulse/revenue-trend?months=13", "GET"),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+
+  // Customer table state
+  const [custSearch, setCustSearch] = useState("");
+  const [custSortKey, setCustSortKey] = useState<PulseSortKey>("inFlight");
+  const [custSortDir, setCustSortDir] = useState<SortDir>("desc");
+  const [custPage, setCustPage] = useState(0);
+  const CUST_PAGE_SIZE = 25;
+
+  // Tech table state
+  const [techSortKey, setTechSortKey] = useState<PulseSortKey>("inFlight");
+  const [techSortDir, setTechSortDir] = useState<SortDir>("desc");
+
+  const onCustSort = (key: PulseSortKey) => {
+    setCustPage(0);
+    if (custSortKey === key) {
+      setCustSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setCustSortKey(key);
+      setCustSortDir(key === "name" ? "asc" : "desc");
+    }
+  };
+
+  const onTechSort = (key: PulseSortKey) => {
+    if (techSortKey === key) {
+      setTechSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setTechSortKey(key);
+      setTechSortDir(key === "name" ? "asc" : "desc");
+    }
+  };
+
+  const sortedCustomers = useMemo(() => {
+    const raw = pulse.data?.customers ?? [];
+    const filtered = custSearch
+      ? raw.filter((r) =>
+          r.name.toLowerCase().includes(custSearch.toLowerCase()),
+        )
+      : raw;
+    const copy = [...filtered];
+    copy.sort((a, b) => {
+      let diff = 0;
+      if (custSortKey === "name") diff = a.name.localeCompare(b.name);
+      else if (custSortKey === "inFlight") diff = a.inFlight - b.inFlight;
+      else diff = a.ytd - b.ytd;
+      return custSortDir === "desc" ? -diff : diff;
+    });
+    return copy;
+  }, [pulse.data?.customers, custSearch, custSortKey, custSortDir]);
+
+  const custPageRows = sortedCustomers.slice(
+    custPage * CUST_PAGE_SIZE,
+    (custPage + 1) * CUST_PAGE_SIZE,
+  );
+  const custTotalPages = Math.max(
+    1,
+    Math.ceil(sortedCustomers.length / CUST_PAGE_SIZE),
+  );
+
+  const sortedTechs = useMemo(() => {
+    const raw = pulse.data?.technicians ?? [];
+    const copy = [...raw];
+    copy.sort((a, b) => {
+      let diff = 0;
+      if (techSortKey === "name") diff = a.name.localeCompare(b.name);
+      else if (techSortKey === "inFlight") diff = a.inFlight - b.inFlight;
+      else diff = a.ytd - b.ytd;
+      return techSortDir === "desc" ? -diff : diff;
+    });
+    return copy;
+  }, [pulse.data?.technicians, techSortKey, techSortDir]);
+
+  const isLoading = pulse.isLoading;
+  const isError = pulse.isError;
+
+  return (
+    <div className="space-y-6" data-testid="pulse-tab">
+      {/* ── KPI tiles ──────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {/* Last Cycle — clickable → invoices filtered to that month */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => {
+            const iso = pulse.data?.lastCycle.monthIso;
+            if (iso) navigate(`/invoices?month=${iso}`);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              const iso = pulse.data?.lastCycle.monthIso;
+              if (iso) navigate(`/invoices?month=${iso}`);
+            }
+          }}
+          className="cursor-pointer hover:opacity-90 transition-opacity"
+          data-testid="pulse-tile-last-cycle"
+        >
+          <MetricTile
+            label="Last Cycle Billed"
+            value={pulse.data?.lastCycle.value ?? null}
+            format="currency"
+            helper={
+              pulse.data?.lastCycle.monthLabel && pulse.data.lastCycle.monthIso
+                ? `${pulse.data.lastCycle.monthLabel} · ${pulse.data.lastCycle.invoiceCount} invoices`
+                : pulse.data
+                ? "No cycles yet"
+                : undefined
+            }
+            deltaGoodDirection="up"
+            isLoading={isLoading}
+            isError={isError}
+            infoTip="Total billed in the most recent billing cycle. Click to view those invoices."
+          />
+        </div>
+
+        {/* In-Flight — scrolls to customers table */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() =>
+            tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+          }
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ")
+              tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+          className="cursor-pointer hover:opacity-90 transition-opacity"
+          data-testid="pulse-tile-in-flight"
+        >
+          <MetricTile
+            label="In-Flight Pipeline"
+            value={pulse.data?.inFlight.value ?? null}
+            format="currency"
+            helper={
+              pulse.data?.inFlight != null
+                ? `${pulse.data.inFlight.customerCount} customers · ${pulse.data.inFlight.techCount} techs`
+                : undefined
+            }
+            deltaGoodDirection="up"
+            isLoading={isLoading}
+            isError={isError}
+            infoTip="Uninvoiced work orders + billing sheets with no invoice yet. Click to scroll to the customer breakdown."
+          />
+        </div>
+
+        {/* Year to Date — switches to Accounting tab */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setTab("accounting")}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") setTab("accounting");
+          }}
+          className="cursor-pointer hover:opacity-90 transition-opacity"
+          data-testid="pulse-tile-ytd"
+        >
+          <MetricTile
+            label="Year to Date"
+            value={pulse.data?.yearToDate.value ?? null}
+            format="currency"
+            helper="Invoiced + in-flight"
+            deltaGoodDirection="up"
+            isLoading={isLoading}
+            isError={isError}
+            windowBadge="YTD"
+            infoTip="Invoiced this calendar year plus current in-flight pipeline. Click to see full accounting metrics."
+          />
+        </div>
+      </div>
+
+      {/* ── Revenue trend (13-month line chart) ────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Revenue trend</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RevenueTrendChart
+            data={trend.data?.series ?? []}
+            isLoading={trend.isLoading}
+          />
+        </CardContent>
+      </Card>
+
+      {/* ── In-Flight by Customer + Technician (side-by-side on lg+) ── */}
+      <div
+        ref={tableRef}
+        className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start"
+        data-testid="pulse-tables-row"
+      >
+        <Card data-testid="pulse-customers-card">
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <CardTitle>In-Flight by Customer</CardTitle>
+            <div className="relative w-56">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400 pointer-events-none" />
+              <Input
+                value={custSearch}
+                onChange={(e) => {
+                  setCustSearch(e.target.value);
+                  setCustPage(0);
+                }}
+                placeholder="Search customers…"
+                className="pl-8 h-8 text-sm"
+                data-testid="pulse-customer-search"
+              />
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="rounded-md overflow-x-auto">
+              <Table>
+                <TableHeader className="sticky top-0 bg-white">
+                  <TableRow>
+                    <TableHead>
+                      <SortHeader
+                        label="Customer"
+                        active={custSortKey === "name"}
+                        dir={custSortDir}
+                        onClick={() => onCustSort("name")}
+                        testId="pulse-sort-cust-name"
+                      />
+                    </TableHead>
+                    <TableHead>Budget</TableHead>
+                    <TableHead className="text-right">
+                      <SortHeader
+                        label="In-Flight"
+                        active={custSortKey === "inFlight"}
+                        dir={custSortDir}
+                        align="right"
+                        onClick={() => onCustSort("inFlight")}
+                        testId="pulse-sort-cust-inflight"
+                      />
+                    </TableHead>
+                    <TableHead className="text-right">
+                      <SortHeader
+                        label="YTD"
+                        active={custSortKey === "ytd"}
+                        dir={custSortDir}
+                        align="right"
+                        onClick={() => onCustSort("ytd")}
+                        testId="pulse-sort-cust-ytd"
+                      />
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="py-8 text-center text-sm text-gray-500"
+                      >
+                        Loading…
+                      </TableCell>
+                    </TableRow>
+                  ) : custPageRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="py-8 text-center text-sm text-gray-400"
+                      >
+                        {custSearch ? "No customers match your search." : "No in-flight work found."}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    custPageRows.map((r) => (
+                      <TableRow
+                        key={r.customerId}
+                        className="cursor-pointer hover:bg-gray-50"
+                        onClick={() => navigate(`/customers/${r.customerId}`)}
+                        data-testid={`pulse-customer-row-${r.customerId}`}
+                      >
+                        <TableCell className="font-medium">
+                          <span>{r.name}</span>
+                        </TableCell>
+                        <TableCell>
+                          <StatusPill status={r.budgetStatus} />
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">
+                          {r.inFlight > 0
+                            ? CURRENCY.format(r.inFlight)
+                            : <span className="text-gray-400">—</span>}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {CURRENCY.format(r.ytd)}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+            {sortedCustomers.length > CUST_PAGE_SIZE && (
+              <div className="flex items-center justify-between px-4 py-3 text-xs text-gray-600 border-t">
+                <span>
+                  Page {custPage + 1} of {custTotalPages} ·{" "}
+                  {sortedCustomers.length} customers
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={custPage === 0}
+                    onClick={() => setCustPage((p) => Math.max(0, p - 1))}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={custPage >= custTotalPages - 1}
+                    onClick={() =>
+                      setCustPage((p) => Math.min(custTotalPages - 1, p + 1))
+                    }
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ── In-Flight by Technician ──────────────────────────────── */}
+        <Card data-testid="pulse-techs-card">
+        <CardHeader>
+          <CardTitle>In-Flight by Technician</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="rounded-md overflow-x-auto">
+            <Table>
+              <TableHeader className="sticky top-0 bg-white">
+                <TableRow>
+                  <TableHead>
+                    <SortHeader
+                      label="Technician"
+                      active={techSortKey === "name"}
+                      dir={techSortDir}
+                      onClick={() => onTechSort("name")}
+                      testId="pulse-sort-tech-name"
+                    />
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <SortHeader
+                      label="In-Flight"
+                      active={techSortKey === "inFlight"}
+                      dir={techSortDir}
+                      align="right"
+                      onClick={() => onTechSort("inFlight")}
+                      testId="pulse-sort-tech-inflight"
+                    />
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <SortHeader
+                      label="YTD"
+                      active={techSortKey === "ytd"}
+                      dir={techSortDir}
+                      align="right"
+                      onClick={() => onTechSort("ytd")}
+                      testId="pulse-sort-tech-ytd"
+                    />
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={3}
+                      className="py-8 text-center text-sm text-gray-500"
+                    >
+                      Loading…
+                    </TableCell>
+                  </TableRow>
+                ) : sortedTechs.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={3}
+                      className="py-8 text-center text-sm text-gray-400"
+                    >
+                      No technician activity found.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  sortedTechs.map((r) => (
+                    <TableRow
+                      key={r.technicianId}
+                      data-testid={`pulse-tech-row-${r.technicianId}`}
+                    >
+                      <TableCell className="font-medium">{r.name}</TableCell>
+                      <TableCell className="text-right tabular-nums font-medium">
+                        {r.inFlight > 0
+                          ? CURRENCY.format(r.inFlight)
+                          : <span className="text-gray-400">—</span>}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {CURRENCY.format(r.ytd)}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+      </div>
     </div>
   );
 }

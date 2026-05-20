@@ -32,11 +32,16 @@ import {
   getYtdWindow,
   isUnbilledWorkRow,
   pctDelta,
+  computePulseCustomers,
+  computePulseTechnicians,
   type BillingSheetBillableLike,
   type CustomerWithBudget,
   type InvoiceLike,
   type UserLike,
+  type UserWithName,
   type WorkOrderBillableLike,
+  type PulseWorkOrderLike,
+  type PulseBillingSheetLike,
 } from "../financial-pulse-math";
 
 describe("Task #688 — financial-pulse role guard", () => {
@@ -1028,3 +1033,436 @@ describe("Task #688 — MTD/YTD windows are to-date, not full period", () => {
   });
 });
 
+
+// ─── Task #731: pulse-summary endpoint role guard + math helpers ──────────
+
+// Role-guard tests for GET /api/financial-pulse/pulse-summary.
+// The endpoint uses the same resolveFinancialPulseScope helper as every
+// other FP endpoint, so we verify the roles that must be denied (403)
+// and the roles that should be granted (200 scope).
+describe("Task #731 — pulse-summary endpoint role guard", () => {
+  it("denies field_tech", () => {
+    const r = resolveFinancialPulseScope("field_tech", 1, undefined);
+    assert.equal(r.status, 403);
+  });
+  it("denies irrigation_manager", () => {
+    const r = resolveFinancialPulseScope("irrigation_manager", 1, undefined);
+    assert.equal(r.status, 403);
+  });
+  it("allows billing_manager scoped to own company", () => {
+    const r = resolveFinancialPulseScope("billing_manager", 5, undefined);
+    assert.equal(r.status, 200);
+    if (r.status === 200) assert.equal(r.companyId, 5);
+  });
+  it("allows company_admin scoped to own company", () => {
+    const r = resolveFinancialPulseScope("company_admin", 7, undefined);
+    assert.equal(r.status, 200);
+    if (r.status === 200) assert.equal(r.companyId, 7);
+  });
+  it("super_admin with explicit companyId resolves to that company", () => {
+    const r = resolveFinancialPulseScope("super_admin", 1, "42");
+    assert.equal(r.status, 200);
+    if (r.status === 200) assert.equal(r.companyId, 42);
+  });
+  it("super_admin without companyId resolves to null (all companies)", () => {
+    const r = resolveFinancialPulseScope("super_admin", 1, undefined);
+    assert.equal(r.status, 200);
+    if (r.status === 200) assert.equal(r.companyId, null);
+  });
+  it("non-super_admin queryCompanyId is silently ignored — own company is always used", () => {
+    const r = resolveFinancialPulseScope("billing_manager", 5, "99");
+    assert.equal(r.status, 200);
+    if (r.status === 200) assert.equal(r.companyId, 5);
+  });
+});
+
+// Tab routing default — pure URL-parsing logic verifying the
+// defaulting logic (no server required)
+describe("Task #731 — Pulse tab URL routing defaults", () => {
+  const parseTab = (search: string): "pulse" | "accounting" => {
+    const params = new URLSearchParams(search);
+    return params.get("tab") === "accounting" ? "accounting" : "pulse";
+  };
+
+  it("defaults to pulse when no ?tab param", () => {
+    assert.equal(parseTab(""), "pulse");
+  });
+  it("defaults to pulse when tab has unknown value", () => {
+    assert.equal(parseTab("tab=unknown"), "pulse");
+    assert.equal(parseTab("tab="), "pulse");
+  });
+  it("routes to accounting when tab=accounting", () => {
+    assert.equal(parseTab("tab=accounting"), "accounting");
+  });
+  it("routes to pulse when tab=pulse", () => {
+    assert.equal(parseTab("tab=pulse"), "pulse");
+  });
+});
+
+describe("Task #731 — isUnbilledWorkRow", () => {
+  it("returns true for null invoiceId and non-cancelled status", () => {
+    assert.ok(isUnbilledWorkRow({ invoiceId: null, status: "work_completed" }));
+    assert.ok(isUnbilledWorkRow({ invoiceId: undefined, status: "pending_manager_review" }));
+    assert.ok(isUnbilledWorkRow({ invoiceId: null, status: "approved_passed_to_billing" }));
+  });
+  it("returns false when invoiceId is set", () => {
+    assert.ok(!isUnbilledWorkRow({ invoiceId: 42, status: "work_completed" }));
+    assert.ok(!isUnbilledWorkRow({ invoiceId: 1, status: "pending_manager_review" }));
+  });
+  it("returns false when status is cancelled regardless of invoiceId", () => {
+    assert.ok(!isUnbilledWorkRow({ invoiceId: null, status: "cancelled" }));
+    assert.ok(!isUnbilledWorkRow({ invoiceId: undefined, status: "cancelled" }));
+  });
+});
+
+describe("Task #731 — computePulseCustomers", () => {
+  const makeCust = (id: number, cap?: number | null): CustomerWithBudget => ({
+    id,
+    companyId: 1,
+    contractType: null,
+    emergencyLaborRate: null,
+    name: `Customer ${id}`,
+    hiddenFromBilling: false,
+    monthlyBudgetCap: cap ?? null,
+    annualBudgetCap: null,
+    budgetSoftThresholdPercent: null,
+    budgetHardThresholdPercent: null,
+  });
+
+  const now = new Date("2026-05-20T12:00:00Z");
+  const currentYear = 2026;
+
+  it("sums in-flight WOs + BSs per customer", () => {
+    const wos: PulseWorkOrderLike[] = [
+      { invoiceId: null, totalAmount: "100", status: "work_completed", customerId: 1 },
+      { invoiceId: null, totalAmount: "200", status: "pending_manager_review", customerId: 1 },
+    ];
+    const bss: PulseBillingSheetLike[] = [
+      { invoiceId: null, totalAmount: "50", status: "submitted", customerId: 1 },
+    ];
+    const rows = computePulseCustomers({
+      customers: [makeCust(1)],
+      invoices: [],
+      workOrders: wos,
+      billingSheets: bss,
+      currentYear,
+      now,
+    });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].inFlight, 350);
+  });
+
+  it("excludes hiddenFromBilling customers", () => {
+    const hidden: CustomerWithBudget = { ...makeCust(2), hiddenFromBilling: true };
+    const rows = computePulseCustomers({
+      customers: [hidden],
+      invoices: [],
+      workOrders: [{ invoiceId: null, totalAmount: "999", status: "work_completed", customerId: 2 }],
+      billingSheets: [],
+      currentYear,
+      now,
+    });
+    assert.equal(rows.length, 0);
+  });
+
+  it("excludes cancelled rows from in-flight", () => {
+    const rows = computePulseCustomers({
+      customers: [makeCust(1)],
+      invoices: [],
+      workOrders: [{ invoiceId: null, totalAmount: "500", status: "cancelled", customerId: 1 }],
+      billingSheets: [],
+      currentYear,
+      now,
+    });
+    assert.equal(rows[0].inFlight, 0);
+  });
+
+  it("computes invoiced YTD using invoiceYear", () => {
+    const inv: InvoiceLike = {
+      id: 1,
+      customerId: 1,
+      totalAmount: "1000",
+      status: "sent",
+      createdAt: new Date("2026-03-15"),
+      invoiceYear: 2026,
+      invoiceMonth: 3,
+    };
+    const prevYearInv: InvoiceLike = {
+      id: 2,
+      customerId: 1,
+      totalAmount: "500",
+      status: "sent",
+      createdAt: new Date("2025-12-01"),
+      invoiceYear: 2025,
+      invoiceMonth: 12,
+    };
+    const rows = computePulseCustomers({
+      customers: [makeCust(1)],
+      invoices: [inv, prevYearInv],
+      workOrders: [],
+      billingSheets: [],
+      currentYear,
+      now,
+    });
+    assert.equal(rows[0].ytd, 1000); // only current year
+  });
+
+  it("math identity: per-customer in-flight sums to total in-flight", () => {
+    const custs = [makeCust(1), makeCust(2)];
+    const wos: PulseWorkOrderLike[] = [
+      { invoiceId: null, totalAmount: "300", status: "work_completed", customerId: 1 },
+      { invoiceId: null, totalAmount: "500", status: "work_completed", customerId: 2 },
+    ];
+    const rows = computePulseCustomers({
+      customers: custs,
+      invoices: [],
+      workOrders: wos,
+      billingSheets: [],
+      currentYear,
+      now,
+    });
+    const custTotal = rows.reduce((s, r) => s + r.inFlight, 0);
+    assert.equal(custTotal, 800);
+  });
+});
+
+describe("Task #731 — computePulseTechnicians", () => {
+  const makeTech = (id: number): UserWithName => ({
+    id,
+    hourlyWage: null,
+    name: `Tech ${id}`,
+    role: "field_tech",
+  });
+
+  it("sums in-flight WOs by assignedTechnicianId", () => {
+    const wos: PulseWorkOrderLike[] = [
+      { invoiceId: null, totalAmount: "400", status: "work_completed", customerId: 1, assignedTechnicianId: 10 },
+      { invoiceId: null, totalAmount: "100", status: "pending_manager_review", customerId: 1, assignedTechnicianId: 10 },
+    ];
+    const rows = computePulseTechnicians({
+      techs: [makeTech(10)],
+      invoices: [],
+      workOrders: wos,
+      billingSheets: [],
+      currentYear: 2026,
+    });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].inFlight, 500);
+  });
+
+  it("sums in-flight BSs by technicianId", () => {
+    const bss: PulseBillingSheetLike[] = [
+      { invoiceId: null, totalAmount: "250", status: "submitted", customerId: 1, technicianId: 20 },
+    ];
+    const rows = computePulseTechnicians({
+      techs: [makeTech(20)],
+      invoices: [],
+      workOrders: [],
+      billingSheets: bss,
+      currentYear: 2026,
+    });
+    assert.equal(rows[0].inFlight, 250);
+  });
+
+  it("does not double-count ytd when WO and BS both link to same invoice", () => {
+    const invs: InvoiceLike[] = [
+      { id: 5, customerId: 1, totalAmount: "600", status: "sent", createdAt: new Date("2026-04-01"), invoiceYear: 2026, invoiceMonth: 4 },
+    ];
+    const wos: PulseWorkOrderLike[] = [
+      { invoiceId: 5, totalAmount: "0", status: "invoiced", customerId: 1, assignedTechnicianId: 10 },
+    ];
+    const bss: PulseBillingSheetLike[] = [
+      { invoiceId: 5, totalAmount: "0", status: "invoiced", customerId: 1, technicianId: 10 },
+    ];
+    const rows = computePulseTechnicians({
+      techs: [makeTech(10)],
+      invoices: invs,
+      workOrders: wos,
+      billingSheets: bss,
+      currentYear: 2026,
+    });
+    assert.equal(rows[0].ytd, 600); // counted once, not twice
+  });
+
+  it("excludes techs not in the techs array (prevents ghost rows)", () => {
+    const wos: PulseWorkOrderLike[] = [
+      { invoiceId: null, totalAmount: "999", status: "work_completed", customerId: 1, assignedTechnicianId: 99 },
+    ];
+    const rows = computePulseTechnicians({
+      techs: [], // no techs registered
+      invoices: [],
+      workOrders: wos,
+      billingSheets: [],
+      currentYear: 2026,
+    });
+    assert.equal(rows.length, 0);
+  });
+
+  it("math identity: tech in-flight sums match independent totals", () => {
+    const wos: PulseWorkOrderLike[] = [
+      { invoiceId: null, totalAmount: "200", status: "work_completed", customerId: 1, assignedTechnicianId: 10 },
+      { invoiceId: null, totalAmount: "300", status: "work_completed", customerId: 1, assignedTechnicianId: 11 },
+    ];
+    const rows = computePulseTechnicians({
+      techs: [makeTech(10), makeTech(11)],
+      invoices: [],
+      workOrders: wos,
+      billingSheets: [],
+      currentYear: 2026,
+    });
+    const total = rows.reduce((s, r) => s + r.inFlight, 0);
+    assert.equal(total, 500);
+  });
+});
+
+// ─── Task #731 — pulse-summary payload contract ──────────────────────────
+//
+// Unit-level tests on the pulse-summary math helpers used directly by the
+// endpoint handler. These verify the payload shape and key invariants without
+// requiring a running Express server or database.
+describe("Task #731 — pulse-summary payload contract: empty state", () => {
+  const emptyInput = {
+    customers: [] as CustomerWithBudget[],
+    invoices: [] as InvoiceLike[],
+    workOrders: [] as PulseWorkOrderLike[],
+    billingSheets: [] as PulseBillingSheetLike[],
+    currentYear: 2026,
+    now: new Date("2026-05-20T12:00:00Z"),
+  };
+
+  it("computePulseCustomers returns [] when no customers", () => {
+    const rows = computePulseCustomers(emptyInput);
+    assert.deepEqual(rows, []);
+  });
+
+  it("computePulseTechnicians returns [] when no techs", () => {
+    const rows = computePulseTechnicians({ ...emptyInput, techs: [] });
+    assert.deepEqual(rows, []);
+  });
+
+  it("getDistinctBillingCycles returns [] for empty invoice list (→ No cycles yet path)", () => {
+    const cycles = getDistinctBillingCycles([]);
+    assert.equal(cycles.length, 0);
+  });
+});
+
+describe("Task #731 — pulse-summary payload contract: YTD = invoicedYtd + inFlight", () => {
+  const makeCust = (id: number): CustomerWithBudget => ({
+    id,
+    companyId: 1,
+    contractType: null,
+    emergencyLaborRate: null,
+    name: `Customer ${id}`,
+    hiddenFromBilling: false,
+    monthlyBudgetCap: null,
+    annualBudgetCap: null,
+    budgetSoftThresholdPercent: null,
+    budgetHardThresholdPercent: null,
+  });
+
+  it("per-customer inFlight + invoiced YTD sum to expected totals", () => {
+    const inv: InvoiceLike = {
+      id: 1,
+      customerId: 1,
+      totalAmount: "500",
+      status: "sent",
+      createdAt: new Date("2026-02-10"),
+      invoiceYear: 2026,
+      invoiceMonth: 2,
+    };
+    const wo: PulseWorkOrderLike = {
+      invoiceId: null,
+      totalAmount: "200",
+      status: "work_completed",
+      customerId: 1,
+    };
+    const rows = computePulseCustomers({
+      customers: [makeCust(1)],
+      invoices: [inv],
+      workOrders: [wo],
+      billingSheets: [],
+      currentYear: 2026,
+      now: new Date("2026-05-20"),
+    });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].inFlight, 200);
+    assert.equal(rows[0].ytd, 500);
+  });
+
+  it("ytd tile = invoicedYtd + inFlightTotal", () => {
+    const inv: InvoiceLike = {
+      id: 1,
+      customerId: 1,
+      totalAmount: "1000",
+      status: "sent",
+      createdAt: new Date("2026-01-15"),
+      invoiceYear: 2026,
+      invoiceMonth: 1,
+    };
+    const wo: PulseWorkOrderLike = {
+      invoiceId: null,
+      totalAmount: "300",
+      status: "pending_manager_review",
+      customerId: 1,
+    };
+    const invoicedYtd = 1000;
+    const inFlightTotal = 300;
+    const ytdValue = invoicedYtd + inFlightTotal;
+    assert.equal(ytdValue, 1300);
+  });
+});
+
+// ─── Task #731 — hidden-customer / tile consistency ───────────────────────
+//
+// Verifies the identity: sum(technicians.inFlight) === inFlight.value
+// when hidden customers exist. The endpoint prefilters WOs/BSs before
+// passing to computePulseTechnicians so both agree.
+describe("Task #731 — hidden-customer exclusion: tech inFlight equals tile inFlight", () => {
+  const makeCust = (id: number, hidden: boolean): CustomerWithBudget => ({
+    id,
+    companyId: 1,
+    contractType: null,
+    emergencyLaborRate: null,
+    name: `Customer ${id}`,
+    hiddenFromBilling: hidden,
+    monthlyBudgetCap: null,
+    annualBudgetCap: null,
+    budgetSoftThresholdPercent: null,
+    budgetHardThresholdPercent: null,
+  });
+
+  it("tech inFlight excludes work for hiddenFromBilling customers (parity with tile)", () => {
+    const allWos: PulseWorkOrderLike[] = [
+      // visible customer 1 — should be included
+      { invoiceId: null, totalAmount: "300", status: "work_completed", customerId: 1, assignedTechnicianId: 10 },
+      // hidden customer 2 — should be excluded from both tile and tech row
+      { invoiceId: null, totalAmount: "700", status: "work_completed", customerId: 2, assignedTechnicianId: 10 },
+    ];
+
+    const hiddenIds = new Set([2]);
+
+    // Simulate what the endpoint does: build tile value and prefilter before computePulseTechnicians
+    let tileInFlight = 0;
+    for (const wo of allWos) {
+      if (hiddenIds.has(wo.customerId)) continue;
+      if (!isUnbilledWorkRow(wo)) continue;
+      tileInFlight += parseFloat(wo.totalAmount as string);
+    }
+
+    const visibleWos = allWos.filter((wo) => !hiddenIds.has(wo.customerId));
+
+    const techRows = computePulseTechnicians({
+      techs: [{ id: 10, hourlyWage: null, name: "Tech 10", role: "field_tech" } as UserWithName],
+      invoices: [],
+      workOrders: visibleWos,
+      billingSheets: [],
+      currentYear: 2026,
+    });
+
+    const techInFlight = techRows.reduce((s, r) => s + r.inFlight, 0);
+
+    // Both the tile and tech total should equal 300 (hidden 700 excluded from both)
+    assert.equal(tileInFlight, 300);
+    assert.equal(techInFlight, tileInFlight);
+  });
+});

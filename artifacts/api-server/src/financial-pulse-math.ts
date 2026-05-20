@@ -312,7 +312,7 @@ export function computeAllBillableYtd(
 // endpoint so both surfaces apply exactly the same rule. A row is unbilled when
 // it has no invoice yet AND was not explicitly cancelled.
 export function isUnbilledWorkRow(row: {
-  invoiceId: number | null | undefined;
+  invoiceId?: number | null | undefined;
   status: string;
 }): boolean {
   return row.invoiceId == null && row.status !== "cancelled";
@@ -963,4 +963,191 @@ export function computeRevenueMix(input: {
     emergencyVsStandard: { emergency, standard },
     contractVsAdhoc: { contract, adhoc },
   };
+}
+
+// ─── Slice 5.3: Pulse-tab helpers (Task #731) ─────────────────────────────
+// isUnbilledWorkRow is defined in Task #730 above (line ~314) — shared with
+// computeUnbilledExposure. These interfaces extend it for per-customer/tech
+// attribution in the pulse-summary endpoint.
+
+/**
+ * Extended WO shape used by the pulse-summary endpoint to enable
+ * per-customer and per-tech attribution without extra round-trips.
+ */
+export interface PulseWorkOrderLike extends WorkOrderBillableLike {
+  customerId: number;
+  assignedTechnicianId?: number | null;
+}
+
+/**
+ * Extended BS shape used by the pulse-summary endpoint.
+ */
+export interface PulseBillingSheetLike extends BillingSheetBillableLike {
+  customerId: number;
+  technicianId?: number | null;
+}
+
+export interface PulseCustomerRow {
+  customerId: number;
+  name: string;
+  inFlight: number;
+  ytd: number;
+  budgetStatus: BudgetStatus;
+  monthlyCap: number | null;
+  monthlySpend: number;
+}
+
+export interface PulseTechRow {
+  technicianId: number;
+  name: string;
+  inFlight: number;
+  ytd: number;
+}
+
+/**
+ * Compute per-customer in-flight + YTD rows for the Pulse tab.
+ * Customers flagged hiddenFromBilling are excluded.
+ *
+ * - inFlight: sum of uninvoiced non-cancelled WOs + BSs for this customer
+ * - ytd:      sum of invoices in the current calendar year (by invoiceYear)
+ * - budgetStatus: classified from monthly spend / cap (same logic as budget-usage)
+ */
+export function computePulseCustomers(input: {
+  customers: CustomerWithBudget[];
+  invoices: InvoiceLike[];
+  workOrders: PulseWorkOrderLike[];
+  billingSheets: PulseBillingSheetLike[];
+  currentYear: number;
+  now: Date;
+}): PulseCustomerRow[] {
+  const { customers: custs, invoices, workOrders, billingSheets, currentYear, now } = input;
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const ytdByCust = new Map<number, number>();
+  const monthlySpendByCust = new Map<number, number>();
+
+  for (const inv of invoices) {
+    if (inv.status === "draft" || inv.status === "cancelled") continue;
+    const amt = toNum(inv.totalAmount);
+    if ((inv.invoiceYear ?? 0) === currentYear) {
+      ytdByCust.set(inv.customerId, (ytdByCust.get(inv.customerId) ?? 0) + amt);
+    }
+    const d = inv.createdAt instanceof Date ? inv.createdAt : new Date(inv.createdAt as string);
+    if (!Number.isNaN(d.getTime()) && d >= monthStart) {
+      monthlySpendByCust.set(inv.customerId, (monthlySpendByCust.get(inv.customerId) ?? 0) + amt);
+    }
+  }
+
+  const inFlightByCust = new Map<number, number>();
+  for (const wo of workOrders) {
+    if (!isUnbilledWorkRow(wo)) continue;
+    inFlightByCust.set(wo.customerId, (inFlightByCust.get(wo.customerId) ?? 0) + toNum(wo.totalAmount));
+  }
+  for (const bs of billingSheets) {
+    if (!isUnbilledWorkRow(bs)) continue;
+    inFlightByCust.set(bs.customerId, (inFlightByCust.get(bs.customerId) ?? 0) + toNum(bs.totalAmount));
+  }
+
+  const out: PulseCustomerRow[] = [];
+  for (const c of custs) {
+    if (c.hiddenFromBilling) continue;
+    const rawCap = c.monthlyBudgetCap;
+    const capN = rawCap == null || rawCap === "" ? null : toNum(rawCap) || null;
+    const monthlySpend = monthlySpendByCust.get(c.id) ?? 0;
+    const mPct = capN != null && capN > 0 ? monthlySpend / capN : null;
+    const soft = c.budgetSoftThresholdPercent ?? 75;
+    const hard = c.budgetHardThresholdPercent ?? 100;
+    out.push({
+      customerId: c.id,
+      name: c.name ?? `Customer #${c.id}`,
+      inFlight: inFlightByCust.get(c.id) ?? 0,
+      ytd: ytdByCust.get(c.id) ?? 0,
+      budgetStatus: classifyStatus(mPct, soft, hard),
+      monthlyCap: capN,
+      monthlySpend,
+    });
+  }
+  return out;
+}
+
+/**
+ * Compute per-technician in-flight + YTD rows for the Pulse tab.
+ *
+ * - inFlight: sum of uninvoiced non-cancelled WOs (via assignedTechnicianId)
+ *             + BSs (via technicianId)
+ * - ytd:      revenue from invoices this year whose linked WOs/BSs attribute
+ *             to this tech. Each invoice counted at most once per tech to
+ *             avoid double-counting when a WO and BS both link to the same
+ *             invoice for the same technician.
+ */
+export function computePulseTechnicians(input: {
+  techs: UserWithName[];
+  invoices: InvoiceLike[];
+  workOrders: PulseWorkOrderLike[];
+  billingSheets: PulseBillingSheetLike[];
+  currentYear: number;
+}): PulseTechRow[] {
+  const { techs, invoices, workOrders, billingSheets, currentYear } = input;
+
+  const ytdInvoiceAmount = new Map<number, number>();
+  for (const inv of invoices) {
+    if (inv.status === "draft" || inv.status === "cancelled") continue;
+    if ((inv.invoiceYear ?? 0) !== currentYear) continue;
+    ytdInvoiceAmount.set(inv.id, toNum(inv.totalAmount));
+  }
+
+  const ytdByTech = new Map<number, number>();
+  const seenByTech = new Map<number, Set<number>>();
+
+  const creditInvoice = (techId: number, invoiceId: number | null | undefined) => {
+    if (invoiceId == null) return;
+    const amount = ytdInvoiceAmount.get(invoiceId);
+    if (amount == null) return;
+    let seen = seenByTech.get(techId);
+    if (!seen) { seen = new Set(); seenByTech.set(techId, seen); }
+    if (seen.has(invoiceId)) return;
+    seen.add(invoiceId);
+    ytdByTech.set(techId, (ytdByTech.get(techId) ?? 0) + amount);
+  };
+
+  for (const wo of workOrders) {
+    if (wo.assignedTechnicianId == null) continue;
+    creditInvoice(wo.assignedTechnicianId, wo.invoiceId);
+  }
+  for (const bs of billingSheets) {
+    if (bs.technicianId == null) continue;
+    creditInvoice(bs.technicianId, bs.invoiceId);
+  }
+
+  const inFlightByTech = new Map<number, number>();
+  for (const wo of workOrders) {
+    if (!isUnbilledWorkRow(wo) || wo.assignedTechnicianId == null) continue;
+    inFlightByTech.set(
+      wo.assignedTechnicianId,
+      (inFlightByTech.get(wo.assignedTechnicianId) ?? 0) + toNum(wo.totalAmount),
+    );
+  }
+  for (const bs of billingSheets) {
+    if (!isUnbilledWorkRow(bs) || bs.technicianId == null) continue;
+    inFlightByTech.set(
+      bs.technicianId,
+      (inFlightByTech.get(bs.technicianId) ?? 0) + toNum(bs.totalAmount),
+    );
+  }
+
+  const techById = new Map(techs.map((t) => [t.id, t]));
+  const allIds = new Set([...ytdByTech.keys(), ...inFlightByTech.keys()]);
+  const out: PulseTechRow[] = [];
+  for (const id of allIds) {
+    const t = techById.get(id);
+    if (!t) continue;
+    out.push({
+      technicianId: id,
+      name: t.name ?? `Tech #${id}`,
+      inFlight: inFlightByTech.get(id) ?? 0,
+      ytd: ytdByTech.get(id) ?? 0,
+    });
+  }
+  out.sort((a, b) => b.inFlight - a.inFlight);
+  return out;
 }

@@ -42,6 +42,9 @@ import {
   isUnbilledWorkRow,
   pctDelta,
   sortTopCustomers,
+  computePulseCustomers,
+  computePulseTechnicians,
+  toNum,
   type BillingSheetBillableLike,
   type CustomerWithBudget,
   type InvoiceLike,
@@ -55,6 +58,8 @@ import {
   type TopCustomerRow,
   type TechnicianRow,
   type ServiceTypeRow,
+  type PulseWorkOrderLike,
+  type PulseBillingSheetLike,
 } from "../financial-pulse-math";
 
 const ALLOWED_ROLES = new Set([
@@ -1227,10 +1232,213 @@ export function registerFinancialPulseRoutes(
     },
   );
 
+  // ─── Slice 5.3: pulse-summary (Task #731) ────────────────────────────────
+  //
+  // Feeds the Pulse tab of /financial-pulse: three KPI tiles (Last Cycle,
+  // In-Flight, Year-to-Date) plus per-customer and per-tech in-flight + YTD
+  // rows. Same role guard as every other FP endpoint.
+  app.get(
+    "/api/financial-pulse/pulse-summary",
+    requireAuthentication,
+    async (req: Request, res) => {
+      try {
+        const scope = resolveFinancialPulseScope(
+          (req as any).authenticatedUserRole,
+          (req as any).authenticatedUserCompanyId,
+          req.query.companyId as string | undefined,
+        );
+        if (scope.status !== 200) {
+          res.status(scope.status).json(scope.body);
+          return;
+        }
+        const asOf = parseAsOfParam(req.query.asOf as string | undefined);
+        if (!asOf.ok) {
+          res.status(400).json({ message: asOf.message });
+          return;
+        }
+
+        const now = new Date();
+        const currentYear = now.getFullYear();
+
+        const cust = await loadCustomers(scope.companyId);
+        const customerIds = cust.map((c) => c.id);
+
+        const [allInvoices, allWos, allBss, techs] = await Promise.all([
+          loadInvoicesForCustomers(customerIds),
+          loadPulseWorkOrdersForCustomers(customerIds),
+          loadPulseBillingSheetForCustomers(customerIds),
+          loadTechs(scope.companyId),
+        ]);
+
+        // ── Last Cycle ─────────────────────────────────────────────────────
+        const cycles = getDistinctBillingCycles(allInvoices);
+        const lastCycle = cycles[0] ?? null;
+        let lastCycleValue = 0;
+        let lastCycleInvoiceCount = 0;
+        let lastCycleMonthLabel = "No billing cycles";
+        let lastCycleMonthIso = "";
+
+        if (lastCycle) {
+          lastCycleValue = computeBilledForCycle(allInvoices, lastCycle);
+          lastCycleInvoiceCount = allInvoices.filter(
+            (inv) =>
+              inv.status !== "draft" &&
+              inv.status !== "cancelled" &&
+              inv.invoiceYear === lastCycle.year &&
+              inv.invoiceMonth === lastCycle.month,
+          ).length;
+          const d = new Date(lastCycle.year, lastCycle.month - 1, 1);
+          lastCycleMonthLabel = d.toLocaleDateString("en-US", {
+            month: "long",
+            year: "numeric",
+          });
+          lastCycleMonthIso = `${lastCycle.year}-${String(lastCycle.month).padStart(2, "0")}`;
+        }
+
+        // ── In-Flight ──────────────────────────────────────────────────────
+        // Excludes customers flagged hiddenFromBilling — parity with
+        // computeUnbilledExposure and the billing-preview rollup.
+        const hiddenIds = new Set(
+          cust.filter((c) => c.hiddenFromBilling).map((c) => c.id),
+        );
+        let inFlightTotal = 0;
+        const inFlightCustomerIds = new Set<number>();
+        const inFlightTechIds = new Set<number>();
+
+        for (const wo of allWos) {
+          if (hiddenIds.has(wo.customerId)) continue;
+          if (!isUnbilledWorkRow(wo)) continue;
+          inFlightTotal += toNum(wo.totalAmount);
+          inFlightCustomerIds.add(wo.customerId);
+          if (wo.assignedTechnicianId) inFlightTechIds.add(wo.assignedTechnicianId);
+        }
+        for (const bs of allBss) {
+          if (hiddenIds.has(bs.customerId)) continue;
+          if (!isUnbilledWorkRow(bs)) continue;
+          inFlightTotal += toNum(bs.totalAmount);
+          inFlightCustomerIds.add(bs.customerId);
+          if (bs.technicianId) inFlightTechIds.add(bs.technicianId);
+        }
+
+        // ── Year-to-Date (invoiced YTD + in-flight) ───────────────────────
+        let invoicedYtd = 0;
+        for (const inv of allInvoices) {
+          if (inv.status === "draft" || inv.status === "cancelled") continue;
+          if ((inv.invoiceYear ?? 0) !== currentYear) continue;
+          invoicedYtd += toNum(inv.totalAmount);
+        }
+
+        // ── Per-customer + per-tech breakdown ─────────────────────────────
+        // Prefilter WOs/BSs to visible customers only so technician in-flight
+        // totals stay consistent with the tile (both exclude hiddenFromBilling).
+        const visibleWos = allWos.filter((wo) => !hiddenIds.has(wo.customerId));
+        const visibleBss = allBss.filter((bs) => !hiddenIds.has(bs.customerId));
+
+        const pulseCustomers = computePulseCustomers({
+          customers: cust,
+          invoices: allInvoices,
+          workOrders: allWos,
+          billingSheets: allBss,
+          currentYear,
+          now,
+        });
+
+        const pulseTechs = computePulseTechnicians({
+          techs,
+          invoices: allInvoices,
+          workOrders: visibleWos,
+          billingSheets: visibleBss,
+          currentYear,
+        });
+
+        res.json({
+          lastCycle: {
+            value: lastCycleValue,
+            monthLabel: lastCycleMonthLabel,
+            monthIso: lastCycleMonthIso,
+            invoiceCount: lastCycleInvoiceCount,
+          },
+          inFlight: {
+            value: inFlightTotal,
+            customerCount: inFlightCustomerIds.size,
+            techCount: inFlightTechIds.size,
+          },
+          yearToDate: {
+            value: invoicedYtd + inFlightTotal,
+          },
+          customers: pulseCustomers.sort((a, b) => b.inFlight - a.inFlight),
+          technicians: pulseTechs,
+          asOf: now.toISOString(),
+        });
+      } catch (err) {
+        req.log?.error?.({ err }, "financial-pulse/pulse-summary error");
+        res.status(500).json({ message: "Failed to compute pulse summary" });
+      }
+    },
+  );
+
   // Mark sql import as used to keep the strict-mode lint happy in
   // environments that whine about unused named imports.
   void sql;
   void and;
+}
+
+// ─── Pulse-summary DB loaders (Task #731) ────────────────────────────────
+//
+// These loaders return extended WO / BS shapes that include customerId and
+// assignedTechnicianId / technicianId so the pulse-summary math helpers can
+// attribute in-flight amounts per customer and per tech without extra queries.
+
+async function loadPulseWorkOrdersForCustomers(
+  customerIds: number[],
+): Promise<PulseWorkOrderLike[]> {
+  if (customerIds.length === 0) return [];
+  const rows = await db
+    .select({
+      invoiceId: workOrders.invoiceId,
+      totalAmount: workOrders.totalAmount,
+      status: workOrders.status,
+      createdAt: workOrders.createdAt,
+      customerId: workOrders.customerId,
+      assignedTechnicianId: workOrders.assignedTechnicianId,
+    })
+    .from(workOrders)
+    .where(inArray(workOrders.customerId, customerIds));
+  return rows.map((w) => ({
+    invoiceId: w.invoiceId,
+    totalAmount: w.totalAmount,
+    status: w.status,
+    createdAt: w.createdAt,
+    customerId: w.customerId,
+    assignedTechnicianId: w.assignedTechnicianId ?? null,
+  }));
+}
+
+async function loadPulseBillingSheetForCustomers(
+  customerIds: number[],
+): Promise<PulseBillingSheetLike[]> {
+  if (customerIds.length === 0) return [];
+  const rows = await db
+    .select({
+      invoiceId: billingSheets.invoiceId,
+      totalAmount: billingSheets.totalAmount,
+      status: billingSheets.status,
+      createdAt: billingSheets.createdAt,
+      customerId: billingSheets.customerId,
+      technicianId: billingSheets.technicianId,
+    })
+    .from(billingSheets)
+    .where(inArray(billingSheets.customerId, customerIds));
+  return rows
+    .filter((b): b is typeof b & { customerId: number } => b.customerId != null)
+    .map((b) => ({
+      invoiceId: b.invoiceId,
+      totalAmount: b.totalAmount,
+      status: b.status,
+      createdAt: b.createdAt,
+      customerId: b.customerId,
+      technicianId: b.technicianId ?? null,
+    }));
 }
 
 // ─── CSV helpers (Slice 3) ────────────────────────────────────────────────
