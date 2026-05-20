@@ -438,6 +438,42 @@ export async function updateFinding(findingClientId: string, findingId: number |
   }));
 }
 
+// Task #755 — patch repairLaborHours on a zone record.
+// When offline and the zone record was created in this session (has a
+// clientId but may not yet have a server id), the mutation is queued
+// with a `{{zr}}` placeholder so the engine substitutes the server id
+// at dispatch time, matching the same pattern as finding.update.
+export async function patchZoneRecordRepairLabor(
+  zoneRecordClientId: string,
+  zoneRecordId: number | undefined,
+  repairLaborHours: string,
+): Promise<void> {
+  if (!isOfflineQueueEnabled() && zoneRecordId != null) {
+    await apiRequest(`/api/wet-checks/zone-records/${zoneRecordId}/repair-labor`, "PATCH", {
+      repairLaborHours,
+    });
+    return;
+  }
+  const db = await openOfflineDB();
+  const existing = await db.get("wetCheckZoneRecords", zoneRecordClientId);
+  if (existing) {
+    await putZoneRecordMirror(db, {
+      ...existing,
+      data: { ...existing.data, repairLaborHours },
+      updatedAt: Date.now(),
+    });
+  }
+  await getSyncEngine().enqueue(newMutation({
+    kind: "zone_record.update",
+    method: "PATCH",
+    urlTemplate: "/api/wet-checks/zone-records/{{zr}}/repair-labor",
+    body: { repairLaborHours },
+    clientId: uuid(),
+    parentClientId: zoneRecordClientId,
+    placeholders: { zr: zoneRecordClientId },
+  }));
+}
+
 // Queue a photo→finding link PATCH.
 //
 // Task #510 — the photo is addressed by its `clientId` via a new `{{p}}`

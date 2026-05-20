@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, ChevronLeft, CheckCircle2, Wrench, MinusCircle, Trash2, Pencil, Camera } from "lucide-react";
 import { countFindingPhotos } from "@/lib/wet-check-photos";
@@ -15,8 +15,10 @@ import {
   updateFinding as offlineUpdateFinding,
   deleteFinding as offlineDeleteFinding,
   enqueueZoneRevertCascade as offlineEnqueueZoneRevertCascade,
+  patchZoneRecordRepairLabor as offlinePatchZoneRecordRepairLabor,
   cachedApiRequest,
 } from "@/lib/offline/api";
+import { LaborHoursStepper } from "@/components/ui/labor-hours-stepper";
 import type {
   WetCheckWithDetails,
   WetCheckZoneRecord,
@@ -68,6 +70,51 @@ export function ZoneScreen({
 }) {
   const { toast } = useToast();
   const [findingSheet, setFindingSheet] = useState<FindingSheetState>({ open: false });
+  // Task #755 — per-zone repair labor stepper. Seeded from the server row;
+  // mutations are debounced 600ms so rapid taps coalesce into one PATCH.
+  const [repairLaborHours, setRepairLaborHours] = useState<string>(
+    zoneRecord?.repairLaborHours ?? "0.00",
+  );
+  // Keep local state in sync if the parent swaps the zoneRecord prop
+  // (e.g. after a background refetch that changes the stored value).
+  useEffect(() => {
+    setRepairLaborHours(zoneRecord?.repairLaborHours ?? "0.00");
+  }, [zoneRecord?.repairLaborHours]);
+  const repairLaborMut = useMutation({
+    mutationFn: async (hours: string) => {
+      if (isOfflineQueueEnabled() && zoneRecord?.clientId) {
+        await offlinePatchZoneRecordRepairLabor(
+          zoneRecord.clientId,
+          zoneRecord.id ?? undefined,
+          hours,
+        );
+        return;
+      }
+      if (zoneRecord?.id) {
+        await apiRequest(`/api/wet-checks/zone-records/${zoneRecord.id}/repair-labor`, "PATCH", {
+          repairLaborHours: hours,
+        });
+      }
+    },
+    onError: (e: any) => {
+      toast({
+        title: "Couldn't save repair labor",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
+    },
+  });
+  const repairLaborDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleRepairLaborChange = useCallback((next: string) => {
+    setRepairLaborHours(next);
+    if (repairLaborDebounceRef.current) clearTimeout(repairLaborDebounceRef.current);
+    repairLaborDebounceRef.current = setTimeout(() => {
+      repairLaborMut.mutate(next);
+    }, 600);
+  }, [repairLaborMut]);
   // Task #597 — keep optimistic photos rendered until the server row with
   // the same `clientId` shows up in `photos`. Without this, the optimistic
   // thumbnail flashes out for ~one render cycle before the cache refetch
@@ -930,6 +977,25 @@ export function ZoneScreen({
                 })()}
               </div>
             ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Task #755 — per-zone repair labor stepper. Only visible when the
+          zone has been marked Needs Work; hidden for readOnly views because
+          the zone record was already submitted. */}
+      {zoneRecord && !readOnly && zoneRecord.status === "checked_with_issues" && (
+        <Card data-testid="repair-labor-card">
+          <CardHeader>
+            <CardTitle className="text-base">Repair labor for this zone</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <LaborHoursStepper
+              value={repairLaborHours}
+              onChange={handleRepairLaborChange}
+              min="0.25"
+              disabled={repairLaborMut.isPending}
+            />
           </CardContent>
         </Card>
       )}

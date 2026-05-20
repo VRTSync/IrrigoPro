@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LaborHoursStepper } from "@/components/ui/labor-hours-stepper";
 import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
@@ -333,9 +334,14 @@ export function FindingSheet({
               <div className="text-sm font-medium mb-1">Quantity</div>
               <Input type="number" inputMode="numeric" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className="h-11 text-base" data-testid="finding-qty" />
             </div>
-            <div>
-              <div className="text-sm font-medium mb-1">Labor hours</div>
-              <Input type="number" inputMode="decimal" step="0.05" min={0} value={laborHours} onChange={(e) => setLaborHours(e.target.value)} className="h-11 text-base" data-testid="finding-hours" />
+            <div data-testid="finding-labor-stepper">
+              <LaborHoursStepper
+                label="Labor hours"
+                value={laborHours}
+                onChange={setLaborHours}
+                min="0.25"
+                disabled={readOnly}
+              />
             </div>
           </div>
 
