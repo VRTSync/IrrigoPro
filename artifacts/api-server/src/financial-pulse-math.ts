@@ -307,12 +307,27 @@ export function computeAllBillableYtd(
   return sum;
 }
 
+// Task #730 — shared predicate for "is this row part of the unbilled pipeline?"
+// Used by computeUnbilledExposure (global tile) and the per-customer summary
+// endpoint so both surfaces apply exactly the same rule. A row is unbilled when
+// it has no invoice yet AND was not explicitly cancelled.
+export function isUnbilledWorkRow(row: {
+  invoiceId: number | null | undefined;
+  status: string;
+}): boolean {
+  return row.invoiceId == null && row.status !== "cancelled";
+}
+
 export interface GrossMarginResult {
   pct: number | null;
   revenue: number;
   partsCost: number;
   laborCost: number;
   missingWageTechCount: number;
+  /** Task #730 — total dollar amount of labor cost computed using the fallback
+   * wage (both missing-wage techs and unknown techs). Exposed on the tile
+   * warning so users understand the magnitude of the estimate. */
+  estimatedLaborCostShortfall: number;
 }
 
 export function computeGrossMargin(input: {
@@ -343,12 +358,14 @@ export function computeGrossMargin(input: {
 
   let partsCost = 0;
   let laborCost = 0;
+  let estimatedLaborCostShortfall = 0;
   const missingWageTechs = new Set<number>();
   const usedFallbackForUnknownTech = { flag: false };
 
   const tally = (techId: number | null | undefined, hours: number) => {
     if (!Number.isFinite(hours) || hours <= 0) return;
     let wage = fallbackHourlyWage;
+    let usedFallback = false;
     if (techId != null) {
       const u = usersById.get(techId);
       const w = toNum(u?.hourlyWage, NaN);
@@ -356,11 +373,17 @@ export function computeGrossMargin(input: {
         wage = w;
       } else {
         missingWageTechs.add(techId);
+        usedFallback = true;
       }
     } else {
       usedFallbackForUnknownTech.flag = true;
+      usedFallback = true;
     }
-    laborCost += hours * wage;
+    const cost = hours * wage;
+    laborCost += cost;
+    if (usedFallback) {
+      estimatedLaborCostShortfall += cost;
+    }
   };
 
   for (const wo of workOrders) {
@@ -385,6 +408,7 @@ export function computeGrossMargin(input: {
     partsCost,
     laborCost,
     missingWageTechCount: missingWageTechs.size,
+    estimatedLaborCostShortfall,
   };
 }
 

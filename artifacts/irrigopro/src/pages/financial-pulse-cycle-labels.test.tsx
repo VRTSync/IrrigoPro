@@ -98,15 +98,15 @@ describe("Task #723 — static-source guards for the rename", () => {
     expect(tile).not.toMatch(/INFO_TIPS\.billedMtd/);
   });
 
-  it("unbilled-exposure tile uses the 'Current Cycle ({Month})' label", () => {
+  it("unbilled-exposure tile uses the 'Work Not Yet Billed' label (Task #730 rename)", () => {
     const tileStart = SRC.indexOf('testId="kpi-unbilled-exposure"');
     expect(tileStart).toBeGreaterThan(-1);
     const tileEnd = SRC.indexOf("/>", tileStart);
     const tile = SRC.slice(tileStart, tileEnd);
-    expect(tile).toMatch(/Current Cycle \(\$\{/);
-    expect(tile).toMatch(/toLocaleDateString/);
-    expect(tile).toMatch(/month:\s*"long"/);
-    // Old static label is gone.
+    // Task #730 renamed the tile from "Unbilled Pipeline" (Task #726) to "Work Not Yet Billed".
+    expect(tile).toMatch(/label="Work Not Yet Billed"/);
+    // Old labels must be gone.
     expect(tile).not.toMatch(/label="Unbilled Exposure"/);
+    expect(tile).not.toMatch(/label="Unbilled Pipeline"/);
   });
 });

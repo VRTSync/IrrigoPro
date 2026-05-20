@@ -239,14 +239,14 @@ function AdminDashboardVariant() {
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <MetricTile
-            label="Outstanding A/R"
+            label="Money Owed"
             value={data?.outstandingAr.value ?? null}
             format="currency"
             isLoading={isLoading}
             testId="fp-tile-outstanding-ar"
           />
           <MetricTile
-            label="Unbilled Exposure"
+            label="Work Not Yet Billed"
             value={data?.unbilledExposure.value ?? null}
             format="currency"
             isLoading={isLoading}
@@ -261,7 +261,7 @@ function AdminDashboardVariant() {
             testId="fp-tile-billed-mtd"
           />
           <MetricTile
-            label="Projected Month-End"
+            label="Projected by Month-End"
             value={data?.projectedMonthEnd.value ?? null}
             format="currency"
             isLoading={isLoading}
@@ -383,7 +383,7 @@ function BillingHeaderVariant({ className }: { className?: string }) {
               testId="fp-tile-billing-header-collected-mtd"
             />
             <MetricTile
-              label="Outstanding A/R"
+              label="Money Owed"
               value={null}
               format="currency"
               isError
@@ -424,7 +424,7 @@ function BillingHeaderVariant({ className }: { className?: string }) {
             infoTip={BILLING_HEADER_TIPS.collectedMtd}
           />
           <MetricTile
-            label="Outstanding A/R"
+            label="Money Owed"
             value={data?.outstandingAr.value ?? null}
             format="currency"
             deltaPct={data?.outstandingAr.deltaPct ?? null}
@@ -518,14 +518,14 @@ function CustomerDetailVariant({ customerId }: { customerId: number }) {
               testId="fp-tile-cust-billed-ytd"
             />
             <MetricTile
-              label="Outstanding A/R"
+              label="Money Owed"
               value={data?.outstandingAr ?? null}
               format="currency"
               isLoading={isLoading}
               testId="fp-tile-cust-outstanding-ar"
             />
             <MetricTile
-              label="Avg Days to Pay"
+              label="Avg. Time to Get Paid"
               value={data?.avgDaysToPay ?? null}
               format="days"
               isLoading={isLoading}
@@ -569,7 +569,7 @@ function ArAgingVariant() {
     ] as AgingBucket[]);
   return (
     <WidgetCard
-      title="A/R Aging"
+      title="Money Owed by Age"
       href="/financial-pulse"
       testId="fp-widget-ar-aging"
     >

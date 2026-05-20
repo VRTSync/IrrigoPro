@@ -84,6 +84,7 @@ interface KpiTile {
 }
 interface MarginTile extends KpiTile {
   missingWageTechCount?: number;
+  estimatedLaborCostShortfall?: number;
 }
 interface BilledLastCycleTile extends KpiTile {
   monthLabel: string;
@@ -266,7 +267,7 @@ export const INFO_TIPS = {
   unbilledExposure:
     "Work orders + billing sheets with no invoice yet, regardless of status (except cancelled) · excludes customers hidden from billing.",
   projectedMonthEnd:
-    "Unbilled pipeline ÷ days elapsed × days in month — forecast based on current uninvoiced work.",
+    "Work Not Yet Billed ÷ days elapsed × days in month — forecast based on current uninvoiced work.",
   avgDaysToPay:
     "Average (paidAt − createdAt) across invoices paid in the last 90 days. Requires QuickBooks payment sync.",
   grossMargin:
@@ -772,7 +773,7 @@ function CustomersTab({ period }: { period: Period }) {
               <TableHead>Status</TableHead>
               <TableHead className="text-right">
                 <SortHeader
-                  label="Avg days to pay"
+                  label="Avg. time to pay"
                   active={isActive("avgDaysToPay")}
                   dir={sortDir}
                   align="right"
@@ -1161,7 +1162,7 @@ function ArAgingCard({
   return (
     <Card data-testid="ar-aging-card">
       <CardHeader>
-        <CardTitle>A/R Aging</CardTitle>
+        <CardTitle>Money Owed by Age</CardTitle>
       </CardHeader>
       <CardContent>
         {isLoading ? (
@@ -1325,7 +1326,7 @@ function KpiBand({
       />
       <MetricTile
         testId="kpi-outstanding-ar"
-        label="Outstanding A/R"
+        label="Money Owed"
         value={data?.outstandingAr.value ?? null}
         format="currency"
         deltaGoodDirection="down"
@@ -1335,7 +1336,7 @@ function KpiBand({
       />
       <MetricTile
         testId="kpi-projected-month-end"
-        label="Projected Month-End"
+        label="Projected by Month-End"
         value={data?.projectedMonthEnd.value ?? null}
         format="currency"
         helper="Run-rate projection"
@@ -1359,7 +1360,7 @@ function KpiBand({
       />
       <MetricTile
         testId="kpi-unbilled-exposure"
-        label="Unbilled Pipeline"
+        label="Work Not Yet Billed"
         value={data?.unbilledExposure.value ?? null}
         format="currency"
         deltaGoodDirection="down"
@@ -1369,7 +1370,7 @@ function KpiBand({
       />
       <MetricTile
         testId="kpi-avg-days-to-pay"
-        label="Avg Days to Pay"
+        label="Avg. Time to Get Paid"
         value={data?.avgDaysToPay.value ?? null}
         format="days"
         deltaGoodDirection="down"
@@ -1379,7 +1380,7 @@ function KpiBand({
       />
       <MetricTile
         testId="kpi-gross-margin"
-        label="Gross Margin"
+        label="Profit Margin"
         value={data?.grossMarginPct.value ?? null}
         format="percent"
         deltaGoodDirection="up"
@@ -1389,9 +1390,13 @@ function KpiBand({
         warning={
           data?.grossMarginPct.missingWageTechCount &&
           data.grossMarginPct.missingWageTechCount > 0
-            ? `${data.grossMarginPct.missingWageTechCount} technician${
+            ? `Margin uses fallback wage for ${data.grossMarginPct.missingWageTechCount} technician${
                 data.grossMarginPct.missingWageTechCount === 1 ? "" : "s"
-              } have no hourly wage set — margin uses fallback rate.`
+              } with no hourly rate set${
+                data.grossMarginPct.estimatedLaborCostShortfall
+                  ? ` (${CURRENCY.format(data.grossMarginPct.estimatedLaborCostShortfall)} of labor cost is estimated)`
+                  : ""
+              }. Set their wages for a more accurate number.`
             : undefined
         }
       />

@@ -51,7 +51,7 @@ in every dollar tile below.
 - **QBO caveat**: `paidAt` is populated by the QuickBooks payment sync.
   This tile may show $0 if the QBO connection is inactive.
 
-## Tile 3 — Outstanding A/R
+## Tile 3 — Money Owed *(previously "Outstanding A/R")*
 
 - **Source**: `invoices` (local Postgres, NOT QuickBooks)
 - **Date column**: none — point-in-time snapshot as of `now`
@@ -64,7 +64,7 @@ in every dollar tile below.
 - **QBO caveat**: accuracy depends on QuickBooks payment sync. Invoices
   are only marked paid when QBO syncs payment data back.
 
-## Tile 4 — Projected Month-End
+## Tile 4 — Projected by Month-End *(previously "Projected Month-End")*
 
 - **Formula**: `(unbilledExposure ÷ daysElapsed) × daysInMonth`
   where `unbilledExposure` is the total uninvoiced pipeline (tile 6).
@@ -111,13 +111,13 @@ in every dollar tile below.
 - **Tax / markup**: included (rolled into the row's `totalAmount`
   at the time the WO/BS was costed; not recomputed)
 - **Endpoint**: `GET /api/financial-pulse/kpis` → `unbilledExposure.value`
-- **Label on page**: "Unbilled Pipeline" (previously mis-labeled as
-  "Current Cycle (Month)" — fixed in Task #726)
-- **Note**: Tile 4 (Projected Month-End) uses this value as its
+- **Label on page**: "Work Not Yet Billed" (previously "Unbilled Pipeline" /
+  "Unbilled Exposure" — renamed in Task #730 for plain-language clarity)
+- **Note**: Tile 4 (Projected by Month-End) uses this value as its
   forecast base, so the broader status inclusion also improves the
   month-end projection.
 
-## Tile 7 — Avg Days to Pay
+## Tile 7 — Avg. Time to Get Paid *(previously "Avg Days to Pay")*
 
 - **Source**: `invoices`
 - **Date column**: `paidAt` (for window), `createdAt` (for duration)
@@ -127,7 +127,7 @@ in every dollar tile below.
 - **Endpoint**: `GET /api/financial-pulse/kpis` → `avgDaysToPay.value`
 - **QBO caveat**: requires QuickBooks payment sync to populate `paidAt`.
 
-## Tile 8 — Gross Margin
+## Tile 8 — Profit Margin *(previously "Gross Margin")*
 
 - **Formula**: `(revenue − partsCost − laborCost) ÷ revenue`
   for invoices in the selected period (MTD or YTD).
@@ -209,9 +209,9 @@ invoice is in neither. That is by design — both numbers stay.
 Anywhere two tiles refer to the same underlying number, both
 surfaces MUST go through the same helper in `financial-pulse-math.ts`
 and the same endpoint. The Billing Workspace embeds the Financial
-Pulse KPI widget for Billed MTD / Collected MTD / Outstanding A/R —
+Pulse KPI widget for Billed MTD / Collected MTD / Money Owed —
 it does **not** recompute them locally in
 `billing-workspace-routes.ts`. The QuickBooks Overdue tile is the
 only Billing-Workspace tile whose dollar amount comes from a
-different formula; it lives next to Outstanding A/R and is labeled
+different formula; it lives next to Money Owed and is labeled
 as a separate concept.

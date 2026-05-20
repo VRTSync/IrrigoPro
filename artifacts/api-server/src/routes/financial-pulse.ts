@@ -39,6 +39,7 @@ import {
   getPrevFullMonthWindow,
   getPrevYearYtdWindow,
   getYtdWindow,
+  isUnbilledWorkRow,
   pctDelta,
   sortTopCustomers,
   type BillingSheetBillableLike,
@@ -336,6 +337,8 @@ async function computeUnbilledExposure(
   // status = 'cancelled' (explicitly abandoned). Hidden-from-billing
   // customers are still excluded so suppressed accounts don't inflate KPIs.
 
+  // Task #730 — use isUnbilledWorkRow so global tile and per-customer
+  // summary share one predicate with no chance of drift.
   let sum = 0;
   const toN = (v: unknown) => {
     if (v == null) return 0;
@@ -343,13 +346,11 @@ async function computeUnbilledExposure(
     return Number.isFinite(n) ? n : 0;
   };
   for (const w of woRows) {
-    if (w.invoiceId != null) continue;
-    if (w.status === "cancelled") continue;
+    if (!isUnbilledWorkRow(w)) continue;
     sum += toN(w.total);
   }
   for (const b of bsRows) {
-    if (b.invoiceId != null) continue;
-    if (b.status === "cancelled") continue;
+    if (!isUnbilledWorkRow(b)) continue;
     sum += toN(b.total);
   }
   return sum;
@@ -561,6 +562,7 @@ export function registerFinancialPulseRoutes(
             deltaPct: null,
             comparedTo: "prevMonth",
             missingWageTechCount: margin.missingWageTechCount,
+            estimatedLaborCostShortfall: margin.estimatedLaborCostShortfall,
             revenue: margin.revenue,
             partsCost: margin.partsCost,
             laborCost: margin.laborCost,
@@ -1123,17 +1125,8 @@ export function registerFinancialPulseRoutes(
           })
           .from(billingSheets)
           .where(eq(billingSheets.customerId, customerId));
-        const unbilledWoStatuses = new Set([
-          "approved_passed_to_billing",
-          "pending_manager_review",
-          "work_completed",
-        ]);
-        const unbilledBsStatuses = new Set([
-          "approved_passed_to_billing",
-          "pending_manager_review",
-          "completed",
-          "submitted",
-        ]);
+        // Task #730 — use the shared isUnbilledWorkRow predicate so the
+        // per-customer tile uses exactly the same rule as computeUnbilledExposure.
         const toN = (v: unknown) => {
           if (v == null) return 0;
           const n = typeof v === "number" ? v : parseFloat(String(v));
@@ -1142,13 +1135,11 @@ export function registerFinancialPulseRoutes(
         let unbilledExposure = 0;
         if (!c.hiddenFromBilling) {
           for (const w of woRows) {
-            if (w.invoiceId != null) continue;
-            if (!unbilledWoStatuses.has(w.status)) continue;
+            if (!isUnbilledWorkRow(w)) continue;
             unbilledExposure += toN(w.total);
           }
           for (const b of bsRows) {
-            if (b.invoiceId != null) continue;
-            if (!unbilledBsStatuses.has(b.status)) continue;
+            if (!isUnbilledWorkRow(b)) continue;
             unbilledExposure += toN(b.total);
           }
         }
