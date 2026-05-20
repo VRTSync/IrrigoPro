@@ -356,6 +356,7 @@ import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
 import { registerBudgetRoutes } from "./budget-routes";
 import { registerFinancialPulseRoutes } from "./financial-pulse";
+import { registerCleanupInvoice71256Routes } from "./cleanup-invoice-71256";
 import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
 import { scrubEvent, setScrubCustomerNames } from "../lib/scrubEvent";
 import { setTelemetrySink, withTelemetry, type TelemetryEvent } from "../lib/withTelemetry";
@@ -7079,6 +7080,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Task #687 — Financial Pulse Slice 1: per-customer budget usage.
   registerBudgetRoutes(app, { requireAuthentication });
   registerFinancialPulseRoutes(app, { requireAuthentication });
+  // Task #760 — Temporary one-time cleanup: delete test invoice #71256.
+  // Remove this registration (and cleanup-invoice-71256.ts) after successful run.
+  registerCleanupInvoice71256Routes(app, { requireAuthentication });
   // ── Property Boundary (GIS) ────────────────────────────────────────────────
   // NOTE: Express 5 / path-to-regexp v8 — do NOT use inline regex param syntax
   // like `:id(\\d+)`. Validate manually below.
