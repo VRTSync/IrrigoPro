@@ -582,6 +582,12 @@ export interface IStorage {
   // Task #197 — flag a billing sheet as not requiring photos so it disappears
   // from the missing-photos report. Stamps the acting user and timestamp.
   markBillingSheetNoPhotosNeeded(sheetId: number, userId: number): Promise<BillingSheet | undefined>;
+  // Task #752 (WC Billing Slice 3) — zone-grouped view for billing sheets
+  // that originated from a wet check. Returns null for non-WC sheets (no
+  // findings point at this billingSheetId). companyId is used to load the
+  // correct issueTypeConfigs; pass null for super_admin callers (the method
+  // derives it from the wet check row).
+  getBillingSheetWetCheckView(billingSheetId: number, companyId: number | null): Promise<import("./wet-check-billing-view").WetCheckBillingView | null>;
 
   // Missing-photos outreach tracking — one row per technician
   getMissingPhotosNotifications(): Promise<MissingPhotosNotification[]>;
@@ -3715,6 +3721,71 @@ export class DatabaseStorage implements IStorage {
       .where(eq(billingSheets.id, sheetId))
       .returning();
     return updated || undefined;
+  }
+
+  // Task #752 (WC Billing Slice 3) — zone-grouped view assembler
+  async getBillingSheetWetCheckView(
+    billingSheetId: number,
+    _companyId: number | null,
+  ): Promise<import("./wet-check-billing-view").WetCheckBillingView | null> {
+    const { buildWetCheckBillingView } = await import("./wet-check-billing-view");
+
+    // 1. Load findings that are routed to this billing sheet
+    const findings = await db
+      .select()
+      .from(wetCheckFindings)
+      .where(eq(wetCheckFindings.billingSheetId, billingSheetId));
+
+    if (findings.length === 0) {
+      // No wet-check findings → this is not a WC billing sheet
+      return null;
+    }
+
+    // 2. Load the billing sheet itself
+    const [bs] = await db
+      .select()
+      .from(billingSheets)
+      .where(eq(billingSheets.id, billingSheetId));
+    if (!bs) return null;
+
+    // 3. Load the wet check (all findings share the same wetCheckId)
+    const wetCheckId = findings[0].wetCheckId;
+    const [wc] = await db
+      .select()
+      .from(wetChecks)
+      .where(eq(wetChecks.id, wetCheckId));
+    if (!wc) return null;
+
+    // 4. Load zone records for every zoneRecordId referenced by findings
+    const zoneRecordIds = [...new Set(findings.map((f) => f.zoneRecordId))];
+    const zoneRecords = await db
+      .select()
+      .from(wetCheckZoneRecords)
+      .where(inArray(wetCheckZoneRecords.id, zoneRecordIds));
+
+    // 5. Load issueTypeConfigs for the company (from the wet check)
+    const configs = await db
+      .select()
+      .from(issueTypeConfigs)
+      .where(eq(issueTypeConfigs.companyId, wc.companyId))
+      .orderBy(issueTypeConfigs.sortOrder);
+
+    // 6. Load customer
+    if (!bs.customerId) return null;
+    const [customer] = await db
+      .select()
+      .from(customers)
+      .where(eq(customers.id, bs.customerId));
+    if (!customer) return null;
+
+    return buildWetCheckBillingView({
+      billingSheet: bs,
+      customer,
+      findings,
+      zoneRecords,
+      wetCheck: wc,
+      issueTypeConfigs: configs,
+    });
   }
 
   async deleteBillingSheet(id: number): Promise<boolean> {

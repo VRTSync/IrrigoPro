@@ -12116,6 +12116,44 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // Task #752 (WC Billing Slice 3) — zone-grouped wet-check billing view
+  // Returns the WetCheckBillingView for billing sheets backed by a wet check.
+  // 404 — billing sheet not found
+  // 422 — billing sheet exists but has no wet-check findings (not a WC sheet)
+  // 200 — the zone-grouped view payload
+  app.get("/api/billing-sheets/:id/wet-check-view", async (req, res) => {
+    try {
+      const billingSheetId = parseInt(req.params.id);
+      if (isNaN(billingSheetId) || billingSheetId <= 0) {
+        res.status(400).json({ message: "Invalid billing sheet ID" });
+        return;
+      }
+
+      // Verify the sheet exists before delegating to storage
+      const bs = await storage.getBillingSheetById(billingSheetId);
+      if (!bs) {
+        res.status(404).json({ message: "Billing sheet not found" });
+        return;
+      }
+
+      const companyId: number | null =
+        typeof (req as any).authenticatedUserCompanyId === "number"
+          ? (req as any).authenticatedUserCompanyId
+          : null;
+
+      const view = await storage.getBillingSheetWetCheckView(billingSheetId, companyId);
+      if (view === null) {
+        res.status(422).json({ message: "This billing sheet is not linked to a wet check inspection" });
+        return;
+      }
+
+      res.json(view);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Failed to fetch wet-check billing view" });
+    }
+  });
+
   // ─── Catalog $0-price audit / backfill (Task #160) ────────────────────────
   // Authorization: only company_admin / billing_manager / super_admin can
   // see or repair these rows. We trust ONLY the fields populated by the
