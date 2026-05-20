@@ -35,6 +35,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem, Customer } from "@workspace/db/schema";
+import { WetCheckBillingViewComponent, type WetCheckBillingView } from "@/components/billing/wet-check-billing-view";
 import { format } from "date-fns";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
@@ -246,6 +247,23 @@ export function CompletedWorkDetailModal({
     queryKey: [type === "work_order" ? "/api/work-orders" : "/api/billing-sheets", id, "items"],
     queryFn: () => fetch(itemsEndpoint).then((r) => r.json()),
     enabled: open && !!id,
+  });
+
+  // WC Billing Slice 5 — zone-grouped view for billing sheets backed by a wet check.
+  // HTTP 200 → parsed WetCheckBillingView; 422 (not a WC sheet) or any error → null.
+  const { data: wetCheckView = null } = useQuery<WetCheckBillingView | null>({
+    queryKey: ["/api/billing-sheets", id, "wet-check-view"],
+    queryFn: async () => {
+      const res = await fetch(`/api/billing-sheets/${id}/wet-check-view`, {
+        headers: getAuthHeaders(),
+        credentials: "include",
+      });
+      if (res.status === 422 || !res.ok) return null;
+      return res.json() as Promise<WetCheckBillingView>;
+    },
+    enabled: open && type === "billing_sheet" && !!id,
+    staleTime: 60_000,
+    retry: false,
   });
 
   const isWorkOrder = type === "work_order";
@@ -698,7 +716,40 @@ export function CompletedWorkDetailModal({
 
             {/* Time & Labor */}
             <SectionCard title="Time & Labor" icon={<Clock className="w-4 h-4" />}>
-              {canSeePricing ? (
+              {wetCheckView && type === "billing_sheet" ? (
+                /* WC sheet: separate Inspection Labor and Repair Labor lines */
+                canSeePricing ? (
+                  <div className="space-y-2">
+                    {(() => {
+                      const repairLaborNum = parseFloat(wetCheckView.laborSubtotal ?? "0");
+                      const totalLaborNum = parseFloat(String(laborSubtotal ?? "0"));
+                      const inspectionLaborNum = Math.max(0, totalLaborNum - repairLaborNum);
+                      return (
+                        <>
+                          <div className="flex justify-between text-sm text-gray-600">
+                            <span>Inspection Labor</span>
+                            <span className="font-medium text-gray-900">{currency(inspectionLaborNum)}</span>
+                          </div>
+                          <div className="flex justify-between text-sm text-gray-600">
+                            <span>Repair Labor</span>
+                            <span className="font-medium text-gray-900">{currency(repairLaborNum)}</span>
+                          </div>
+                          <div className="flex justify-between items-center pt-1 border-t border-gray-100">
+                            <span className="text-sm font-semibold text-gray-800">Labor Total</span>
+                            <span className="text-lg font-bold text-blue-700">{currency(totalLaborNum)}</span>
+                          </div>
+                        </>
+                      );
+                    })()}
+                    <p className="text-xs text-gray-400">Rate: {currency(wetCheckView.laborRate)}/hr</p>
+                  </div>
+                ) : (
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-gray-900">{totalHours ?? "0"}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Hours Worked</p>
+                  </div>
+                )
+              ) : canSeePricing ? (
                 <div className="flex items-center flex-wrap gap-3">
                   <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
                     <p className="text-2xl font-bold text-gray-900">{totalHours ?? "0"}</p>
@@ -723,8 +774,10 @@ export function CompletedWorkDetailModal({
               )}
             </SectionCard>
 
-            {/* Parts & Materials */}
-            {items.length > 0 && (
+            {/* Parts & Materials — replaced by zone-grouped view for WC billing sheets */}
+            {wetCheckView && type === "billing_sheet" ? (
+              <WetCheckBillingViewComponent view={wetCheckView} canSeePricing={canSeePricing} />
+            ) : items.length > 0 && (
               <SectionCard
                 title={`Parts & Materials (${items.length} item${items.length !== 1 ? "s" : ""})`}
                 icon={<Package className="w-4 h-4" />}
