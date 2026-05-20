@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -187,14 +187,75 @@ function ConnectionHealthPanel() {
   );
 }
 
+type ConnectErrorKind = "not_configured" | "oauth_failed" | "network" | "unknown";
+
+interface ConnectError {
+  kind: ConnectErrorKind;
+  message: string;
+}
+
+/**
+ * Parse the error thrown by apiRequest into a structured ConnectError.
+ *
+ * apiRequest throws `new Error(\`\${status}: \${bodyText}\`)` for HTTP errors
+ * and a TypeError for fetch-level network failures.
+ */
+function parseConnectError(error: unknown): ConnectError {
+  // Network / fetch failure — no HTTP response at all
+  if (error instanceof TypeError) {
+    return {
+      kind: "network",
+      message:
+        "Could not reach the server. Check your internet connection and try again.",
+    };
+  }
+
+  if (!(error instanceof Error)) {
+    return { kind: "unknown", message: "An unexpected error occurred. Please try again." };
+  }
+
+  // Try to extract the status code and JSON body from the message
+  const match = error.message.match(/^(\d+):\s*([\s\S]*)$/);
+  if (!match) {
+    return { kind: "unknown", message: error.message || "An unexpected error occurred." };
+  }
+
+  const status = parseInt(match[1], 10);
+  const bodyText = match[2].trim();
+
+  let serverMessage = bodyText;
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (parsed?.message) serverMessage = parsed.message as string;
+  } catch {
+    // body wasn't JSON — use raw text
+  }
+
+  if (status === 400) {
+    // Both "credentials" and "redirect URI" cases are configuration problems
+    return {
+      kind: "not_configured",
+      message: serverMessage,
+    };
+  }
+
+  if (status === 500) {
+    return {
+      kind: "oauth_failed",
+      message:
+        "The QuickBooks authorization request failed on the server. Please try again. " +
+        "If this keeps happening, verify your Intuit app credentials in the Intuit Developer Portal.",
+    };
+  }
+
+  return { kind: "unknown", message: serverMessage || "An unexpected error occurred." };
+}
+
 export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) {
   const [isConnecting, setIsConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<ConnectError | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  
-  useEffect(() => {
-    console.log("QuickBooks Integration component loaded");
-  }, []);
 
   // Fetch QuickBooks connection status
   const { data: connectionStatus, isLoading: loadingConnection, error: connectionError } = useQuery<QbConnectionStatus>({
@@ -238,46 +299,43 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     }
   });
 
-  // Simple and direct QuickBooks connection handler
+  // QuickBooks connection handler with structured error reporting
   const handleQuickBooksConnect = async () => {
-    console.log("QuickBooks button clicked - starting connection");
-    
-    if (isConnecting) {
-      console.log("Already connecting, ignoring click");
-      return;
-    }
-    
+    if (isConnecting) return;
+
     setIsConnecting(true);
-    
+    setConnectError(null);
+
     try {
       const response = await apiRequest('/api/quickbooks/auth');
-      console.log("QuickBooks auth response:", response);
-      
-      if (response?.authUrl) {
-        console.log("QuickBooks auth success:", response);
-        const data = response;
-        
-        if (data?.authUrl) {
-          toast({
-            title: "Connecting to QuickBooks",
-            description: "You'll be redirected to QuickBooks to authorize the connection.",
-          });
-          
-          setTimeout(() => {
-            window.location.href = data.authUrl;
-          }, 1500);
-        } else {
-          throw new Error("No authUrl in response");
-        }
-      } else {
+
+      if (!response?.authUrl) {
         throw new Error("No authUrl in response");
       }
-    } catch (error) {
-      console.error("QuickBooks connection error:", error);
+
       toast({
-        title: "Error",
-        description: "Failed to connect to QuickBooks",
-        variant: "destructive"
+        title: "Connecting to QuickBooks",
+        description: "You'll be redirected to QuickBooks to authorize the connection.",
+      });
+
+      setTimeout(() => {
+        window.location.href = response.authUrl;
+      }, 1500);
+    } catch (error) {
+      const parsed = parseConnectError(error);
+      setConnectError(parsed);
+
+      const toastDescriptions: Record<ConnectErrorKind, string> = {
+        not_configured: "QuickBooks is not configured. Contact your administrator.",
+        oauth_failed: "OAuth request failed. Please try again.",
+        network: "Network error. Check your connection and try again.",
+        unknown: "Failed to connect to QuickBooks. Please try again.",
+      };
+
+      toast({
+        title: "QuickBooks Connection Failed",
+        description: toastDescriptions[parsed.kind],
+        variant: "destructive",
       });
     } finally {
       setIsConnecting(false);
@@ -358,24 +416,68 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
 
             {/* Reconnect Required Banner */}
             {isReconnectRequired && (
-              <Alert className="border-red-300 bg-red-50">
-                <ShieldAlert className="h-5 w-5 text-red-600" />
-                <AlertTitle className="text-red-900 font-semibold">QuickBooks Reauthorization Required</AlertTitle>
-                <AlertDescription className="text-red-800 mt-1">
-                  {connectionStatus?.reconnectRequiredReason || "Your QuickBooks authorization has expired or been revoked. You must reconnect to continue syncing data."}
-                </AlertDescription>
-                <div className="mt-3">
-                  <button
-                    onClick={handleQuickBooksConnect}
-                    disabled={isConnecting}
-                    className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:bg-gray-400 font-medium"
-                    data-testid="quickbooks-reconnect-btn"
-                    type="button"
-                  >
-                    {isConnecting ? "Connecting..." : "Reconnect to QuickBooks"}
-                  </button>
-                </div>
-              </Alert>
+              <div className="space-y-3">
+                <Alert className="border-red-300 bg-red-50">
+                  <ShieldAlert className="h-5 w-5 text-red-600" />
+                  <AlertTitle className="text-red-900 font-semibold">QuickBooks Reauthorization Required</AlertTitle>
+                  <AlertDescription className="text-red-800 mt-1">
+                    {connectionStatus?.reconnectRequiredReason || "Your QuickBooks authorization has expired or been revoked. You must reconnect to continue syncing data."}
+                  </AlertDescription>
+                  <div className="mt-3">
+                    <button
+                      onClick={handleQuickBooksConnect}
+                      disabled={isConnecting}
+                      className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:bg-gray-400 font-medium"
+                      data-testid="quickbooks-reconnect-btn"
+                      type="button"
+                    >
+                      {isConnecting ? "Connecting..." : "Reconnect to QuickBooks"}
+                    </button>
+                  </div>
+                </Alert>
+
+                {connectError && (
+                  <Alert className={
+                    connectError.kind === "not_configured"
+                      ? "border-amber-300 bg-amber-50"
+                      : "border-red-300 bg-red-50"
+                  }>
+                    {connectError.kind === "not_configured" ? (
+                      <ShieldAlert className="h-4 w-4 text-amber-600" />
+                    ) : (
+                      <AlertTriangle className="h-4 w-4 text-red-600" />
+                    )}
+                    <AlertTitle className={
+                      connectError.kind === "not_configured"
+                        ? "text-amber-900 font-semibold"
+                        : "text-red-900 font-semibold"
+                    }>
+                      {connectError.kind === "not_configured" && "QuickBooks Not Configured"}
+                      {connectError.kind === "oauth_failed" && "Authorization Failed"}
+                      {connectError.kind === "network" && "Network Error"}
+                      {connectError.kind === "unknown" && "Connection Failed"}
+                    </AlertTitle>
+                    <AlertDescription className={
+                      connectError.kind === "not_configured"
+                        ? "text-amber-800 text-sm"
+                        : "text-red-800 text-sm"
+                    }>
+                      {connectError.message}
+                      {connectError.kind === "oauth_failed" && (
+                        <a
+                          href="https://developer.intuit.com/app/developer/qbo/docs/develop/authentication-and-authorization/oauth-2.0"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block mt-1 underline text-red-700 hover:text-red-900"
+                        >
+                          View Intuit OAuth documentation
+                          <ExternalLink className="inline w-3 h-3 ml-1" />
+                        </a>
+                      )}
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </div>
             )}
 
             {!isReconnectRequired && connectionStatus?.isConnected ? (
@@ -423,8 +525,8 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                 </div>
               </div>
             ) : !isReconnectRequired ? (
-              <div className="p-4 bg-blue-50 rounded-lg">
-                <p className="text-blue-900 mb-3">
+              <div className="p-4 bg-blue-50 rounded-lg space-y-3">
+                <p className="text-blue-900">
                   Connect your QuickBooks Online account to automatically sync estimates, invoices, and customer data.
                 </p>
                 <button 
@@ -436,6 +538,48 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                 >
                   {isConnecting ? "Connecting..." : "Connect to QuickBooks"}
                 </button>
+
+                {connectError && (
+                  <Alert className={
+                    connectError.kind === "not_configured"
+                      ? "border-amber-300 bg-amber-50"
+                      : "border-red-300 bg-red-50"
+                  }>
+                    {connectError.kind === "not_configured" ? (
+                      <ShieldAlert className="h-4 w-4 text-amber-600" />
+                    ) : (
+                      <AlertTriangle className="h-4 w-4 text-red-600" />
+                    )}
+                    <AlertTitle className={
+                      connectError.kind === "not_configured"
+                        ? "text-amber-900 font-semibold"
+                        : "text-red-900 font-semibold"
+                    }>
+                      {connectError.kind === "not_configured" && "QuickBooks Not Configured"}
+                      {connectError.kind === "oauth_failed" && "Authorization Failed"}
+                      {connectError.kind === "network" && "Network Error"}
+                      {connectError.kind === "unknown" && "Connection Failed"}
+                    </AlertTitle>
+                    <AlertDescription className={
+                      connectError.kind === "not_configured"
+                        ? "text-amber-800 text-sm"
+                        : "text-red-800 text-sm"
+                    }>
+                      {connectError.message}
+                      {connectError.kind === "oauth_failed" && (
+                        <a
+                          href="https://developer.intuit.com/app/developer/qbo/docs/develop/authentication-and-authorization/oauth-2.0"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block mt-1 underline text-red-700 hover:text-red-900"
+                        >
+                          View Intuit OAuth documentation
+                          <ExternalLink className="inline w-3 h-3 ml-1" />
+                        </a>
+                      )}
+                    </AlertDescription>
+                  </Alert>
+                )}
               </div>
             ) : null}
           </div>
