@@ -1,0 +1,238 @@
+# Slice 5.3 — Financial Pulse: Pulse + Accounting Tabs
+
+**Goal:** Restructure `/financial-pulse` into a two-tab page so the at-a-glance "who's billing what and where" lives at the top of the user's day, and the deeper accounting analytics are still one click away. Closes the gap between what the page is today (a monthly close report) and what it was originally meant to be (a daily operations pulse).
+
+**Depends on:** Slices 5, 5.1, and **5.2** (the math parity fix is required — both the In-Flight tile and the In-Flight columns rely on `isUnbilledWorkRow` returning consistent results).
+
+---
+
+## 1. Page structure
+
+`/financial-pulse` becomes a tabbed page with two tabs. The active tab is persisted in the URL as `?tab=pulse` or `?tab=accounting`. Default is `pulse`. Deep-linking either view should be possible from elsewhere in the app.
+
+**File:** `artifacts/irrigopro/src/pages/financial-pulse.tsx` — significantly refactored. Lift the existing content into an `AccountingTab` component; build a new `PulseTab`; render via a Tabs component.
+
+```
+/financial-pulse
+├── Tab: Pulse        (default)
+│   ├── 3 KPI tiles
+│   ├── Two tables (Customers, Technicians)
+│   └── Revenue trend chart
+└── Tab: Accounting
+    └── (everything from today's page, lifted intact)
+```
+
+---
+
+## 2. The Pulse tab
+
+### Header
+
+Page title: **Financial Pulse**. Subtitle: something operational, not financial — e.g., "Where the money is moving right now." Replace the current "Live financial picture across all customers and techs."
+
+No period selector on this tab. The data model is anchored to billing cycles and the year, not arbitrary date ranges.
+
+### Top row — three tiles
+
+Three large tiles in a single row, equal width on desktop. Stack on mobile.
+
+| Tile | Label | What it sums |
+|---|---|---|
+| 1 | **Last Cycle** | Total of every invoice belonging to the most recent monthly billing event. Group invoices by `(invoiceYear, invoiceMonth)`, take the most recent group, sum `totalAmount`, exclude `status IN ('draft', 'cancelled')`. |
+| 2 | **In-Flight** | Sum of all currently-unbilled work using the `isUnbilledWorkRow` predicate from Slice 5.2. This is what's accumulating toward the next billing event. |
+| 3 | **Year to Date** | `Σ invoices.totalAmount` where `invoiceYear = currentYear` (and not draft/cancelled) **plus** the current In-Flight. This is "everything in the system attributed to this year right now." |
+
+Each tile shows: big number, label, and a small caption beneath.
+
+- **Last Cycle** caption: `"May 2026 — 23 invoices"` (the cycle's month + invoice count).
+- **In-Flight** caption: `"Across 14 customers, 6 technicians"`.
+- **Year to Date** caption: `"Invoiced + In-Flight"` so the user understands what's included without thinking.
+
+Click behavior:
+- **Last Cycle** click → jumps to the Invoices page filtered to that month.
+- **In-Flight** click → scrolls down to the Customers table (which breaks it down).
+- **Year to Date** click → opens the Accounting tab (where YTD trend chart lives).
+
+### Tables
+
+Two tables side by side on desktop, stacked on mobile.
+
+#### Customers table
+
+| Column | Notes |
+|---|---|
+| Customer | Name; click → `/customers/:id`. Show a small budget-status pill next to the name (uses Slice 1's monthly budget cap; green/amber/red/gray). |
+| In-Flight | Per-customer sum from `isUnbilledWorkRow`. |
+| Year to Date | Customer's invoiced YTD + their In-Flight. Same definition as Tile 3 but scoped to this customer. |
+
+Default sort: In-Flight descending (biggest pending billing at top — that's the operationally interesting view). Sortable on every column.
+
+Pagination: 25 rows per page, sticky header. Search box above the table that filters by customer name.
+
+If the customer has `hiddenFromBilling = true`, they don't appear. Period.
+
+#### Technicians table
+
+| Column | Notes |
+|---|---|
+| Technician | Name; click → ~~tech profile~~ Slice 5.3 has no tech profile to link to, so the click is a no-op for now. (When a tech profile lands, add the link in that slice.) |
+| In-Flight | Sum of `isUnbilledWorkRow` rows attributed to this tech via `billingSheets.technicianId` and `workOrders.assignedTechnicianId`. |
+| Year to Date | Tech's attributed invoiced revenue YTD + their In-Flight. |
+
+Attribution rules to spell out:
+
+- For a billing sheet, the tech is `billingSheets.technicianId`.
+- For a work order, the tech is `workOrders.assignedTechnicianId`.
+- If a work order has multiple billable items handled by different techs, this slice attributes the whole work order to the assigned tech. (Multi-tech attribution is a future enhancement; flag in the code.)
+
+Default sort: In-Flight descending.
+
+### Revenue trend chart
+
+Below the two tables, a full-width Recharts `LineChart` of monthly revenue for the last 13 months, with the previous-year overlay. This is the same chart Slice 2 built — lift it from the existing page into the Pulse tab. (Don't duplicate it on the Accounting tab; move it once.)
+
+Reason it lives on the Pulse tab and not Accounting: it gives 13 months of context for the three tiles above it. The Accounting tab still has the parts-vs-labor stacked bar and the revenue mix donut for finer breakdowns.
+
+### Empty / first-run state
+
+If there have been no invoices yet (brand-new company), all three tiles read `$0` and both tables show their empty state with helper text. The page should still render cleanly.
+
+---
+
+## 3. The Accounting tab
+
+Everything currently on `/financial-pulse` that isn't covered by the Pulse tab moves here. Lift, don't rewrite.
+
+- The other KPI tiles: Outstanding A/R (now labeled **Money Owed** after 5.2), Avg. Time to Get Paid, Profit Margin (with shortfall disclosure from 5.2), Projected by Month-End.
+- The parts vs. labor stacked bar chart.
+- The revenue mix donut.
+- The drill-down tabs (By Customer, By Technician, By Service Type) — these still live here as the analytical depth layer.
+- The A/R aging panel (now labeled per 5.2's chosen scheme).
+- The QuickBooks sync banner.
+- The runs-history link to the monthly billing audit work (deferred to Slice 7/8 if not landed yet).
+
+The Accounting tab keeps the existing period selector (MTD / YTD).
+
+---
+
+## 4. New endpoints
+
+All under `/api/financial-pulse/*`, role-guarded the same way as the existing FP endpoints.
+
+### `GET /api/financial-pulse/pulse-summary`
+
+Powers the entire Pulse tab in one request. Three tile values + both table rows.
+
+```json
+{
+  "lastCycle": {
+    "total": 184230.50,
+    "invoiceCount": 23,
+    "monthLabel": "2026-05"
+  },
+  "inFlight": {
+    "total": 42180.00,
+    "customerCount": 14,
+    "technicianCount": 6
+  },
+  "yearToDate": {
+    "total": 612500.00,
+    "invoicedComponent": 570320.00,
+    "inFlightComponent": 42180.00
+  },
+  "customers": [
+    {
+      "customerId": "uuid",
+      "customerName": "Westfield HOA",
+      "inFlight": 8420.00,
+      "yearToDate": 41200.00,
+      "budgetStatus": "approaching"   // healthy | approaching | over | unset
+    }
+  ],
+  "technicians": [
+    {
+      "technicianId": "uuid",
+      "technicianName": "Sam Rivera",
+      "inFlight": 6100.00,
+      "yearToDate": 38400.00
+    }
+  ]
+}
+```
+
+One endpoint, one query path. Keeps the Pulse tab fast and avoids a fan-out of requests.
+
+### Existing endpoints stay
+
+The Accounting tab continues to use the endpoints it already does (`/kpis`, `/revenue-trend`, `/revenue-mix`, `/top-customers`, `/by-technician`, `/by-service-type`, `/ar-aging`, `/projections`). Don't break or rename them — the widgets on other pages depend on them.
+
+---
+
+## 5. Defining "Last Cycle" cleanly
+
+A cycle is the set of invoices created in the same monthly billing event. The schema already has `invoices.invoiceMonth` and `invoices.invoiceYear` — use those, not `createdAt`, since the latter can shift if a cycle gets created late in the next month.
+
+Query:
+
+```sql
+SELECT invoice_year, invoice_month, SUM(total_amount) AS cycle_total, COUNT(*) AS invoice_count
+FROM invoices
+WHERE status NOT IN ('draft', 'cancelled')
+GROUP BY invoice_year, invoice_month
+ORDER BY invoice_year DESC, invoice_month DESC
+LIMIT 1;
+```
+
+Edge case: what if the most recent cycle is the current calendar month (you ran billing early)? That's fine — it's still the last cycle. It just means In-Flight will be near $0 until new work accrues.
+
+Edge case: what if no invoices have ever been created? Last Cycle is null; tile shows "$0" with caption "No cycles yet."
+
+---
+
+## 6. Acceptance criteria
+
+1. `/financial-pulse` loads on the Pulse tab by default.
+2. The three tiles render correct values on a seeded fixture, and the cycle caption reads the right month (e.g., `"2026-05 — 23 invoices"`).
+3. Tile 3 (Year to Date) equals Tile 2 (In-Flight) plus the sum of `invoices.totalAmount` for the current year (excluding draft/cancelled), within rounding.
+4. The Customers table's In-Flight column sums to Tile 2's total exactly (using the `isUnbilledWorkRow` predicate from Slice 5.2).
+5. The Technicians table's In-Flight column sums to Tile 2's total exactly (same data, different aggregation axis).
+6. Sorting and pagination work on both tables. Search filters the Customers table by name.
+7. Clicking Tile 1 navigates to the Invoices page filtered to the last cycle's month. Clicking Tile 3 switches to the Accounting tab.
+8. Switching to the Accounting tab shows all the deeper analytics intact (no regressions on the existing widgets, drill-downs, A/R aging, etc.).
+9. The Pulse tab loads in under 1.5 seconds on a fixture with 1,000 invoices and 50 customers.
+10. Field tech and irrigation manager tokens still get 403 on `/api/financial-pulse/pulse-summary`.
+11. A customer with `hiddenFromBilling = true` doesn't appear in the Customers table even if they have unbilled work.
+
+---
+
+## 7. Out of scope
+
+- Per-customer projections ("at current pace, this customer will exceed budget on date X"). Future slice.
+- Multi-tech attribution on a single work order.
+- A new tech profile page to link to from the Technicians table.
+- Bulk-edit budget caps from the Customers table.
+- Customer-facing or external views of any of this.
+- Touching the existing endpoints' shape — Accounting tab and the existing widgets keep them as-is.
+
+---
+
+## 8. Implementation order
+
+1. New `GET /api/financial-pulse/pulse-summary` endpoint with tests covering the math identities in acceptance criteria 3, 4, and 5.
+2. Lift the current page contents into a new `AccountingTab` component. Confirm nothing breaks (this is purely a refactor — no behavior change).
+3. Build the `PulseTab` component: header, three tiles, two tables, lift the revenue trend chart.
+4. Render both via a Tabs component on the FP page with `?tab=` URL param.
+5. Wire tile click-throughs.
+6. Sort, search, pagination on the tables.
+7. Empty-state handling for first-run companies.
+8. Tests: tab routing, math identities, role guards, fixture-based snapshot of the Pulse tab.
+
+Each step lands independently. Step 2 is the safest first PR; step 3 is where the visual change lands and the user feels it.
+
+---
+
+## 9. Open questions worth flagging
+
+- **Naming of "Year to Date" tile.** Plain "Year to Date" is fine, but because the tile includes In-Flight, some users might read it as "billed YTD." If you'd rather, swap the label to **"Year Total"** or **"This Year"** to make it sound more comprehensive. The caption ("Invoiced + In-Flight") handles the precision regardless.
+- **Tech click destination.** Currently a no-op. If a tech profile page lands while this slice is in progress, wire the link as part of this slice; otherwise leave the no-op and follow up.
+- **Multi-cycle months.** Vanishingly rare but possible: if billing runs twice in one calendar month (corrective second batch, say), they both show up under the same `(invoiceYear, invoiceMonth)` group. The "Last Cycle" tile sums them together. That's probably the right behavior, but worth confirming.

@@ -1,0 +1,187 @@
+# Slice 5.2 — Math Parity, Missing Mount, and Naming Cleanup
+
+**Goal:** Patch three real issues surfaced in the Slice 5 review, all small and independent:
+1. Unbilled-exposure math gives different answers depending on whether you sum the global tile or sum per-customer rows — a parity bug.
+2. The customer-billing page imports the widget but never renders it — dead import.
+3. Several user-visible labels read like an accountant wrote them.
+
+**Why this slice ships before Slice 5.3:** The Pulse restructure in 5.3 leans heavily on a correct In-Flight calculation. Fixing the parity bug here first means 5.3 can be built on trustworthy numbers rather than racing the fix.
+
+**Depends on:** Slice 5 + 5.1 (already shipped).
+
+---
+
+## 1. Fix unbilled-exposure parity
+
+### The bug
+
+Two queries claim to compute "unbilled exposure" with different rules:
+
+- `computeUnbilledExposure` in `artifacts/api-server/src/routes/financial-pulse.ts:301-356` — includes **all** uninvoiced work orders and billing sheets except cancelled ones.
+- The per-customer summary endpoint at `financial-pulse.ts:1126-1154` — restricts to a narrow status allowlist: `approved_passed_to_billing`, `pending_manager_review`, `work_completed`.
+
+Result: the global tile total ≠ sum of per-customer rows. Both numbers will be visible on Slice 5.3's restructured page and they will visibly disagree.
+
+### The fix
+
+Pick one rule and apply it both places. Recommended rule (preserves the broader interpretation the global query intends and matches the user's "anything not yet invoiced" mental model):
+
+> **Unbilled = every uninvoiced work order and billing sheet, excluding rows with `status = 'cancelled'`. Customers with `hiddenFromBilling = true` are excluded.**
+
+Refactor: extract the row-level predicate into a single helper, e.g.
+
+```ts
+// in financial-pulse-math.ts (or a new shared module)
+export function isUnbilledWorkRow(row: { invoiceId?: string | null; status?: string | null }) {
+  return row.invoiceId == null && row.status !== "cancelled";
+}
+```
+
+Use it in both the global `computeUnbilledExposure` and the per-customer summary endpoint. Same predicate, same answer.
+
+### Acceptance for the fix
+
+Add a regression test that fixtures a known dataset and asserts:
+
+```
+sum(perCustomerSummary[c].unbilled for every customer c) === computeUnbilledExposure(global)
+```
+
+within rounding tolerance.
+
+---
+
+## 2. Mount the missing widget on Customer Billing
+
+### The bug
+
+`artifacts/irrigopro/src/pages/customer-billing.tsx` line 47 imports `FinancialPulseWidget` but never renders it. Slice 5's spec called for a `<FinancialPulseWidget variant="customer-detail" customerId={id} />` at the top of the page.
+
+### The fix
+
+Add the widget at the top of the customer-billing page, above the existing customer-billing content. Same shape as the Customer Profile mount that did land:
+
+```tsx
+<FinancialPulseWidget variant="customer-detail" customerId={customerId} className="mb-4" />
+```
+
+Place it directly under the page header, above any of the work-orders / billing-sheets / invoices sections.
+
+### Acceptance
+
+1. The widget renders on `/customers/:id/billing` for `company_admin` and `billing_manager`.
+2. It returns null for field tech (existing role-aware behavior).
+3. The widget's per-customer values match the same customer's row on Financial Pulse's By Customer table — same endpoint, same answer.
+
+---
+
+## 3. Quantify the gross-margin wage fallback
+
+### The disclosure gap
+
+When a technician has no `hourlyWage` set, `computeGrossMargin` falls back to `DEFAULT_FALLBACK_HOURLY_WAGE = 25`. The page shows a count of techs missing a wage but doesn't disclose how much that's affecting the reported margin number. If your real techs make more than $25/hr, reported margin is overstated.
+
+### The fix
+
+In `computeGrossMargin` (`financial-pulse-math.ts:310-389`), additionally compute and return:
+
+```ts
+{
+  pct: number | null;
+  revenue: number;
+  partsCost: number;
+  laborCost: number;
+  missingWageTechCount: number;
+  estimatedLaborCostShortfall: number;   // NEW
+}
+```
+
+`estimatedLaborCostShortfall` = `sum over invoiced work where the originating tech had no wage of (hours × FALLBACK_RATE)`. This is the floor on what the labor cost would be at minimum if those wages were set — it tells the user "at least $X of labor cost is at the $25/hr assumption."
+
+UI change in `financial-pulse.tsx`: the existing missing-wage warning becomes more honest. Something like:
+
+> "Margin assumes $25/hr for 4 technicians missing wages. At least $1,240 of labor cost is based on this fallback — set their wages for a more accurate number."
+
+### Acceptance
+
+The gross-margin tile shows the shortfall amount in addition to the count. Setting wages on those techs causes the warning to disappear.
+
+---
+
+## 4. Rename jargony labels
+
+Five labels read like accounting terminology. Swap them for the language an irrigation business owner would actually use. Apply everywhere they appear (FP page tiles, widget variants, customer profile cards, tooltips, ARIA labels).
+
+| Current label | New label | Reasoning |
+|---|---|---|
+| Outstanding A/R | **Money Owed** | "A/R" is jargon. "Money Owed" is what it actually is. |
+| Unbilled Exposure | **Work Not Yet Billed** | "Exposure" sounds like risk; this is just pending billing. |
+| Avg Days to Pay | **Avg. Time to Get Paid** | Same data, plain English. |
+| Gross Margin | **Profit Margin** | Same number; less accountant-y. |
+| Projected Month-End | **Projected by Month-End** | Slight rephrase; "Projected Month-End" reads as a date. |
+
+Also: the Invoices page section currently labelled "A/R Aging" should match — call it **"Money Owed by Age"** or similar. Pick a label that the team is willing to commit to and use it in both places.
+
+### Acceptance
+
+Search the repo for every prior label string (case-sensitive). Confirm zero remaining instances. The new labels appear consistently on FP, the widget, customer pages, and Invoices.
+
+---
+
+## 5. Add the cross-page regression tests Slice 5 was supposed to ship
+
+Slice 5's acceptance criteria included regression tests that catch widget drift. They didn't ship. Adding them here both closes the original gap and validates the parity fix in Section 1.
+
+### Tests
+
+In `artifacts/api-server/src/routes/financial-pulse.test.ts` (or a new `financial-pulse-consistency.test.ts`):
+
+```ts
+describe("Financial Pulse cross-surface consistency", () => {
+  it("Per-customer Work Not Yet Billed sums to the global tile", async () => {
+    const global = await fetchKpis();
+    const customers = await fetchTopCustomers({ limit: 1000 });
+    const summed = customers.rows.reduce((s, r) => s + r.unbilled, 0);
+    expect(summed).toBeCloseTo(global.unbilledExposure.value, 2);
+  });
+
+  it("A/R aging total matches the Money Owed tile", async () => {
+    const aging = await fetchArAging();
+    const kpis = await fetchKpis();
+    expect(aging.total).toBeCloseTo(kpis.outstandingAr.value, 2);
+  });
+
+  it("Per-customer summary endpoint agrees with top-customers row", async () => {
+    const rows = await fetchTopCustomers({ limit: 20 });
+    for (const r of rows.rows) {
+      const summary = await fetchCustomerSummary(r.customerId);
+      expect(summary.billedMtd).toBeCloseTo(r.revenuePeriod, 2);
+      expect(summary.unbilled).toBeCloseTo(r.unbilled, 2);
+    }
+  });
+});
+```
+
+Fixture data should include at least one customer with mixed invoiced + unbilled work, one tech without a wage set, and one customer marked `hiddenFromBilling`.
+
+---
+
+## 6. Out of scope
+
+- The tabbed Pulse + Accounting restructure (Slice 5.3).
+- Per-customer projections (Slice 5.4 or later).
+- Adding new metrics.
+- Renaming anything not in Section 4.
+
+---
+
+## 7. Implementation checklist
+
+- [ ] Extract shared `isUnbilledWorkRow` predicate, use in both global and per-customer queries
+- [ ] Add regression test for global vs per-customer parity
+- [ ] Mount `<FinancialPulseWidget variant="customer-detail" customerId={id} />` on `customer-billing.tsx`
+- [ ] Add `estimatedLaborCostShortfall` to `computeGrossMargin` return value
+- [ ] Update Profit Margin tile to display the shortfall in the warning
+- [ ] Rename five labels everywhere they appear (FP page, widget variants, customer pages, Invoices A/R)
+- [ ] Add cross-surface consistency tests
+- [ ] Smoke-check the customer-billing page renders the widget for admin/billing roles and not for field techs
