@@ -37,7 +37,7 @@ function auditProductionEnv(): void {
   if (missing.length === 0) {
     logger.info("[boot] QB env vars present");
   } else {
-    logger.warn(`[boot] QB env vars MISSING: ${missing.join(", ")}`);
+    throw new Error(`Missing required env vars: ${missing.join(", ")}`);
   }
 }
 
