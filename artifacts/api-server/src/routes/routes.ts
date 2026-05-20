@@ -949,12 +949,16 @@ const requireQuickBooksAccess = (req: any, res: any, next: any) => {
 
 // In-memory OAuth state store (replaces session-based storage — app uses localStorage auth, not server sessions)
 // Maps state token -> { expiry timestamp, companyId } (10 min TTL)
+// Task #744: USE_DB_OAUTH_STATE=1 routes new flows through Postgres instead; the Map stays for the in-memory path.
 const oauthStateStore = new Map<string, { expiry: number; companyId: string | null }>();
 setInterval(() => {
+  // Prune in-memory entries (both paths — harmless when the Map is idle)
   const now = Date.now();
   for (const [state, entry] of Array.from(oauthStateStore.entries())) {
     if (now > entry.expiry) oauthStateStore.delete(state);
   }
+  // Prune Postgres entries unconditionally — cheap and correct regardless of active flag
+  void storage.pruneExpiredOauthStates().catch(() => {/* non-critical sweep */});
 }, 60_000);
 
 
@@ -8106,9 +8110,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const state = crypto.randomBytes(16).toString('hex');
-      // Store state + company ID in memory store for CSRF verification in the callback (10 min TTL)
+      // Store state + company ID for CSRF verification in the callback (10 min TTL).
+      // USE_DB_OAUTH_STATE=1 → durable Postgres store (survives server restarts);
+      // unset (default) → existing in-memory Map.
       const authCompanyId = (headerUserCompanyId(req) as string) || null;
-      oauthStateStore.set(state, { expiry: Date.now() + 10 * 60 * 1000, companyId: authCompanyId });
+      if (process.env.USE_DB_OAUTH_STATE) {
+        await storage.saveOauthState(state, 'quickbooks', authCompanyId, new Date(Date.now() + 10 * 60 * 1000));
+      } else {
+        oauthStateStore.set(state, { expiry: Date.now() + 10 * 60 * 1000, companyId: authCompanyId });
+      }
       
       // QuickBooks OAuth URL
       const authUrl = `https://appcenter.intuit.com/app/connect/oauth2?` +
@@ -8143,26 +8153,45 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
-      // Verify CSRF state parameter against in-memory store
-      const stateEntry = state ? oauthStateStore.get(state as string) : undefined;
-      if (!state || !stateEntry || Date.now() > stateEntry.expiry) {
-        console.error('QuickBooks OAuth state mismatch or expired. Possible CSRF attack.', { received: state });
-        res.status(400).send(`
-          <html>
-            <head><title>Connection Failed</title></head>
-            <body>
-              <h2>QuickBooks Connection Failed</h2>
-              <p>Security verification failed. Please try connecting again.</p>
-              <button onclick="window.location.href='/billing'">Return to IrrigoPro</button>
-            </body>
-          </html>
-        `);
-        return;
+      // Verify CSRF state parameter (atomic consume — prevents replay attacks).
+      // USE_DB_OAUTH_STATE=1 → durable Postgres store; unset → in-memory Map.
+      let oauthCompanyId: string | null = null;
+      if (process.env.USE_DB_OAUTH_STATE) {
+        const dbEntry = state ? await storage.consumeOauthState(state as string) : undefined;
+        if (!state || !dbEntry) {
+          console.error('QuickBooks OAuth state mismatch or expired (db path). Possible CSRF attack.', { received: state });
+          res.status(400).send(`
+            <html>
+              <head><title>Connection Failed</title></head>
+              <body>
+                <h2>QuickBooks Connection Failed</h2>
+                <p>Security verification failed. Please try connecting again.</p>
+                <button onclick="window.location.href='/billing'">Return to IrrigoPro</button>
+              </body>
+            </html>
+          `);
+          return;
+        }
+        oauthCompanyId = dbEntry.companyId;
+      } else {
+        const stateEntry = state ? oauthStateStore.get(state as string) : undefined;
+        if (!state || !stateEntry || Date.now() > stateEntry.expiry) {
+          console.error('QuickBooks OAuth state mismatch or expired. Possible CSRF attack.', { received: state });
+          res.status(400).send(`
+            <html>
+              <head><title>Connection Failed</title></head>
+              <body>
+                <h2>QuickBooks Connection Failed</h2>
+                <p>Security verification failed. Please try connecting again.</p>
+                <button onclick="window.location.href='/billing'">Return to IrrigoPro</button>
+              </body>
+            </html>
+          `);
+          return;
+        }
+        oauthCompanyId = stateEntry.companyId;
+        oauthStateStore.delete(state as string);
       }
-      // Retrieve company ID that was stored when the OAuth flow was initiated
-      const oauthCompanyId = stateEntry.companyId;
-      // Clear the state from store after verification
-      oauthStateStore.delete(state as string);
 
       // Exchange the authorization code for access tokens
       console.log("QuickBooks OAuth callback received:", { code, state, realmId });

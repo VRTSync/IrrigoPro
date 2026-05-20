@@ -590,6 +590,19 @@ export const quickbooksSync = pgTable("quickbooks_sync", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
+// Task #744 — QB Harden #2: durable OAuth state store (behind USE_DB_OAUTH_STATE flag).
+// Survives api-server restarts mid-OAuth flow on autoscale deployments.
+// consumeOauthState uses a single atomic DELETE...RETURNING to prevent replay attacks.
+export const oauthState = pgTable("oauth_state", {
+  state: text("state").primaryKey(),
+  provider: text("provider").notNull(),
+  companyId: text("company_id"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  expiresAtIdx: index("oauth_state_expires_at_idx").on(table.expiresAt),
+}));
+
 // =============================================================================
 // CANONICAL STATUS LIFECYCLE — Work Orders & Billing Sheets
 // =============================================================================

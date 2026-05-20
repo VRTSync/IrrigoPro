@@ -29,6 +29,7 @@ import {
   aiGenerationLogs,
   notifications,
   quickbooksIntegration,
+  oauthState,
   siteMaps,
   controllers,
   irrigationZones,
@@ -385,6 +386,11 @@ export interface IStorage {
   disconnectQuickBooksCustomers(): Promise<void>;
   markQuickBooksReconnectRequired(realmId: string, reason: string): Promise<void>;
   getAllActiveQuickBooksIntegrations(): Promise<(typeof quickbooksIntegration.$inferSelect)[]>;
+
+  // OAuth state (Task #744 — QB Harden #2, behind USE_DB_OAUTH_STATE flag)
+  saveOauthState(state: string, provider: string, companyId: string | null, expiresAt: Date): Promise<void>;
+  consumeOauthState(state: string): Promise<{ provider: string; companyId: string | null } | undefined>;
+  pruneExpiredOauthStates(): Promise<void>;
 
   // Parts Reference Lists (per-company: categories, brands, sizes, materials, fitting types)
   getPartCategories(companyId: number): Promise<PartCategory[]>;
@@ -2716,6 +2722,22 @@ export class DatabaseStorage implements IStorage {
       console.error('Error saving QuickBooks integration:', error);
       throw error;
     }
+  }
+
+  // Task #744 — QB Harden #2: durable OAuth state (behind USE_DB_OAUTH_STATE flag)
+  async saveOauthState(state: string, provider: string, companyId: string | null, expiresAt: Date): Promise<void> {
+    await db.insert(oauthState).values({ state, provider, companyId, expiresAt });
+  }
+
+  async consumeOauthState(state: string): Promise<{ provider: string; companyId: string | null } | undefined> {
+    const rows = await db.delete(oauthState)
+      .where(and(eq(oauthState.state, state), gt(oauthState.expiresAt, new Date())))
+      .returning({ provider: oauthState.provider, companyId: oauthState.companyId });
+    return rows[0];
+  }
+
+  async pruneExpiredOauthStates(): Promise<void> {
+    await db.delete(oauthState).where(lte(oauthState.expiresAt, new Date()));
   }
 
   async getQuickBooksIntegration(realmId: string): Promise<(typeof quickbooksIntegration.$inferSelect) | null> {
