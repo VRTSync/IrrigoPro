@@ -100,6 +100,15 @@ export function getPrevMonthWindow(now: Date) {
   );
   return { start, end };
 }
+export function getPrevFullMonthWindow(now: Date) {
+  // Full prior calendar month: [first day of prev month, first day of
+  // current month). Used by the "Billed Last Cycle" tile so it shows
+  // the closed prior month total regardless of where we are in the
+  // current month.
+  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const end = new Date(now.getFullYear(), now.getMonth(), 1);
+  return { start, end };
+}
 export function getPrevYearYtdWindow(now: Date) {
   // Same calendar slice in previous year — Jan 1 of last year through
   // `now`'s month/day, aligned to the millisecond after the matching

@@ -143,6 +143,7 @@ describe("Task #688 — /api/financial-pulse/kpis response shape", () => {
     const body = (await r.json()) as any;
     for (const k of [
       "billedMtd",
+      "billedLastCycle",
       "billedYtd",
       "collectedMtd",
       "outstandingAr",
@@ -155,6 +156,18 @@ describe("Task #688 — /api/financial-pulse/kpis response shape", () => {
     }
     assert.ok("missingWageTechCount" in body.grossMarginPct);
     assert.equal(body.grossMarginPct.missingWageTechCount, 0);
+    // Task #723 — billedLastCycle carries value + monthLabel + monthIso.
+    assert.ok("value" in body.billedLastCycle);
+    assert.ok(
+      typeof body.billedLastCycle.monthLabel === "string" &&
+        body.billedLastCycle.monthLabel.length > 0,
+      "billedLastCycle.monthLabel should be a non-empty string",
+    );
+    assert.ok(
+      typeof body.billedLastCycle.monthIso === "string" &&
+        /^\d{4}-\d{2}$/.test(body.billedLastCycle.monthIso),
+      "billedLastCycle.monthIso should be YYYY-MM",
+    );
   });
 
   it("MTD vs YTD period selector is reflected in the response", async () => {

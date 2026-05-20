@@ -166,7 +166,7 @@ export function MetricTile({
             </span>
           </div>
         )}
-        {helper && !isLoading && !hasDelta && (
+        {helper && !isLoading && (
           <p className="text-xs text-gray-400 mt-1 truncate">{helper}</p>
         )}
       </CardContent>

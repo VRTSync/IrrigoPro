@@ -85,8 +85,13 @@ interface KpiTile {
 interface MarginTile extends KpiTile {
   missingWageTechCount?: number;
 }
+interface BilledLastCycleTile extends KpiTile {
+  monthLabel: string;
+  monthIso: string;
+}
 interface KpisResponse {
   billedMtd: KpiTile;
+  billedLastCycle: BilledLastCycleTile;
   billedYtd: KpiTile;
   collectedMtd: KpiTile;
   outstandingAr: KpiTile;
@@ -250,6 +255,8 @@ const ALLOWED_ROLES = new Set([
 export const INFO_TIPS = {
   billedMtd:
     "From invoices · current month-to-date by createdAt · excludes draft, cancelled · includes tax and markup.",
+  billedLastCycle:
+    "From invoices · full prior calendar month by createdAt · excludes draft, cancelled · includes tax and markup.",
   collectedMtd:
     "From invoices · current month-to-date by paidAt · excludes draft, cancelled · includes tax and markup.",
   outstandingAr:
@@ -1291,17 +1298,17 @@ function KpiBand({
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
       <MetricTile
-        testId="kpi-billed-mtd"
-        label="Billed MTD"
-        value={data?.billedMtd.value ?? null}
+        testId="kpi-billed-last-cycle"
+        label="Billed Last Cycle"
+        value={data?.billedLastCycle.value ?? null}
         format="currency"
-        deltaPct={data?.billedMtd.deltaPct ?? null}
-        deltaLabel="vs last month"
+        deltaPct={data?.billedLastCycle.deltaPct ?? null}
+        deltaLabel="vs prior month"
         deltaGoodDirection="up"
+        helper={data?.billedLastCycle.monthLabel}
         isLoading={isLoading}
         isError={isError}
-        windowBadge="MTD"
-        infoTip={INFO_TIPS.billedMtd}
+        infoTip={INFO_TIPS.billedLastCycle}
       />
       <MetricTile
         testId="kpi-collected-mtd"
@@ -1352,7 +1359,9 @@ function KpiBand({
       />
       <MetricTile
         testId="kpi-unbilled-exposure"
-        label="Unbilled Exposure"
+        label={`Current Cycle (${new Date().toLocaleDateString(undefined, {
+          month: "long",
+        })})`}
         value={data?.unbilledExposure.value ?? null}
         format="currency"
         deltaGoodDirection="down"

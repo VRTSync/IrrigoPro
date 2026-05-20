@@ -33,6 +33,7 @@ import {
   getMonthStarts,
   getMtdWindow,
   getPrevMonthWindow,
+  getPrevFullMonthWindow,
   getPrevYearYtdWindow,
   getYtdWindow,
   pctDelta,
@@ -355,6 +356,8 @@ export function registerFinancialPulseRoutes(
         const mtd = getMtdWindow(now);
         const ytd = getYtdWindow(now);
         const prevMonth = getPrevMonthWindow(now);
+        const prevFullMonth = getPrevFullMonthWindow(now);
+        const prevPrevFullMonth = getPrevFullMonthWindow(prevFullMonth.start);
         const prevYearYtd = getPrevYearYtdWindow(now);
 
         const billedMtd = computeBilled(allInvoices, mtd.start, mtd.end);
@@ -362,6 +365,16 @@ export function registerFinancialPulseRoutes(
           allInvoices,
           prevMonth.start,
           prevMonth.end,
+        );
+        const billedLastCycle = computeBilled(
+          allInvoices,
+          prevFullMonth.start,
+          prevFullMonth.end,
+        );
+        const billedCycleBeforeLast = computeBilled(
+          allInvoices,
+          prevPrevFullMonth.start,
+          prevPrevFullMonth.end,
         );
         const billedYtd = computeBilled(allInvoices, ytd.start, ytd.end);
         const billedPrevYearYtd = computeBilled(
@@ -413,6 +426,18 @@ export function registerFinancialPulseRoutes(
             value: billedMtd,
             deltaPct: pctDelta(billedMtd, billedPrevMonth),
             comparedTo: "prevMonth",
+          },
+          billedLastCycle: {
+            value: billedLastCycle,
+            deltaPct: pctDelta(billedLastCycle, billedCycleBeforeLast),
+            comparedTo: "prevMonth",
+            monthLabel: prevFullMonth.start.toLocaleDateString("en-US", {
+              month: "long",
+              year: "numeric",
+            }),
+            monthIso: `${prevFullMonth.start.getFullYear()}-${String(
+              prevFullMonth.start.getMonth() + 1,
+            ).padStart(2, "0")}`,
           },
           billedYtd: {
             value: billedYtd,
