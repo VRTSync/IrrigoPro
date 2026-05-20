@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSearch } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -256,6 +257,27 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   const [connectError, setConnectError] = useState<ConnectError | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const search = useSearch();
+
+  // Phase 5b — QB Harden #5: surface credential/env mismatch errors that were
+  // forwarded from the OAuth callback via ?qb_connect_error=<message>.
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    const qbConnectError = params.get("qb_connect_error");
+    if (!qbConnectError) return;
+
+    toast({
+      title: "QuickBooks Connection Failed",
+      description: qbConnectError,
+      variant: "destructive",
+    });
+
+    // Remove the param from the URL without adding a history entry.
+    params.delete("qb_connect_error");
+    const newSearch = params.toString();
+    const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "");
+    window.history.replaceState(null, "", newUrl);
+  }, [search, toast]);
 
   // Fetch QuickBooks connection status
   const { data: connectionStatus, isLoading: loadingConnection, error: connectionError } = useQuery<QbConnectionStatus>({

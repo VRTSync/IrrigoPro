@@ -23,6 +23,17 @@ import twilio from "twilio";
 import { ObjectStorageService } from "../objectStorage";
 import { InvoicePdfService } from "../invoice-pdf-service";
 import { buildWorkDescriptionPrompt, buildExpandDescriptionPrompt, TEMPLATE_VERSION, CRITICAL_FIELDS, type WorkDescriptionInputs } from "../ai-prompt-templates";
+/**
+ * Phase 5b — QB Harden #5: thrown when the detected credential environment
+ * does not match the server environment and STRICT_QB_ENV_CHECK is set.
+ */
+class QbCredentialMismatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "QbCredentialMismatchError";
+  }
+}
+
 import {
   classifyQbRefreshError,
   withQbRefreshLock,
@@ -8059,34 +8070,62 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       throw new Error(`Token exchange failed: ${response.status} ${errorText}${intuitTid ? ` [TID: ${intuitTid}]` : ''}`);
     }
 
-    const tokenData = (await response.json()) as QbTokenResponseValidated & { expires_in: number };
+    const tokenData = (await response.json()) as QbTokenResponseValidated & { expires_in: number; detectedTokenEnvironment?: string };
     console.log('Successfully exchanged code for tokens');
-    
-    // Get company info from QuickBooks API
-    try {
-      // Use production QuickBooks API for deployment, sandbox for development
-      const apiBase = process.env.NODE_ENV === 'production' 
-        ? 'https://quickbooks.api.intuit.com' 
-        : 'https://sandbox-quickbooks.api.intuit.com';
-      const companyInfoResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${realmId}/companyinfo/${realmId}`, {
-        headers: {
-          'Authorization': `Bearer ${tokenData.access_token}`,
-          'Accept': 'application/json'
+
+    // Phase 5b — QB Harden #5: probe both Intuit API hosts to detect which
+    // environment the credentials actually belong to, rather than assuming
+    // the host based on NODE_ENV.
+    const INTUIT_HOSTS = {
+      production: 'https://quickbooks.api.intuit.com',
+      sandbox: 'https://sandbox-quickbooks.api.intuit.com',
+    } as const;
+
+    let detectedTokenEnvironment: 'production' | 'sandbox' | null = null;
+
+    for (const [env, apiBase] of Object.entries(INTUIT_HOSTS) as [keyof typeof INTUIT_HOSTS, string][]) {
+      try {
+        const companyInfoResponse = await makeQuickBooksRequest(
+          `${apiBase}/v3/company/${realmId}/companyinfo/${realmId}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${tokenData.access_token}`,
+              'Accept': 'application/json'
+            }
+          },
+          'Company Info',
+          realmId
+        );
+
+        if (companyInfoResponse.ok) {
+          const companyData = (await companyInfoResponse.json()) as QbCompanyInfoQueryResponse;
+          tokenData.companyName = companyData?.QueryResponse?.CompanyInfo?.[0]?.CompanyName || `Company ${realmId}`;
+          detectedTokenEnvironment = env;
+          break;
         }
-      }, 'Company Info', realmId);
-      
-      if (companyInfoResponse.ok) {
-        const companyData = (await companyInfoResponse.json()) as QbCompanyInfoQueryResponse;
-        tokenData.companyName = companyData?.QueryResponse?.CompanyInfo?.[0]?.CompanyName || `Company ${realmId}`;
-        console.log('Company info fetched successfully');
-      } else {
-        console.error('Failed to fetch company info:', companyInfoResponse.status);
+      } catch {
+        // try the other host
       }
-    } catch (companyError) {
-      console.error('Failed to fetch company info:', companyError);
-      tokenData.companyName = `Company ${realmId}`;
     }
 
+    if (!detectedTokenEnvironment) {
+      // Both hosts failed — fall back to NODE_ENV derivation and log a warning.
+      detectedTokenEnvironment = process.env.NODE_ENV === 'production' ? 'production' : 'sandbox';
+      console.warn('[QB] Could not detect token environment from either Intuit host — defaulting to NODE_ENV derivation', { realmId });
+      tokenData.companyName = tokenData.companyName ?? `Company ${realmId}`;
+    }
+
+    const serverEnv = process.env.NODE_ENV === 'production' ? 'production' : 'sandbox';
+    if (detectedTokenEnvironment !== serverEnv) {
+      const mismatchMsg = `Credentials are ${detectedTokenEnvironment} but server is ${serverEnv}`;
+      if (process.env.STRICT_QB_ENV_CHECK) {
+        throw new QbCredentialMismatchError(mismatchMsg);
+      } else {
+        console.warn(`[QB] ${mismatchMsg} — STRICT_QB_ENV_CHECK is off, saving with detected environment`, { realmId, detectedTokenEnvironment, serverEnv });
+      }
+    }
+
+    tokenData.detectedTokenEnvironment = detectedTokenEnvironment;
     return tokenData;
   }
 
@@ -8220,7 +8259,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           realmId: realmId as string, // Keep QB realm ID for API calls
           expiresAt: qbData.expiresAt,
           connectionStatus: 'connected',        // Explicitly clear any previous reconnect_required state
-          reconnectRequiredReason: null
+          reconnectRequiredReason: null,
+          // Phase 5b — QB Harden #5: store the environment detected by probing
+          // both Intuit hosts, rather than deriving it from NODE_ENV.
+          tokenEnvironment: tokenResponse.detectedTokenEnvironment as string | undefined,
         });
 
         console.log(`QuickBooks connection established for company: ${realmId}`);
@@ -8279,6 +8321,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           </html>
         `);
       } catch (error) {
+        // Phase 5b — QB Harden #5: credential/env mismatch with STRICT_QB_ENV_CHECK on.
+        // Redirect back to /billing with the error message in the query string so the
+        // frontend can surface it as a toast (no row is persisted).
+        if (error instanceof QbCredentialMismatchError) {
+          const errParam = encodeURIComponent(error.message);
+          res.redirect(`${req.protocol}://${req.get('host')}/billing?qb_connect_error=${errParam}`);
+          return;
+        }
         console.error("QuickBooks callback error:", error);
         res.status(500).send(`
           <html>

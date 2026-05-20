@@ -1,6 +1,7 @@
 import { createApp } from "./app";
 import { resolveChromiumExecutable } from "./chromium-resolver";
 import { logger } from "./lib/logger";
+import { auditQbTokenEnvironments } from "./qb-boot-audit";
 
 try {
   const chromiumPath = resolveChromiumExecutable();
@@ -44,6 +45,15 @@ function auditProductionEnv(): void {
 auditProductionEnv();
 
 const { httpServer } = await createApp();
+
+// Phase 5a — QB Harden #5: scan existing QB rows for credential/env mismatches.
+// Fire-and-forget; must not block the server from accepting requests.
+auditQbTokenEnvironments().catch((err) => {
+  logger.warn(
+    { err: err instanceof Error ? err.message : String(err) },
+    "[boot] QB token environment audit threw unexpectedly",
+  );
+});
 
 httpServer.listen(port, () => {
   logger.info({ port }, "Server listening");
