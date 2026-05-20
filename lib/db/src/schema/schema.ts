@@ -1413,8 +1413,8 @@ export const WET_CHECK_ISSUE_TYPE_SEED: ReadonlyArray<{
   sortOrder: number;
 }> = [
   { issueType: "head_replacement",   issueGroup: "quick_fix", displayLabel: "Head Replace",     defaultLaborHours: "0.25", partCategoryFilter: "Head",       sortOrder: 10 },
-  { issueType: "nozzle_replacement", issueGroup: "quick_fix", displayLabel: "Nozzle Replace",   defaultLaborHours: "0.10", partCategoryFilter: "Nozzle",     sortOrder: 20 },
-  { issueType: "head_adjustment",    issueGroup: "quick_fix", displayLabel: "Adjust",           defaultLaborHours: "0.05", partCategoryFilter: null,         sortOrder: 30 },
+  { issueType: "nozzle_replacement", issueGroup: "quick_fix", displayLabel: "Nozzle Replace",   defaultLaborHours: "0.25", partCategoryFilter: "Nozzle",     sortOrder: 20 },
+  { issueType: "head_adjustment",    issueGroup: "quick_fix", displayLabel: "Adjust",           defaultLaborHours: "0.25", partCategoryFilter: null,         sortOrder: 30 },
   { issueType: "leak_repair",        issueGroup: "advanced",  displayLabel: "Leak",             defaultLaborHours: "1.00", partCategoryFilter: "Fitting",    sortOrder: 40 },
   { issueType: "pressure_issue",     issueGroup: "advanced",  displayLabel: "Pressure Issue",   defaultLaborHours: "0.50", partCategoryFilter: null,         sortOrder: 50 },
   { issueType: "coverage_issue",     issueGroup: "advanced",  displayLabel: "Coverage Issue",   defaultLaborHours: "0.50", partCategoryFilter: null,         sortOrder: 60 },

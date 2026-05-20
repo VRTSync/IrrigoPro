@@ -323,8 +323,8 @@ export default function AdminIssueTypesPage() {
                           {isEditing ? (
                             <Input
                               type="number"
-                              min={0}
-                              step={0.05}
+                              min={0.25}
+                              step={0.25}
                               value={edit.defaultLaborHours}
                               onChange={e => setEditing(prev => ({ ...prev, [row.id]: { ...edit, defaultLaborHours: e.target.value } }))}
                               data-testid={`input-hours-${row.id}`}
@@ -534,8 +534,8 @@ function AddIssueTypeDialog({
               <Input
                 id="add-hours"
                 type="number"
-                min={0}
-                step={0.05}
+                min={0.25}
+                step={0.25}
                 value={defaultLaborHours}
                 onChange={e => setDefaultLaborHours(e.target.value)}
                 data-testid="input-add-hours"

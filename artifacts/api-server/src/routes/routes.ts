@@ -14411,8 +14411,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       defaultLaborHours: z.union([z.string(), z.number()])
         .transform((v) => typeof v === "number" ? v.toFixed(2) : v.trim())
         .refine((v) => /^\d+(\.\d{1,2})?$/.test(v), "defaultLaborHours must be a non-negative number with up to 2 decimals")
-        .refine((v) => parseFloat(v) >= 0, "defaultLaborHours must be non-negative")
-        .refine((v) => parseFloat(v) <= 999.99, "defaultLaborHours is too large"),
+        .refine((v) => parseFloat(v) >= 0.25, "defaultLaborHours must be at least 0.25")
+        .refine((v) => parseFloat(v) <= 999.99, "defaultLaborHours is too large")
+        .refine((v) => Math.abs(Math.round(parseFloat(v) * 4) - parseFloat(v) * 4) < 1e-9, "defaultLaborHours must be a multiple of 0.25"),
       partCategoryFilter: z.string().trim().max(64).nullish()
         .transform((v) => (v == null || v === "") ? null : v),
       sortOrder: z.coerce.number().int().min(0).max(100000).optional(),
