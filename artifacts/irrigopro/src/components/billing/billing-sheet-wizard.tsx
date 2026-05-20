@@ -172,11 +172,15 @@ function CustomerDateStep({
   onChange,
   onContinue,
   onCancel,
+  isEdit,
+  originalTechnicianName,
 }: {
   value: CustomerStepValue;
   onChange: (v: CustomerStepValue) => void;
   onContinue: () => void;
   onCancel: () => void;
+  isEdit?: boolean;
+  originalTechnicianName?: string;
 }) {
   const [showPicker, setShowPicker] = useState(!value.customer);
 
@@ -325,6 +329,28 @@ function CustomerDateStep({
                 Today
               </Button>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Read-only technician display in edit mode — the technician is the
+          person who performed the work and is locked after creation. */}
+      {isEdit && originalTechnicianName && (
+        <Card>
+          <CardContent className="p-4 sm:p-5 space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="bg-gray-50 p-2 rounded-md">
+                <User className="w-4 h-4 text-gray-500" />
+              </div>
+              <h2 className="text-base font-semibold text-gray-900">Technician</h2>
+              <span className="text-xs text-gray-500 ml-auto">Read-only</span>
+            </div>
+            <div className="flex items-center h-10 px-3 rounded-md border border-gray-200 bg-gray-50 text-gray-700 text-sm">
+              {originalTechnicianName}
+            </div>
+            <p className="text-xs text-gray-500">
+              The technician is locked to the person who performed the work and cannot be changed.
+            </p>
           </CardContent>
         </Card>
       )}
@@ -1363,6 +1389,16 @@ export function BillingSheetWizard({
         : perPartHoursSubmit;
       const laborSubtotal = submitTotalHours * laborRate;
 
+      // Task #764 — in edit mode, the technician must always come from the
+      // original record. Never use currentUser here to avoid silently
+      // overwriting the field tech with the manager who is editing.
+      const technicianId = isEdit
+        ? (existing?.technicianId ?? null)
+        : (currentUser?.id ?? null);
+      const technicianName = isEdit
+        ? (existing?.technicianName ?? "")
+        : (currentUser?.name || currentUser?.username || "");
+
       const payload: Record<string, unknown> = {
         customerId: customerStep.customer.id,
         customerName: customerStep.customer.name,
@@ -1374,10 +1410,8 @@ export function BillingSheetWizard({
         controllerLetter: locationStep.controllerLetter,
         zoneNumber: locationStep.zoneNumber,
         workDate: customerStep.workDate,
-        technicianName: isFieldTech
-          ? currentUser?.name || currentUser?.username || ""
-          : currentUser?.name || currentUser?.username || "",
-        technicianId: currentUser?.id ?? null,
+        technicianName,
+        technicianId,
         workDescription: descriptionStep.workDescription.trim(),
         notes: descriptionStep.notes,
         branchName: customerStep.branchName || null,
@@ -1619,6 +1653,12 @@ export function BillingSheetWizard({
                 onChange={handleCustomerStepChange}
                 onContinue={goNext}
                 onCancel={requestClose}
+                isEdit={isEdit}
+                originalTechnicianName={
+                  isEdit && !isFieldTech
+                    ? (existing?.technicianName ?? undefined)
+                    : undefined
+                }
               />
             ) : step === 2 ? (
               <WizardLocationStep

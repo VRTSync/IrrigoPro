@@ -10489,6 +10489,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const { items, companyId, ...billingSheetData } = req.body;
+      // Task #764 — technician is locked to the person who created the sheet.
+      // Strip these fields unconditionally so no client payload can overwrite them.
+      delete billingSheetData.technicianId;
+      delete billingSheetData.technicianName;
       // Normalize the optional pin / controller fields so they round-trip
       // through the decimal/integer columns regardless of whether the client
       // sent numbers, strings, or omitted them entirely.
