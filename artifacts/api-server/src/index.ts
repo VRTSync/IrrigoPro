@@ -26,6 +26,23 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
+function auditProductionEnv(): void {
+  if (process.env["NODE_ENV"] !== "production") return;
+  const required = [
+    "QUICKBOOKS_CLIENT_ID",
+    "QUICKBOOKS_CLIENT_SECRET",
+    "QUICKBOOKS_REDIRECT_URI",
+  ] as const;
+  const missing = required.filter((key) => !process.env[key]);
+  if (missing.length === 0) {
+    logger.info("[boot] QB env vars present");
+  } else {
+    logger.warn(`[boot] QB env vars MISSING: ${missing.join(", ")}`);
+  }
+}
+
+auditProductionEnv();
+
 const { httpServer } = await createApp();
 
 httpServer.listen(port, () => {
