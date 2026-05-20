@@ -9351,8 +9351,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(404).json({ message: "Work order not found" });
         return;
       }
-      if (workOrder.status !== 'pending_manager_review') {
-        res.status(400).json({ message: "Work order must be in Pending Manager Review to approve." });
+      if (workOrder.status !== 'pending_manager_review' && workOrder.status !== 'work_completed') {
+        res.status(400).json({ message: "Work order must be in Pending Manager Review or Work Completed to approve." });
         return;
       }
 
@@ -9410,8 +9410,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(404).json({ message: "Work order not found" });
         return;
       }
-      if (workOrder.status !== 'pending_manager_review') {
-        res.status(400).json({ message: "Work order must be in Pending Manager Review to return for correction." });
+      if (workOrder.status !== 'pending_manager_review' && workOrder.status !== 'work_completed') {
+        res.status(400).json({ message: "Work order must be in Pending Manager Review or Work Completed to return for correction." });
         return;
       }
 
@@ -9456,8 +9456,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(404).json({ message: "Billing sheet not found" });
         return;
       }
-      if (billingSheet.status !== 'pending_manager_review') {
-        res.status(400).json({ message: "Billing sheet must be in Pending Manager Review to approve." });
+      if (billingSheet.status !== 'pending_manager_review' && billingSheet.status !== 'submitted') {
+        res.status(400).json({ message: "Billing sheet must be in Pending Manager Review or Submitted to approve." });
         return;
       }
 
@@ -9506,8 +9506,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(404).json({ message: "Billing sheet not found" });
         return;
       }
-      if (billingSheet.status !== 'pending_manager_review') {
-        res.status(400).json({ message: "Billing sheet must be in Pending Manager Review to return for correction." });
+      if (billingSheet.status !== 'pending_manager_review' && billingSheet.status !== 'submitted') {
+        res.status(400).json({ message: "Billing sheet must be in Pending Manager Review or Submitted to return for correction." });
         return;
       }
 

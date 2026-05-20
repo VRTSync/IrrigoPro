@@ -674,7 +674,7 @@ export default function BillingSheets() {
                               </Button>
                             )}
                             {/* Manager approval gate: Approve or Return for Correction */}
-                            {(currentUser?.role === 'irrigation_manager' || currentUser?.role === 'company_admin') && sheet.status === 'pending_manager_review' && (
+                            {(currentUser?.role === 'irrigation_manager' || currentUser?.role === 'company_admin') && (sheet.status === 'pending_manager_review' || sheet.status === 'submitted') && (
                               <div className="flex flex-col gap-2 w-full sm:w-auto">
                                 <Button size="sm" onClick={() => approveBillingSheet.mutate(sheet.id)} disabled={approveBillingSheet.isPending} className="bg-teal-600 hover:bg-teal-700 text-white w-full sm:w-auto">
                                   <Check className="w-3 h-3 mr-1" />Approve / Pass to Billing

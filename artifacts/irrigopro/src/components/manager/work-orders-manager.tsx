@@ -263,8 +263,8 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
               </Select>
             )}
 
-            {/* Manager approval actions for pending_manager_review */}
-            {workOrder.status === 'pending_manager_review' && (
+            {/* Manager approval actions for pending_manager_review and work_completed */}
+            {(workOrder.status === 'pending_manager_review' || workOrder.status === 'work_completed') && (
               <div className="flex flex-col gap-2">
                 <Button
                   size="sm"
