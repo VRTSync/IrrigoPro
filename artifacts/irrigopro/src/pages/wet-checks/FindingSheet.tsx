@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +28,27 @@ import { newClientId } from "./helpers";
 import { PhotoCaptureButton } from "./PhotoCaptureButton";
 import { PhotoThumb } from "./PhotoThumb";
 import { PendingPhotosGrid } from "./PendingPhotosGrid";
+
+// Retry a single async call up to `maxAttempts` times with exponential
+// back-off. Returns the resolved value or throws the last error.
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxAttempts = 3,
+  baseDelayMs = 400,
+): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt < maxAttempts - 1) {
+        await new Promise<void>((r) => setTimeout(r, baseDelayMs * 2 ** attempt));
+      }
+    }
+  }
+  throw lastErr;
+}
 
 export type FindingSheetState =
   | { open: false }
@@ -77,6 +99,9 @@ export function FindingSheet({
   // Photos picked while creating a finding (before save). Uploaded immediately
   // with findingId=null and linked to the new finding once saveMut succeeds.
   const [pendingPhotos, setPendingPhotos] = useState<WetCheckPhoto[]>([]);
+  // Persistent error count for photos that couldn't be linked after all
+  // retries — shown as a non-dismissing alert so the tech doesn't miss it.
+  const [unlinkedPhotoCount, setUnlinkedPhotoCount] = useState(0);
 
   const { data: configs = [] } = useArrayQuery<IssueTypeConfig>({ queryKey: ["/api/wet-checks/issue-types"], queryFn: () => cachedApiRequest(`/api/wet-checks/issue-types`), enabled: open });
   const cfg = configs.find(c => c.issueType === issueType);
@@ -237,18 +262,24 @@ export function FindingSheet({
                 ),
             );
           } else {
+            // Attempt each link up to 3 times with exponential back-off
+            // (400 ms → 800 ms → 1600 ms). This recovers from single-packet
+            // drops and transient 5xx responses without burdening the tech.
             const results = await Promise.allSettled(
               pendingPhotos.map((p) =>
-                apiRequest(`/api/wet-checks/photos/${p.id}`, "PATCH", { findingId: createdId }),
+                withRetry(
+                  () => apiRequest(`/api/wet-checks/photos/${p.id}`, "PATCH", { findingId: createdId }),
+                  3,
+                  400,
+                ),
               ),
             );
-            const failed = results.filter((r) => r.status === "rejected").length;
-            if (failed > 0) {
-              toast({
-                title: "Some photos didn't attach",
-                description: `${failed} photo(s) couldn't be linked to the finding. You can re-add them by editing it.`,
-                variant: "destructive",
-              });
+            const stillFailed = results.filter((r) => r.status === "rejected").length;
+            if (stillFailed > 0) {
+              // Persist the count so the alert renders after the sheet closes.
+              // The tech can use LoosePhotosSection (visible on the wet check
+              // detail page) to manually attach these photos to the finding.
+              setUnlinkedPhotoCount(stillFailed);
             }
           }
         }
@@ -295,6 +326,46 @@ export function FindingSheet({
   };
 
   return (
+    <>
+    {/* Persistent re-link failure alert — rendered outside the Sheet so it
+        stays visible after the sheet closes. Only shown after all retries
+        are exhausted; the tech can use the wet check's "loose photos" section
+        to manually attach the affected photos to the correct finding. */}
+    {unlinkedPhotoCount > 0 && (
+      <div
+        role="alert"
+        className="fixed bottom-4 left-4 right-4 z-50 rounded-lg border border-red-300 bg-red-50 px-4 py-3 shadow-lg flex items-start gap-3"
+        data-testid="unlinked-photos-alert"
+      >
+        <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" aria-hidden />
+        <div className="flex-1 text-sm text-red-900">
+          <div className="font-semibold">
+            {unlinkedPhotoCount} photo{unlinkedPhotoCount === 1 ? "" : "s"} couldn't be linked after multiple attempts
+          </div>
+          <div className="text-xs text-red-800 mt-0.5">
+            The finding was saved. Use the loose photos section to attach these photos to the right finding.
+          </div>
+          {wetCheckId > 0 && (
+            <Link
+              href={`/wet-checks/${wetCheckId}`}
+              className="inline-block mt-1.5 text-xs font-medium text-red-700 underline underline-offset-2 hover:text-red-900"
+              data-testid="unlinked-photos-alert-link"
+              onClick={() => setUnlinkedPhotoCount(0)}
+            >
+              Open wet check →
+            </Link>
+          )}
+        </div>
+        <button
+          type="button"
+          aria-label="Dismiss"
+          className="text-red-600 hover:text-red-900 shrink-0 p-1"
+          onClick={() => setUnlinkedPhotoCount(0)}
+        >
+          ×
+        </button>
+      </div>
+    )}
     <Sheet open={open} onOpenChange={(b) => { if (!b) onClose(); }}>
       <SheetContent side="bottom" className="h-[90vh] sm:h-[85vh] overflow-y-auto pb-safe">
         <SheetHeader>
@@ -474,5 +545,6 @@ export function FindingSheet({
         </div>
       </SheetContent>
     </Sheet>
+    </>
   );
 }

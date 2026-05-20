@@ -14,6 +14,7 @@ import type {
 import { FindingCard, type FindingEdits } from "./finding-card";
 import { DecisionCard } from "./decision-card";
 import { AutoBilledBanner } from "./auto-billed-banner";
+import { LoosePhotosSection, type LooseFindingOption } from "@/pages/wet-checks/LoosePhotosSection";
 
 type Resolution =
   | "pending" | "repaired_in_field" | "sent_to_estimate" | "deferred_to_work_order" | "documented_only";
@@ -156,6 +157,26 @@ export function WetCheckWizard({ id }: { id: number }) {
     }
     return m;
   }, [wc]);
+
+  // Photos with no findingId — zone-level evidence or pending-link failures.
+  // Rendered in LoosePhotosSection below the active FindingCard so the manager
+  // can manually attach them to the correct finding without leaving the wizard.
+  const loosePhotos = useMemo(
+    () => asArray(wc?.photos).filter(p => p.findingId == null),
+    [wc],
+  );
+
+  // Finding options for the LoosePhotosSection dropdown — every finding on
+  // this wet check, formatted as {id, label} pairs.
+  const loosePhotoFindingOptions = useMemo<LooseFindingOption[]>(
+    () =>
+      allFindings.map(({ f, zr }) => {
+        const cfg = issueConfigs.find(c => c.issueType === f.issueType);
+        const label = `${cfg?.displayLabel ?? f.issueType} · Controller ${zr.controllerLetter} · Zone ${zr.zoneNumber}`;
+        return { id: f.id, label };
+      }),
+    [allFindings, issueConfigs],
+  );
 
   // Sync the explicit pointer + edit buffer with whichever finding is active.
   // Setting activeId from inside this effect (rather than deriving it) keeps
@@ -504,6 +525,27 @@ export function WetCheckWizard({ id }: { id: number }) {
             onChange={setEdits}
           />
         </div>
+      )}
+
+      {/* Loose / zone-level photos that have no findingId — either captured
+          as zone evidence or failed to auto-link after a finding was saved.
+          The manager can attach each one to the correct finding via the
+          dropdown without leaving the wizard.
+          readOnly is false when status === "submitted" (the normal manager-
+          review state) so the manager can attach; true for "converted" or any
+          other terminal state where edits are no longer meaningful.
+          LoosePhotosSection.onSuccess calls
+          `queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] })`
+          which is a prefix match — it covers both the id-keyed query used by
+          this wizard (`["/api/wet-checks", id]`) and clientId-keyed detail
+          queries, so the updated photo list arrives without a manual reload. */}
+      {loosePhotos.length > 0 && (
+        <LoosePhotosSection
+          photos={loosePhotos}
+          findingOptions={loosePhotoFindingOptions}
+          wetCheckId={id}
+          readOnly={wc.status !== "submitted"}
+        />
       )}
 
       <div className="relative">
