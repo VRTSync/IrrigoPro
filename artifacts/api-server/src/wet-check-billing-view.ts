@@ -50,8 +50,9 @@ export interface WcvZone {
   /** Formatted label, e.g. "A-1". */
   zoneLabel: string;
   /**
-   * Sum of finding.laborHours for this zone.
-   * Temporary placeholder — Slice 4 will switch this to a dedicated column.
+   * Authoritative per-zone repair labor hours from the `repair_labor_hours`
+   * column on wet_check_zone_records (Task #753, Slice 4 Option B).
+   * The billing sheet total is driven by this value, not per-finding sums.
    */
   repairLaborHours: string;
   lineItems: WcvLineItem[];
@@ -177,22 +178,27 @@ export function buildWetCheckBillingView(
     // Sort findings by id for deterministic output
     const sorted = [...zonefindings].sort((a, b) => a.id - b.id);
 
+    // Task #753, Slice 4 — zone-level repair labor comes from the dedicated
+    // column, NOT from summing per-finding laborHours. This eliminates
+    // double-counting (the column is the single source of truth for billing).
+    const repairLaborHoursNum = toNum(zr.repairLaborHours);
+    const zoneLabor = repairLaborHoursNum * laborRateNum;
+
     let zoneParts = 0;
-    let zoneLabor = 0;
-    let repairLaborHours = 0;
 
     const lineItems: WcvLineItem[] = sorted.map((f) => {
       const issueDisplayLabel = labelMap.get(f.issueType) ?? titleCase(f.issueType);
       const unitPrice = toNum(f.partPrice);
       const qty = f.quantity ?? 0;
       const partsTotal = f.noPartNeeded ? 0 : unitPrice * qty;
+      // Per-finding laborHours are shown for display purposes on line items but
+      // do NOT contribute to zone or sheet totals — repairLaborHours drives
+      // billing math at the zone level (Slice 4 Option B).
       const laborHoursNum = toNum(f.laborHours);
       const laborTotal = laborHoursNum * laborRateNum;
       const lineTotal = partsTotal + laborTotal;
 
       zoneParts += partsTotal;
-      zoneLabor += laborTotal;
-      repairLaborHours += laborHoursNum;
 
       return {
         findingId: f.id,
@@ -214,7 +220,7 @@ export function buildWetCheckBillingView(
       controllerLetter: zr.controllerLetter,
       zoneNumber: zr.zoneNumber,
       zoneLabel: `${zr.controllerLetter}-${zr.zoneNumber}`,
-      repairLaborHours: fmt(repairLaborHours),
+      repairLaborHours: fmt(repairLaborHoursNum),
       lineItems,
       zonePartsSubtotal: fmt(zoneParts),
       zoneLaborSubtotal: fmt(zoneLabor),

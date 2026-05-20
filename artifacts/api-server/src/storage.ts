@@ -888,6 +888,16 @@ export interface IStorage {
     companyId: number,
     patch: Partial<InsertWetCheckZoneRecord>,
   ): Promise<WetCheckZoneRecord | undefined>;
+  /**
+   * Task #753 (Slice 4) — set the authoritative per-zone repair labor hours.
+   * Company-scoped existence check. Idempotent (safe to call multiple times
+   * with the same value). Returns the updated record or undefined when not found.
+   */
+  setZoneRepairLabor(
+    zoneRecordId: number,
+    companyId: number,
+    repairLaborHours: string,
+  ): Promise<WetCheckZoneRecord | undefined>;
 
   createWetCheckFinding(
     zoneRecordId: number,
@@ -6954,16 +6964,41 @@ export class DatabaseStorage implements IStorage {
       return { qty, partPrice, laborHours, partsTotal };
     });
     const newPartsSubtotal = lines.reduce((s, l) => s + l.partsTotal, 0);
-    const newLaborHours = lines.reduce((s, l) => s + l.laborHours, 0);
+
+    // Task #753 (Slice 4 Option B) — zone-level repairLaborHours is the
+    // authoritative labor source for BS-WC billing totals.
+    //
+    // Total labor formula (per task spec):
+    //   totalLabor = wc.totalLaborHours + Σ(zoneRecords.repairLaborHours
+    //                                       WHERE zone has any billed finding)
+    //
+    // wc.totalLaborHours captures wet-check-level overhead (travel, inspection)
+    // that is separate from the per-zone repair component. Each zone is counted
+    // once regardless of how many findings it contributed (no per-finding sum).
+    const wcBaseLaborHours = parseFloat(String(wc.totalLaborHours ?? "0")) || 0;
+
+    const newZoneIds = Array.from(new Set(repaired.map(f => f.zoneRecordId)));
+    const newZoneRows = newZoneIds.length > 0
+      ? await tx.select({ id: wetCheckZoneRecords.id, repairLaborHours: wetCheckZoneRecords.repairLaborHours })
+          .from(wetCheckZoneRecords)
+          .where(inArray(wetCheckZoneRecords.id, newZoneIds))
+      : [];
+    const newZoneRepairHours = newZoneRows.reduce(
+      (s, zr) => s + parseFloat(String(zr.repairLaborHours ?? "0")), 0,
+    );
+    // For the new-sheet branch: total = wc base + new zone repair hours.
+    const newLaborHours = wcBaseLaborHours + newZoneRepairHours;
 
     let bsId: number;
     if (priorBsId != null) {
-      // Append to existing wet-check billing sheet and recompute totals
-      // from (existing items + new items). The labor rate used here is
-      // the SNAPSHOT (`appliedLaborRate`) stored on the existing sheet,
-      // NOT the live customer rate — previously converted findings must
-      // never be repriced if the customer's labor rate changes between
-      // partial-conversion runs.
+      // Append to existing wet-check billing sheet and recompute totals from
+      // scratch (not incrementally). The labor rate used here is the SNAPSHOT
+      // (`appliedLaborRate`) stored on the existing sheet, NOT the live
+      // customer rate — previously converted findings must never be repriced.
+      //
+      // For labor hours: union zone IDs from existing billed findings with the
+      // new batch, look up their repairLaborHours, and add wc.totalLaborHours
+      // once. Each zone is counted once (partial-conversion guard).
       const [priorBs] = await tx.select().from(billingSheets)
         .where(eq(billingSheets.id, priorBsId));
       const snapshotRate = parseFloat(String(priorBs?.appliedLaborRate ?? priorBs?.laborRate ?? customerLaborRate));
@@ -6971,9 +7006,25 @@ export class DatabaseStorage implements IStorage {
         .where(eq(billingSheetItems.billingSheetId, priorBsId));
       const existingPartsSubtotal = existingItems.reduce(
         (s, it) => s + parseFloat(String(it.totalPrice ?? "0")), 0);
-      const existingLaborHours = existingItems.reduce(
-        (s, it) => s + parseFloat(String(it.laborHours ?? "0")), 0);
-      const totalLaborHours = existingLaborHours + newLaborHours;
+      // Collect zone IDs already in this billing sheet (via findings stamped in prior run).
+      const existingFindingZones = await tx
+        .select({ zoneRecordId: wetCheckFindings.zoneRecordId })
+        .from(wetCheckFindings)
+        .where(eq(wetCheckFindings.billingSheetId, priorBsId));
+      const allZoneIds = Array.from(new Set([
+        ...existingFindingZones.map(f => f.zoneRecordId),
+        ...newZoneIds,
+      ]));
+      const allZoneRows = allZoneIds.length > 0
+        ? await tx.select({ repairLaborHours: wetCheckZoneRecords.repairLaborHours })
+            .from(wetCheckZoneRecords)
+            .where(inArray(wetCheckZoneRecords.id, allZoneIds))
+        : [];
+      const allZoneRepairHours = allZoneRows.reduce(
+        (s, zr) => s + parseFloat(String(zr.repairLaborHours ?? "0")), 0,
+      );
+      // wc.totalLaborHours is counted once regardless of how many partial runs.
+      const totalLaborHours = wcBaseLaborHours + allZoneRepairHours;
       const partsSubtotal = existingPartsSubtotal + newPartsSubtotal;
       const laborSubtotal = totalLaborHours * snapshotRate;
       const total = partsSubtotal + laborSubtotal;
@@ -7103,6 +7154,30 @@ export class DatabaseStorage implements IStorage {
     if (!zr) return undefined;
     await this.assertWetCheckEditableByTech(zr.wetCheckId, companyId);
     const [updated] = await db.update(wetCheckZoneRecords).set(patch).where(eq(wetCheckZoneRecords.id, id)).returning();
+    return updated;
+  }
+
+  // Task #753 (Slice 4) — set the authoritative per-zone repair labor hours.
+  // Only updates the repairLaborHours column; all other fields are unchanged.
+  // Company-scoped + edit-window: delegates to assertWetCheckEditableByTech so
+  // only in-progress wet checks can have their repair labor adjusted (same guard
+  // as the general zone PATCH path). Idempotent: safe to call with same value.
+  async setZoneRepairLabor(
+    zoneRecordId: number,
+    companyId: number,
+    repairLaborHours: string,
+  ): Promise<WetCheckZoneRecord | undefined> {
+    const [zr] = await db.select().from(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.id, zoneRecordId));
+    if (!zr) return undefined;
+    // assertWetCheckEditableByTech throws when the wet check is not found for
+    // companyId OR when it is no longer in-progress (submitted/converted/etc.).
+    // Callers see a 404 for wrong company and a 400 for the lock-window error.
+    await this.assertWetCheckEditableByTech(zr.wetCheckId, companyId);
+    const [updated] = await db
+      .update(wetCheckZoneRecords)
+      .set({ repairLaborHours })
+      .where(eq(wetCheckZoneRecords.id, zoneRecordId))
+      .returning();
     return updated;
   }
 

@@ -15199,6 +15199,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // Task #753 (Slice 4) — reusable Zod schema for repairLaborHours.
+  // Accepts a decimal string that is >= 0 and a multiple of 0.25.
+  // Rejects: "0.1", "-1", "0.33"; accepts: "0", "0.25", "0.50", "2.00".
+  const repairLaborHoursSchema = z
+    .string()
+    .refine((s) => {
+      const n = parseFloat(s);
+      return Number.isFinite(n) && n >= 0;
+    }, { message: "repairLaborHours must be a non-negative number" })
+    .refine((s) => {
+      const n = parseFloat(s);
+      return Math.abs(Math.round(n * 4) - n * 4) < 0.0001;
+    }, { message: "repairLaborHours must be a multiple of 0.25" });
+
   // PATCH zone-record: strict allow-list — protected linkage fields
   // (wetCheckId, controllerLetter, zoneNumber, clientId) are NOT mutable
   // post-creation; only field-tech-editable observation fields are.
@@ -15218,6 +15232,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     // request payload) is already idempotent so we just allow the field
     // through the strict schema and ignore it.
     clientId: z.string().uuid().nullish(),
+    // Task #753 (Slice 4) — optional per-zone repair labor hours field on the
+    // general PATCH body so existing zone-update flows can set it in one call.
+    repairLaborHours: repairLaborHoursSchema.optional(),
   }).strict();
 
   app.patch("/api/wet-checks/zone-records/:id", requireAuthentication, async (req, res) => {
@@ -15256,6 +15273,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     if (body.status !== undefined && body.status !== "checked_with_issues") {
       patch.markedCompleteAt = null;
     }
+    // Task #753 (Slice 4) — pass repairLaborHours through to the patch when present.
+    if (body.repairLaborHours !== undefined) {
+      patch.repairLaborHours = body.repairLaborHours;
+    }
     try {
       const updated = await storage.updateWetCheckZoneRecord(parseInt(req.params.id), cid, patch);
       if (!updated) { res.status(404).json({ message: "Not found" }); return; }
@@ -15266,6 +15287,35 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         ctx: { cid, zoneRecordId: req.params.id },
         fallbackStatus: 400,
         fallbackMessage: "Couldn't save zone — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Task #753 (Slice 4) — dedicated stepper endpoint for per-zone repair labor.
+  // Body: { repairLaborHours: string } — must be >= 0 and a multiple of 0.25.
+  // Returns the updated zone record or 404 if not found / not in company scope.
+  const repairLaborPatchBody = z.object({ repairLaborHours: repairLaborHoursSchema });
+
+  app.patch("/api/wet-checks/zone-records/:id/repair-labor", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
+    const parsed = repairLaborPatchBody.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
+    try {
+      const updated = await storage.setZoneRepairLabor(
+        parseInt(req.params.id),
+        cid,
+        parsed.data.repairLaborHours,
+      );
+      if (!updated) { res.status(404).json({ message: "Not found" }); return; }
+      res.json(updated);
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "setZoneRepairLabor",
+        ctx: { cid, zoneRecordId: req.params.id },
+        fallbackStatus: 400,
+        fallbackMessage: "Couldn't save repair labor — please retry",
       });
       res.status(status).json({ message });
     }

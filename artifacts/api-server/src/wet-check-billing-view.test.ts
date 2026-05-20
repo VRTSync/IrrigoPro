@@ -96,6 +96,9 @@ function makeZoneRecord(id: number, controllerLetter: string, zoneNumber: number
     checkedAt: null,
     checkedBy: null,
     markedCompleteAt: null,
+    // Task #753 Slice 4 — authoritative zone-level repair labor hours. Must be
+    // set explicitly in tests that check labor amounts; defaults to "0.00".
+    repairLaborHours: "0.00",
     clientId: null,
     ...overrides,
   };
@@ -153,7 +156,9 @@ function makeConfig(issueType: string, displayLabel: string): any {
 }
 
 function baseInput(overrides: Partial<BuildWetCheckBillingViewInput> = {}): BuildWetCheckBillingViewInput {
-  const zr1 = makeZoneRecord(1, "A", 1);
+  // Task #753 Slice 4: default zone has repairLaborHours="0.50" matching the
+  // default finding's laborHours so existing math tests continue to pass.
+  const zr1 = makeZoneRecord(1, "A", 1, { repairLaborHours: "0.50" });
   const f1 = makeFinding(1, 1, "head_replacement");
   return {
     billingSheet: makeBS(),
@@ -223,7 +228,8 @@ describe("buildWetCheckBillingView", () => {
   });
 
   it("single zone, multiple findings — sums are correct", () => {
-    const zr = makeZoneRecord(1, "A", 1);
+    // Task #753 Slice 4: repairLaborHours = 1.25 (0.25 + 1.00) drives zone labor total.
+    const zr = makeZoneRecord(1, "A", 1, { repairLaborHours: "1.25" });
     const f1 = makeFinding(1, 1, "head_replacement", { partPrice: "10.00", quantity: 3, laborHours: "0.25" });
     const f2 = makeFinding(2, 1, "valve_repair", { partPrice: "25.00", quantity: 1, laborHours: "1.00" });
     const input = baseInput({
@@ -275,7 +281,8 @@ describe("buildWetCheckBillingView", () => {
   });
 
   it("labor-only finding — noPartNeeded=true means partsTotal=0", () => {
-    const zr = makeZoneRecord(1, "A", 1);
+    // Task #753 Slice 4: zone repairLaborHours drives the sheet labor total.
+    const zr = makeZoneRecord(1, "A", 1, { repairLaborHours: "2.00" });
     const f = makeFinding(1, 1, "general_labor", {
       noPartNeeded: true,
       partId: null,
@@ -295,10 +302,12 @@ describe("buildWetCheckBillingView", () => {
     const li = view.zones[0].lineItems[0];
     assert.equal(li.noPartNeeded, true);
     assert.equal(li.partsTotal, "0.00");
+    // Per-finding display values are still populated on line items.
     assert.equal(li.laborHours, "2.00");
     assert.equal(li.laborTotal, "100.00");
     assert.equal(li.lineTotal, "100.00");
 
+    // Zone and sheet totals come from zone.repairLaborHours × rate.
     assert.equal(view.partsSubtotal, "0.00");
     assert.equal(view.laborSubtotal, "100.00");
     assert.equal(view.grandTotal, "100.00");
@@ -427,17 +436,67 @@ describe("buildWetCheckBillingView", () => {
     assert.equal(v2.repairsSummary, "3 repairs across 2 zones");
   });
 
-  it("repairLaborHours per zone is sum of finding.laborHours in that zone", () => {
-    const zr = makeZoneRecord(1, "A", 1);
+  // Task #753 Slice 4 — repairLaborHours reads from the zone record column,
+  // not per-finding sums. The column is the single authoritative source.
+  it("repairLaborHours on the zone comes from the zoneRecord column, not finding sums", () => {
+    // Zone has repairLaborHours="0.75" set on the record. Both findings together
+    // have laborHours = 0.50 + 1.25 = 1.75 — but the column wins.
+    const zr = makeZoneRecord(1, "A", 1, { repairLaborHours: "0.75" });
     const f1 = makeFinding(1, 1, "head_replacement", { laborHours: "0.50" });
     const f2 = makeFinding(2, 1, "valve_repair", { laborHours: "1.25" });
 
     const view = buildWetCheckBillingView(baseInput({
+      billingSheet: makeBS({ laborRate: "60.00" }),
       findings: [f1, f2],
       zoneRecords: [zr],
     }));
 
-    assert.equal(view.zones[0].repairLaborHours, "1.75");
+    // repairLaborHours is sourced from the column, not per-finding sum.
+    assert.equal(view.zones[0].repairLaborHours, "0.75");
+    // Zone labor subtotal = column value × rate = 0.75 × 60 = 45.00 (not 1.75×60=105).
+    assert.equal(view.zones[0].zoneLaborSubtotal, "45.00");
+    // Per-finding line items still show their individual laborHours for display.
+    assert.equal(view.zones[0].lineItems[0].laborHours, "0.50");
+    assert.equal(view.zones[0].lineItems[1].laborHours, "1.25");
+    assertGrandTotalInvariant(view);
+  });
+
+  it("no double-counting — zone with 1 finding (laborHours=0.50) and repairLaborHours=0.50 contributes 0.50h, not 1.0h", () => {
+    // The core Slice 4 invariant: zone repairLaborHours is the single source;
+    // per-finding laborHours are display-only and must not be summed again.
+    const zr = makeZoneRecord(1, "A", 1, { repairLaborHours: "0.50" });
+    const f = makeFinding(1, 1, "head_replacement", { laborHours: "0.50" });
+
+    const view = buildWetCheckBillingView(baseInput({
+      billingSheet: makeBS({ laborRate: "100.00" }),
+      findings: [f],
+      zoneRecords: [zr],
+    }));
+
+    assert.equal(view.zones[0].repairLaborHours, "0.50");
+    // totalLaborHours = 0.50 (column), not 0.50+0.50=1.0 from per-finding sum.
+    assert.equal(view.laborSubtotal, "50.00");   // 0.50 × 100 = 50
+    assert.equal(view.grandTotal, (parseFloat(view.partsSubtotal) + 50).toFixed(2));
+    assertGrandTotalInvariant(view);
+  });
+
+  it("no double-counting — multi-finding zone: repairLaborHours=0.50 while findings sum to 1.50", () => {
+    // Three findings each with laborHours=0.50 → per-finding sum = 1.50.
+    // But repairLaborHours column = 0.50, so only 0.50h reaches billing.
+    const zr = makeZoneRecord(1, "A", 1, { repairLaborHours: "0.50" });
+    const f1 = makeFinding(1, 1, "head_replacement", { laborHours: "0.50" });
+    const f2 = makeFinding(2, 1, "valve_repair",     { laborHours: "0.50" });
+    const f3 = makeFinding(3, 1, "pipe_repair",      { laborHours: "0.50" });
+
+    const view = buildWetCheckBillingView(baseInput({
+      billingSheet: makeBS({ laborRate: "80.00" }),
+      findings: [f1, f2, f3],
+      zoneRecords: [zr],
+    }));
+
+    assert.equal(view.zones[0].repairLaborHours, "0.50");
+    assert.equal(view.zones[0].zoneLaborSubtotal, "40.00");  // 0.50 × 80, not 1.50 × 80
+    assertGrandTotalInvariant(view);
   });
 
   it("inspection fields are sourced from the wet check row", () => {

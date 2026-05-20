@@ -1290,6 +1290,10 @@ export const wetCheckZoneRecords = pgTable("wet_check_zone_records", {
   // Needs Work zones from ones still mid-edit. Cleared automatically when
   // the zone status moves away from `checked_with_issues`.
   markedCompleteAt: timestamp("marked_complete_at"),
+  // Task #753 — Slice 4: per-zone repair labor hours (Option B). Authoritative
+  // labor total for billing — replaces per-finding sum in BS-WC billing math.
+  // Multiples of 0.25 only; enforced by the API layer (repairLaborHoursSchema).
+  repairLaborHours: decimal("repair_labor_hours", { precision: 5, scale: 2 }).notNull().default("0.00"),
   clientId: text("client_id"),
 }, (table) => ({
   uniqZone: uniqueIndex("uniq_wet_check_zone").on(table.wetCheckId, table.controllerLetter, table.zoneNumber),
