@@ -203,6 +203,21 @@ export class WetCheckHasInvoicedRecordsError extends Error {
   }
 }
 
+// Thrown by deleteWetCheck when one or more of the wet check's findings has
+// billingSheetId IS NOT NULL but the billing sheet is not yet on an invoice.
+// The invoiced-records error above takes priority; this fires only when there
+// are no invoiced blockers. Surface mapped to HTTP 409 by the route layer.
+export class WetCheckHasBillingSheetError extends Error {
+  readonly code = "WET_CHECK_HAS_BILLING_SHEET";
+  billingNumbers: (string | null)[];
+  constructor(wetCheckId: number, blockers: Array<{ id: number; billingNumber: string | null }>) {
+    const parts = blockers.map(b => `billing sheet ${b.billingNumber ?? `#${b.id}`}`);
+    super(`Cannot delete wet check #${wetCheckId}: linked to ${parts.join("; ")}. Remove it from the billing sheet first.`);
+    this.name = "WetCheckHasBillingSheetError";
+    this.billingNumbers = blockers.map(b => b.billingNumber);
+  }
+}
+
 // Thrown by deleteBillingSheet when the sheet has already been pushed onto
 // an invoice (either via billing_sheets.invoiceId or via invoice_items rows
 // pointing at it). Surface mapped to HTTP 409 by the route layer so the UI
@@ -6294,10 +6309,29 @@ export class DatabaseStorage implements IStorage {
       });
     }
 
+    // Second pass: any billing sheet linked by a finding but NOT yet on an
+    // invoice is also a blocker. The zone-grouped billing renderer depends
+    // on those zone records remaining intact, so we close this back door
+    // before the invoiced-records check (which takes priority when both fire).
+    const invoicedBsIds = new Set(
+      blockers.filter(b => b.kind === "billing_sheet").map(b => b.id)
+    );
+    const uninvoicedBsBlockers: Array<{ id: number; billingNumber: string | null }> = [];
+    for (const bs of bsRows) {
+      if (!invoicedBsIds.has(bs.id)) {
+        uninvoicedBsBlockers.push({ id: bs.id, billingNumber: bs.billingNumber ?? null });
+      }
+    }
+
     if (blockers.length > 0) {
       // Sort for stable, predictable message ordering (kind then id).
       blockers.sort((a, b) => a.kind.localeCompare(b.kind) || a.id - b.id);
       throw new WetCheckHasInvoicedRecordsError(id, blockers);
+    }
+
+    if (uninvoicedBsBlockers.length > 0) {
+      uninvoicedBsBlockers.sort((a, b) => a.id - b.id);
+      throw new WetCheckHasBillingSheetError(id, uninvoicedBsBlockers);
     }
 
     // Snapshot every photo URL across the wet check AND every downstream

@@ -4,6 +4,7 @@ import { createServer, type Server } from "http";
 import {
   storage,
   WetCheckHasInvoicedRecordsError,
+  WetCheckHasBillingSheetError,
   ControllerHasZonesError,
   BillingSheetInvoicedError,
   WetCheckFindingNotFoundError,
@@ -14763,6 +14764,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             message: e.message,
             blockers: e.blockers,
           });
+        } else if (e instanceof WetCheckHasBillingSheetError) {
+          results.push({
+            id,
+            status: 'blocked',
+            message: e.message,
+            blockers: undefined,
+          });
         } else {
           const raw = typeof e?.message === 'string' ? e.message : '';
           if (/not found for company/.test(raw)) {
@@ -14823,6 +14831,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(409).json({
           message: e.message,
           blockers: e.blockers,
+        });
+        return;
+      }
+      if (e instanceof WetCheckHasBillingSheetError) {
+        res.status(409).json({
+          message: e.message,
+          code: e.code,
+          billingNumbers: e.billingNumbers,
         });
         return;
       }
