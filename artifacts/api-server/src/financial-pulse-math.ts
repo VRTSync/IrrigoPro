@@ -13,6 +13,26 @@ export interface InvoiceLike {
   status: string;
   createdAt: Date | string;
   paidAt?: Date | string | null;
+  // Task #726 — billing-cycle fields for computeBilledForCycle / computeAllBillableYtd.
+  // Optional so existing fixtures without these fields keep compiling.
+  invoiceMonth?: number | null;
+  invoiceYear?: number | null;
+}
+
+// Task #726 — lightweight shapes used only by computeAllBillableYtd so the
+// YTD helper stays pure (no Drizzle / Postgres dependency).
+export interface WorkOrderBillableLike {
+  invoiceId?: number | null;
+  totalAmount?: string | number | null;
+  status: string;
+  createdAt?: Date | string | null;
+}
+
+export interface BillingSheetBillableLike {
+  invoiceId?: number | null;
+  totalAmount?: string | number | null;
+  status: string;
+  createdAt?: Date | string | null;
 }
 
 export interface InvoiceItemLike {
@@ -196,7 +216,7 @@ export function computeAvgDaysToPay(
 }
 
 export function computeProjectedMonthEnd(
-  billedMtd: number,
+  pipelineBase: number,
   now: Date,
 ): number {
   const day = now.getDate();
@@ -205,8 +225,86 @@ export function computeProjectedMonthEnd(
     now.getMonth() + 1,
     0,
   ).getDate();
-  if (day <= 0) return billedMtd;
-  return (billedMtd / day) * daysInMonth;
+  if (day <= 0) return pipelineBase;
+  return (pipelineBase / day) * daysInMonth;
+}
+
+// Task #726 — Tile 1: Billed Last Cycle.
+// Returns all distinct billing cycles (non-draft, non-cancelled) sorted
+// most-recent-first. Each entry is { year, month } matching the invoice
+// invoiceYear / invoiceMonth columns. Invoices missing these columns are
+// skipped.
+export function getDistinctBillingCycles(
+  invoices: InvoiceLike[],
+): Array<{ year: number; month: number }> {
+  const seen = new Map<number, { year: number; month: number }>();
+  for (const inv of invoices) {
+    if (inv.status === "draft" || inv.status === "cancelled") continue;
+    if (inv.invoiceMonth == null || inv.invoiceYear == null) continue;
+    const key = inv.invoiceYear * 100 + inv.invoiceMonth;
+    if (!seen.has(key)) {
+      seen.set(key, { year: inv.invoiceYear, month: inv.invoiceMonth });
+    }
+  }
+  return Array.from(seen.values()).sort(
+    (a, b) => (b.year * 100 + b.month) - (a.year * 100 + a.month),
+  );
+}
+
+// Sums non-draft, non-cancelled invoices that belong to the given
+// invoiceYear / invoiceMonth billing cycle.
+export function computeBilledForCycle(
+  invoices: InvoiceLike[],
+  cycle: { year: number; month: number },
+): number {
+  let sum = 0;
+  for (const inv of invoices) {
+    if (inv.status === "draft" || inv.status === "cancelled") continue;
+    if (inv.invoiceYear === cycle.year && inv.invoiceMonth === cycle.month) {
+      sum += toNum(inv.totalAmount);
+    }
+  }
+  return sum;
+}
+
+// Task #726 — Tile 5: Billed YTD (all billable activity this year).
+//
+// Formula:
+//   invoices where invoiceYear = currentYear, status ≠ draft/cancelled
+//   + ALL work_orders where status ≠ cancelled, createdAt year = currentYear
+//     (invoiced OR uninvoiced — both count)
+//   + ALL billing_sheets where status ≠ cancelled, createdAt year = currentYear
+//     (invoiced OR uninvoiced — both count)
+//
+// This intentionally includes WOs/BSs that have already been invoiced alongside
+// the invoice totals, giving a complete picture of all billable work contracted
+// this year per the task-#726 definition ("invoiced or not").
+export function computeAllBillableYtd(
+  invoices: InvoiceLike[],
+  workOrders: WorkOrderBillableLike[],
+  billingSheets: BillingSheetBillableLike[],
+  currentYear: number,
+): number {
+  let sum = 0;
+  for (const inv of invoices) {
+    if (inv.status === "draft" || inv.status === "cancelled") continue;
+    if (inv.invoiceYear !== currentYear) continue;
+    sum += toNum(inv.totalAmount);
+  }
+  for (const wo of workOrders) {
+    // invoiced or not — include all except cancelled
+    if (wo.status === "cancelled") continue;
+    const d = toDate(wo.createdAt ?? null);
+    if (!d || d.getFullYear() !== currentYear) continue;
+    sum += toNum(wo.totalAmount);
+  }
+  for (const bs of billingSheets) {
+    if (bs.status === "cancelled") continue;
+    const d = toDate(bs.createdAt ?? null);
+    if (!d || d.getFullYear() !== currentYear) continue;
+    sum += toNum(bs.totalAmount);
+  }
+  return sum;
 }
 
 export interface GrossMarginResult {

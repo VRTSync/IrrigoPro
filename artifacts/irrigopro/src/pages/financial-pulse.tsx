@@ -256,19 +256,19 @@ export const INFO_TIPS = {
   billedMtd:
     "From invoices · current month-to-date by createdAt · excludes draft, cancelled · includes tax and markup.",
   billedLastCycle:
-    "From invoices · full prior calendar month by createdAt · excludes draft, cancelled · includes tax and markup.",
+    "From invoices · most recent billing cycle by invoiceMonth/invoiceYear · excludes draft, cancelled · includes tax and markup. April invoices created in May still land in the April cycle.",
   collectedMtd:
-    "From invoices · current month-to-date by paidAt · excludes draft, cancelled · includes tax and markup.",
+    "From invoices · current month-to-date by paidAt · excludes draft, cancelled · includes tax and markup. Reflects QuickBooks payment sync — may show $0 without an active QBO connection.",
   outstandingAr:
-    "From invoices · point-in-time snapshot · excludes draft, cancelled, paid · live from this app (not QuickBooks).",
+    "From invoices · point-in-time snapshot · excludes draft, cancelled, paid · live from this app. Accuracy depends on QuickBooks payment sync.",
   billedYtd:
-    "From invoices · year-to-date by createdAt · excludes draft, cancelled · includes tax and markup.",
+    "All billable work this year — invoice totals (by billing month) plus work order and billing sheet amounts whether invoiced or not, excluding cancelled. Invoiced work appears in both the invoice total and the WO/BS total to show full contracted scope alongside realized revenue.",
   unbilledExposure:
-    "From work orders + billing sheets without an invoice yet · excludes customers hidden from billing.",
+    "Work orders + billing sheets with no invoice yet, regardless of status (except cancelled) · excludes customers hidden from billing.",
   projectedMonthEnd:
-    "Billed MTD × (days in month ÷ days elapsed) — simple run-rate.",
+    "Unbilled pipeline ÷ days elapsed × days in month — forecast based on current uninvoiced work.",
   avgDaysToPay:
-    "Average (paidAt − createdAt) across invoices paid in the last 90 days.",
+    "Average (paidAt − createdAt) across invoices paid in the last 90 days. Requires QuickBooks payment sync.",
   grossMargin:
     "(Revenue − parts cost − labor cost) ÷ revenue for invoices created this period.",
 } as const;
@@ -1359,9 +1359,7 @@ function KpiBand({
       />
       <MetricTile
         testId="kpi-unbilled-exposure"
-        label={`Current Cycle (${new Date().toLocaleDateString(undefined, {
-          month: "long",
-        })})`}
+        label="Unbilled Pipeline"
         value={data?.unbilledExposure.value ?? null}
         format="currency"
         deltaGoodDirection="down"

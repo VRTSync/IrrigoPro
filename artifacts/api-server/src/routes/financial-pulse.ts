@@ -19,9 +19,11 @@ import {
 } from "@workspace/db/schema";
 import {
   bucketMonthlyRevenue,
+  computeAllBillableYtd,
   computeArAging,
   computeAvgDaysToPay,
   computeBilled,
+  computeBilledForCycle,
   computeByServiceType,
   computeByTechnician,
   computeCollected,
@@ -30,6 +32,7 @@ import {
   computeProjectedMonthEnd,
   computeRevenueMix,
   computeTopCustomers,
+  getDistinctBillingCycles,
   getMonthStarts,
   getMtdWindow,
   getPrevMonthWindow,
@@ -38,10 +41,12 @@ import {
   getYtdWindow,
   pctDelta,
   sortTopCustomers,
+  type BillingSheetBillableLike,
   type CustomerWithBudget,
   type InvoiceLike,
   type UserLike,
   type UserWithName,
+  type WorkOrderBillableLike,
   type WorkOrderLike,
   type BillingSheetLike,
   type CustomerLike,
@@ -174,6 +179,53 @@ async function loadInvoicesForCustomers(
     status: i.status,
     createdAt: i.createdAt,
     paidAt: i.paidAt,
+    // Task #726 — needed for cycle-based billing period lookups.
+    invoiceMonth: i.invoiceMonth,
+    invoiceYear: i.invoiceYear,
+  }));
+}
+
+// Task #726 — load all work orders / billing sheets for a customer scope so
+// computeAllBillableYtd can include uninvoiced pipeline in the YTD tile.
+async function loadAllWorkOrdersForCustomers(
+  customerIds: number[],
+): Promise<WorkOrderBillableLike[]> {
+  if (customerIds.length === 0) return [];
+  const rows = await db
+    .select({
+      invoiceId: workOrders.invoiceId,
+      totalAmount: workOrders.totalAmount,
+      status: workOrders.status,
+      createdAt: workOrders.createdAt,
+    })
+    .from(workOrders)
+    .where(inArray(workOrders.customerId, customerIds));
+  return rows.map((w) => ({
+    invoiceId: w.invoiceId,
+    totalAmount: w.totalAmount,
+    status: w.status,
+    createdAt: w.createdAt,
+  }));
+}
+
+async function loadAllBillingSheetsForCustomers(
+  customerIds: number[],
+): Promise<BillingSheetBillableLike[]> {
+  if (customerIds.length === 0) return [];
+  const rows = await db
+    .select({
+      invoiceId: billingSheets.invoiceId,
+      totalAmount: billingSheets.totalAmount,
+      status: billingSheets.status,
+      createdAt: billingSheets.createdAt,
+    })
+    .from(billingSheets)
+    .where(inArray(billingSheets.customerId, customerIds));
+  return rows.map((b) => ({
+    invoiceId: b.invoiceId,
+    totalAmount: b.totalAmount,
+    status: b.status,
+    createdAt: b.createdAt,
   }));
 }
 
@@ -275,17 +327,14 @@ async function computeUnbilledExposure(
     .from(billingSheets)
     .where(inArray(billingSheets.customerId, customerIds));
 
-  const unbilledWoStatuses = new Set([
-    "approved_passed_to_billing",
-    "pending_manager_review",
-    "work_completed",
-  ]);
-  const unbilledBsStatuses = new Set([
-    "approved_passed_to_billing",
-    "pending_manager_review",
-    "completed",
-    "submitted",
-  ]);
+  // Task #726 — Tile 6 "Unbilled Pipeline": include ALL uninvoiced rows
+  // except cancelled. The prior narrow status allowlist
+  // (approved_passed_to_billing / pending_manager_review / work_completed /
+  // submitted / completed) significantly undercounted the pipeline by
+  // excluding in-progress, draft, assigned, and other active statuses.
+  // The only exclusion is invoiceId IS NOT NULL (already billed) and
+  // status = 'cancelled' (explicitly abandoned). Hidden-from-billing
+  // customers are still excluded so suppressed accounts don't inflate KPIs.
 
   let sum = 0;
   const toN = (v: unknown) => {
@@ -295,12 +344,12 @@ async function computeUnbilledExposure(
   };
   for (const w of woRows) {
     if (w.invoiceId != null) continue;
-    if (!unbilledWoStatuses.has(w.status)) continue;
+    if (w.status === "cancelled") continue;
     sum += toN(w.total);
   }
   for (const b of bsRows) {
     if (b.invoiceId != null) continue;
-    if (!unbilledBsStatuses.has(b.status)) continue;
+    if (b.status === "cancelled") continue;
     sum += toN(b.total);
   }
   return sum;
@@ -351,13 +400,17 @@ export function registerFinancialPulseRoutes(
 
         const cust = await loadCustomers(scope.companyId);
         const customerIds = cust.map((c) => c.id);
-        const allInvoices = await loadInvoicesForCustomers(customerIds);
+
+        // Load invoices + all WOs/BSs in parallel.
+        const [allInvoices, allWos, allBss] = await Promise.all([
+          loadInvoicesForCustomers(customerIds),
+          loadAllWorkOrdersForCustomers(customerIds),
+          loadAllBillingSheetsForCustomers(customerIds),
+        ]);
 
         const mtd = getMtdWindow(now);
         const ytd = getYtdWindow(now);
         const prevMonth = getPrevMonthWindow(now);
-        const prevFullMonth = getPrevFullMonthWindow(now);
-        const prevPrevFullMonth = getPrevFullMonthWindow(prevFullMonth.start);
         const prevYearYtd = getPrevYearYtdWindow(now);
 
         const billedMtd = computeBilled(allInvoices, mtd.start, mtd.end);
@@ -366,17 +419,46 @@ export function registerFinancialPulseRoutes(
           prevMonth.start,
           prevMonth.end,
         );
-        const billedLastCycle = computeBilled(
+
+        // Task #726 — Tile 1: Billed Last Cycle.
+        // Uses invoiceMonth/invoiceYear (billing period) instead of createdAt so
+        // April invoices created in early May are attributed to the April cycle.
+        // Fallback to the previous calendar month is provided so monthLabel /
+        // monthIso are always non-empty strings (required by the HTTP contract).
+        const prevFullMonth = getPrevFullMonthWindow(now);
+        const cycles = getDistinctBillingCycles(allInvoices);
+        const lastCycle = cycles[0] ?? null;
+        const prevCycle = cycles[1] ?? null;
+        const billedLastCycle = lastCycle
+          ? computeBilledForCycle(allInvoices, lastCycle)
+          : 0;
+        const billedCycleBeforeLast = prevCycle
+          ? computeBilledForCycle(allInvoices, prevCycle)
+          : 0;
+        // Resolve the date used for the month label: prefer the actual
+        // billing cycle when one exists; fall back to the previous calendar
+        // month so the field is always a non-empty string.
+        const lastCycleDate = lastCycle
+          ? new Date(lastCycle.year, lastCycle.month - 1, 1)
+          : prevFullMonth.start;
+        const lastCycleMonthLabel = lastCycleDate.toLocaleDateString("en-US", {
+          month: "long",
+          year: "numeric",
+        });
+        const lastCycleMonthIso = `${lastCycleDate.getFullYear()}-${String(
+          lastCycleDate.getMonth() + 1,
+        ).padStart(2, "0")}`;
+
+        // Task #726 — Tile 5: Billed YTD.
+        // Sums all invoiced revenue (by invoiceYear) + uninvoiced WO/BS pipeline
+        // created this year, so the tile captures all billable work regardless of
+        // whether an invoice has been issued yet.
+        const billedYtd = computeAllBillableYtd(
           allInvoices,
-          prevFullMonth.start,
-          prevFullMonth.end,
+          allWos,
+          allBss,
+          now.getFullYear(),
         );
-        const billedCycleBeforeLast = computeBilled(
-          allInvoices,
-          prevPrevFullMonth.start,
-          prevPrevFullMonth.end,
-        );
-        const billedYtd = computeBilled(allInvoices, ytd.start, ytd.end);
         const billedPrevYearYtd = computeBilled(
           allInvoices,
           prevYearYtd.start,
@@ -389,12 +471,19 @@ export function registerFinancialPulseRoutes(
           prevMonth.end,
         );
         const outstandingAr = computeOutstandingAr(allInvoices);
-        const projectedMonthEnd = computeProjectedMonthEnd(billedMtd, now);
         const avgDaysToPay = computeAvgDaysToPay(allInvoices, now);
 
+        // Task #726 — unbilledExposure must be computed BEFORE projectedMonthEnd
+        // because projection now uses the unbilled pipeline as the forecast base
+        // instead of billedMtd run-rate.
         const unbilledExposure = await computeUnbilledExposure(
           scope.companyId,
         );
+
+        // Task #726 — Tile 4: Projected Month-End now uses unbilled pipeline
+        // (uninvoiced work ÷ days elapsed × days in month) rather than billed
+        // invoice run-rate.
+        const projectedMonthEnd = computeProjectedMonthEnd(unbilledExposure, now);
 
         // Gross margin scope follows the period selector.
         const marginWindow = period === "ytd" ? ytd : mtd;
@@ -430,14 +519,13 @@ export function registerFinancialPulseRoutes(
           billedLastCycle: {
             value: billedLastCycle,
             deltaPct: pctDelta(billedLastCycle, billedCycleBeforeLast),
-            comparedTo: "prevMonth",
-            monthLabel: prevFullMonth.start.toLocaleDateString("en-US", {
-              month: "long",
-              year: "numeric",
-            }),
-            monthIso: `${prevFullMonth.start.getFullYear()}-${String(
-              prevFullMonth.start.getMonth() + 1,
-            ).padStart(2, "0")}`,
+            comparedTo: "prevCycle",
+            // Task #726 — label derived from actual billing cycle
+            // (invoiceMonth/invoiceYear); falls back to previous calendar
+            // month when no invoices exist so the field is always a
+            // non-empty string (HTTP contract, see financial-pulse-http.test.ts).
+            monthLabel: lastCycleMonthLabel,
+            monthIso: lastCycleMonthIso,
           },
           billedYtd: {
             value: billedYtd,
