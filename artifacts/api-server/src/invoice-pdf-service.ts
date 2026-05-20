@@ -4,6 +4,7 @@ import type { PdfBrandColors } from './pdf-view-model';
 import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
 import type { IStorage } from './storage';
 import type { WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem } from '@workspace/db';
+import type { WetCheckBillingView } from './wet-check-billing-view';
 
 async function extractBrandColorsFromDataUri(dataUri: string): Promise<PdfBrandColors> {
   try {
@@ -264,7 +265,7 @@ export class InvoicePdfService {
       }
 
       const workOrders: Array<{ workOrder: WorkOrder; items: WorkOrderItem[] }> = [];
-      const billingSheets: Array<{ billingSheet: BillingSheet; items: BillingSheetItem[] }> = [];
+      const billingSheets: Array<{ billingSheet: BillingSheet; items: BillingSheetItem[]; wetCheckView?: WetCheckBillingView }> = [];
 
       for (const item of invoice.items) {
         if (item.sourceType === 'work_order' && item.workOrderId) {
@@ -281,9 +282,14 @@ export class InvoicePdfService {
           if (billingSheet) {
             const existingBs = billingSheets.find(bs => bs.billingSheet.id === billingSheet.id);
             if (!existingBs) {
+              const wetCheckView = await this.storage.getBillingSheetWetCheckView(
+                billingSheet.id,
+                customer.companyId,
+              ).catch(() => null);
               billingSheets.push({
                 billingSheet: billingSheet,
                 items: billingSheet.items || [],
+                wetCheckView: wetCheckView ?? undefined,
               });
             }
           }

@@ -1,4 +1,5 @@
 import type { Invoice, WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem } from '@workspace/db';
+import type { WetCheckBillingView } from './wet-check-billing-view';
 
 // ── Sub-interfaces ──────────────────────────────────────────────────────────
 
@@ -81,6 +82,8 @@ export interface PdfBillingSheetRow {
   rowTotal: number;
   approvedBy: string | null;
   approvedAt: Date | null;
+  /** Present only for billing sheets backed by a wet check inspection. */
+  wetCheckView?: WetCheckBillingView;
 }
 
 export interface PdfTotals {
@@ -145,6 +148,7 @@ export interface InvoiceDetailData {
   billingSheets: Array<{
     billingSheet: BillingSheet;
     items: BillingSheetItem[];
+    wetCheckView?: WetCheckBillingView;
   }>;
   laborRate?: string;
   brandColors?: PdfBrandColors;
@@ -257,7 +261,7 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
     };
   });
 
-  const billingSheetRows: PdfBillingSheetRow[] = (rawBillingSheets ?? []).map(({ billingSheet, items }) => {
+  const billingSheetRows: PdfBillingSheetRow[] = (rawBillingSheets ?? []).map(({ billingSheet, items, wetCheckView }) => {
     const totalHours = safeNum(billingSheet.totalHours);
     const bsStoredLaborSubtotal = safeNum(billingSheet.laborSubtotal);
     const bsStoredLaborRate = safeNum(billingSheet.laborRate);
@@ -305,6 +309,7 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
       rowTotal,
       approvedBy: safeStr(billingSheet.approvedBy) || null,
       approvedAt: billingSheet.approvedAt ? new Date(billingSheet.approvedAt) : null,
+      wetCheckView: wetCheckView ?? undefined,
     };
   });
 

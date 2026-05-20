@@ -8,6 +8,7 @@ import type {
   PdfBrandColors,
 } from './pdf-view-model';
 import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
+import type { WetCheckBillingView, WcvZone } from './wet-check-billing-view';
 
 export const FAILED_PHOTO_SENTINEL = '__PHOTO_UNAVAILABLE__';
 
@@ -237,7 +238,7 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
   </div>`;
 }
 
-export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, photoDataUris: string[], logoDataUri?: string | null, companyName?: string): string {
+export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, photoDataUris: string[], logoDataUri?: string | null, companyName?: string, brandColors: PdfBrandColors = DEFAULT_BRAND_COLORS): string {
   // WORK PERFORMED is customer-facing. Source ONLY from technician-authored
   // fields (`aiDetailedDescription` then `workDescription`) — never from
   // `bs.notes`, which holds internal manager notes and historically also
@@ -292,10 +293,26 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
     <div class="ticket-section ticket-financial">
       <div class="ticket-section-label">FINANCIAL BREAKDOWN</div>
       <div class="ticket-fin-rows">
+        ${bs.wetCheckView
+          ? (() => {
+              // Partition bs.laborSubtotal into inspection + repair components so
+              // Inspection Labor + Repair Labor === bs.laborSubtotal (no double-count).
+              // Repair labor is zone-derived; inspection labor is the remainder (floor 0).
+              const repairLabor = Math.min(parseFloat(bs.wetCheckView.laborSubtotal), bs.laborSubtotal);
+              const inspectionLabor = Math.max(0, bs.laborSubtotal - repairLabor);
+              return `<div class="ticket-fin-row">
+          <span class="ticket-fin-label">Inspection Labor (${bs.totalHours} hrs × ${formatCurrency(bs.laborRate)}/hr)</span>
+          <span class="ticket-fin-value">${formatCurrency(inspectionLabor)}</span>
+        </div>
         <div class="ticket-fin-row">
+          <span class="ticket-fin-label">Repair Labor</span>
+          <span class="ticket-fin-value">${formatCurrency(repairLabor)}</span>
+        </div>`;
+            })()
+          : `<div class="ticket-fin-row">
           <span class="ticket-fin-label">Labor (${bs.totalHours} hrs × ${formatCurrency(bs.laborRate)}/hr)</span>
           <span class="ticket-fin-value">${formatCurrency(bs.laborSubtotal)}</span>
-        </div>
+        </div>`}
         <div class="ticket-fin-row">
           <span class="ticket-fin-label">Parts Subtotal</span>
           <span class="ticket-fin-value">${formatCurrency(bs.partsSubtotal)}</span>
@@ -307,11 +324,121 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
       </div>
     </div>
 
-    ${partsTableFromBS(bs.items)}
+    ${bs.wetCheckView
+      ? partsBlockForWetCheckBS(bs.wetCheckView, brandColors)
+      : partsTableFromBS(bs.items)}
 
     ${photoFailWarningBS}
     ${photoGridSection(photoDataUris)}
   </div>`;
+}
+
+/**
+ * Zone-grouped parts block for billing sheets backed by a wet check inspection.
+ * Replaces the flat `partsTableFromBS` call when `bs.wetCheckView` is present.
+ *
+ * Suppression rule (matches task spec):
+ *   - $0.00 non-labor-only items are ABSENT.
+ *   - labor-only items (noPartNeeded === true) are PRESENT regardless of price.
+ */
+export function partsBlockForWetCheckBS(
+  view: WetCheckBillingView,
+  colors: PdfBrandColors = DEFAULT_BRAND_COLORS,
+): string {
+  const { navy, green, gray, black, brown } = colors;
+
+  function money(s: string): string {
+    return formatCurrency(parseFloat(s) || 0);
+  }
+
+  // ── Repairs Summary table ────────────────────────────────────────────────
+  const allLineItems = view.zones.flatMap(z => z.lineItems);
+  const summaryRows = allLineItems.map(li => {
+    const show = li.noPartNeeded || parseFloat(li.partsTotal) !== 0;
+    if (!show) return '';
+    return `
+      <tr>
+        <td>${li.issueDisplayLabel}${li.notes ? `<br><small class="item-note">${li.notes}</small>` : ''}</td>
+        <td class="text-right">${li.noPartNeeded ? '—' : li.partName ?? '—'}</td>
+        <td class="text-right">${li.noPartNeeded ? '—' : String(li.quantity)}</td>
+        <td class="text-right">${li.noPartNeeded ? '—' : money(li.unitPrice)}</td>
+        <td class="text-right">${li.noPartNeeded ? '—' : money(li.partsTotal)}</td>
+      </tr>`;
+  }).filter(Boolean).join('');
+
+  const repairsSummaryBlock = summaryRows
+    ? `
+  <div class="ticket-section ticket-parts-section">
+    <div class="ticket-section-label">Repairs Summary &mdash; ${view.repairsSummary}</div>
+    <table class="items-table">
+      <thead>
+        <tr>
+          <th>Repair Type</th>
+          <th class="text-right">Part</th>
+          <th class="text-right">Qty</th>
+          <th class="text-right">Unit Price</th>
+          <th class="text-right">Parts Total</th>
+        </tr>
+      </thead>
+      <tbody>${summaryRows}</tbody>
+    </table>
+  </div>`
+    : `<div class="ticket-section"><p class="no-items-msg">No repairs recorded for this wet check.</p></div>`;
+
+  // ── Per-zone blocks ───────────────────────────────────────────────────────
+  const zoneBlocks = view.zones.map((zone: WcvZone) => {
+    const visibleItems = zone.lineItems.filter(
+      li => li.noPartNeeded || parseFloat(li.partsTotal) !== 0,
+    );
+
+    const zoneRows = visibleItems.map(li => `
+      <tr>
+        <td>${li.issueDisplayLabel}${li.notes ? `<br><small class="item-note">${li.notes}</small>` : ''}</td>
+        <td class="text-right">${li.noPartNeeded ? '(labor only)' : li.partName ?? '—'}</td>
+        <td class="text-right">${li.noPartNeeded ? '—' : String(li.quantity)}</td>
+        <td class="text-right">${li.noPartNeeded ? '—' : money(li.unitPrice)}</td>
+        <td class="text-right">${li.noPartNeeded ? '—' : money(li.partsTotal)}</td>
+      </tr>`).join('');
+
+    const laborRow = `
+      <tr class="zone-labor-row">
+        <td colspan="4" style="font-weight:600; color:${navy};">
+          Zone Labor (${zone.repairLaborHours} hrs &times; ${money(view.laborRate)}/hr)
+        </td>
+        <td class="text-right" style="font-weight:600; color:${navy};">${money(zone.zoneLaborSubtotal)}</td>
+      </tr>`;
+
+    const subtotalRow = `
+      <tr class="zone-subtotal-row">
+        <td colspan="4" style="font-weight:700; color:${black};">Zone ${zone.zoneLabel} Subtotal</td>
+        <td class="text-right" style="font-weight:700; color:${brown};">${money(zone.zoneTotal)}</td>
+      </tr>`;
+
+    return `
+  <div class="zone-block">
+    <div class="ticket-section ticket-parts-section">
+      <div class="ticket-section-label">Zone ${zone.zoneLabel}</div>
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th>Repair Type</th>
+            <th class="text-right">Part</th>
+            <th class="text-right">Qty</th>
+            <th class="text-right">Unit Price</th>
+            <th class="text-right">Parts Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${zoneRows || '<tr><td colspan="5" class="no-items-msg">No billable items</td></tr>'}
+          ${laborRow}
+          ${subtotalRow}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+  }).join('');
+
+  return repairsSummaryBlock + zoneBlocks;
 }
 
 export function partsTableFromWO(items: PdfWorkOrderRow['items']): string {
@@ -1312,5 +1439,26 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
   .pdf-page-num::before { content: counter(page); }
 
   .text-right { text-align: right; }
+
+  /* ═══════════════════════════════════
+     WET CHECK ZONE BLOCKS
+  ═══════════════════════════════════ */
+  .zone-block {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .zone-labor-row td {
+    background: ${gray};
+    border-top: 1px solid #d1d5db;
+  }
+
+  .zone-subtotal-row td {
+    background: ${gray};
+    border-top: 2px solid ${green};
+    border-bottom: 2px solid ${green};
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
   `;
 }
