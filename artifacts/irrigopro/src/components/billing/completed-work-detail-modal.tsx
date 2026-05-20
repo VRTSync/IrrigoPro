@@ -717,31 +717,22 @@ export function CompletedWorkDetailModal({
             {/* Time & Labor */}
             <SectionCard title="Time & Labor" icon={<Clock className="w-4 h-4" />}>
               {wetCheckView && type === "billing_sheet" ? (
-                /* WC sheet: separate Inspection Labor and Repair Labor lines */
                 canSeePricing ? (
-                  <div className="space-y-2">
-                    {(() => {
-                      const repairLaborNum = parseFloat(wetCheckView.laborSubtotal ?? "0");
-                      const totalLaborNum = parseFloat(String(laborSubtotal ?? "0"));
-                      const inspectionLaborNum = Math.max(0, totalLaborNum - repairLaborNum);
-                      return (
-                        <>
-                          <div className="flex justify-between text-sm text-gray-600">
-                            <span>Inspection Labor</span>
-                            <span className="font-medium text-gray-900">{currency(inspectionLaborNum)}</span>
-                          </div>
-                          <div className="flex justify-between text-sm text-gray-600">
-                            <span>Repair Labor</span>
-                            <span className="font-medium text-gray-900">{currency(repairLaborNum)}</span>
-                          </div>
-                          <div className="flex justify-between items-center pt-1 border-t border-gray-100">
-                            <span className="text-sm font-semibold text-gray-800">Labor Total</span>
-                            <span className="text-lg font-bold text-blue-700">{currency(totalLaborNum)}</span>
-                          </div>
-                        </>
-                      );
-                    })()}
-                    <p className="text-xs text-gray-400">Rate: {currency(wetCheckView.laborRate)}/hr</p>
+                  <div className="flex items-center flex-wrap gap-3">
+                    <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
+                      <p className="text-2xl font-bold text-gray-900">{totalHours ?? "0"}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">Hours</p>
+                    </div>
+                    <span className="text-xl font-semibold text-gray-400">×</span>
+                    <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
+                      <p className="text-2xl font-bold text-gray-900">{currency(wetCheckView.laborRate)}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">Rate / hr</p>
+                    </div>
+                    <span className="text-xl font-semibold text-gray-400">=</span>
+                    <div className="bg-blue-50 rounded-lg px-4 py-3 text-center min-w-[80px] border border-blue-100">
+                      <p className="text-2xl font-bold text-blue-700">{currency(laborSubtotal)}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">Irrigation Labor</p>
+                    </div>
                   </div>
                 ) : (
                   <div className="text-center">

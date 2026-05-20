@@ -293,26 +293,10 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
     <div class="ticket-section ticket-financial">
       <div class="ticket-section-label">FINANCIAL BREAKDOWN</div>
       <div class="ticket-fin-rows">
-        ${bs.wetCheckView
-          ? (() => {
-              // Partition bs.laborSubtotal into inspection + repair components so
-              // Inspection Labor + Repair Labor === bs.laborSubtotal (no double-count).
-              // Repair labor is zone-derived; inspection labor is the remainder (floor 0).
-              const repairLabor = Math.min(parseFloat(bs.wetCheckView.laborSubtotal), bs.laborSubtotal);
-              const inspectionLabor = Math.max(0, bs.laborSubtotal - repairLabor);
-              return `<div class="ticket-fin-row">
-          <span class="ticket-fin-label">Inspection Labor (${bs.totalHours} hrs × ${formatCurrency(bs.laborRate)}/hr)</span>
-          <span class="ticket-fin-value">${formatCurrency(inspectionLabor)}</span>
-        </div>
         <div class="ticket-fin-row">
-          <span class="ticket-fin-label">Repair Labor</span>
-          <span class="ticket-fin-value">${formatCurrency(repairLabor)}</span>
-        </div>`;
-            })()
-          : `<div class="ticket-fin-row">
-          <span class="ticket-fin-label">Labor (${bs.totalHours} hrs × ${formatCurrency(bs.laborRate)}/hr)</span>
+          <span class="ticket-fin-label">Irrigation Labor (${bs.totalHours} hrs × ${formatCurrency(bs.laborRate)}/hr)</span>
           <span class="ticket-fin-value">${formatCurrency(bs.laborSubtotal)}</span>
-        </div>`}
+        </div>
         <div class="ticket-fin-row">
           <span class="ticket-fin-label">Parts Subtotal</span>
           <span class="ticket-fin-value">${formatCurrency(bs.partsSubtotal)}</span>
@@ -400,18 +384,10 @@ export function partsBlockForWetCheckBS(
         <td class="text-right">${li.noPartNeeded ? '—' : money(li.partsTotal)}</td>
       </tr>`).join('');
 
-    const laborRow = `
-      <tr class="zone-labor-row">
-        <td colspan="4" style="font-weight:600; color:${navy};">
-          Zone Labor (${zone.repairLaborHours} hrs &times; ${money(view.laborRate)}/hr)
-        </td>
-        <td class="text-right" style="font-weight:600; color:${navy};">${money(zone.zoneLaborSubtotal)}</td>
-      </tr>`;
-
     const subtotalRow = `
       <tr class="zone-subtotal-row">
         <td colspan="4" style="font-weight:700; color:${black};">Zone ${zone.zoneLabel} Subtotal</td>
-        <td class="text-right" style="font-weight:700; color:${brown};">${money(zone.zoneTotal)}</td>
+        <td class="text-right" style="font-weight:700; color:${brown};">${money(zone.zonePartsSubtotal)}</td>
       </tr>`;
 
     return `
@@ -430,7 +406,6 @@ export function partsBlockForWetCheckBS(
         </thead>
         <tbody>
           ${zoneRows || '<tr><td colspan="5" class="no-items-msg">No billable items</td></tr>'}
-          ${laborRow}
           ${subtotalRow}
         </tbody>
       </table>
