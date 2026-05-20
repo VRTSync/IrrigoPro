@@ -41,18 +41,21 @@ describe("billing-workspace routes", () => {
   before(async () => {
     patch("getAllBillingSheets", async () => [
       // active (awaiting), in company 1, 9 days old (stale flag)
+      // wetCheckView: undefined — confirms non-WC sheets are unaffected by the BS-WC feature
       { id: 1, billingSheetNumber: "BS-1", technicianId: 100, customerId: 10, customerName: "Acme",
-        status: "pending_manager_review", totalAmount: "150.00", photos: [], createdAt: iso(9 * 86400_000) },
+        status: "pending_manager_review", totalAmount: "150.00", photos: [], createdAt: iso(9 * 86400_000),
+        wetCheckView: undefined },
       // active in company 2 (should not show for billing_manager in co 1)
       { id: 2, billingSheetNumber: "BS-2", technicianId: 200, customerId: 20, customerName: "BetaCo",
-        status: "pending_manager_review", totalAmount: "250.00", photos: ["x.jpg"], createdAt: iso(2 * 86400_000) },
+        status: "pending_manager_review", totalAmount: "250.00", photos: ["x.jpg"], createdAt: iso(2 * 86400_000),
+        wetCheckView: undefined },
       // approved 3 days ago (counts toward approvedThisWeek)
       { id: 3, billingSheetNumber: "BS-3", technicianId: 100, customerId: 11, customerName: "Charlie",
         status: "approved", totalAmount: "300.00", photos: ["a.jpg"],
-        approvedAt: iso(3 * 86400_000), createdAt: iso(10 * 86400_000) },
+        approvedAt: iso(3 * 86400_000), createdAt: iso(10 * 86400_000), wetCheckView: undefined },
       // draft last 24h (drafts tile)
       { id: 4, billingSheetNumber: "BS-4", technicianId: 100, customerId: 12, customerName: "Delta",
-        status: "draft", totalAmount: "50.00", photos: [], createdAt: iso(3600_000) },
+        status: "draft", totalAmount: "50.00", photos: [], createdAt: iso(3600_000), wetCheckView: undefined },
     ]);
     patch("getWorkOrders", async () => [
       // active WO 1 day old in company 1

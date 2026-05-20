@@ -3773,6 +3773,36 @@ export class DatabaseStorage implements IStorage {
       .from(wetCheckZoneRecords)
       .where(inArray(wetCheckZoneRecords.id, zoneRecordIds));
 
+    // ── Observability: detect forgotten backfill rows ─────────────────────
+    // If a zone has repair_labor_hours=0 but its findings carry a non-zero
+    // per-finding laborHours sum, the Slice 4 backfill script was likely not
+    // run against this record. The billing total will be under-counted.
+    // This warn is a canary for ops to spot rows that slipped past the
+    // one-time backfill.
+    for (const zr of zoneRecords) {
+      const zoneFindings = findings.filter((f) => f.zoneRecordId === zr.id);
+      const findingLaborSum = zoneFindings.reduce(
+        (s, f) => s + parseFloat(String(f.laborHours ?? "0")),
+        0,
+      );
+      const repairLaborHoursNum = parseFloat(String(zr.repairLaborHours ?? "0"));
+      if (repairLaborHoursNum === 0 && findingLaborSum > 0) {
+        console.warn(
+          JSON.stringify({
+            event: "wcv.backfill_gap",
+            billingSheetId,
+            wetCheckId: wc.id,
+            zoneRecordId: zr.id,
+            controllerLetter: zr.controllerLetter,
+            zoneNumber: zr.zoneNumber,
+            findingLaborHoursSum: findingLaborSum,
+            message:
+              "zone.repair_labor_hours is 0 but findings have non-zero laborHours — run the BS-WC backfill script",
+          }),
+        );
+      }
+    }
+
     // 5. Load issueTypeConfigs for the company (from the wet check)
     const configs = await db
       .select()
@@ -6912,6 +6942,25 @@ export class DatabaseStorage implements IStorage {
   // snapshot rate so previously billed lines are never repriced when the
   // customer's labor rate changes between partial-conversion runs. Stamps
   // findings with billingSheetId + convertedAt and returns the sheet id.
+  //
+  // ── BS-WC v2 totals math (Task #753, Slice 4 Option B) ───────────────────
+  //
+  //   total_labor_hours = wc.totalLaborHours             // inspection overhead
+  //                     + Σ zone.repairLaborHours         // per-zone repair
+  //                         (for each unique zone that has at least one
+  //                          billed finding; each zone counted exactly once
+  //                          regardless of how many findings it contributed)
+  //
+  //   total_parts      = Σ (finding.quantity × finding.partPrice)
+  //
+  //   labor_subtotal   = total_labor_hours × appliedLaborRate
+  //   total_amount     = total_parts + labor_subtotal
+  //
+  // When appending to a prior sheet (partial-conversion), the prior sheet's
+  // appliedLaborRate snapshot is used — never the live customer rate — so
+  // previously billed lines are never repriced. Zone IDs already stamped on
+  // the prior sheet are unioned with the new batch before summing repair hours
+  // so each zone is still counted only once across all conversion passes.
   private async _writeRepairedInFieldBilling(
     tx: DbExecutor,
     wc: WetCheck,

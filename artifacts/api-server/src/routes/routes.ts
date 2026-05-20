@@ -12121,7 +12121,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // 404 — billing sheet not found
   // 422 — billing sheet exists but has no wet-check findings (not a WC sheet)
   // 200 — the zone-grouped view payload
-  app.get("/api/billing-sheets/:id/wet-check-view", async (req, res) => {
+  app.get("/api/billing-sheets/:id/wet-check-view", requireAuthentication, async (req, res) => {
     try {
       const billingSheetId = parseInt(req.params.id);
       if (isNaN(billingSheetId) || billingSheetId <= 0) {
@@ -12147,7 +12147,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
-      res.json(view);
+      // Strip pricing fields for field technicians (matches the same visibility
+      // contract as GET /api/billing-sheets/:id — field_tech callers cannot see
+      // labor rate, parts/labor subtotals, or grand total).
+      res.json(applyPricingVisibility(req, view));
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to fetch wet-check billing view" });

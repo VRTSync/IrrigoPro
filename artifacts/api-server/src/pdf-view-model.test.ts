@@ -74,7 +74,8 @@ function makeBS(
   billingNumber: string,
   branchName: string | null,
   totalAmount: number,
-): { billingSheet: any; items: any[] } {
+  wetCheckView?: any,
+): { billingSheet: any; items: any[]; wetCheckView?: any } {
   return {
     billingSheet: {
       billingNumber,
@@ -95,6 +96,7 @@ function makeBS(
       approvedAt: null,
     },
     items: [],
+    wetCheckView,
   };
 }
 
@@ -337,5 +339,43 @@ describe("ticketPageBS — Branch header line (Task #479)", () => {
     const html = ticketPageBS(bsRow(""), "INV-1", []);
     assert.doesNotMatch(html, /ticket-header-branch/);
     assert.doesNotMatch(html, /Branch: /);
+  });
+});
+
+// ── wetCheckView fixture extension (Task #757) ───────────────────────────────
+
+describe("buildPdfViewModel — wetCheckView field passthrough (Task #757)", () => {
+  it("non-wet-check billing sheets (wetCheckView=undefined) are unaffected", () => {
+    // Confirms that the optional wetCheckView field on BillingSheet fixtures
+    // does not break any existing logic — non-WC sheets behave identically.
+    const { viewModel } = buildPdfViewModel(
+      makeData({
+        invoice: makeInvoice({ totalAmount: "200" }),
+        billingSheets: [
+          makeBS("BS-1", null, 100, undefined),   // explicitly no wetCheckView
+          makeBS("BS-2", null, 100),              // wetCheckView omitted
+        ],
+      }),
+    );
+    assert.equal(viewModel.billingSheets.length, 2);
+    assert.equal(viewModel.billingSheets[0].wetCheckView, undefined);
+    assert.equal(viewModel.billingSheets[1].wetCheckView, undefined);
+  });
+
+  it("wetCheckView is passed through to PdfBillingSheetRow when provided", () => {
+    const stubView: any = {
+      billingSheetId: 99,
+      billingNumber: "BS-WC-001",
+      zones: [],
+      repairsSummary: "0 repairs across 0 zones",
+    };
+    const { viewModel } = buildPdfViewModel(
+      makeData({
+        invoice: makeInvoice({ totalAmount: "50" }),
+        billingSheets: [makeBS("BS-WC-001", null, 50, stubView)],
+      }),
+    );
+    assert.equal(viewModel.billingSheets.length, 1);
+    assert.deepEqual(viewModel.billingSheets[0].wetCheckView, stubView);
   });
 });

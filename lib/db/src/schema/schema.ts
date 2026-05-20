@@ -250,6 +250,10 @@ export const billingSheets = pgTable("billing_sheets", {
   // Task #396 — labor entry mode for the sheet. 'flat' means use the single
   // totalHours field for all labor; 'per_part' means sum per-line laborHours.
   // Default 'flat' for new sheets; existing sheets are backfilled to 'per_part'.
+  // NOTE (BS-WC v2, Task #753): ignored for wet-check-sourced billing sheets
+  // (BS-WC prefix). Those sheets derive their labor totals from
+  // wc.totalLaborHours + Σ zone.repairLaborHours — not from this column.
+  // Preserved here for non-wet-check billing paths.
   laborMode: text("labor_mode").notNull().default("flat"),
   // Snapshot of customer.laborRate at creation (mirrors work_orders).
   appliedLaborRate: decimal("applied_labor_rate", { precision: 10, scale: 2 }),
@@ -1253,6 +1257,10 @@ export const wetChecks = pgTable("wet_checks", {
   // totalLaborHours as the authoritative aggregate; 'per_part' sums per-finding
   // laborHours. Default 'flat' for new wet checks; existing are backfilled to
   // 'per_part'.
+  // NOTE (BS-WC v2, Task #753): ignored for wet-check billing. The authoritative
+  // labor sources for BS-WC invoices are wc.totalLaborHours (inspection overhead:
+  // travel, setup, etc.) and zone.repairLaborHours (per-zone repair labor).
+  // This column is preserved for non-wet-check billing paths.
   laborMode: text("labor_mode").notNull().default("flat"),
   totalLaborHours: decimal("total_labor_hours", { precision: 6, scale: 2 }).notNull().default("0.00"),
   startedAt: timestamp("started_at").defaultNow().notNull(),
