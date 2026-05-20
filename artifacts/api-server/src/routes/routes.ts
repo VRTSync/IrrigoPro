@@ -13559,32 +13559,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
   
-  // Disconnect URL - Called when user disconnects the app from QuickBooks
-  app.post("/api/quickbooks/disconnect", async (req, res) => {
-    try {
-      console.log('QuickBooks Disconnect URL accessed:', req.body);
-      
-      // Handle the disconnection
-      // This would typically:
-      // 1. Remove stored QuickBooks tokens for this company
-      // 2. Update company settings to reflect disconnection
-      // 3. Log the disconnection event
-      
-      const realmId = req.body.realmId;
-      
-      // For now, just acknowledge the disconnection
-      // In a full implementation, you'd clean up stored tokens and company associations
-      
-      res.json({ 
-        message: "QuickBooks disconnection processed successfully",
-        status: "disconnected",
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      console.error('QuickBooks Disconnect URL error:', error);
-      res.status(500).json({ message: "QuickBooks disconnect processing failed" });
-    }
-  });
 
   // ============================================
   // External API Key Management Routes

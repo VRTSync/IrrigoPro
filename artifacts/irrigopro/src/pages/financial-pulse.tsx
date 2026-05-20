@@ -342,10 +342,10 @@ export default function FinancialPulsePage() {
   });
 
   const qb = useQuery<QbStatusPayload>({
-    queryKey: ["/api/quickbooks/connection-status"],
+    queryKey: ["/api/quickbooks/connection"],
     queryFn: async () => {
       try {
-        return await apiRequest("/api/quickbooks/connection-status", "GET");
+        return await apiRequest("/api/quickbooks/connection", "GET");
       } catch {
         return {};
       }
