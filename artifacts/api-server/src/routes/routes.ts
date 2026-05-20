@@ -10078,6 +10078,132 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // Task #765 — Admin correction: reassign the technician on a billing sheet.
+  // Guard: company_admin or super_admin only. Accepts { technicianId: number }.
+  // Blocks on billed / invoiced sheets (returns 409). Validates the new
+  // technician belongs to the same company as the billing sheet's customer.
+  // Emits an audit log row with before/after technician info.
+  app.patch("/api/billing-sheets/:id/reassign-technician", requireAuthentication, async (req: any, res) => {
+    try {
+      const role = req.authenticatedUserRole;
+      if (role !== 'company_admin' && role !== 'super_admin') {
+        res.status(403).json({ message: "Only company admins and super admins can reassign the technician on a billing sheet." });
+        return;
+      }
+
+      const id = parseInt(req.params.id);
+      if (isNaN(id) || id <= 0) {
+        res.status(400).json({ message: "Invalid billing sheet ID" });
+        return;
+      }
+
+      const { technicianId: rawTechId } = req.body ?? {};
+      const newTechId = rawTechId == null ? NaN : parseInt(String(rawTechId));
+      if (isNaN(newTechId) || newTechId <= 0) {
+        res.status(400).json({ message: "technicianId is required and must be a positive integer" });
+        return;
+      }
+
+      const existing = await storage.getBillingSheetById(id);
+      if (!existing) {
+        res.status(404).json({ message: "Billing sheet not found" });
+        return;
+      }
+
+      // Block reassignment on invoiced or billed sheets — would cause accounting issues.
+      if (existing.invoiceId || existing.status === 'billed') {
+        res.status(409).json({ message: "Cannot reassign the technician on a billing sheet that has already been invoiced or billed." });
+        return;
+      }
+
+      // Determine which company this billing sheet belongs to via its customer.
+      const isSuperAdmin = role === 'super_admin';
+      let sheetCompanyId: number | null = null;
+      if (existing.customerId) {
+        const customer = await storage.getCustomer(existing.customerId);
+        sheetCompanyId = customer?.companyId ?? null;
+      }
+
+      // Tenant guard: company_admin may only touch sheets that belong to their company.
+      if (!isSuperAdmin) {
+        const requesterCompanyId: number | null = req.authenticatedUserCompanyId ?? null;
+        if (requesterCompanyId == null) {
+          res.status(403).json({ message: "Access denied: no company context." });
+          return;
+        }
+        if (sheetCompanyId !== requesterCompanyId) {
+          res.status(403).json({ message: "Access denied." });
+          return;
+        }
+      }
+
+      // Validate the new technician: must exist and belong to the same company.
+      const newTech = await storage.getUser(newTechId);
+      if (!newTech) {
+        res.status(400).json({ message: "Technician not found" });
+        return;
+      }
+      if (sheetCompanyId != null && newTech.companyId !== sheetCompanyId) {
+        res.status(400).json({ message: "The selected technician does not belong to the same company as this billing sheet." });
+        return;
+      }
+
+      const prevTechName = existing.technicianName;
+      const prevTechId = existing.technicianId;
+
+      // If the technician is already the same, short-circuit gracefully.
+      if (prevTechId === newTechId) {
+        res.json(existing);
+        return;
+      }
+
+      const updated = await storage.updateBillingSheet(id, {
+        technicianId: newTechId,
+        technicianName: newTech.name,
+      } as any);
+
+      if (!updated) {
+        res.status(500).json({ message: "Failed to update billing sheet" });
+        return;
+      }
+
+      // Capture who triggered the reassignment for the audit note.
+      const actorId = parseInt(String(req.authenticatedUserId ?? headerUserId(req)));
+      let actorName = `user ${actorId}`;
+      try {
+        if (!isNaN(actorId)) {
+          const actor = await storage.getUser(actorId);
+          if (actor) actorName = actor.name;
+        }
+      } catch { /* best-effort */ }
+
+      await recordAuditEvent(req, {
+        actionType: "data",
+        action: "billing_sheet.technician_reassigned",
+        severity: "info",
+        targetType: "billing_sheet",
+        targetId: String(id),
+        actorUserId: isNaN(actorId) ? null : actorId,
+        actorLabel: actorName,
+        actorRole: role,
+        actorCompanyId: sheetCompanyId,
+        summary: `Technician reassigned from ${prevTechName ?? "unknown"} to ${newTech.name} by ${actorName}`,
+        details: {
+          billingNumber: existing.billingNumber,
+          previousTechnicianId: prevTechId ?? null,
+          previousTechnicianName: prevTechName ?? null,
+          newTechnicianId: newTechId,
+          newTechnicianName: newTech.name,
+        },
+      });
+
+      res.json(updated);
+    } catch (error) {
+      logger.error({ err: error }, "Error reassigning technician on billing sheet");
+      res.status(500).json({ message: "Failed to reassign technician" });
+    }
+  });
+
   // Twilio status callback webhook for SMS delivery tracking.
   // Twilio POSTs application/x-www-form-urlencoded with fields including
   // MessageSid, MessageStatus (queued|sent|delivered|failed|undelivered),

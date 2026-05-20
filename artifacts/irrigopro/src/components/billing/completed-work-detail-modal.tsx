@@ -44,6 +44,8 @@ import { preparePhotoForUpload } from "@/lib/photo-prep";
 import { PricingAuditHistory } from "@/components/billing/pricing-audit-history";
 import { History, Cpu, Droplets, Navigation } from "lucide-react";
 import { buildMapsUrl } from "@/lib/maps-url";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -155,6 +157,9 @@ export function CompletedWorkDetailModal({
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [photoToRemove, setPhotoToRemove] = useState<number | null>(null);
   const [confirmNoPhotosNeeded, setConfirmNoPhotosNeeded] = useState(false);
+  const [showReassignDialog, setShowReassignDialog] = useState(false);
+  const [reassignTechId, setReassignTechId] = useState<string>("");
+  const [localTechName, setLocalTechName] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -226,16 +231,63 @@ export function CompletedWorkDetailModal({
     },
   });
 
-  // Fetch the customer to compare their current labor rate vs stored rate on billing sheet
+  // Task #765 — Reassign Technician (company_admin / super_admin only).
+  // Reset local state whenever the dialog closes or a different sheet opens.
+  useEffect(() => {
+    if (!showReassignDialog) {
+      setReassignTechId("");
+    }
+  }, [showReassignDialog]);
+  useEffect(() => {
+    setLocalTechName(null);
+  }, [id, open]);
+
+  const isBilledOrInvoiced = !!(data.status === 'billed' || (data as BillingSheet).invoiceId);
+  const canReassignTechnician =
+    type === "billing_sheet" &&
+    (userRole === "company_admin" || userRole === "super_admin");
+
+  // Fetch assignable technicians when the reassign dialog is open (field techs + irrigation managers).
+  // Hook must be called unconditionally; filtering happens below after customerForRateCheck is available.
+  type TechUser = { id: number; name: string; role: string; companyId: number | null; isActive: boolean };
+  const { data: allFieldTechs = [] } = useArrayQuery<TechUser>({
+    queryKey: ["/api/users/field-techs"],
+    enabled: showReassignDialog,
+  });
+
+  const reassignMutation = useMutation<BillingSheet, Error, { technicianId: number }>({
+    mutationFn: async ({ technicianId }) => {
+      return apiRequest(`/api/billing-sheets/${id}/reassign-technician`, "PATCH", { technicianId });
+    },
+    onSuccess: (updated) => {
+      setLocalTechName(updated.technicianName ?? null);
+      toast({ title: "Technician reassigned", description: `Now assigned to ${updated.technicianName}.` });
+      setShowReassignDialog(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
+    },
+    onError: (err) => {
+      toast({ title: "Could not reassign technician", description: parseApiError(err, err.message), variant: "destructive" });
+    },
+  });
+
+  // Fetch the customer to compare their current labor rate vs stored rate on billing sheet.
+  // Also needed to scope the technician list to the right company in the reassign dialog.
   const { data: customerForRateCheck } = useQuery<Customer>({
     queryKey: ["/api/customers", bs?.customerId],
-    enabled: open && type === "billing_sheet" && !!bs?.customerId && canSeePricing,
+    enabled: open && type === "billing_sheet" && !!bs?.customerId && (canSeePricing || canReassignTechnician),
   });
 
   // Detect rate mismatch for billing sheets
   const storedRate = bs ? parseFloat(bs.laborRate || '0') : null;
   const currentCustomerRate = customerForRateCheck ? parseFloat(customerForRateCheck.laborRate || '0') : null;
   const hasRateMismatch = canSeePricing && storedRate !== null && currentCustomerRate !== null && Math.abs(storedRate - currentCustomerRate) > 0.001;
+
+  // Task #765 — filter available techs to the same company as this billing sheet.
+  // customerForRateCheck is available here so companyId can be used for filtering.
+  const sheetCompanyId = customerForRateCheck?.companyId ?? null;
+  const availableTechs = sheetCompanyId != null
+    ? allFieldTechs.filter((u) => u.companyId === sheetCompanyId && u.isActive)
+    : allFieldTechs.filter((u) => u.isActive);
 
   // Fetch items
   const itemsEndpoint =
@@ -276,7 +328,7 @@ export function CompletedWorkDetailModal({
   const status = data.status ?? "unknown";
   const customerName = isWorkOrder ? wo?.customerName : bs?.customerName;
   const address = isWorkOrder ? wo?.projectAddress : bs?.propertyAddress;
-  const techName = isWorkOrder ? wo?.assignedTechnicianName : bs?.technicianName;
+  const techName = isWorkOrder ? wo?.assignedTechnicianName : (localTechName ?? bs?.technicianName);
   const workDate = isWorkOrder ? wo?.scheduledDate : bs?.workDate;
   const completedDate = isWorkOrder ? wo?.completedAt : null;
   const completedBy = isWorkOrder ? wo?.completedByUserName : null;
@@ -584,6 +636,41 @@ export function CompletedWorkDetailModal({
                   <CheckCircle2 className="w-4 h-4 mr-1.5" />
                   {noPhotosNeededMutation.isPending ? "Marking…" : "No Photos Needed"}
                 </Button>
+              </div>
+            )}
+
+            {/* Reassign Technician — admin correction action (company_admin / super_admin only) */}
+            {canReassignTechnician && (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm">
+                <span className="text-gray-700">
+                  Wrong technician on this sheet? Reassign it to the correct person.
+                </span>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setReassignTechId(bs?.technicianId?.toString() ?? "");
+                            setShowReassignDialog(true);
+                          }}
+                          disabled={isBilledOrInvoiced || reassignMutation.isPending}
+                          data-testid="button-reassign-technician"
+                        >
+                          <Edit className="w-4 h-4 mr-1.5" />
+                          Reassign Technician
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    {isBilledOrInvoiced && (
+                      <TooltipContent side="left">
+                        <p>Cannot reassign — this sheet has already been invoiced or billed.</p>
+                      </TooltipContent>
+                    )}
+                  </Tooltip>
+                </TooltipProvider>
               </div>
             )}
 
@@ -1084,6 +1171,64 @@ export function CompletedWorkDetailModal({
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Reassign Technician dialog */}
+      <Dialog open={showReassignDialog} onOpenChange={setShowReassignDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Reassign Technician</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-gray-600">
+              Select the correct technician for billing sheet{" "}
+              <strong>{bs?.billingNumber}</strong>.
+            </p>
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Technician</p>
+              <Select
+                value={reassignTechId}
+                onValueChange={setReassignTechId}
+              >
+                <SelectTrigger className="w-full" data-testid="select-reassign-tech">
+                  <SelectValue placeholder="Select a technician…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableTechs.length === 0 && (
+                    <SelectItem value="_none" disabled>No technicians found</SelectItem>
+                  )}
+                  {availableTechs.map((tech) => (
+                    <SelectItem key={tech.id} value={String(tech.id)}>
+                      {tech.name}
+                      {tech.id === bs?.technicianId && " (current)"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowReassignDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                const newId = parseInt(reassignTechId);
+                if (!isNaN(newId) && newId > 0) {
+                  reassignMutation.mutate({ technicianId: newId });
+                }
+              }}
+              disabled={
+                !reassignTechId ||
+                reassignTechId === (bs?.technicianId?.toString() ?? "") ||
+                reassignMutation.isPending
+              }
+              data-testid="button-confirm-reassign-technician"
+            >
+              {reassignMutation.isPending ? "Reassigning…" : "Confirm Reassignment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* No Photos Needed confirmation */}
       <AlertDialog
