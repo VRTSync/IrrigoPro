@@ -5,6 +5,7 @@ import {
   storage,
   WetCheckHasInvoicedRecordsError,
   WetCheckHasBillingSheetError,
+  WetCheckHasWetCheckBillingError,
   ControllerHasZonesError,
   BillingSheetInvoicedError,
   WetCheckFindingNotFoundError,
@@ -14972,6 +14973,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       status: 'deleted' | 'blocked' | 'not_found' | 'error';
       message?: string;
       blockers?: WetCheckHasInvoicedRecordsError['blockers'];
+      code?: string;
+      billingNumbers?: (string | null)[];
     };
     const results: Outcome[] = [];
     for (const id of validIds) {
@@ -15003,7 +15006,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             id,
             status: 'blocked',
             message: e.message,
-            blockers: undefined,
+            code: e.code,
+            billingNumbers: e.billingNumbers,
+          });
+        } else if (e instanceof WetCheckHasWetCheckBillingError) {
+          results.push({
+            id,
+            status: 'blocked',
+            message: e.message,
+            code: e.code,
+            billingNumbers: e.billingNumbers,
           });
         } else {
           const raw = typeof e?.message === 'string' ? e.message : '';
@@ -15069,6 +15081,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
       if (e instanceof WetCheckHasBillingSheetError) {
+        res.status(409).json({
+          message: e.message,
+          code: e.code,
+          billingNumbers: e.billingNumbers,
+        });
+        return;
+      }
+      if (e instanceof WetCheckHasWetCheckBillingError) {
         res.status(409).json({
           message: e.message,
           code: e.code,

@@ -190,7 +190,7 @@ export class WetCheckAlreadyRoutedError extends Error {
 // `blockers` list so the UI can render an actionable message instead of
 // silently swallowing the conflict.
 export type WetCheckInvoiceBlocker = {
-  kind: "billing_sheet" | "estimate" | "work_order";
+  kind: "billing_sheet" | "estimate" | "work_order" | "wet_check_billing";
   id: number;
   displayNumber: string | null;
   invoiceId: number | null;
@@ -203,6 +203,7 @@ export class WetCheckHasInvoicedRecordsError extends Error {
       const kindLabel =
         b.kind === "billing_sheet" ? "billing sheet"
         : b.kind === "estimate" ? "estimate"
+        : b.kind === "wet_check_billing" ? "wet check billing"
         : "work order";
       const recordLabel = b.displayNumber ?? `#${b.id}`;
       const invoiceLabel = b.invoiceNumber ?? (b.invoiceId != null ? `#${b.invoiceId}` : "an invoice");
@@ -226,6 +227,22 @@ export class WetCheckHasBillingSheetError extends Error {
     const parts = blockers.map(b => `billing sheet ${b.billingNumber ?? `#${b.id}`}`);
     super(`Cannot delete wet check #${wetCheckId}: linked to ${parts.join("; ")}. Remove it from the billing sheet first.`);
     this.name = "WetCheckHasBillingSheetError";
+    this.billingNumbers = blockers.map(b => b.billingNumber);
+  }
+}
+
+// Thrown by deleteWetCheck when one or more of the wet check's findings has
+// wetCheckBillingId IS NOT NULL but the WCB is not yet on an invoice.
+// Invoiced WCBs fold into WetCheckHasInvoicedRecordsError (first priority);
+// this fires only when there are no invoiced blockers and no uninvoiced BS.
+// Surface mapped to HTTP 409 by the route layer.
+export class WetCheckHasWetCheckBillingError extends Error {
+  readonly code = "WET_CHECK_HAS_WET_CHECK_BILLING";
+  billingNumbers: (string | null)[];
+  constructor(wetCheckId: number, blockers: Array<{ id: number; billingNumber: string | null }>) {
+    const parts = blockers.map(b => `wet check billing ${b.billingNumber ?? `#${b.id}`}`);
+    super(`Cannot delete wet check #${wetCheckId}: linked to ${parts.join("; ")}. Remove it from the billing record first.`);
+    this.name = "WetCheckHasWetCheckBillingError";
     this.billingNumbers = blockers.map(b => b.billingNumber);
   }
 }
@@ -6553,11 +6570,14 @@ export class DatabaseStorage implements IStorage {
     // for both the invoice block and the cascade delete.
     const findings = await db.select({
       billingSheetId: wetCheckFindings.billingSheetId,
+      wetCheckBillingId: wetCheckFindings.wetCheckBillingId,
       estimateId: wetCheckFindings.estimateId,
       workOrderId: wetCheckFindings.workOrderId,
     }).from(wetCheckFindings).where(eq(wetCheckFindings.wetCheckId, id));
     const billingSheetIds = Array.from(new Set(
       findings.map(f => f.billingSheetId).filter((v): v is number => v != null)));
+    const wcbIds = Array.from(new Set(
+      findings.map(f => f.wetCheckBillingId).filter((v): v is number => v != null)));
     const directEstimateIds = Array.from(new Set(
       findings.map(f => f.estimateId).filter((v): v is number => v != null)));
     const directWorkOrderIds = new Set<number>(
@@ -6688,6 +6708,35 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
+    // Third pass: WCB blocker check. Invoiced WCBs fold into WetCheckHasInvoicedRecordsError
+    // (same priority tier as invoiced BS/WO). Uninvoiced WCBs form a new error tier below
+    // uninvoiced BS but above unconditional cascade (priority: invoiced → uninvoiced BS → uninvoiced WCB).
+    const uninvoicedWcbBlockers: Array<{ id: number; billingNumber: string | null }> = [];
+    if (wcbIds.length > 0) {
+      const wcbRows = await db.select({
+        id: wetCheckBillings.id,
+        billingNumber: wetCheckBillings.billingNumber,
+        invoiceId: wetCheckBillings.invoiceId,
+      }).from(wetCheckBillings).where(inArray(wetCheckBillings.id, wcbIds));
+      for (const wcb of wcbRows) {
+        if (wcb.invoiceId != null) {
+          let invoiceNumber: string | null = null;
+          const [inv] = await db.select({ invoiceNumber: invoices.invoiceNumber })
+            .from(invoices).where(eq(invoices.id, wcb.invoiceId));
+          invoiceNumber = inv?.invoiceNumber ?? null;
+          blockers.push({
+            kind: "wet_check_billing",
+            id: wcb.id,
+            displayNumber: wcb.billingNumber ?? null,
+            invoiceId: wcb.invoiceId,
+            invoiceNumber,
+          });
+        } else {
+          uninvoicedWcbBlockers.push({ id: wcb.id, billingNumber: wcb.billingNumber ?? null });
+        }
+      }
+    }
+
     if (blockers.length > 0) {
       // Sort for stable, predictable message ordering (kind then id).
       blockers.sort((a, b) => a.kind.localeCompare(b.kind) || a.id - b.id);
@@ -6697,6 +6746,11 @@ export class DatabaseStorage implements IStorage {
     if (uninvoicedBsBlockers.length > 0) {
       uninvoicedBsBlockers.sort((a, b) => a.id - b.id);
       throw new WetCheckHasBillingSheetError(id, uninvoicedBsBlockers);
+    }
+
+    if (uninvoicedWcbBlockers.length > 0) {
+      uninvoicedWcbBlockers.sort((a, b) => a.id - b.id);
+      throw new WetCheckHasWetCheckBillingError(id, uninvoicedWcbBlockers);
     }
 
     // Snapshot every photo URL across the wet check AND every downstream
@@ -6745,6 +6799,15 @@ export class DatabaseStorage implements IStorage {
       await tx.delete(wetCheckPhotos).where(eq(wetCheckPhotos.wetCheckId, id));
       await tx.delete(wetCheckFindings).where(eq(wetCheckFindings.wetCheckId, id));
       await tx.delete(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.wetCheckId, id));
+
+      // Delete WCBs only after findings are removed (findings FK → WCBs).
+      // By the time we reach this transaction, all WCB blockers have been
+      // cleared by the throw checks above, so wcbIds will be empty for any
+      // wet check that had live WCBs. The delete is still present as a safe
+      // catch-all for edge cases (e.g. broken FK state after a migration).
+      if (wcbIds.length > 0) {
+        await tx.delete(wetCheckBillings).where(inArray(wetCheckBillings.id, wcbIds));
+      }
 
       if (workOrderIds.length > 0) {
         await tx.delete(workOrderItems).where(inArray(workOrderItems.workOrderId, workOrderIds));
@@ -6996,9 +7059,12 @@ export class DatabaseStorage implements IStorage {
     if (wc0.status !== "in_progress") {
       const fs = await db.select().from(wetCheckFindings)
         .where(eq(wetCheckFindings.wetCheckId, id));
-      const priorBsId = fs.find(f => f.billingSheetId != null)?.billingSheetId ?? null;
+      // Slice 6: prefer wetCheckBillingId. Only fall back to billingSheetId for
+      // the return value (route display) — NOT as an ID into wet_check_billings.
+      const priorWcbId = fs.find(f => f.wetCheckBillingId != null)?.wetCheckBillingId ?? null;
+      const priorLegacyBsId = fs.find(f => f.billingSheetId != null)?.billingSheetId ?? null;
       const pendingCount = fs.filter(f => f.resolution === "pending").length;
-      return { wetCheck: wc0, billingSheetId: priorBsId, autoBilledCount: 0, pendingCount };
+      return { wetCheck: wc0, billingSheetId: priorWcbId ?? priorLegacyBsId, autoBilledCount: 0, pendingCount };
     }
 
     return await db.transaction(async (tx) => {
@@ -7072,20 +7138,21 @@ export class DatabaseStorage implements IStorage {
       const repaired = allFindings.filter(f =>
         f.resolution === "repaired_in_field" &&
         f.convertedAt == null &&
+        f.wetCheckBillingId == null &&
         f.billingSheetId == null,
       );
       const pendingCount = allFindings.filter(f => f.resolution === "pending").length;
 
       const now = new Date();
-      let billingSheetId: number | null = null;
+      let wetCheckBillingId: number | null = null;
       let autoBilledCount = 0;
 
       if (autoBillEnabled && repaired.length > 0) {
         const [cust] = await tx.select().from(customers).where(eq(customers.id, wc.customerId));
         if (!cust) throw new Error(`Customer ${wc.customerId} not found`);
         const laborRate = parseFloat(String(cust.laborRate ?? "45.00"));
-        billingSheetId = await this._writeRepairedInFieldBilling(
-          tx, wc, laborRate, repaired, /* priorBsId */ null, now,
+        wetCheckBillingId = await this._writeRepairedInFieldBilling(
+          tx, wc, laborRate, repaired, /* priorWcbId */ null, now,
         );
         autoBilledCount = repaired.length;
       }
@@ -7122,7 +7189,7 @@ export class DatabaseStorage implements IStorage {
         updatedAt: now,
       }).where(and(eq(wetChecks.id, id), eq(wetChecks.companyId, companyId))).returning();
 
-      return { wetCheck: updated, billingSheetId, autoBilledCount, pendingCount };
+      return { wetCheck: updated, billingSheetId: wetCheckBillingId, autoBilledCount, pendingCount };
     });
   }
 
@@ -7145,6 +7212,7 @@ export class DatabaseStorage implements IStorage {
     const repaired = findings.filter(f =>
       f.resolution === "repaired_in_field" &&
       f.convertedAt == null &&
+      f.wetCheckBillingId == null &&
       f.billingSheetId == null,
     );
     // Task #464 — preview must mirror the submit guard exactly so the
@@ -7220,7 +7288,7 @@ export class DatabaseStorage implements IStorage {
     wc: WetCheck,
     customerLaborRate: number,
     repaired: WetCheckFinding[],
-    priorBsId: number | null,
+    priorWcbId: number | null,
     now: Date,
   ): Promise<number> {
     // Slice 3 — guard required billing inputs BEFORE writing anything.
@@ -7269,7 +7337,7 @@ export class DatabaseStorage implements IStorage {
     const newPartsSubtotal = lines.reduce((s, l) => s + l.partsTotal, 0);
 
     // Task #753 (Slice 4 Option B) — zone-level repairLaborHours is the
-    // authoritative labor source for BS-WC billing totals.
+    // authoritative labor source for WCB billing totals.
     //
     // Total labor formula (per task spec):
     //   totalLabor = wc.totalLaborHours + Σ(zoneRecords.repairLaborHours
@@ -7289,33 +7357,38 @@ export class DatabaseStorage implements IStorage {
     const newZoneRepairHours = newZoneRows.reduce(
       (s, zr) => s + parseFloat(String(zr.repairLaborHours ?? "0")), 0,
     );
-    // For the new-sheet branch: total = wc base + new zone repair hours.
+    // For the new-WCB branch: total = wc base + new zone repair hours.
     const newLaborHours = wcBaseLaborHours + newZoneRepairHours;
 
-    let bsId: number;
-    if (priorBsId != null) {
-      // Append to existing wet-check billing sheet and recompute totals from
+    let wcbId: number;
+    if (priorWcbId != null) {
+      // Append to existing wet-check billing record and recompute totals from
       // scratch (not incrementally). The labor rate used here is the SNAPSHOT
-      // (`appliedLaborRate`) stored on the existing sheet, NOT the live
+      // (`appliedLaborRate`) stored on the existing WCB, NOT the live
       // customer rate — previously converted findings must never be repriced.
       //
       // For labor hours: union zone IDs from existing billed findings with the
       // new batch, look up their repairLaborHours, and add wc.totalLaborHours
       // once. Each zone is counted once (partial-conversion guard).
-      const [priorBs] = await tx.select().from(billingSheets)
-        .where(eq(billingSheets.id, priorBsId));
-      const snapshotRate = parseFloat(String(priorBs?.appliedLaborRate ?? priorBs?.laborRate ?? customerLaborRate));
-      const existingItems = await tx.select().from(billingSheetItems)
-        .where(eq(billingSheetItems.billingSheetId, priorBsId));
-      const existingPartsSubtotal = existingItems.reduce(
-        (s, it) => s + parseFloat(String(it.totalPrice ?? "0")), 0);
-      // Collect zone IDs already in this billing sheet (via findings stamped in prior run).
-      const existingFindingZones = await tx
-        .select({ zoneRecordId: wetCheckFindings.zoneRecordId })
-        .from(wetCheckFindings)
-        .where(eq(wetCheckFindings.billingSheetId, priorBsId));
+      const [priorWcb] = await tx.select().from(wetCheckBillings)
+        .where(eq(wetCheckBillings.id, priorWcbId));
+      const snapshotRate = parseFloat(String(priorWcb?.appliedLaborRate ?? priorWcb?.laborRate ?? customerLaborRate));
+      // Read existing parts subtotal from wetCheckFindings (no items table).
+      const existingFindingRows = await tx.select({
+        partId: wetCheckFindings.partId,
+        partPrice: wetCheckFindings.partPrice,
+        quantity: wetCheckFindings.quantity,
+        noPartNeeded: wetCheckFindings.noPartNeeded,
+        zoneRecordId: wetCheckFindings.zoneRecordId,
+      }).from(wetCheckFindings)
+        .where(eq(wetCheckFindings.wetCheckBillingId, priorWcbId));
+      const existingPartsSubtotal = existingFindingRows.reduce((s, f) => {
+        if (f.partId == null && f.noPartNeeded) return s;
+        return s + parseFloat(String(f.partPrice ?? "0")) * Number(f.quantity ?? 0);
+      }, 0);
+      // Collect zone IDs already in this WCB (via findings stamped in prior run).
       const allZoneIds = Array.from(new Set([
-        ...existingFindingZones.map(f => f.zoneRecordId),
+        ...existingFindingRows.map(f => f.zoneRecordId),
         ...newZoneIds,
       ]));
       const allZoneRows = allZoneIds.length > 0
@@ -7331,18 +7404,22 @@ export class DatabaseStorage implements IStorage {
       const partsSubtotal = existingPartsSubtotal + newPartsSubtotal;
       const laborSubtotal = totalLaborHours * snapshotRate;
       const total = partsSubtotal + laborSubtotal;
-      await tx.update(billingSheets).set({
+      await tx.update(wetCheckBillings).set({
         totalHours: totalLaborHours.toFixed(2),
         laborSubtotal: laborSubtotal.toFixed(2),
         partsSubtotal: partsSubtotal.toFixed(2),
         totalAmount: total.toFixed(2),
-      }).where(eq(billingSheets.id, priorBsId));
-      bsId = priorBsId;
+      }).where(eq(wetCheckBillings.id, priorWcbId));
+      wcbId = priorWcbId;
     } else {
       const laborSubtotal = newLaborHours * customerLaborRate;
       const total = newPartsSubtotal + laborSubtotal;
-      const billingNumber = `BS-WC-${wc.id}-${Date.now()}`;
-      const [bs] = await tx.insert(billingSheets).values({
+      // Slice 6 — allocate a WC-YYYY-NNNN number from the wet-check billing
+      // counter. Called outside the inner transaction because it uses the
+      // top-level db handle; the counter is atomically incremented so
+      // concurrent submissions never collide.
+      const billingNumber = await this.getNextWetCheckBillingNumber();
+      const [wcb] = await tx.insert(wetCheckBillings).values({
         billingNumber,
         customerId: wc.customerId,
         customerName: wc.customerName,
@@ -7350,7 +7427,7 @@ export class DatabaseStorage implements IStorage {
         workDate: wc.submittedAt ?? now,
         technicianName: wc.technicianName,
         technicianId: wc.technicianId,
-        workDescription: `Wet check repairs (#${wc.id})`,
+        wetCheckId: wc.id,
         status: "submitted",
         totalHours: newLaborHours.toFixed(2),
         laborRate: customerLaborRate.toFixed(2),
@@ -7358,31 +7435,22 @@ export class DatabaseStorage implements IStorage {
         partsSubtotal: newPartsSubtotal.toFixed(2),
         totalAmount: total.toFixed(2),
         appliedLaborRate: customerLaborRate.toFixed(2),
-      } as typeof billingSheets.$inferInsert).returning();
-      bsId = bs.id;
+      } as typeof wetCheckBillings.$inferInsert).returning();
+      wcbId = wcb.id;
     }
 
-    for (let i = 0; i < repaired.length; i++) {
-      const f = repaired[i];
-      const l = lines[i];
-      await tx.insert(billingSheetItems).values({
-        billingSheetId: bsId,
-        partId: f.partId,
-        partName: f.partName ?? f.issueType,
-        partDescription: f.notes ?? null,
-        quantity: l.qty.toFixed(2),
-        unitPrice: l.partPrice.toFixed(2),
-        totalPrice: l.partsTotal.toFixed(2),
-        laborHours: l.laborHours.toFixed(2),
-        notes: f.notes ?? null,
-      });
+    // Stamp findings with wetCheckBillingId + convertedAt; clear billingSheetId.
+    // No billing_sheet_items rows are created — the WCB totals are derived
+    // directly from finding-level fields at read time.
+    for (const f of repaired) {
       await tx.update(wetCheckFindings).set({
-        billingSheetId: bsId,
+        wetCheckBillingId: wcbId,
+        billingSheetId: null,
         convertedAt: now,
         updatedAt: now,
       }).where(eq(wetCheckFindings.id, f.id));
     }
-    return bsId;
+    return wcbId;
   }
 
   private async assertWetCheckBelongsToCompany(wetCheckId: number, companyId: number): Promise<WetCheck> {
@@ -7858,19 +7926,27 @@ export class DatabaseStorage implements IStorage {
       // per wet check lifecycle" invariant. Subsequent runs append items
       // to the existing record and recompute its totals instead of
       // creating a duplicate.
-      const priorBsId = allFindings.find(f => f.billingSheetId != null)?.billingSheetId ?? null;
+      // Slice 6: priorWcbId MUST be a real wet_check_billings.id — never a
+      // billing_sheet id — because _writeRepairedInFieldBilling queries
+      // wet_check_billings by this value. Legacy partial-conversion wet checks
+      // (only billingSheetId set, no wetCheckBillingId) pass null so a new WCB
+      // is created rather than silently targeting a non-existent WCB row.
+      // The return value uses legacyPriorBsId as a fallback so callers that
+      // display the id (route layer) still see a non-null value for legacy rows.
+      const priorWcbId = allFindings.find(f => f.wetCheckBillingId != null)?.wetCheckBillingId ?? null;
+      const legacyPriorBsId = allFindings.find(f => f.billingSheetId != null)?.billingSheetId ?? null;
       const priorEstId = allFindings.find(f => f.estimateId != null)?.estimateId ?? null;
       const priorWoId = allFindings.find(f => f.workOrderId != null)?.workOrderId ?? null;
-      let billingSheetId: number | null = priorBsId;
+      let billingSheetId: number | null = priorWcbId ?? legacyPriorBsId;
       let estimateId: number | null = priorEstId;
       let workOrderId: number | null = priorWoId;
 
-      // 1) Repaired-in-field → at most one billing sheet per wet check.
+      // 1) Repaired-in-field → at most one WCB per wet check (Slice 6).
       // Shared helper with submitWetCheck (Slice 3 auto-bill) keeps both
-      // paths writing identical billing-sheet shapes.
+      // paths writing identical WCB shapes.
       if (repaired.length > 0) {
         billingSheetId = await this._writeRepairedInFieldBilling(
-          tx, wc, laborRate, repaired, priorBsId, now,
+          tx, wc, laborRate, repaired, priorWcbId, now,
         );
       }
 

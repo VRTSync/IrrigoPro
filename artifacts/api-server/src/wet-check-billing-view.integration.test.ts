@@ -44,6 +44,7 @@ const T = {
   zoneA1Id: 77101,
   zoneB2Id: 77102,
   bsId: 77001,
+  wcbId: 77001,
   findingIds: [77201, 77202, 77203],
   issueConfigId: 77001,
 };
@@ -97,7 +98,8 @@ async function seedMain() {
     VALUES (${T.zoneB2Id}, ${T.wetCheckId}, 'B', 2, 'checked_with_issues', '2.00')
     ON CONFLICT (id) DO NOTHING
   `);
-  // billing sheet simulating _writeRepairedInFieldBilling outcome:
+  // billing sheet (legacy path — kept so getBillingSheetWetCheckView still resolves
+  // during the Slice 6 migration window where both columns may be populated):
   //   total_labor = wc.totalLaborHours(1.00) + zoneA1(1.50) + zoneB2(2.00) = 4.50h
   //   labor_subtotal = 4.50 × 80 = 360; parts = 2×15 + 30 = 60; total = 420
   await db.execute(sql`
@@ -111,31 +113,45 @@ async function seedMain() {
             '360.00', '60.00', '420.00', 'flat')
     ON CONFLICT (id) DO NOTHING
   `);
+  // Slice 6 — wet_check_billings row mirrors the same totals as the legacy BS row.
+  // Findings are stamped with BOTH billing_sheet_id (legacy compat) and
+  // wet_check_billing_id (new path) during the migration window.
+  await db.execute(sql`
+    INSERT INTO wet_check_billings (id, billing_number, customer_id, customer_name, property_address,
+                                    work_date, technician_name, technician_id, wet_check_id,
+                                    status, total_hours, labor_rate, applied_labor_rate,
+                                    labor_subtotal, parts_subtotal, total_amount)
+    VALUES (${T.wcbId}, 'WC-TEST-77001', ${T.customerId}, 'WCV Test Customer', '123 Test St',
+            now(), 'WCV Tech', ${T.userId}, ${T.wetCheckId},
+            'submitted', '4.50', '80.00', '80.00',
+            '360.00', '60.00', '420.00')
+    ON CONFLICT (id) DO NOTHING
+  `);
   // finding 1 — zone A-1, synthetic type with config entry (tests label lookup)
   await db.execute(sql`
     INSERT INTO wet_check_findings (id, zone_record_id, wet_check_id, issue_type, issue_group,
                                     quantity, labor_hours, resolution, no_part_needed,
-                                    part_name, part_price, billing_sheet_id)
+                                    part_name, part_price, billing_sheet_id, wet_check_billing_id)
     VALUES (${T.findingIds[0]}, ${T.zoneA1Id}, ${T.wetCheckId}, 'wcv_test_type_a', 'quick_fix',
-            2, '0.75', 'repaired_in_field', false, 'Rotor Head', '15.00', ${T.bsId})
+            2, '0.75', 'repaired_in_field', false, 'Rotor Head', '15.00', ${T.bsId}, ${T.wcbId})
     ON CONFLICT (id) DO NOTHING
   `);
   // finding 2 — zone A-1, synthetic type with NO config entry → title-case "Wcv Test Type B"
   await db.execute(sql`
     INSERT INTO wet_check_findings (id, zone_record_id, wet_check_id, issue_type, issue_group,
                                     quantity, labor_hours, resolution, no_part_needed,
-                                    part_name, part_price, billing_sheet_id)
+                                    part_name, part_price, billing_sheet_id, wet_check_billing_id)
     VALUES (${T.findingIds[1]}, ${T.zoneA1Id}, ${T.wetCheckId}, 'wcv_test_type_b', 'advanced',
-            1, '0.50', 'repaired_in_field', false, 'PVC Pipe', '30.00', ${T.bsId})
+            1, '0.50', 'repaired_in_field', false, 'PVC Pipe', '30.00', ${T.bsId}, ${T.wcbId})
     ON CONFLICT (id) DO NOTHING
   `);
   // finding 3 — zone B-2, labor-only (noPartNeeded=true)
   await db.execute(sql`
     INSERT INTO wet_check_findings (id, zone_record_id, wet_check_id, issue_type, issue_group,
                                     quantity, labor_hours, resolution, no_part_needed,
-                                    billing_sheet_id)
+                                    billing_sheet_id, wet_check_billing_id)
     VALUES (${T.findingIds[2]}, ${T.zoneB2Id}, ${T.wetCheckId}, 'adjustment', 'quick_fix',
-            0, '0.25', 'repaired_in_field', true, ${T.bsId})
+            0, '0.25', 'repaired_in_field', true, ${T.bsId}, ${T.wcbId})
     ON CONFLICT (id) DO NOTHING
   `);
 }
@@ -143,6 +159,7 @@ async function seedMain() {
 async function cleanupMain() {
   await db.execute(sql`DELETE FROM wet_check_findings WHERE id = ANY(ARRAY[${T.findingIds[0]}, ${T.findingIds[1]}, ${T.findingIds[2]}]::int[])`);
   await db.execute(sql`DELETE FROM wet_check_zone_records WHERE id IN (${T.zoneA1Id}, ${T.zoneB2Id})`);
+  await db.execute(sql`DELETE FROM wet_check_billings WHERE id = ${T.wcbId}`);
   await db.execute(sql`DELETE FROM wet_checks WHERE id = ${T.wetCheckId}`);
   await db.execute(sql`DELETE FROM billing_sheets WHERE id = ${T.bsId}`);
   await db.execute(sql`DELETE FROM issue_type_configs WHERE id = ${T.issueConfigId}`);
