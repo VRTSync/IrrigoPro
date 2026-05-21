@@ -13,6 +13,7 @@ import {
   coverPage,
   ticketPageWO,
   ticketPageBS,
+  ticketPageWCB,
   reconciliationPage,
   pageFooter,
   buildFullCSS,
@@ -199,6 +200,17 @@ export class PDFGenerator {
       bsPhotoMaps.push(result);
     }
 
+    const wcbPhotoMaps: string[][] = [];
+    for (const wcbRow of viewModel.wetCheckBillings) {
+      const photos = Array.isArray(wcbRow.wetCheckBilling.photos) ? wcbRow.wetCheckBilling.photos.filter(Boolean) : [];
+      const result = photos.length > 0 ? await preloadPhotos(photos, port) : [];
+      const failCount = result.filter(r => r === FAILED_PHOTO_SENTINEL).length;
+      if (failCount > 0) {
+        console.warn(`[PDF] Invoice ${invoiceNumber}: WC Billing ${wcbRow.wetCheckBilling.billingNumber} — ${failCount} photo(s) failed to load`);
+      }
+      wcbPhotoMaps.push(result);
+    }
+
     const browser = await puppeteer.launch({
       headless: true,
       executablePath: getChromiumPath(),
@@ -208,7 +220,7 @@ export class PDFGenerator {
     try {
       const page = await browser.newPage();
 
-      const htmlContent = this.generateInvoiceDetailHTML(viewModel, woPhotoMaps, bsPhotoMaps, viewModel.brandColors);
+      const htmlContent = this.generateInvoiceDetailHTML(viewModel, woPhotoMaps, bsPhotoMaps, wcbPhotoMaps, viewModel.brandColors);
 
       await page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
 
@@ -239,13 +251,15 @@ export class PDFGenerator {
     vm: PdfViewModel,
     woPhotoMaps: string[][] = [],
     bsPhotoMaps: string[][] = [],
+    wcbPhotoMaps: string[][] = [],
     brandColors: PdfBrandColors = DEFAULT_BRAND_COLORS,
   ): string {
-    const { invoice, workOrders, billingSheets } = vm;
+    const { invoice, workOrders, billingSheets, wetCheckBillings } = vm;
 
     const ticketPages = [
       ...workOrders.map((wo, i) => ticketPageWO(wo, invoice.invoiceNumber, woPhotoMaps[i] ?? [], vm.company.logoDataUri, vm.company.name)),
       ...billingSheets.map((bs, i) => ticketPageBS(bs, invoice.invoiceNumber, bsPhotoMaps[i] ?? [], vm.company.logoDataUri, vm.company.name, brandColors)),
+      ...wetCheckBillings.map((wcb, i) => ticketPageWCB(wcb, invoice.invoiceNumber, wcbPhotoMaps[i] ?? [], vm.company.logoDataUri, vm.company.name, brandColors)),
     ].join('');
 
     return `<!DOCTYPE html>

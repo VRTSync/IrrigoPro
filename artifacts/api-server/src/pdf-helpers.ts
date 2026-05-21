@@ -4,6 +4,7 @@ import type {
   PdfInvoiceHeader,
   PdfWorkOrderRow,
   PdfBillingSheetRow,
+  PdfWetCheckBillingRow,
   PdfTotals,
   PdfBrandColors,
 } from './pdf-view-model';
@@ -313,6 +314,90 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
       : partsTableFromBS(bs.items)}
 
     ${photoFailWarningBS}
+    ${photoGridSection(photoDataUris)}
+  </div>`;
+}
+
+/**
+ * Task #787 (WC Separate System Slice 2) — ticket page for a wet_check_billings
+ * row. Header fields come from `row.wetCheckBilling`; the body is the zone-
+ * grouped Repairs Summary from `partsBlockForWetCheckBS(row.wetCheckView)`;
+ * the financial section uses the same single "Irrigation Labor" pattern as
+ * `ticketPageBS` (post-Task #766).
+ */
+export function ticketPageWCB(
+  row: PdfWetCheckBillingRow,
+  invoiceNumber: string,
+  photoDataUris: string[],
+  logoDataUri?: string | null,
+  companyName?: string,
+  brandColors: PdfBrandColors = DEFAULT_BRAND_COLORS,
+): string {
+  const { wetCheckBilling: wcb, wetCheckView: view } = row;
+
+  const totalHours = parseFloat(String(wcb.totalHours || '0'));
+  const laborRate = parseFloat(String(wcb.appliedLaborRate || wcb.laborRate || '0'));
+  const laborSubtotal = parseFloat(String(wcb.laborSubtotal || '0'));
+  const partsSubtotal = parseFloat(String(wcb.partsSubtotal || '0'));
+  const rowTotal = parseFloat(String(wcb.totalAmount || '0'));
+
+  const failedPhotoCount = photoDataUris.filter(u => u === FAILED_PHOTO_SENTINEL).length;
+  const photoFailWarning = failedPhotoCount > 0
+    ? `<div class="ticket-photo-fail-warning">
+         &#9888; Warning: ${failedPhotoCount} photo${failedPhotoCount > 1 ? 's' : ''} could not be loaded and ${failedPhotoCount > 1 ? 'were' : 'was'} omitted from this PDF.
+       </div>`
+    : '';
+
+  const approvalHtml = (wcb.approvedBy || wcb.approvedAt)
+    ? `<div class="ticket-approval">
+         <span class="ticket-approval-icon">&#10003;</span>
+         <div class="ticket-approval-details">
+           ${wcb.approvedBy ? `<span class="ticket-approval-by">Approved By: <strong>${wcb.approvedBy}</strong></span>` : ''}
+           ${wcb.approvedAt ? `<span class="ticket-approval-at">Approved At: ${formatDate(new Date(wcb.approvedAt))}</span>` : ''}
+         </div>
+       </div>`
+    : '';
+
+  const wcbLogoHtml = logoDataUri
+    ? `<img src="${logoDataUri}" class="ticket-header-logo" alt="Company logo">`
+    : companyName
+      ? `<div class="ticket-header-company-name">${companyName}</div>`
+      : '';
+
+  return `
+  <div class="ticket-page">
+    <div class="ticket-header ticket-header-bs">
+      <div class="ticket-header-condensed">
+        ${wcbLogoHtml}
+        <div class="ticket-header-line1">WC Billing #${wcb.billingNumber} &nbsp;|&nbsp; Invoice #${invoiceNumber}</div>
+        <div class="ticket-header-line2">Date: ${formatDate(new Date(wcb.workDate))} &nbsp;|&nbsp; Technician: ${wcb.technicianName} &nbsp;|&nbsp; Hours: ${totalHours} hrs</div>
+        ${wcb.propertyAddress ? `<div class="ticket-header-line3">&#128205; ${wcb.propertyAddress}</div>` : ''}
+        ${wcb.branchName ? `<div class="ticket-header-branch">&#127970; Branch: ${wcb.branchName}</div>` : ''}
+        ${approvalHtml}
+      </div>
+    </div>
+
+    <div class="ticket-section ticket-financial">
+      <div class="ticket-section-label">FINANCIAL BREAKDOWN</div>
+      <div class="ticket-fin-rows">
+        <div class="ticket-fin-row">
+          <span class="ticket-fin-label">Irrigation Labor (${totalHours} hrs × ${formatCurrency(laborRate)}/hr)</span>
+          <span class="ticket-fin-value">${formatCurrency(laborSubtotal)}</span>
+        </div>
+        <div class="ticket-fin-row">
+          <span class="ticket-fin-label">Parts Subtotal</span>
+          <span class="ticket-fin-value">${formatCurrency(partsSubtotal)}</span>
+        </div>
+        <div class="ticket-fin-row ticket-fin-total">
+          <span class="ticket-fin-label">TOTAL</span>
+          <span class="ticket-fin-value">${formatCurrency(rowTotal)}</span>
+        </div>
+      </div>
+    </div>
+
+    ${partsBlockForWetCheckBS(view, brandColors)}
+
+    ${photoFailWarning}
     ${photoGridSection(photoDataUris)}
   </div>`;
 }

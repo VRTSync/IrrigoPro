@@ -1,9 +1,9 @@
 import { PDFGenerator, fetchLogoAsBase64 } from './pdf-generator';
 import { buildPdfViewModel } from './pdf-view-model';
-import type { PdfBrandColors } from './pdf-view-model';
+import type { PdfBrandColors, PdfWetCheckBillingRow } from './pdf-view-model';
 import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
 import type { IStorage } from './storage';
-import type { WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem } from '@workspace/db';
+import type { WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem, WetCheckBilling } from '@workspace/db';
 import type { WetCheckBillingView } from './wet-check-billing-view';
 
 async function extractBrandColorsFromDataUri(dataUri: string): Promise<PdfBrandColors> {
@@ -154,6 +154,7 @@ function validateRows(
   invoiceId: number,
   workOrders: Array<{ workOrder: WorkOrder; items: WorkOrderItem[] }>,
   billingSheets: Array<{ billingSheet: BillingSheet; items: BillingSheetItem[] }>,
+  wetCheckBillings: Array<WetCheckBilling>,
   storedInvoiceTotal: number,
 ): InvoicePdfValidationFailure | null {
   const rowErrors: RowValidationError[] = [];
@@ -215,6 +216,11 @@ function validateRows(
     }
   }
 
+  for (const wcb of wetCheckBillings) {
+    const total = toNum(wcb.totalAmount);
+    rowTotals.push({ recordType: 'wet_check_billing', recordId: wcb.id, rowTotal: total });
+  }
+
   const computedGrandTotal = rowTotals.reduce((sum, r) => sum + r.rowTotal, 0);
   const grandDelta = Math.abs(computedGrandTotal - storedInvoiceTotal);
 
@@ -266,6 +272,7 @@ export class InvoicePdfService {
 
       const workOrders: Array<{ workOrder: WorkOrder; items: WorkOrderItem[] }> = [];
       const billingSheets: Array<{ billingSheet: BillingSheet; items: BillingSheetItem[]; wetCheckView?: WetCheckBillingView }> = [];
+      const wetCheckBillingRows: PdfWetCheckBillingRow[] = [];
 
       for (const item of invoice.items) {
         if (item.sourceType === 'work_order' && item.workOrderId) {
@@ -293,11 +300,35 @@ export class InvoicePdfService {
               });
             }
           }
+        } else if (item.sourceType === 'wet_check_billing' && item.wetCheckBillingId) {
+          const existing = wetCheckBillingRows.find(r => r.wetCheckBillingId === item.wetCheckBillingId);
+          if (!existing) {
+            const wcb = await this.storage.getWetCheckBillingById(item.wetCheckBillingId);
+            if (wcb) {
+              const wetCheckView = await this.storage.getWetCheckBillingViewById(
+                wcb.id,
+                customer.companyId,
+              ).catch(() => null);
+              if (wetCheckView) {
+                wetCheckBillingRows.push({
+                  wetCheckBillingId: wcb.id,
+                  wetCheckBilling: wcb,
+                  wetCheckView,
+                });
+              }
+            }
+          }
         }
       }
 
       const storedInvoiceTotal = toNum(invoice.totalAmount);
-      const validationFailure = validateRows(invoiceId, workOrders, billingSheets, storedInvoiceTotal);
+      const validationFailure = validateRows(
+        invoiceId,
+        workOrders,
+        billingSheets,
+        wetCheckBillingRows.map(r => r.wetCheckBilling),
+        storedInvoiceTotal,
+      );
 
       if (validationFailure) {
         if (validationFailure.rowErrors.length > 0 || validationFailure.totalsError) {
@@ -331,6 +362,7 @@ export class InvoicePdfService {
         },
         workOrders,
         billingSheets,
+        wetCheckBillings: wetCheckBillingRows,
         laborRate,
         brandColors,
         customerHasBranches,

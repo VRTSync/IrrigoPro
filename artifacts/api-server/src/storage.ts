@@ -591,6 +591,14 @@ export interface IStorage {
   // correct issueTypeConfigs; pass null for super_admin callers (the method
   // derives it from the wet check row).
   getBillingSheetWetCheckView(billingSheetId: number, companyId: number | null): Promise<import("./wet-check-billing-view").WetCheckBillingView | null>;
+  // Task #787 (WC Separate System Slice 2) — zone-grouped view assembled from
+  // a `wet_check_billings` row (the new dedicated table). Mirrors
+  // getBillingSheetWetCheckView but sources the billing header from
+  // `wet_check_billings` and filters findings by `wetCheckBillingId`.
+  // Returns null when the WCB row is missing, has no findings, or the wet
+  // check / customer cannot be loaded. Sets `wetCheckBillingId` on the
+  // returned view; does NOT set `billingSheetId`.
+  getWetCheckBillingViewById(wcbId: number, companyId: number | null): Promise<import("./wet-check-billing-view").WetCheckBillingView | null>;
 
   // Missing-photos outreach tracking — one row per technician
   getMissingPhotosNotifications(): Promise<MissingPhotosNotification[]>;
@@ -3928,6 +3936,107 @@ export class DatabaseStorage implements IStorage {
       wetCheck: wc,
       issueTypeConfigs: configs,
     });
+  }
+
+  // Task #787 (WC Separate System Slice 2) — zone-grouped view assembler for
+  // the wet_check_billings table path. Mirrors getBillingSheetWetCheckView but
+  // sources the billing header from `wet_check_billings` and filters findings
+  // by `wetCheckBillingId`. Returns null when the WCB row is missing, has no
+  // findings, or the parent wet check / customer cannot be resolved.
+  async getWetCheckBillingViewById(
+    wcbId: number,
+    _companyId: number | null,
+  ): Promise<import("./wet-check-billing-view").WetCheckBillingView | null> {
+    const { buildWetCheckBillingView } = await import("./wet-check-billing-view");
+
+    // 1. Load the wet_check_billing row
+    const [wcb] = await db
+      .select()
+      .from(wetCheckBillings)
+      .where(eq(wetCheckBillings.id, wcbId));
+    if (!wcb) return null;
+
+    // 2. Load findings filtered by wetCheckBillingId (not billingSheetId)
+    const findings = await db
+      .select()
+      .from(wetCheckFindings)
+      .where(eq(wetCheckFindings.wetCheckBillingId, wcbId));
+
+    if (findings.length === 0) {
+      return null;
+    }
+
+    // 3. Load the wet check via wcb.wetCheckId
+    const [wc] = await db
+      .select()
+      .from(wetChecks)
+      .where(eq(wetChecks.id, wcb.wetCheckId));
+    if (!wc) return null;
+
+    // 4. Load zone records for every zoneRecordId referenced by findings
+    const zoneRecordIds = [...new Set(findings.map((f) => f.zoneRecordId))];
+    const zoneRecords = await db
+      .select()
+      .from(wetCheckZoneRecords)
+      .where(inArray(wetCheckZoneRecords.id, zoneRecordIds));
+
+    // ── Observability: detect forgotten backfill rows ─────────────────────
+    for (const zr of zoneRecords) {
+      const zoneFindings = findings.filter((f) => f.zoneRecordId === zr.id);
+      const findingLaborSum = zoneFindings.reduce(
+        (s, f) => s + parseFloat(String(f.laborHours ?? "0")),
+        0,
+      );
+      const repairLaborHoursNum = parseFloat(String(zr.repairLaborHours ?? "0"));
+      if (repairLaborHoursNum === 0 && findingLaborSum > 0) {
+        console.warn(
+          JSON.stringify({
+            event: "wcv.backfill_gap",
+            wetCheckBillingId: wcbId,
+            wetCheckId: wc.id,
+            zoneRecordId: zr.id,
+            controllerLetter: zr.controllerLetter,
+            zoneNumber: zr.zoneNumber,
+            findingLaborHoursSum: findingLaborSum,
+            message:
+              "zone.repair_labor_hours is 0 but findings have non-zero laborHours — run the WCB backfill script",
+          }),
+        );
+      }
+    }
+
+    // 5. Load issueTypeConfigs for the company (from the wet check)
+    const configs = await db
+      .select()
+      .from(issueTypeConfigs)
+      .where(eq(issueTypeConfigs.companyId, wc.companyId))
+      .orderBy(issueTypeConfigs.sortOrder);
+
+    // 6. Load customer
+    if (!wcb.customerId) return null;
+    const [customer] = await db
+      .select()
+      .from(customers)
+      .where(eq(customers.id, wcb.customerId));
+    if (!customer) return null;
+
+    // 7. Build the view using wcb cast to the shape buildWetCheckBillingView
+    //    needs. Only `id`, `billingNumber`, `workDate`, `appliedLaborRate`, and
+    //    `laborRate` are read from the billingSheet parameter — WetCheckBilling
+    //    carries all of those fields.
+    const viewRaw = buildWetCheckBillingView({
+      billingSheet: wcb as unknown as import("@workspace/db").BillingSheet,
+      customer,
+      findings,
+      zoneRecords,
+      wetCheck: wc,
+      issueTypeConfigs: configs,
+    });
+
+    // Replace billingSheetId (set to wcb.id by buildWetCheckBillingView) with
+    // wetCheckBillingId; leave billingSheetId undefined on the WCB path.
+    const { billingSheetId: _ignored, ...viewRest } = viewRaw;
+    return { ...viewRest, wetCheckBillingId: wcb.id };
   }
 
   async deleteBillingSheet(id: number): Promise<boolean> {

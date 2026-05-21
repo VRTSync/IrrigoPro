@@ -1,4 +1,4 @@
-import type { Invoice, WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem } from '@workspace/db';
+import type { Invoice, WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem, WetCheckBilling } from '@workspace/db';
 import type { WetCheckBillingView } from './wet-check-billing-view';
 
 // ── Sub-interfaces ──────────────────────────────────────────────────────────
@@ -86,6 +86,17 @@ export interface PdfBillingSheetRow {
   wetCheckView?: WetCheckBillingView;
 }
 
+/**
+ * Task #787 (WC Separate System Slice 2) — one entry per `wet_check_billings`
+ * row on the invoice. Carries both the raw DB row (for the ticket header) and
+ * the assembled zone-grouped view (for the Repairs Summary body).
+ */
+export interface PdfWetCheckBillingRow {
+  wetCheckBillingId: number;
+  wetCheckBilling: WetCheckBilling;
+  wetCheckView: WetCheckBillingView;
+}
+
 export interface PdfTotals {
   partsSubtotal: number;
   laborSubtotal: number;
@@ -121,6 +132,7 @@ export interface PdfViewModel {
   invoice: PdfInvoiceHeader;
   workOrders: PdfWorkOrderRow[];
   billingSheets: PdfBillingSheetRow[];
+  wetCheckBillings: PdfWetCheckBillingRow[];
   totals: PdfTotals;
   totalJobs: number;
   validationWarning: string | null;
@@ -150,6 +162,11 @@ export interface InvoiceDetailData {
     items: BillingSheetItem[];
     wetCheckView?: WetCheckBillingView;
   }>;
+  /**
+   * Task #787 (WC Separate System Slice 2) — wet_check_billings rows on the
+   * invoice. Empty array until Slice 5 routes the WCB path end-to-end.
+   */
+  wetCheckBillings?: PdfWetCheckBillingRow[];
   laborRate?: string;
   brandColors?: PdfBrandColors;
   customerHasBranches?: boolean;
@@ -313,17 +330,22 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
     };
   });
 
+  const wcbRows: PdfWetCheckBillingRow[] = data.wetCheckBillings ?? [];
+
   const computedPartsSubtotal =
     workOrderRows.reduce((s, r) => s + r.partsSubtotal, 0) +
-    billingSheetRows.reduce((s, r) => s + r.partsSubtotal, 0);
+    billingSheetRows.reduce((s, r) => s + r.partsSubtotal, 0) +
+    wcbRows.reduce((s, r) => s + safeNum(r.wetCheckBilling.partsSubtotal), 0);
 
   const computedLaborSubtotal =
     workOrderRows.reduce((s, r) => s + r.laborSubtotal, 0) +
-    billingSheetRows.reduce((s, r) => s + r.laborSubtotal, 0);
+    billingSheetRows.reduce((s, r) => s + r.laborSubtotal, 0) +
+    wcbRows.reduce((s, r) => s + safeNum(r.wetCheckBilling.laborSubtotal), 0);
 
   const computedGrandTotal =
     workOrderRows.reduce((s, r) => s + r.rowTotal, 0) +
-    billingSheetRows.reduce((s, r) => s + r.rowTotal, 0);
+    billingSheetRows.reduce((s, r) => s + r.rowTotal, 0) +
+    wcbRows.reduce((s, r) => s + safeNum(r.wetCheckBilling.totalAmount), 0);
 
   const storedTotalAmount = safeNum(invoice.totalAmount);
 
@@ -380,8 +402,9 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
     invoice: invoiceHeader,
     workOrders: workOrderRows,
     billingSheets: billingSheetRows,
+    wetCheckBillings: wcbRows,
     totals,
-    totalJobs: workOrderRows.length + billingSheetRows.length,
+    totalJobs: workOrderRows.length + billingSheetRows.length + wcbRows.length,
     validationWarning,
     brandColors: data.brandColors ?? DEFAULT_BRAND_COLORS,
     customerHasBranches,

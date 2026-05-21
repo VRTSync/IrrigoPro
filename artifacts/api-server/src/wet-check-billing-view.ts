@@ -74,7 +74,16 @@ export interface WcvInspection {
 
 /** Full zone-grouped billing view for a billing sheet backed by a wet check. */
 export interface WetCheckBillingView {
-  billingSheetId: number;
+  /**
+   * Set when the view was assembled from the `billing_sheets` path (legacy).
+   * Undefined when assembled from `wet_check_billings` (Slice 2+).
+   */
+  billingSheetId?: number;
+  /**
+   * Set when the view was assembled from the `wet_check_billings` table (Slice 2+).
+   * Undefined on the legacy billing-sheet path. Both may coexist during migration.
+   */
+  wetCheckBillingId?: number;
   billingNumber: string;
   customerId: number;
   customerName: string;

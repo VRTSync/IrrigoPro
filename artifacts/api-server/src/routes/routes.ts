@@ -6420,7 +6420,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Invoice preview (no creation, just calculation)
   app.post("/api/invoices/preview", requireAuthentication, async (req, res) => {
     try {
-      const { customerId, workOrderIds = [], billingSheetIds = [] } = req.body;
+      const { customerId, workOrderIds = [], billingSheetIds = [], wetCheckBillingIds = [] } = req.body;
       
       // Get customer details
       const customer = await storage.getCustomerById(customerId);
@@ -6437,9 +6437,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allBillingSheets = await storage.getAllBillingSheets();
       const billingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
 
+      // Query eligible wet check billings for this customer (Slice 2+)
+      const allWcbsForPreview = await storage.getWetCheckBillingsByCustomer(customerId);
+      const eligibleWcbs = allWcbsForPreview.filter(wcb =>
+        wcb.status === 'approved_passed_to_billing' && wcb.invoiceId == null,
+      );
+
       // Filter to only include selected items
       let selectedWorkOrders: (typeof allWorkOrders)[number][] = [];
       let selectedBillingSheets: (typeof allBillingSheets)[number][] = [];
+      let selectedWcbsPreview: typeof eligibleWcbs = [];
 
       if (workOrderIds.length > 0) {
         selectedWorkOrders = workOrders.filter(wo => 
@@ -6457,8 +6464,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      // If no specific items selected, fall back to all approved unbilled items
-      if (workOrderIds.length === 0 && billingSheetIds.length === 0) {
+      if (wetCheckBillingIds.length > 0) {
+        selectedWcbsPreview = eligibleWcbs.filter(wcb =>
+          wetCheckBillingIds.includes(wcb.id),
+        );
+      }
+
+      // If no specific items selected, fall back to all approved unbilled items.
+      // WCBs intentionally do NOT auto-expand in the fallback: the caller must
+      // pass selectedWetCheckBillingIds explicitly (Slice 5+ will wire the UI).
+      if (workOrderIds.length === 0 && billingSheetIds.length === 0 && wetCheckBillingIds.length === 0) {
         selectedWorkOrders = workOrders.filter(wo => 
           (wo.status === 'approved_passed_to_billing') && !wo.invoiceId
         );
@@ -6467,7 +6482,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      if (selectedWorkOrders.length === 0 && selectedBillingSheets.length === 0) {
+      if (selectedWorkOrders.length === 0 && selectedBillingSheets.length === 0 && selectedWcbsPreview.length === 0) {
         res.status(400).json({ message: "No valid items selected for invoicing" });
         return;
       }
@@ -6481,16 +6496,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // use totalAmount for the total but show no breakdown detail.
       const laborSubtotal = 
         selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.laborSubtotal || '0'), 0) +
-        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.laborSubtotal || '0'), 0);
+        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.laborSubtotal || '0'), 0) +
+        selectedWcbsPreview.reduce((sum, wcb) => sum + parseFloat(wcb.laborSubtotal || '0'), 0);
       
       const partsSubtotal = 
         selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.partsSubtotal || '0'), 0) +
-        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0);
+        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0) +
+        selectedWcbsPreview.reduce((sum, wcb) => sum + parseFloat(wcb.partsSubtotal || '0'), 0);
 
-      // Total is the sum of stored totalAmount per work order + stored totalAmount per billing sheet
+      // Total is the sum of stored totalAmount per work order + stored totalAmount per billing sheet + WCBs
       const totalAmount = 
         selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
-        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0);
+        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0) +
+        selectedWcbsPreview.reduce((sum, wcb) => sum + parseFloat(wcb.totalAmount || '0'), 0);
 
       // Create preview items
       const previewItems = [];
@@ -6532,6 +6550,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Add wet check billing items (Slice 2+)
+      for (const wcb of selectedWcbsPreview) {
+        previewItems.push({
+          sourceType: 'wet_check_billing',
+          sourceId: wcb.id,
+          description: `WC Billing ${wcb.billingNumber}`,
+          workDate: wcb.workDate,
+          technicianName: wcb.technicianName,
+          laborHours: parseFloat(wcb.totalHours || '0'),
+          laborRate: parseFloat(wcb.appliedLaborRate || wcb.laborRate || '0'),
+          laborAmount: parseFloat(wcb.laborSubtotal || '0'),
+          partsAmount: parseFloat(wcb.partsSubtotal || '0'),
+          totalAmount: parseFloat(wcb.totalAmount || '0'),
+        });
+      }
+
       // Return preview data
       const previewData = {
         invoiceNumber,
@@ -6545,7 +6579,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         laborSubtotal: laborSubtotal.toFixed(2),
         totalAmount: totalAmount.toFixed(2),
         items: previewItems,
-        itemCount: selectedWorkOrders.length + selectedBillingSheets.length
+        wetCheckBillings: eligibleWcbs,
+        itemCount: selectedWorkOrders.length + selectedBillingSheets.length + selectedWcbsPreview.length,
       };
 
       res.json(previewData);
@@ -6558,7 +6593,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Create monthly invoice for customer - consolidates selected or all unbilled work
   app.post("/api/invoices/monthly", requireAuthentication, async (req, res) => {
     try {
-      const { customerId, workOrderIds = [], billingSheetIds = [], periodStart: periodStartInput, periodEnd: periodEndInput } = req.body;
+      const { customerId, workOrderIds = [], billingSheetIds = [], selectedWetCheckBillingIds = [], periodStart: periodStartInput, periodEnd: periodEndInput } = req.body;
 
       // Pre-flight: verify QuickBooks connection before doing anything
       // req.authenticatedUserCompanyId is set by requireAuthentication middleware from the x-user-company-id header
@@ -6691,9 +6726,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allBillingSheets = await storage.getAllBillingSheets();
       const billingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
 
+      // Query eligible wet check billings for this customer (Slice 2+)
+      const allWcbsForMonthly = await storage.getWetCheckBillingsByCustomer(customerId);
+      const eligibleWcbsMonthly = allWcbsForMonthly.filter(wcb =>
+        wcb.status === 'approved_passed_to_billing' && wcb.invoiceId == null,
+      );
+
       // Filter to only include selected items
       let selectedWorkOrders: (typeof allWorkOrders)[number][] = [];
       let selectedBillingSheets: (typeof allBillingSheets)[number][] = [];
+      let selectedWcbs: typeof eligibleWcbsMonthly = [];
 
       if (workOrderIds.length > 0) {
         selectedWorkOrders = workOrders.filter(wo => 
@@ -6711,8 +6753,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      // If no specific items selected, fall back to all approved unbilled items
-      if (workOrderIds.length === 0 && billingSheetIds.length === 0) {
+      if (selectedWetCheckBillingIds.length > 0) {
+        selectedWcbs = eligibleWcbsMonthly.filter(wcb =>
+          selectedWetCheckBillingIds.includes(wcb.id),
+        );
+      }
+
+      // If no specific items selected, fall back to all approved unbilled items.
+      // WCBs intentionally do NOT auto-expand in the fallback: the caller must
+      // pass selectedWetCheckBillingIds explicitly (Slice 5+ will wire the UI).
+      if (workOrderIds.length === 0 && billingSheetIds.length === 0 && selectedWetCheckBillingIds.length === 0) {
         selectedWorkOrders = workOrders.filter(wo => 
           (wo.status === 'approved_passed_to_billing') && !wo.invoiceId
         );
@@ -6721,7 +6771,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      if (selectedWorkOrders.length === 0 && selectedBillingSheets.length === 0) {
+      if (selectedWorkOrders.length === 0 && selectedBillingSheets.length === 0 && selectedWcbs.length === 0) {
         res.status(400).json({ message: "No valid items selected for invoicing" });
         return;
       }
@@ -6764,15 +6814,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // laborSubtotal/partsSubtotal will aggregate as 0 but totalAmount is authoritative.
       const laborSubtotal = 
         selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.laborSubtotal || '0'), 0) +
-        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.laborSubtotal || '0'), 0);
+        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.laborSubtotal || '0'), 0) +
+        selectedWcbs.reduce((sum, wcb) => sum + parseFloat(wcb.laborSubtotal || '0'), 0);
       
       const partsSubtotal = 
         selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.partsSubtotal || '0'), 0) +
-        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0);
+        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0) +
+        selectedWcbs.reduce((sum, wcb) => sum + parseFloat(wcb.partsSubtotal || '0'), 0);
       
       const totalAmount = 
         selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
-        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0);
+        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0) +
+        selectedWcbs.reduce((sum, wcb) => sum + parseFloat(wcb.totalAmount || '0'), 0);
 
       // Create the invoice record (not yet marking items as billed)
       let invoice = await storage.createInvoice({
@@ -6833,6 +6886,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
           quantity: '1',
           unitPrice: (parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')).toString(),
           totalPrice: (parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')).toString()
+        });
+      }
+
+      // Create invoice items for wet check billings (Slice 2+)
+      for (const wcb of selectedWcbs) {
+        await storage.createInvoiceItem({
+          invoiceId: invoice.id,
+          sourceType: 'wet_check_billing',
+          sourceId: wcb.id,
+          wetCheckBillingId: wcb.id,
+          description: `WC Billing ${wcb.billingNumber}`,
+          workDate: wcb.workDate,
+          laborHours: (parseFloat(wcb.totalHours || '0')).toString(),
+          laborRate: (parseFloat(wcb.appliedLaborRate || wcb.laborRate || '0')).toString(),
+          laborTotal: (parseFloat(wcb.laborSubtotal || '0')).toString(),
+          quantity: '1',
+          unitPrice: (parseFloat(wcb.totalAmount || '0')).toString(),
+          totalPrice: (parseFloat(wcb.totalAmount || '0')).toString(),
         });
       }
 
@@ -6899,6 +6970,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 Qty: 1
               },
               Description: `BS-${billingSheet.billingNumber} - ${parseFloat(billingSheet.totalHours || '0')}h labor @ $${parseFloat(billingSheet.laborRate || '0').toFixed(2)}/h, $${parseFloat(billingSheet.partsSubtotal || '0').toFixed(2)} parts`
+            });
+          }
+        }
+
+        for (const wcb of selectedWcbs) {
+          const lineTotal = parseFloat(wcb.totalAmount || '0');
+          if (lineTotal > 0) {
+            qbLineItems.push({
+              Amount: lineTotal,
+              DetailType: "SalesItemLineDetail",
+              SalesItemLineDetail: {
+                ItemRef: {
+                  value: resolvedItemId,
+                  name: resolvedItemName
+                },
+                UnitPrice: lineTotal,
+                Qty: 1
+              },
+              Description: `WCB-${wcb.billingNumber} - ${parseFloat(wcb.totalHours || '0')}h labor @ $${parseFloat(wcb.appliedLaborRate || wcb.laborRate || '0').toFixed(2)}/h, $${parseFloat(wcb.partsSubtotal || '0').toFixed(2)} parts`,
             });
           }
         }
@@ -7008,6 +7098,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Mark wet check billings as billed (Slice 2+)
+      for (const wcb of selectedWcbs) {
+        await storage.updateWetCheckBilling(wcb.id, {
+          invoiceId: invoice.id,
+          billedAt: currentDate,
+          status: 'billed',
+        });
+      }
+
       // Reconciliation: ensure any billing sheet that is an invoice line item
       // but was missed by the status update loop is also marked as billed.
       try {
@@ -7059,7 +7158,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         invoice,
         invoiceNumber: invoice.invoiceNumber,
         totalAmount: totalAmount.toFixed(2),
-        itemCount: selectedWorkOrders.length + selectedBillingSheets.length,
+        itemCount: selectedWorkOrders.length + selectedBillingSheets.length + selectedWcbs.length,
         quickbooksId,
         quickbooksSuccess: true,
         quickbooksError: null
