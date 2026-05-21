@@ -6084,11 +6084,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           console.log(`Processing customer: ${customer.name} (ID: ${customer.id})`);
           
-          // Get all three data sources for this customer
+          // Get all four data sources for this customer
           const workOrders = await storage.getWorkOrdersByCustomer(customer.id);
           const estimates = await storage.getEstimatesByCustomer(customer.id);
           const billingSheets = await storage.getBillingSheetsByCustomer(customer.id);
-          
+          const wetCheckBillingsForCustomer = await storage.getWetCheckBillingsByCustomer(customer.id);
+
           const approvedEstimates = estimates.filter(est => est.status === 'approved');
 
           // Helper: check if a work order falls within the selected date range
@@ -6100,6 +6101,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Helper: check if a billing sheet falls within the selected date range
           const bsInRange = (bs: typeof billingSheets[0]) => {
             const d = bs.workDate ? new Date(bs.workDate) : (bs.createdAt ? new Date(bs.createdAt) : null);
+            if (!d) return true;
+            return d >= startDate && d <= endDate;
+          };
+          // Helper: check if a wet check billing falls within the selected date range
+          const wcbInRange = (wcb: typeof wetCheckBillingsForCustomer[0]) => {
+            const d = wcb.workDate ? new Date(wcb.workDate) : (wcb.createdAt ? new Date(wcb.createdAt) : null);
             if (!d) return true;
             return d >= startDate && d <= endDate;
           };
@@ -6126,11 +6133,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const unbilledBillingSheets = billingSheets.filter(bs =>
             (bs.status === 'approved_passed_to_billing') && !bs.invoiceId && bsInRange(bs)
           );
+          const unbilledWetCheckBillings = wetCheckBillingsForCustomer.filter(wcb =>
+            wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId && wcbInRange(wcb)
+          );
 
           // Use stored totalAmount as the authoritative total (historical backfill guardrail)
           const unbilledAmount =
             unbilledWorkOrders.reduce((sum, wo) => sum + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
-            unbilledBillingSheets.reduce((sum, bs) => sum + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0);
+            unbilledBillingSheets.reduce((sum, bs) => sum + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0) +
+            unbilledWetCheckBillings.reduce((sum, wcb) => sum + safeAmount(wcb.totalAmount, `wcb:${wcb.id}`), 0);
 
           // Approved total: approved_passed_to_billing with no invoiceId (same as unbilledAmount)
           const approvedTotal = unbilledAmount;
@@ -6142,22 +6153,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const unapprovedBillingSheets = billingSheets.filter(bs =>
             (bs.status === 'pending_manager_review' || bs.status === 'completed' || bs.status === 'submitted') && !bs.invoiceId
           );
+          const unapprovedWetCheckBillings = wetCheckBillingsForCustomer.filter(wcb =>
+            (wcb.status === 'submitted' || wcb.status === 'pending_manager_review') && !wcb.invoiceId
+          );
           const unapprovedTotal =
             unapprovedWorkOrders.reduce((sum, wo) => sum + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
-            unapprovedBillingSheets.reduce((sum, bs) => sum + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0);
+            unapprovedBillingSheets.reduce((sum, bs) => sum + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0) +
+            unapprovedWetCheckBillings.reduce((sum, wcb) => sum + safeAmount(wcb.totalAmount, `wcb:${wcb.id}`), 0);
 
           // Independent accumulation of combinedTotal — single pass over all
-          // four source arrays rather than reusing the approvedTotal /
+          // source arrays rather than reusing the approvedTotal /
           // unapprovedTotal locals. This is what makes the drift guard below
           // a real invariant check: if any future refactor changes how one
-          // of the four subtotals is computed (e.g. adds tax, swaps the
+          // of the subtotals is computed (e.g. adds tax, swaps the
           // amount field, applies a discount), this independent sum diverges
           // and the warn fires.
           let combinedTotal = 0;
           for (const wo of unbilledWorkOrders) combinedTotal += safeAmount(wo.totalAmount, `wo:${wo.id}`);
           for (const bs of unbilledBillingSheets) combinedTotal += safeAmount(bs.totalAmount, `bs:${bs.id}`);
+          for (const wcb of unbilledWetCheckBillings) combinedTotal += safeAmount(wcb.totalAmount, `wcb:${wcb.id}`);
           for (const wo of unapprovedWorkOrders) combinedTotal += safeAmount(wo.totalAmount, `wo:${wo.id}`);
           for (const bs of unapprovedBillingSheets) combinedTotal += safeAmount(bs.totalAmount, `bs:${bs.id}`);
+          for (const wcb of unapprovedWetCheckBillings) combinedTotal += safeAmount(wcb.totalAmount, `wcb:${wcb.id}`);
 
           // Two extra rollups (date-filter independent) exposed alongside the
           // date-filtered totals: totalUnbilled = all approved+unapproved
@@ -6167,6 +6184,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             wo.completedAt ? new Date(wo.completedAt) : (wo.createdAt ? new Date(wo.createdAt) : null);
           const bsAnyDate = (bs: typeof billingSheets[0]) =>
             bs.workDate ? new Date(bs.workDate) : (bs.createdAt ? new Date(bs.createdAt) : null);
+          const wcbAnyDate = (wcb: typeof wetCheckBillingsForCustomer[0]) =>
+            wcb.workDate ? new Date(wcb.workDate) : (wcb.createdAt ? new Date(wcb.createdAt) : null);
           const inCurrentMonth = (d: Date | null) => {
             if (!d) return false;
             return d >= currentMonthStart && d <= currentDate;
@@ -6179,24 +6198,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const allTimeApprovedBSs = billingSheets.filter(bs =>
             (bs.status === 'approved_passed_to_billing') && !bs.invoiceId
           );
+          const allTimeApprovedWCBs = wetCheckBillingsForCustomer.filter(wcb =>
+            wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId
+          );
           const allTimeApprovedTotal =
             allTimeApprovedWOs.reduce((s, wo) => s + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
-            allTimeApprovedBSs.reduce((s, bs) => s + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0);
+            allTimeApprovedBSs.reduce((s, bs) => s + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0) +
+            allTimeApprovedWCBs.reduce((s, wcb) => s + safeAmount(wcb.totalAmount, `wcb:${wcb.id}`), 0);
 
           // unapprovedTotal is already unfiltered, so total unbilled is just the sum
           const totalUnbilled = allTimeApprovedTotal + unapprovedTotal;
 
-          // Current-month slice across both buckets
+          // Current-month slice across all buckets
           const currentMonthApprovedTotal =
             allTimeApprovedWOs.filter(wo => inCurrentMonth(woAnyDate(wo)))
               .reduce((s, wo) => s + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
             allTimeApprovedBSs.filter(bs => inCurrentMonth(bsAnyDate(bs)))
-              .reduce((s, bs) => s + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0);
+              .reduce((s, bs) => s + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0) +
+            allTimeApprovedWCBs.filter(wcb => inCurrentMonth(wcbAnyDate(wcb)))
+              .reduce((s, wcb) => s + safeAmount(wcb.totalAmount, `wcb:${wcb.id}`), 0);
           const currentMonthUnapprovedTotal =
             unapprovedWorkOrders.filter(wo => inCurrentMonth(woAnyDate(wo)))
               .reduce((s, wo) => s + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
             unapprovedBillingSheets.filter(bs => inCurrentMonth(bsAnyDate(bs)))
-              .reduce((s, bs) => s + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0);
+              .reduce((s, bs) => s + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0) +
+            unapprovedWetCheckBillings.filter(wcb => inCurrentMonth(wcbAnyDate(wcb)))
+              .reduce((s, wcb) => s + safeAmount(wcb.totalAmount, `wcb:${wcb.id}`), 0);
           const currentMonthUnbilled = currentMonthApprovedTotal + currentMonthUnapprovedTotal;
 
           // Guard 1: warn when any raw totalAmount was non-finite and coerced to 0.
@@ -6243,7 +6270,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             billingPace: 1,
             lastInvoiceDate: null,
             totalWorkOrders: workOrders.length,
-            pendingWorkOrders: workOrders.filter(wo => wo.status === 'pending' || wo.status === 'assigned' || wo.status === 'in_progress').length
+            pendingWorkOrders: workOrders.filter(wo => wo.status === 'pending' || wo.status === 'assigned' || wo.status === 'in_progress').length,
+            wetCheckBillings: wetCheckBillingsForCustomer
           };
         } catch (error) {
           console.error(`Error processing customer ${customer.id}: ${error instanceof Error ? error.message : String(error)}`);
@@ -6330,6 +6358,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allEstimates = await storage.getEstimates();
       const rawEstimates = allEstimates.filter(est => est.customerId === customerId);
 
+      // Get wet check billings for the customer
+      const rawWetCheckBillings = await storage.getWetCheckBillingsByCustomer(customerId);
+
       // Transform work orders to match frontend expectations.
       // Use the stored financial snapshot as the source of truth.
       // Historical backfill guardrail: if laborSubtotal is null (pre-fix record),
@@ -6382,6 +6413,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         completedDate: est.updatedAt
       }));
 
+      // Transform wet check billings to a parallel shape matching billing sheets
+      const wetCheckBillings = rawWetCheckBillings.map(wcb => {
+        const laborCost = parseFloat(wcb.laborSubtotal || '0') || 0;
+        const partsCost = parseFloat(wcb.partsSubtotal || '0') || 0;
+        const totalAmount = parseFloat(wcb.totalAmount || String(laborCost + partsCost));
+        return {
+          ...wcb,
+          laborCost,
+          partsCost,
+          totalAmount: totalAmount.toString(),
+          description: `Wet Check — ${wcb.propertyAddress || wcb.customerName}`,
+          billedDate: wcb.billedAt ?? null,
+          completedDate: wcb.workDate
+        };
+      });
+
       // Filter unbilled work: only approved_passed_to_billing tickets surface to billing intake
       const unbilledWorkOrders = workOrders.filter(wo => 
         (wo.status === 'approved_passed_to_billing') && !wo.invoiceId
@@ -6391,11 +6438,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const unbilledBillingSheets = billingSheets.filter(bs => 
         (bs.status === 'approved_passed_to_billing') && !bs.invoiceId
       );
+      // Unbilled wet check billings: approved_passed_to_billing with no invoiceId
+      const unbilledWetCheckBillings = wetCheckBillings.filter(wcb =>
+        wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId
+      );
 
-      // Calculate total unbilled amount
+      // Calculate total unbilled amount (includes wet check billings)
       const totalUnbilledAmount = 
         unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
-        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0);
+        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0) +
+        unbilledWetCheckBillings.reduce((sum, wcb) => sum + parseFloat(wcb.totalAmount || '0'), 0);
 
       const billingData = {
         customer: applyBillingNotesVisibility(req, customer),
@@ -6404,7 +6456,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         estimates,
         unbilledWorkOrders,
         unbilledBillingSheets,
-        totalUnbilledAmount
+        totalUnbilledAmount,
+        wetCheckBillings,
+        unbilledWetCheckBillings
       };
 
       res.json(billingData);

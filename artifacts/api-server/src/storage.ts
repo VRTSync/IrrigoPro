@@ -499,6 +499,9 @@ export interface IStorage {
     billingSheetStats: {
       pendingManagerReview: number;
     };
+    wetCheckBillingStats: {
+      pendingManagerReview: number;
+    };
     recentWorkOrders: WorkOrder[];
   }>;
 
@@ -2588,6 +2591,9 @@ export class DatabaseStorage implements IStorage {
     billingSheetStats: {
       pendingManagerReview: number;
     };
+    wetCheckBillingStats: {
+      pendingManagerReview: number;
+    };
     recentWorkOrders: WorkOrder[];
   }> {
     // Task #634 — dashboards never surface soft-deleted estimates.
@@ -2641,6 +2647,14 @@ export class DatabaseStorage implements IStorage {
       ).length,
     };
 
+    // Wet check billing stats
+    const allWetCheckBillingsForStats = await db.select().from(wetCheckBillings);
+    const wetCheckBillingStats = {
+      pendingManagerReview: allWetCheckBillingsForStats.filter(wcb =>
+        wcb.status === "submitted" || wcb.status === "pending_manager_review"
+      ).length,
+    };
+
     // Calculate top parts usage
     const partUsage = new Map<number, number>();
     allEstimateItems.forEach(item => {
@@ -2665,6 +2679,7 @@ export class DatabaseStorage implements IStorage {
       topParts,
       workOrderStats,
       billingSheetStats,
+      wetCheckBillingStats,
       recentWorkOrders
     };
   }
