@@ -1,0 +1,417 @@
+# Replit Task — WC Separate System, Slice 5 (Migration with safety harness)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader rebuild — it is reference material so you understand
+the intent. The actual work for this task is in the **Slice 5** section at the
+bottom. Do not deviate from any file paths, function names, schema field names,
+or payload shapes specified. If you believe a deviation is necessary, surface it
+and stop rather than proceeding.
+
+> **THIS IS THE HIGHEST-RISK SLICE IN THE REBUILD.** It moves production data
+> between tables. The safety harness — dry-run mode, per-row transactions,
+> reconciliation queries, checkpointing, idempotency — is MANDATORY, not
+> optional. If you skip or weaken any safety property, the spec is violated.
+> The reviewer should reject any implementation that does not have all the
+> safety properties listed.
+
+> **Deploy ordering.** This slice produces a script that does NOT auto-run on
+> deploy. The script must be invoked manually after both this slice AND
+> Slice 6 (switch conversion path) are deployed to production. If the
+> migration is run before Slice 6 is in production, a wet check submitted
+> during migration will create a new BS-WC row in the old table that the
+> migration's snapshot misses, leaving an orphan. The spec assumes Slice 6 is
+> already in production when migration runs.
+
+> **Rule of thumb for this slice:** the migration is destructive. Every step
+> must be reversible only via database backup — there is NO automated
+> rollback. Any deviation from the spec increases the risk that the migration
+> corrupts data. Be conservative.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in conversation and are referenced by every slice in this
+rebuild.
+
+**Scope.** Only billing sheets whose `billingNumber` starts with `BS-WC-` are
+migrated. Work-order and standalone BS sheets are NOT touched.
+
+**Source of truth for the new layout.** `wetCheckFindings` joined to
+`wetCheckZoneRecords`. Findings have `billingSheetId` (legacy) and
+`wetCheckBillingId` (new, added in Slice 1). After migration, BS-WC findings
+have `wetCheckBillingId` set and `billingSheetId` cleared.
+
+**Numbering.** New wet check billings use `WC-YYYY-NNNN` format, with the
+sequence starting at 1000 per Slice 1. The migration consumes
+`getNextWetCheckBillingNumber()` for each new row — numbers are sequential
+across the migration run.
+
+**Wet check billing status enum.** `'submitted'`, `'pending_manager_review'`,
+`'approved_passed_to_billing'`, `'billed'`. The migration must map legacy BS
+statuses (`'draft'`, `'completed'`) onto this narrower enum.
+
+**Invoice items are polymorphic.** `invoice_items.sourceType` accepts
+`'work_order'`, `'billing_sheet'`, `'wet_check_billing'`. Migration must
+update existing `'billing_sheet'` items for BS-WC rows to `'wet_check_billing'`.
+
+**No PDF backward compatibility.** All wet check billings live in the current
+billing cycle.
+
+---
+
+## Slice 5 — Migration with safety harness
+
+**Scope.** Build the one-shot migration script that moves every existing
+BS-WC row from `billing_sheets` to `wet_check_billings`, with new
+`WC-YYYY-NNNN` numbering, and updates every FK that references those rows
+(`wet_check_findings`, `invoice_items`, `billing_sheet_items`). The script
+must be dry-runnable, resumable, batched, idempotent, and per-row
+transactional. Reconciliation queries verify pre- and post-state counts and
+totals. **This slice adds only the script and its tests — no production code
+paths change, no schema changes.**
+
+**Files modified.**
+- New: `artifacts/api-server/src/scripts/migrate-bs-wc-to-wet-check-billings.ts`
+  — the migration script
+- New: `artifacts/api-server/src/scripts/migrate-bs-wc-to-wet-check-billings.test.ts`
+  — full test coverage
+- New: `artifacts/api-server/src/scripts/migrate-bs-wc-reconciliation.sql`
+  — standalone reconciliation queries for ops
+
+**No production code changes. No schema changes.** The columns
+`wet_check_findings.wetCheckBillingId` and
+`invoice_items.wetCheckBillingId` already exist from Slice 1.
+
+**Concrete changes.**
+
+**(1) Migration script** at
+`artifacts/api-server/src/scripts/migrate-bs-wc-to-wet-check-billings.ts`.
+
+Pattern: follow
+`artifacts/api-server/src/scripts/backfill-zone-repair-labor.ts` exactly —
+same shebang/import structure, same `parseFlag`/`parseArg` helpers, same
+`loadIdSet`/`saveIdSet` checkpoint pattern using `app_settings`.
+
+**CLI flags:**
+- `--dry-run` — fetch the set of BS-WC rows that would migrate, run
+  reconciliation queries, print a report, write nothing. No `app_settings`
+  updates either.
+- `--batch=N` — process N rows per batch, default 100. Commit per row, not
+  per batch.
+- `--abort-on-error` — default true. If any per-row migration throws, stop
+  the script (the row that failed is rolled back via its own transaction;
+  previously-completed rows stay migrated). Pass `--abort-on-error=false` to
+  record the failure and continue.
+- `--bs-ids=a,b,c` — restrict to a specific set of `billing_sheets.id`
+  values. Useful for targeted retry of a known-failed row.
+
+**App settings checkpoint keys:**
+- `bsWcMigration.done` — JSON array of `billing_sheets.id` values that have
+  been migrated.
+- `bsWcMigration.failed` — JSON array of `billing_sheets.id` values where
+  migration threw.
+- `bsWcMigration.failedDetails` — JSON object mapping id → error message.
+
+**Source set selection.** At start of run, query:
+
+```sql
+SELECT id FROM billing_sheets WHERE billing_number LIKE 'BS-WC-%' ORDER BY id ASC
+```
+
+Subtract any IDs already in the `done` set. If `--bs-ids` was passed,
+intersect with that set.
+
+**Per-row migration** (wrapped in a single transaction per BS):
+
+For each `billing_sheets.id` in the working set, in
+`db.transaction(async (tx) => {...})`:
+
+1. **Load** the BS row, verify `billing_number LIKE 'BS-WC-%'` (defensive —
+   abort this row if not).
+2. **Derive `wetCheckId`** by selecting any `wet_check_findings` row where
+   `billingSheetId = bs.id`:
+   - If at least one finding exists, use `findings[0].wetCheckId`.
+   - If no findings exist (orphan BS — should be rare), abort this row with
+     an explicit error and record in `failed`. Do not attempt to recover —
+     orphan BS-WC sheets have no provenance.
+3. **Generate new billing number** via
+   `storage.getNextWetCheckBillingNumber()` (added in Slice 1). Returns
+   `WC-YYYY-NNNN`.
+4. **Map status** from BS enum to WCB enum. Mapping rules — apply in this
+   order:
+   - `'draft'` → `'submitted'` (defensive — wet checks should never produce
+     draft BS-WC, but if they did, treat as auto-submitted)
+   - `'completed'` → `'approved_passed_to_billing'` (legacy BS status; wet
+     check billings skip "completed" and go straight to billing-ready)
+   - All other values (`'submitted'`, `'pending_manager_review'`,
+     `'approved_passed_to_billing'`, `'billed'`) → pass through unchanged.
+   - If status is none of the above (unexpected), abort this row and record
+     in `failed`.
+5. **Insert** new `wet_check_billings` row via
+   `storage.createWetCheckBilling()` (added in Slice 1) with this exact
+   field mapping from BS:
+
+```
+id              → (auto-generated)
+billingNumber   → (new WC-YYYY-NNNN from step 3)
+wetCheckId      → (from step 2)
+customerId      → bs.customerId
+customerName    → bs.customerName
+propertyAddress → bs.propertyAddress
+workDate        → bs.workDate
+technicianName  → bs.technicianName
+technicianId    → bs.technicianId
+status          → (mapped per step 4)
+totalHours      → bs.totalHours
+laborRate       → bs.laborRate
+laborSubtotal   → bs.laborSubtotal
+partsSubtotal   → bs.partsSubtotal
+totalAmount     → bs.totalAmount
+appliedLaborRate→ bs.appliedLaborRate
+invoiceId       → bs.invoiceId  (preserve invoice linkage)
+billedAt        → bs.billedAt   (preserve billed timestamp)
+photos          → bs.photos     (preserve array)
+notes           → bs.notes
+branchName      → bs.branchName
+approvedBy      → bs.approvedBy
+approvedByUserId→ bs.approvedByUserId
+approvedAt      → bs.approvedAt
+approvedTotal   → bs.approvedTotal
+noPhotosNeeded  → bs.noPhotosNeeded
+noPhotosNeededBy→ bs.noPhotosNeededBy
+noPhotosNeededAt→ bs.noPhotosNeededAt
+createdAt       → bs.createdAt  (preserve original creation timestamp)
+updatedAt       → (new Date() — migration moment)
+```
+
+**Do NOT carry over:** `workDescription`, `workOrderId`, `controllerLetter`,
+`zoneNumber`, `laborMode`, `aiInputs`, `aiShortDescription`,
+`aiDetailedDescription`, `approvedPartsSnapshot`, `approvedLaborSnapshot`,
+`workLocationLat`, `workLocationLng`, `workLocationAddress`. These columns
+don't exist on `wet_check_billings` per Slice 1.
+
+Capture the new `wcb.id` for the next steps.
+
+6. **Update findings**: `UPDATE wet_check_findings SET wetCheckBillingId =
+   wcb.id, billingSheetId = NULL WHERE billingSheetId = bs.id`. Clear the
+   old FK in the same statement.
+7. **Update invoice items**: `UPDATE invoice_items SET sourceType =
+   'wet_check_billing', wetCheckBillingId = wcb.id, sourceId = wcb.id,
+   billingSheetId = NULL WHERE sourceType = 'billing_sheet' AND
+   billingSheetId = bs.id`.
+8. **Delete orphan billing_sheet_items**: `DELETE FROM billing_sheet_items
+   WHERE billingSheetId = bs.id`. Wet check billings derive line items from
+   findings, so these BS items are vestigial — delete them. (FK constraint
+   on billing_sheets.id from billing_sheet_items requires this step before
+   the next.)
+9. **Check for any other FK pointing at bs.id** that we haven't handled:
+   `manualPartReviews.billingSheetId`. Query: `SELECT COUNT(*) FROM
+   manual_part_reviews WHERE billingSheetId = bs.id`. If non-zero, abort
+   this row with an explicit error — the spec author did not analyze
+   manualPartReviews behavior for wet check sheets and the row needs manual
+   review before migration. (Almost certainly 0 in practice — wet check
+   auto-bill bypasses the manual part review queue — but the defensive
+   check prevents data loss.)
+10. **Delete the old BS row**: `DELETE FROM billing_sheets WHERE id = bs.id`.
+11. **Inside the same transaction**, append `bs.id` to the `done` set in
+    `app_settings`. Persisting the checkpoint within the same transaction
+    ensures the checkpoint and the migration are atomic — no chance of "row
+    migrated but checkpoint not saved."
+
+If the transaction throws at any step, the transaction rolls back. The row
+stays in `billing_sheets` unchanged. Record the failure in `failed`
+(separate transaction) and either continue (if `--abort-on-error=false`) or
+exit the script.
+
+**Logging.** Every per-row migration logs a JSON line:
+- On success: `{ event: "bs_wc_migration.row_done", bsId, wcbId,
+  newBillingNumber, oldBillingNumber, findingsUpdated, invoiceItemsUpdated,
+  billingSheetItemsDeleted, durationMs }`
+- On failure: `{ event: "bs_wc_migration.row_failed", bsId,
+  oldBillingNumber, error: error.message, stage }` where `stage` indicates
+  which of steps 1–10 threw.
+
+At end of run, log a summary: `{ event: "bs_wc_migration.run_done",
+totalCandidates, migrated, failed, skipped, dryRun, durationMs }`.
+
+**Reconciliation queries.** Run these at the START of the script (always —
+dry-run or real) and print results. Then re-run at the END (only on a real
+run) and verify the assertions below:
+
+```sql
+-- PRE-MIGRATION
+SELECT COUNT(*) AS bs_wc_count,
+       COUNT(DISTINCT customer_id) AS distinct_customers,
+       COALESCE(SUM(total_amount::numeric), 0) AS total_value,
+       COUNT(*) FILTER (WHERE invoice_id IS NOT NULL) AS already_billed
+FROM billing_sheets WHERE billing_number LIKE 'BS-WC-%';
+
+SELECT COUNT(*) AS findings_pointing_at_bs_wc
+FROM wet_check_findings WHERE billing_sheet_id IN (
+  SELECT id FROM billing_sheets WHERE billing_number LIKE 'BS-WC-%'
+);
+
+SELECT COUNT(*) AS invoice_items_for_bs_wc
+FROM invoice_items WHERE source_type = 'billing_sheet' AND billing_sheet_id IN (
+  SELECT id FROM billing_sheets WHERE billing_number LIKE 'BS-WC-%'
+);
+
+-- POST-MIGRATION
+SELECT COUNT(*) AS remaining_bs_wc FROM billing_sheets WHERE billing_number LIKE 'BS-WC-%';
+-- Expect: 0 (or count(failed))
+
+SELECT COUNT(*) AS wcb_count, COALESCE(SUM(total_amount::numeric), 0) AS wcb_total_value
+FROM wet_check_billings;
+-- Expect: wcb_count == bs_wc_count (from pre), wcb_total_value == total_value (from pre)
+
+SELECT COUNT(*) AS findings_still_pointing_at_bs_wc
+FROM wet_check_findings WHERE billing_sheet_id IS NOT NULL AND billing_sheet_id IN (
+  SELECT id FROM billing_sheets WHERE billing_number LIKE 'BS-WC-%'
+);
+-- Expect: 0
+
+SELECT COUNT(*) AS invoice_items_orphaned
+FROM invoice_items WHERE source_type = 'billing_sheet' AND billing_sheet_id IS NOT NULL
+  AND billing_sheet_id NOT IN (SELECT id FROM billing_sheets);
+-- Expect: 0 (no dangling FKs)
+```
+
+If any post-migration assertion fails, exit the script with non-zero status
+and log a critical-level error. Ops must investigate before re-running.
+
+**Idempotency.** Re-running the script after a successful migration should:
+- Source-set query returns the BS-WC IDs not in `done` → empty (because
+  everything is done).
+- Reconciliation queries report the same final state.
+- Exit 0 with summary `{ migrated: 0, ... }`.
+
+**(2) Test file** at
+`artifacts/api-server/src/scripts/migrate-bs-wc-to-wet-check-billings.test.ts`.
+
+Required test cases (all nine must be present):
+
+**a. Dry-run happy path.**
+- Fixture: 2 BS-WC rows with findings, 1 with
+  `status='approved_passed_to_billing'`, 1 with `status='billed'` +
+  invoiceId.
+- Run script with `--dry-run`.
+- Assert: 2 BS-WC rows still in `billing_sheets`, 0 in `wet_check_billings`,
+  0 finding updates, 0 invoice_items updates, 0 `app_settings` writes.
+- Assert: stdout contains the pre-migration reconciliation report.
+
+**b. Full migration happy path.**
+- Fixture: 3 BS-WC rows (mixed statuses including one with invoiceId set),
+  each with 2 findings across 2 zones, one with an invoice_items row.
+- Run script (no `--dry-run`).
+- Assert: 0 BS-WC remaining in `billing_sheets`, 3 rows in
+  `wet_check_billings`.
+- Assert: each new WCB row has `billingNumber` starting with `WC-`, unique,
+  sequential.
+- Assert: each new WCB row has correct field mapping (customerId, totals,
+  photos, invoiceId, billedAt preserved).
+- Assert: findings now have `wetCheckBillingId` set and `billingSheetId IS
+  NULL`.
+- Assert: invoice_items have `sourceType='wet_check_billing'`,
+  `wetCheckBillingId` set, `billingSheetId IS NULL`.
+- Assert: `billing_sheet_items` for the migrated BSes are deleted.
+- Assert: `app_settings` for `bsWcMigration.done` contains all 3 BS IDs.
+
+**c. Idempotency: re-run produces zero changes.**
+- Run the full-migration fixture (case b) successfully.
+- Run the script again.
+- Assert: 0 new WCB rows created, no DB writes beyond reconciliation.
+- Assert: summary log shows `{ migrated: 0 }`.
+
+**d. Status mapping.**
+- Fixture: BS-WC rows with each of: `'draft'`, `'completed'`, `'submitted'`,
+  `'pending_manager_review'`, `'approved_passed_to_billing'`, `'billed'`.
+- Run migration.
+- Assert: WCB statuses are `'submitted'`, `'approved_passed_to_billing'`,
+  `'submitted'`, `'pending_manager_review'`,
+  `'approved_passed_to_billing'`, `'billed'`.
+
+**e. Orphan BS-WC (no findings) is skipped.**
+- Fixture: 1 BS-WC row with 0 findings, 1 BS-WC row with findings.
+- Run script.
+- Assert: the orphan is in `failed` set with an explicit error message
+  ("no findings found to derive wetCheckId").
+- Assert: the second row is in `done` and migrated successfully.
+
+**f. Per-row transactional isolation.**
+- Fixture: 3 BS-WC rows. Use a test hook to throw mid-migration on the
+  second row (e.g., mock storage.createWetCheckBilling to throw on the
+  second call).
+- Run script with default `--abort-on-error`.
+- Assert: row 1 is migrated (in `done`). Row 2 is in `failed`. Row 3 was
+  not attempted (script exited).
+- Assert: row 2's `billing_sheets` row is unchanged (transaction rolled
+  back).
+
+**g. Resume from checkpoint.**
+- Fixture: 3 BS-WC rows. Pre-populate `app_settings`
+  `bsWcMigration.done` with the first row's id.
+- Run script.
+- Assert: only 2 rows are processed.
+- Assert: final `done` set contains all 3.
+
+**h. Reconciliation pre-/post-match.**
+- Fixture: 5 BS-WC rows with mixed totals.
+- Run script.
+- Assert: post-migration `wcb_count == pre.bs_wc_count`.
+- Assert: post-migration `wcb_total_value == pre.total_value` (within 0.01
+  tolerance for decimal precision).
+
+**i. manualPartReviews defensive check.**
+- Fixture: 1 BS-WC row with a `manual_part_reviews` row referencing it.
+- Run script.
+- Assert: row is in `failed` with error referencing `manualPartReviews`.
+- Assert: BS-WC row is unchanged.
+
+**(3) Standalone reconciliation SQL** at
+`artifacts/api-server/src/scripts/migrate-bs-wc-reconciliation.sql`:
+
+A plain `.sql` file containing both the pre- and post-migration queries
+above, with comment headers explaining what each one tells you. Ops can run
+this independently of the TypeScript script for sanity checks.
+
+**Acceptance criteria.**
+- Migration script runs with `--dry-run` and produces a report without
+  writing.
+- Migration script runs without `--dry-run` and successfully migrates all
+  BS-WC rows in the fixture per test case (b).
+- All 9 test cases (a through i) pass.
+- Re-running the script after success is a no-op (idempotency).
+- Reconciliation queries verify pre/post counts and totals match (zero rows
+  lost, zero values changed).
+- Failed rows are recorded in `app_settings.bsWcMigration.failed` with
+  error messages.
+- Per-row migration is transactional — a failure mid-row leaves the BS
+  unchanged.
+- Checkpoint is updated within the same transaction as the migration (no
+  "migrated but not checkpointed" state possible).
+- **No production code paths change. No schema changes. No new endpoints.**
+
+**Out of scope.**
+- Switching the wet check conversion path (Slice 6). New wet check
+  submissions go to wet_check_billings only AFTER Slice 6 is deployed; the
+  migration cannot run safely until then.
+- Removing the `wet_check_findings.billingSheetId` column (Slice 7
+  cleanup; the column is now empty after migration but stays for now).
+- Removing dual-source code from consumers (Slice 7 cleanup).
+- Dropping the BS-WC rows IF migration produces failures — failed rows
+  MUST be retained in `billing_sheets` and investigated manually. Do not
+  add an auto-delete-on-failure path.
+- Rolling back the migration. There is no automated rollback — restoration
+  requires database backup. The migration script does not write any
+  rollback metadata.
+- Backfilling any other data. This is strictly BS-WC-to-WCB.
+- Modifying the `getNextWetCheckBillingNumber` numbering logic. The script
+  consumes it as-is.
+- Modifying the `applyPricingVisibility` or auth middleware.
+- Sending notifications about the migration to users or admins.
+- Frontend changes.
+
+**Dependencies.** Slice 1 merged (table + storage methods). Slice 6 deployed
+(the script EXISTS in code after this slice merges, but it should not be
+RUN until Slice 6 is shipped to production).
