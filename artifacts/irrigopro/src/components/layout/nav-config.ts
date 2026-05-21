@@ -20,6 +20,7 @@ import {
   AlertTriangle,
   UserCog,
   Repeat,
+  Database,
   type LucideIcon,
 } from "lucide-react";
 
@@ -184,6 +185,7 @@ export const superAdminNav: NavConfig = {
         { type: "leaf", label: "App Health", path: "/super-admin/app-health", icon: Activity },
         { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
         { type: "leaf", label: "Client Errors", path: "/admin/client-errors", icon: AlertTriangle },
+        { type: "leaf", label: "BS-WC Migration", path: "/admin/migrate-wet-check", icon: Database },
       ],
     },
   ],

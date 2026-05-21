@@ -26,7 +26,7 @@ import {
   runReconciliationQueries,
   loadIdSet,
   ensureWcBillingCounterSeeded,
-} from "./migrate-bs-wc-to-wet-check-billings";
+} from "../migrations/bs-wc-migration";
 
 // ── Fixture IDs ───────────────────────────────────────────────────────────────
 
