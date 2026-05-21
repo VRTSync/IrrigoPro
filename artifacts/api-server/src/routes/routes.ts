@@ -9617,6 +9617,42 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // ── Wet Check Billings (Slice 4) ─────────────────────────────────────────
+  // List all wet check billings with aggregate issuesCount / zonesCount.
+  // Sorted workDate DESC by the storage layer; pricing stripped for field_tech.
+  app.get("/api/wet-check-billings", requireAuthentication, async (req, res) => {
+    try {
+      const billings = await storage.getAllWetCheckBillingsWithCounts();
+      res.json(applyPricingVisibility(req, billings));
+    } catch (error) {
+      logger.error({ err: error }, "GET /api/wet-check-billings failed");
+      res.status(500).json({ message: "Failed to fetch wet check billings" });
+    }
+  });
+
+  // Detail: { wetCheckBilling, view } — 404 on missing, 400 on non-numeric id.
+  app.get("/api/wet-check-billings/:id", requireAuthentication, async (req, res) => {
+    try {
+      const rawId = req.params.id;
+      const id = parseInt(rawId, 10);
+      if (!Number.isFinite(id)) {
+        res.status(400).json({ message: "Invalid wet check billing id" });
+        return;
+      }
+      const wetCheckBilling = await storage.getWetCheckBillingById(id);
+      if (!wetCheckBilling) {
+        res.status(404).json({ message: "Wet check billing not found" });
+        return;
+      }
+      const companyId: number | null = req.authenticatedUserCompanyId ?? null;
+      const view = await storage.getWetCheckBillingViewById(id, companyId);
+      res.json(applyPricingVisibility(req, { wetCheckBilling, view }));
+    } catch (error) {
+      logger.error({ err: error }, "GET /api/wet-check-billings/:id failed");
+      res.status(500).json({ message: "Failed to fetch wet check billing" });
+    }
+  });
+
   // Billing Sheets API - for work done without work orders
   // Note: Pricing fields are stripped for field_tech role via applyPricingVisibility
   app.get("/api/billing-sheets", async (req, res) => {

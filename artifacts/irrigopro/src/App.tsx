@@ -63,6 +63,7 @@ const EstimateCommandCenter = lazyPage(() => import("@/pages/estimate-command-ce
 const RedirectPendingApprovalToCC = lazy(() => import("@/components/estimates/redirect-to-command-center"));
 const InvoicesPage = lazyPage(() => import("@/pages/invoices"));
 const WetChecksPage = lazyPage(() => import("@/pages/wet-checks"));
+const WetCheckBillingsPage = lazyPage(() => import("@/pages/wet-check-billings"));
 const AdminWetChecksPage = lazyPage(() => import("@/pages/admin-wet-checks"));
 const WetCheckReviewPage = lazyPage(() => import("@/pages/wet-check-review"));
 const ManagerWetChecksPage = lazyPage(() => import("@/pages/manager-wet-checks"));
@@ -257,6 +258,7 @@ function Router() {
                   <Route path="/field-portal" component={FieldPortal} />
                   <Route path="/work-orders" component={WorkOrders} />
                   <Route path="/billing-sheets" component={BillingSheets} />
+                  <Route path="/wet-check-billings" component={WetCheckBillingsPage} />
                   <Route path="/wet-checks" component={WetChecksPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksPage} />
                   <Route path="/wet-checks/:id" component={WetChecksPage} />
@@ -309,6 +311,7 @@ function Router() {
                   <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
                   <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
                   <Route path="/billing-sheets" component={BillingSheets} />
+                  <Route path="/wet-check-billings" component={WetCheckBillingsPage} />
                   <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
                   <Route path="/manager/wet-checks" component={ManagerWetChecksPage} />
                   <Route path="/manager/wet-checks/:id/confirm">
@@ -367,6 +370,7 @@ function Router() {
                   <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
                   <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
                   <Route path="/billing-sheets" component={BillingSheets} />
+                  <Route path="/wet-check-billings" component={WetCheckBillingsPage} />
                   <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                   <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
                   <Route path="/wet-checks" component={WetChecksPage} />
@@ -419,6 +423,7 @@ function Router() {
                   <Route path="/wet-checks" component={WetChecksPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksPage} />
                   <Route path="/wet-checks/:id" component={WetChecksPage} />
+                  <Route path="/wet-check-billings" component={WetCheckBillingsPage} />
                   <Route path="/system-users" component={SystemUserManagement} />
                   <Route path="/admin/controllers" component={AdminControllers} />
                   <Route path="/admin/client-errors" component={AdminClientErrorsPage} />

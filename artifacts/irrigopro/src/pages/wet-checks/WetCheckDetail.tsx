@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ActivityTab } from "@/components/activity/ActivityTab";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, ChevronLeft, CheckCircle2, Wrench, AlertTriangle, Camera, Download } from "lucide-react";
 import { countZonePhotos } from "@/lib/wet-check-photos";
@@ -40,6 +40,11 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [activeLetter, setActiveLetter] = useState<string | null>(null);
+
+  // Back-link: show "← Back to Wet Check Billings" when navigated from that page
+  const fromParam = typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search).get("from") ?? ""
+    : "";
   const [activeZone, setActiveZone] = useState<number | null>(null);
 
   const { data: wc, isLoading } = useQuery<WetCheckWithDetails>({
@@ -475,6 +480,15 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
         propertyAddress={wc.propertyAddress}
       />
       <OfflineStrip />
+      {fromParam === "wet-check-billings" && (
+        <Link
+          href="/wet-check-billings"
+          className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4"
+        >
+          <ChevronLeft className="w-4 h-4 mr-1" />
+          Back to Wet Check Billings
+        </Link>
+      )}
       <div className="flex items-center justify-between gap-2">
         <Button variant="ghost" onClick={() => navigate("/wet-checks")}>
           <ChevronLeft className="w-4 h-4 mr-1" /> All Wet Checks

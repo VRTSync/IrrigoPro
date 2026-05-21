@@ -28,6 +28,7 @@ import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
 import WorkOrders from "@/pages/work-orders";
 import WetChecksPage from "@/pages/wet-checks";
+import WetCheckBillingsPage from "@/pages/wet-check-billings";
 import WetCheckReviewPage from "@/pages/wet-check-review";
 import AdminWetChecksPage from "@/pages/admin-wet-checks";
 import ManagerWetChecksPage from "@/pages/manager-wet-checks";
@@ -172,6 +173,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
           <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
           <Route path="/billing-sheets" component={BillingSheets} />
+          <Route path="/wet-check-billings" component={WetCheckBillingsPage} />
           <Route path="/manager/wet-checks" component={ManagerWetChecksPage} />
           <Route path="/manager/wet-checks/:id" component={WetCheckReviewPage} />
           <Route path="/wet-checks/admin" component={AdminWetChecksPage} />

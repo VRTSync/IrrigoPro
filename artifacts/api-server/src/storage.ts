@@ -155,6 +155,15 @@ import { computeEstimateSummary } from "./estimate-summary";
 import type { EstimateSummary } from "@workspace/db";
 import { ObjectStorageService } from "./objectStorage";
 
+// ── WC Billing list item type (Slice 4) ────────────────────────────────────
+// Extends WetCheckBilling with aggregate counts derived via LEFT JOIN in
+// getAllWetCheckBillingsWithCounts(). Kept adjacent to BillingSheetWithItems
+// (imported above) as the analogous type for the wet-check billing table.
+export type WetCheckBillingListItem = WetCheckBilling & {
+  issuesCount: number;
+  zonesCount: number;
+};
+
 // Executor accepted by storage helpers that may run inside a caller's
 // transaction. Both `db` and a Drizzle PgTransaction satisfy this
 // (insert/update/delete/select are interface-compatible); typing it as the
@@ -970,6 +979,7 @@ export interface IStorage {
   // billingNumber is a required field on InsertWetCheckBilling (NOT NULL in schema).
   createWetCheckBilling(data: InsertWetCheckBilling): Promise<WetCheckBilling>;
   getAllWetCheckBillings(): Promise<WetCheckBilling[]>;
+  getAllWetCheckBillingsWithCounts(): Promise<WetCheckBillingListItem[]>;
   getWetCheckBillingById(id: number): Promise<WetCheckBilling | undefined>;
   getWetCheckBillingsByCustomer(customerId: number): Promise<WetCheckBilling[]>;
   getWetCheckBillingsByTechnician(technicianId: number): Promise<WetCheckBilling[]>;
@@ -3704,6 +3714,24 @@ export class DatabaseStorage implements IStorage {
 
   async getAllWetCheckBillings(): Promise<WetCheckBilling[]> {
     return db.select().from(wetCheckBillings).orderBy(desc(wetCheckBillings.createdAt));
+  }
+
+  async getAllWetCheckBillingsWithCounts(): Promise<WetCheckBillingListItem[]> {
+    const rows = await db
+      .select({
+        wcb: wetCheckBillings,
+        issuesCount: sql<number>`cast(count(${wetCheckFindings.id}) as int)`,
+        zonesCount: sql<number>`cast(count(distinct ${wetCheckFindings.zoneRecordId}) as int)`,
+      })
+      .from(wetCheckBillings)
+      .leftJoin(wetCheckFindings, eq(wetCheckFindings.wetCheckBillingId, wetCheckBillings.id))
+      .groupBy(wetCheckBillings.id)
+      .orderBy(desc(wetCheckBillings.workDate), desc(wetCheckBillings.id));
+    return rows.map((r) => ({
+      ...r.wcb,
+      issuesCount: r.issuesCount ?? 0,
+      zonesCount: r.zonesCount ?? 0,
+    }));
   }
 
   async getWetCheckBillingById(id: number): Promise<WetCheckBilling | undefined> {
