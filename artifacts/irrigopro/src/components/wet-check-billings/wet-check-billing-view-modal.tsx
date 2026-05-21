@@ -1,5 +1,6 @@
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import {
   Dialog,
   DialogContent,
@@ -49,11 +50,7 @@ export function WetCheckBillingViewModal({
     view: WetCheckBillingView | null;
   }>({
     queryKey: ["/api/wet-check-billings", wetCheckBillingId],
-    queryFn: () =>
-      fetch(`/api/wet-check-billings/${wetCheckBillingId}`).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      }),
+    queryFn: () => apiRequest(`/api/wet-check-billings/${wetCheckBillingId}`),
     enabled: open,
   });
 
