@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ActivityTab } from "@/components/activity/ActivityTab";
 import { useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Loader2, ChevronLeft, CheckCircle2, Wrench, AlertTriangle, Camera } from "lucide-react";
+import { Loader2, ChevronLeft, CheckCircle2, Wrench, AlertTriangle, Camera, Download } from "lucide-react";
 import { countZonePhotos } from "@/lib/wet-check-photos";
 import { apiRequest, asArray, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ import type {
   WetCheckWithDetails,
   PropertyController,
 } from "@workspace/db/schema";
+import { buildWetCheckCsv, downloadCsv, wetCheckCsvFilename } from "@/lib/wet-check-csv";
 import { PropertyContextHeader } from "./PropertyContextHeader";
 import { PhotoCaptureButton } from "./PhotoCaptureButton";
 import { PhotoThumb } from "./PhotoThumb";
@@ -478,7 +479,18 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
         <Button variant="ghost" onClick={() => navigate("/wet-checks")}>
           <ChevronLeft className="w-4 h-4 mr-1" /> All Wet Checks
         </Button>
-        <OfflineSyncUI />
+        <div className="flex items-center gap-2">
+          {typeof wc.id === "number" && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => downloadCsv(buildWetCheckCsv(wc), wetCheckCsvFilename(wc))}
+            >
+              <Download className="w-4 h-4 mr-1" /> Export CSV
+            </Button>
+          )}
+          <OfflineSyncUI />
+        </div>
       </div>
       {/* Sticky chip — keeps the complete / pending / skipped tally
           visible while the tech scrolls through controllers, so they
