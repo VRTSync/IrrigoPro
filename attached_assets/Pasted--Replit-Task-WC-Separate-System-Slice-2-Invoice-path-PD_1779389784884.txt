@@ -1,0 +1,346 @@
+# Replit Task — WC Separate System, Slice 2 (Invoice path + PDF)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader rebuild — it is reference material so you understand
+the intent. The actual work for this task is in the **Slice 2** section at the
+bottom. Do not deviate from any file paths, function names, schema field names,
+or payload shapes specified. If you believe a deviation is necessary, surface it
+and stop rather than proceeding.
+
+> **Architectural note for this slice.** Wet check billings are being moved out
+> of the shared `billing_sheets` table into their own parallel
+> `wet_check_billings` table (Slice 1 added the table; nothing reads from it
+> yet). This slice teaches the invoice path — preview, monthly generation, and
+> PDF rendering — to recognize wet check billings as a polymorphic source
+> alongside work orders and billing sheets.
+>
+> **Critical safety property:** This slice adds new code paths but produces
+> **zero user-visible behavior change on day 1**. The `wet_check_billings`
+> table is empty until Slice 5 (migration) populates it. New invoice generation
+> and PDF rendering will look exactly the same to users — the new code is
+> waiting for data. If you find yourself making changes that affect what users
+> see today (with the table still empty), you've drifted from the slice scope.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in conversation and are referenced by every slice in this
+rebuild. Do not deviate from any of them.
+
+**Scope.** Only billing sheets whose `billingNumber` starts with `BS-WC-` are
+affected by the broader rebuild today. After Phase 2 completes, those rows
+will live in `wet_check_billings` with `WC-YYYY-NNNN` numbering.
+
+**Source of truth for the new layout.** `wetCheckFindings` joined to
+`wetCheckZoneRecords`. Each finding has `billingSheetId` (legacy) and
+`wetCheckBillingId` (new, added in Slice 1). Both columns coexist during
+migration; consumers must handle either source.
+
+**Layout.** Zone-grouped. Each zone displays as: zone header
+(`<controllerLetter> <zoneNumber>` + issue display label), part lines, per-zone
+repair labor row showing `hours × rate = total`, per-zone subtotal. A single
+wet-check-level "Inspection Labor" line appears once per sheet.
+
+**Labor rate.** Always the per-customer global rate, snapshotted onto the
+billing record at creation (`appliedLaborRate`). Never reprice based on later
+customer-rate changes.
+
+**Issue type display.** Always use `issueTypeConfigs.displayLabel` for the
+customer's company. Never display the raw `issueType` field. If no config row
+exists, fall back to title-cased `issueType.replace(/_/g, " ")`.
+
+**$0.00 line item suppression on PDF.** Suppress when `lineTotal === 0 AND
+laborHours === 0 AND NOT isLaborOnly`. Labor-only findings (qty=0, partPrice=0,
+noPartNeeded=true) are kept because they represent real work performed.
+
+**PDF treatment.** Repairs Summary table at the top, each zone wrapped in a
+div with `page-break-inside: avoid`, labor math shown on PDF
+(`hours × rate = total`), labor subtotal collapsed into a single "Irrigation
+Labor" line (per Task #766), issue type display labels everywhere.
+
+**Invoice items are already polymorphic.** `invoice_items.sourceType` accepts
+`"work_order"` or `"billing_sheet"` today. Slice 1 added `"wet_check_billing"`
+as a third value and added a nullable `wetCheckBillingId` FK column on
+`invoice_items`. This slice extends consumers to use that pattern.
+
+**No PDF backward compatibility.** All wet check billings live in the current
+billing cycle. There is no "old vs new" PDF reconciliation to handle.
+
+---
+
+## Slice 2 — Invoice path + PDF: dual-source consumer
+
+**Scope.** Make the invoice preview, monthly invoice generator, and invoice
+PDF generation paths handle wet check billings as a first-class polymorphic
+source alongside work orders and billing sheets. This is consumer-readiness
+work: it adds new code paths but produces no user-visible change on day 1
+because the `wet_check_billings` table is still empty after Slice 1 lands. The
+new paths activate naturally once Slice 5 (migration) populates the new table
+and Slice 6 (switch conversion) starts writing new rows there.
+
+**Files modified.**
+- `artifacts/api-server/src/wet-check-billing-view.ts` — add optional
+  `wetCheckBillingId` field to `WetCheckBillingView`
+- `artifacts/api-server/src/storage.ts` — add `getWetCheckBillingViewById()`
+  method
+- `artifacts/api-server/src/pdf-view-model.ts` — extend `InvoiceDetailData`
+  with a new `wetCheckBillings` array
+- `artifacts/api-server/src/invoice-pdf-service.ts` — fetch wet check billings
+  from `invoice_items`; populate the new view-model array
+- `artifacts/api-server/src/pdf-helpers.ts` — add `ticketPageWCB` rendering
+  function; iterate wet check billings in the document body
+- `artifacts/api-server/src/routes/routes.ts` — update `/api/invoices/preview`
+  and `/api/invoices/monthly` to surface and accept wet check billings
+- New: `artifacts/api-server/src/wet-check-billing-view-from-wcb.test.ts`
+- New: `artifacts/api-server/src/invoice-pdf-wet-check-billing.test.ts`
+- New: `artifacts/api-server/src/routes/invoice-preview-wet-check.test.ts`
+- New: `artifacts/api-server/src/routes/invoice-monthly-wet-check.test.ts`
+
+**Concrete changes.**
+
+**(1) Extend `WetCheckBillingView` interface** in
+`artifacts/api-server/src/wet-check-billing-view.ts` (~line 76):
+
+```typescript
+export interface WetCheckBillingView {
+  /** Legacy source: set when the view was built from a BS-WC billing_sheets row. */
+  billingSheetId: number;
+  /** New source: set when the view was built from a wet_check_billings row. Mutually exclusive with billingSheetId — only one is the authoritative source per view. */
+  wetCheckBillingId?: number;
+  billingNumber: string;
+  // ... all other existing fields unchanged ...
+}
+```
+
+Both ID fields coexist during the migration window. After Slice 7 (cleanup),
+`billingSheetId` may be removed and `wetCheckBillingId` becomes required.
+
+**(2) Add storage method** in `artifacts/api-server/src/storage.ts`. Place
+adjacent to `getBillingSheetWetCheckView` (~line 3737):
+
+```typescript
+async getWetCheckBillingViewById(
+  wetCheckBillingId: number,
+  _companyId: number | null,
+): Promise<import("./wet-check-billing-view").WetCheckBillingView | null>
+```
+
+Mirror the structure of `getBillingSheetWetCheckView` (storage.ts:3737-3823)
+exactly, but:
+- Load the `wet_check_billings` row by id first (instead of the billing_sheets
+  row).
+- Use `wcb.wetCheckId` to load the wet check (instead of deriving from
+  `findings[0].wetCheckId`).
+- Load findings via `WHERE wetCheckBillingId = X` (not `billingSheetId`).
+- Return `null` if either the wcb row, the wet check, or the customer cannot
+  be loaded.
+- Preserve the observability `console.warn` block (storage.ts:3776-3804)
+  verbatim, but log `wetCheckBillingId` instead of `billingSheetId` in the
+  JSON payload, and update the message to reference the WC backfill script.
+- In the returned `WetCheckBillingView`, set `wetCheckBillingId: wcb.id`. Do
+  NOT set `billingSheetId` (it stays undefined for views built from this
+  method).
+
+**(3) Extend the PDF view model** in `artifacts/api-server/src/pdf-view-model.ts`:
+
+Add a new row interface (place next to the existing `PdfBillingSheetRow`):
+
+```typescript
+export interface PdfWetCheckBillingRow {
+  wetCheckBillingId: number;
+  wetCheckBilling: WetCheckBilling; // import from @workspace/db
+  wetCheckView: WetCheckBillingView; // required — every wet check billing has a view
+}
+```
+
+Add the array to `InvoiceDetailData` (~line 145):
+
+```typescript
+wetCheckBillings: PdfWetCheckBillingRow[];
+```
+
+Extend `buildPdfViewModel` (~line 260) to accept and pass through the new
+array. The transformation is straightforward — every input
+`PdfWetCheckBillingRow` maps 1:1 to the output array. No per-row mutation, no
+computed fields beyond what's already on the input.
+
+Update `validateRows` (where the totals reconciliation happens, ~line 189–215
+referenced in earlier slice work) to sum `wcb.totalAmount` from the new array
+alongside the existing `bs.totalAmount` and `wo.totalAmount` sums. The
+grand-total check (`storedInvoiceTotal` vs sum of all rows) must include wet
+check billings.
+
+**(4) Extend `invoice-pdf-service.ts`** (~lines 268–297):
+
+After the existing for-loop that builds the `workOrders` and `billingSheets`
+arrays, add a parallel block:
+
+```typescript
+const wetCheckBillings: PdfWetCheckBillingRow[] = [];
+
+for (const item of invoice.items) {
+  if (item.sourceType === 'wet_check_billing' && item.wetCheckBillingId) {
+    const wcb = await this.storage.getWetCheckBillingById(item.wetCheckBillingId);
+    if (!wcb) continue;
+    const existing = wetCheckBillings.find(
+      (w) => w.wetCheckBilling.id === wcb.id,
+    );
+    if (existing) continue;
+    const wetCheckView = await this.storage.getWetCheckBillingViewById(
+      wcb.id,
+      customer.companyId,
+    );
+    if (!wetCheckView) continue;
+    wetCheckBillings.push({
+      wetCheckBillingId: wcb.id,
+      wetCheckBilling: wcb,
+      wetCheckView,
+    });
+  }
+}
+```
+
+Pass `wetCheckBillings` into the `buildPdfViewModel` call (~line 322).
+
+**(5) Add `ticketPageWCB` to `pdf-helpers.ts`** (place adjacent to
+`ticketPageBS` at ~line 240):
+
+```typescript
+export function ticketPageWCB(
+  row: PdfWetCheckBillingRow,
+  brandColors: BrandColors,
+): string
+```
+
+Behavior: render a self-contained ticket page for a wet check billing. The
+body is always `partsBlockForWetCheckBS(row.wetCheckView, brandColors)` —
+reuse the existing zone-grouped renderer verbatim. The header (billing number,
+customer, work date, technician, address) pulls from `row.wetCheckBilling`
+fields. The financial breakdown follows the same single "Irrigation Labor"
+line pattern that `ticketPageBS` uses post-Task #766.
+
+In the PDF document body assembly (wherever `viewModel.billingSheetRows` is
+iterated to produce ticket pages), add a parallel iteration over
+`viewModel.wetCheckBillings`, emitting a `ticketPageWCB` for each. Order in
+the document: WOs first, then BSs, then WCBs.
+
+Reuse the `.zone-block { page-break-inside: avoid; }` CSS already present from
+earlier slice work — no new CSS needed.
+
+**(6) Update invoice routes** in `artifacts/api-server/src/routes/routes.ts`:
+
+`GET /api/invoices/preview` (~line 6420–6556):
+- Add a query alongside the existing billing_sheets + work_orders queries:
+  fetch `wet_check_billings` where `status = 'approved_passed_to_billing'` AND
+  `invoiceId IS NULL` AND scoped to the customer.
+- Add the result to the response payload as a new `wetCheckBillings` array
+  (parallel to the existing `billingSheets` and `workOrders` arrays). Do NOT
+  merge into the billingSheets array — keep them typed separately so the
+  frontend can distinguish.
+
+`POST /api/invoices/monthly` (~line 6558–7170):
+- Accept `selectedWetCheckBillingIds: number[]` in the request body alongside
+  the existing `selectedBillingSheetIds` and `selectedWorkOrderIds`.
+- For each selected wet check billing:
+  - Verify it's eligible (status='approved_passed_to_billing', invoiceId IS
+    NULL).
+  - Create an `invoice_items` row with: `sourceType='wet_check_billing'`,
+    `sourceId=wcb.id`, `wetCheckBillingId=wcb.id` (NOT `billingSheetId`), plus
+    the standard line fields (workDate, description, totals).
+  - Update `wet_check_billings.invoiceId` and `billedAt` (mirror the existing
+    BS update logic).
+  - Update `wet_check_billings.status` to `'billed'`.
+- Include wet check billings in the invoice's `totalAmount` calculation.
+
+**(7) Tests.**
+
+`wet-check-billing-view-from-wcb.test.ts`:
+- Fixture: a `wet_check_billing` row, the originating wet check, two findings
+  across two zones with different issue types, zone records with
+  `repairLaborHours` set.
+- Call `storage.getWetCheckBillingViewById(wcbId, companyId)`.
+- Assert returned view has `wetCheckBillingId === wcbId` and `billingSheetId
+  === undefined`.
+- Assert zone-grouped structure matches what `getBillingSheetWetCheckView`
+  returns for an equivalent BS-WC fixture (sanity check that both code paths
+  build identical views from equivalent inputs).
+- Assert returns `null` when the wcb row doesn't exist.
+- Assert returns `null` when the customer can't be loaded.
+
+`invoice-pdf-wet-check-billing.test.ts`:
+- Fixture: an invoice with one `invoice_items` row of
+  `sourceType='wet_check_billing'` linked to a wet check billing with one zone
+  and two findings.
+- Call the PDF generation entry point (`InvoicePdfService.generatePdfBuffer`
+  or whatever the test entry is).
+- Assert PDF generation succeeds without throwing.
+- Assert the rendered HTML (extracted via existing test helper if available)
+  contains:
+  - The `WC-YYYY-NNNN`-style billing number.
+  - The zone-grouped structure (verify presence of "Repairs Summary").
+  - A single `Irrigation Labor` line (post-Task #766, no separate Inspection/
+    Repair Labor split).
+
+`invoice-preview-wet-check.test.ts`:
+- Seed a `wet_check_billing` row with `status='approved_passed_to_billing'`
+  and `invoiceId=null` for a known customer.
+- Call `GET /api/invoices/preview?customerId=X`.
+- Assert the response includes the wet check billing in its `wetCheckBillings`
+  array.
+- Assert a wet check billing with `invoiceId IS NOT NULL` is NOT included.
+- Assert a wet check billing with `status='submitted'` is NOT included.
+
+`invoice-monthly-wet-check.test.ts`:
+- Seed an eligible wet check billing.
+- Call `POST /api/invoices/monthly` with `{ selectedWetCheckBillingIds:
+  [wcbId], selectedBillingSheetIds: [], selectedWorkOrderIds: [] }`.
+- Assert an invoice is created.
+- Assert exactly one `invoice_items` row exists for the created invoice with
+  `sourceType='wet_check_billing'` and `wetCheckBillingId=wcbId`.
+- Assert `wet_check_billings.invoiceId` is now set, `billedAt` is non-null,
+  `status='billed'`.
+- Assert the invoice's `totalAmount` equals `wcb.totalAmount`.
+
+**Acceptance criteria.**
+- `WetCheckBillingView` interface has the optional `wetCheckBillingId` field;
+  existing `billingSheetId` field is unchanged.
+- `storage.getWetCheckBillingViewById` exists with the listed signature and
+  returns the expected shape.
+- `buildPdfViewModel` accepts and passes through a `wetCheckBillings` array.
+- `invoice-pdf-service.ts` builds the `wetCheckBillings` array from
+  `invoice_items` where `sourceType='wet_check_billing'`.
+- PDF rendering produces a ticket page for each wet check billing using the
+  existing `partsBlockForWetCheckBS` renderer.
+- `GET /api/invoices/preview` includes a `wetCheckBillings` array in its
+  response (which may be empty on day 1).
+- `POST /api/invoices/monthly` accepts `selectedWetCheckBillingIds` and
+  processes them polymorphically.
+- All four new test files pass.
+- All existing tests pass without modification.
+- **No user-visible behavior change at landing time.** The
+  `wet_check_billings` table is empty, so all new code paths are effectively
+  no-ops in practice. This is the safety property — Slice 5 (migration) is
+  what activates them.
+
+**Out of scope.**
+- Migrating existing BS-WC rows to `wet_check_billings` (Slice 5).
+- Switching the wet check conversion path to write to the new table
+  (Slice 6).
+- Updating the customer billing endpoint (`/api/customers/:id/billing`),
+  dashboard stats, or monthly-billed view (Slice 3).
+- Creating the new `/wet-check-billings` page or `GET /api/wet-check-billings`
+  list endpoint (Slice 4).
+- Removing the existing `billingSheetId` field from `WetCheckBillingView`
+  (Slice 7 cleanup).
+- Removing the `getBillingSheetWetCheckView`-based BS-WC path from
+  `invoice-pdf-service.ts` (Slice 7 — both paths coexist until migration
+  completes).
+- Designing the wet check billing edit flow (Slice 8, deferred).
+- Any frontend changes. The `/api/invoices/preview` response gets a new
+  field; existing frontends that don't read it are unaffected.
+- Updating `manualPartReviews` to accept a `wetCheckBillingId` (separate
+  future concern; wet checks may or may not trigger manual part reviews —
+  verify in a later slice if needed).
+
+**Dependencies.** Slice 1 merged.

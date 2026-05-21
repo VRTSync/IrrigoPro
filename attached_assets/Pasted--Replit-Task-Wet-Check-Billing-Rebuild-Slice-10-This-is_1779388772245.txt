@@ -1,0 +1,312 @@
+# Replit Task — Wet Check Billing Rebuild, Slice 10
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader rebuild — it is reference material so you understand
+the intent. The actual work for this task is in the **Slice 10** section at the
+bottom. Do not deviate from any file paths, function names, schema field names,
+or payload shapes specified. If you believe a deviation is necessary, surface it
+and stop rather than proceeding.
+
+> **Architectural note for this slice and the slices that follow.** Wet check
+> billings are being moved out of the shared `billing_sheets` table into their
+> own parallel `wet_check_billings` table — the same separation pattern as
+> `estimates` vs `billing_sheets` today. This is the first of ~6 slices that
+> together complete the separation. This slice is plumbing only: it adds the
+> new table, the WC- numbering sequence, the nullable FK columns on referencing
+> tables, and CRUD storage methods. **Zero behavior change in this slice.** No
+> conversion path is rewired, no data is moved, no consumer is updated, no UI
+> is touched. Treat any urge to do more than what's listed as scope creep —
+> later slices handle each of those concerns.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in conversation and are referenced by every slice in this
+rebuild. Do not deviate from any of them.
+
+**Scope.** Only billing sheets whose `billingNumber` starts with `BS-WC-` are
+affected by the broader rebuild. Work-order and other billings keep the
+existing flat-parts layout. (Note: in the new world, those BS-WC sheets will
+live in `wet_check_billings` with a new `WC-YYYY-NNNN` numbering scheme — see
+the architectural note above.)
+
+**Source of truth for the new layout.** `wetCheckFindings` joined to
+`wetCheckZoneRecords`. Each finding already has `billingSheetId`,
+`zoneRecordId`, `issueType`, `partId`, `partName`, `partPrice`, `quantity`,
+`laborHours`. (After the separation, findings will also have
+`wetCheckBillingId` — added by this slice.)
+
+**Layout.** Zone-grouped. Each zone displays as: zone header
+(`<controllerLetter> <zoneNumber>` + issue display label), part lines, per-zone
+repair labor row showing `hours × rate = total`, per-zone subtotal. A single
+wet-check-level "Inspection Labor" line appears once per sheet.
+
+**Repair labor entry.** Per-zone, stepper UI, 0.25-hour increments, 0.25-hour
+minimum. Free-form decimal inputs are not permitted in the new flow.
+
+**Labor rate.** Always the per-customer global rate (`customers.laborRate`),
+snapshotted onto the billing sheet at creation (`billing_sheets.appliedLaborRate`,
+and in the new world `wet_check_billings.appliedLaborRate`). Never reprice
+based on later customer-rate changes. Existing snapshot logic is preserved.
+
+**Issue type display.** Always use `issueTypeConfigs.displayLabel` for the
+customer's company. Never display the raw `issueType` field. If no config row
+exists for a `(companyId, issueType)` pair, fall back to title-cased
+`issueType.replace(/_/g, " ")`.
+
+**$0.00 line item suppression on PDF.** Suppress when `lineTotal === 0 AND
+laborHours === 0 AND NOT isLaborOnly`. Labor-only findings (qty=0, partPrice=0,
+noPartNeeded=true) are kept because they represent real work performed.
+
+**PDF treatment.** Repairs Summary table at the top (zone label → subtotal).
+Each zone wrapped in a div with `page-break-inside: avoid`. Labor math shown on
+PDF (`hours × rate = total`). Labor subtotal collapsed into a single
+"Irrigation Labor" line (per Task #766). Issue type display labels everywhere.
+
+**Issue type config normalization.** `issueTypeConfigs.defaultLaborHours` must
+be a multiple of 0.25 with a 0.25 minimum. The seed and admin validation must
+enforce this.
+
+**Safety patch.** `deleteWetCheck` must refuse when any of the wet check's
+findings has `billingSheetId IS NOT NULL` (already shipped in Slice 1). Will
+be extended in Slice 11 to also check `wetCheckBillingId IS NOT NULL`.
+
+**No PDF backward compatibility.** All wet check billings live in the current
+billing cycle (the wet check feature didn't exist before this cycle). There is
+no "old vs new" PDF reconciliation to handle.
+
+---
+
+## Slice 10 — Schema foundation: `wet_check_billings` table + numbering + FK plumbing
+
+**Scope.** Lay the schema and storage foundation for the wet check billing
+separation. Zero behavior change: no conversion path is rewired (Slice 11), no
+existing data is moved (Slice 12), no consumer reads from the new table
+(Slices 13a/13b), no UI changes (Slice 14). This slice is plumbing only — it
+adds the new table, the WC- numbering sequence, the nullable FK columns on
+referencing tables, and the CRUD storage methods that later slices will call.
+
+**Files modified.**
+- `lib/db/src/schema/schema.ts` — add `wetCheckBillings` table; add
+  `wetCheckBillingId` columns to `invoiceItems` and `wetCheckFindings`
+- Drizzle migration: new file under the project's drizzle migrations directory
+  (mirror the pattern used by the Slice 4 `repair_labor_hours` migration)
+- `artifacts/api-server/src/storage.ts` — add new storage methods (listed
+  below)
+- New: `artifacts/api-server/src/storage/wet-check-billings-storage.test.ts`
+- New: `artifacts/api-server/src/storage/wet-check-billings-numbering.test.ts`
+
+**Concrete changes.**
+
+Add `wetCheckBillings` table in `lib/db/src/schema/schema.ts`. Place it
+adjacent to `wetCheckFindings` (the related wet-check tables, ~line 1289+).
+Exact shape — do not add or omit columns:
+
+```typescript
+export const wetCheckBillings = pgTable("wet_check_billings", {
+  id: serial("id").primaryKey(),
+  billingNumber: text("billing_number").notNull().unique(),
+  // Every wet check billing is tied to exactly one originating wet check.
+  // Non-nullable: a WC billing without a wet check is not a valid state.
+  wetCheckId: integer("wet_check_id").references(() => wetChecks.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id),
+  customerName: text("customer_name").notNull(),
+  propertyAddress: text("property_address").notNull(),
+  workDate: timestamp("work_date").notNull(),
+  technicianName: text("technician_name").notNull(),
+  technicianId: integer("technician_id").references(() => users.id),
+  // Default 'submitted' — wet check billings auto-submit on wet check
+  // submission; there is no 'draft' state. Same enum as billing_sheets
+  // otherwise: submitted, pending_manager_review, approved_passed_to_billing,
+  // billed.
+  status: text("status").notNull().default("submitted"),
+  totalHours: decimal("total_hours", { precision: 5, scale: 2 }).notNull(),
+  laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).notNull(),
+  laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
+  partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
+  // Snapshot of customer.laborRate at creation (mirrors billing_sheets).
+  appliedLaborRate: decimal("applied_labor_rate", { precision: 10, scale: 2 }),
+  // Invoice linkage — prevents double billing.
+  invoiceId: integer("invoice_id").references(() => invoices.id),
+  billedAt: timestamp("billed_at"),
+  photos: text("photos").array().default([]),
+  notes: text("notes"),
+  branchName: text("branch_name"),
+  // Manager approval stamp.
+  approvedBy: text("approved_by"),
+  approvedByUserId: integer("approved_by_user_id").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  approvedTotal: decimal("approved_total", { precision: 10, scale: 2 }),
+  // Photos-needed override (mirrors billing_sheets Task #197).
+  noPhotosNeeded: boolean("no_photos_needed").notNull().default(false),
+  noPhotosNeededBy: integer("no_photos_needed_by").references(() => users.id),
+  noPhotosNeededAt: timestamp("no_photos_needed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  customerIdx: index("wet_check_billings_customer_idx").on(table.customerId),
+  technicianIdx: index("wet_check_billings_technician_idx").on(table.technicianId),
+  invoiceIdx: index("wet_check_billings_invoice_idx").on(table.invoiceId),
+  statusCreatedIdx: index("wet_check_billings_status_created_idx").on(table.status, table.createdAt),
+  wetCheckIdx: index("wet_check_billings_wet_check_idx").on(table.wetCheckId),
+}));
+```
+
+**Deliberately omitted columns** — these exist on `billing_sheets` but do NOT
+apply here. Do not add them:
+- `workDescription` — wet check billings derive description from findings.
+- `workOrderId` — wet check billings do not come from work orders.
+- `controllerLetter`, `zoneNumber` — wet check billings span multiple zones
+  (multi-zone, not single-zone).
+- `laborMode` — explicitly ignored for wet-check-sourced billing per existing
+  schema comment (schema.ts ~line 253–256).
+- `aiInputs`, `aiShortDescription`, `aiDetailedDescription` — findings ARE the
+  description; AI generation does not apply.
+- `approvedPartsSnapshot`, `approvedLaborSnapshot` — wet check approval drift
+  detection is a separate future concern, out of scope.
+- `workLocationLat`, `workLocationLng`, `workLocationAddress` — wet checks
+  carry their own location data on the `wetChecks` table.
+
+Add nullable `wetCheckBillingId` column to `invoiceItems`
+(lib/db/src/schema/schema.ts ~line 785), positioned adjacent to the existing
+`billingSheetId`:
+
+```typescript
+// Nullable; non-null when sourceType="wet_check_billing"
+wetCheckBillingId: integer("wet_check_billing_id").references(() => wetCheckBillings.id),
+```
+
+Update the `sourceType` comment to reflect the new value:
+
+```typescript
+sourceType: text("source_type").notNull(), // "work_order" | "billing_sheet" | "wet_check_billing"
+```
+
+Add nullable `wetCheckBillingId` column to `wetCheckFindings`
+(lib/db/src/schema/schema.ts ~line 1343), positioned adjacent to the existing
+`billingSheetId`:
+
+```typescript
+wetCheckBillingId: integer("wet_check_billing_id").references(() => wetCheckBillings.id),
+```
+
+Both columns coexist during the migration window (Slice 12). The existing
+`billingSheetId` column is **not** modified or dropped in this slice.
+
+**Drizzle migration.** Generate the migration file using whatever pattern the
+project uses (`drizzle-kit generate` if migration files are committed,
+`drizzle-kit push` if not). Mirror the pattern from the Slice 4
+`repair_labor_hours` migration exactly — do not invent a new pattern. Verify
+the generated SQL includes:
+- `CREATE TABLE wet_check_billings (...)` with all columns and indexes from
+  above.
+- `ALTER TABLE invoice_items ADD COLUMN wet_check_billing_id INTEGER REFERENCES wet_check_billings(id);`
+- `ALTER TABLE wet_check_findings ADD COLUMN wet_check_billing_id INTEGER REFERENCES wet_check_billings(id);`
+
+**Numbering sequence.** Bootstrap the WC- counter row in
+`billing_number_counters` from within the new `getNextWetCheckBillingNumber()`
+storage method (mirrors the existing `getNextBillingNumber` seeding pattern at
+storage.ts:3584-3618). Seed value is 999 so the first emitted value is 1000:
+
+```typescript
+INSERT INTO billing_number_counters (prefix, last_seq)
+VALUES (${prefix}, 999)
+ON CONFLICT (prefix) DO NOTHING
+```
+
+The `ON CONFLICT DO NOTHING` ensures the seed only fires on a fresh database.
+The increment-and-return logic mirrors the existing pattern exactly.
+
+**New storage methods** in `artifacts/api-server/src/storage.ts`. Place
+adjacent to the existing billing-sheet methods (~line 3584+). Exact signatures:
+
+- `getNextWetCheckBillingNumber(): Promise<string>` — paralleled directly on
+  `getNextBillingNumber` (storage.ts:3584-3618). Prefix is `WC-${year}-`. Seed
+  value is 999. Returns e.g. `"WC-2026-1000"`. Add sibling
+  `_wetCheckCounterPrefixSeeded: Set<string>` and
+  `_wetCheckCounterTableReady: boolean` if needed to mirror the existing
+  memoization.
+- `createWetCheckBilling(data: InsertWetCheckBilling): Promise<WetCheckBilling>`
+  — basic insert. No line-item handling (wet check billings derive items from
+  findings). The caller is responsible for passing a pre-generated
+  `billingNumber` (mirrors how `createBillingSheet` works today; do not
+  auto-generate inside the method).
+- `getAllWetCheckBillings(): Promise<WetCheckBilling[]>`
+- `getWetCheckBillingById(id: number): Promise<WetCheckBilling | undefined>`
+- `getWetCheckBillingsByCustomer(customerId: number): Promise<WetCheckBilling[]>`
+- `getWetCheckBillingsByTechnician(technicianId: number): Promise<WetCheckBilling[]>`
+- `getWetCheckBillingsByWetCheckId(wetCheckId: number): Promise<WetCheckBilling[]>`
+  — new pattern; resolves "what billing(s) exist for this wet check?"
+- `updateWetCheckBilling(id: number, updates: Partial<InsertWetCheckBilling>): Promise<WetCheckBilling>`
+  — updates row and bumps `updatedAt`.
+- `deleteWetCheckBilling(id: number): Promise<void>`
+
+Do **not** add line-item methods. There is no `addWetCheckBillingItem`, no
+`getWetCheckBillingItems`, no `repriceWetCheckBillingItems`, etc. Wet check
+billings derive line items from `wetCheckFindings` via the existing
+`getBillingSheetWetCheckView` pattern (which will be adapted in a later slice;
+not this one).
+
+**Test files.**
+
+`artifacts/api-server/src/storage/wet-check-billings-numbering.test.ts`:
+- First call to `getNextWetCheckBillingNumber()` on a fresh database returns
+  `WC-${currentYear}-1000`.
+- Second call returns `WC-${currentYear}-1001`.
+- `billing_number_counters` has exactly one row for `WC-${currentYear}-` after
+  the calls.
+- Seed bootstrap is idempotent: running the seeding logic twice does not reset
+  the counter.
+
+`artifacts/api-server/src/storage/wet-check-billings-storage.test.ts`:
+- `createWetCheckBilling` inserts a row and returns the full object including
+  auto-assigned `id`, with the `billingNumber` already populated by the caller.
+- `getWetCheckBillingById` returns the inserted row.
+- `getWetCheckBillingsByWetCheckId` returns the row when queried by its
+  `wetCheckId`.
+- `getAllWetCheckBillings` includes the inserted row.
+- `updateWetCheckBilling` updates a field (e.g. `status` → `"billed"`) and the
+  `updatedAt` timestamp moves forward.
+- `deleteWetCheckBilling` removes the row; a subsequent `getWetCheckBillingById`
+  returns `undefined`.
+
+**Acceptance criteria.**
+- `wet_check_billings` table exists in the database with all columns, FKs, and
+  indexes specified above. No extra columns, no missing columns.
+- `billing_number_counters` has a `WC-${currentYear}-` row with
+  `last_seq >= 1000` after the first call to `getNextWetCheckBillingNumber()`.
+- The first wet check billing number emitted on a fresh database is
+  `WC-${currentYear}-1000`.
+- `invoiceItems.wetCheckBillingId` and `wetCheckFindings.wetCheckBillingId`
+  columns exist, both nullable, both FK-referenced to `wet_check_billings.id`.
+- All listed storage methods exist with the listed signatures and are exported
+  from the storage module.
+- Both new test files pass.
+- All existing tests continue to pass without modification.
+- No production behavior change observable from any HTTP endpoint or UI. This
+  is plumbing only.
+
+**Out of scope.**
+- Rewiring `convertWetCheckToBillingSheet` to write to the new table
+  (Slice 11).
+- Updating the safety patch in `deleteWetCheck` to also check
+  `wetCheckBillingId` (Slice 11).
+- Migrating existing BS-WC rows from `billing_sheets` to `wet_check_billings`
+  (Slice 12).
+- Updating invoice generation, PDF rendering, dashboards, or any consumer
+  (Slices 13a, 13b).
+- Adding any HTTP endpoints (`GET /api/wet-check-billings` belongs to
+  Slice 14).
+- Adding any UI components or pages (Slice 14).
+- Navigation changes (Slice 15).
+- Designing the wet check billing edit flow (Slice 16).
+- Dropping or modifying `wetCheckFindings.billingSheetId` (the column stays
+  — it remains the legitimate link until Slice 12 completes; cleanup is a
+  separate future decision).
+- Backfilling any data into `wet_check_billings` (Slice 12 is responsible for
+  all data moves).
+- Any change to the existing `getNextBillingNumber` for the `BS-` sequence.
+
+**Dependencies.** Slices 1–9 merged.
