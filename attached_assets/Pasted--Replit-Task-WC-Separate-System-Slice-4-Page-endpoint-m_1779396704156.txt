@@ -1,0 +1,402 @@
+# Replit Task — WC Separate System, Slice 4 (Page + endpoint + modal)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader rebuild — it is reference material so you understand
+the intent. The actual work for this task is in the **Slice 4** section at the
+bottom. Do not deviate from any file paths, function names, schema field names,
+or payload shapes specified. If you believe a deviation is necessary, surface it
+and stop rather than proceeding.
+
+> **Rule of thumb for this slice (learned from earlier slices):** when the spec
+> lists what fields, columns, props, or buttons to add, that is the complete
+> set. **Do not add additional UI elements, response fields, or buttons beyond
+> what is explicitly listed.** Do not "improve" by adding bulk actions, edit
+> buttons, or sidebar nav entries — those belong to other slices and are
+> explicitly out of scope here. Surface a question and stop if you think an
+> addition is necessary.
+
+> **Architectural note for this slice.** Wet check billings are being moved out
+> of the shared `billing_sheets` table into their own parallel
+> `wet_check_billings` table (Slice 1 added the table; Slices 2–3 taught
+> consumers to read from it). This slice builds the user-facing surface: a new
+> `/wet-check-billings` page, the list and detail endpoints behind it, and a
+> purpose-built detail modal.
+>
+> **Critical safety property:** On day 1, the `wet_check_billings` table is
+> empty (until Slice 5 migration populates it). The new page renders an empty
+> state in both sections, which is **correct** — not a bug. The page is built
+> so it's ready to display data the moment Slice 5 lands.
+>
+> **Do NOT reuse `CompletedWorkDetailModal`.** That modal carries
+> billing-sheet-specific concerns (Edit routing, approve flow, send flow) that
+> don't apply to wet check billings and would require conditional branching
+> that pollutes a shared component. This slice builds a new purpose-built
+> `WetCheckBillingViewModal`.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in conversation and are referenced by every slice in this
+rebuild. Do not deviate from any of them.
+
+**Scope.** Only billing sheets whose `billingNumber` starts with `BS-WC-` are
+affected by the broader rebuild today. After Phase 2 completes, those rows
+will live in `wet_check_billings` with `WC-YYYY-NNNN` numbering.
+
+**Wet check billing status enum.** Wet check billings auto-submit on creation
+(no `'draft'` state). Possible statuses: `'submitted'`,
+`'pending_manager_review'`, `'approved_passed_to_billing'`, `'billed'`. This
+is narrower than the billing_sheets enum which also has `'draft'` and
+`'completed'`.
+
+**Layout for detail view.** Zone-grouped (reuse the existing
+`WetCheckBillingView` component). Each zone displays as: zone header
+(`<controllerLetter> <zoneNumber>` + issue display label), part lines,
+per-zone repair labor row showing `hours × rate = total`, per-zone subtotal.
+A single wet-check-level "Inspection Labor" line appears once per sheet.
+
+**Edit flow is deferred.** Wet check billings are NOT editable through this
+page or modal in this slice. Phase 2 Slice 8 will design the edit experience
+separately. For now, the detail modal is read-only — no Edit button.
+
+**Wet checks feel like their own thing.** Wet check billings are presented
+with wet-check-native columns (issues count, zones count) and link back to
+their originating wet check, not as a special case of billing sheets.
+
+---
+
+## Slice 4 — Wet Check Billings page + endpoint + detail modal
+
+**Scope.** Build the user-facing surface for the new wet check billings
+system: a dedicated `/wet-check-billings` page with two sections (Awaiting
+Invoice + Billed), a new `GET /api/wet-check-billings` list endpoint, a
+single-fetch `GET /api/wet-check-billings/:id` endpoint, a purpose-built
+`WetCheckBillingViewModal` component (NOT a reuse of the existing
+CompletedWorkDetailModal), and a back-navigation pattern so clicks through to
+the originating wet check page have a one-click return. The Edit button is
+hidden entirely in this slice; the wet-check-native edit flow is Slice 8
+(deferred). No data flows through this surface on day 1 because the
+`wet_check_billings` table is empty until Slice 5 (migration) populates it —
+the page renders an empty state, which is correct.
+
+**Files modified.**
+- `artifacts/api-server/src/storage.ts` — add `getAllWetCheckBillingsWithCounts()`
+  method and `WetCheckBillingListItem` type
+- `artifacts/api-server/src/routes/routes.ts` — add `GET /api/wet-check-billings`
+  and `GET /api/wet-check-billings/:id` endpoints
+- New: `artifacts/irrigopro/src/pages/wet-check-billings.tsx` — the new page
+- New: `artifacts/irrigopro/src/components/wet-check-billings/wet-check-billing-view-modal.tsx`
+  — the detail modal
+- `artifacts/irrigopro/src/App.tsx` — register the new route
+- `artifacts/irrigopro/src/pages/wet-checks.tsx` — render
+  `?from=wet-check-billings` back-link
+- New: `artifacts/api-server/src/routes/wet-check-billings-list.test.ts`
+- New: `artifacts/api-server/src/routes/wet-check-billings-detail.test.ts`
+- New: `artifacts/irrigopro/src/pages/wet-check-billings.test.tsx`
+- New: `artifacts/irrigopro/src/components/wet-check-billings/wet-check-billing-view-modal.test.tsx`
+
+**Concrete changes.**
+
+**(1) New `WetCheckBillingListItem` type** in
+`artifacts/api-server/src/storage.ts` (place near the existing
+`BillingSheetWithItems` type, or in a co-located types section). Exact shape
+— do not add fields:
+
+```typescript
+export type WetCheckBillingListItem = WetCheckBilling & {
+  /** Count of findings linked to this wet check billing. */
+  issuesCount: number;
+  /** Count of distinct zones across those findings. */
+  zonesCount: number;
+};
+```
+
+**(2) New storage method `getAllWetCheckBillingsWithCounts`** in storage.ts.
+Place adjacent to `getAllWetCheckBillings` (added in Slice 1):
+
+```typescript
+async getAllWetCheckBillingsWithCounts(): Promise<WetCheckBillingListItem[]>
+```
+
+Implementation: a single SQL query that LEFT JOINs `wet_check_findings` to
+`wet_check_billings` on `wcf.wetCheckBillingId = wcb.id`, GROUPs by `wcb.id`,
+and aggregates `COUNT(wcf.id) AS issues_count` plus
+`COUNT(DISTINCT wcf.zone_record_id) AS zones_count`. Return rows sorted by
+`wcb.workDate DESC, wcb.id DESC`. Use the Drizzle query builder, not raw SQL,
+where possible.
+
+**(3) New `GET /api/wet-check-billings` endpoint** in routes.ts. Place
+adjacent to `GET /api/billing-sheets` (~line 9649):
+
+```typescript
+app.get("/api/wet-check-billings", requireAuthentication, async (req, res) => {
+  try {
+    const items = await storage.getAllWetCheckBillingsWithCounts();
+    res.json(applyPricingVisibility(req, items));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch wet check billings" });
+  }
+});
+```
+
+Notes:
+- Uses `requireAuthentication` (same middleware as other list endpoints).
+- Applies `applyPricingVisibility` so field techs get pricing fields stripped
+  (mirrors the existing `/api/billing-sheets` behavior).
+- No query parameters in this slice. Filtering is client-side. Server returns
+  the full list; the page filters into sections.
+
+**(4) New `GET /api/wet-check-billings/:id` endpoint** in routes.ts. Returns
+the wet check billing PLUS its `WetCheckBillingView` (the zone-grouped
+detail). The detail modal needs both shapes in one request:
+
+```typescript
+app.get("/api/wet-check-billings/:id", requireAuthentication, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      res.status(400).json({ message: "Invalid id" });
+      return;
+    }
+    const wcb = await storage.getWetCheckBillingById(id);
+    if (!wcb) { res.status(404).json({ message: "Not found" }); return; }
+    const view = await storage.getWetCheckBillingViewById(id, null);
+    if (!view) { res.status(404).json({ message: "View not buildable" }); return; }
+    res.json(applyPricingVisibility(req, { wetCheckBilling: wcb, view }));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch wet check billing" });
+  }
+});
+```
+
+Response shape (exact — do not add fields):
+
+```typescript
+{
+  wetCheckBilling: WetCheckBilling;
+  view: WetCheckBillingView;
+}
+```
+
+`getWetCheckBillingViewById` is added in Slice 2. If Slice 2 hasn't been
+merged yet when you're working on this slice, **surface a question and stop**
+rather than reimplementing the method here.
+
+**(5) New page** `artifacts/irrigopro/src/pages/wet-check-billings.tsx`.
+
+Component contract — exact set of features, do not add any more:
+- Default exported function component `WetCheckBillings`.
+- Fetches via `useArrayQuery<WetCheckBillingListItem>({ queryKey:
+  ["/api/wet-check-billings"], queryFn: () =>
+  fetch('/api/wet-check-billings').then(r => r.json()) })`.
+- Page chrome: `PageContainer` > `PageHeader` (title "Wet Check Billings",
+  subtitle "Auto-generated from wet check submissions") > `PageContent`
+  (mirrors the structure of `pages/billing-sheets.tsx`).
+- Search box (Input with Search icon) that filters across `billingNumber`,
+  `customerName`, `propertyAddress`, `technicianName`. Same UX as
+  billing-sheets search.
+- Two sections, each rendered as a card with an expand/collapse header:
+  - **Awaiting Invoice**: `status === 'submitted' || status ===
+    'pending_manager_review' || status === 'approved_passed_to_billing'` AND
+    `!invoiceId`
+  - **Billed**: `status === 'billed' OR invoiceId !== null`
+- Empty state per section: "No wet check billings awaiting invoice." / "No
+  billed wet check billings yet."
+- Table columns (in this exact order — do not add or rearrange):
+  1. **WC #** — `wcb.billingNumber` (e.g., `WC-2026-1000`). Below it, a small
+     muted line: `from Wet Check #{wcb.wetCheckId}` rendered as a `<Link>` to
+     `/wet-checks/${wetCheckId}?from=wet-check-billings`. Use `wouter`'s
+     `Link` component (already imported in billing-sheets.tsx).
+  2. **Customer** — `wcb.customerName`
+  3. **Property** — `wcb.propertyAddress`
+  4. **Service date** — `wcb.workDate` formatted as locale date
+  5. **Tech** — `wcb.technicianName`
+  6. **Issues** — formatted as `"{issuesCount} {issuesCount === 1 ? 'finding'
+     : 'findings'} across {zonesCount} {zonesCount === 1 ? 'zone' : 'zones'}"`.
+     E.g., "8 findings across 3 zones", "1 finding across 1 zone".
+  7. **Parts** — `wcb.partsSubtotal` formatted as currency
+  8. **Labor** — `wcb.laborSubtotal` formatted as currency
+  9. **Total** — `wcb.totalAmount` formatted as currency
+  10. **Status** — `Badge` with the wcb.status, color-mapped same as
+      billing-sheets (use existing color mapping helper if one exists in
+      billing-sheets.tsx; if not, inline the mapping)
+- Click a row (anywhere except on the WC # link) → opens
+  `<WetCheckBillingViewModal wetCheckBillingId={wcb.id} open={true}
+  onOpenChange={...} />`.
+- Click the WC # link → `wouter` navigation to the wet check detail page with
+  the back-link query param.
+- Loading state: render `<Skeleton />` blocks in each section.
+- Use `BilledIndicator` / `BilledBadge` for the Billed section rows (mirrors
+  billing-sheets.tsx pattern).
+
+**Do NOT include:** bulk select, bulk delete, drafts section, FAB to create
+new (wet check billings are created via wet check submission, not from this
+page), wizard, edit, approve, send buttons. This is a read-only list with
+click-through to a read-only detail modal.
+
+**(6) New modal**
+`artifacts/irrigopro/src/components/wet-check-billings/wet-check-billing-view-modal.tsx`.
+
+Component contract — exact:
+
+```typescript
+interface WetCheckBillingViewModalProps {
+  wetCheckBillingId: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+```
+
+Behavior:
+- Fetches `GET /api/wet-check-billings/:id` via `useQuery` when `open === true`.
+- Renders inside a Dialog (shadcn `Dialog`).
+- Header shows `wcb.billingNumber` as the title, `wcb.customerName` and
+  `wcb.propertyAddress` as subtitle.
+- Body renders the existing `<WetCheckBillingView view={data.view} />`
+  component (already exists from earlier slice work). If a slightly different
+  component is needed (e.g., to render the wet check billing's own header),
+  reuse `WetCheckBillingView` for the zone-grouped financial body and add the
+  header above it inline.
+- A "View originating wet check" link/button at the top of the modal:
+  navigates to `/wet-checks/${wcb.wetCheckId}?from=wet-check-billings`
+  (closes the modal via `onOpenChange(false)` before navigating).
+- Footer: just a "Close" button. **NO Edit button. NO Approve button. NO Send
+  button. NO Delete button.** This is read-only by design — editing wet check
+  billings is Slice 8 (deferred).
+- Loading state: skeleton inside the dialog body.
+- Error state: an error message inside the dialog body with a Close button.
+
+Do NOT use `CompletedWorkDetailModal`. The existing modal has billing-sheet-
+specific concerns (Edit routing, approve flow, send flow) that don't apply
+here and would require conditional branching that pollutes the shared
+component. This new modal is purpose-built and short — it composes the
+existing `WetCheckBillingView` body but supplies its own chrome.
+
+**(7) Route registration** in `artifacts/irrigopro/src/App.tsx`.
+
+Add the lazy import next to the existing wet-checks page imports (~line
+65–69):
+
+```typescript
+const WetCheckBillingsPage = lazyPage(() => import("@/pages/wet-check-billings"));
+```
+
+Register the route in every role-scoped route block that already has
+`/billing-sheets`. The current role blocks include `/billing-sheets` for
+managers (billing_manager, irrigation_manager, company_admin, super_admin).
+Add `/wet-check-billings` to those same blocks, immediately after the
+`/billing-sheets` route. Field techs do NOT get this route (mirror
+billing-sheets, which field techs also don't have direct access to in their
+nav — they get `/billing-sheets` but not `/wet-check-billings` since wet
+check billings are a manager-facing artifact, not tech-facing).
+
+Wait — verify this assumption by looking at which roles currently see
+`/billing-sheets`. If field techs DO see `/billing-sheets`, then also give
+them `/wet-check-billings` for consistency. The principle: same audience as
+`/billing-sheets`. **If you find the role-permission story is different than
+expected, surface a question and stop rather than guessing.**
+
+**(8) Back-link on wet check detail page** in
+`artifacts/irrigopro/src/pages/wet-checks.tsx`.
+
+At the top of the page (above the existing content), add:
+- Parse the URL query string for `from`.
+- If `from === 'wet-check-billings'`, render a small back link: `<Link
+  to="/wet-check-billings">← Back to Wet Check Billings</Link>` with
+  appropriate styling (e.g., text-muted-foreground, mb-4). Use the existing
+  wouter `Link` component already imported in the project.
+- If `from` is any other value or not present, render nothing — do not change
+  the existing page header for other navigation contexts.
+
+This is a minimal back-link pattern, not a full breadcrumb component. Keep it
+lean.
+
+**(9) Tests.**
+
+`wet-check-billings-list.test.ts`:
+- Fixture: 2 wet check billings, one with 3 findings across 2 zones, one with
+  1 finding in 1 zone.
+- Call `GET /api/wet-check-billings`.
+- Assert response is an array of 2 items.
+- Assert each item has `issuesCount` and `zonesCount` matching the fixture.
+- Assert response is sorted by workDate DESC.
+- Assert field-tech caller gets pricing fields stripped via
+  `applyPricingVisibility`.
+
+`wet-check-billings-detail.test.ts`:
+- Fixture: 1 wet check billing with 2 findings.
+- Call `GET /api/wet-check-billings/:id` with the wcb's id.
+- Assert response shape `{ wetCheckBilling: {...}, view: {...} }`.
+- Assert `view` has the zone-grouped structure (zones array populated).
+- Assert HTTP 404 for a non-existent id.
+- Assert HTTP 400 for non-numeric id.
+
+`wet-check-billings.test.tsx`:
+- Render the page with a mocked queryClient returning a fixture list (2
+  awaiting-invoice, 1 billed).
+- Assert "Wet Check Billings" appears in the header.
+- Assert both sections render with the correct row counts.
+- Assert a row's "Issues" cell renders the expected string format.
+- Assert clicking a row opens the modal (verify by spying on modal state or
+  rendering).
+- Assert the WC # link href points to
+  `/wet-checks/${wetCheckId}?from=wet-check-billings`.
+- Assert empty state renders when the list is empty.
+
+`wet-check-billing-view-modal.test.tsx`:
+- Render the modal with `open={true}` and a mocked fetch returning a fixture
+  wcb + view.
+- Assert the modal title shows the wcb billingNumber.
+- Assert NO Edit button is rendered (query for it; assert null).
+- Assert NO Approve button is rendered.
+- Assert the "View originating wet check" link is rendered with the correct
+  href.
+- Assert the close button works (calls `onOpenChange(false)`).
+
+**Acceptance criteria.**
+- `GET /api/wet-check-billings` returns an array of `WetCheckBillingListItem`
+  with derived `issuesCount` and `zonesCount` fields.
+- `GET /api/wet-check-billings/:id` returns `{ wetCheckBilling, view }`
+  shape; 404 on missing id, 400 on invalid id.
+- New page renders at `/wet-check-billings` for the same roles that currently
+  see `/billing-sheets`.
+- Page has the exact 10 columns listed in section (5), in that order — no
+  more, no less.
+- Two sections (Awaiting Invoice + Billed) partition rows by the rules in
+  section (5).
+- Click row → opens the new `WetCheckBillingViewModal`.
+- Click WC # link → navigates to `/wet-checks/:id?from=wet-check-billings`.
+- Wet check detail page renders a back link to `/wet-check-billings` when
+  the query param is present; no change when absent.
+- Modal has NO Edit, Approve, Send, or Delete buttons.
+- All four new test files pass.
+- All existing tests pass without modification.
+- **On day 1, the page renders an empty state in both sections** — the
+  `wet_check_billings` table is empty. This is correct behavior.
+- The `/billing-sheets` page behavior is unchanged.
+
+**Out of scope.**
+- Adding `/wet-check-billings` to the sidebar nav (Slice 7).
+- Migrating BS-WC rows (Slice 5).
+- Switching the wet check conversion path (Slice 6).
+- Building an edit flow for wet check billings (Slice 8, deferred).
+- Adding bulk actions (delete, approve, send) — wet check billings have no
+  bulk operations in this slice.
+- Adding a "Create new wet check billing" button — wet check billings are
+  created via wet check submission, not from this page.
+- Modifying `CompletedWorkDetailModal` — that modal continues to be used for
+  non-wet-check billing sheets. Don't touch it.
+- Modifying the `/api/billing-sheets` endpoint or its page.
+- Pricing visibility logic changes — use the existing `applyPricingVisibility`
+  middleware as-is.
+- Adding query parameters to the new list endpoint (`?technician=`,
+  `?customerId=`) — filtering is client-side in this slice.
+- Modifying the `WetCheckBillingView` component (already exists from earlier
+  slice work; reuse as-is).
+- Polishing or animating the back-link beyond a basic `<Link>`.
+
+**Dependencies.** Slice 1 merged. Slice 2 merged (for
+`getWetCheckBillingViewById`).
