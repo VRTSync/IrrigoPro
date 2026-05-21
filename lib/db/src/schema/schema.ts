@@ -786,10 +786,11 @@ export const invoiceItems = pgTable("invoice_items", {
   id: serial("id").primaryKey(),
   invoiceId: integer("invoice_id").references(() => invoices.id),
   // Source tracking - either from work order or billing sheet
-  sourceType: text("source_type").notNull(), // "work_order" or "billing_sheet"
+  sourceType: text("source_type").notNull(), // "work_order" or "billing_sheet" or "wet_check_billing"
   sourceId: integer("source_id").notNull(), // ID of work order or billing sheet
   workOrderId: integer("work_order_id").references(() => workOrders.id), // Nullable for billing sheet items
   billingSheetId: integer("billing_sheet_id").references(() => billingSheets.id), // Nullable for work order items
+  wetCheckBillingId: integer("wet_check_billing_id").references(() => wetCheckBillings.id), // Nullable; set when item originates from a wet_check_billing
   // Item details
   workDate: timestamp("work_date").notNull(),
   description: text("description").notNull(), // Work description or project name
@@ -1341,6 +1342,7 @@ export const wetCheckFindings = pgTable("wet_check_findings", {
   resolutionDecidedAt: timestamp("resolution_decided_at"),
   resolutionDecidedBy: integer("resolution_decided_by").references(() => users.id),
   billingSheetId: integer("billing_sheet_id").references(() => billingSheets.id),
+  wetCheckBillingId: integer("wet_check_billing_id").references(() => wetCheckBillings.id),
   estimateId: integer("estimate_id").references(() => estimates.id),
   workOrderId: integer("work_order_id").references(() => workOrders.id),
   convertedAt: timestamp("converted_at"),
@@ -1363,6 +1365,60 @@ export const wetCheckFindings = pgTable("wet_check_findings", {
     ) <= 1`,
   ),
 }));
+
+// Wet-check billing records — dedicated billing table for work discovered
+// during wet checks. Separated from billing_sheets (Slice 10 schema foundation).
+// `wetCheckId` is NOT NULL (every WCB row must reference its source wet check).
+// Later slices (11–16) rewire conversion, migrate data, expose HTTP endpoints.
+export const wetCheckBillings = pgTable("wet_check_billings", {
+  id: serial("id").primaryKey(),
+  billingNumber: text("billing_number").notNull().unique(),
+  customerId: integer("customer_id").references(() => customers.id),
+  customerName: text("customer_name").notNull(),
+  propertyAddress: text("property_address").notNull(),
+  workDate: timestamp("work_date").notNull(),
+  technicianName: text("technician_name").notNull(),
+  technicianId: integer("technician_id").references(() => users.id),
+  // Wet-check link — NOT NULL: every WCB row must trace back to its wet check.
+  wetCheckId: integer("wet_check_id").references(() => wetChecks.id).notNull(),
+  status: text("status").notNull().default("submitted"), // submitted | pending_manager_review | approved_passed_to_billing | billed
+  totalHours: decimal("total_hours", { precision: 5, scale: 2 }).notNull(),
+  laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).notNull(),
+  laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
+  partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
+  // Snapshot of customer.laborRate at creation time.
+  appliedLaborRate: decimal("applied_labor_rate", { precision: 10, scale: 2 }),
+  // Invoice linkage — prevents double billing.
+  invoiceId: integer("invoice_id").references(() => invoices.id),
+  billedAt: timestamp("billed_at"),
+  photos: text("photos").array().default([]),
+  notes: text("notes"),
+  branchName: text("branch_name"),
+  // Manager approval stamp fields.
+  approvedBy: text("approved_by"),
+  approvedByUserId: integer("approved_by_user_id").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  approvedTotal: decimal("approved_total", { precision: 10, scale: 2 }),
+  // "No photos needed" audit flag — mirrors billing_sheets.no_photos_needed.
+  noPhotosNeeded: boolean("no_photos_needed").notNull().default(false),
+  noPhotosNeededBy: integer("no_photos_needed_by").references(() => users.id),
+  noPhotosNeededAt: timestamp("no_photos_needed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  customerIdx: index("wet_check_billings_customer_idx").on(table.customerId),
+  technicianIdx: index("wet_check_billings_technician_idx").on(table.technicianId),
+  wetCheckIdx: index("wet_check_billings_wet_check_idx").on(table.wetCheckId),
+  invoiceIdx: index("wet_check_billings_invoice_idx").on(table.invoiceId),
+  statusCreatedIdx: index("wet_check_billings_status_created_idx").on(table.status, table.createdAt),
+}));
+
+export const insertWetCheckBillingSchema = createInsertSchema(wetCheckBillings).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export type WetCheckBilling = typeof wetCheckBillings.$inferSelect;
+export type InsertWetCheckBilling = z.infer<typeof insertWetCheckBillingSchema>;
 
 export const wetCheckPhotos = pgTable("wet_check_photos", {
   id: serial("id").primaryKey(),

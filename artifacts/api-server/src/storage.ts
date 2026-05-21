@@ -122,6 +122,7 @@ import {
   wetCheckZoneRecords,
   wetCheckFindings,
   wetCheckPhotos,
+  wetCheckBillings,
   type PropertyController,
   type InsertPropertyController,
   type IssueTypeConfig,
@@ -134,6 +135,8 @@ import {
   type InsertWetCheckFinding,
   type WetCheckPhoto,
   type InsertWetCheckPhoto,
+  type WetCheckBilling,
+  type InsertWetCheckBilling,
   type WetCheckWithDetails,
   deriveIssueGroup,
 } from "@workspace/db";
@@ -945,11 +948,29 @@ export interface IStorage {
     findingId: number,
     companyId: number,
   ): Promise<WetCheckPhoto | undefined>;
+
+  // ── Wet Check Billings (Slice 10) ────────────────────────────────────────
+  // Allocates the next WC-YYYY-NNNN number from billing_number_counters.
+  // Seeds the prefix row with last_seq=999 on first call so the first
+  // emitted number is WC-YYYY-1000. Never resets an existing counter.
+  getNextWetCheckBillingNumber(): Promise<string>;
+  // Creates a wet check billing record. billingNumber must be pre-generated
+  // by the caller via getNextWetCheckBillingNumber() (mirrors createBillingSheet).
+  // billingNumber is a required field on InsertWetCheckBilling (NOT NULL in schema).
+  createWetCheckBilling(data: InsertWetCheckBilling): Promise<WetCheckBilling>;
+  getAllWetCheckBillings(): Promise<WetCheckBilling[]>;
+  getWetCheckBillingById(id: number): Promise<WetCheckBilling | undefined>;
+  getWetCheckBillingsByCustomer(customerId: number): Promise<WetCheckBilling[]>;
+  getWetCheckBillingsByTechnician(technicianId: number): Promise<WetCheckBilling[]>;
+  getWetCheckBillingsByWetCheckId(wetCheckId: number): Promise<WetCheckBilling[]>;
+  updateWetCheckBilling(id: number, data: Partial<InsertWetCheckBilling>): Promise<WetCheckBilling>;
+  deleteWetCheckBilling(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
   private _billingCounterTableReady = false;
   private _billingCounterPrefixSeeded = new Set<string>();
+  private _wetCheckCounterPrefixSeeded = new Set<string>();
 
   constructor() {
     // Database initialization - schema is managed by Drizzle
@@ -3615,6 +3636,87 @@ export class DatabaseStorage implements IStorage {
     `);
     const seq = Number(result.rows[0].last_seq);
     return `${prefix}${seq.toString().padStart(4, '0')}`;
+  }
+
+  // ── Wet Check Billings (Slice 10) ────────────────────────────────────────
+
+  async getNextWetCheckBillingNumber(): Promise<string> {
+    const year = new Date().getFullYear();
+    const prefix = `WC-${year}-`;
+
+    if (!this._billingCounterTableReady) {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS billing_number_counters (
+          prefix TEXT PRIMARY KEY,
+          last_seq INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+      this._billingCounterTableReady = true;
+    }
+
+    if (!this._wetCheckCounterPrefixSeeded.has(prefix)) {
+      await db.execute(sql`
+        INSERT INTO billing_number_counters (prefix, last_seq)
+        VALUES (${prefix}, 999)
+        ON CONFLICT (prefix) DO NOTHING
+      `);
+      this._wetCheckCounterPrefixSeeded.add(prefix);
+    }
+
+    const result = await db.execute(sql`
+      UPDATE billing_number_counters
+      SET last_seq = last_seq + 1
+      WHERE prefix = ${prefix}
+      RETURNING last_seq
+    `);
+    const seq = Number(result.rows[0].last_seq);
+    return `${prefix}${seq.toString().padStart(4, '0')}`;
+  }
+
+  async createWetCheckBilling(data: InsertWetCheckBilling): Promise<WetCheckBilling> {
+    const { createdAt, updatedAt, ...insertData } = data as Record<string, unknown>;
+    const [row] = await db.insert(wetCheckBillings).values(insertData as typeof wetCheckBillings.$inferInsert).returning();
+    return row;
+  }
+
+  async getAllWetCheckBillings(): Promise<WetCheckBilling[]> {
+    return db.select().from(wetCheckBillings).orderBy(desc(wetCheckBillings.createdAt));
+  }
+
+  async getWetCheckBillingById(id: number): Promise<WetCheckBilling | undefined> {
+    const [row] = await db.select().from(wetCheckBillings).where(eq(wetCheckBillings.id, id));
+    return row;
+  }
+
+  async getWetCheckBillingsByCustomer(customerId: number): Promise<WetCheckBilling[]> {
+    return db.select().from(wetCheckBillings)
+      .where(eq(wetCheckBillings.customerId, customerId))
+      .orderBy(desc(wetCheckBillings.createdAt));
+  }
+
+  async getWetCheckBillingsByTechnician(technicianId: number): Promise<WetCheckBilling[]> {
+    return db.select().from(wetCheckBillings)
+      .where(eq(wetCheckBillings.technicianId, technicianId))
+      .orderBy(desc(wetCheckBillings.createdAt));
+  }
+
+  async getWetCheckBillingsByWetCheckId(wetCheckId: number): Promise<WetCheckBilling[]> {
+    return db.select().from(wetCheckBillings)
+      .where(eq(wetCheckBillings.wetCheckId, wetCheckId))
+      .orderBy(desc(wetCheckBillings.createdAt));
+  }
+
+  async updateWetCheckBilling(id: number, data: Partial<InsertWetCheckBilling>): Promise<WetCheckBilling> {
+    const [row] = await db.update(wetCheckBillings)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(wetCheckBillings.id, id))
+      .returning();
+    if (!row) throw new Error(`WetCheckBilling id=${id} not found`);
+    return row;
+  }
+
+  async deleteWetCheckBilling(id: number): Promise<void> {
+    await db.delete(wetCheckBillings).where(eq(wetCheckBillings.id, id));
   }
 
   async createBillingSheet(billingSheetData: InsertBillingSheet & { items?: InsertBillingSheetItem[] }): Promise<BillingSheet> {
