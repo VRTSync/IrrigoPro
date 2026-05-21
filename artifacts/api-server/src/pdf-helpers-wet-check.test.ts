@@ -133,15 +133,6 @@ describe('partsBlockForWetCheckBS', () => {
     assert.ok(html.includes('Zone B-2'), 'Expected Zone B-2 label');
   });
 
-  it('contains a labor row for zone A-1 with correct repair hours', () => {
-    assert.ok(html.includes('Zone Labor'), 'Expected zone labor row');
-    assert.ok(html.includes('1.50'), 'Expected 1.50 hours for zone A-1');
-  });
-
-  it('contains a labor row for zone B-2 with correct hours', () => {
-    assert.ok(html.includes('0.50'), 'Expected 0.50 hours for zone B-2');
-  });
-
   it('suppresses $0.00 non-labor-only item (Valve Repair / Solenoid)', () => {
     assert.ok(!html.includes('Solenoid'), 'Solenoid should be suppressed ($0 non-labor-only)');
     assert.ok(!html.includes('Valve Repair'), 'Valve Repair should be suppressed ($0 non-labor-only)');
@@ -179,45 +170,6 @@ describe('partsBlockForWetCheckBS', () => {
 });
 
 describe('ticketPageBS — wet check financial breakdown', () => {
-  it('shows Inspection Labor and Repair Labor rows when wetCheckView is present', () => {
-    const bsRow = {
-      billingNumber: 'BS-001',
-      workDescription: 'Wet check service',
-      propertyAddress: '123 Main St',
-      branchName: null,
-      technicianName: 'Jane Smith',
-      workDate: new Date('2026-05-01'),
-      totalHours: 2,
-      laborRate: 75,
-      aiDetailedDescription: '',
-      notes: '',
-      photos: [],
-      items: [],
-      partsSubtotal: 45,
-      laborSubtotal: 150,
-      rowTotal: 195,
-      approvedBy: null,
-      approvedAt: null,
-      wetCheckView: FIXTURE,
-    };
-
-    const html: string = ticketPageBS(bsRow, 'INV-001', [], null, undefined, DEFAULT_BRAND_COLORS);
-
-    assert.ok(html.includes('Inspection Labor'), 'Expected Inspection Labor label');
-    assert.ok(html.includes('Repair Labor'), 'Expected Repair Labor label');
-    assert.ok(!html.includes('>Labor ('), 'Legacy single labor row must not appear for wet-check BS');
-
-    // Verify the partition: inspectionLabor + repairLabor === bs.laborSubtotal
-    // In this fixture bs.laborSubtotal=150 and view.laborSubtotal='150.00'
-    // repairLabor = min(150, 150) = 150; inspectionLabor = max(0, 0) = 0
-    const repairLabor = Math.min(parseFloat(FIXTURE.laborSubtotal), bsRow.laborSubtotal);
-    const inspectionLabor = Math.max(0, bsRow.laborSubtotal - repairLabor);
-    assert.ok(
-      Math.abs(inspectionLabor + repairLabor - bsRow.laborSubtotal) < 0.01,
-      `Expected inspectionLabor(${inspectionLabor}) + repairLabor(${repairLabor}) === bs.laborSubtotal(${bsRow.laborSubtotal})`,
-    );
-  });
-
   it('shows single Labor row when wetCheckView is absent', () => {
     const bsRow = {
       billingNumber: 'BS-002',

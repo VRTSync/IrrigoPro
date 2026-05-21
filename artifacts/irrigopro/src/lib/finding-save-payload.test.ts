@@ -103,3 +103,27 @@ describe("buildFindingSavePayload — edit save preserves completed-in-field sta
     expect(payload.noPartNeeded).toBe(false);
   });
 });
+
+import { quantizeLaborHours } from "./finding-save-payload";
+
+describe("quantizeLaborHours integration", () => {
+  it('"0.33" rounds down to "0.25"', () => {
+    expect(quantizeLaborHours("0.33")).toBe("0.25");
+  });
+
+  it('"0.40" rounds up to "0.50"', () => {
+    expect(quantizeLaborHours("0.40")).toBe("0.50");
+  });
+
+  it('"1.00" is an exact multiple and stays "1.00"', () => {
+    expect(quantizeLaborHours("1.00")).toBe("1.00");
+  });
+
+  it('"0.10" is below the 0.25 minimum and clamps to "0.25"', () => {
+    expect(quantizeLaborHours("0.10")).toBe("0.25");
+  });
+
+  it('empty string falls back to the default "0.25"', () => {
+    expect(quantizeLaborHours("")).toBe("0.25");
+  });
+});

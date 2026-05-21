@@ -1423,11 +1423,6 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     break-inside: avoid;
   }
 
-  .zone-labor-row td {
-    background: ${gray};
-    border-top: 1px solid #d1d5db;
-  }
-
   .zone-subtotal-row td {
     background: ${gray};
     border-top: 2px solid ${green};
