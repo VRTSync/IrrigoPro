@@ -1,0 +1,465 @@
+# Replit Task — WC Separate System, Slice 5b (Admin UI for migration)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader rebuild — it is reference material so you understand
+the intent. The actual work for this task is in the **Slice 5b** section at the
+bottom. Do not deviate from any file paths, function names, schema field names,
+or payload shapes specified. If you believe a deviation is necessary, surface it
+and stop rather than proceeding.
+
+> **This slice depends on Slice 5 being in your branch.** The work refactors
+> Slice 5's CLI script to extract its logic into a reusable module, then wraps
+> a UI around that module. If Slice 5's script doesn't exist yet, surface a
+> question and stop.
+
+> **Why this exists.** The deploy environment doesn't have shell access for
+> invoking Slice 5's CLI script directly. This slice exposes the same
+> migration through admin UI endpoints so it can be triggered by a button.
+> The underlying migration logic, safety harness, reconciliation queries,
+> and idempotency from Slice 5 are unchanged — they're just behind a
+> different entry point.
+
+> **Rule of thumb for this slice:** the per-row migration logic stays
+> exactly as Slice 5 specified. Do NOT modify field mappings, status
+> mapping, FK update sequence, or transaction boundaries. The refactor is
+> structural (extract module, add HTTP surface, add UI) not behavioral.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in conversation and are referenced by every slice in this
+rebuild.
+
+**Scope.** Only the BS-WC → wet_check_billings migration is affected. No
+other migrations are touched.
+
+**Safety harness from Slice 5 is non-negotiable.** Per-row transactional,
+checkpointed via `app_settings`, idempotent, reconciliation queries with
+explicit assertions, abort-on-error default true. All preserved as-is.
+
+**Numbering.** New wet check billings use `WC-YYYY-NNNN` format, allocated
+via `getNextWetCheckBillingNumber()` (added in Slice 1).
+
+**Multi-tenant SaaS future framing.** The user is building toward
+multi-tenant SaaS. Admin tooling exposed via UI (instead of shell-only) is
+on-brand for that future. But this specific migration is a one-shot
+operation, not recurring infrastructure — keep the implementation focused
+on this migration, not a general-purpose framework.
+
+---
+
+## Slice 5b — Admin UI wrapper for the migration
+
+**Scope.** Wrap the Slice 5 migration script in an admin-accessible HTTP
+surface so the migration can be triggered without shell access. Refactor
+Slice 5's script logic into a reusable module so both the CLI script (kept
+as emergency fallback) and the new UI share one implementation. Background
+job pattern handles HTTP timeout concerns: the start endpoint returns
+immediately with a job ID and the UI polls a status endpoint for progress.
+Super admin only.
+
+**Files modified.**
+- New: `artifacts/api-server/src/migrations/bs-wc-migration.ts` — extracted
+  migration module (the actual logic)
+- `artifacts/api-server/src/scripts/migrate-bs-wc-to-wet-check-billings.ts`
+  — refactor to thin CLI wrapper that imports from the new module
+- New: `artifacts/api-server/src/lib/migration-runner-state.ts` —
+  in-process job state tracker
+- `artifacts/api-server/src/routes/routes.ts` — add four admin endpoints
+  (start, status, cancel, reset)
+- New: `artifacts/irrigopro/src/pages/admin-migrate-wet-check.tsx` — the
+  admin page
+- `artifacts/irrigopro/src/App.tsx` — register the route under the
+  super-admin route block
+- `artifacts/irrigopro/src/components/layout/nav-config.ts` — add entry to
+  `superAdminNav` only
+- New: `artifacts/api-server/src/migrations/bs-wc-migration.test.ts` —
+  moved/adapted Slice 5 tests to test the module directly
+- New: `artifacts/api-server/src/routes/admin-migrate-wet-check-routes.test.ts`
+  — endpoint tests
+- New: `artifacts/irrigopro/src/pages/admin-migrate-wet-check.test.tsx` —
+  page smoke test
+
+**Concrete changes.**
+
+**(1) Extract migration logic** to
+`artifacts/api-server/src/migrations/bs-wc-migration.ts`.
+
+Move all the per-row migration logic, status mapping, FK update sequence,
+reconciliation queries, and checkpoint persistence out of the script file
+and into this module. Export these public functions:
+
+```typescript
+export interface MigrationOptions {
+  dryRun: boolean;
+  batchSize: number;
+  abortOnError: boolean;
+  bsIds?: number[];
+  /** Returns true to cancel; called between rows. */
+  cancelToken?: () => boolean;
+  /** Called after each row with current progress. */
+  onProgress?: (progress: MigrationProgress) => void;
+}
+
+export interface MigrationProgress {
+  totalCandidates: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  currentBsId: number | null;
+  lastError: string | null;
+}
+
+export interface MigrationResult {
+  totalCandidates: number;
+  migrated: number;
+  failed: number;
+  skipped: number;
+  dryRun: boolean;
+  durationMs: number;
+  reconciliationPre: ReconciliationReport;
+  reconciliationPost: ReconciliationReport | null; // null on dry-run
+  recentFailures: Array<{ bsId: number; error: string }>;
+}
+
+export interface ReconciliationReport {
+  bsWcCount: number;
+  distinctCustomers: number;
+  totalValue: number;
+  alreadyBilled: number;
+  findingsPointingAtBsWc: number;
+  invoiceItemsForBsWc: number;
+  // Post-only fields (undefined on pre):
+  remainingBsWc?: number;
+  wcbCount?: number;
+  wcbTotalValue?: number;
+  findingsStillPointingAtBsWc?: number;
+  invoiceItemsOrphaned?: number;
+}
+
+export async function runMigration(opts: MigrationOptions): Promise<MigrationResult>
+export async function getReconciliationReport(phase: 'pre' | 'post'): Promise<ReconciliationReport>
+```
+
+The actual per-row logic is the same as specified in Slice 5 (steps 1–11
+inside a transaction, status mapping, FK updates, etc.). The `cancelToken`
+is checked at the top of each iteration so a UI-initiated cancel exits the
+loop cleanly after the current row finishes.
+
+**(2) Refactor the CLI script** at
+`artifacts/api-server/src/scripts/migrate-bs-wc-to-wet-check-billings.ts`.
+
+Replace the body with a thin wrapper that parses CLI args and calls the
+module:
+
+```typescript
+import { runMigration } from "../migrations/bs-wc-migration";
+
+async function main() {
+  const dryRun = parseFlag("dry-run");
+  const batchSize = parseArg("batch", 100);
+  const abortOnError = !process.argv.includes("--abort-on-error=false");
+  const bsIdsRaw = parseStringArg("bs-ids");
+  const bsIds = bsIdsRaw ? bsIdsRaw.split(",").map(Number).filter(Number.isFinite) : undefined;
+
+  const result = await runMigration({
+    dryRun,
+    batchSize,
+    abortOnError,
+    bsIds,
+    onProgress: (p) => {
+      console.log(JSON.stringify({
+        event: "bs_wc_migration.progress",
+        ...p,
+      }));
+    },
+  });
+
+  console.log(JSON.stringify({
+    event: "bs_wc_migration.run_done",
+    ...result,
+  }));
+  process.exit(result.failed > 0 ? 1 : 0);
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
+```
+
+All structured logging that Slice 5 specified (per-row done/failed events)
+moves INTO the module's `onProgress` callback so both CLI and UI see the
+same events.
+
+**(3) Job state tracker** at
+`artifacts/api-server/src/lib/migration-runner-state.ts`.
+
+Simple in-process module-level state (no Redis, no queue infrastructure —
+the migration is a single-tenant operation on a single Node process):
+
+```typescript
+type JobState = 'idle' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+interface JobSnapshot {
+  state: JobState;
+  jobId: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  dryRun: boolean;
+  progress: MigrationProgress | null;
+  result: MigrationResult | null;
+  cancelRequested: boolean;
+}
+
+let currentJob: JobSnapshot = { state: 'idle', jobId: null, /* ... */ };
+
+export function getJobSnapshot(): JobSnapshot { return { ...currentJob }; }
+export function startJob(jobId: string, dryRun: boolean): void { /* validates state is 'idle' */ }
+export function updateProgress(progress: MigrationProgress): void { /* called from runMigration's onProgress */ }
+export function completeJob(result: MigrationResult): void { /* state → 'completed' or 'failed' */ }
+export function requestCancel(): void { currentJob.cancelRequested = true; }
+export function shouldCancel(): boolean { return currentJob.cancelRequested; }
+export function resetJob(): void { /* only allowed when state is in ['completed', 'failed', 'cancelled'] */ }
+```
+
+A new run can only start when `state === 'idle'`. Reject start requests
+otherwise with HTTP 409.
+
+**(4) Four admin endpoints** in `artifacts/api-server/src/routes/routes.ts`.
+Place adjacent to other `/api/admin/*` endpoints. All require super_admin
+role check.
+
+```typescript
+// POST /api/admin/migrate-bs-wc/start
+app.post("/api/admin/migrate-bs-wc/start", requireAuthentication, async (req: any, res) => {
+  if (req.authenticatedUserRole !== 'super_admin') {
+    res.status(403).json({ message: "Super admin only" });
+    return;
+  }
+  const snapshot = getJobSnapshot();
+  if (snapshot.state === 'running') {
+    res.status(409).json({ message: "A migration is already running" });
+    return;
+  }
+  const body = req.body as { dryRun?: boolean; batchSize?: number; bsIds?: number[] };
+  const jobId = `bsWcMigration-${Date.now()}`;
+  startJob(jobId, body.dryRun ?? false);
+
+  // Fire and forget — runs in background, updates state via onProgress.
+  runMigration({
+    dryRun: body.dryRun ?? false,
+    batchSize: body.batchSize ?? 100,
+    abortOnError: true,
+    bsIds: body.bsIds,
+    cancelToken: shouldCancel,
+    onProgress: updateProgress,
+  })
+    .then((result) => completeJob(result))
+    .catch((err) => {
+      console.error("bs_wc_migration.run_failed", err);
+      completeJob({ /* ...partial result with failed: 1, error: err.message */ } as MigrationResult);
+    });
+
+  res.status(202).json({ jobId, message: "Migration started" });
+});
+
+// GET /api/admin/migrate-bs-wc/status
+app.get("/api/admin/migrate-bs-wc/status", requireAuthentication, async (req: any, res) => {
+  if (req.authenticatedUserRole !== 'super_admin') {
+    res.status(403).json({ message: "Super admin only" });
+    return;
+  }
+  res.json(getJobSnapshot());
+});
+
+// POST /api/admin/migrate-bs-wc/cancel
+app.post("/api/admin/migrate-bs-wc/cancel", requireAuthentication, async (req: any, res) => {
+  if (req.authenticatedUserRole !== 'super_admin') {
+    res.status(403).json({ message: "Super admin only" });
+    return;
+  }
+  const snapshot = getJobSnapshot();
+  if (snapshot.state !== 'running') {
+    res.status(409).json({ message: "No migration is running" });
+    return;
+  }
+  requestCancel();
+  res.status(202).json({ message: "Cancel requested" });
+});
+
+// POST /api/admin/migrate-bs-wc/reset
+app.post("/api/admin/migrate-bs-wc/reset", requireAuthentication, async (req: any, res) => {
+  if (req.authenticatedUserRole !== 'super_admin') {
+    res.status(403).json({ message: "Super admin only" });
+    return;
+  }
+  const snapshot = getJobSnapshot();
+  if (snapshot.state === 'running') {
+    res.status(409).json({ message: "Cancel the running migration first" });
+    return;
+  }
+  resetJob();
+  res.json({ message: "Job state reset to idle" });
+});
+```
+
+The "fire and forget" pattern is intentional — the HTTP request returns
+immediately (status 202 Accepted), the migration runs in the Node event
+loop, and the UI polls `/status` to follow progress. There is no risk of
+HTTP timeout because the request returns before any work happens.
+
+Note: this pattern requires the Node process to stay alive for the duration
+of the migration. If the deploy platform restarts the process mid-migration,
+the job state is lost but the database state is intact (the per-row
+transactions from Slice 5 protect against partial-row damage; the
+checkpoint in `app_settings.bsWcMigration.done` lets a subsequent run
+resume).
+
+**(5) Admin page** at
+`artifacts/irrigopro/src/pages/admin-migrate-wet-check.tsx`.
+
+Component contract — exact features, do not add more:
+- Default exported function component `AdminMigrateWetCheck`.
+- Page chrome: `PageContainer` > `PageHeader` (title "BS-WC → Wet Check
+  Billings Migration", subtitle "One-time data migration. Read the docs
+  before running.") > `PageContent`.
+- A short paragraph explaining what the migration does, with a link or
+  callout pointing at the Slice 5 spec or runbook docs.
+- Polls `GET /api/admin/migrate-bs-wc/status` every 2 seconds via
+  `useQuery({ refetchInterval: 2000 })`. Stops polling when `state !==
+  'running'`.
+- **Status panel** (top of page) showing the current state:
+  - `state` as a badge (idle / running / completed / failed / cancelled).
+  - `startedAt`, `completedAt`, `durationMs`.
+  - Progress bar (`processed / totalCandidates`) when state is `running`.
+  - Counts: `succeeded`, `failed`, `skipped`.
+  - `currentBsId` when state is `running`.
+  - `lastError` when state is `failed`.
+- **Action buttons** (only visible when `state === 'idle'`):
+  - "Run Dry Run" — calls `POST /api/admin/migrate-bs-wc/start` with
+    `{ dryRun: true }`. No confirmation.
+  - "Run Migration" — wraps in a confirmation modal: "This will move all
+    BS-WC rows from billing_sheets to wet_check_billings. This is
+    destructive and not reversible without a database backup. Are you
+    sure?" with a typed confirmation field requiring the user to type the
+    word `MIGRATE` before the confirm button enables. Then calls
+    `POST /api/admin/migrate-bs-wc/start` with `{ dryRun: false }`.
+- **Cancel button** (only visible when `state === 'running'`): calls
+  `POST /api/admin/migrate-bs-wc/cancel`. No confirmation — cancel is
+  recoverable.
+- **Reset button** (only visible when `state` is in
+  `['completed', 'failed', 'cancelled']`): hits `POST /api/admin/migrate-bs-wc/reset`
+  so a new run can start.
+- **Reconciliation report panel** (collapsible card, expanded by default
+  when state is `completed`): displays the pre- and post-reconciliation
+  reports in a small table. Each metric row shows the pre value, post
+  value, and a green check or red X based on the expected assertion.
+- **Recent failures list** (collapsible, expanded when `failed > 0`):
+  table with `bsId`, error message. Limit to 50 rows.
+- Loading state: skeleton.
+- Error state: if status endpoint returns non-200, show an error message
+  and a retry button.
+
+**Do NOT include:** batch size selector, `--bs-ids` UI (advanced users can
+hit the endpoint directly with the body), download buttons for logs,
+scheduling/cron UI, real-time websocket updates (polling is fine),
+confirmation modals on dry-run.
+
+**(6) Route registration** in `App.tsx`.
+
+Add the lazy import:
+
+```typescript
+const AdminMigrateWetCheckPage = lazyPage(() => import("@/pages/admin-migrate-wet-check"));
+```
+
+Register the route in the super-admin route block ONLY (do not add to
+billing manager, company admin, or any other role):
+
+```typescript
+<Route path="/admin/migrate-wet-check" component={AdminMigrateWetCheckPage} />
+```
+
+**(7) Nav entry** in `nav-config.ts`.
+
+Add ONLY to `superAdminNav` (not billingManagerNav, not companyAdminNav).
+Place in the "System" group:
+
+```typescript
+{ type: "leaf", label: "BS-WC Migration", path: "/admin/migrate-wet-check", icon: ArrowRight },
+```
+
+Use an existing icon import; pick `ArrowRight` or `Database` or whatever
+feels right and is already imported.
+
+**(8) Tests.**
+
+`bs-wc-migration.test.ts` — port Slice 5's 9 test cases to test the new
+module directly (call `runMigration(opts)` instead of invoking the
+script). All assertions remain the same.
+
+`admin-migrate-wet-check-routes.test.ts`:
+- Calling `POST /start` as non-super-admin returns 403.
+- Calling `POST /start` when state is `'idle'` returns 202 with a jobId;
+  state moves to `'running'` synchronously.
+- Calling `POST /start` when state is `'running'` returns 409.
+- Calling `GET /status` returns the current snapshot.
+- Calling `POST /cancel` when state is `'running'` sets the cancel flag.
+- Calling `POST /cancel` when state is `'idle'` returns 409.
+- Calling `POST /reset` when state is `'completed'` moves to `'idle'`.
+- Calling `POST /reset` when state is `'running'` returns 409.
+
+`admin-migrate-wet-check.test.tsx` (smoke test):
+- Renders the page with mocked status responses for each state value.
+- Assert the appropriate buttons appear for each state.
+- Assert the "Run Migration" confirmation modal requires typing
+  `MIGRATE`.
+- Assert the reconciliation panel renders when a completed result is
+  present.
+
+**Acceptance criteria.**
+- The migration module (`bs-wc-migration.ts`) exposes `runMigration(opts)`
+  and is called by both the CLI script and the new admin endpoint.
+- The CLI script from Slice 5 still works exactly as specified — same
+  flags, same output, same exit codes.
+- All Slice 5 test cases pass against the refactored module.
+- Four admin endpoints (start/status/cancel/reset) exist and require
+  super_admin.
+- The start endpoint returns HTTP 202 immediately and runs the migration
+  in the background.
+- The admin page polls status every 2 seconds when state is `running`.
+- The "Run Migration" button requires typed `MIGRATE` confirmation before
+  activating.
+- Dry-run does NOT require confirmation.
+- Cancel cleanly stops the migration between rows (the current row's
+  transaction completes; subsequent rows are skipped).
+- The page is only accessible to super_admin.
+- The nav entry only appears for super_admin.
+- All existing CLI tests still pass.
+- All new endpoint and page tests pass.
+
+**Out of scope.**
+- Generalizing the migration runner into reusable infrastructure for
+  future migrations. This is single-purpose.
+- Persisting job state across Node process restarts. If the process
+  restarts during a migration, the in-process state is lost (database
+  state is intact via per-row transactions + app_settings checkpoint;
+  rerunning resumes correctly).
+- Multi-tenant migration isolation. This is a global one-shot operation.
+- Real-time websocket progress updates. Polling is sufficient.
+- Email/notification on completion.
+- Migration history / log retention. Each run overwrites the previous
+  state. If you need historical runs, query `app_settings` directly.
+- Removing the CLI script. It stays as an emergency fallback for
+  environments with shell access.
+- Modifying the per-row migration logic itself (the actual data
+  transformations stay exactly as specified in Slice 5).
+- Adding `--bs-ids` UI surface. Advanced users can hit the endpoint with
+  a custom body if needed.
+
+**Dependencies.** Slice 5 merged (the CLI script and its tests must exist
+for the refactor to apply). The migration module extraction touches Slice
+5's script file, so Slice 5 should be in your branch before this slice is
+built.
