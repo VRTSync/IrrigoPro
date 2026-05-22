@@ -208,10 +208,11 @@ export default function AdminMigrateWetCheckPage() {
   const [showFailures, setShowFailures] = useState(true);
   const [failures, setFailures] = useState<FailureDetail[]>([]);
 
-  const { data: snapshot } = useQuery<JobSnapshot>({
+  const { data: snapshot, isError: statusError, refetch: refetchStatus } = useQuery<JobSnapshot>({
     queryKey: ["/api/admin/migrate-bs-wc/status"],
     queryFn: async () => {
       const res = await apiRequest("/api/admin/migrate-bs-wc/status", "GET");
+      if (!res.ok) throw new Error(`Status fetch failed: ${res.status}`);
       return res.json();
     },
     refetchInterval: (query) => {
@@ -219,6 +220,7 @@ export default function AdminMigrateWetCheckPage() {
       return data?.state === "running" ? 2000 : false;
     },
     staleTime: 1000,
+    retry: 2,
   });
 
   const prevStateRef = useRef<JobSnapshot["state"] | undefined>(undefined);
@@ -385,7 +387,7 @@ export default function AdminMigrateWetCheckPage() {
               {snapshot?.cancelRequested ? "Cancelling…" : "Cancel"}
             </Button>
           )}
-          {isTerminal && (
+          {(isTerminal || statusError) && (
             <Button
               variant="outline"
               size="sm"
@@ -465,6 +467,12 @@ export default function AdminMigrateWetCheckPage() {
                 <p className="text-sm text-gray-500">No migration has run yet in this session.</p>
               )}
             </>
+          ) : statusError ? (
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+              <p className="text-sm text-gray-500">Could not load status. The job may be in a completed state.</p>
+              <Button variant="outline" size="sm" onClick={() => refetchStatus()}>Retry</Button>
+            </div>
           ) : (
             <p className="text-sm text-gray-400">Loading…</p>
           )}
