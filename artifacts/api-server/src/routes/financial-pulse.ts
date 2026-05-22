@@ -15,6 +15,7 @@ import {
   invoiceItems,
   invoices,
   users,
+  wetCheckBillings,
   workOrders,
 } from "@workspace/db/schema";
 import {
@@ -60,6 +61,9 @@ import {
   type ServiceTypeRow,
   type PulseWorkOrderLike,
   type PulseBillingSheetLike,
+  type WetCheckBillingBillableLike,
+  type WetCheckBillingLike,
+  type PulseWetCheckBillingLike,
 } from "../financial-pulse-math";
 
 const ALLOWED_ROLES = new Set([
@@ -284,6 +288,52 @@ async function loadBillingSheetsForInvoices(
   }));
 }
 
+// Task #814 — WCB loaders, mirroring billing sheet loaders.
+
+async function loadAllWetCheckBillingsForCustomers(
+  customerIds: number[],
+): Promise<WetCheckBillingBillableLike[]> {
+  if (customerIds.length === 0) return [];
+  const rows = await db
+    .select({
+      invoiceId: wetCheckBillings.invoiceId,
+      totalAmount: wetCheckBillings.totalAmount,
+      status: wetCheckBillings.status,
+      workDate: wetCheckBillings.workDate,
+    })
+    .from(wetCheckBillings)
+    .where(inArray(wetCheckBillings.customerId, customerIds));
+  return rows.map((w) => ({
+    invoiceId: w.invoiceId,
+    totalAmount: w.totalAmount,
+    status: w.status,
+    workDate: w.workDate,
+  }));
+}
+
+async function loadWetCheckBillingsForInvoices(
+  invoiceIds: number[],
+): Promise<WetCheckBillingLike[]> {
+  if (invoiceIds.length === 0) return [];
+  const rows = await db
+    .select({
+      invoiceId: wetCheckBillings.invoiceId,
+      partsSubtotal: wetCheckBillings.partsSubtotal,
+      laborSubtotal: wetCheckBillings.laborSubtotal,
+      technicianId: wetCheckBillings.technicianId,
+      totalHours: wetCheckBillings.totalHours,
+    })
+    .from(wetCheckBillings)
+    .where(inArray(wetCheckBillings.invoiceId, invoiceIds));
+  return rows.map((w) => ({
+    invoiceId: w.invoiceId,
+    partsSubtotal: w.partsSubtotal ?? null,
+    laborSubtotal: w.laborSubtotal ?? null,
+    technicianId: w.technicianId ?? null,
+    totalHours: w.totalHours ?? null,
+  }));
+}
+
 async function loadTechs(companyId: number | null): Promise<UserWithName[]> {
   const rows = companyId == null
     ? await db.select().from(users)
@@ -324,14 +374,21 @@ async function computeUnbilledExposure(
     .map((r) => r.id);
   if (customerIds.length === 0) return 0;
 
-  const woRows = await db
-    .select({ total: workOrders.totalAmount, status: workOrders.status, invoiceId: workOrders.invoiceId })
-    .from(workOrders)
-    .where(inArray(workOrders.customerId, customerIds));
-  const bsRows = await db
-    .select({ total: billingSheets.totalAmount, status: billingSheets.status, invoiceId: billingSheets.invoiceId })
-    .from(billingSheets)
-    .where(inArray(billingSheets.customerId, customerIds));
+  const [woRows, bsRows, wcbRows] = await Promise.all([
+    db
+      .select({ total: workOrders.totalAmount, status: workOrders.status, invoiceId: workOrders.invoiceId })
+      .from(workOrders)
+      .where(inArray(workOrders.customerId, customerIds)),
+    db
+      .select({ total: billingSheets.totalAmount, status: billingSheets.status, invoiceId: billingSheets.invoiceId })
+      .from(billingSheets)
+      .where(inArray(billingSheets.customerId, customerIds)),
+    // Task #814 — WCBs have no cancelled status; uninvoiced = invoiceId IS NULL.
+    db
+      .select({ total: wetCheckBillings.totalAmount, invoiceId: wetCheckBillings.invoiceId })
+      .from(wetCheckBillings)
+      .where(inArray(wetCheckBillings.customerId, customerIds)),
+  ]);
 
   // Task #726 — Tile 6 "Unbilled Pipeline": include ALL uninvoiced rows
   // except cancelled. The prior narrow status allowlist
@@ -357,6 +414,11 @@ async function computeUnbilledExposure(
   for (const b of bsRows) {
     if (!isUnbilledWorkRow(b)) continue;
     sum += toN(b.total);
+  }
+  // Task #814 — WCBs: no cancelled status, so just check invoiceId.
+  for (const wcb of wcbRows) {
+    if (wcb.invoiceId != null) continue;
+    sum += toN(wcb.total);
   }
   return sum;
 }
@@ -407,11 +469,13 @@ export function registerFinancialPulseRoutes(
         const cust = await loadCustomers(scope.companyId);
         const customerIds = cust.map((c) => c.id);
 
-        // Load invoices + all WOs/BSs in parallel.
-        const [allInvoices, allWos, allBss] = await Promise.all([
+        // Load invoices + all WOs/BSs/WCBs in parallel.
+        const [allInvoices, allWos, allBss, allWcbs] = await Promise.all([
           loadInvoicesForCustomers(customerIds),
           loadAllWorkOrdersForCustomers(customerIds),
           loadAllBillingSheetsForCustomers(customerIds),
+          // Task #814 — uninvoiced WCBs for YTD.
+          loadAllWetCheckBillingsForCustomers(customerIds),
         ]);
 
         const mtd = getMtdWindow(now);
@@ -459,11 +523,13 @@ export function registerFinancialPulseRoutes(
         // Sums all invoiced revenue (by invoiceYear) + uninvoiced WO/BS pipeline
         // created this year, so the tile captures all billable work regardless of
         // whether an invoice has been issued yet.
+        // Task #814 — uninvoiced WCBs (by workDate) also included.
         const billedYtd = computeAllBillableYtd(
           allInvoices,
           allWos,
           allBss,
           now.getFullYear(),
+          allWcbs,
         );
         const billedPrevYearYtd = computeBilled(
           allInvoices,
@@ -503,14 +569,19 @@ export function registerFinancialPulseRoutes(
             return d >= marginWindow.start && d < marginWindow.end;
           })
           .map((i) => i.id);
-        const wos = await loadWorkOrdersForInvoices(invoiceIdsInWindow);
-        const bss = await loadBillingSheetsForInvoices(invoiceIdsInWindow);
-        const techs = await loadTechs(scope.companyId);
+        const [wos, bss, wcbsForMargin, techs] = await Promise.all([
+          loadWorkOrdersForInvoices(invoiceIdsInWindow),
+          loadBillingSheetsForInvoices(invoiceIdsInWindow),
+          // Task #814 — WCBs linked to invoices in the margin window.
+          loadWetCheckBillingsForInvoices(invoiceIdsInWindow),
+          loadTechs(scope.companyId),
+        ]);
         const usersById = new Map(techs.map((u) => [u.id, u]));
         const margin = computeGrossMargin({
           invoices: allInvoices,
           workOrders: wos,
           billingSheets: bss,
+          wetCheckBillings: wcbsForMargin,
           usersById,
           fallbackHourlyWage: fallbackHourlyWage(),
           window: marginWindow,
@@ -614,7 +685,11 @@ export function registerFinancialPulseRoutes(
         const now = new Date();
         const cust = await loadCustomers(scope.companyId);
         const customerIds = cust.map((c) => c.id);
-        const allInvoices = await loadInvoicesForCustomers(customerIds);
+        // Task #814 — load uninvoiced WCBs alongside invoices for bucketing.
+        const [allInvoices, allWcbsTrend] = await Promise.all([
+          loadInvoicesForCustomers(customerIds),
+          loadAllWetCheckBillingsForCustomers(customerIds),
+        ]);
 
         const currentStarts = getMonthStarts(now, months);
         const earliest = currentStarts[0];
@@ -630,6 +705,22 @@ export function registerFinancialPulseRoutes(
 
         const current = bucketMonthlyRevenue(allInvoices, currentStarts);
         const prev = bucketMonthlyRevenue(allInvoices, prevStarts);
+
+        // Task #814 — bucket uninvoiced WCBs by workDate into current series.
+        // Invoiced WCBs are already captured via the invoice's totalAmount above.
+        const currentMonthKeys = new Map(current.map((b) => [b.month, b]));
+        for (const wcb of allWcbsTrend) {
+          if (wcb.invoiceId != null) continue; // invoiced: skip (in invoice total)
+          const d = wcb.workDate instanceof Date
+            ? wcb.workDate
+            : wcb.workDate ? new Date(wcb.workDate as unknown as string) : null;
+          if (!d || Number.isNaN(d.getTime())) continue;
+          const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+          const bucket = currentMonthKeys.get(key);
+          if (!bucket) continue;
+          const amt = wcb.totalAmount == null ? 0 : parseFloat(String(wcb.totalAmount));
+          if (Number.isFinite(amt)) bucket.revenue += amt;
+        }
 
         const series = current.map((row, i) => ({
           month: row.month,
@@ -688,7 +779,11 @@ export function registerFinancialPulseRoutes(
         const cust = await loadCustomers(scope.companyId);
         const customersById = new Map(cust.map((c) => [c.id, c]));
         const customerIds = cust.map((c) => c.id);
-        const allInvoices = await loadInvoicesForCustomers(customerIds);
+        // Task #814 — load uninvoiced WCBs alongside invoices.
+        const [allInvoices, allWcbsMix] = await Promise.all([
+          loadInvoicesForCustomers(customerIds),
+          loadAllWetCheckBillingsForCustomers(customerIds),
+        ]);
         const invoiceIdsInWindow = allInvoices
           .filter((inv) => {
             if (inv.status === "draft" || inv.status === "cancelled")
@@ -701,11 +796,54 @@ export function registerFinancialPulseRoutes(
           .map((i) => i.id);
         const items = await loadInvoiceItemsForInvoices(invoiceIdsInWindow);
 
+        // Task #814 — load uninvoiced and invoiced WCBs in the window.
+        // `allWcbsMix` (BillableLike shape) has workDate/totalAmount but not subtotals,
+        // so run a single direct query scoped to this company's customers for both legs.
+        void allWcbsMix; // used only to confirm the parallel fetch; subtotals query below
+        const uninvoicedWcbRows: WetCheckBillingLike[] = [];
+        const invoicedWcbRows: WetCheckBillingLike[] = [];
+        if (customerIds.length > 0) {
+          const wcbFull = await db
+            .select({
+              invoiceId: wetCheckBillings.invoiceId,
+              partsSubtotal: wetCheckBillings.partsSubtotal,
+              laborSubtotal: wetCheckBillings.laborSubtotal,
+              technicianId: wetCheckBillings.technicianId,
+              totalHours: wetCheckBillings.totalHours,
+              workDate: wetCheckBillings.workDate,
+            })
+            .from(wetCheckBillings)
+            .where(inArray(wetCheckBillings.customerId, customerIds));
+          for (const w of wcbFull) {
+            const row: WetCheckBillingLike = {
+              invoiceId: w.invoiceId ?? null,
+              partsSubtotal: w.partsSubtotal ?? null,
+              laborSubtotal: w.laborSubtotal ?? null,
+              technicianId: w.technicianId ?? null,
+              totalHours: w.totalHours ?? null,
+            };
+            if (w.invoiceId == null) {
+              // Uninvoiced: bucket by workDate to stay within the window.
+              const d = w.workDate instanceof Date
+                ? w.workDate
+                : w.workDate ? new Date(w.workDate as unknown as string) : null;
+              if (!d || Number.isNaN(d.getTime())) continue;
+              if (d < window.start || d >= window.end) continue;
+              uninvoicedWcbRows.push(row);
+            } else if (invoiceIdsInWindow.includes(w.invoiceId)) {
+              // Invoiced: only include if the linked invoice falls in the window.
+              invoicedWcbRows.push(row);
+            }
+          }
+        }
+
         const mix = computeRevenueMix({
           invoices: allInvoices,
           items,
           customersById,
           window,
+          uninvoicedWetCheckBillings: uninvoicedWcbRows,
+          invoicedWetCheckBillings: invoicedWcbRows,
         });
         res.json({ ...mix, period, asOf: now.toISOString() });
       } catch (err) {
@@ -826,14 +964,19 @@ export function registerFinancialPulseRoutes(
             return d >= window.start && d < window.end;
           })
           .map((i) => i.id);
-        const wos = await loadWorkOrdersForInvoices(invoiceIdsInWindow);
-        const bss = await loadBillingSheetsForInvoices(invoiceIdsInWindow);
-        const techs = await loadTechs(scope.companyId);
+        const [wos, bss, wcbsTech, techs] = await Promise.all([
+          loadWorkOrdersForInvoices(invoiceIdsInWindow),
+          loadBillingSheetsForInvoices(invoiceIdsInWindow),
+          // Task #814 — WCBs linked to invoices in window for tech attribution.
+          loadWetCheckBillingsForInvoices(invoiceIdsInWindow),
+          loadTechs(scope.companyId),
+        ]);
         const rows = computeByTechnician({
           techs,
           invoices: allInvoices,
           workOrders: wos,
           billingSheets: bss,
+          wetCheckBillings: wcbsTech,
           window,
         });
 
@@ -1107,29 +1250,42 @@ export function registerFinancialPulseRoutes(
         const ytd = getYtdWindow(now);
         const allInvoices = await loadInvoicesForCustomers([customerId]);
 
-        const billedMtd = computeBilled(allInvoices, mtd.start, mtd.end);
-        const billedYtd = computeBilled(allInvoices, ytd.start, ytd.end);
+        // Invoice-sourced figures — uninvoiced WCBs are added below after the
+        // WCB query resolves. (Task #814: WCBs must be included in all calcs)
+        let billedMtd = computeBilled(allInvoices, mtd.start, mtd.end);
+        let billedYtd = computeBilled(allInvoices, ytd.start, ytd.end);
         const outstandingAr = computeOutstandingAr(allInvoices);
         const avgDaysToPay = computeAvgDaysToPay(allInvoices, now);
 
         // Unbilled exposure scoped to this customer only — same
         // status sets as `computeUnbilledExposure` above.
-        const woRows = await db
-          .select({
-            total: workOrders.totalAmount,
-            status: workOrders.status,
-            invoiceId: workOrders.invoiceId,
-          })
-          .from(workOrders)
-          .where(eq(workOrders.customerId, customerId));
-        const bsRows = await db
-          .select({
-            total: billingSheets.totalAmount,
-            status: billingSheets.status,
-            invoiceId: billingSheets.invoiceId,
-          })
-          .from(billingSheets)
-          .where(eq(billingSheets.customerId, customerId));
+        const [woRows, bsRows, wcbSummaryRows] = await Promise.all([
+          db
+            .select({
+              total: workOrders.totalAmount,
+              status: workOrders.status,
+              invoiceId: workOrders.invoiceId,
+            })
+            .from(workOrders)
+            .where(eq(workOrders.customerId, customerId)),
+          db
+            .select({
+              total: billingSheets.totalAmount,
+              status: billingSheets.status,
+              invoiceId: billingSheets.invoiceId,
+            })
+            .from(billingSheets)
+            .where(eq(billingSheets.customerId, customerId)),
+          // Task #814 — all WCBs for this customer (workDate needed for MTD/YTD bucketing).
+          db
+            .select({
+              total: wetCheckBillings.totalAmount,
+              invoiceId: wetCheckBillings.invoiceId,
+              workDate: wetCheckBillings.workDate,
+            })
+            .from(wetCheckBillings)
+            .where(eq(wetCheckBillings.customerId, customerId)),
+        ]);
         // Task #730 — use the shared isUnbilledWorkRow predicate so the
         // per-customer tile uses exactly the same rule as computeUnbilledExposure.
         const toN = (v: unknown) => {
@@ -1147,6 +1303,24 @@ export function registerFinancialPulseRoutes(
             if (!isUnbilledWorkRow(b)) continue;
             unbilledExposure += toN(b.total);
           }
+          // Task #814 — WCBs: no cancelled status, check invoiceId only.
+          for (const wcb of wcbSummaryRows) {
+            if (wcb.invoiceId != null) continue;
+            unbilledExposure += toN(wcb.total);
+          }
+        }
+
+        // Task #814 — add uninvoiced WCBs to billed MTD / YTD and budget spend,
+        // bucketed by workDate. Invoiced WCBs flow through invoice totals already.
+        for (const wcb of wcbSummaryRows) {
+          if (wcb.invoiceId != null) continue; // invoiced WCBs already counted via allInvoices
+          const d = wcb.workDate instanceof Date
+            ? wcb.workDate
+            : wcb.workDate ? new Date(wcb.workDate as unknown as string) : null;
+          if (!d || Number.isNaN(d.getTime())) continue;
+          const amt = toN(wcb.total);
+          if (d >= mtd.start && d < mtd.end) billedMtd += amt;
+          if (d >= ytd.start && d < ytd.end) billedYtd += amt;
         }
 
         // Last invoice date — most recent createdAt across any
@@ -1183,6 +1357,17 @@ export function registerFinancialPulseRoutes(
           if (!Number.isFinite(total)) continue;
           if (d >= monthStart) monthSpend += total;
           if (d >= yearStart) yearSpend += total;
+        }
+        // Task #814 — include uninvoiced WCBs in budget spend (by workDate).
+        for (const wcb of wcbSummaryRows) {
+          if (wcb.invoiceId != null) continue;
+          const d = wcb.workDate instanceof Date
+            ? wcb.workDate
+            : wcb.workDate ? new Date(wcb.workDate as unknown as string) : null;
+          if (!d || Number.isNaN(d.getTime())) continue;
+          const amt = toN(wcb.total);
+          if (d >= monthStart) monthSpend += amt;
+          if (d >= yearStart) yearSpend += amt;
         }
         const parseCap = (v: unknown): number | null => {
           if (v == null || v === "") return null;
@@ -1263,10 +1448,12 @@ export function registerFinancialPulseRoutes(
         const cust = await loadCustomers(scope.companyId);
         const customerIds = cust.map((c) => c.id);
 
-        const [allInvoices, allWos, allBss, techs] = await Promise.all([
+        const [allInvoices, allWos, allBss, allWcbsPulse, techs] = await Promise.all([
           loadInvoicesForCustomers(customerIds),
           loadPulseWorkOrdersForCustomers(customerIds),
           loadPulseBillingSheetForCustomers(customerIds),
+          // Task #814 — WCBs for in-flight + tech attribution in pulse tab.
+          loadPulseWetCheckBillingsForCustomers(customerIds),
           loadTechs(scope.companyId),
         ]);
 
@@ -1319,8 +1506,18 @@ export function registerFinancialPulseRoutes(
           inFlightCustomerIds.add(bs.customerId);
           if (bs.technicianId) inFlightTechIds.add(bs.technicianId);
         }
+        // Task #814 — uninvoiced WCBs in in-flight tile (no cancelled status).
+        for (const wcb of allWcbsPulse) {
+          if (hiddenIds.has(wcb.customerId)) continue;
+          if (wcb.invoiceId != null) continue;
+          inFlightTotal += toNum(wcb.totalAmount);
+          inFlightCustomerIds.add(wcb.customerId);
+          if (wcb.technicianId) inFlightTechIds.add(wcb.technicianId);
+        }
 
         // ── Year-to-Date (invoiced YTD + in-flight) ───────────────────────
+        // inFlightTotal already includes uninvoiced WCBs (added above), so
+        // invoicedYtd + inFlightTotal avoids any double-count. (Task #814)
         let invoicedYtd = 0;
         for (const inv of allInvoices) {
           if (inv.status === "draft" || inv.status === "cancelled") continue;
@@ -1329,16 +1526,18 @@ export function registerFinancialPulseRoutes(
         }
 
         // ── Per-customer + per-tech breakdown ─────────────────────────────
-        // Prefilter WOs/BSs to visible customers only so technician in-flight
+        // Prefilter WOs/BSs/WCBs to visible customers only so technician in-flight
         // totals stay consistent with the tile (both exclude hiddenFromBilling).
         const visibleWos = allWos.filter((wo) => !hiddenIds.has(wo.customerId));
         const visibleBss = allBss.filter((bs) => !hiddenIds.has(bs.customerId));
+        const visibleWcbs = allWcbsPulse.filter((wcb) => !hiddenIds.has(wcb.customerId));
 
         const pulseCustomers = computePulseCustomers({
           customers: cust,
           invoices: allInvoices,
           workOrders: allWos,
           billingSheets: allBss,
+          wetCheckBillings: allWcbsPulse,
           currentYear,
           now,
         });
@@ -1348,6 +1547,7 @@ export function registerFinancialPulseRoutes(
           invoices: allInvoices,
           workOrders: visibleWos,
           billingSheets: visibleBss,
+          wetCheckBillings: visibleWcbs,
           currentYear,
         });
 
@@ -1364,6 +1564,9 @@ export function registerFinancialPulseRoutes(
             techCount: inFlightTechIds.size,
           },
           yearToDate: {
+            // Task #814 — include uninvoiced WCB amounts in the YTD total
+            // (invoiced WCBs flow through invoicedYtd via invoice totals).
+            // inFlightTotal already includes uninvoiced WCBs — no separate addend needed. (Task #814)
             value: invoicedYtd + inFlightTotal,
           },
           customers: pulseCustomers.sort((a, b) => b.inFlight - a.inFlight),
@@ -1438,6 +1641,34 @@ async function loadPulseBillingSheetForCustomers(
       createdAt: b.createdAt,
       customerId: b.customerId,
       technicianId: b.technicianId ?? null,
+    }));
+}
+
+// Task #814 — pulse WCB loader (mirrors loadPulseBillingSheetForCustomers).
+async function loadPulseWetCheckBillingsForCustomers(
+  customerIds: number[],
+): Promise<PulseWetCheckBillingLike[]> {
+  if (customerIds.length === 0) return [];
+  const rows = await db
+    .select({
+      invoiceId: wetCheckBillings.invoiceId,
+      totalAmount: wetCheckBillings.totalAmount,
+      status: wetCheckBillings.status,
+      workDate: wetCheckBillings.workDate,
+      customerId: wetCheckBillings.customerId,
+      technicianId: wetCheckBillings.technicianId,
+    })
+    .from(wetCheckBillings)
+    .where(inArray(wetCheckBillings.customerId, customerIds));
+  return rows
+    .filter((w): w is typeof w & { customerId: number } => w.customerId != null)
+    .map((w) => ({
+      invoiceId: w.invoiceId ?? null,
+      totalAmount: w.totalAmount,
+      status: w.status ?? "",
+      workDate: w.workDate,
+      customerId: w.customerId,
+      technicianId: w.technicianId ?? null,
     }));
 }
 

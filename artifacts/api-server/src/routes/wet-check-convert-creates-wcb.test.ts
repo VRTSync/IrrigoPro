@@ -248,7 +248,7 @@ describe("Partial-conversion append — second convertWetCheck call reuses the s
       UPDATE wet_check_findings SET resolution = 'repaired_in_field'
       WHERE id = ${S.finding4Id}
     `);
-    const convertResult = await storage.convertWetCheck(S.wc2Id, S.companyId, { id: S.techId, name: "WCB Tech" });
+    const convertResult = await storage.convertWetCheckToWetCheckBilling(S.wc2Id, S.companyId, { id: S.techId, name: "WCB Tech" });
     assert.ok(convertResult, "convertWetCheck must succeed");
     const secondWcbId = convertResult.billingSheetId;
 

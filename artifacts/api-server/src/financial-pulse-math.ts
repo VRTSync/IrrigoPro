@@ -35,6 +35,27 @@ export interface BillingSheetBillableLike {
   createdAt?: Date | string | null;
 }
 
+// Task #814 — wet_check_billings shape for computeAllBillableYtd.
+// Uses workDate (logical work date) for year bucketing, parallel to
+// billing_sheets.createdAt / work_orders.createdAt patterns.
+export interface WetCheckBillingBillableLike {
+  invoiceId?: number | null;
+  totalAmount?: string | number | null;
+  status: string;
+  workDate?: Date | string | null;
+}
+
+// Task #814 — wet_check_billings shape for computeGrossMargin and
+// computeByTechnician. Has pre-computed subtotals (no hours × wage needed
+// for gross margin — task specifies adding laborSubtotal directly).
+export interface WetCheckBillingLike {
+  invoiceId?: number | null;
+  partsSubtotal?: string | number | null;
+  laborSubtotal?: string | number | null;
+  technicianId?: number | null;
+  totalHours?: string | number | null;
+}
+
 export interface InvoiceItemLike {
   invoiceId: number | null;
   laborRate?: string | number | null;
@@ -275,6 +296,8 @@ export function computeBilledForCycle(
 //     (invoiced OR uninvoiced — both count)
 //   + ALL billing_sheets where status ≠ cancelled, createdAt year = currentYear
 //     (invoiced OR uninvoiced — both count)
+//   + uninvoiced wet_check_billings where workDate year = currentYear
+//     (invoiced ones already flow through the invoices leg above)
 //
 // This intentionally includes WOs/BSs that have already been invoiced alongside
 // the invoice totals, giving a complete picture of all billable work contracted
@@ -284,6 +307,8 @@ export function computeAllBillableYtd(
   workOrders: WorkOrderBillableLike[],
   billingSheets: BillingSheetBillableLike[],
   currentYear: number,
+  // Task #814 — uninvoiced wet check billings bucketed by workDate.
+  wetCheckBillings: WetCheckBillingBillableLike[] = [],
 ): number {
   let sum = 0;
   for (const inv of invoices) {
@@ -303,6 +328,15 @@ export function computeAllBillableYtd(
     const d = toDate(bs.createdAt ?? null);
     if (!d || d.getFullYear() !== currentYear) continue;
     sum += toNum(bs.totalAmount);
+  }
+  // Task #814 — uninvoiced WCBs only (invoiced ones already in the invoices
+  // leg above). wet_check_billings has no cancelled status so no exclusion
+  // needed beyond the invoiceId check.
+  for (const wcb of wetCheckBillings) {
+    if (wcb.invoiceId != null) continue; // already in invoice totals
+    const d = toDate(wcb.workDate ?? null);
+    if (!d || d.getFullYear() !== currentYear) continue;
+    sum += toNum(wcb.totalAmount);
   }
   return sum;
 }
@@ -334,6 +368,10 @@ export function computeGrossMargin(input: {
   invoices: InvoiceLike[];
   workOrders: WorkOrderLike[];
   billingSheets: BillingSheetLike[];
+  // Task #814 — wet check billings linked to invoices in the window.
+  // partsSubtotal added to partsCost; laborSubtotal added directly to
+  // laborCost (WCBs already carry a computed rate-based subtotal).
+  wetCheckBillings?: WetCheckBillingLike[];
   usersById: Map<number, UserLike>;
   fallbackHourlyWage: number;
   window: { start: Date; end: Date };
@@ -342,6 +380,7 @@ export function computeGrossMargin(input: {
     invoices,
     workOrders,
     billingSheets,
+    wetCheckBillings = [],
     usersById,
     fallbackHourlyWage,
     window,
@@ -398,6 +437,13 @@ export function computeGrossMargin(input: {
     if (bs.invoiceId == null || !invoiceIdsInWindow.has(bs.invoiceId)) continue;
     partsCost += toNum(bs.partsSubtotal);
     tally(bs.technicianId ?? null, toNum(bs.totalHours));
+  }
+  // Task #814 — wet check billings linked to invoices in the window.
+  // Use pre-computed subtotals directly (labor rate already baked in).
+  for (const wcb of wetCheckBillings) {
+    if (wcb.invoiceId == null || !invoiceIdsInWindow.has(wcb.invoiceId)) continue;
+    partsCost += toNum(wcb.partsSubtotal);
+    laborCost += toNum(wcb.laborSubtotal);
   }
 
   const pct =
@@ -716,9 +762,13 @@ export function computeByTechnician(input: {
   invoices: InvoiceLike[];
   workOrders: WorkOrderLike[];
   billingSheets: BillingSheetLike[];
+  // Task #814 — wet check billings linked to invoices in the window,
+  // attributed by technicianId. Hours tallied for margin; invoice revenue
+  // and partsRevenue come from the invoice (no double-count).
+  wetCheckBillings?: WetCheckBillingLike[];
   window: { start: Date; end: Date };
 }): TechnicianRow[] {
-  const { techs, invoices, workOrders, billingSheets, window } = input;
+  const { techs, invoices, workOrders, billingSheets, wetCheckBillings = [], window } = input;
   const invoiceIdsInWindow = new Set<number>();
   const invoiceById = new Map<number, InvoiceLike>();
   for (const inv of invoices) {
@@ -734,12 +784,13 @@ export function computeByTechnician(input: {
     invoiceIds: Set<number>;
     woCount: number;
     bsCount: number;
+    wcbCount: number;
   }
   const acc = new Map<number, Acc>();
   const ensure = (id: number): Acc => {
     let a = acc.get(id);
     if (!a) {
-      a = { hours: 0, invoiceIds: new Set(), woCount: 0, bsCount: 0 };
+      a = { hours: 0, invoiceIds: new Set(), woCount: 0, bsCount: 0, wcbCount: 0 };
       acc.set(id, a);
     }
     return a;
@@ -761,6 +812,15 @@ export function computeByTechnician(input: {
     a.hours += toNum(bs.totalHours);
     a.invoiceIds.add(bs.invoiceId);
     a.bsCount += 1;
+  }
+  // Task #814 — wet check billings attributed to technician for hours + invoice.
+  for (const wcb of wetCheckBillings) {
+    if (wcb.invoiceId == null || !invoiceIdsInWindow.has(wcb.invoiceId)) continue;
+    if (wcb.technicianId == null) continue;
+    const a = ensure(wcb.technicianId);
+    a.hours += toNum(wcb.totalHours);
+    a.invoiceIds.add(wcb.invoiceId);
+    a.wcbCount += 1;
   }
 
   const techById = new Map(techs.map((t) => [t.id, t]));
@@ -901,8 +961,18 @@ export function computeRevenueMix(input: {
   items: InvoiceItemLike[];
   customersById: Map<number, CustomerLike>;
   window: { start: Date; end: Date };
+  // Task #814 — uninvoiced wet check billings add their parts/labor
+  // directly to the mix since they're not yet captured in any invoice.
+  uninvoicedWetCheckBillings?: WetCheckBillingLike[];
+  // Task #814 — WCBs linked to invoices in the window contribute
+  // parts/labor costs that may not be reflected in invoice subtotals.
+  invoicedWetCheckBillings?: WetCheckBillingLike[];
 }): RevenueMixResult {
-  const { invoices, items, customersById, window } = input;
+  const {
+    invoices, items, customersById, window,
+    uninvoicedWetCheckBillings = [],
+    invoicedWetCheckBillings = [],
+  } = input;
   const invoiceIdsInWindow = new Set<number>();
   let parts = 0;
   let labor = 0;
@@ -922,6 +992,17 @@ export function computeRevenueMix(input: {
     } else {
       adhoc += total;
     }
+  }
+  // Task #814 — uninvoiced WCBs contribute parts/labor to the mix.
+  for (const wcb of uninvoicedWetCheckBillings) {
+    parts += toNum(wcb.partsSubtotal);
+    labor += toNum(wcb.laborSubtotal);
+  }
+  // Task #814 — invoiced WCBs linked to invoices in the window contribute
+  // their parts/labor subtotals (contract/adhoc split stays at invoice level).
+  for (const wcb of invoicedWetCheckBillings) {
+    parts += toNum(wcb.partsSubtotal);
+    labor += toNum(wcb.laborSubtotal);
   }
 
   // Emergency vs standard — bucket per invoice item, comparing each
@@ -987,6 +1068,15 @@ export interface PulseBillingSheetLike extends BillingSheetBillableLike {
   technicianId?: number | null;
 }
 
+/**
+ * Task #814 — Extended WCB shape used by the pulse-summary endpoint.
+ * Uses workDate for bucketing (logical work date).
+ */
+export interface PulseWetCheckBillingLike extends WetCheckBillingBillableLike {
+  customerId: number;
+  technicianId?: number | null;
+}
+
 export interface PulseCustomerRow {
   customerId: number;
   name: string;
@@ -1017,10 +1107,12 @@ export function computePulseCustomers(input: {
   invoices: InvoiceLike[];
   workOrders: PulseWorkOrderLike[];
   billingSheets: PulseBillingSheetLike[];
+  // Task #814 — uninvoiced WCBs contribute to inFlight per customer.
+  wetCheckBillings?: PulseWetCheckBillingLike[];
   currentYear: number;
   now: Date;
 }): PulseCustomerRow[] {
-  const { customers: custs, invoices, workOrders, billingSheets, currentYear, now } = input;
+  const { customers: custs, invoices, workOrders, billingSheets, wetCheckBillings = [], currentYear, now } = input;
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
   const ytdByCust = new Map<number, number>();
@@ -1046,6 +1138,11 @@ export function computePulseCustomers(input: {
   for (const bs of billingSheets) {
     if (!isUnbilledWorkRow(bs)) continue;
     inFlightByCust.set(bs.customerId, (inFlightByCust.get(bs.customerId) ?? 0) + toNum(bs.totalAmount));
+  }
+  // Task #814 — uninvoiced WCBs (no cancelled status, so only invoiceId check).
+  for (const wcb of wetCheckBillings) {
+    if (wcb.invoiceId != null) continue;
+    inFlightByCust.set(wcb.customerId, (inFlightByCust.get(wcb.customerId) ?? 0) + toNum(wcb.totalAmount));
   }
 
   const out: PulseCustomerRow[] = [];
@@ -1085,9 +1182,12 @@ export function computePulseTechnicians(input: {
   invoices: InvoiceLike[];
   workOrders: PulseWorkOrderLike[];
   billingSheets: PulseBillingSheetLike[];
+  // Task #814 — WCBs: invoiced ones credit the invoice amount to technician;
+  // uninvoiced ones contribute directly to inFlight.
+  wetCheckBillings?: PulseWetCheckBillingLike[];
   currentYear: number;
 }): PulseTechRow[] {
-  const { techs, invoices, workOrders, billingSheets, currentYear } = input;
+  const { techs, invoices, workOrders, billingSheets, wetCheckBillings = [], currentYear } = input;
 
   const ytdInvoiceAmount = new Map<number, number>();
   for (const inv of invoices) {
@@ -1118,6 +1218,11 @@ export function computePulseTechnicians(input: {
     if (bs.technicianId == null) continue;
     creditInvoice(bs.technicianId, bs.invoiceId);
   }
+  // Task #814 — invoiced WCBs credit the invoice to the technician.
+  for (const wcb of wetCheckBillings) {
+    if (wcb.technicianId == null) continue;
+    creditInvoice(wcb.technicianId, wcb.invoiceId);
+  }
 
   const inFlightByTech = new Map<number, number>();
   for (const wo of workOrders) {
@@ -1132,6 +1237,14 @@ export function computePulseTechnicians(input: {
     inFlightByTech.set(
       bs.technicianId,
       (inFlightByTech.get(bs.technicianId) ?? 0) + toNum(bs.totalAmount),
+    );
+  }
+  // Task #814 — uninvoiced WCBs contribute to technician in-flight.
+  for (const wcb of wetCheckBillings) {
+    if (wcb.invoiceId != null || wcb.technicianId == null) continue;
+    inFlightByTech.set(
+      wcb.technicianId,
+      (inFlightByTech.get(wcb.technicianId) ?? 0) + toNum(wcb.totalAmount),
     );
   }
 
