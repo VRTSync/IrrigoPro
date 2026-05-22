@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -211,9 +211,7 @@ export default function AdminMigrateWetCheckPage() {
   const { data: snapshot, isError: statusError, refetch: refetchStatus } = useQuery<JobSnapshot>({
     queryKey: ["/api/admin/migrate-bs-wc/status"],
     queryFn: async () => {
-      const res = await apiRequest("/api/admin/migrate-bs-wc/status", "GET");
-      if (!res.ok) throw new Error(`Status fetch failed: ${res.status}`);
-      return res.json();
+      return await apiRequest("/api/admin/migrate-bs-wc/status", "GET");
     },
     refetchInterval: (query) => {
       const data = query.state.data as JobSnapshot | undefined;
@@ -242,45 +240,32 @@ export default function AdminMigrateWetCheckPage() {
 
   const startMutation = useMutation({
     mutationFn: async (dryRun: boolean) => {
-      const res = await apiRequest("/api/admin/migrate-bs-wc/start", "POST", { dryRun });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({})) as { message?: string };
-        throw new Error(body?.message ?? "Failed to start migration");
-      }
-      return res.json();
+      return await apiRequest("/api/admin/migrate-bs-wc/start", "POST", { dryRun });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/admin/migrate-bs-wc/status"] });
     },
     onError: (e: Error) => {
-      toast({ title: "Could not start migration", description: e.message, variant: "destructive" });
+      toast({ title: "Could not start migration", description: parseApiError(e, e.message), variant: "destructive" });
     },
   });
 
   const cancelMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("/api/admin/migrate-bs-wc/cancel", "POST");
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({})) as { message?: string };
-        throw new Error(body?.message ?? "Failed to cancel");
-      }
+      await apiRequest("/api/admin/migrate-bs-wc/cancel", "POST");
     },
     onSuccess: () => {
       toast({ title: "Cancel requested — the current row will finish first" });
       qc.invalidateQueries({ queryKey: ["/api/admin/migrate-bs-wc/status"] });
     },
     onError: (e: Error) => {
-      toast({ title: "Could not cancel", description: e.message, variant: "destructive" });
+      toast({ title: "Could not cancel", description: parseApiError(e, e.message), variant: "destructive" });
     },
   });
 
   const resetMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("/api/admin/migrate-bs-wc/reset", "POST");
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({})) as { message?: string };
-        throw new Error(body?.message ?? "Failed to reset");
-      }
+      await apiRequest("/api/admin/migrate-bs-wc/reset", "POST");
     },
     onSuccess: () => {
       toast({ title: "Job state reset to idle" });
@@ -288,7 +273,7 @@ export default function AdminMigrateWetCheckPage() {
       qc.invalidateQueries({ queryKey: ["/api/admin/migrate-bs-wc/status"] });
     },
     onError: (e: Error) => {
-      toast({ title: "Could not reset", description: e.message, variant: "destructive" });
+      toast({ title: "Could not reset", description: parseApiError(e, e.message), variant: "destructive" });
     },
   });
 
@@ -297,7 +282,6 @@ export default function AdminMigrateWetCheckPage() {
     const failedIds = snapshot.result?.failedIds ?? [];
     if (failedIds.length === 0) return;
     apiRequest("/api/admin/migrate-bs-wc/status", "GET")
-      .then((r) => r.json())
       .then((s: JobSnapshot) => {
         if (s.result?.failedIds?.length) {
           setFailures(
