@@ -85,6 +85,23 @@ export const reportsGroup: NavGroup = {
   ],
 };
 
+export const wetCheckGroup: NavGroup = {
+  type: "group",
+  label: "Wet Check",
+  icon: Droplets,
+  items: [
+    { type: "leaf", label: "Wet Checks", path: "/wet-checks", icon: Droplets },
+    {
+      type: "leaf",
+      label: "Wet Check Reviews",
+      path: "/wet-checks/pending-review",
+      icon: ShieldCheck,
+      badgeKey: "wetCheckReviews",
+    },
+    { type: "leaf", label: "Wet Check Billings", path: "/wet-check-billings", icon: ClipboardList },
+  ],
+};
+
 export const billingManagerNav: NavConfig = {
   items: [
     { type: "leaf", label: "Dashboard", path: "/", icon: Home },
@@ -115,15 +132,9 @@ export const billingManagerNav: NavConfig = {
           icon: ShieldCheck,
           badgeKey: "estimatesPendingApproval",
         },
-        {
-          type: "leaf",
-          label: "Wet Check Reviews",
-          path: "/wet-checks/pending-review",
-          icon: ShieldCheck,
-          badgeKey: "wetCheckReviews",
-        },
       ],
     },
+    wetCheckGroup,
     { type: "leaf", label: "Customers", path: "/customers", icon: Users },
     {
       type: "group",
@@ -173,10 +184,10 @@ export const superAdminNav: NavConfig = {
       label: "Operations",
       icon: Briefcase,
       items: [
-        { type: "leaf", label: "Wet Checks", path: "/wet-checks", icon: Droplets },
         { type: "leaf", label: "Controllers & Zones", path: "/admin/controllers", icon: Cpu },
       ],
     },
+    wetCheckGroup,
     {
       type: "group",
       label: "System",
@@ -209,16 +220,9 @@ export const companyAdminNav: NavConfig = {
           icon: LayoutDashboard,
           badgeKey: "estimatesPendingApproval",
         },
-        { type: "leaf", label: "Wet Checks", path: "/wet-checks/admin", icon: Droplets },
-        {
-          type: "leaf",
-          label: "Wet Check Reviews",
-          path: "/wet-checks/pending-review",
-          icon: ShieldCheck,
-          badgeKey: "wetCheckReviews",
-        },
       ],
     },
+    wetCheckGroup,
     {
       type: "group",
       label: "Customers",

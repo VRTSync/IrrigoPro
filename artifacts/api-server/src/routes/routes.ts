@@ -16016,7 +16016,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (!me) { res.status(401).json({ message: "User not found" }); return; }
       const wcId = parseInt(req.params.id);
       const wcBefore = await storage.getWetCheck(wcId, cid).catch(() => null);
-      const result = await storage.convertWetCheck(wcId, cid, { id: me.id, name: me.name }, scheduledDates);
+      const result = await storage.convertWetCheckToWetCheckBilling(wcId, cid, { id: me.id, name: me.name }, scheduledDates);
       await recordLifecycleAudit(req, {
         resource: "wet_check",
         action: "wet_check.converted",

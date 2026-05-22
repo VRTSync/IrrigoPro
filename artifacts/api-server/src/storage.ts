@@ -962,7 +962,7 @@ export interface IStorage {
     resolution: "pending" | "repaired_in_field" | "sent_to_estimate" | "deferred_to_work_order" | "documented_only",
     manager: { id: number; name: string },
   ): Promise<WetCheckFinding | undefined>;
-  convertWetCheck(
+  convertWetCheckToWetCheckBilling(
     id: number,
     companyId: number,
     manager: { id: number; name: string },
@@ -7874,7 +7874,7 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async convertWetCheck(
+  async convertWetCheckToWetCheckBilling(
     id: number,
     companyId: number,
     manager: { id: number; name: string },

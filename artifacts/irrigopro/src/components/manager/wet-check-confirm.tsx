@@ -219,7 +219,7 @@ export function WetCheckConfirm({ id }: { id: number }) {
               accent="green"
               icon={CheckCircle2}
               primary={`${groups.repaired.length} finding${groups.repaired.length === 1 ? "" : "s"} completed in field · $${totals.repaired.toFixed(2)}`}
-              secondary={`repaired by ${wc.technicianName} during wet check${repairedSheetId ? ` · billing sheet BS-WC-${repairedSheetId}` : ""}`}
+              secondary={`repaired by ${wc.technicianName} during wet check${repairedSheetId ? ` · wet check billing #${repairedSheetId}` : ""}`}
               editHref={`/manager/wet-checks/${id}?edit=${firstRepaired.f.id}`}
             />
           )}

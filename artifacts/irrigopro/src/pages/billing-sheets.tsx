@@ -117,20 +117,10 @@ export default function BillingSheets() {
     }
   }, [pendingOpenSheetId, billingSheets]);
 
-  // Deep-link support: ?prefix=BS-WC- narrows the page to billing sheets
-  // whose billing number starts with the given prefix. Used by the manager
-  // wet check inbox KPI to drill into wet-check-sourced billing.
-  const filterPrefix = (() => {
-    if (typeof window === "undefined") return null;
-    const v = new URLSearchParams(window.location.search).get("prefix");
-    return v && v.length > 0 ? v : null;
-  })();
-
-  // Apply optional ?ids=… and ?prefix=… narrowing before bucketing into sections.
+  // Apply optional ?ids=… narrowing before bucketing into sections.
   const scopedSheets = billingSheets
     ? billingSheets
         .filter(s => (filterIdSet ? filterIdSet.has(s.id) : true))
-        .filter(s => (filterPrefix ? (s.billingNumber ?? "").startsWith(filterPrefix) : true))
     : undefined;
 
   // Separate drafts and submitted sheets

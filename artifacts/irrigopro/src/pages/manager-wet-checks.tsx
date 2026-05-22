@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { CheckCircle2, AlertTriangle, DollarSign } from "lucide-react";
 import { Loader2 } from "lucide-react";
 import { WetCheckCard, type WetCheckCardData } from "@/components/manager/wet-check-card";
-import type { WetCheck, BillingSheetWithItems } from "@workspace/db/schema";
+import type { WetCheck, WetCheckBilling } from "@workspace/db/schema";
 
 interface User { id: number; companyId?: number; name: string; role: string; }
 
@@ -56,11 +56,8 @@ export default function ManagerWetChecksPage() {
     queryKey: ["/api/wet-checks/pending-review"],
   });
 
-  // Wet-check-sourced billing sheets are tagged with the BS-WC- billing
-  // number prefix at conversion time. We pull the full list and filter
-  // client-side rather than add a new endpoint for this sub-slice.
-  const billingSheetsQ = useArrayQuery<BillingSheetWithItems>({
-    queryKey: ["/api/billing-sheets"],
+  const wetCheckBillingsQ = useArrayQuery<WetCheckBilling>({
+    queryKey: ["/api/wet-check-billings"],
   });
 
   const rows = pendingQ.data ?? [];
@@ -77,28 +74,16 @@ export default function ManagerWetChecksPage() {
   }, [rows]);
 
   const todayWcStats = useMemo(() => {
-    const sheets = billingSheetsQ.data ?? [];
+    const billings = wetCheckBillingsQ.data ?? [];
     let total = 0;
-    // Each BS-WC- billing sheet corresponds to exactly one converted wet
-    // check (the conversion stamps `BS-WC-<wetCheckId>-<timestamp>`). Each
-    // line item on that sheet is one auto-billed (repaired_in_field)
-    // finding, so summing items across today's BS-WC sheets gives the
-    // findings count.
-    const wetCheckIds = new Set<string>();
-    let findings = 0;
-    for (const s of sheets) {
-      if (!s.billingNumber || !s.billingNumber.startsWith("BS-WC-")) continue;
-      // Use createdAt to mean "completed today" — these sheets are produced
-      // by the conversion step, not by a separate completion event.
-      if (!isToday(s.createdAt)) continue;
-      const segments = s.billingNumber.split("-");
-      const wcId = segments[2];
-      if (wcId) wetCheckIds.add(wcId);
-      total += toNumber(s.totalAmount);
-      findings += Array.isArray(s.items) ? s.items.length : 0;
+    let count = 0;
+    for (const wcb of billings) {
+      if (!isToday(wcb.workDate)) continue;
+      total += toNumber(wcb.totalAmount);
+      count++;
     }
-    return { total, wetChecks: wetCheckIds.size, findings };
-  }, [billingSheetsQ.data]);
+    return { total, wetChecks: count };
+  }, [wetCheckBillingsQ.data]);
 
   const pendingFindingsTotal = useMemo(() => {
     return rows.reduce((sum, r) => sum + r.pendingCount, 0);
@@ -111,9 +96,9 @@ export default function ManagerWetChecksPage() {
   const pendingHelper = pendingQ.isLoading
     ? undefined
     : `${pendingFindingsTotal} finding${pendingFindingsTotal === 1 ? "" : "s"} to decide`;
-  const completedHelper = billingSheetsQ.isLoading
+  const completedHelper = wetCheckBillingsQ.isLoading
     ? undefined
-    : `${todayWcStats.wetChecks} wet check${todayWcStats.wetChecks === 1 ? "" : "s"}, ${todayWcStats.findings} finding${todayWcStats.findings === 1 ? "" : "s"}`;
+    : `${todayWcStats.wetChecks} wet check${todayWcStats.wetChecks === 1 ? "" : "s"} billed`;
 
   return (
     <div className="max-w-5xl mx-auto py-4 space-y-4" data-testid="manager-wet-checks-page">
@@ -136,12 +121,12 @@ export default function ManagerWetChecksPage() {
         />
         <KpiTile
           label="Wet check work completed today"
-          value={billingSheetsQ.isLoading ? null : `$${todayWcStats.total.toFixed(2)}`}
+          value={wetCheckBillingsQ.isLoading ? null : `$${todayWcStats.total.toFixed(2)}`}
           icon={DollarSign}
           accent="blue"
-          href="/billing-sheets?prefix=BS-WC-"
-          isLoading={billingSheetsQ.isLoading}
-          isError={billingSheetsQ.isError}
+          href="/wet-check-billings"
+          isLoading={wetCheckBillingsQ.isLoading}
+          isError={wetCheckBillingsQ.isError}
           helper={completedHelper}
           testId="kpi-completed-today"
         />
