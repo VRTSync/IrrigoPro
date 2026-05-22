@@ -38,7 +38,10 @@ function auditProductionEnv(): void {
   if (missing.length === 0) {
     logger.info("[boot] QB env vars present");
   } else {
-    throw new Error(`Missing required env vars: ${missing.join(", ")}`);
+    logger.warn(
+      { missing },
+      `[boot] QB env vars missing: ${missing.join(", ")} — QuickBooks integration will be unavailable until these are set`,
+    );
   }
 }
 
