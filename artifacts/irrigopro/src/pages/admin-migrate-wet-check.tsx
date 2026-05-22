@@ -211,7 +211,7 @@ export default function AdminMigrateWetCheckPage() {
   const { data: snapshot } = useQuery<JobSnapshot>({
     queryKey: ["/api/admin/migrate-bs-wc/status"],
     queryFn: async () => {
-      const res = await apiRequest("GET", "/api/admin/migrate-bs-wc/status");
+      const res = await apiRequest("/api/admin/migrate-bs-wc/status", "GET");
       return res.json();
     },
     refetchInterval: (query) => {
@@ -240,7 +240,7 @@ export default function AdminMigrateWetCheckPage() {
 
   const startMutation = useMutation({
     mutationFn: async (dryRun: boolean) => {
-      const res = await apiRequest("POST", "/api/admin/migrate-bs-wc/start", { dryRun });
+      const res = await apiRequest("/api/admin/migrate-bs-wc/start", "POST", { dryRun });
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { message?: string };
         throw new Error(body?.message ?? "Failed to start migration");
@@ -257,7 +257,7 @@ export default function AdminMigrateWetCheckPage() {
 
   const cancelMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/admin/migrate-bs-wc/cancel");
+      const res = await apiRequest("/api/admin/migrate-bs-wc/cancel", "POST");
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { message?: string };
         throw new Error(body?.message ?? "Failed to cancel");
@@ -274,7 +274,7 @@ export default function AdminMigrateWetCheckPage() {
 
   const resetMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/admin/migrate-bs-wc/reset");
+      const res = await apiRequest("/api/admin/migrate-bs-wc/reset", "POST");
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { message?: string };
         throw new Error(body?.message ?? "Failed to reset");
@@ -294,7 +294,7 @@ export default function AdminMigrateWetCheckPage() {
     if (!snapshot) return;
     const failedIds = snapshot.result?.failedIds ?? [];
     if (failedIds.length === 0) return;
-    apiRequest("GET", "/api/admin/migrate-bs-wc/status")
+    apiRequest("/api/admin/migrate-bs-wc/status", "GET")
       .then((r) => r.json())
       .then((s: JobSnapshot) => {
         if (s.result?.failedIds?.length) {
