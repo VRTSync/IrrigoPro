@@ -1,4 +1,5 @@
 // Task #688 — Financial Pulse Slice 2.
+// Task #817 — Aesthetic makeover: optional `accent` prop.
 //
 // Shared metric tile used by the Financial Pulse KPI band. Separate
 // from `components/admin-dashboard/kpi-tile.tsx` because that tile is
@@ -16,6 +17,19 @@ import { cn } from "@/lib/utils";
 
 export type MetricFormat = "currency" | "percent" | "days" | "number";
 export type MetricIntent = "neutral" | "good" | "bad";
+
+// Task #817 — accent color map. All class strings are fully-written so
+// Tailwind's JIT scanner can detect them at build time (no dynamic
+// string concatenation that would be missed by the purge pass).
+const ACCENT_CLASSES: Record<string, string> = {
+  blue:    "border-l-4 border-blue-400 bg-blue-50/40",
+  indigo:  "border-l-4 border-indigo-400 bg-indigo-50/40",
+  emerald: "border-l-4 border-emerald-400 bg-emerald-50/40",
+  amber:   "border-l-4 border-amber-400 bg-amber-50/40",
+  orange:  "border-l-4 border-orange-400 bg-orange-50/40",
+  teal:    "border-l-4 border-teal-400 bg-teal-50/40",
+  violet:  "border-l-4 border-violet-400 bg-violet-50/40",
+};
 
 export interface MetricTileProps {
   label: string;
@@ -43,6 +57,13 @@ export interface MetricTileProps {
    * with MTD/YTD tiles.
    */
   windowBadge?: string;
+  /**
+   * Task #817 — optional accent color name (e.g. "blue", "emerald",
+   * "amber"). Applies a left-border accent and a very subtle tinted
+   * background. Falls back to the plain white card when omitted so
+   * no existing usage breaks.
+   */
+  accent?: string;
 }
 
 const CURRENCY = new Intl.NumberFormat("en-US", {
@@ -85,6 +106,7 @@ export function MetricTile({
   helper,
   infoTip,
   windowBadge,
+  accent,
 }: MetricTileProps) {
   const formatted = formatMetricValue(value, format);
   const hasDelta = deltaPct != null && Number.isFinite(deltaPct);
@@ -101,8 +123,13 @@ export function MetricTile({
         ? "text-rose-600"
         : "text-gray-500";
 
+  const accentClass = accent ? (ACCENT_CLASSES[accent] ?? "") : "";
+  // Only apply shadow elevation when an accent is set — keeps the default
+  // plain-card look intact for shared consumers (financial-pulse-widget, etc.)
+  const shadowClass = accent ? "shadow-md" : "";
+
   return (
-    <Card className="h-full" data-testid={testId}>
+    <Card className={cn("h-full", accentClass, shadowClass)} data-testid={testId}>
       <CardContent className="pt-5 pb-4">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">

@@ -1,10 +1,12 @@
 // Task #688 — Financial Pulse Slice 2.
 // Task #692, #693, #708, #720, #731 — subsequent slices.
+// Task #817 — Aesthetic makeover: gradient header, accent tiles, chart palette.
 //
 // /financial-pulse page — two-tab layout (Task #731):
 //   Pulse tab:      daily-ops KPI tiles, revenue trend, in-flight by customer/tech
 //   Accounting tab: existing KPI snapshot, charts, drill-downs, forward look
 
+import irrigoLogoUrl from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 import { useMemo, useRef, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -362,42 +364,51 @@ export default function FinancialPulsePage() {
 
   return (
     <div className="py-6 space-y-6" data-testid="financial-pulse-page">
-      {/* Page header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Financial Pulse</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {activeTab === "pulse"
-              ? "Daily operations view — in-flight pipeline and revenue trend."
-              : "Accounting metrics — KPIs, drill-downs, and forward look."}
-          </p>
-        </div>
-        {/* Tab switcher */}
-        <div className="flex rounded-md border border-gray-200 overflow-hidden self-start">
-          <button
-            type="button"
-            onClick={() => setTab("pulse")}
-            data-testid="tab-pulse"
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === "pulse"
-                ? "bg-white text-gray-900 shadow-sm"
-                : "bg-gray-50 text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-            }`}
-          >
-            Pulse
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("accounting")}
-            data-testid="tab-accounting"
-            className={`px-4 py-2 text-sm font-medium transition-colors border-l border-gray-200 ${
-              activeTab === "accounting"
-                ? "bg-white text-gray-900 shadow-sm"
-                : "bg-gray-50 text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-            }`}
-          >
-            Accounting
-          </button>
+      {/* Page header — Task #817: deep-blue gradient with logo watermark */}
+      <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-blue-800 to-indigo-900 px-6 py-5 shadow-lg">
+        {/* Decorative logo watermark */}
+        <img
+          src={irrigoLogoUrl}
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none select-none absolute right-4 top-1/2 -translate-y-1/2 h-[70%] max-h-28 object-contain opacity-[0.07]"
+        />
+        <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Financial Pulse</h1>
+            <p className="text-sm text-blue-200 mt-1">
+              {activeTab === "pulse"
+                ? "Daily operations view — in-flight pipeline and revenue trend."
+                : "Accounting metrics — KPIs, drill-downs, and forward look."}
+            </p>
+          </div>
+          {/* Tab switcher — Task #817: brand-blue active state */}
+          <div className="flex rounded-lg overflow-hidden self-start shadow-sm">
+            <button
+              type="button"
+              onClick={() => setTab("pulse")}
+              data-testid="tab-pulse"
+              className={`px-4 py-2 text-sm font-medium transition-colors ${
+                activeTab === "pulse"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "bg-blue-900/30 text-blue-100 hover:bg-blue-800/40"
+              }`}
+            >
+              Pulse
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("accounting")}
+              data-testid="tab-accounting"
+              className={`px-4 py-2 text-sm font-medium transition-colors border-l border-blue-700/40 ${
+                activeTab === "accounting"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "bg-blue-900/30 text-blue-100 hover:bg-blue-800/40"
+              }`}
+            >
+              Accounting
+            </button>
+          </div>
         </div>
       </div>
 
@@ -534,7 +545,7 @@ function AccountingTab({ navigate }: { navigate: (path: string) => void }) {
       <KpiBand data={kpis.data} isLoading={kpis.isLoading} isError={kpis.isError} />
 
       {/* Band 2 — Parts vs labor stacked bar (revenue trend line moved to Pulse tab) */}
-      <Card>
+      <Card className="shadow-md hover:shadow-lg transition-shadow">
         <CardHeader>
           <CardTitle>Revenue trends</CardTitle>
         </CardHeader>
@@ -554,6 +565,7 @@ function AccountingTab({ navigate }: { navigate: (path: string) => void }) {
 
       {/* Band 4 — Forward look */}
       <ForwardLookBand period={period} navigate={navigate} />
+
     </div>
   );
 }
@@ -697,6 +709,7 @@ function PulseTab({
             isLoading={isLoading}
             isError={isError}
             infoTip="Total billed in the most recent billing cycle. Click to view those invoices."
+            accent="blue"
           />
         </div>
 
@@ -727,6 +740,7 @@ function PulseTab({
             isLoading={isLoading}
             isError={isError}
             infoTip="Uninvoiced work orders + billing sheets with no invoice yet. Click to scroll to the customer breakdown."
+            accent="indigo"
           />
         </div>
 
@@ -751,12 +765,13 @@ function PulseTab({
             isError={isError}
             windowBadge="YTD"
             infoTip="Invoiced this calendar year plus current in-flight pipeline. Click to see full accounting metrics."
+            accent="emerald"
           />
         </div>
       </div>
 
       {/* ── Revenue trend (13-month line chart) ────────────────────── */}
-      <Card>
+      <Card className="shadow-md hover:shadow-lg transition-shadow">
         <CardHeader>
           <CardTitle>Revenue trend</CardTitle>
         </CardHeader>
@@ -774,7 +789,7 @@ function PulseTab({
         className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start"
         data-testid="pulse-tables-row"
       >
-        <Card data-testid="pulse-customers-card">
+        <Card className="shadow-md hover:shadow-lg transition-shadow" data-testid="pulse-customers-card">
           <CardHeader className="flex flex-row items-center justify-between gap-2">
             <CardTitle>In-Flight by Customer</CardTitle>
             <div className="relative w-56">
@@ -907,7 +922,7 @@ function PulseTab({
         </Card>
 
         {/* ── In-Flight by Technician ──────────────────────────────── */}
-        <Card data-testid="pulse-techs-card">
+        <Card className="shadow-md hover:shadow-lg transition-shadow" data-testid="pulse-techs-card">
         <CardHeader>
           <CardTitle>In-Flight by Technician</CardTitle>
         </CardHeader>
@@ -1103,7 +1118,7 @@ type DrillTab = "customers" | "technicians" | "service";
 function DrillDownBand({ period }: { period: Period }) {
   const [tab, setTab] = useState<DrillTab>("customers");
   return (
-    <Card data-testid="financial-pulse-drilldown">
+    <Card className="shadow-md hover:shadow-lg transition-shadow" data-testid="financial-pulse-drilldown">
       <CardHeader className="flex flex-row items-center justify-between gap-2">
         <CardTitle>Drill-downs</CardTitle>
         <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)}>
@@ -1687,7 +1702,7 @@ function ArAgingCard({
   const buckets = data?.buckets ?? [];
   const total = data?.total ?? 0;
   return (
-    <Card data-testid="ar-aging-card">
+    <Card className="shadow-md hover:shadow-lg transition-shadow" data-testid="ar-aging-card">
       <CardHeader>
         <CardTitle>Money Owed by Age</CardTitle>
       </CardHeader>
@@ -1736,7 +1751,7 @@ function ProjectionCard({
 }) {
   if (isLoading || !data) {
     return (
-      <Card data-testid="projection-card">
+      <Card className="shadow-md hover:shadow-lg transition-shadow" data-testid="projection-card">
         <CardHeader>
           <CardTitle>Month-End Projection</CardTitle>
         </CardHeader>
@@ -1753,7 +1768,7 @@ function ProjectionCard({
   const projectedWidth = (projectedMonthEnd / max) * 100;
   const prevWidth = (prevMonthActual / max) * 100;
   return (
-    <Card data-testid="projection-card">
+    <Card className="shadow-md hover:shadow-lg transition-shadow" data-testid="projection-card">
       <CardHeader>
         <CardTitle>Month-End Projection</CardTitle>
       </CardHeader>
@@ -1825,6 +1840,21 @@ function KpiBand({
 }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* Revenue group — blue */}
+      <MetricTile
+        testId="kpi-billed-mtd"
+        label="Billed MTD"
+        value={data?.billedMtd.value ?? null}
+        format="currency"
+        deltaPct={data?.billedMtd.deltaPct ?? null}
+        deltaLabel="vs last month"
+        deltaGoodDirection="up"
+        isLoading={isLoading}
+        isError={isError}
+        windowBadge="MTD"
+        infoTip={INFO_TIPS.billedMtd}
+        accent="blue"
+      />
       <MetricTile
         testId="kpi-billed-last-cycle"
         label="Billed Last Cycle"
@@ -1837,6 +1867,7 @@ function KpiBand({
         isLoading={isLoading}
         isError={isError}
         infoTip={INFO_TIPS.billedLastCycle}
+        accent="blue"
       />
       <MetricTile
         testId="kpi-collected-mtd"
@@ -1850,6 +1881,7 @@ function KpiBand({
         isError={isError}
         windowBadge="MTD"
         infoTip={INFO_TIPS.collectedMtd}
+        accent="emerald"
       />
       <MetricTile
         testId="kpi-outstanding-ar"
@@ -1860,6 +1892,7 @@ function KpiBand({
         isLoading={isLoading}
         isError={isError}
         infoTip={INFO_TIPS.outstandingAr}
+        accent="amber"
       />
       <MetricTile
         testId="kpi-projected-month-end"
@@ -1871,6 +1904,7 @@ function KpiBand({
         isLoading={isLoading}
         isError={isError}
         infoTip={INFO_TIPS.projectedMonthEnd}
+        accent="indigo"
       />
       <MetricTile
         testId="kpi-billed-ytd"
@@ -1884,6 +1918,7 @@ function KpiBand({
         isError={isError}
         windowBadge="YTD"
         infoTip={INFO_TIPS.billedYtd}
+        accent="blue"
       />
       <MetricTile
         testId="kpi-unbilled-exposure"
@@ -1894,6 +1929,7 @@ function KpiBand({
         isLoading={isLoading}
         isError={isError}
         infoTip={INFO_TIPS.unbilledExposure}
+        accent="orange"
       />
       <MetricTile
         testId="kpi-avg-days-to-pay"
@@ -1904,6 +1940,7 @@ function KpiBand({
         isLoading={isLoading}
         isError={isError}
         infoTip={INFO_TIPS.avgDaysToPay}
+        accent="teal"
       />
       <MetricTile
         testId="kpi-gross-margin"
@@ -1914,6 +1951,7 @@ function KpiBand({
         isLoading={isLoading}
         isError={isError}
         infoTip={INFO_TIPS.grossMargin}
+        accent="violet"
         warning={
           data?.grossMarginPct.missingWageTechCount &&
           data.grossMarginPct.missingWageTechCount > 0
@@ -1976,7 +2014,7 @@ function RevenueTrendChart({
                 type="monotone"
                 dataKey="revenue"
                 name="This year"
-                stroke="#2563eb"
+                stroke="#1d4ed8"
                 strokeWidth={2}
                 dot={false}
               />
@@ -1984,7 +2022,7 @@ function RevenueTrendChart({
                 type="monotone"
                 dataKey="prevYearRevenue"
                 name="Last year"
-                stroke="#94a3b8"
+                stroke="#4338ca"
                 strokeDasharray="4 4"
                 strokeWidth={2}
                 dot={false}
@@ -2028,13 +2066,13 @@ function PartsVsLaborChart({
                 dataKey="partsRevenue"
                 name="Parts"
                 stackId="rev"
-                fill="#0ea5e9"
+                fill="#1d4ed8"
               />
               <Bar
                 dataKey="laborRevenue"
                 name="Labor"
                 stackId="rev"
-                fill="#22c55e"
+                fill="#059669"
               />
             </BarChart>
           </ResponsiveContainer>
@@ -2059,8 +2097,8 @@ function RevenueMixCard({
     if (!data) return [];
     if (tab === "partsLabor") {
       return [
-        { name: "Parts", value: data.partsVsLabor.parts, fill: "#0ea5e9" },
-        { name: "Labor", value: data.partsVsLabor.labor, fill: "#22c55e" },
+        { name: "Parts", value: data.partsVsLabor.parts, fill: "#1d4ed8" },
+        { name: "Labor", value: data.partsVsLabor.labor, fill: "#059669" },
       ];
     }
     if (tab === "emergency") {
@@ -2068,17 +2106,17 @@ function RevenueMixCard({
         {
           name: "Emergency",
           value: data.emergencyVsStandard.emergency,
-          fill: "#ef4444",
+          fill: "#f59e0b",
         },
         {
           name: "Standard",
           value: data.emergencyVsStandard.standard,
-          fill: "#6366f1",
+          fill: "#1d4ed8",
         },
       ];
     }
     return [
-      { name: "Contract", value: data.contractVsAdhoc.contract, fill: "#8b5cf6" },
+      { name: "Contract", value: data.contractVsAdhoc.contract, fill: "#4338ca" },
       { name: "Ad-hoc", value: data.contractVsAdhoc.adhoc, fill: "#f59e0b" },
     ];
   }, [data, tab]);
@@ -2086,7 +2124,7 @@ function RevenueMixCard({
   const total = slices.reduce((s, x) => s + x.value, 0);
 
   return (
-    <Card data-testid="revenue-mix-card">
+    <Card className="shadow-md hover:shadow-lg transition-shadow" data-testid="revenue-mix-card">
       <CardHeader className="flex flex-row items-center justify-between gap-2">
         <CardTitle>Revenue mix</CardTitle>
         <Tabs value={tab} onValueChange={(v) => setTab(v as MixTab)}>
