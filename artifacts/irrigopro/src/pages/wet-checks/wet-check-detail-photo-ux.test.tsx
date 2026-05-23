@@ -13,6 +13,12 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
+// vi.hoisted ensures this runs before the vi.mock factory below, so the
+// factory can close over the stable reference even after hoisting.
+const { toastSpy } = vi.hoisted(() => ({ toastSpy: vi.fn() }));
+
+vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: toastSpy }) }));
+
 vi.mock("@/lib/lifecycle", () => ({
   tintForControllerLetter: () => "bg-gray-100 border-gray-300 text-gray-800",
   lifecycleStageMeta: () => ({ label: "Active", className: "bg-gray-100" }),
@@ -133,6 +139,96 @@ describe("Task #597 — WetCheckDetail photo-visibility", () => {
     const loose = await screen.findByTestId("loose-photos-section");
     expect(loose).toBeTruthy();
     expect(loose.textContent ?? "").toMatch(/1\s*loose photo/i);
+  });
+});
+
+// ─── Task #842 — PhotoThumb error state ──────────────────────────────────────
+//
+// When the <img> fires onError for a photo with a real server id, PhotoThumb
+// must:
+//   (a) replace the broken <img> with the "Photo unavailable" placeholder
+//   (b) fire a toast
+//   (c) NOT show the placeholder for an optimistic/uploading photo
+
+describe("Task #842 — PhotoThumb shows error placeholder on load failure", () => {
+  it("(a) switches to placeholder and fires toast when server photo fails to load", async () => {
+    toastSpy.mockClear();
+    const { PhotoThumb } = await import("./PhotoThumb");
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const photo: any = {
+      id: 200,
+      wetCheckId: 99,
+      url: "https://example/missing.jpg",
+      takenAt: new Date().toISOString(),
+      zoneRecordId: null,
+      findingId: null,
+      clientId: "p-200",
+    };
+
+    const { fireEvent } = await import("@testing-library/react");
+
+    render(
+      <QueryClientProvider client={qc}>
+        <PhotoThumb photo={photo} canDelete={false} />
+      </QueryClientProvider>,
+    );
+
+    const thumb = screen.getByTestId("photo-thumb-200");
+    expect(thumb).toBeTruthy();
+
+    // Simulate the image failing to load.
+    const img = thumb.querySelector("img");
+    expect(img).not.toBeNull();
+    fireEvent.error(img!);
+
+    // Placeholder must now be visible.
+    const placeholder = await screen.findByTestId("photo-thumb-200-error");
+    expect(placeholder).toBeTruthy();
+    expect(placeholder.textContent).toMatch(/photo unavailable/i);
+
+    // The broken <img> must be gone.
+    expect(thumb.querySelector("img")).toBeNull();
+
+    // Toast must have fired with a "retake" message.
+    expect(toastSpy).toHaveBeenCalledOnce();
+    expect(toastSpy.mock.calls[0][0]).toMatchObject({
+      title: "Photo unavailable",
+      variant: "destructive",
+    });
+  });
+
+  it("(c) does NOT switch to placeholder for an optimistic photo (no server id)", async () => {
+    const { PhotoThumb } = await import("./PhotoThumb");
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // id=0 means no server row yet (optimistic)
+    const photo: any = {
+      id: 0,
+      wetCheckId: 99,
+      url: "blob:http://localhost/fake",
+      takenAt: new Date().toISOString(),
+      zoneRecordId: null,
+      findingId: null,
+      clientId: "p-opt",
+    };
+
+    const { fireEvent } = await import("@testing-library/react");
+
+    render(
+      <QueryClientProvider client={qc}>
+        <PhotoThumb photo={photo} canDelete={false} />
+      </QueryClientProvider>,
+    );
+
+    const thumb = screen.getByTestId("photo-thumb-0");
+    const img = thumb.querySelector("img");
+    expect(img).not.toBeNull();
+    fireEvent.error(img!);
+
+    // Placeholder must NOT appear — still shows the img.
+    expect(screen.queryByTestId("photo-thumb-0-error")).toBeNull();
+    expect(thumb.querySelector("img")).not.toBeNull();
   });
 });
 

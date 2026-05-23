@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Loader2, Trash2 } from "lucide-react";
+import { Camera, Loader2, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, authedPhotoSrc, queryClient } from "@/lib/queryClient";
 import { isOfflineQueueEnabled } from "@/lib/offline/engine";
@@ -8,6 +9,7 @@ import type { WetCheckPhoto } from "@workspace/db/schema";
 
 export function PhotoThumb({ photo, canDelete }: { photo: WetCheckPhoto; canDelete: boolean }) {
   const { toast } = useToast();
+  const [imgError, setImgError] = useState(false);
   // Task #510 — split "bytes still uploading" from "no server row yet"
   // so the lightbox tap target is available the moment the upload
   // finalize POST returns, even if a follow-up `photo.link` PATCH is
@@ -36,7 +38,21 @@ export function PhotoThumb({ photo, canDelete }: { photo: WetCheckPhoto; canDele
   // drained, we open it — the link PATCH being stuck no longer blocks
   // the tap target.
   const fullSrc =
-    hasServerUrl && !uploading ? authedPhotoSrc(photo.url, "medium") : null;
+    hasServerUrl && !uploading && !imgError ? authedPhotoSrc(photo.url, "medium") : null;
+
+  function handleImgError() {
+    // Only show the error placeholder for photos that have a real server id.
+    // Optimistic/uploading photos may have a blob URL that resolves later.
+    if (hasServerId && !uploading) {
+      setImgError(true);
+      toast({
+        title: "Photo unavailable",
+        description: "This photo could not be loaded and may need to be retaken.",
+        variant: "destructive",
+      });
+    }
+  }
+
   const delMut = useMutation({
     mutationFn: () => apiRequest(`/api/wet-checks/photos/${photo.id}`, "DELETE"),
     onSuccess: () => {
@@ -44,14 +60,33 @@ export function PhotoThumb({ photo, canDelete }: { photo: WetCheckPhoto; canDele
     },
     onError: (e: any) => toast({ title: "Delete failed", description: e?.message, variant: "destructive" }),
   });
+
+  const imgElement = imgError ? null : (
+    <img
+      src={src}
+      alt=""
+      className="w-full h-full object-cover"
+      loading="lazy"
+      onError={handleImgError}
+    />
+  );
+
   return (
     <div className="relative inline-block w-20 h-20 rounded overflow-hidden border" data-testid={`photo-thumb-${photo.id}`}>
-      {fullSrc ? (
+      {imgError ? (
+        <div
+          className="w-full h-full flex flex-col items-center justify-center bg-gray-100 text-gray-500 gap-1 p-1"
+          data-testid={`photo-thumb-${photo.id}-error`}
+        >
+          <Camera className="w-6 h-6" />
+          <span className="text-[9px] text-center leading-tight">Photo unavailable</span>
+        </div>
+      ) : fullSrc ? (
         <a href={fullSrc} target="_blank" rel="noreferrer" className="block w-full h-full">
-          <img src={src} alt="" className="w-full h-full object-cover" loading="lazy" />
+          {imgElement}
         </a>
       ) : (
-        <img src={src} alt="" className="w-full h-full object-cover" loading="lazy" />
+        imgElement
       )}
       {uploading && (
         <div
