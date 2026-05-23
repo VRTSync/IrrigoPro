@@ -362,10 +362,18 @@ interface BudgetBucket {
   periodKey: string;
 }
 
+const BUCKET_ACCENT: Record<BudgetStatus, string> = {
+  healthy:    "border-l-4 border-emerald-400 bg-emerald-50/40",
+  approaching: "border-l-4 border-amber-400 bg-amber-50/40",
+  over:       "border-l-4 border-rose-400 bg-rose-50/40",
+  unset:      "",
+};
+
 function BudgetBucketRow({ label, bucket }: { label: string; bucket: BudgetBucket }) {
   const pct = bucket.percent != null ? Math.min(100, Math.round(bucket.percent * 100)) : 0;
+  const accentClass = BUCKET_ACCENT[bucket.status] ?? "";
   return (
-    <div className="rounded-md border p-3 bg-white" data-testid={`budget-bucket-${label.toLowerCase().replace(/\s+/g, "-")}`}>
+    <div className={`rounded-md border p-3 bg-white shadow-sm ${accentClass}`} data-testid={`budget-bucket-${label.toLowerCase().replace(/\s+/g, "-")}`}>
       <div className="flex items-center justify-between mb-2">
         <span className="font-medium text-sm text-gray-700">
           {label} <span className="text-xs text-gray-400">({bucket.periodKey})</span>
@@ -414,7 +422,7 @@ function RecentBudgetAlertsCard({ customerId }: { customerId: number }) {
 
   if (isLoading) {
     return (
-      <Card>
+      <Card className="shadow-md">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Bell className="w-5 h-5" /> Recent Budget Alerts
@@ -430,7 +438,7 @@ function RecentBudgetAlertsCard({ customerId }: { customerId: number }) {
   const events = Array.isArray(data?.events) ? data!.events : [];
   if (events.length === 0) {
     return (
-      <Card>
+      <Card className="shadow-md">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Bell className="w-5 h-5" /> Recent Budget Alerts
@@ -446,7 +454,7 @@ function RecentBudgetAlertsCard({ customerId }: { customerId: number }) {
   }
 
   return (
-    <Card>
+    <Card className="shadow-md">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Bell className="w-5 h-5" /> Recent Budget Alerts

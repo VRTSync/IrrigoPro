@@ -509,6 +509,7 @@ function CustomerDetailVariant({ customerId }: { customerId: number }) {
               format="currency"
               isLoading={isLoading}
               testId="fp-tile-cust-billed-mtd"
+              accent="blue"
             />
             <MetricTile
               label="Billed YTD"
@@ -516,6 +517,7 @@ function CustomerDetailVariant({ customerId }: { customerId: number }) {
               format="currency"
               isLoading={isLoading}
               testId="fp-tile-cust-billed-ytd"
+              accent="blue"
             />
             <MetricTile
               label="Money Owed"
@@ -523,6 +525,7 @@ function CustomerDetailVariant({ customerId }: { customerId: number }) {
               format="currency"
               isLoading={isLoading}
               testId="fp-tile-cust-outstanding-ar"
+              accent="amber"
             />
             <MetricTile
               label="Avg. Time to Get Paid"
