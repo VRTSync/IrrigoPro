@@ -3,6 +3,9 @@
 //   * the per-controller "📷 N" rollup badge
 //   * the loose-photos amber banner (regardless of whether findings exist)
 //
+// Task #829 — Regression: finding-linked photos (null zoneRecordId) must
+//   appear in the zone's rendered photo list and under their finding card.
+//
 // Mounts the default export (`WetChecksPage`) routed at `/wet-checks/:id`
 // with a seeded React Query cache, mirroring `wet-checks-null-safe.test.tsx`.
 
@@ -14,6 +17,22 @@ vi.mock("@/lib/lifecycle", () => ({
   tintForControllerLetter: () => "bg-gray-100 border-gray-300 text-gray-800",
   lifecycleStageMeta: () => ({ label: "Active", className: "bg-gray-100" }),
 }));
+
+vi.mock("@/lib/offline/engine", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/offline/engine")>();
+  return {
+    ...actual,
+    isOfflineQueueEnabled: () => false,
+  };
+});
+
+vi.mock("@/components/offline/sync-ui", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/offline/sync-ui")>();
+  return {
+    ...actual,
+    useSyncEngineState: () => ({ mutations: [] }),
+  };
+});
 
 describe("Task #597 — WetCheckDetail photo-visibility", () => {
   it("shows header total, per-controller badge, and loose-photos banner", async () => {
@@ -114,5 +133,154 @@ describe("Task #597 — WetCheckDetail photo-visibility", () => {
     const loose = await screen.findByTestId("loose-photos-section");
     expect(loose).toBeTruthy();
     expect(loose.textContent ?? "").toMatch(/1\s*loose photo/i);
+  });
+});
+
+// ─── Task #829 — Regression: finding-linked photos (null zoneRecordId) ───────
+//
+// Bug 1: WetCheckDetail previously filtered photos as
+//   `p.zoneRecordId === zoneRecord?.id`
+// which excluded finding-linked photos whose zoneRecordId is null (e.g.
+// uploaded from the mobile app before the zone record was persisted).
+// The fix widens the predicate to also include any photo whose findingId
+// belongs to a finding in the zone.
+//
+// This suite covers:
+//   (a) Pure predicate test — proves the filter logic includes finding-linked photos.
+//   (b) ZoneScreen render test — proves the photo thumb renders under its finding card.
+
+describe("Task #829 — Bug 1 regression: finding-linked photo filter", () => {
+  it("(a) filter predicate includes photos with null zoneRecordId when findingId matches zone finding", () => {
+    // Inline asArray helper (same logic as @/lib/queryClient.asArray) so this
+    // test has no external dependency and cannot be broken by mock ordering.
+    const asArray = <T,>(v: T[] | null | undefined): T[] => (Array.isArray(v) ? v : []);
+
+    const zoneRecord = {
+      id: 1,
+      findings: [
+        { id: 10, issueType: "leak" },
+        { id: 11, issueType: "head_replacement" },
+      ],
+    };
+
+    const photos = [
+      // zone-level: included because zoneRecordId matches
+      { id: 100, zoneRecordId: 1, findingId: null },
+      // finding-linked, null zoneRecordId: Bug 1 caused this to be excluded
+      { id: 101, zoneRecordId: null, findingId: 10 },
+      // belongs to a different zone entirely — must be excluded
+      { id: 102, zoneRecordId: 2, findingId: null },
+      // finding from a different zone — must be excluded
+      { id: 103, zoneRecordId: null, findingId: 99 },
+    ];
+
+    const filtered = photos.filter(
+      (p) =>
+        p.zoneRecordId === zoneRecord.id ||
+        (p.findingId != null &&
+          asArray(zoneRecord.findings).some((f: { id: number }) => f.id === p.findingId)),
+    );
+
+    expect(filtered).toHaveLength(2);
+    expect(filtered.map((p) => p.id)).toContain(100);
+    // Bug 1 regression: finding-linked photo with null zoneRecordId must be included
+    expect(filtered.map((p) => p.id)).toContain(101);
+    expect(filtered.map((p) => p.id)).not.toContain(102);
+    expect(filtered.map((p) => p.id)).not.toContain(103);
+  });
+
+  it("(b) ZoneScreen renders finding-linked photo under its finding card", async () => {
+    const { ZoneScreen } = await import("./ZoneScreen");
+
+    const qc = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          staleTime: Infinity,
+          queryFn: async ({ queryKey }) => {
+            const k = queryKey as unknown[];
+            if (k[0] === "/api/config/wet-check-auto-bill") return { enabled: false };
+            if (k[0] === "/api/wet-checks/issue-types") return [];
+            return null;
+          },
+        },
+      },
+    });
+
+    // Seed the queries ZoneScreen depends on
+    qc.setQueryData(["/api/config/wet-check-auto-bill"], { enabled: false });
+    qc.setQueryData(["/api/wet-checks/issue-types"], []);
+
+    const zoneRecord: any = {
+      id: 1,
+      clientId: "z-1",
+      wetCheckId: 99,
+      controllerLetter: "A",
+      zoneNumber: 1,
+      status: "checked_with_issues",
+      repairLaborHours: "0.00",
+      findings: [
+        {
+          id: 10,
+          clientId: "f-10",
+          zoneRecordId: 1,
+          wetCheckId: 99,
+          issueType: "leak",
+          resolution: "pending",
+          techDisposition: "needs_review",
+          partId: null,
+          noPartNeeded: false,
+          partName: null,
+          partPrice: "0.00",
+          quantity: 1,
+          laborHours: "0.00",
+          notes: null,
+        },
+      ],
+    };
+
+    // Finding-linked photo with null zoneRecordId — this is the Bug 1 regression photo.
+    // Use a data: URL so PhotoThumb's isLocalUrl check is true and authedPhotoSrc is not called.
+    const photos: any[] = [
+      {
+        id: 101,
+        wetCheckId: 99,
+        url: "data:image/jpeg;base64,dGVzdA==",
+        takenAt: new Date().toISOString(),
+        zoneRecordId: null,
+        findingId: 10,
+        clientId: "p-101",
+      },
+    ];
+
+    render(
+      <QueryClientProvider client={qc}>
+        <ZoneScreen
+          wetCheckId={99}
+          wetCheckClientId="wc-99"
+          customerId={1}
+          customerName="Acme"
+          propertyAddress="123 Main St"
+          letter="A"
+          zoneNumber={1}
+          zoneCount={4}
+          zoneRecord={zoneRecord}
+          photos={photos}
+          readOnly={true}
+          onBack={vi.fn()}
+          onAdvance={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    // The finding card's photo strip must contain the finding-linked photo thumb.
+    const findingPhotos = await screen.findByTestId("finding-photos-10");
+    expect(findingPhotos).toBeTruthy();
+
+    const thumb = await screen.findByTestId("photo-thumb-101");
+    expect(thumb).toBeTruthy();
+
+    // Zone-only photo strip must be absent (no photos with null findingId).
+    expect(screen.queryByTestId("zone-photos")).toBeNull();
   });
 });

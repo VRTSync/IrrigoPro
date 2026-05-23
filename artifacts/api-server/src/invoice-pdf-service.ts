@@ -310,10 +310,12 @@ export class InvoicePdfService {
                 customer.companyId,
               ).catch(() => null);
               if (wetCheckView) {
+                const photoUrls = await this.storage.getWetCheckPhotoUrls(wcb.wetCheckId);
                 wetCheckBillingRows.push({
                   wetCheckBillingId: wcb.id,
                   wetCheckBilling: wcb,
                   wetCheckView,
+                  photoUrls,
                 });
               }
             }

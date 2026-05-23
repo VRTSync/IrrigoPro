@@ -95,6 +95,12 @@ export interface PdfWetCheckBillingRow {
   wetCheckBillingId: number;
   wetCheckBilling: WetCheckBilling;
   wetCheckView: WetCheckBillingView;
+  /**
+   * Live photo URLs fetched from wet_check_photos at PDF generation time.
+   * Preferred over the denormalized wetCheckBilling.photos text-array snapshot,
+   * which may be stale or incomplete (finding-linked photos were never included).
+   */
+  photoUrls?: string[];
 }
 
 export interface PdfTotals {

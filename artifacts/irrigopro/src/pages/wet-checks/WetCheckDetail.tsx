@@ -304,7 +304,10 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
         zoneNumber={activeZone}
         zoneCount={zoneCount}
         zoneRecord={zoneRecord}
-        photos={wcPhotos.filter(p => p.zoneRecordId === zoneRecord?.id)}
+        photos={wcPhotos.filter(p =>
+          p.zoneRecordId === zoneRecord?.id ||
+          (p.findingId != null && asArray(zoneRecord?.findings).some(f => f.id === p.findingId))
+        )}
         readOnly={isReadOnly}
         onBack={() => setActiveZone(null)}
         onAdvance={() => {

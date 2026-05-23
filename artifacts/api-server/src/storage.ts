@@ -1003,6 +1003,8 @@ export interface IStorage {
   getWetCheckBillingsByWetCheckId(wetCheckId: number): Promise<WetCheckBilling[]>;
   updateWetCheckBilling(id: number, data: Partial<InsertWetCheckBilling>): Promise<WetCheckBilling>;
   deleteWetCheckBilling(id: number): Promise<void>;
+  /** Returns the URL strings of all photos attached to a wet check (both zone-level and finding-level). */
+  getWetCheckPhotoUrls(wetCheckId: number): Promise<string[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -7795,6 +7797,14 @@ export class DatabaseStorage implements IStorage {
       await objectStorage.deletePhotoBlobs(p.url);
     }
     return ok;
+  }
+
+  async getWetCheckPhotoUrls(wetCheckId: number): Promise<string[]> {
+    const rows = await db
+      .select({ url: wetCheckPhotos.url })
+      .from(wetCheckPhotos)
+      .where(eq(wetCheckPhotos.wetCheckId, wetCheckId));
+    return rows.map((r) => r.url).filter(Boolean);
   }
 
   async linkWetCheckPhotoToFinding(

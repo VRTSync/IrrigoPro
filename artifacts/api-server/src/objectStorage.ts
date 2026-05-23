@@ -240,7 +240,11 @@ export class ObjectStorageService {
     const direct = await this.searchPublicObject(target);
     if (direct) return direct;
     if (variant === "original") return null;
-    return this.searchPublicObject(baseId);
+    const base = await this.searchPublicObject(baseId);
+    if (base) {
+      console.warn(`[PHOTO-SERVE] variant '${variant}' missing for key '${baseId}'; serving base key as fallback`);
+    }
+    return base;
   }
 
   // Returns a short-lived signed GET URL for downloading a photo (or variant).
