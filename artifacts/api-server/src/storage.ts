@@ -986,6 +986,14 @@ export interface IStorage {
     companyId: number,
   ): Promise<WetCheckPhoto | undefined>;
 
+  /**
+   * Batch-fetch wet check photo URLs grouped by wetCheckId.
+   * Returns a Map<wetCheckId, url[]> — missing ids map to [].
+   * Used by the invoice PDF service to merge new-system photos into
+   * the WCB ticket pages without N+1 queries.
+   */
+  getWetCheckPhotoUrlsByIds(wetCheckIds: number[]): Promise<Map<number, string[]>>;
+
   // ── Wet Check Billings (Slice 10) ────────────────────────────────────────
   // Allocates the next WC-YYYY-NNNN number from billing_number_counters.
   // Seeds the prefix row with last_seq=999 on first call so the first
@@ -7825,6 +7833,22 @@ export class DatabaseStorage implements IStorage {
       .where(eq(wetCheckPhotos.id, photoId))
       .returning();
     return updated;
+  }
+
+  async getWetCheckPhotoUrlsByIds(wetCheckIds: number[]): Promise<Map<number, string[]>> {
+    if (wetCheckIds.length === 0) return new Map();
+    const rows = await db
+      .select({ wetCheckId: wetCheckPhotos.wetCheckId, url: wetCheckPhotos.url })
+      .from(wetCheckPhotos)
+      .where(inArray(wetCheckPhotos.wetCheckId, wetCheckIds))
+      .orderBy(wetCheckPhotos.wetCheckId, desc(wetCheckPhotos.takenAt));
+    const result = new Map<number, string[]>();
+    for (const row of rows) {
+      const list = result.get(row.wetCheckId) ?? [];
+      list.push(row.url);
+      result.set(row.wetCheckId, list);
+    }
+    return result;
   }
 
   async approveWetCheck(

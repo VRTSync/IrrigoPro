@@ -202,12 +202,11 @@ export class PDFGenerator {
 
     const wcbPhotoMaps: string[][] = [];
     for (const wcbRow of viewModel.wetCheckBillings) {
-      // Prefer the live photo URLs fetched at build time (photoUrls) over the
-      // denormalized snapshot on wet_check_billings.photos, which may be stale
-      // or missing finding-linked photos that were never written to the snapshot.
-      const photos = Array.isArray(wcbRow.photoUrls) && wcbRow.photoUrls.length > 0
-        ? wcbRow.photoUrls.filter(Boolean)
-        : (Array.isArray(wcbRow.wetCheckBilling.photos) ? wcbRow.wetCheckBilling.photos.filter(Boolean) : []);
+      // Prefer the merged, deduped URL list from the service layer (combines
+      // wet_check_photos new-system rows with the legacy wcb.photos snapshot).
+      // Fall back to the legacy array for callers that bypass InvoicePdfService.
+      const photos = wcbRow.mergedPhotoUrls
+        ?? (Array.isArray(wcbRow.wetCheckBilling.photos) ? wcbRow.wetCheckBilling.photos.filter(Boolean) : []);
       const result = photos.length > 0 ? await preloadPhotos(photos, port) : [];
       const failCount = result.filter(r => r === FAILED_PHOTO_SENTINEL).length;
       if (failCount > 0) {

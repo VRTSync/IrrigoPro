@@ -96,11 +96,13 @@ export interface PdfWetCheckBillingRow {
   wetCheckBilling: WetCheckBilling;
   wetCheckView: WetCheckBillingView;
   /**
-   * Live photo URLs fetched from wet_check_photos at PDF generation time.
-   * Preferred over the denormalized wetCheckBilling.photos text-array snapshot,
-   * which may be stale or incomplete (finding-linked photos were never included).
+   * Merged, deduped photo URLs for this WCB ticket — populated by the
+   * invoice PDF service by combining wet_check_photos (new system) with
+   * the legacy wcb.photos array. Preferred over the denormalized
+   * wetCheckBilling.photos snapshot, which may be stale or incomplete.
+   * When present, the PDF generator uses this list exclusively.
    */
-  photoUrls?: string[];
+  mergedPhotoUrls?: string[];
 }
 
 export interface PdfTotals {

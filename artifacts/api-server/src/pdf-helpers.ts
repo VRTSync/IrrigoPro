@@ -398,7 +398,7 @@ export function ticketPageWCB(
     ${partsBlockForWetCheckBS(view, brandColors)}
 
     ${photoFailWarning}
-    ${photoGridSection(photoDataUris)}
+    ${photoGridSectionWCB(photoDataUris)}
   </div>`;
 }
 
@@ -594,6 +594,43 @@ export function photoGridSection(dataUris: string[]): string {
   <div class="ticket-section ticket-photos-section">
     <div class="ticket-section-label">WORK PHOTOS</div>
     <div class="photo-grid">${rows.join('')}</div>
+  </div>`;
+}
+
+/**
+ * Compact 4-column photo grid used exclusively on WCB ticket pages.
+ * Thumbnails are ~110px tall (vs 160px for the standard grid) to save
+ * page space on longer inspection reports.
+ * Label reads "WET CHECK PHOTOS" to distinguish it from work order
+ * photo sections.
+ */
+export function photoGridSectionWCB(dataUris: string[]): string {
+  const validUris = dataUris.filter(uri => uri !== FAILED_PHOTO_SENTINEL);
+
+  if (!dataUris || dataUris.length === 0 || validUris.length === 0) {
+    return `
+    <div class="ticket-section ticket-photos-section">
+      <div class="ticket-section-label">WET CHECK PHOTOS</div>
+      <div class="photo-no-photos">No photos captured for this inspection</div>
+    </div>`;
+  }
+
+  const COLS = 4;
+  const cells = validUris.map(uri =>
+    `<div class="photo-cell"><img src="${uri}" alt="Wet check photo" class="photo-img-compact"></div>`
+  );
+
+  const rows: string[] = [];
+  for (let i = 0; i < cells.length; i += COLS) {
+    const slice = cells.slice(i, i + COLS);
+    while (slice.length < COLS) slice.push(`<div class="photo-cell photo-empty-compact"></div>`);
+    rows.push(`<div class="photo-row-compact">${slice.join('')}</div>`);
+  }
+
+  return `
+  <div class="ticket-section ticket-photos-section">
+    <div class="ticket-section-label">WET CHECK PHOTOS</div>
+    <div class="photo-grid-compact">${rows.join('')}</div>
   </div>`;
 }
 
@@ -1283,6 +1320,12 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
   .photo-cell { flex: 1; }
   .photo-img { width: 100%; height: 160px; object-fit: cover; border-radius: 5px; border: 1px solid #e5e7eb; display: block; }
   .photo-empty { height: 160px; }
+
+  /* Compact 4-column grid for WCB ticket pages */
+  .photo-grid-compact { display: flex; flex-direction: column; gap: 5px; }
+  .photo-row-compact { display: flex; gap: 5px; }
+  .photo-img-compact { width: 100%; height: 110px; object-fit: cover; border-radius: 4px; border: 1px solid #e5e7eb; display: block; }
+  .photo-empty-compact { height: 110px; }
 
   .ticket-photo-fail-warning {
     background: #fef3c7;

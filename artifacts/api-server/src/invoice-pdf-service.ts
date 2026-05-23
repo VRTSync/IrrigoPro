@@ -310,17 +310,38 @@ export class InvoicePdfService {
                 customer.companyId,
               ).catch(() => null);
               if (wetCheckView) {
-                const photoUrls = await this.storage.getWetCheckPhotoUrls(wcb.wetCheckId);
                 wetCheckBillingRows.push({
                   wetCheckBillingId: wcb.id,
                   wetCheckBilling: wcb,
                   wetCheckView,
-                  photoUrls,
                 });
               }
             }
           }
         }
+      }
+
+      // ── Merge wet_check_photos (new system) with legacy wcb.photos ─────────
+      // Batch-fetch all URLs in a single query then merge + dedup per row.
+      const wetCheckIds = wetCheckBillingRows
+        .map(r => r.wetCheckView.wetCheckId)
+        .filter((id): id is number => typeof id === 'number');
+
+      const wcPhotoUrlMap = wetCheckIds.length > 0
+        ? await this.storage.getWetCheckPhotoUrlsByIds(wetCheckIds)
+        : new Map<number, string[]>();
+
+      for (const r of wetCheckBillingRows) {
+        const newSystemUrls = wcPhotoUrlMap.get(r.wetCheckView.wetCheckId) ?? [];
+        const legacyUrls = Array.isArray(r.wetCheckBilling.photos)
+          ? (r.wetCheckBilling.photos as string[]).filter(Boolean)
+          : [];
+        const seen = new Set<string>();
+        const merged: string[] = [];
+        for (const url of [...newSystemUrls, ...legacyUrls]) {
+          if (!seen.has(url)) { seen.add(url); merged.push(url); }
+        }
+        r.mergedPhotoUrls = merged;
       }
 
       const storedInvoiceTotal = toNum(invoice.totalAmount);
