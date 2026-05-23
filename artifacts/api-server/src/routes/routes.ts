@@ -15175,11 +15175,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // server is authoritative and always derives it from the customer record
   // (customer.totalControllers) so a manipulated client cannot under- or
   // over-scope a wet check.
+  // Exception: `blankStart: true` is accepted from the Slice 3 controller-
+  // selection UI when the customer has no site-map controllers on file. In
+  // that case the server skips ensurePropertyControllers and records
+  // numControllers=0 so the tech can add zones manually as they go.
   const wetCheckCreateBody = z.object({
     customerId: z.coerce.number().int().positive(),
     weather: z.string().nullish(),
     notes: z.string().nullish(),
     clientId: z.string().uuid().nullish(),
+    blankStart: z.boolean().optional(),
   }).strict();
 
   app.post("/api/wet-checks", requireAuthentication, async (req, res) => {
@@ -15204,8 +15209,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
-      const numControllers = Math.max(1, Math.min(26, Number(customer.totalControllers ?? 1)));
-      await storage.ensurePropertyControllers(cid, body.customerId, numControllers);
+      // blankStart=true: caller has confirmed there are no site-map controllers.
+      // Skip ensurePropertyControllers and record numControllers=0 so the wet check
+      // starts empty and the tech adds zones manually (preserving pre-Slice-3 UX).
+      const numControllers = body.blankStart
+        ? 0
+        : Math.max(1, Math.min(26, Number(customer.totalControllers ?? 1)));
+      if (!body.blankStart) {
+        await storage.ensurePropertyControllers(cid, body.customerId, numControllers);
+      }
 
       const wc = await storage.createWetCheck({
         companyId: cid,

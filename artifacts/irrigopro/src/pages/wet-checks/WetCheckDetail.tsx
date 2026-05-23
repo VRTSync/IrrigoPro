@@ -39,13 +39,24 @@ import { LoosePhotosSection } from "./LoosePhotosSection";
 export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId?: string }) {
   const [, navigate] = useLocation();
   const { toast } = useToast();
-  const [activeLetter, setActiveLetter] = useState<string | null>(null);
+
+  // Read URL search params once at init so state can be seeded from them.
+  // Slice 3 passes ?controller=A&zone=1 after creating zone records so the
+  // tech lands directly on the first zone rather than the controller grid.
+  const _searchParams = typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search)
+    : new URLSearchParams();
+  const _initController = _searchParams.get("controller") ?? null;
+  const _initZoneRaw = _searchParams.get("zone");
+  const _initZone = _initZoneRaw ? parseInt(_initZoneRaw, 10) : null;
+
+  const [activeLetter, setActiveLetter] = useState<string | null>(_initController);
 
   // Back-link: show "← Back to Wet Check Billings" when navigated from that page
-  const fromParam = typeof window !== "undefined"
-    ? new URLSearchParams(window.location.search).get("from") ?? ""
-    : "";
-  const [activeZone, setActiveZone] = useState<number | null>(null);
+  const fromParam = _searchParams.get("from") ?? "";
+  const [activeZone, setActiveZone] = useState<number | null>(
+    _initZone != null && !isNaN(_initZone) ? _initZone : null,
+  );
 
   const { data: wc, isLoading } = useQuery<WetCheckWithDetails>({
     queryKey: id != null ? ["/api/wet-checks", id] : ["/api/wet-checks", "c", routeClientId],
