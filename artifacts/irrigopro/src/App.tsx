@@ -64,7 +64,6 @@ const RedirectPendingApprovalToCC = lazy(() => import("@/components/estimates/re
 const InvoicesPage = lazyPage(() => import("@/pages/invoices"));
 const WetChecksPage = lazyPage(() => import("@/pages/wet-checks"));
 const WetCheckBillingsPage = lazyPage(() => import("@/pages/wet-check-billings"));
-const AdminMigrateWetCheckPage = lazyPage(() => import("@/pages/admin-migrate-wet-check"));
 const AdminWetChecksPage = lazyPage(() => import("@/pages/admin-wet-checks"));
 const WetCheckReviewPage = lazyPage(() => import("@/pages/wet-check-review"));
 const ManagerWetChecksPage = lazyPage(() => import("@/pages/manager-wet-checks"));
@@ -429,7 +428,6 @@ function Router() {
                   <Route path="/admin/controllers" component={AdminControllers} />
                   <Route path="/admin/client-errors" component={AdminClientErrorsPage} />
                   <Route path="/super-admin/app-health" component={SuperAdminAppHealthPage} />
-                  <Route path="/admin/migrate-wet-check" component={AdminMigrateWetCheckPage} />
                   <Route path="/financial-pulse" component={FinancialPulsePage} />
                   <Route path="/user-manager" component={UserManager} />
                   <Route path="/switch-user" component={SwitchUser} />

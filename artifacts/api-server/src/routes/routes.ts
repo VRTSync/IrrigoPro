@@ -359,19 +359,6 @@ import { registerCustomerRoutes } from "./customer-routes";
 import { registerBudgetRoutes } from "./budget-routes";
 import { registerFinancialPulseRoutes } from "./financial-pulse";
 import { registerCleanupInvoice71256Routes } from "./cleanup-invoice-71256";
-import {
-  runMigration,
-  getReconciliationReport,
-} from "../migrations/bs-wc-migration";
-import {
-  getJobSnapshot,
-  startJob,
-  updateProgress,
-  completeJob,
-  requestCancel,
-  shouldCancel,
-  resetJob,
-} from "../lib/migration-runner-state";
 import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
 import { scrubEvent, setScrubCustomerNames } from "../lib/scrubEvent";
 import { setTelemetrySink, withTelemetry, type TelemetryEvent } from "../lib/withTelemetry";
@@ -1868,107 +1855,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fallbackMessage: "Couldn't update crashes — please retry",
       });
       res.status(status).json({ message });
-    }
-  });
-
-  // ── Task #808 — BS-WC migration admin endpoints ───────────────────────
-
-  app.post("/api/admin/migrate-bs-wc/start", requireAuthentication, async (req, res) => {
-    if (!requireSuperAdminGuard(req, res)) return;
-    try {
-      const snapshot = getJobSnapshot();
-      if (snapshot.state !== "idle") {
-        res.status(409).json({ message: `Migration is already ${snapshot.state}. Reset before starting again.` });
-        return;
-      }
-      const body = (req.body ?? {}) as Record<string, unknown>;
-      const dryRun = body.dryRun === true;
-      const batchSize = typeof body.batchSize === "number" && body.batchSize > 0
-        ? Math.floor(body.batchSize)
-        : 50;
-      const abortOnError = body.abortOnError !== false;
-      const bsIdFilter = Array.isArray(body.bsIds)
-        ? new Set(
-            (body.bsIds as unknown[])
-              .map((v) => Number(v))
-              .filter((n) => Number.isFinite(n) && n > 0),
-          )
-        : undefined;
-
-      const jobId = `bswc-${Date.now()}`;
-      startJob(jobId);
-
-      const cancelToken = { cancelled: false };
-
-      void (async () => {
-        try {
-          const result = await runMigration({
-            dryRun,
-            batchSize,
-            abortOnError,
-            bsIdFilter: bsIdFilter && bsIdFilter.size > 0 ? bsIdFilter : undefined,
-            cancelToken,
-            onProgress: (p) => {
-              if (shouldCancel()) {
-                cancelToken.cancelled = true;
-              }
-              updateProgress(p);
-            },
-          });
-          completeJob(result);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          completeJob({
-            migrated: 0,
-            skippedAlreadyDone: 0,
-            failed: 1,
-            failedIds: [],
-            preReport: await getReconciliationReport("pre").catch(() => ({
-              bsWcCount: 0, bsWcDistinctCustomers: 0, bsWcTotalValue: 0,
-              bsWcAlreadyBilled: 0, findingsLinkedToBsWc: 0, invoiceItemsLinkedToBsWc: 0,
-              wcbCount: 0, danglingFindingsBsWcId: 0, danglingInvoiceItemsBsWcId: 0,
-            })),
-            assertionsPassed: false,
-          });
-          logger.error({ err, jobId }, `[bs-wc-migration] job ${jobId} failed with unhandled error: ${msg}`);
-        }
-      })();
-
-      res.status(202).json({ jobId, message: "Migration started" });
-    } catch (e) {
-      const { status, message } = classifyAndLog(req, e, {
-        op: "bsWcMigrationStart",
-        ctx: {},
-        fallbackMessage: "Could not start migration",
-      });
-      res.status(status).json({ message });
-    }
-  });
-
-  app.get("/api/admin/migrate-bs-wc/status", requireAuthentication, async (req, res) => {
-    if (!requireSuperAdminGuard(req, res)) return;
-    res.json(getJobSnapshot());
-  });
-
-  app.post("/api/admin/migrate-bs-wc/cancel", requireAuthentication, async (req, res) => {
-    if (!requireSuperAdminGuard(req, res)) return;
-    try {
-      requestCancel();
-      res.json({ ok: true, message: "Cancel requested — current row will finish first" });
-    } catch (e) {
-      const err = e instanceof Error ? e : new Error(String(e));
-      res.status(409).json({ message: err.message });
-    }
-  });
-
-  app.post("/api/admin/migrate-bs-wc/reset", requireAuthentication, async (req, res) => {
-    if (!requireSuperAdminGuard(req, res)) return;
-    try {
-      resetJob();
-      res.json({ ok: true, message: "Job state reset to idle" });
-    } catch (e) {
-      const err = e instanceof Error ? e : new Error(String(e));
-      res.status(409).json({ message: err.message });
     }
   });
 
