@@ -4,7 +4,7 @@ import { useLocation, Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, ChevronLeft, CheckCircle2, Wrench, AlertTriangle, Camera, Download } from "lucide-react";
 import { countZonePhotos } from "@/lib/wet-check-photos";
-import { apiRequest, asArray, queryClient, useArrayQuery } from "@/lib/queryClient";
+import { apiRequest, asArray, queryClient, useArrayQuery, authedPdfUrl } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -120,6 +120,7 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
   };
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [preview, setPreview] = useState<SubmitPreview | null>(null);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   // Slice 3 — server-authoritative WET_CHECK_AUTO_BILL flag. When OFF,
   // the field UI must fall back to the Slice 2 plain-submit flow (no
@@ -495,13 +496,73 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
         </Button>
         <div className="flex items-center gap-2">
           {typeof wc.id === "number" && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => downloadCsv(buildWetCheckCsv(wc), wetCheckCsvFilename(wc))}
-            >
-              <Download className="w-4 h-4 mr-1" /> Export CSV
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => downloadCsv(buildWetCheckCsv(wc), wetCheckCsvFilename(wc))}
+              >
+                <Download className="w-4 h-4 mr-1" /> Export CSV
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isDownloadingPdf}
+                data-testid="wet-check-download-pdf"
+                onClick={async () => {
+                  if (isDownloadingPdf) return;
+                  setIsDownloadingPdf(true);
+                  try {
+                    const url = authedPdfUrl(`/api/wet-checks/${wc.id}/pdf`, { download: "1" });
+                    const res = await fetch(url, { credentials: "include" });
+                    if (!res.ok) {
+                      let msg = `Failed (${res.status})`;
+                      try {
+                        const ct = res.headers.get("content-type") ?? "";
+                        if (ct.includes("application/json")) {
+                          const j = await res.json();
+                          if (j?.message) msg = j.message;
+                        } else {
+                          const t = await res.text();
+                          if (t) msg = t;
+                        }
+                      } catch { /* ignore */ }
+                      throw new Error(msg);
+                    }
+                    const blob = await res.blob();
+                    const objUrl = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = objUrl;
+                    const date = wc.startedAt
+                      ? new Date(wc.startedAt).toISOString().slice(0, 10)
+                      : "unknown";
+                    const safeName = (wc.customerName ?? "")
+                      .replace(/[/\\:*?"<>|]/g, " ")
+                      .replace(/\s+/g, " ")
+                      .trim();
+                    a.download = safeName
+                      ? `${safeName} - Wet Check ${wc.id} - ${date}.pdf`
+                      : `wet-check-${wc.id}-${date}.pdf`;
+                    a.rel = "noopener";
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
+                  } catch (err) {
+                    toast({
+                      title: "Couldn't download PDF",
+                      description: err instanceof Error ? err.message : "Please try again.",
+                      variant: "destructive",
+                    });
+                  } finally {
+                    setIsDownloadingPdf(false);
+                  }
+                }}
+              >
+                <Download className="w-4 h-4 mr-1" />
+                {isDownloadingPdf ? "Preparing..." : "Download PDF"}
+              </Button>
+            </>
           )}
           <OfflineSyncUI />
         </div>

@@ -15238,6 +15238,49 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  app.get("/api/wet-checks/:id/pdf", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    try {
+      const id = parseInt(req.params.id);
+      if (Number.isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
+      const wc = await storage.getWetCheck(id, cid);
+      if (!wc) { res.status(404).json({ message: "Not found" }); return; }
+
+      const company = await storage.getCompanyProfile(cid);
+      const { renderWetCheckPdf } = await import("../wet-check-pdf");
+      const pdf = await renderWetCheckPdf(wc, { company: company ?? null });
+
+      const wantsDownload = String(req.query?.download ?? "") === "1";
+      const safeCustomer = (wc.customerName ?? "")
+        // eslint-disable-next-line no-control-regex
+        .replace(/[\/\\:*?"<>|\x00-\x1f]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const date = wc.startedAt
+        ? new Date(wc.startedAt).toISOString().slice(0, 10)
+        : "unknown";
+      const filename = safeCustomer
+        ? `${safeCustomer} - Wet Check ${id} - ${date}.pdf`
+        : `wet-check-${id}-${date}.pdf`;
+      // eslint-disable-next-line no-control-regex
+      const asciiFilename = filename.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
+      const utf8Filename = encodeURIComponent(filename);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `${wantsDownload ? "attachment" : "inline"}; filename="${asciiFilename}"; filename*=UTF-8''${utf8Filename}`,
+      );
+      res.send(pdf);
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "wetCheckPdf",
+        ctx: { cid, wetCheckId: req.params.id },
+        fallbackMessage: "Failed to generate PDF",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
   // numControllers is intentionally NOT accepted from the client — the
   // server is authoritative and always derives it from the customer record
   // (customer.totalControllers) so a manipulated client cannot under- or
