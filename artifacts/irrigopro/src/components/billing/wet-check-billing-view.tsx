@@ -11,7 +11,7 @@
  */
 
 import { format } from "date-fns";
-import { Wrench, MapPin, ClipboardList, DollarSign, CloudSun } from "lucide-react";
+import { Wrench, MapPin, ClipboardList, DollarSign, CloudSun, Camera } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 
 // ─── Mirrored types (match artifacts/api-server/src/wet-check-billing-view.ts) ─
@@ -31,6 +31,8 @@ export interface WcvLineItem {
   /** True when the finding is labor-only (no part required). Always shown. */
   noPartNeeded: boolean;
   notes: string | null;
+  /** URLs of photos attached to this finding. Empty when no photos. */
+  findingPhotoUrls: string[];
 }
 
 export interface WcvZone {
@@ -44,6 +46,8 @@ export interface WcvZone {
   zonePartsSubtotal: string;
   zoneLaborSubtotal: string;
   zoneTotal: string;
+  /** URLs of photos attached at the zone level (not linked to any finding). */
+  zonePhotoUrls: string[];
 }
 
 export interface WcvInspection {
@@ -102,6 +106,46 @@ function shouldShowLineItem(item: WcvLineItem): boolean {
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
+/** Compact inline photo strip used for both zone-level and finding-level photos. */
+function PhotoStrip({
+  urls,
+  label,
+}: {
+  urls: string[];
+  label?: string;
+}) {
+  if (urls.length === 0) return null;
+  return (
+    <div className="mt-2" data-testid="photo-strip">
+      {label && (
+        <p className="flex items-center gap-1 text-xs font-medium text-gray-500 mb-1.5">
+          <Camera className="w-3 h-3" />
+          {label}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {urls.map((url, i) => (
+          <a
+            key={i}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block flex-shrink-0"
+            data-testid={`photo-thumb-${i}`}
+          >
+            <img
+              src={url}
+              alt={`Photo ${i + 1}`}
+              className="w-20 h-20 object-cover rounded border border-gray-200 hover:opacity-90 transition-opacity"
+              loading="lazy"
+            />
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ZoneSection({
   zone,
   canSeePricing,
@@ -111,6 +155,7 @@ function ZoneSection({
 }) {
   const visibleItems = zone.lineItems.filter(shouldShowLineItem);
   const repairLaborNum = toNum(zone.repairLaborHours);
+  const zonePhotos = zone.zonePhotoUrls ?? [];
 
   return (
     <div
@@ -125,14 +170,30 @@ function ZoneSection({
             Zone {zone.zoneLabel}
           </span>
         </div>
-        {canSeePricing && (
-          <span className="text-sm font-semibold text-blue-800">
-            {currency(zone.zoneTotal)}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {zonePhotos.length > 0 && (
+            <span className="flex items-center gap-1 text-xs text-blue-600">
+              <Camera className="w-3 h-3" />
+              {zonePhotos.length}
+            </span>
+          )}
+          {canSeePricing && (
+            <span className="text-sm font-semibold text-blue-800">
+              {currency(zone.zoneTotal)}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="p-3 space-y-2">
+        {/* Zone-level photos (appear before findings table) */}
+        {zonePhotos.length > 0 && (
+          <PhotoStrip
+            urls={zonePhotos}
+            label={`Zone ${zone.zoneLabel} photos`}
+          />
+        )}
+
         {/* Line items */}
         {visibleItems.length > 0 ? (
           <div className="overflow-x-auto">
@@ -158,42 +219,48 @@ function ZoneSection({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {visibleItems.map((item) => (
-                  <tr key={item.findingId} className="hover:bg-gray-50">
-                    <td className="py-2 pr-3">
-                      <p
-                        className="font-medium text-gray-900 text-sm"
-                        data-testid={`line-item-label-${item.findingId}`}
-                      >
-                        {item.issueDisplayLabel}
-                        {item.noPartNeeded && (
-                          <span className="ml-1.5 text-xs font-normal text-amber-600 bg-amber-50 border border-amber-200 rounded px-1 py-0.5">
-                            Labor Only
-                          </span>
+                {visibleItems.map((item) => {
+                  const findingPhotos = item.findingPhotoUrls ?? [];
+                  return (
+                    <tr key={item.findingId} className="hover:bg-gray-50 align-top">
+                      <td className="py-2 pr-3">
+                        <p
+                          className="font-medium text-gray-900 text-sm"
+                          data-testid={`line-item-label-${item.findingId}`}
+                        >
+                          {item.issueDisplayLabel}
+                          {item.noPartNeeded && (
+                            <span className="ml-1.5 text-xs font-normal text-amber-600 bg-amber-50 border border-amber-200 rounded px-1 py-0.5">
+                              Labor Only
+                            </span>
+                          )}
+                        </p>
+                        {item.partName && !item.noPartNeeded && (
+                          <p className="text-xs text-gray-500 mt-0.5">{item.partName}</p>
                         )}
-                      </p>
-                      {item.partName && !item.noPartNeeded && (
-                        <p className="text-xs text-gray-500 mt-0.5">{item.partName}</p>
+                        {item.notes && (
+                          <p className="text-xs text-gray-400 mt-0.5 italic">{item.notes}</p>
+                        )}
+                        {findingPhotos.length > 0 && (
+                          <PhotoStrip urls={findingPhotos} />
+                        )}
+                      </td>
+                      {canSeePricing && (
+                        <>
+                          <td className="py-2 px-2 text-center text-gray-700 text-sm">
+                            {item.noPartNeeded ? "—" : item.quantity}
+                          </td>
+                          <td className="py-2 px-2 text-right text-gray-700 text-sm">
+                            {item.noPartNeeded ? "—" : currency(item.unitPrice)}
+                          </td>
+                          <td className="py-2 pl-2 text-right font-medium text-gray-900 text-sm">
+                            {item.noPartNeeded ? "—" : currency(item.partsTotal)}
+                          </td>
+                        </>
                       )}
-                      {item.notes && (
-                        <p className="text-xs text-gray-400 mt-0.5 italic">{item.notes}</p>
-                      )}
-                    </td>
-                    {canSeePricing && (
-                      <>
-                        <td className="py-2 px-2 text-center text-gray-700 text-sm">
-                          {item.noPartNeeded ? "—" : item.quantity}
-                        </td>
-                        <td className="py-2 px-2 text-right text-gray-700 text-sm">
-                          {item.noPartNeeded ? "—" : currency(item.unitPrice)}
-                        </td>
-                        <td className="py-2 pl-2 text-right font-medium text-gray-900 text-sm">
-                          {item.noPartNeeded ? "—" : currency(item.partsTotal)}
-                        </td>
-                      </>
-                    )}
-                  </tr>
-                ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

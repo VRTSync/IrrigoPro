@@ -4000,12 +4000,16 @@ export class DatabaseStorage implements IStorage {
       .where(eq(customers.id, bs.customerId));
     if (!customer) return null;
 
+    // 6b. Load photos for in-app grouped display
+    const photos = await this.getWetCheckPhotosGrouped(wc.id);
+
     return buildWetCheckBillingView({
       billingSheet: bs,
       customer,
       findings,
       zoneRecords,
       wetCheck: wc,
+      photos,
       issueTypeConfigs: configs,
     });
   }
@@ -4092,6 +4096,9 @@ export class DatabaseStorage implements IStorage {
       .where(eq(customers.id, wcb.customerId));
     if (!customer) return null;
 
+    // 6b. Load photos for the wet check (zone/finding linkage for in-app grouped display)
+    const photos = await this.getWetCheckPhotosGrouped(wc.id);
+
     // 7. Build the view using wcb cast to the shape buildWetCheckBillingView
     //    needs. Only `id`, `billingNumber`, `workDate`, `appliedLaborRate`, and
     //    `laborRate` are read from the billingSheet parameter — WetCheckBilling
@@ -4103,6 +4110,7 @@ export class DatabaseStorage implements IStorage {
       zoneRecords,
       wetCheck: wc,
       issueTypeConfigs: configs,
+      photos,
     });
 
     // Replace billingSheetId (set to wcb.id by buildWetCheckBillingView) with

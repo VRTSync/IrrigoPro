@@ -41,6 +41,8 @@ export interface WcvLineItem {
   /** True when the finding is a labor-only repair (no part required). */
   noPartNeeded: boolean;
   notes: string | null;
+  /** URLs of photos attached to this finding. Empty when no photos. */
+  findingPhotoUrls: string[];
 }
 
 /** All findings for a single controller zone. */
@@ -59,6 +61,8 @@ export interface WcvZone {
   zonePartsSubtotal: string;
   zoneLaborSubtotal: string;
   zoneTotal: string;
+  /** URLs of photos attached at the zone level (not linked to any finding). Empty when none. */
+  zonePhotoUrls: string[];
 }
 
 /** Snapshot of the wet check inspection that produced these findings. */
@@ -119,6 +123,11 @@ export interface BuildWetCheckBillingViewInput {
   wetCheck: WetCheck;
   /** issueTypeConfigs for the billing sheet's company (active + inactive). */
   issueTypeConfigs: IssueTypeConfig[];
+  /**
+   * Optional wet check photos with zone/finding linkage.
+   * When provided, each zone and line item will carry the relevant photo URLs.
+   */
+  photos?: Array<{ url: string; zoneRecordId: number | null; findingId: number | null }>;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -147,7 +156,7 @@ function titleCase(issueType: string): string {
 export function buildWetCheckBillingView(
   input: BuildWetCheckBillingViewInput,
 ): WetCheckBillingView {
-  const { billingSheet: bs, customer, findings, zoneRecords, wetCheck, issueTypeConfigs } = input;
+  const { billingSheet: bs, customer, findings, zoneRecords, wetCheck, issueTypeConfigs, photos = [] } = input;
 
   // ── Labor rate precedence ────────────────────────────────────────────────
   // Nullish precedence: appliedLaborRate ?? laborRate ?? customer.laborRate.
@@ -175,6 +184,25 @@ export function buildWetCheckBillingView(
     const bucket = grouped.get(f.zoneRecordId) ?? [];
     bucket.push(f);
     grouped.set(f.zoneRecordId, bucket);
+  }
+
+  // ── Photo grouping ───────────────────────────────────────────────────────
+  // findingId → photo URLs
+  const findingPhotoMap = new Map<number, string[]>();
+  // zoneRecordId → zone-level photo URLs (no findingId)
+  const zonePhotoMap = new Map<number, string[]>();
+
+  for (const photo of photos) {
+    if (!photo.url) continue;
+    if (photo.findingId !== null) {
+      const arr = findingPhotoMap.get(photo.findingId) ?? [];
+      arr.push(photo.url);
+      findingPhotoMap.set(photo.findingId, arr);
+    } else if (photo.zoneRecordId !== null) {
+      const arr = zonePhotoMap.get(photo.zoneRecordId) ?? [];
+      arr.push(photo.url);
+      zonePhotoMap.set(photo.zoneRecordId, arr);
+    }
   }
 
   // ── Build zones ──────────────────────────────────────────────────────────
@@ -222,6 +250,7 @@ export function buildWetCheckBillingView(
         lineTotal: fmt(lineTotal),
         noPartNeeded: f.noPartNeeded,
         notes: f.notes ?? null,
+        findingPhotoUrls: findingPhotoMap.get(f.id) ?? [],
       };
     });
 
@@ -234,6 +263,7 @@ export function buildWetCheckBillingView(
       zonePartsSubtotal: fmt(zoneParts),
       zoneLaborSubtotal: fmt(zoneLabor),
       zoneTotal: fmt(zoneParts + zoneLabor),
+      zonePhotoUrls: zonePhotoMap.get(zoneRecordId) ?? [],
     });
   }
 
