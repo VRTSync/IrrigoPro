@@ -14896,11 +14896,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get("/api/wet-checks", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     try {
-      const opts: { status?: string; technicianId?: number } = {};
+      const opts: { status?: string; technicianId?: number; customerId?: number } = {};
       if (req.query.status) opts.status = String(req.query.status);
       if (req.query.mine === "1" && req.authenticatedUserId) opts.technicianId = req.authenticatedUserId;
+      if (req.query.customerId) opts.customerId = parseInt(String(req.query.customerId));
       const rows = await storage.listWetChecks(cid, opts);
-      res.json(rows);
+      // When customerId is provided, support offset-based loading so the
+      // Customer Hub can page through long histories without loading all
+      // records up front. paginate() sets X-Total-Count and slices.
+      res.json(opts.customerId ? paginate(req, res, rows, { limit: 10, max: 200 }) : rows);
     } catch (e: any) {
       const { status, message } = classifyAndLog(req, e, {
         op: "listWetChecks",

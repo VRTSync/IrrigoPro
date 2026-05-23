@@ -858,7 +858,7 @@ export interface IStorage {
     opts?: { confirmDeleteWithZones?: boolean; branchName?: string | null },
   ): Promise<{ customer: Customer; controllers: PropertyController[]; removedLetters: string[] }>;
 
-  listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number }): Promise<Array<WetCheck & { zoneCount: number; workOrderIds: number[] }>>;
+  listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number; customerId?: number }): Promise<Array<WetCheck & { zoneCount: number; processedCount: number; failedCount: number; workOrderIds: number[] }>>;
   // Admin-only company-wide list with per-row aggregate counts (zone
   // records, findings, photos). Used by the company-admin Wet Checks
   // management page.
@@ -6474,22 +6474,29 @@ export class DatabaseStorage implements IStorage {
     return { customer: updatedCustomer ?? customer, controllers, removedLetters };
   }
 
-  async listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number }): Promise<Array<WetCheck & { zoneCount: number; workOrderIds: number[] }>> {
+  async listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number; customerId?: number }): Promise<Array<WetCheck & { zoneCount: number; processedCount: number; failedCount: number; workOrderIds: number[] }>> {
     const conds = [eq(wetChecks.companyId, companyId)];
     if (opts?.status) conds.push(eq(wetChecks.status, opts.status));
     if (opts?.technicianId) conds.push(eq(wetChecks.technicianId, opts.technicianId));
-    const wcs = await db.select().from(wetChecks).where(and(...conds)).orderBy(desc(wetChecks.startedAt)).limit(200);
+    if (opts?.customerId) conds.push(eq(wetChecks.customerId, opts.customerId));
+    // When scoped to a single customer the route applies paginate() for
+    // offset-based loading; don't cap here so the helper sees the full
+    // result set and can set an accurate X-Total-Count. For the generic
+    // (company-wide) list keep the existing 200-row safety cap.
+    const baseQ = db.select().from(wetChecks).where(and(...conds)).orderBy(desc(wetChecks.startedAt));
+    const wcs = await (opts?.customerId ? baseQ : baseQ.limit(200));
     if (wcs.length === 0) return [];
     const ids = wcs.map(w => w.id);
 
-    // Per-row zone count + linked work order ids so the mobile/list UIs
-    // can show "N zones" and "WO #..." chips without N+1 fetches. Work
-    // orders are linked indirectly via `wet_check_findings.work_order_id`
-    // (the canonical schema link); in_progress wet checks usually have
-    // none yet, so the array is commonly empty.
+    // Per-row zone count + processed/failed breakdown + linked work order ids
+    // so the mobile/list UIs can show stats without N+1 fetches.
+    // processed = ranSuccessfully IS TRUE, failed = ranSuccessfully IS FALSE
+    // (NULL means the zone record exists but hasn't been evaluated yet).
     const zoneRows = await db.select({
       wetCheckId: wetCheckZoneRecords.wetCheckId,
       n: sql<number>`count(*)::int`,
+      processed: sql<number>`count(*) filter (where ${wetCheckZoneRecords.ranSuccessfully} = true)::int`,
+      failed: sql<number>`count(*) filter (where ${wetCheckZoneRecords.ranSuccessfully} = false)::int`,
     }).from(wetCheckZoneRecords)
       .where(inArray(wetCheckZoneRecords.wetCheckId, ids))
       .groupBy(wetCheckZoneRecords.wetCheckId);
@@ -6502,7 +6509,7 @@ export class DatabaseStorage implements IStorage {
         sql`${wetCheckFindings.workOrderId} IS NOT NULL`,
       ));
 
-    const zoneMap = new Map(zoneRows.map(r => [r.wetCheckId, Number(r.n)]));
+    const zoneMap = new Map(zoneRows.map(r => [r.wetCheckId, { n: Number(r.n), processed: Number(r.processed), failed: Number(r.failed) }]));
     const woMap = new Map<number, number[]>();
     for (const r of woRows) {
       if (r.workOrderId == null) continue;
@@ -6512,11 +6519,16 @@ export class DatabaseStorage implements IStorage {
     }
     for (const list of woMap.values()) list.sort((a, b) => a - b);
 
-    return wcs.map(wc => ({
-      ...wc,
-      zoneCount: zoneMap.get(wc.id) ?? 0,
-      workOrderIds: woMap.get(wc.id) ?? [],
-    }));
+    return wcs.map(wc => {
+      const z = zoneMap.get(wc.id);
+      return {
+        ...wc,
+        zoneCount: z?.n ?? 0,
+        processedCount: z?.processed ?? 0,
+        failedCount: z?.failed ?? 0,
+        workOrderIds: woMap.get(wc.id) ?? [],
+      };
+    });
   }
 
   async listWetChecksForAdmin(
