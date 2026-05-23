@@ -34,6 +34,7 @@ import AdminWetChecksPage from "@/pages/admin-wet-checks";
 import ManagerWetChecksPage from "@/pages/manager-wet-checks";
 import AdminIssueTypesPage from "@/pages/admin-issue-types";
 import AdminClientErrorsPage from "@/pages/admin-client-errors";
+import WetCheckInspectionSummaryPage from "@/pages/wet-checks/WetCheckInspectionSummaryPage";
 import BillingZeroPriceAuditPage from "@/pages/billing-zero-price-audit";
 import LaborRateAuditPage from "@/pages/labor-rate-audit";
 import MissingPhotosReport from "@/pages/missing-photos-report";
@@ -182,6 +183,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
           <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
           <Route path="/wet-checks" component={WetChecksPage} />
+          <Route path="/wet-checks/:id/summary" component={WetCheckInspectionSummaryPage} />
           <Route path="/wet-checks/:id" component={WetChecksPage} />
           <Route path="/work-orders" component={WorkOrders} />
           <Route path="/user-profile" component={UserProfile} />

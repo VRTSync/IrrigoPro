@@ -31,6 +31,7 @@ import { PhotoCaptureButton } from "./PhotoCaptureButton";
 import { PhotoThumb } from "./PhotoThumb";
 import { ControllerHeader } from "./ControllerHeader";
 import { ZoneScreen } from "./ZoneScreen";
+import { ZoneOverviewSheet } from "./ZoneOverviewSheet";
 import { FindingsByResolution } from "./FindingsByResolution";
 import { LoosePhotosSection } from "./LoosePhotosSection";
 
@@ -57,6 +58,9 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
   const [activeZone, setActiveZone] = useState<number | null>(
     _initZone != null && !isNaN(_initZone) ? _initZone : null,
   );
+
+  // Zone overview sheet (open from zone screen's "View All" button)
+  const [overviewOpen, setOverviewOpen] = useState(false);
 
   const { data: wc, isLoading } = useQuery<WetCheckWithDetails>({
     queryKey: id != null ? ["/api/wet-checks", id] : ["/api/wet-checks", "c", routeClientId],
@@ -293,39 +297,110 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
     const zoneCount = ctrl?.zoneCount ?? 100;
     const records = zonesByLetter(activeLetter);
     const zoneRecord = records.find(z => z.zoneNumber === activeZone);
+
+    // Flat ordered zone list across all controllers for prev/next navigation
+    const allZones = controllers.flatMap(c =>
+      Array.from({ length: c.zoneCount }, (_, i) => ({
+        letter: c.controllerLetter,
+        zone: i + 1,
+      })),
+    );
+    const currentZoneIndex = allZones.findIndex(
+      z => z.letter === activeLetter && z.zone === activeZone,
+    );
+    const totalZones = allZones.length;
+
+    // Quick lookup: does a zone have an existing record with a checked status?
+    const zoneRecordMap = new Map(
+      wcZoneRecords.map(r => [`${r.controllerLetter}-${r.zoneNumber}`, r]),
+    );
+    const isUnchecked = (letter: string, zone: number) => {
+      const r = zoneRecordMap.get(`${letter}-${zone}`);
+      return !r || r.status === "not_checked";
+    };
+
+    // Globally unchecked zones (excludes the current zone being actively viewed,
+    // since the tech is deciding its status right now).
+    const otherUncheckedZones = allZones.filter(
+      z => !(z.letter === activeLetter && z.zone === activeZone) && isUnchecked(z.letter, z.zone),
+    );
+
+    // "Review & Submit" appears when no OTHER unchecked zones exist — the current
+    // zone is the last remaining one, or all zones have already been checked.
+    const isLastUncheckedZone = otherUncheckedZones.length === 0;
+
+    // Next unchecked zone to visit. Prefer zones after the current position so the
+    // tech moves forward naturally; wrap around to earlier zones if none remain
+    // ahead. This handles the "jumped via View All" case correctly.
+    const nextUncheckedZone =
+      allZones.slice(currentZoneIndex + 1).find(z => isUnchecked(z.letter, z.zone)) ??
+      allZones.slice(0, currentZoneIndex).find(z => isUnchecked(z.letter, z.zone)) ??
+      null;
+
+    const navigateToZone = (letter: string, zone: number) => {
+      setActiveLetter(letter);
+      setActiveZone(zone);
+    };
+
+    // Prev button: previous sequential zone so techs can review prior work.
+    const prevZone = currentZoneIndex > 0 ? allZones[currentZoneIndex - 1] : null;
+
+    const goToNextUncheckedOrOverview = () => {
+      if (nextUncheckedZone) {
+        navigateToZone(nextUncheckedZone.letter, nextUncheckedZone.zone);
+      } else {
+        // All zones checked — navigate to the Slice 5 summary placeholder.
+        navigate(`/wet-checks/${wc.id ?? id ?? 0}/summary`);
+      }
+    };
+
     return (
-      // Task #511 — `key` forces a fresh mount whenever the tech advances
-      // to a different zone. Without it, ZoneScreen (and the FindingSheet
-      // it owns) is the same React instance across zones, so per-zone
-      // local state — the Needs Work form (selected part, qty, labor
-      // hours, notes, mark-complete toggle, no-part-needed toggle,
-      // pending photos), the open finding sheet, the pending revert
-      // dialog, and the inline Mark Zone Complete confirm — would leak
-      // onto the next zone after `onAdvance()` flipped only the
-      // `activeZone` prop. Remounting on `${letter}-${zone}` resets all
-      // that state to defaults so each zone opens as a clean slate.
-      <ZoneScreen
-        key={`zone-${activeLetter}-${activeZone}`}
-        wetCheckId={wc.id ?? id ?? 0}
-        wetCheckClientId={wc.clientId ?? null}
-        customerId={wc.customerId}
-        customerName={wc.customerName}
-        propertyAddress={wc.propertyAddress}
-        letter={activeLetter}
-        zoneNumber={activeZone}
-        zoneCount={zoneCount}
-        zoneRecord={zoneRecord}
-        photos={wcPhotos.filter(p =>
-          p.zoneRecordId === zoneRecord?.id ||
-          (p.findingId != null && asArray(zoneRecord?.findings).some(f => f.id === p.findingId))
-        )}
-        readOnly={isReadOnly}
-        onBack={() => setActiveZone(null)}
-        onAdvance={() => {
-          if (activeZone < zoneCount) setActiveZone(activeZone + 1);
-          else setActiveZone(null);
-        }}
-      />
+      <>
+        {/* Task #511 — `key` forces a fresh mount whenever the tech advances
+            to a different zone. Remounting on `${letter}-${zone}` resets all
+            per-zone local state to defaults so each zone opens as a clean slate. */}
+        <ZoneScreen
+          key={`zone-${activeLetter}-${activeZone}`}
+          wetCheckId={wc.id ?? id ?? 0}
+          wetCheckClientId={wc.clientId ?? null}
+          customerId={wc.customerId}
+          customerName={wc.customerName}
+          propertyAddress={wc.propertyAddress}
+          letter={activeLetter}
+          zoneNumber={activeZone}
+          zoneCount={zoneCount}
+          zoneRecord={zoneRecord}
+          photos={wcPhotos.filter(p =>
+            p.zoneRecordId === zoneRecord?.id ||
+            (p.findingId != null && asArray(zoneRecord?.findings).some(f => f.id === p.findingId))
+          )}
+          readOnly={isReadOnly}
+          onBack={() => setActiveZone(null)}
+          // Auto-advance (Ran OK / N/A) jumps to the next unchecked zone,
+          // skipping zones already marked, so the tech's flow stays fast.
+          onAdvance={goToNextUncheckedOrOverview}
+          currentZoneIndex={currentZoneIndex >= 0 ? currentZoneIndex : undefined}
+          totalZones={totalZones}
+          onNavigatePrev={
+            prevZone ? () => navigateToZone(prevZone.letter, prevZone.zone) : null
+          }
+          // Manual Next also advances to the next unchecked zone; when none
+          // remain the button reads "Review & Submit" and goes to the overview.
+          onNavigateNext={goToNextUncheckedOrOverview}
+          isLastZone={isLastUncheckedZone}
+          onOpenOverview={() => setOverviewOpen(true)}
+        />
+        <ZoneOverviewSheet
+          open={overviewOpen}
+          onClose={() => setOverviewOpen(false)}
+          controllers={controllers}
+          zoneRecords={wcZoneRecords}
+          activeLetter={activeLetter}
+          activeZone={activeZone}
+          onNavigate={navigateToZone}
+          photos={wcPhotos}
+        />
+      </>
     );
   }
 

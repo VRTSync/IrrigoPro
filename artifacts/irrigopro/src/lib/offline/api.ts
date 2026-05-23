@@ -474,6 +474,40 @@ export async function patchZoneRecordRepairLabor(
   }));
 }
 
+export async function patchZoneRecordReadings(
+  zoneRecordClientId: string,
+  zoneRecordId: number | undefined,
+  observedPressure: string,
+  observedFlow: string,
+): Promise<void> {
+  const body = {
+    observedPressure: observedPressure.trim() !== "" ? observedPressure.trim() : null,
+    observedFlow: observedFlow.trim() !== "" ? observedFlow.trim() : null,
+  };
+  if (!isOfflineQueueEnabled() && zoneRecordId != null) {
+    await apiRequest(`/api/wet-checks/zone-records/${zoneRecordId}`, "PATCH", body);
+    return;
+  }
+  const db = await openOfflineDB();
+  const existing = await db.get("wetCheckZoneRecords", zoneRecordClientId);
+  if (existing) {
+    await putZoneRecordMirror(db, {
+      ...existing,
+      data: { ...existing.data, ...body },
+      updatedAt: Date.now(),
+    });
+  }
+  await getSyncEngine().enqueue(newMutation({
+    kind: "zone_record.update",
+    method: "PATCH",
+    urlTemplate: "/api/wet-checks/zone-records/{{zr}}",
+    body,
+    clientId: uuid(),
+    parentClientId: zoneRecordClientId,
+    placeholders: { zr: zoneRecordClientId },
+  }));
+}
+
 // Queue a photo→finding link PATCH.
 //
 // Task #510 — the photo is addressed by its `clientId` via a new `{{p}}`
