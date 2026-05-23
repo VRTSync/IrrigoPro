@@ -13,6 +13,7 @@ export interface WetCheckCardData {
   autoBilledTotal: string;
   pendingCount: number;
   pendingTotal: string;
+  totalFindings?: number;
   dispositionCounts?: { completed_in_field: number; needs_review: number };
 }
 
@@ -73,9 +74,16 @@ export function WetCheckCard({ wc }: { wc: WetCheckCardData }) {
                   <>
                     <span className="mx-1.5 text-gray-300">·</span>
                     Submitted {formatRelative(submittedAt)}
+                    <span className="mx-1.5 text-gray-300">·</span>
+                    {submittedAt.toLocaleString([], {
+                      month: "short", day: "numeric",
+                      hour: "numeric", minute: "2-digit",
+                    })}
                   </>
                 )}
               </p>
+
+              {/* Three count chips: Completed in field / Pending decision / Total */}
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <Badge
                   variant="outline"
@@ -83,7 +91,7 @@ export function WetCheckCard({ wc }: { wc: WetCheckCardData }) {
                   data-testid={`manager-wc-card-${wc.id}-auto-billed`}
                 >
                   <CheckCircle2 className="w-3 h-3 mr-1" />
-                  {wc.autoBilledCount} auto-billed · {formatMoney(wc.autoBilledTotal)}
+                  {wc.autoBilledCount} completed in field
                 </Badge>
                 <Badge
                   variant="outline"
@@ -91,24 +99,15 @@ export function WetCheckCard({ wc }: { wc: WetCheckCardData }) {
                   data-testid={`manager-wc-card-${wc.id}-pending`}
                 >
                   <AlertTriangle className="w-3 h-3 mr-1" />
-                  {wc.pendingCount} to decide
+                  {wc.pendingCount} pending decision
                 </Badge>
-                {wc.dispositionCounts && wc.dispositionCounts.completed_in_field > 0 && (
+                {wc.totalFindings != null && (
                   <Badge
                     variant="outline"
-                    className="bg-green-50 text-green-700 border-green-200 text-xs"
-                    data-testid={`manager-wc-card-${wc.id}-tech-completed`}
+                    className="bg-gray-50 text-gray-600 border-gray-200 text-xs"
+                    data-testid={`manager-wc-card-${wc.id}-total`}
                   >
-                    {wc.dispositionCounts.completed_in_field} tech-completed
-                  </Badge>
-                )}
-                {wc.dispositionCounts && wc.dispositionCounts.needs_review > 0 && (
-                  <Badge
-                    variant="outline"
-                    className="bg-amber-50 text-amber-800 border-amber-300 text-xs"
-                    data-testid={`manager-wc-card-${wc.id}-tech-review`}
-                  >
-                    {wc.dispositionCounts.needs_review} flagged by tech
+                    {wc.totalFindings} total
                   </Badge>
                 )}
               </div>

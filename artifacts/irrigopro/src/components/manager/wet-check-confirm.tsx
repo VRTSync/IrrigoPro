@@ -93,7 +93,6 @@ export function WetCheckConfirm({ id }: { id: number }) {
 
   const allFindings: FindingItem[] = useMemo(() => {
     if (!wc) return [];
-    // Task #540 — null-safe traversal of nested arrays.
     return asArray(wc.zoneRecords).flatMap(zr =>
       asArray(zr.findings).map(f => ({ f, zr })),
     );
@@ -118,17 +117,11 @@ export function WetCheckConfirm({ id }: { id: number }) {
   const convertMut = useMutation({
     mutationFn: () => apiRequest(`/api/wet-checks/${id}/convert`, "POST", {}),
     onSuccess: (resp: any) => {
-      // Stash an authoritative convert end-time so the done screen's
-      // time-to-complete copy never drifts. Prefer the server-provided
-      // fullyConvertedAt from the convert response; fall back to client
-      // clock so the value is still populated if the field is absent.
       const serverTs = resp?.wetCheck?.fullyConvertedAt;
       const stamp = serverTs ? new Date(serverTs).getTime() : Date.now();
       try {
         sessionStorage.setItem(`wc-converted-at-${id}`, String(stamp));
-      } catch { /* sessionStorage may be unavailable; the fallback still works */ }
-      // Done screen reads the freshly-updated wet check; invalidate so it
-      // sees fullyConvertedAt + linked estimate/WO/billing IDs on findings.
+      } catch { /* sessionStorage may be unavailable */ }
       queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", id] });
       queryClient.invalidateQueries({ queryKey: ["/api/wet-checks/pending-review"] });
@@ -156,23 +149,27 @@ export function WetCheckConfirm({ id }: { id: number }) {
     groups.documented.length > 0 || groups.repaired.length > 0;
 
   return (
-    <div className="max-w-3xl mx-auto py-4 space-y-4 px-4 sm:px-0" data-testid="wet-check-confirm">
-      <Link href={`/manager/wet-checks/${id}`}>
-        <Button variant="ghost" data-testid="confirm-back-to-wizard">
-          <ChevronLeft className="w-4 h-4 mr-1" /> Back to wizard
-        </Button>
-      </Link>
-
-      <div className="space-y-1">
-        <h1 className="text-2xl font-bold" data-testid="confirm-heading">
+    <div className="max-w-3xl mx-auto py-4 space-y-0 px-4 sm:px-0" data-testid="wet-check-confirm">
+      {/* Gradient header */}
+      <div className="rounded-t-xl overflow-hidden bg-gradient-to-br from-blue-600 to-indigo-700 px-5 py-5 text-white">
+        <Link href={`/manager/wet-checks/${id}`}>
+          <button
+            type="button"
+            className="inline-flex items-center text-xs text-blue-200 hover:text-white mb-3 -ml-1 transition-colors"
+            data-testid="confirm-back-to-wizard"
+          >
+            <ChevronLeft className="w-4 h-4 mr-0.5" /> Back to triage
+          </button>
+        </Link>
+        <h1 className="text-xl font-bold leading-tight" data-testid="confirm-heading">
           Almost done — review and confirm
         </h1>
-        <div className="text-sm text-gray-500" data-testid="confirm-subtitle">
+        <div className="text-sm text-blue-200 mt-0.5" data-testid="confirm-subtitle">
           {wc.customerName} · WC-{wc.id}
         </div>
       </div>
 
-      <Card className="overflow-hidden" data-testid="confirm-summary-card">
+      <Card className="rounded-t-none border-t-0 overflow-hidden" data-testid="confirm-summary-card">
         <CardContent className="p-0 divide-y">
           {!hasAnyAction && (
             <div className="px-4 py-6 text-sm text-gray-500 text-center" data-testid="confirm-empty">
@@ -226,7 +223,7 @@ export function WetCheckConfirm({ id }: { id: number }) {
         </CardContent>
       </Card>
 
-      <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2">
+      <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-4">
         <Link
           href={
             firstSentEst || firstDeferred || firstDocumentd || firstRepaired

@@ -91,7 +91,6 @@ export function WetCheckDone({ id }: { id: number }) {
 
   const allFindings: FindingItem[] = useMemo(() => {
     if (!wc) return [];
-    // Task #540 — null-safe traversal of nested arrays.
     return asArray(wc.zoneRecords).flatMap(zr =>
       asArray(zr.findings).map(f => ({ f, zr })),
     );
@@ -117,9 +116,6 @@ export function WetCheckDone({ id }: { id: number }) {
   const durationMs = useMemo(() => {
     if (!wc?.submittedAt) return 0;
     const start = new Date(wc.submittedAt).getTime();
-    // Prefer the persisted convert timestamp; if the wet check refetch hasn't
-    // landed yet, use the moment we stashed in confirm right after the convert
-    // call returned. Final fallback is now() so the copy never blanks out.
     let end = Date.now();
     if (wc.fullyConvertedAt) {
       end = new Date(wc.fullyConvertedAt).getTime();
@@ -128,7 +124,7 @@ export function WetCheckDone({ id }: { id: number }) {
         const stashed = sessionStorage.getItem(`wc-converted-at-${id}`);
         const n = stashed ? parseInt(stashed) : NaN;
         if (Number.isFinite(n)) end = n;
-      } catch { /* sessionStorage may be unavailable; fall through to now() */ }
+      } catch { /* sessionStorage may be unavailable */ }
     }
     return end - start;
   }, [wc, id]);
@@ -144,7 +140,7 @@ export function WetCheckDone({ id }: { id: number }) {
   }
 
   return (
-    <div className="max-w-3xl mx-auto py-8 space-y-6 px-4 sm:px-0" data-testid="wet-check-done">
+    <div className="max-w-3xl mx-auto py-4 space-y-0 px-4 sm:px-0" data-testid="wet-check-done">
       <style>{`
         @keyframes wetCheckHeroScale {
           0% { transform: scale(0.6); opacity: 0; }
@@ -155,21 +151,24 @@ export function WetCheckDone({ id }: { id: number }) {
         }
       `}</style>
 
-      <div className="text-center space-y-3">
+      {/* Gradient header */}
+      <div className="rounded-t-xl overflow-hidden bg-gradient-to-br from-green-500 to-emerald-700 px-5 py-6 text-white text-center space-y-3">
         <div
-          className="wet-check-hero mx-auto rounded-full bg-green-100 flex items-center justify-center"
+          className="wet-check-hero mx-auto rounded-full bg-white/20 flex items-center justify-center"
           style={{ width: 56, height: 56 }}
           data-testid="done-hero-check"
         >
-          <Check className="w-8 h-8 text-green-600" />
+          <Check className="w-8 h-8 text-white" />
         </div>
-        <h1 className="text-2xl font-bold" data-testid="done-heading">Wet check complete</h1>
-        <div className="text-sm text-gray-500" data-testid="done-subtitle">
-          {totalDecisions} finding{totalDecisions === 1 ? "" : "s"} handled in {formatDuration(durationMs)}
+        <div>
+          <h1 className="text-xl font-bold" data-testid="done-heading">Wet check complete</h1>
+          <div className="text-sm text-green-100 mt-0.5" data-testid="done-subtitle">
+            {totalDecisions} finding{totalDecisions === 1 ? "" : "s"} handled in {formatDuration(durationMs)}
+          </div>
         </div>
       </div>
 
-      <Card className="overflow-hidden">
+      <Card className="rounded-t-none border-t-0 overflow-hidden">
         <CardContent className="p-0 divide-y">
           <OutcomeRow
             testId="done-row-completed-in-field"
@@ -200,7 +199,7 @@ export function WetCheckDone({ id }: { id: number }) {
         </CardContent>
       </Card>
 
-      <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2">
+      <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-4">
         <Button
           variant="outline"
           onClick={() => navigate("/manager")}

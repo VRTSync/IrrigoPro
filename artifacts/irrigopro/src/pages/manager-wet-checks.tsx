@@ -159,6 +159,7 @@ export default function ManagerWetChecksPage() {
               autoBilledTotal: wc.autoBilledTotal,
               pendingCount: wc.pendingCount,
               pendingTotal: wc.pendingTotal,
+              totalFindings: wc.findingCounts?.total,
               dispositionCounts: wc.dispositionCounts,
             };
             return <WetCheckCard key={wc.id} wc={data} />;
