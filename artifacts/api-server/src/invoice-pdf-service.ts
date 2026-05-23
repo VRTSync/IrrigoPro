@@ -5,6 +5,7 @@ import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
 import type { IStorage } from './storage';
 import type { WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem, WetCheckBilling } from '@workspace/db';
 import type { WetCheckBillingView } from './wet-check-billing-view';
+import { buildWcbZonePhotoGroups } from './wcb-zone-photo-groups';
 
 async function extractBrandColorsFromDataUri(dataUri: string): Promise<PdfBrandColors> {
   try {
@@ -148,119 +149,6 @@ function toNum(val: string | number | null | undefined): number {
   if (val === null || val === undefined) return 0;
   const n = typeof val === 'string' ? parseFloat(val) : val;
   return isNaN(n) ? 0 : n;
-}
-
-/**
- * Task #843 — Group wet check photos by zone and finding.
- * Cross-references wetCheckView.zones to attach zone labels and finding
- * display labels so the PDF can render photos under the correct zone block.
- */
-function buildWcbZonePhotoGroups(
-  photos: Array<{url: string; zoneRecordId: number | null; findingId: number | null}>,
-  view: WetCheckBillingView,
-): PdfWcbZonePhotoGroup[] {
-  if (photos.length === 0 || view.zones.length === 0) return [];
-
-  // Build lookup: zoneRecordId → zone (for label)
-  // We derive zoneRecordId from the view's lineItems (each lineItem has findingId)
-  // The WcvZone doesn't carry zoneRecordId directly, but zoneLabel is the key.
-  // To map zoneRecordId → zoneLabel, we need findingId → zoneRecordId linkage.
-  // However WcvZone's lineItems carry findingId but not zoneRecordId.
-  // We use a two-pass approach:
-  //   1. Build findingId → zone map from view.zones[].lineItems
-  //   2. For zone-level photos (findingId null), match via photo.zoneRecordId —
-  //      but the view doesn't expose zoneRecordId directly.
-  //
-  // Workaround: build a map of zoneRecordId → zone by scanning photo records
-  // that have findingId set and using those findingId → zone associations to
-  // infer which zoneRecordId belongs to which zone.
-
-  // findingId → WcvZone
-  const findingToZone = new Map<number, (typeof view.zones)[0]>();
-  for (const zone of view.zones) {
-    for (const li of zone.lineItems) {
-      findingToZone.set(li.findingId, zone);
-    }
-  }
-
-  // zoneRecordId → WcvZone (inferred from photos that have both fields set)
-  const zoneRecordToZone = new Map<number, (typeof view.zones)[0]>();
-  for (const photo of photos) {
-    if (photo.zoneRecordId !== null && photo.findingId !== null) {
-      const zone = findingToZone.get(photo.findingId);
-      if (zone) zoneRecordToZone.set(photo.zoneRecordId, zone);
-    }
-  }
-  // Also populate from photos that only have zoneRecordId (zone-level photos)
-  // by iterating view zones in label order — if there's still no mapping,
-  // we just skip unresolvable zone-level photos (they'll appear in flat fallback).
-
-  // findingId → issueDisplayLabel
-  const findingToLabel = new Map<number, string>();
-  for (const zone of view.zones) {
-    for (const li of zone.lineItems) {
-      findingToLabel.set(li.findingId, li.issueDisplayLabel);
-    }
-  }
-
-  // Group photos
-  // Key: zoneLabel; value: accumulated group
-  const groups = new Map<string, PdfWcbZonePhotoGroup>();
-
-  function getOrCreateGroup(zone: (typeof view.zones)[0]): PdfWcbZonePhotoGroup {
-    let g = groups.get(zone.zoneLabel);
-    if (!g) {
-      g = {
-        zoneLabel: zone.zoneLabel,
-        zoneRecordId: 0, // will be set below
-        zonePhotoUrls: [],
-        findingGroups: [],
-      };
-      groups.set(zone.zoneLabel, g);
-    }
-    return g;
-  }
-
-  for (const photo of photos) {
-    if (!photo.url) continue;
-
-    let zone: (typeof view.zones)[0] | undefined;
-
-    if (photo.findingId !== null) {
-      zone = findingToZone.get(photo.findingId);
-    } else if (photo.zoneRecordId !== null) {
-      zone = zoneRecordToZone.get(photo.zoneRecordId);
-    }
-
-    if (!zone) continue; // unlinked — excluded from per-zone rendering
-
-    const group = getOrCreateGroup(zone);
-    if (photo.zoneRecordId !== null && group.zoneRecordId === 0) {
-      group.zoneRecordId = photo.zoneRecordId;
-    }
-
-    if (photo.findingId !== null) {
-      // finding-level photo
-      let fg = group.findingGroups.find(f => f.findingId === photo.findingId);
-      if (!fg) {
-        fg = {
-          findingId: photo.findingId,
-          issueDisplayLabel: findingToLabel.get(photo.findingId) ?? `Finding ${photo.findingId}`,
-          photoUrls: [],
-        };
-        group.findingGroups.push(fg);
-      }
-      fg.photoUrls.push(photo.url);
-    } else {
-      // zone-level photo (no finding link)
-      group.zonePhotoUrls.push(photo.url);
-    }
-  }
-
-  // Return in zone display order
-  return view.zones
-    .map(z => groups.get(z.zoneLabel))
-    .filter((g): g is PdfWcbZonePhotoGroup => g !== undefined);
 }
 
 function validateRows(

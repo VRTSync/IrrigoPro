@@ -1,5 +1,5 @@
 /**
- * pdf-helpers-wcb.test.ts  (Task #787 Slice 2)
+ * pdf-helpers-wcb.test.ts  (Task #787 Slice 2 + Task #854)
  *
  * Validates ticketPageWCB HTML output:
  *   - billing number and invoice number in header
@@ -8,12 +8,17 @@
  *   - branch name rendered when present, omitted when absent
  *   - approval block rendered when approvedBy is set
  *   - photo-fail warning rendered when sentinel is present
+ *   - zone photo groups: photos appear in the correct zone block (Task #854)
+ *   - finding-level photo label rendered inside its finding group (Task #854)
+ *   - flat gallery falls back when zonePhotoGroups is absent (Task #854)
  */
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ticketPageWCB, FAILED_PHOTO_SENTINEL } from "./pdf-helpers";
+import { ticketPageWCB, partsBlockForWetCheckBS, FAILED_PHOTO_SENTINEL } from "./pdf-helpers";
+import type { WcbZonePhotoGroupResolved } from "./pdf-helpers";
 import type { PdfWetCheckBillingRow } from "./pdf-view-model";
+import type { WetCheckBillingView } from "./wet-check-billing-view";
 
 // ── minimal fixture ───────────────────────────────────────────────────────────
 
@@ -153,5 +158,242 @@ describe("ticketPageWCB — photo fail warning (Task #787)", () => {
   it("omits photo-fail warning when no sentinels are present", () => {
     const html = ticketPageWCB(makeRow(), "INV-1", []);
     assert.doesNotMatch(html, /ticket-photo-fail-warning/);
+  });
+});
+
+// ── Task #854: zone photo group rendering ─────────────────────────────────────
+
+// Shared 2-zone WetCheckBillingView fixture for zone-photo tests
+function makeWetCheckView(): WetCheckBillingView {
+  return {
+    wetCheckBillingId: 42,
+    billingNumber: "WCB-2026-001",
+    customerId: 10,
+    customerName: "Drip Corp",
+    workDate: new Date("2026-05-15").toISOString(),
+    laborRate: "80.00",
+    inspection: {
+      wetCheckId: 5,
+      technicianName: "Jane Smith",
+      inspectionDate: new Date("2026-05-15").toISOString(),
+      propertyAddress: "99 Drip Lane",
+      weather: "Sunny",
+      notes: null,
+    },
+    zones: [
+      {
+        controllerLetter: "A",
+        zoneNumber: 1,
+        zoneLabel: "A-1",
+        repairLaborHours: "1.00",
+        lineItems: [
+          {
+            findingId: 1,
+            issueType: "head_replacement",
+            issueDisplayLabel: "Head Replacement",
+            partName: "Rotor Head",
+            quantity: 1,
+            unitPrice: "15.00",
+            partsTotal: "15.00",
+            laborHours: "0.50",
+            laborTotal: "40.00",
+            lineTotal: "55.00",
+            noPartNeeded: false,
+            notes: null,
+          },
+        ],
+        zonePartsSubtotal: "15.00",
+        zoneLaborSubtotal: "40.00",
+        zoneTotal: "55.00",
+      },
+      {
+        controllerLetter: "B",
+        zoneNumber: 2,
+        zoneLabel: "B-2",
+        repairLaborHours: "0.50",
+        lineItems: [
+          {
+            findingId: 2,
+            issueType: "valve_repair",
+            issueDisplayLabel: "Valve Repair",
+            partName: "Solenoid Valve",
+            quantity: 1,
+            unitPrice: "20.00",
+            partsTotal: "20.00",
+            laborHours: "0.50",
+            laborTotal: "40.00",
+            lineTotal: "60.00",
+            noPartNeeded: false,
+            notes: null,
+          },
+        ],
+        zonePartsSubtotal: "20.00",
+        zoneLaborSubtotal: "40.00",
+        zoneTotal: "60.00",
+      },
+    ],
+    repairsSummary: "2 repairs across 2 zones",
+    partsSubtotal: "35.00",
+    laborSubtotal: "80.00",
+    grandTotal: "115.00",
+  };
+}
+
+describe("partsBlockForWetCheckBS — zone photo groups (Task #854)", () => {
+  /**
+   * Split the HTML by zone-block wrapper divs to isolate each zone's rendered
+   * section.  The template wraps each zone in <div class="zone-block">…</div>,
+   * so splitting on that tag gives us one piece per zone (after a leading piece
+   * for the Repairs Summary block that precedes all zone blocks).
+   *
+   * blocks[0] = Repairs Summary
+   * blocks[1] = content of zone A-1 zone-block div (including its photo html)
+   * blocks[2] = content of zone B-2 zone-block div
+   */
+  function zoneBlocks(html: string): string[] {
+    return html.split('<div class="zone-block">');
+  }
+
+  it("places a zone-A-1 photo inside the A-1 zone block, not in B-2", () => {
+    const zoneGroups: WcbZonePhotoGroupResolved[] = [
+      {
+        zoneLabel: "A-1",
+        zonePhotoDataUris: ["data:image/jpeg;base64,PHOTO_ONLY_IN_A1"],
+        findingGroups: [],
+      },
+    ];
+    const html = partsBlockForWetCheckBS(makeWetCheckView(), undefined as any, zoneGroups);
+    const blocks = zoneBlocks(html);
+
+    // blocks[1] = A-1, blocks[2] = B-2
+    assert.equal(blocks.length, 3, "Expected 2 zone blocks plus preamble");
+    assert.match(blocks[1], /PHOTO_ONLY_IN_A1/, "A-1 photo must appear inside the A-1 zone block");
+    assert.doesNotMatch(blocks[2], /PHOTO_ONLY_IN_A1/, "A-1 photo must NOT bleed into B-2 zone block");
+  });
+
+  it("places a zone-B-2 photo inside the B-2 zone block, not in A-1", () => {
+    const zoneGroups: WcbZonePhotoGroupResolved[] = [
+      {
+        zoneLabel: "B-2",
+        zonePhotoDataUris: ["data:image/jpeg;base64,PHOTO_ONLY_IN_B2"],
+        findingGroups: [],
+      },
+    ];
+    const html = partsBlockForWetCheckBS(makeWetCheckView(), undefined as any, zoneGroups);
+    const blocks = zoneBlocks(html);
+
+    assert.equal(blocks.length, 3, "Expected 2 zone blocks plus preamble");
+    assert.doesNotMatch(blocks[1], /PHOTO_ONLY_IN_B2/, "B-2 photo must NOT appear in A-1 zone block");
+    assert.match(blocks[2], /PHOTO_ONLY_IN_B2/, "B-2 photo must appear inside the B-2 zone block");
+  });
+
+  it("renders the finding-level photo label inside its zone's section", () => {
+    const zoneGroups: WcbZonePhotoGroupResolved[] = [
+      {
+        zoneLabel: "A-1",
+        zonePhotoDataUris: [],
+        findingGroups: [
+          {
+            findingId: 1,
+            issueDisplayLabel: "Head Replacement",
+            photoDataUris: ["data:image/jpeg;base64,FINDING_PHOTO"],
+          },
+        ],
+      },
+    ];
+    const html = partsBlockForWetCheckBS(makeWetCheckView(), undefined as any, zoneGroups);
+    const blocks = zoneBlocks(html);
+    const blockA1 = blocks[1];
+
+    assert.match(
+      blockA1,
+      /zone-photo-label/,
+      "Finding photo section must include a label element inside A-1 block",
+    );
+    assert.match(
+      blockA1,
+      /Head Replacement/,
+      "Finding label text must appear inside the A-1 zone block",
+    );
+    assert.match(
+      blockA1,
+      /FINDING_PHOTO/,
+      "Finding photo data URI must appear inside the A-1 zone block",
+    );
+  });
+
+  it("renders both zone-level and finding-level photos in the same zone block", () => {
+    const zoneGroups: WcbZonePhotoGroupResolved[] = [
+      {
+        zoneLabel: "A-1",
+        zonePhotoDataUris: ["data:image/jpeg;base64,ZONE_LEVEL"],
+        findingGroups: [
+          {
+            findingId: 1,
+            issueDisplayLabel: "Head Replacement",
+            photoDataUris: ["data:image/jpeg;base64,FINDING_LEVEL"],
+          },
+        ],
+      },
+    ];
+    const html = partsBlockForWetCheckBS(makeWetCheckView(), undefined as any, zoneGroups);
+    const blocks = zoneBlocks(html);
+    const blockA1 = blocks[1];
+
+    assert.match(blockA1, /ZONE_LEVEL/, "Zone-level photo must appear in A-1 block");
+    assert.match(blockA1, /FINDING_LEVEL/, "Finding-level photo must appear in A-1 block");
+  });
+
+  it("produces no inline photo html when zonePhotoGroups is absent", () => {
+    const html = partsBlockForWetCheckBS(makeWetCheckView(), undefined as any);
+    assert.doesNotMatch(html, /zone-photo-section/);
+  });
+
+  it("produces no inline photo html when zonePhotoGroups is an empty array", () => {
+    const html = partsBlockForWetCheckBS(makeWetCheckView(), undefined as any, []);
+    assert.doesNotMatch(html, /zone-photo-section/);
+  });
+});
+
+describe("ticketPageWCB — zone photo grouping (Task #854)", () => {
+  function makeRowWithView(): PdfWetCheckBillingRow {
+    const row = makeRow();
+    (row as any).wetCheckView = makeWetCheckView();
+    return row;
+  }
+
+  it("embeds zone photo inline and omits flat gallery when zonePhotoGroups provided", () => {
+    const zoneGroups: WcbZonePhotoGroupResolved[] = [
+      {
+        zoneLabel: "A-1",
+        zonePhotoDataUris: ["data:image/jpeg;base64,INLINE_ZONE_PHOTO"],
+        findingGroups: [],
+      },
+    ];
+    const html = ticketPageWCB(makeRowWithView(), "INV-99", [], undefined, undefined, undefined, zoneGroups);
+
+    assert.match(html, /INLINE_ZONE_PHOTO/, "Inline zone photo must appear in output");
+    assert.doesNotMatch(
+      html,
+      /ticket-photos-section/,
+      "Flat photo gallery section must be absent when zonePhotoGroups is provided",
+    );
+  });
+
+  it("renders flat gallery when zonePhotoGroups is absent and photoDataUris are present", () => {
+    const html = ticketPageWCB(
+      makeRowWithView(),
+      "INV-99",
+      ["data:image/jpeg;base64,FLAT_PHOTO"],
+    );
+
+    assert.match(html, /ticket-photos-section/, "Flat gallery section must appear when no zone groups");
+    assert.match(html, /FLAT_PHOTO/, "Flat photo must appear in the gallery");
+  });
+
+  it("renders empty photo message in flat gallery when no photos and no zone groups", () => {
+    const html = ticketPageWCB(makeRowWithView(), "INV-99", []);
+    assert.match(html, /ticket-photos-section/);
+    assert.match(html, /No photos captured/);
   });
 });
