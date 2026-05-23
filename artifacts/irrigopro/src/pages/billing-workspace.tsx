@@ -13,6 +13,7 @@
 //             detail, "/" focus search, Esc close, ? cheat sheet,
 //             Ctrl+S save edits (NOT approve), B kickback.
 
+import irrigoLogoUrl from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -742,26 +743,42 @@ export default function BillingWorkspacePage() {
 
   return (
     <div className="max-w-7xl mx-auto py-4 px-4 space-y-4" data-testid="billing-workspace">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Billing Workspace</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Approve, kick back, and clear the queue.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCheatsheetOpen(true)}
-            data-testid="shortcuts-button"
-          >
-            <Keyboard className="w-4 h-4 mr-1" /> Shortcuts
-          </Button>
-          <Link href="/billing/command-center">
-            <Button variant="outline" size="sm">Command Center</Button>
-          </Link>
+      {/* Header — Task #818: deep-blue gradient with logo watermark */}
+      <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-blue-800 to-indigo-900 px-6 py-5 shadow-lg">
+        {/* Decorative logo watermark */}
+        <img
+          src={irrigoLogoUrl}
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none select-none absolute right-4 top-1/2 -translate-y-1/2 h-[70%] max-h-28 object-contain opacity-[0.07]"
+        />
+        <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Billing Workspace</h1>
+            <p className="text-sm text-blue-200 mt-1">
+              Approve, kick back, and clear the queue.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCheatsheetOpen(true)}
+              data-testid="shortcuts-button"
+              className="border-white/30 text-white bg-white/10 hover:bg-white/20 hover:text-white"
+            >
+              <Keyboard className="w-4 h-4 mr-1" /> Shortcuts
+            </Button>
+            <Link href="/billing/command-center">
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-white/30 text-white bg-white/10 hover:bg-white/20 hover:text-white"
+              >
+                Command Center
+              </Button>
+            </Link>
+          </div>
         </div>
       </div>
 
