@@ -3967,7 +3967,7 @@ export class DatabaseStorage implements IStorage {
             zoneNumber: zr.zoneNumber,
             findingLaborHoursSum: findingLaborSum,
             message:
-              "zone.repair_labor_hours is 0 but findings have non-zero laborHours — run the BS-WC backfill script",
+              "zone.repair_labor_hours is 0 but findings have non-zero laborHours — run the wet_check_billings migration tool",
           }),
         );
       }

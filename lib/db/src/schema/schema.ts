@@ -250,8 +250,8 @@ export const billingSheets = pgTable("billing_sheets", {
   // Task #396 — labor entry mode for the sheet. 'flat' means use the single
   // totalHours field for all labor; 'per_part' means sum per-line laborHours.
   // Default 'flat' for new sheets; existing sheets are backfilled to 'per_part'.
-  // NOTE (BS-WC v2, Task #753): ignored for wet-check-sourced billing sheets
-  // (BS-WC prefix). Those sheets derive their labor totals from
+  // NOTE (WCB, Task #753): ignored for wet_check_billings-sourced billing sheets.
+  // Those sheets derive their labor totals from
   // wc.totalLaborHours + Σ zone.repairLaborHours — not from this column.
   // Preserved here for non-wet-check billing paths.
   laborMode: text("labor_mode").notNull().default("flat"),
@@ -1258,8 +1258,8 @@ export const wetChecks = pgTable("wet_checks", {
   // totalLaborHours as the authoritative aggregate; 'per_part' sums per-finding
   // laborHours. Default 'flat' for new wet checks; existing are backfilled to
   // 'per_part'.
-  // NOTE (BS-WC v2, Task #753): ignored for wet-check billing. The authoritative
-  // labor sources for BS-WC invoices are wc.totalLaborHours (inspection overhead:
+  // NOTE (WCB, Task #753): ignored for wet_check_billings rows. The authoritative
+  // labor sources for WCB invoices are wc.totalLaborHours (inspection overhead:
   // travel, setup, etc.) and zone.repairLaborHours (per-zone repair labor).
   // This column is preserved for non-wet-check billing paths.
   laborMode: text("labor_mode").notNull().default("flat"),
@@ -1300,7 +1300,7 @@ export const wetCheckZoneRecords = pgTable("wet_check_zone_records", {
   // the zone status moves away from `checked_with_issues`.
   markedCompleteAt: timestamp("marked_complete_at"),
   // Task #753 — Slice 4: per-zone repair labor hours (Option B). Authoritative
-  // labor total for billing — replaces per-finding sum in BS-WC billing math.
+  // labor total for billing — replaces per-finding sum in wet_check_billings math.
   // Multiples of 0.25 only; enforced by the API layer (repairLaborHoursSchema).
   repairLaborHours: decimal("repair_labor_hours", { precision: 5, scale: 2 }).notNull().default("0.00"),
   clientId: text("client_id"),
