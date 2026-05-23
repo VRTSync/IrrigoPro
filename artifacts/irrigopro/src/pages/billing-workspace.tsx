@@ -743,8 +743,8 @@ export default function BillingWorkspacePage() {
 
   return (
     <div className="max-w-7xl mx-auto py-4 px-4 space-y-4" data-testid="billing-workspace">
-      {/* Header — Task #818: deep-blue gradient with logo watermark */}
-      <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-blue-800 to-indigo-900 px-6 py-5 shadow-lg">
+      {/* Header — Task #818: brand-palette gradient with logo watermark */}
+      <div className="relative overflow-hidden rounded-xl bg-gradient-brand px-6 py-5 shadow-lg">
         {/* Decorative logo watermark */}
         <img
           src={irrigoLogoUrl}
@@ -755,7 +755,7 @@ export default function BillingWorkspacePage() {
         <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-white">Billing Workspace</h1>
-            <p className="text-sm text-blue-200 mt-1">
+            <p className="text-sm mt-1" style={{ color: "hsl(var(--primary-light))" }}>
               Approve, kick back, and clear the queue.
             </p>
           </div>

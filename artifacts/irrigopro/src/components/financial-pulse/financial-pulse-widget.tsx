@@ -343,9 +343,13 @@ function BillingHeaderVariant({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "border-b border-gray-200 bg-gray-50/60 rounded-md px-3 py-2",
+        "rounded-md px-3 py-2",
         className,
       )}
+      style={{
+        background: "hsl(var(--primary)/0.05)",
+        borderBottom: "1px solid hsl(var(--primary)/0.15)",
+      }}
       data-testid="fp-widget-billing-header"
     >
       <div className="flex items-center justify-between mb-2">

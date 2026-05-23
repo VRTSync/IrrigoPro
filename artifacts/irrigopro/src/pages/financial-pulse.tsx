@@ -364,8 +364,8 @@ export default function FinancialPulsePage() {
 
   return (
     <div className="py-6 space-y-6" data-testid="financial-pulse-page">
-      {/* Page header — Task #817: deep-blue gradient with logo watermark */}
-      <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-blue-800 to-indigo-900 px-6 py-5 shadow-lg">
+      {/* Page header — Task #817: brand-palette gradient with logo watermark */}
+      <div className="relative overflow-hidden rounded-xl bg-gradient-brand px-6 py-5 shadow-lg">
         {/* Decorative logo watermark */}
         <img
           src={irrigoLogoUrl}
@@ -376,7 +376,7 @@ export default function FinancialPulsePage() {
         <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-white">Financial Pulse</h1>
-            <p className="text-sm text-blue-200 mt-1">
+            <p className="text-sm mt-1" style={{ color: "hsl(var(--primary-light))" }}>
               {activeTab === "pulse"
                 ? "Daily operations view — in-flight pipeline and revenue trend."
                 : "Accounting metrics — KPIs, drill-downs, and forward look."}

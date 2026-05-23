@@ -286,11 +286,20 @@ export default function Navigation() {
             {/* Logo */}
             <div className="flex-shrink-0">
               <Link href="/">
-                <img
-                  src={irrigoProLogo}
-                  alt="IrrigoPro"
-                  className="h-20 w-auto cursor-pointer transition-opacity duration-200 hover:opacity-80"
-                />
+                <div
+                  className="inline-flex items-center justify-center px-3 py-2 rounded-xl cursor-pointer transition-all duration-200 hover:opacity-90"
+                  style={{
+                    background: "linear-gradient(135deg, hsl(var(--primary-dark)/0.08) 0%, hsl(var(--primary)/0.05) 100%)",
+                    boxShadow: "0 0 0 1px hsl(var(--primary)/0.12), 0 2px 8px hsl(var(--primary)/0.10)",
+                  }}
+                >
+                  <img
+                    src={irrigoProLogo}
+                    alt="IrrigoPro"
+                    className="h-20 w-auto"
+                    style={{ filter: "drop-shadow(0 2px 6px hsl(var(--primary)/0.22))" }}
+                  />
+                </div>
               </Link>
             </div>
             
@@ -445,11 +454,20 @@ export default function Navigation() {
           <div className="flex justify-between items-center h-14 px-4">
             {/* Logo */}
             <div className="flex items-center min-w-0 flex-1 mr-2">
-              <img
-                src={irrigoProLogo}
-                alt="IrrigoPro"
-                className="h-8 w-auto max-w-full object-contain"
-              />
+              <div
+                className="inline-flex items-center justify-center px-2 py-1 rounded-lg"
+                style={{
+                  background: "linear-gradient(135deg, hsl(var(--primary-dark)/0.08) 0%, hsl(var(--primary)/0.05) 100%)",
+                  boxShadow: "0 0 0 1px hsl(var(--primary)/0.12), 0 1px 4px hsl(var(--primary)/0.10)",
+                }}
+              >
+                <img
+                  src={irrigoProLogo}
+                  alt="IrrigoPro"
+                  className="h-9 w-auto max-w-full object-contain"
+                  style={{ filter: "drop-shadow(0 1px 4px hsl(var(--primary)/0.20))" }}
+                />
+              </div>
             </div>
 
             {/* User Menu and Notifications */}
