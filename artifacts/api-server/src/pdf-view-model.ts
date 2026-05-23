@@ -87,6 +87,23 @@ export interface PdfBillingSheetRow {
 }
 
 /**
+ * Task #843 — per-zone photo group for the WCB PDF ticket.
+ * Populated by invoice-pdf-service.ts from wet_check_photos metadata.
+ */
+export interface PdfWcbZonePhotoGroup {
+  zoneLabel: string;
+  zoneRecordId: number;
+  /** Photos attached at the zone level (zoneRecordId set, findingId null). */
+  zonePhotoUrls: string[];
+  /** Photos linked to a specific finding within this zone. */
+  findingGroups: Array<{
+    findingId: number;
+    issueDisplayLabel: string;
+    photoUrls: string[];
+  }>;
+}
+
+/**
  * Task #787 (WC Separate System Slice 2) — one entry per `wet_check_billings`
  * row on the invoice. Carries both the raw DB row (for the ticket header) and
  * the assembled zone-grouped view (for the Repairs Summary body).
@@ -95,6 +112,16 @@ export interface PdfWetCheckBillingRow {
   wetCheckBillingId: number;
   wetCheckBilling: WetCheckBilling;
   wetCheckView: WetCheckBillingView;
+  /**
+   * Task #843 — new-system photo URLs for zone grouping.
+   */
+  photoUrls?: string[];
+  /**
+   * Task #843 — per-zone photo grouping. When present, ticketPageWCB renders
+   * photos under the zone they belong to instead of a flat header gallery.
+   * Falls back to the flat photoUrls gallery when absent.
+   */
+  zonePhotoGroups?: PdfWcbZonePhotoGroup[];
   /**
    * Merged, deduped photo URLs for this WCB ticket — populated by the
    * invoice PDF service by combining wet_check_photos (new system) with

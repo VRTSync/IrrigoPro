@@ -11,6 +11,22 @@ import type {
 import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
 import type { WetCheckBillingView, WcvZone } from './wet-check-billing-view';
 
+/**
+ * Task #843 — Resolved (data-URI) version of PdfWcbZonePhotoGroup.
+ * Built in pdf-generator.ts after photo URLs are converted to base64 data URIs.
+ */
+export interface WcbZonePhotoGroupResolved {
+  zoneLabel: string;
+  /** Data URIs for photos attached at the zone level (no finding link). */
+  zonePhotoDataUris: string[];
+  /** Data URIs for photos linked to a specific finding. */
+  findingGroups: Array<{
+    findingId: number;
+    issueDisplayLabel: string;
+    photoDataUris: string[];
+  }>;
+}
+
 export const FAILED_PHOTO_SENTINEL = '__PHOTO_UNAVAILABLE__';
 
 export function formatWorkSummaryAsBullets(text: string | null | undefined): string {
@@ -324,6 +340,9 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
  * grouped Repairs Summary from `partsBlockForWetCheckBS(row.wetCheckView)`;
  * the financial section uses the same single "Irrigation Labor" pattern as
  * `ticketPageBS` (post-Task #766).
+ *
+ * Task #843 — when `zonePhotoGroups` is provided, photos are rendered inline
+ * under each zone block instead of in a flat gallery at the bottom.
  */
 export function ticketPageWCB(
   row: PdfWetCheckBillingRow,
@@ -332,6 +351,7 @@ export function ticketPageWCB(
   logoDataUri?: string | null,
   companyName?: string,
   brandColors: PdfBrandColors = DEFAULT_BRAND_COLORS,
+  zonePhotoGroups?: WcbZonePhotoGroupResolved[],
 ): string {
   const { wetCheckBilling: wcb, wetCheckView: view } = row;
 
@@ -364,6 +384,17 @@ export function ticketPageWCB(
       ? `<div class="ticket-header-company-name">${companyName}</div>`
       : '';
 
+  // Task #843: when grouped photos are available, embed them per-zone;
+  // otherwise fall back to the flat gallery at the bottom.
+  const hasZonePhotos = Array.isArray(zonePhotoGroups) && zonePhotoGroups.length > 0;
+  const partsBlock = hasZonePhotos
+    ? partsBlockForWetCheckBS(view, brandColors, zonePhotoGroups)
+    : partsBlockForWetCheckBS(view, brandColors);
+
+  const bottomPhotoSection = hasZonePhotos
+    ? ''  // photos are already embedded per-zone
+    : photoGridSection(photoDataUris);
+
   return `
   <div class="ticket-page">
     <div class="ticket-header ticket-header-bs">
@@ -395,11 +426,37 @@ export function ticketPageWCB(
       </div>
     </div>
 
-    ${partsBlockForWetCheckBS(view, brandColors)}
+    ${partsBlock}
 
     ${photoFailWarning}
-    ${photoGridSectionWCB(photoDataUris)}
+    ${bottomPhotoSection}
   </div>`;
+}
+
+/**
+ * Render a small 3-column photo grid for a set of data URIs.
+ * Used inline within zone blocks when grouped photo data is available.
+ */
+function inlinePhotoGrid(dataUris: string[], label?: string): string {
+  const valid = dataUris.filter(u => u && u !== FAILED_PHOTO_SENTINEL);
+  if (valid.length === 0) return '';
+
+  const COLS = 3;
+  const cells = valid.map(uri =>
+    `<div class="photo-cell"><img src="${uri}" alt="Zone photo" class="photo-img"></div>`,
+  );
+  const rows: string[] = [];
+  for (let i = 0; i < cells.length; i += COLS) {
+    const slice = cells.slice(i, i + COLS);
+    while (slice.length < COLS) slice.push(`<div class="photo-cell photo-empty"></div>`);
+    rows.push(`<div class="photo-row">${slice.join('')}</div>`);
+  }
+
+  const headerHtml = label
+    ? `<div class="zone-photo-label">${label}</div>`
+    : '';
+
+  return `<div class="zone-photo-section">${headerHtml}<div class="photo-grid">${rows.join('')}</div></div>`;
 }
 
 /**
@@ -409,12 +466,24 @@ export function ticketPageWCB(
  * Suppression rule (matches task spec):
  *   - $0.00 non-labor-only items are ABSENT.
  *   - labor-only items (noPartNeeded === true) are PRESENT regardless of price.
+ *
+ * Task #843 — optional `zonePhotoGroups` parameter embeds photos under each
+ * zone block (and per-finding within the zone) when present.
  */
 export function partsBlockForWetCheckBS(
   view: WetCheckBillingView,
   colors: PdfBrandColors = DEFAULT_BRAND_COLORS,
+  zonePhotoGroups?: WcbZonePhotoGroupResolved[],
 ): string {
   const { navy, green, gray, black, brown } = colors;
+
+  // Build a quick lookup: zoneLabel → resolved photo group
+  const photoGroupByZone = new Map<string, WcbZonePhotoGroupResolved>();
+  if (zonePhotoGroups) {
+    for (const g of zonePhotoGroups) {
+      photoGroupByZone.set(g.zoneLabel, g);
+    }
+  }
 
   function money(s: string): string {
     return formatCurrency(parseFloat(s) || 0);
@@ -475,6 +544,21 @@ export function partsBlockForWetCheckBS(
         <td class="text-right" style="font-weight:700; color:${brown};">${money(zone.zonePartsSubtotal)}</td>
       </tr>`;
 
+    // Task #843 — per-zone photo section (zone-level + per-finding)
+    const photoGroup = photoGroupByZone.get(zone.zoneLabel);
+    let zonePhotoHtml = '';
+    if (photoGroup) {
+      // Zone-level photos (no finding link)
+      zonePhotoHtml += inlinePhotoGrid(photoGroup.zonePhotoDataUris);
+
+      // Per-finding photo groups
+      for (const fg of photoGroup.findingGroups) {
+        if (fg.photoDataUris.length > 0) {
+          zonePhotoHtml += inlinePhotoGrid(fg.photoDataUris, fg.issueDisplayLabel);
+        }
+      }
+    }
+
     return `
   <div class="zone-block">
     <div class="ticket-section ticket-parts-section">
@@ -495,6 +579,7 @@ export function partsBlockForWetCheckBS(
         </tbody>
       </table>
     </div>
+    ${zonePhotoHtml}
   </div>`;
   }).join('');
 
@@ -1557,6 +1642,22 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     border-bottom: 2px solid ${green};
     padding-top: 8px;
     padding-bottom: 8px;
+  }
+
+  /* Task #843 — inline per-zone photo grids */
+  .zone-photo-section {
+    margin: 6px 0 10px 0;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .zone-photo-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: ${navy};
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
   }
   `;
 }

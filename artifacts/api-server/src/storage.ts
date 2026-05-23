@@ -1013,6 +1013,8 @@ export interface IStorage {
   deleteWetCheckBilling(id: number): Promise<void>;
   /** Returns the URL strings of all photos attached to a wet check (both zone-level and finding-level). */
   getWetCheckPhotoUrls(wetCheckId: number): Promise<string[]>;
+  /** Returns photo records with zone/finding linkage metadata for grouped PDF rendering (Task #843). */
+  getWetCheckPhotosGrouped(wetCheckId: number): Promise<Array<{url: string; zoneRecordId: number | null; findingId: number | null}>>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -7825,6 +7827,18 @@ export class DatabaseStorage implements IStorage {
       .from(wetCheckPhotos)
       .where(eq(wetCheckPhotos.wetCheckId, wetCheckId));
     return rows.map((r) => r.url).filter(Boolean);
+  }
+
+  async getWetCheckPhotosGrouped(wetCheckId: number): Promise<Array<{url: string; zoneRecordId: number | null; findingId: number | null}>> {
+    const rows = await db
+      .select({
+        url: wetCheckPhotos.url,
+        zoneRecordId: wetCheckPhotos.zoneRecordId,
+        findingId: wetCheckPhotos.findingId,
+      })
+      .from(wetCheckPhotos)
+      .where(eq(wetCheckPhotos.wetCheckId, wetCheckId));
+    return rows.filter((r) => r.url);
   }
 
   async linkWetCheckPhotoToFinding(

@@ -18,6 +18,8 @@ import {
   pageFooter,
   buildFullCSS,
 } from './pdf-helpers';
+import type { WcbZonePhotoGroupResolved } from './pdf-helpers';
+import type { PdfWcbZonePhotoGroup } from './pdf-view-model';
 
 export { fetchLogoAsBase64 };
 
@@ -128,6 +130,41 @@ export async function preloadPhotos(urls: string[], port: number): Promise<strin
   return results;
 }
 
+/**
+ * Task #843 — Convert URL-based zone photo groups into data-URI-based groups
+ * for inline rendering in the WCB ticket PDF.
+ */
+async function resolveZonePhotoGroups(
+  groups: PdfWcbZonePhotoGroup[],
+  port: number,
+  invoiceNumber: string,
+  billingNumber: string,
+): Promise<WcbZonePhotoGroupResolved[]> {
+  const resolved: WcbZonePhotoGroupResolved[] = [];
+  for (const g of groups) {
+    const zonePhotoDataUris = g.zonePhotoUrls.length > 0
+      ? await preloadPhotos(g.zonePhotoUrls, port)
+      : [];
+
+    const findingGroups: WcbZonePhotoGroupResolved['findingGroups'] = [];
+    for (const fg of g.findingGroups) {
+      const photoDataUris = fg.photoUrls.length > 0
+        ? await preloadPhotos(fg.photoUrls, port)
+        : [];
+      findingGroups.push({ findingId: fg.findingId, issueDisplayLabel: fg.issueDisplayLabel, photoDataUris });
+    }
+
+    const failCount = [...zonePhotoDataUris, ...findingGroups.flatMap(fg => fg.photoDataUris)]
+      .filter(u => u === FAILED_PHOTO_SENTINEL).length;
+    if (failCount > 0) {
+      console.warn(`[PDF] Invoice ${invoiceNumber}: WC Billing ${billingNumber} zone ${g.zoneLabel} — ${failCount} photo(s) failed to load`);
+    }
+
+    resolved.push({ zoneLabel: g.zoneLabel, zonePhotoDataUris, findingGroups });
+  }
+  return resolved;
+}
+
 function getChromiumPath(): string {
   return resolveChromiumExecutable();
 }
@@ -201,6 +238,9 @@ export class PDFGenerator {
     }
 
     const wcbPhotoMaps: string[][] = [];
+    // Task #843 — parallel resolved zone photo groups (one entry per WCB row)
+    const wcbZonePhotoGroupMaps: Array<WcbZonePhotoGroupResolved[] | undefined> = [];
+
     for (const wcbRow of viewModel.wetCheckBillings) {
       // Prefer the merged, deduped URL list from the service layer (combines
       // wet_check_photos new-system rows with the legacy wcb.photos snapshot).
@@ -213,6 +253,14 @@ export class PDFGenerator {
         console.warn(`[PDF] Invoice ${invoiceNumber}: WC Billing ${wcbRow.wetCheckBilling.billingNumber} — ${failCount} photo(s) failed to load`);
       }
       wcbPhotoMaps.push(result);
+
+      // Task #843 — resolve grouped photo URLs → data URIs
+      if (Array.isArray(wcbRow.zonePhotoGroups) && wcbRow.zonePhotoGroups.length > 0) {
+        const resolved = await resolveZonePhotoGroups(wcbRow.zonePhotoGroups, port, invoiceNumber, wcbRow.wetCheckBilling.billingNumber);
+        wcbZonePhotoGroupMaps.push(resolved.length > 0 ? resolved : undefined);
+      } else {
+        wcbZonePhotoGroupMaps.push(undefined);
+      }
     }
 
     const browser = await puppeteer.launch({
@@ -224,7 +272,7 @@ export class PDFGenerator {
     try {
       const page = await browser.newPage();
 
-      const htmlContent = this.generateInvoiceDetailHTML(viewModel, woPhotoMaps, bsPhotoMaps, wcbPhotoMaps, viewModel.brandColors);
+      const htmlContent = this.generateInvoiceDetailHTML(viewModel, woPhotoMaps, bsPhotoMaps, wcbPhotoMaps, viewModel.brandColors, wcbZonePhotoGroupMaps);
 
       await page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
 
@@ -257,13 +305,14 @@ export class PDFGenerator {
     bsPhotoMaps: string[][] = [],
     wcbPhotoMaps: string[][] = [],
     brandColors: PdfBrandColors = DEFAULT_BRAND_COLORS,
+    wcbZonePhotoGroupMaps: Array<WcbZonePhotoGroupResolved[] | undefined> = [],
   ): string {
     const { invoice, workOrders, billingSheets, wetCheckBillings } = vm;
 
     const ticketPages = [
       ...workOrders.map((wo, i) => ticketPageWO(wo, invoice.invoiceNumber, woPhotoMaps[i] ?? [], vm.company.logoDataUri, vm.company.name)),
       ...billingSheets.map((bs, i) => ticketPageBS(bs, invoice.invoiceNumber, bsPhotoMaps[i] ?? [], vm.company.logoDataUri, vm.company.name, brandColors)),
-      ...wetCheckBillings.map((wcb, i) => ticketPageWCB(wcb, invoice.invoiceNumber, wcbPhotoMaps[i] ?? [], vm.company.logoDataUri, vm.company.name, brandColors)),
+      ...wetCheckBillings.map((wcb, i) => ticketPageWCB(wcb, invoice.invoiceNumber, wcbPhotoMaps[i] ?? [], vm.company.logoDataUri, vm.company.name, brandColors, wcbZonePhotoGroupMaps[i])),
     ].join('');
 
     return `<!DOCTYPE html>
