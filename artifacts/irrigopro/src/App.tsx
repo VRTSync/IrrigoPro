@@ -63,6 +63,7 @@ const EstimateCommandCenter = lazyPage(() => import("@/pages/estimate-command-ce
 const RedirectPendingApprovalToCC = lazy(() => import("@/components/estimates/redirect-to-command-center"));
 const InvoicesPage = lazyPage(() => import("@/pages/invoices"));
 const WetChecksPage = lazyPage(() => import("@/pages/wet-checks"));
+const WetCustomerPickerPage = lazyPage(() => import("@/pages/wet-checks/CustomerPickerPage"));
 const WetCheckBillingsPage = lazyPage(() => import("@/pages/wet-check-billings"));
 const AdminWetChecksPage = lazyPage(() => import("@/pages/admin-wet-checks"));
 const WetCheckReviewPage = lazyPage(() => import("@/pages/wet-check-review"));
@@ -259,7 +260,7 @@ function Router() {
                   <Route path="/work-orders" component={WorkOrders} />
                   <Route path="/billing-sheets" component={BillingSheets} />
                   <Route path="/wet-check-billings" component={WetCheckBillingsPage} />
-                  <Route path="/wet-checks" component={WetChecksPage} />
+                  <Route path="/wet-checks" component={WetCustomerPickerPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksPage} />
                   <Route path="/wet-checks/:id" component={WetChecksPage} />
                   <Route path="/customers" component={Customers} />
@@ -325,7 +326,7 @@ function Router() {
                   <Route path="/financial-pulse" component={FinancialPulsePage} />
                   <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                   <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
-                  <Route path="/wet-checks" component={WetChecksPage} />
+                  <Route path="/wet-checks" component={WetCustomerPickerPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksPage} />
                   <Route path="/wet-checks/:id" component={WetChecksPage} />
                   <Route path="/switch-user" component={SwitchUser} />
@@ -373,7 +374,7 @@ function Router() {
                   <Route path="/wet-check-billings" component={WetCheckBillingsPage} />
                   <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                   <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
-                  <Route path="/wet-checks" component={WetChecksPage} />
+                  <Route path="/wet-checks" component={WetCustomerPickerPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksPage} />
                   <Route path="/wet-checks/:id" component={WetChecksPage} />
                   <Route path="/parts" component={PartsCatalog} />
@@ -420,7 +421,7 @@ function Router() {
                   <Route path="/manager/wet-checks/:id" component={WetCheckReviewPage} />
                   <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                   <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
-                  <Route path="/wet-checks" component={WetChecksPage} />
+                  <Route path="/wet-checks" component={WetCustomerPickerPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksPage} />
                   <Route path="/wet-checks/:id" component={WetChecksPage} />
                   <Route path="/wet-check-billings" component={WetCheckBillingsPage} />
@@ -481,7 +482,7 @@ function Router() {
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
-                <Route path="/wet-checks" component={WetChecksPage} />
+                <Route path="/wet-checks" component={WetCustomerPickerPage} />
                 <Route path="/wet-checks/c/:clientId" component={WetChecksPage} />
                 <Route path="/wet-checks/:id" component={WetChecksPage} />
                 <Route path="/user-manager" component={UserManager} />
