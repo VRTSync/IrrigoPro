@@ -1303,6 +1303,11 @@ export const wetCheckZoneRecords = pgTable("wet_check_zone_records", {
   // labor total for billing — replaces per-finding sum in wet_check_billings math.
   // Multiples of 0.25 only; enforced by the API layer (repairLaborHoursSchema).
   repairLaborHours: decimal("repair_labor_hours", { precision: 5, scale: 2 }).notNull().default("0.00"),
+  // Task #891 — when false (default) the server auto-computes repairLaborHours
+  // from SUM(issueTypeConfigs.defaultLaborHours) for all findings on this zone.
+  // When true an explicit edit has been made and the server leaves the value alone
+  // on finding-set changes. Reset to false via the /reset endpoint.
+  repairLaborManuallySet: boolean("repair_labor_manually_set").notNull().default(false),
   clientId: text("client_id"),
 }, (table) => ({
   uniqZone: uniqueIndex("uniq_wet_check_zone").on(table.wetCheckId, table.controllerLetter, table.zoneNumber),

@@ -9658,6 +9658,46 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // Task #891 — billing-manager-tier zone repair labor edit on a finalised WCB.
+  // Body: { zoneRecordId: number, repairLaborHours: string }
+  // Updates the zone record and recomputes the WCB totals in a transaction.
+  const wcbZoneLaborBody = z.object({
+    zoneRecordId: z.coerce.number().int().positive(),
+    repairLaborHours: z
+      .string()
+      .regex(/^\d+(\.\d{1,2})?$/, "Must be a non-negative decimal with up to 2 places")
+      .refine((v) => parseFloat(v) >= 0, "Must be non-negative"),
+  });
+  app.patch("/api/wet-check-billings/:id/zone-labor", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    const role = req.authenticatedUserRole;
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin") {
+      res.status(403).json({ message: "Forbidden" }); return;
+    }
+    const parsed = wcbZoneLaborBody.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
+    const wcbId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(wcbId)) { res.status(400).json({ message: "Invalid id" }); return; }
+    try {
+      const result = await storage.setWcbZoneRepairLabor(
+        wcbId,
+        parsed.data.zoneRecordId,
+        parsed.data.repairLaborHours,
+        cid,
+      );
+      if (!result) { res.status(404).json({ message: "Not found" }); return; }
+      res.json(result);
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "setWcbZoneRepairLabor",
+        ctx: { cid, wcbId, zoneRecordId: parsed.data.zoneRecordId },
+        fallbackStatus: 400,
+        fallbackMessage: "Couldn't save zone labor",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
   // Billing Sheets API - for work done without work orders
   // Note: Pricing fields are stripped for field_tech role via applyPricingVisibility
   app.get("/api/billing-sheets", async (req, res) => {
@@ -15545,6 +15585,74 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         ctx: { cid, zoneRecordId: req.params.id },
         fallbackStatus: 400,
         fallbackMessage: "Couldn't save repair labor — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Task #891 — reset zone repair labor to auto-computed default (tech tier,
+  // in_progress wet checks only). Clears repairLaborManuallySet and reruns the
+  // issueTypeConfigs.defaultLaborHours sum.
+  app.post("/api/wet-checks/zone-records/:id/repair-labor/reset", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
+    try {
+      const updated = await storage.resetZoneRepairLabor(parseInt(req.params.id), cid);
+      if (!updated) { res.status(404).json({ message: "Not found" }); return; }
+      res.json(updated);
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "resetZoneRepairLabor",
+        ctx: { cid, zoneRecordId: req.params.id },
+        fallbackStatus: 400,
+        fallbackMessage: "Couldn't reset repair labor",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Task #891 — manager-tier reset: clear manual flag + recompute.
+  // Allowed when wet check is in_progress | submitted | partially_converted.
+  app.post("/api/wet-checks/zone-records/:id/repair-labor/reset-manager", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isWetCheckManagerRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
+    try {
+      const updated = await storage.resetZoneRepairLaborManagerTier(parseInt(req.params.id), cid);
+      if (!updated) { res.status(404).json({ message: "Not found" }); return; }
+      res.json(updated);
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "resetZoneRepairLaborManagerTier",
+        ctx: { cid, zoneRecordId: req.params.id },
+        fallbackStatus: 400,
+        fallbackMessage: "Couldn't reset repair labor",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Task #891 — manager-tier zone repair labor edit. Allowed when the wet check
+  // is in_progress, submitted, or partially_converted (finding-price window).
+  // Uses a separate storage method so the route can distinguish role from guard.
+  app.patch("/api/wet-checks/zone-records/:id/repair-labor/manager", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isWetCheckManagerRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
+    const parsed = repairLaborPatchBody.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
+    try {
+      const updated = await storage.setZoneRepairLaborManagerTier(
+        parseInt(req.params.id),
+        cid,
+        parsed.data.repairLaborHours,
+      );
+      if (!updated) { res.status(404).json({ message: "Not found" }); return; }
+      res.json(updated);
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "setZoneRepairLaborManagerTier",
+        ctx: { cid, zoneRecordId: req.params.id },
+        fallbackStatus: 400,
+        fallbackMessage: "Couldn't save repair labor",
       });
       res.status(status).json({ message });
     }

@@ -938,6 +938,46 @@ export interface IStorage {
     companyId: number,
     repairLaborHours: string,
   ): Promise<WetCheckZoneRecord | undefined>;
+  /**
+   * Task #891 — reset a zone's repair labor to the auto-computed default.
+   * Clears the manually-set flag and reruns the defaultLaborHours sum.
+   * Tech tier: only works on in-progress wet checks.
+   */
+  resetZoneRepairLabor(
+    zoneRecordId: number,
+    companyId: number,
+  ): Promise<WetCheckZoneRecord | undefined>;
+  /**
+   * Task #891 — manager-tier reset: clears the manual flag and recomputes.
+   * Uses assertFindingPriceEditable (in_progress + submitted + partially_converted).
+   */
+  resetZoneRepairLaborManagerTier(
+    zoneRecordId: number,
+    companyId: number,
+  ): Promise<WetCheckZoneRecord | undefined>;
+  /**
+   * Task #891 — manager-tier zone repair labor edit. Same as setZoneRepairLabor
+   * but uses the finding-price edit window (allows submitted + partially_converted
+   * wet checks) instead of the tech-only in_progress guard.
+   */
+  setZoneRepairLaborManagerTier(
+    zoneRecordId: number,
+    companyId: number,
+    repairLaborHours: string,
+  ): Promise<WetCheckZoneRecord | undefined>;
+  /**
+   * Task #891 — billing-manager-tier zone repair labor edit on a finalised WCB.
+   * Updates the zone record's repairLaborHours, marks it manually set, then
+   * recomputes the WCB totalHours / laborSubtotal / totalAmount in-place.
+   * Returns undefined when the WCB or zone record are not found.
+   * Throws when the WCB is already in a terminal state (invoiced).
+   */
+  setWcbZoneRepairLabor(
+    wcbId: number,
+    zoneRecordId: number,
+    repairLaborHours: string,
+    companyId: number,
+  ): Promise<{ zoneRecord: WetCheckZoneRecord; wcb: WetCheckBilling } | undefined>;
 
   createWetCheckFinding(
     zoneRecordId: number,
@@ -7560,11 +7600,53 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
+  // Task #891 — auto-recompute zone repairLaborHours from the sum of
+  // defaultLaborHours for all findings' issueTypes in the company config.
+  // Only runs when repairLaborManuallySet is false; skips immediately when true.
+  // Writes 0.00 when the zone has no findings. Accepts a DbExecutor so callers
+  // inside a transaction pass the transaction handle.
+  private async _recomputeZoneRepairLaborIfAuto(
+    tx: DbExecutor,
+    zoneRecordId: number,
+    companyId: number,
+  ): Promise<void> {
+    const [zr] = await tx.select({
+      id: wetCheckZoneRecords.id,
+      repairLaborManuallySet: wetCheckZoneRecords.repairLaborManuallySet,
+    }).from(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.id, zoneRecordId));
+    if (!zr) return;
+    if (zr.repairLaborManuallySet) return; // human override — leave it alone
+
+    // Fetch all findings for this zone
+    const findings = await tx.select({ issueType: wetCheckFindings.issueType })
+      .from(wetCheckFindings)
+      .where(eq(wetCheckFindings.zoneRecordId, zoneRecordId));
+
+    let totalHours = 0;
+    if (findings.length > 0) {
+      // Load the company's issue type configs once
+      const configs = await tx.select({
+        issueType: issueTypeConfigs.issueType,
+        defaultLaborHours: issueTypeConfigs.defaultLaborHours,
+      }).from(issueTypeConfigs).where(eq(issueTypeConfigs.companyId, companyId));
+      const configMap = new Map(configs.map((c) => [c.issueType, c.defaultLaborHours]));
+      for (const f of findings) {
+        const raw = configMap.get(f.issueType);
+        if (raw) totalHours += parseFloat(String(raw)) || 0;
+      }
+    }
+
+    await tx.update(wetCheckZoneRecords)
+      .set({ repairLaborHours: totalHours.toFixed(2) })
+      .where(eq(wetCheckZoneRecords.id, zoneRecordId));
+  }
+
   // Task #753 (Slice 4) — set the authoritative per-zone repair labor hours.
   // Only updates the repairLaborHours column; all other fields are unchanged.
   // Company-scoped + edit-window: delegates to assertWetCheckEditableByTech so
   // only in-progress wet checks can have their repair labor adjusted (same guard
   // as the general zone PATCH path). Idempotent: safe to call with same value.
+  // Task #891 — also marks repairLaborManuallySet = true.
   async setZoneRepairLabor(
     zoneRecordId: number,
     companyId: number,
@@ -7578,10 +7660,146 @@ export class DatabaseStorage implements IStorage {
     await this.assertWetCheckEditableByTech(zr.wetCheckId, companyId);
     const [updated] = await db
       .update(wetCheckZoneRecords)
-      .set({ repairLaborHours })
+      .set({ repairLaborHours, repairLaborManuallySet: true })
       .where(eq(wetCheckZoneRecords.id, zoneRecordId))
       .returning();
     return updated;
+  }
+
+  // Task #891 — reset a zone's repair labor to the auto-computed default.
+  // Sets repairLaborManuallySet = false and immediately reruns the recompute.
+  // Tech tier: only works on in-progress wet checks (assertWetCheckEditableByTech).
+  async resetZoneRepairLabor(
+    zoneRecordId: number,
+    companyId: number,
+  ): Promise<WetCheckZoneRecord | undefined> {
+    const [zr] = await db.select().from(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.id, zoneRecordId));
+    if (!zr) return undefined;
+    await this.assertWetCheckEditableByTech(zr.wetCheckId, companyId);
+    // Clear the manual flag first, then recompute
+    await db.update(wetCheckZoneRecords)
+      .set({ repairLaborManuallySet: false })
+      .where(eq(wetCheckZoneRecords.id, zoneRecordId));
+    await this._recomputeZoneRepairLaborIfAuto(db, zoneRecordId, companyId);
+    const [updated] = await db.select().from(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.id, zoneRecordId));
+    return updated;
+  }
+
+  // Task #891 — manager-tier reset: clears the manual flag and recomputes.
+  // Uses assertFindingPriceEditable (allows in_progress + submitted +
+  // partially_converted) — the same window as setZoneRepairLaborManagerTier.
+  async resetZoneRepairLaborManagerTier(
+    zoneRecordId: number,
+    companyId: number,
+  ): Promise<WetCheckZoneRecord | undefined> {
+    const [zr] = await db.select().from(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.id, zoneRecordId));
+    if (!zr) return undefined;
+    await this.assertFindingPriceEditable(zr.wetCheckId, companyId);
+    await db.update(wetCheckZoneRecords)
+      .set({ repairLaborManuallySet: false })
+      .where(eq(wetCheckZoneRecords.id, zoneRecordId));
+    await this._recomputeZoneRepairLaborIfAuto(db, zoneRecordId, companyId);
+    const [updated] = await db.select().from(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.id, zoneRecordId));
+    return updated;
+  }
+
+  // Task #891 — manager-tier zone repair labor edit.
+  // Uses assertFindingPriceEditable which allows in_progress + submitted +
+  // partially_converted wet checks (manager review window).
+  async setZoneRepairLaborManagerTier(
+    zoneRecordId: number,
+    companyId: number,
+    repairLaborHours: string,
+  ): Promise<WetCheckZoneRecord | undefined> {
+    const [zr] = await db.select().from(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.id, zoneRecordId));
+    if (!zr) return undefined;
+    await this.assertFindingPriceEditable(zr.wetCheckId, companyId);
+    const [updated] = await db
+      .update(wetCheckZoneRecords)
+      .set({ repairLaborHours, repairLaborManuallySet: true })
+      .where(eq(wetCheckZoneRecords.id, zoneRecordId))
+      .returning();
+    return updated;
+  }
+
+  // Task #891 — billing-manager-tier zone repair labor edit on a finalised WCB.
+  // Updates zone repairLaborHours, stamps repairLaborManuallySet=true, then
+  // recomputes the WCB's totalHours / laborSubtotal / totalAmount to reflect the
+  // change. All zone IDs already tied to this WCB are re-summed so no zone is
+  // double-counted across partial-conversion runs.
+  async setWcbZoneRepairLabor(
+    wcbId: number,
+    zoneRecordId: number,
+    repairLaborHours: string,
+    companyId: number,
+  ): Promise<{ zoneRecord: WetCheckZoneRecord; wcb: WetCheckBilling } | undefined> {
+    return db.transaction(async (tx) => {
+      const [wcb] = await tx.select().from(wetCheckBillings).where(eq(wetCheckBillings.id, wcbId));
+      if (!wcb) return undefined;
+      // Tenant-scope: verify the WCB's wet check belongs to this company.
+      const [wc] = await tx.select().from(wetChecks).where(eq(wetChecks.id, wcb.wetCheckId));
+      if (!wc || wc.companyId !== companyId) return undefined;
+      // Block approved or invoiced WCBs — both are immutable to labor edits.
+      // approved_passed_to_billing signals the WCB has been reviewed and is
+      // queued for invoicing; invoiceId != null means it is already on an invoice.
+      if (wcb.invoiceId != null) {
+        throw new Error(`Wet check billing ${wcbId} is already invoiced and cannot be edited`);
+      }
+      if (wcb.status === "approved_passed_to_billing") {
+        throw new Error(`Wet check billing ${wcbId} has been approved for billing and can no longer be edited`);
+      }
+      // Verify the zone record is actually part of this WCB's findings.
+      // This is a tighter scope than "same wet check" — a zone that exists on
+      // the same wet check but was not included in this WCB must not be editable
+      // via this endpoint.
+      const [wcbFindingForZone] = await tx
+        .select({ zoneRecordId: wetCheckFindings.zoneRecordId })
+        .from(wetCheckFindings)
+        .where(
+          and(
+            eq(wetCheckFindings.wetCheckBillingId, wcbId),
+            eq(wetCheckFindings.zoneRecordId, zoneRecordId),
+          ),
+        )
+        .limit(1);
+      if (!wcbFindingForZone) {
+        // Zone is not part of this WCB's billed findings.
+        return undefined;
+      }
+      // Update the zone record's repair labor and stamp as manually set.
+      const [zoneRow] = await tx
+        .update(wetCheckZoneRecords)
+        .set({ repairLaborHours, repairLaborManuallySet: true })
+        .where(eq(wetCheckZoneRecords.id, zoneRecordId))
+        .returning();
+      if (!zoneRow) return undefined;
+      // Recompute WCB totals: collect all zone IDs with findings tied to this WCB.
+      const findingRows = await tx.select({ zoneRecordId: wetCheckFindings.zoneRecordId })
+        .from(wetCheckFindings)
+        .where(eq(wetCheckFindings.wetCheckBillingId, wcbId));
+      const allZoneIds = Array.from(new Set(findingRows.map((f) => f.zoneRecordId)));
+      const allZoneRows = allZoneIds.length > 0
+        ? await tx.select({ repairLaborHours: wetCheckZoneRecords.repairLaborHours })
+            .from(wetCheckZoneRecords)
+            .where(inArray(wetCheckZoneRecords.id, allZoneIds))
+        : [];
+      const allZoneRepairHours = allZoneRows.reduce(
+        (s, zr) => s + parseFloat(String(zr.repairLaborHours ?? "0")), 0,
+      );
+      const wcBaseLaborHours = parseFloat(String(wc.totalLaborHours ?? "0")) || 0;
+      const totalLaborHours = wcBaseLaborHours + allZoneRepairHours;
+      // Use the snapshot rate on the WCB to avoid repricing.
+      const snapshotRate = parseFloat(String(wcb.appliedLaborRate ?? wcb.laborRate ?? "45"));
+      const laborSubtotal = totalLaborHours * snapshotRate;
+      const partsSubtotal = parseFloat(String(wcb.partsSubtotal ?? "0")) || 0;
+      const total = laborSubtotal + partsSubtotal;
+      const [updatedWcb] = await tx.update(wetCheckBillings).set({
+        totalHours: totalLaborHours.toFixed(2),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        totalAmount: total.toFixed(2),
+      }).where(eq(wetCheckBillings.id, wcbId)).returning();
+      return { zoneRecord: zoneRow, wcb: updatedWcb };
+    });
   }
 
   async createWetCheckFinding(
@@ -7637,6 +7855,8 @@ export class DatabaseStorage implements IStorage {
         .set({ status: "checked_with_issues" })
         .where(eq(wetCheckZoneRecords.id, zoneRecordId));
     }
+    // Task #891 — auto-compute zone repair labor from issueType defaults.
+    await this._recomputeZoneRepairLaborIfAuto(db, zoneRecordId, companyId);
     return created;
   }
 
@@ -7682,6 +7902,11 @@ export class DatabaseStorage implements IStorage {
     applyNoPartNeededInvariant(patch, next);
     if (patch.issueType) next.issueGroup = deriveIssueGroup(patch.issueType);
     const [updated] = await db.update(wetCheckFindings).set(next).where(eq(wetCheckFindings.id, id)).returning();
+    // Task #891 — when issueType changes the zone labor default may have changed.
+    // Call unconditionally (the helper skips immediately when manually set).
+    if (updated?.zoneRecordId != null) {
+      await this._recomputeZoneRepairLaborIfAuto(db, updated.zoneRecordId, companyId);
+    }
     return updated;
   }
 
@@ -7727,7 +7952,12 @@ export class DatabaseStorage implements IStorage {
     // completed_in_field — the previous `f.resolution !== "pending"`
     // guard was too strict and caused the trash button to silently
     // fail on completed-in-field findings.
+    const zoneRecordId = f.zoneRecordId;
     const result = await db.delete(wetCheckFindings).where(eq(wetCheckFindings.id, id));
+    // Task #891 — recompute zone labor after a finding is removed.
+    if (zoneRecordId != null) {
+      await this._recomputeZoneRepairLaborIfAuto(db, zoneRecordId, companyId);
+    }
     return (result.rowCount ?? 0) > 0;
   }
 

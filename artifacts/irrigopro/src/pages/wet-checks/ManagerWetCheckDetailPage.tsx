@@ -9,14 +9,17 @@
  * Layout: full desktop width, no narrow center column.
  */
 
+import { useState, useEffect, useRef } from "react";
 import { useParams, useLocation, Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useArrayQuery } from "@/lib/queryClient";
 import { apiRequest, asArray } from "@/lib/queryClient";
 import { cachedApiRequest } from "@/lib/offline/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import { LaborHoursStepper } from "@/components/ui/labor-hours-stepper";
 import {
   Loader2,
   CheckCircle2,
@@ -190,14 +193,108 @@ function FindingRow({
   );
 }
 
+// ─── Editable zone repair labor row (manager tier) ───────────────────────────
+
+function ZoneRepairLaborRow({ zr, wetCheckId }: { zr: ZoneRecordWithFindings; wetCheckId: number }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [localHours, setLocalHours] = useState<string>(
+    String((zr as any).repairLaborHours ?? "0.00"),
+  );
+  useEffect(() => {
+    setLocalHours(String((zr as any).repairLaborHours ?? "0.00"));
+  }, [(zr as any).repairLaborHours]);
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const saveMut = useMutation({
+    mutationFn: (hours: string) =>
+      apiRequest(`/api/wet-checks/zone-records/${zr.id}/repair-labor/manager`, "PATCH", {
+        repairLaborHours: hours,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId] });
+    },
+    onError: (e: any) => {
+      toast({
+        title: "Couldn't save repair labor",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const resetMut = useMutation({
+    mutationFn: () =>
+      apiRequest(`/api/wet-checks/zone-records/${zr.id}/repair-labor/reset-manager`, "POST", {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId] });
+    },
+    onError: (e: any) => {
+      toast({
+        title: "Couldn't reset repair labor",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleChange = (val: string) => {
+    setLocalHours(val);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => saveMut.mutate(val), 600);
+  };
+
+  const isManual = !!(zr as any).repairLaborManuallySet;
+  const hours = parseFloat(String((zr as any).repairLaborHours ?? "0")) || 0;
+  const anyPending = saveMut.isPending || resetMut.isPending;
+
+  return (
+    <div className="px-4 pb-3 pt-2 bg-gray-50 border-t border-dashed border-gray-200" data-testid={`mgr-zone-repair-labor-${zr.controllerLetter}${zr.zoneNumber}`}>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+          Repair Labor
+          {isManual ? (
+            <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-300 text-[9px] font-semibold">manual</span>
+          ) : (
+            <span className="px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200 text-[9px] font-semibold">auto</span>
+          )}
+        </span>
+        <span className="text-xs text-gray-500">
+          {hours === 0 ? "—" : `${hours.toFixed(2)} hr`}
+        </span>
+      </div>
+      <LaborHoursStepper
+        value={localHours}
+        onChange={handleChange}
+        min="0.00"
+        disabled={anyPending}
+      />
+      {isManual && (
+        <button
+          type="button"
+          className="mt-1.5 text-[10px] text-blue-600 hover:text-blue-800 underline disabled:opacity-40"
+          onClick={() => resetMut.mutate()}
+          disabled={anyPending}
+          data-testid={`mgr-zone-reset-labor-${zr.controllerLetter}${zr.zoneNumber}`}
+        >
+          Reset to default
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── Findings grouped by controller → zone ────────────────────────────────────
 
 function FindingsSummary({
   zoneRecords,
   controllers,
+  wetCheckId,
 }: {
   zoneRecords: ZoneRecordWithFindings[];
   controllers: PropertyController[];
+  wetCheckId: number;
 }) {
   const allFindings = zoneRecords.flatMap((z) => asArray(z.findings));
 
@@ -288,6 +385,10 @@ function FindingsSummary({
               <FindingRow key={f.id} finding={f} />
             ))}
           </div>
+          {/* Task #891 — editable repair labor per zone (manager review tier) */}
+          {zr.id != null && (
+            <ZoneRepairLaborRow zr={zr} wetCheckId={wetCheckId} />
+          )}
         </div>
       ))}
     </div>
@@ -752,6 +853,7 @@ function ManagerWetCheckDetailView({ id }: { id: number }) {
           <FindingsSummary
             zoneRecords={wcZoneRecords}
             controllers={controllers}
+            wetCheckId={wc.id}
           />
         </CardContent>
       </Card>

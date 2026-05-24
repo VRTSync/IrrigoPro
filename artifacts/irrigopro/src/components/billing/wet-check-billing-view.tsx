@@ -36,12 +36,16 @@ export interface WcvLineItem {
 }
 
 export interface WcvZone {
+  /** PK of the wet_check_zone_records row. Used by billing-manager labor edits. */
+  zoneRecordId: number;
   controllerLetter: string;
   zoneNumber: number;
   /** Formatted label e.g. "A-1" */
   zoneLabel: string;
   /** Authoritative zone-level repair labor hours (Slice 4 Option B) */
   repairLaborHours: string;
+  /** True when repairLaborHours was manually overridden (not auto-computed). */
+  repairLaborManuallySet: boolean;
   lineItems: WcvLineItem[];
   zonePartsSubtotal: string;
   zoneLaborSubtotal: string;

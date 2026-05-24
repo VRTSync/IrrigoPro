@@ -533,6 +533,24 @@ export function ZoneScreen({
     [repairLaborMut],
   );
 
+  // Task #891 — reset repair labor to auto-computed default.
+  const resetRepairLaborMut = useMutation({
+    mutationFn: async () => {
+      if (!zoneRecord?.id) return;
+      return apiRequest(`/api/wet-checks/zone-records/${zoneRecord.id}/repair-labor/reset`, "POST", {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
+    },
+    onError: (e: any) => {
+      toast({
+        title: "Couldn't reset repair labor",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   // Task #597 — optimistic photos
   const [optimisticPhotos, setOptimisticPhotos] = useState<WetCheckPhoto[]>([]);
   useEffect(() => {
@@ -1510,14 +1528,44 @@ export function ZoneScreen({
       {/* ── Per-zone repair labor (Needs Work only) ─────────────────────── */}
       {zoneRecord && !readOnly && zoneRecord.status === "checked_with_issues" && (
         <div className="border rounded-xl bg-white px-4 py-3" data-testid="repair-labor-card">
-          <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
-            Repair labor for this zone
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                Repair labor for this zone
+              </span>
+              {(zoneRecord as any).repairLaborManuallySet ? (
+                <span
+                  className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-300"
+                  data-testid="repair-labor-badge-manual"
+                >
+                  manual
+                </span>
+              ) : (
+                <span
+                  className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200"
+                  data-testid="repair-labor-badge-auto"
+                >
+                  auto
+                </span>
+              )}
+            </div>
+            {(zoneRecord as any).repairLaborManuallySet && zoneRecord.id && (
+              <button
+                type="button"
+                className="text-[11px] text-blue-600 hover:underline disabled:opacity-50"
+                onClick={() => resetRepairLaborMut.mutate()}
+                disabled={resetRepairLaborMut.isPending}
+                data-testid="btn-reset-repair-labor"
+              >
+                Reset to default
+              </button>
+            )}
           </div>
           <LaborHoursStepper
             value={repairLaborHours}
             onChange={handleRepairLaborChange}
             min="0.25"
-            disabled={repairLaborMut.isPending}
+            disabled={repairLaborMut.isPending || resetRepairLaborMut.isPending}
           />
         </div>
       )}

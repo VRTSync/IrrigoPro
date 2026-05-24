@@ -47,6 +47,8 @@ export interface WcvLineItem {
 
 /** All findings for a single controller zone. */
 export interface WcvZone {
+  /** PK of the wet_check_zone_records row. Exposed so billing-manager UIs can PATCH zone labor. */
+  zoneRecordId: number;
   controllerLetter: string;
   zoneNumber: number;
   /** Formatted label, e.g. "A-1". */
@@ -57,6 +59,8 @@ export interface WcvZone {
    * The billing sheet total is driven by this value, not per-finding sums.
    */
   repairLaborHours: string;
+  /** True when repairLaborHours was manually overridden (not auto-computed). */
+  repairLaborManuallySet: boolean;
   lineItems: WcvLineItem[];
   zonePartsSubtotal: string;
   zoneLaborSubtotal: string;
@@ -255,10 +259,12 @@ export function buildWetCheckBillingView(
     });
 
     zones.push({
+      zoneRecordId,
       controllerLetter: zr.controllerLetter,
       zoneNumber: zr.zoneNumber,
       zoneLabel: `${zr.controllerLetter}-${zr.zoneNumber}`,
       repairLaborHours: fmt(repairLaborHoursNum),
+      repairLaborManuallySet: !!(zr as any).repairLaborManuallySet,
       lineItems,
       zonePartsSubtotal: fmt(zoneParts),
       zoneLaborSubtotal: fmt(zoneLabor),
