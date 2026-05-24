@@ -700,7 +700,7 @@ export function WetCheckWizard({ id }: { id: number }) {
 
         {/* ── Left panel: findings list ─────────────────────────────── */}
         <div
-          className="lg:w-72 xl:w-80 shrink-0 flex flex-col gap-1 lg:overflow-y-auto"
+          className="lg:w-72 xl:w-80 shrink-0 flex flex-col gap-1 lg:overflow-y-auto lg:h-[calc(100vh-10rem)]"
           data-testid="wizard-finding-list"
         >
           <div className="text-xs uppercase tracking-wider text-gray-500 mb-1 px-0.5">
@@ -729,7 +729,7 @@ export function WetCheckWizard({ id }: { id: number }) {
 
         {/* ── Right panel: detail + decisions ──────────────────────── */}
         <div
-          className="flex-1 min-w-0 flex flex-col mt-4 lg:mt-0 lg:overflow-y-auto"
+          className="flex-1 min-w-0 flex flex-col mt-4 lg:mt-0 lg:overflow-y-auto lg:h-[calc(100vh-10rem)]"
           data-testid="wizard-detail-panel"
         >
           {!active && allResolved ? (

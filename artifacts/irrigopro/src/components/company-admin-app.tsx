@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { safeSet } from "@/utils/safeStorage";
 import { Switch, Route, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -32,6 +32,8 @@ import WetCheckBillingsPage from "@/pages/wet-check-billings";
 import WetCheckReviewPage from "@/pages/wet-check-review";
 import AdminWetChecksPage from "@/pages/admin-wet-checks";
 import ManagerWetChecksPage from "@/pages/manager-wet-checks";
+const WetCheckConfirm = lazy(() => import("@/components/manager/wet-check-confirm").then((m) => ({ default: m.WetCheckConfirm })));
+const WetCheckDone = lazy(() => import("@/components/manager/wet-check-done").then((m) => ({ default: m.WetCheckDone })));
 import AdminIssueTypesPage from "@/pages/admin-issue-types";
 import AdminClientErrorsPage from "@/pages/admin-client-errors";
 import WetCheckInspectionSummaryPage from "@/pages/wet-checks/WetCheckInspectionSummaryPage";
@@ -176,6 +178,12 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/billing-sheets" component={BillingSheets} />
           <Route path="/wet-check-billings" component={WetCheckBillingsPage} />
           <Route path="/manager/wet-checks" component={ManagerWetChecksPage} />
+          <Route path="/manager/wet-checks/:id/confirm">
+            {(params) => <Suspense fallback={null}><WetCheckConfirm id={parseInt(params.id)} /></Suspense>}
+          </Route>
+          <Route path="/manager/wet-checks/:id/done">
+            {(params) => <Suspense fallback={null}><WetCheckDone id={parseInt(params.id)} /></Suspense>}
+          </Route>
           <Route path="/manager/wet-checks/:id" component={WetCheckReviewPage} />
           <Route path="/wet-checks/admin" component={AdminWetChecksPage} />
           <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
