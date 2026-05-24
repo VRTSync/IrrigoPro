@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
-import { Loader2, Search } from "lucide-react";
-import { apiRequest, queryClient, useArrayQuery, useUnauthenticatedReads } from "@/lib/queryClient";
+import { Loader2, Search, Trash2 } from "lucide-react";
+import { apiRequest, queryClient, useArrayQuery, useUnauthenticatedReads, parseApiError } from "@/lib/queryClient";
 import { SessionExpiredEmptyState } from "@/components/auth/session-expired-banner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,8 +11,33 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { OfflineStrip, OfflineSyncUI } from "@/components/offline/sync-ui";
 import { createWetCheck as offlineCreateWetCheck } from "@/lib/offline/api";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { Customer, WorkOrder, WetCheck } from "@workspace/db/schema";
 import { getCurrentUser, newClientId } from "./helpers";
+
+type Blocker = {
+  kind: "billing_sheet" | "estimate" | "work_order" | "wet_check_billing";
+  id: number;
+  displayNumber: string | null;
+  invoiceId: number | null;
+  invoiceNumber: string | null;
+};
+
+function blockerLineLabel(b: Blocker): string {
+  const kindLabel =
+    b.kind === "billing_sheet" ? "Billing sheet"
+    : b.kind === "wet_check_billing" ? "Wet check billing"
+    : b.kind === "estimate" ? "Estimate"
+    : "Work order";
+  const recordLabel = b.displayNumber ?? `#${b.id}`;
+  const invoiceLabel = b.invoiceNumber
+    ? `Invoice ${b.invoiceNumber}`
+    : (b.invoiceId != null ? `Invoice #${b.invoiceId}` : "an invoice");
+  return `${kindLabel} ${recordLabel} → ${invoiceLabel}`;
+}
 
 export function WetCheckList() {
   const [, navigate] = useLocation();
@@ -22,6 +47,12 @@ export function WetCheckList() {
   // Task #556 — when any default-loaded read 401s, we want the empty
   // state copy to read "sign in again", not "No wet checks yet."
   const unauthenticated = useUnauthenticatedReads();
+
+  const canDelete = me?.role === "company_admin" || me?.role === "super_admin";
+
+  const [pendingDelete, setPendingDelete] = useState<WetCheck | null>(null);
+  const [conflictMessage, setConflictMessage] = useState<string | null>(null);
+  const [conflictBlockers, setConflictBlockers] = useState<Blocker[]>([]);
 
   const { data: wetChecks = [], isLoading: loadingWcs } = useArrayQuery<WetCheck>({
     queryKey: ["/api/wet-checks"],
@@ -88,6 +119,50 @@ export function WetCheckList() {
       }
     },
     onError: (e: any) => toast({ title: "Failed", description: e?.message ?? "Could not start wet check", variant: "destructive" }),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: async (id: number) => {
+      return await apiRequest(`/api/wet-checks/${id}`, "DELETE");
+    },
+    onSuccess: () => {
+      toast({ title: "Wet check deleted", description: "The wet check has been removed." });
+      setPendingDelete(null);
+      setConflictMessage(null);
+      setConflictBlockers([]);
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
+    },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/^409:/.test(message)) {
+        const jsonPart = message.replace(/^409:\s*/, "");
+        let parsedMessage: string | null = null;
+        let parsedBlockers: Blocker[] = [];
+        try {
+          const body = JSON.parse(jsonPart);
+          if (body && typeof body.message === "string") parsedMessage = body.message;
+          if (Array.isArray(body?.blockers)) parsedBlockers = body.blockers as Blocker[];
+          // billingNumbers is a flat string array fallback when blockers is absent
+          if (parsedBlockers.length === 0 && Array.isArray(body?.billingNumbers)) {
+            parsedMessage = parsedMessage ?? "Cannot delete: linked to one or more billing records.";
+          }
+        } catch {
+          // fall through
+        }
+        // Keep pendingDelete set so the dialog stays open to show conflict details.
+        setConflictMessage(parsedMessage ?? parseApiError(err, "Cannot delete: a downstream record is on an invoice."));
+        setConflictBlockers(parsedBlockers);
+        return;
+      }
+      toast({
+        title: "Delete failed",
+        description: parseApiError(err, "Could not delete wet check."),
+        variant: "destructive",
+      });
+      setPendingDelete(null);
+      setConflictMessage(null);
+      setConflictBlockers([]);
+    },
   });
 
   return (
@@ -190,19 +265,92 @@ export function WetCheckList() {
                 onClick={() => navigate(`/wet-checks/${wc.id}`)}
                 data-testid={`wet-check-row-${wc.id}`}
               >
-                <CardContent className="py-3 flex items-center justify-between">
-                  <div>
+                <CardContent className="py-3 flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
                     <div className="font-medium">{wc.customerName}</div>
                     <div className="text-xs text-gray-500">{wc.propertyAddress ?? "—"}</div>
                     <div className="text-xs text-gray-500">{new Date(wc.startedAt).toLocaleString()}</div>
                   </div>
-                  <Badge variant={wc.status === "in_progress" ? "secondary" : "default"}>{wc.status}</Badge>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <Badge variant={wc.status === "in_progress" ? "secondary" : "default"}>{wc.status}</Badge>
+                    {canDelete && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 w-8 p-0 text-gray-400 hover:text-red-600 hover:bg-red-50"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConflictMessage(null);
+                          setConflictBlockers([]);
+                          setPendingDelete(wc);
+                        }}
+                        data-testid={`button-delete-${wc.id}`}
+                        aria-label={`Delete wet check for ${wc.customerName}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             ))}
           </div>
         )}
       </div>
+
+      <AlertDialog
+        open={!!pendingDelete}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingDelete(null);
+            setConflictMessage(null);
+            setConflictBlockers([]);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {conflictMessage
+                ? "Cannot delete wet check"
+                : `Delete wet check for ${pendingDelete?.customerName ?? "this customer"}?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                {conflictMessage ? (
+                  <>
+                    <p className="text-red-600">{conflictMessage}</p>
+                    {conflictBlockers.length > 0 && (
+                      <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
+                        {conflictBlockers.map((b, i) => (
+                          <li key={`${b.kind}-${b.id}-${i}`}>{blockerLineLabel(b)}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                ) : (
+                  <p>This cannot be undone.</p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              {conflictMessage ? "Close" : "Cancel"}
+            </AlertDialogCancel>
+            {!conflictMessage && (
+              <Button
+                className="bg-red-600 hover:bg-red-700 text-white"
+                onClick={() => pendingDelete && deleteMut.mutate(pendingDelete.id)}
+                disabled={deleteMut.isPending}
+                data-testid="button-confirm-delete"
+              >
+                {deleteMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
+              </Button>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
