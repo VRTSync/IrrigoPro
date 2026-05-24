@@ -250,6 +250,18 @@ export function WetCheckWizard({ id }: { id: number }) {
     [decisionFindings],
   );
 
+  // Left-panel display order: pending first, then resolved/auto-billed.
+  // Stable within each group (preserves relative API order).
+  const sortedFindings = useMemo(() => {
+    const pending = allFindings.filter(
+      ({ f }) => (f.resolution ?? "pending") === "pending" && f.convertedAt == null,
+    );
+    const resolved = allFindings.filter(
+      ({ f }) => !((f.resolution ?? "pending") === "pending" && f.convertedAt == null),
+    );
+    return [...pending, ...resolved];
+  }, [allFindings]);
+
   const totalDecisions = decisionFindings.length;
   const completedDecisions = totalDecisions - pendingFindings.length;
   const progressPct = totalDecisions === 0 ? 100 : Math.round((completedDecisions / totalDecisions) * 100);
@@ -709,7 +721,7 @@ export function WetCheckWizard({ id }: { id: number }) {
           {allFindings.length === 0 && (
             <div className="text-sm text-gray-500 text-center py-6">No findings on this wet check.</div>
           )}
-          {allFindings.map(item => {
+          {sortedFindings.map(item => {
             const isAutoBilled = autoBilled.some(({ f }) => f.id === item.f.id);
             return (
               <SidebarFindingCard
