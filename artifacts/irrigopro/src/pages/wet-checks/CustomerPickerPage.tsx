@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { Search, Droplets, AlertCircle } from "lucide-react";
-import { useArrayQuery, useUnauthenticatedReads } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery, useUnauthenticatedReads } from "@/lib/queryClient";
 import { SessionExpiredEmptyState } from "@/components/auth/session-expired-banner";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -175,7 +175,8 @@ export default function CustomerPickerPage() {
 
   const { data: customers = [], isLoading: loadingCustomers } =
     useArrayQuery<Customer>({
-      queryKey: ["/api/customers"],
+      queryKey: ["/api/customers", { active: true }],
+      queryFn: () => apiRequest("/api/customers?active=true"),
     });
 
   const { data: wetChecks = [], isLoading: loadingWcs } =

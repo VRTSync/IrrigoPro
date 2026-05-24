@@ -6016,9 +6016,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/customers", requireAuthentication, async (req, res) => {
     try {
       const billingVisible = req.query.billingVisible === "true";
+      const activeOnly = req.query.active === "true";
       let customers = await storage.getCustomers();
       if (billingVisible) {
         customers = customers.filter(c => !c.hiddenFromBilling);
+      }
+      if (activeOnly) {
+        customers = customers.filter(c => c.isActive !== false);
       }
       // Task #532 — opt-in pagination via ?limit=&offset=. When omitted
       // the response is unchanged (full list) for backwards compatibility.
