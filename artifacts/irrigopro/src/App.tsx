@@ -72,6 +72,7 @@ const ManagerWetChecksPage = lazyPage(() => import("@/pages/manager-wet-checks")
 const WetCheckConfirm = lazy(() => import("@/components/manager/wet-check-confirm").then((m) => ({ default: m.WetCheckConfirm })));
 const WetCheckDone = lazy(() => import("@/components/manager/wet-check-done").then((m) => ({ default: m.WetCheckDone })));
 const WetCheckInspectionSummaryPage = lazyPage(() => import("@/pages/wet-checks/WetCheckInspectionSummaryPage"));
+const ManagerWetCheckDetailPage = lazyPage(() => import("@/pages/wet-checks/ManagerWetCheckDetailPage"));
 
 const SiteMapsPage = lazyPage(() => import("@/pages/site-maps"));
 const CustomerSiteMapsPage = lazyPage(() => import("@/pages/customer-site-maps-page"));
@@ -333,7 +334,7 @@ function Router() {
                   <Route path="/wet-checks" component={WetCustomerPickerPage} />
                   <Route path="/wet-checks/c/:customerId/new" component={NewWetCheckPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksPage} />
-                  <Route path="/wet-checks/:id/review" component={WetCheckInspectionSummaryPage} />
+                  <Route path="/wet-checks/:id/review" component={ManagerWetCheckDetailPage} />
                   <Route path="/wet-checks/:id/summary" component={WetCheckInspectionSummaryPage} />
                   <Route path="/wet-checks/:id" component={WetChecksPage} />
                   <Route path="/switch-user" component={SwitchUser} />

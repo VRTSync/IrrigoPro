@@ -37,6 +37,7 @@ const WetCheckDone = lazy(() => import("@/components/manager/wet-check-done").th
 import AdminIssueTypesPage from "@/pages/admin-issue-types";
 import AdminClientErrorsPage from "@/pages/admin-client-errors";
 import WetCheckInspectionSummaryPage from "@/pages/wet-checks/WetCheckInspectionSummaryPage";
+import ManagerWetCheckDetailPage from "@/pages/wet-checks/ManagerWetCheckDetailPage";
 import BillingZeroPriceAuditPage from "@/pages/billing-zero-price-audit";
 import LaborRateAuditPage from "@/pages/labor-rate-audit";
 import MissingPhotosReport from "@/pages/missing-photos-report";
@@ -189,7 +190,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
           <Route path="/admin/client-errors" component={AdminClientErrorsPage} />
           <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
-          <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
+          <Route path="/wet-checks/:id/review" component={ManagerWetCheckDetailPage} />
           <Route path="/wet-checks" component={WetChecksPage} />
           <Route path="/wet-checks/:id/summary" component={WetCheckInspectionSummaryPage} />
           <Route path="/wet-checks/:id" component={WetChecksPage} />
