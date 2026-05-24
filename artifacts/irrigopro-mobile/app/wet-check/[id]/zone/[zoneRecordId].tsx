@@ -1117,17 +1117,17 @@ export default function ZoneDetailScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="Add photo"
                   style={({ pressed }) => [
-                    styles.addFindingButton,
+                    styles.addPhotoButton,
                     {
-                      borderColor: colors.primary,
-                      borderRadius: colors.radius - 4,
+                      backgroundColor: colors.primary,
+                      borderRadius: colors.radius,
                       opacity: pressed ? 0.85 : 1,
                     },
                   ]}
                 >
-                  <Feather name="camera" size={16} color={colors.primary} />
-                  <Text style={[styles.addFindingText, { color: colors.primary }]}>
-                    Add photo
+                  <Feather name="camera" size={20} color={colors.primaryForeground} />
+                  <Text style={[styles.addPhotoText, { color: colors.primaryForeground }]}>
+                    Add Photo
                   </Text>
                 </Pressable>
               ) : null}
@@ -1428,7 +1428,6 @@ function FindingEditorModal({
   const [quantity, setQuantity] = useState("1");
   const [laborHours, setLaborHours] = useState("");
   const [notes, setNotes] = useState("");
-  const [issuePickerOpen, setIssuePickerOpen] = useState(false);
   const [partPickerOpen, setPartPickerOpen] = useState(false);
 
   const issueTypesQuery = useQuery({
@@ -1445,7 +1444,6 @@ function FindingEditorModal({
       setQuantity("1");
       setLaborHours("");
       setNotes("");
-      setIssuePickerOpen(false);
       setPartPickerOpen(false);
     }
   }, [visible]);
@@ -1527,30 +1525,51 @@ function FindingEditorModal({
             keyboardShouldPersistTaps="handled"
           >
             <FieldLabel colors={colors}>Issue type</FieldLabel>
-            <Pressable
-              onPress={() => setIssuePickerOpen(true)}
-              style={({ pressed }) => [
-                styles.fieldButton,
-                {
-                  backgroundColor: colors.card,
-                  borderColor: colors.border,
-                  borderRadius: colors.radius - 4,
-                  opacity: pressed ? 0.85 : 1,
-                },
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="Pick issue type"
-            >
-              <Text
-                style={[
-                  styles.fieldButtonText,
-                  { color: issueType ? colors.foreground : colors.mutedForeground },
-                ]}
-              >
-                {issueType ? issueType.displayLabel : "Select an issue…"}
+            {issueTypesQuery.isLoading ? (
+              <View style={{ paddingVertical: 16, alignItems: "center" }}>
+                <ActivityIndicator color={colors.primary} size="small" />
+              </View>
+            ) : (issueTypesQuery.data ?? []).length === 0 ? (
+              <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+                No issue types configured for this company yet.
               </Text>
-              <Feather name="chevron-down" size={16} color={colors.mutedForeground} />
-            </Pressable>
+            ) : (
+              <View style={styles.issueTypeList}>
+                {(issueTypesQuery.data ?? []).map((opt) => {
+                  const selected = issueType?.id === opt.id;
+                  return (
+                    <Pressable
+                      key={opt.id}
+                      onPress={() => setIssueType(opt)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected }}
+                      accessibilityLabel={opt.displayLabel}
+                      style={({ pressed }) => [
+                        styles.pickerRow,
+                        {
+                          backgroundColor: selected ? colors.secondary : "transparent",
+                          borderRadius: colors.radius - 4,
+                          borderBottomColor: colors.border,
+                          opacity: pressed ? 0.85 : 1,
+                        },
+                      ]}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.pickerRowTitle, { color: colors.foreground }]}>
+                          {opt.displayLabel}
+                        </Text>
+                        <Text style={[styles.pickerRowMeta, { color: colors.mutedForeground }]}>
+                          {prettyIssueType(opt.issueGroup)} · default {opt.defaultLaborHours} hr
+                        </Text>
+                      </View>
+                      {selected ? (
+                        <Feather name="check" size={18} color={colors.primary} />
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
 
             <FieldLabel colors={colors}>Part (optional)</FieldLabel>
             <Pressable
@@ -1661,19 +1680,6 @@ function FindingEditorModal({
           </ScrollView>
         </KeyboardAvoidingView>
 
-        <IssueTypePickerModal
-          visible={issuePickerOpen}
-          onClose={() => setIssuePickerOpen(false)}
-          colors={colors}
-          options={issueTypesQuery.data ?? []}
-          loading={issueTypesQuery.isLoading}
-          selectedId={issueType?.id ?? null}
-          onSelect={(opt) => {
-            setIssueType(opt);
-            setIssuePickerOpen(false);
-          }}
-        />
-
         {issueType ? (
           <PartPickerModal
             visible={partPickerOpen}
@@ -1703,93 +1709,6 @@ function FieldLabel({
     <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>
       {String(children).toUpperCase()}
     </Text>
-  );
-}
-
-function IssueTypePickerModal({
-  visible,
-  onClose,
-  colors,
-  options,
-  loading,
-  selectedId,
-  onSelect,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  colors: ReturnType<typeof useColors>;
-  options: IssueTypeConfig[];
-  loading: boolean;
-  selectedId: number | null;
-  onSelect: (opt: IssueTypeConfig) => void;
-}) {
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
-    >
-      <SafeAreaView style={[styles.modalSafe, { backgroundColor: colors.background }]}>
-        <View
-          style={[
-            styles.modalHeader,
-            { borderBottomColor: colors.border },
-          ]}
-        >
-          <Pressable onPress={onClose} hitSlop={12}>
-            <Text style={[styles.modalCancel, { color: colors.primary }]}>Cancel</Text>
-          </Pressable>
-          <Text style={[styles.modalTitle, { color: colors.foreground }]}>Issue type</Text>
-          <View style={{ width: 60 }} />
-        </View>
-        {loading ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={colors.primary} />
-          </View>
-        ) : (
-          <ScrollView contentContainerStyle={styles.pickerList}>
-            {options.length === 0 ? (
-              <Text style={[styles.emptyText, { color: colors.mutedForeground, padding: 24 }]}>
-                No issue types configured for this company yet.
-              </Text>
-            ) : (
-              options.map((opt) => {
-                const selected = opt.id === selectedId;
-                return (
-                  <Pressable
-                    key={opt.id}
-                    onPress={() => onSelect(opt)}
-                    style={({ pressed }) => [
-                      styles.pickerRow,
-                      {
-                        backgroundColor: selected ? colors.secondary : "transparent",
-                        opacity: pressed ? 0.85 : 1,
-                        borderBottomColor: colors.border,
-                      },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel={opt.displayLabel}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.pickerRowTitle, { color: colors.foreground }]}>
-                        {opt.displayLabel}
-                      </Text>
-                      <Text style={[styles.pickerRowMeta, { color: colors.mutedForeground }]}>
-                        {prettyIssueType(opt.issueGroup)} · default {opt.defaultLaborHours} hr
-                      </Text>
-                    </View>
-                    {selected ? (
-                      <Feather name="check" size={18} color={colors.primary} />
-                    ) : null}
-                  </Pressable>
-                );
-              })
-            )}
-          </ScrollView>
-        )}
-      </SafeAreaView>
-    </Modal>
   );
 }
 
@@ -2014,6 +1933,20 @@ const styles = StyleSheet.create({
     borderStyle: "dashed",
   },
   addFindingText: { fontSize: 14, fontWeight: "600" },
+  addPhotoButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 14,
+    marginTop: 4,
+  },
+  addPhotoText: { fontSize: 16, fontWeight: "700" },
+  issueTypeList: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    overflow: "hidden",
+  },
   // Task #612 facelift — bigger, glove-friendly primary actions.
   // Each row is now a 56pt-tall tappable target with a heavier border
   // when selected, mirroring the web ZoneScreen primary buttons.

@@ -1581,19 +1581,19 @@ function PhotoStripSection({
       <Pressable
         onPress={onAddPhoto}
         accessibilityRole="button"
-        accessibilityLabel="Take photo"
+        accessibilityLabel="Add Photos"
         style={({ pressed }) => [
-          styles.addItemButton,
+          styles.addPhotoButton,
           {
-            borderColor: colors.primary,
-            borderRadius: colors.radius - 4,
+            backgroundColor: colors.primary,
+            borderRadius: colors.radius,
             opacity: pressed ? 0.85 : 1,
           },
         ]}
       >
-        <Feather name="camera" size={16} color={colors.primary} />
-        <Text style={[styles.addItemText, { color: colors.primary }]}>
-          Take photo
+        <Feather name="camera" size={20} color={colors.primaryForeground} />
+        <Text style={[styles.addPhotoText, { color: colors.primaryForeground }]}>
+          Add Photos
         </Text>
       </Pressable>
     </Section>
@@ -1839,6 +1839,15 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   addItemText: { fontSize: 14, fontWeight: "600" },
+  addPhotoButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 14,
+    marginTop: 4,
+  },
+  addPhotoText: { fontSize: 16, fontWeight: "700" },
 
   emptyText: { fontSize: 13, fontStyle: "italic" },
   bodyText: { fontSize: 14, lineHeight: 20 },
