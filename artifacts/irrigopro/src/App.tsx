@@ -265,6 +265,7 @@ function Router() {
                   <Route path="/wet-checks" component={WetCustomerPickerPage} />
                   <Route path="/wet-checks/c/:customerId/new" component={NewWetCheckPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksPage} />
+                  <Route path="/wet-checks/:id/review" component={WetCheckInspectionSummaryPage} />
                   <Route path="/wet-checks/:id/summary" component={WetCheckInspectionSummaryPage} />
                   <Route path="/wet-checks/:id" component={WetChecksPage} />
                   <Route path="/customers" component={Customers} />
@@ -329,10 +330,10 @@ function Router() {
                   <Route path="/wet-checks/admin" component={AdminWetChecksPage} />
                   <Route path="/financial-pulse" component={FinancialPulsePage} />
                   <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
-                  <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
                   <Route path="/wet-checks" component={WetCustomerPickerPage} />
                   <Route path="/wet-checks/c/:customerId/new" component={NewWetCheckPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksPage} />
+                  <Route path="/wet-checks/:id/review" component={WetCheckInspectionSummaryPage} />
                   <Route path="/wet-checks/:id/summary" component={WetCheckInspectionSummaryPage} />
                   <Route path="/wet-checks/:id" component={WetChecksPage} />
                   <Route path="/switch-user" component={SwitchUser} />

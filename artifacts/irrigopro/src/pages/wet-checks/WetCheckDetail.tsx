@@ -349,8 +349,15 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
       if (nextUncheckedZone) {
         navigateToZone(nextUncheckedZone.letter, nextUncheckedZone.zone);
       } else {
-        // All zones checked — navigate to the Slice 5 summary placeholder.
-        navigate(`/wet-checks/${wc.id ?? id ?? 0}/summary`);
+        // All zones checked — navigate to the Slice 5 inspection summary at
+        // /wet-checks/:id/review (the canonical field-tech path per task spec).
+        // For irrigation_manager the /review route now also maps to
+        // WetCheckInspectionSummaryPage; manager triage uses /manager/wet-checks/:id.
+        // Pass the current zone as return context so "Keep Editing" can
+        // drop the tech back on the exact zone they just finished.
+        navigate(
+          `/wet-checks/${wc.id ?? id ?? 0}/review?returnController=${activeLetter}&returnZone=${activeZone}`,
+        );
       }
     };
 
