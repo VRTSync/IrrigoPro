@@ -356,7 +356,24 @@ export function WetCheckBillingViewComponent({
                             {currency(zone.zonePartsSubtotal)}
                           </td>
                           <td className="py-2.5 px-2 text-right text-gray-700">
-                            {toNum(zone.repairLaborHours).toFixed(2)}
+                            <span className="inline-flex items-center justify-end gap-1.5">
+                              {zone.repairLaborManuallySet ? (
+                                <span
+                                  className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-300"
+                                  data-testid={`repair-labor-badge-manual-${zone.zoneLabel}`}
+                                >
+                                  manual
+                                </span>
+                              ) : (
+                                <span
+                                  className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200"
+                                  data-testid={`repair-labor-badge-auto-${zone.zoneLabel}`}
+                                >
+                                  auto
+                                </span>
+                              )}
+                              {toNum(zone.repairLaborHours).toFixed(2)}
+                            </span>
                           </td>
                           <td className="py-2.5 pl-2 text-right font-semibold text-gray-900">
                             {currency(zone.zoneTotal)}
