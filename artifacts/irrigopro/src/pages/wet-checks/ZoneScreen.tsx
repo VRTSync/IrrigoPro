@@ -1120,7 +1120,7 @@ export function ZoneScreen({
                       <div className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-2">
                         {findings.length > 0 ? "Add another finding" : "Add work for this zone"}
                       </div>
-                      <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide -mx-1 px-1">
+                      <div className="flex flex-wrap gap-2">
                         {(["quick_fix", "advanced", "zone_issue"] as const).map((group) => {
                           const groupItems = issueTypes.filter((i) => i.issueGroup === group);
                           if (groupItems.length === 0) return null;
@@ -1128,7 +1128,7 @@ export function ZoneScreen({
                             <button
                               key={it.issueType}
                               type="button"
-                              className="shrink-0 px-3 py-2 rounded-full border-2 border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-amber-400 hover:bg-amber-50 active:bg-amber-100 transition-colors whitespace-nowrap min-h-[44px]"
+                              className="px-3 py-2 rounded-full border-2 border-gray-200 bg-white text-sm font-medium text-gray-700 hover:border-amber-400 hover:bg-amber-50 active:bg-amber-100 transition-colors min-h-[44px]"
                               onClick={() => setInlineIssueType(it.issueType)}
                               data-testid={`chip-${it.issueType}`}
                             >
