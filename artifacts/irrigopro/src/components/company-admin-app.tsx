@@ -183,7 +183,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
             {(params) => <Suspense fallback={null}><WetCheckConfirm id={parseInt(params.id)} /></Suspense>}
           </Route>
           <Route path="/manager/wet-checks/:id/done">
-            {(params) => <Suspense fallback={null}><WetCheckDone id={parseInt(params.id)} /></Suspense>}
+            {(params) => <Suspense fallback={null}><WetCheckDone id={parseInt(params.id)} returnTo="/wet-checks/pending-review" /></Suspense>}
           </Route>
           <Route path="/manager/wet-checks/:id" component={WetCheckReviewPage} />
           <Route path="/wet-checks/admin" component={AdminWetChecksPage} />

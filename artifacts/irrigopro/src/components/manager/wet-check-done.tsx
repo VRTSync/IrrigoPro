@@ -71,7 +71,7 @@ function OutcomeRow({ testId, accent, icon: Icon, primary, link }: OutcomeRowPro
   );
 }
 
-export function WetCheckDone({ id }: { id: number }) {
+export function WetCheckDone({ id, returnTo = "/manager" }: { id: number; returnTo?: string }) {
   const [, navigate] = useLocation();
 
   const { data: wc, isLoading } = useQuery<WetCheckWithDetails>({
@@ -202,7 +202,7 @@ export function WetCheckDone({ id }: { id: number }) {
       <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-4">
         <Button
           variant="outline"
-          onClick={() => navigate("/manager")}
+          onClick={() => navigate(returnTo)}
           data-testid="done-done-for-now"
         >
           Done for now
