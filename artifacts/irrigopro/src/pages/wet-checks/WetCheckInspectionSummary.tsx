@@ -14,15 +14,12 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { cachedApiRequest } from "@/lib/offline/api";
 import { PropertyContextHeader } from "./PropertyContextHeader";
-import { ZoneStatusGrid } from "./ZoneStatusGrid";
+import { ZoneStatusGrid, type ZoneRecordWithFindings } from "./ZoneStatusGrid";
 import type {
   WetCheckWithDetails,
   PropertyController,
   WetCheckFinding,
-  WetCheckZoneRecord,
 } from "@workspace/db/schema";
-
-type ZoneRecordWithFindings = WetCheckZoneRecord & { findings: WetCheckFinding[] };
 
 // ─── Single finding row ────────────────────────────────────────────────────────
 
