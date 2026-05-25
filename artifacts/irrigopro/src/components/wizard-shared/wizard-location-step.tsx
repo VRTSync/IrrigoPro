@@ -17,7 +17,7 @@ import {
 import { LocationFields } from "@/components/location/location-fields";
 import { LocationPicker } from "@/components/ui/location-picker";
 import { composeCustomerAddress } from "@/lib/customer-address";
-import { customerToBoundary } from "@/hooks/use-customer-boundary";
+import { useCustomerBoundary } from "@/hooks/use-customer-boundary";
 import { MapPin, Cpu, Droplets, Briefcase } from "lucide-react";
 import type { Customer, PropertyController } from "@workspace/db/schema";
 
@@ -153,7 +153,7 @@ export function WizardLocationStep({
     value.workLocation?.address ||
     value.projectAddress ||
     composeCustomerAddress(customer);
-  const customerBoundary = customerToBoundary(customer);
+  const { data: customerBoundary } = useCustomerBoundary(customer?.id);
 
   return (
     <div className="space-y-4">
