@@ -6,6 +6,7 @@
  *   - `resetZoneRepairLabor` (tech tier)
  *   - `resetZoneRepairLaborManagerTier` (manager tier)
  *   - `createWetCheckFinding` (auto-triggers recompute on finding add)
+ *   - `deleteWetCheckFinding` (auto-triggers recompute on finding delete — Task #907)
  *
  * All tests run against a real PostgreSQL connection (same pattern as the
  * wet-check-billings storage tests). Fixtures are isolated to a dedicated
@@ -22,6 +23,8 @@
  *      the flag prevents the write so hours stay at the manually-set value)
  *   7. resetZoneRepairLabor clears manuallySet flag and recomputes from findings
  *   8. resetZoneRepairLaborManagerTier works on a submitted wet check
+ *   9. deleteWetCheckFinding: deleting one of two findings recomputes labor down (Task #907)
+ *  10. deleteWetCheckFinding: manuallySet=true zone is NOT recomputed on finding delete (Task #907)
  */
 
 import { describe, it, before, after } from "node:test";
@@ -263,5 +266,76 @@ describe("_recomputeZoneRepairLaborIfAuto (via storage helpers)", () => {
       "manager-tier reset should succeed on a submitted wet check");
     assert.equal(result!.repairLaborManuallySet, false);
     assert.equal(result!.repairLaborHours, "1.00");
+  });
+
+  // ─── Test 9: deleteWetCheckFinding recomputes labor down (Task #907) ──────
+
+  it("deleting one of two findings recomputes repairLaborHours to the single-finding sum", async () => {
+    const zoneId = await insertZone(wetCheckId);
+
+    // Add two findings (A=1.00h, B=0.50h). createWetCheckFinding triggers the
+    // initial recompute, leaving repairLaborHours=1.50 after the second call.
+    const findingA = await storage.createWetCheckFinding(zoneId, cid, {
+      issueType: ISSUE_TYPE_A,
+      quantity: 1,
+    });
+    await storage.createWetCheckFinding(zoneId, cid, {
+      issueType: ISSUE_TYPE_B,
+      quantity: 1,
+    });
+
+    // Confirm pre-delete state: 1.00 (A) + 0.50 (B) = 1.50
+    const preDel = await db.execute(
+      sql`SELECT repair_labor_hours FROM wet_check_zone_records WHERE id = ${zoneId}`,
+    );
+    assert.equal(
+      String((preDel.rows[0] as Record<string, unknown>).repair_labor_hours),
+      "1.50",
+      "pre-delete: repairLaborHours should be 1.50",
+    );
+
+    // Delete finding A — should trigger _recomputeZoneRepairLaborIfAuto.
+    await storage.deleteWetCheckFinding(findingA.id, cid);
+
+    // Post-delete: only finding B remains → 0.50
+    const postDel = await db.execute(
+      sql`SELECT repair_labor_hours FROM wet_check_zone_records WHERE id = ${zoneId}`,
+    );
+    assert.equal(
+      String((postDel.rows[0] as Record<string, unknown>).repair_labor_hours),
+      "0.50",
+      "post-delete: repairLaborHours should drop to 0.50 (only finding B remains)",
+    );
+  });
+
+  // ─── Test 10: manuallySet=true zone is NOT recomputed on finding delete ────
+
+  it("deleteWetCheckFinding does NOT recompute repairLaborHours when repairLaborManuallySet=true", async () => {
+    const zoneId = await insertZone(wetCheckId, { manuallySet: true, hours: "9.00" });
+
+    // Add a finding via direct SQL so the createWetCheckFinding recompute guard
+    // (which also skips when manuallySet=true) doesn't interfere with our fixture.
+    const insRows = await db.execute(sql`
+      INSERT INTO wet_check_findings (zone_record_id, wet_check_id, issue_type, issue_group, quantity)
+      VALUES (${zoneId}, ${wetCheckId}, ${ISSUE_TYPE_A}, 'quick_fix', 1)
+      RETURNING id
+    `);
+    const findingId = Number((insRows.rows[0] as { id: number }).id);
+
+    // Delete the finding — _recomputeZoneRepairLaborIfAuto should be a no-op
+    // because repairLaborManuallySet=true.
+    await storage.deleteWetCheckFinding(findingId, cid);
+
+    const row = await db.execute(
+      sql`SELECT repair_labor_hours, repair_labor_manually_set
+          FROM wet_check_zone_records WHERE id = ${zoneId}`,
+    );
+    const zr = row.rows[0] as Record<string, unknown>;
+    assert.equal(
+      String(zr.repair_labor_hours),
+      "9.00",
+      "manuallySet zone: repairLaborHours must stay at manually-set value after finding delete",
+    );
+    assert.equal(zr.repair_labor_manually_set, true);
   });
 });
