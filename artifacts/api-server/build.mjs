@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { rm, copyFile } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -120,6 +120,13 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+
+  // connect-pg-simple reads table.sql from __dirname at runtime.
+  // After esbuild bundling, __dirname resolves to dist/ (injected by the
+  // banner above), so copy the file there so it's found at the expected path.
+  const req = createRequire(import.meta.url);
+  const tableSqlSrc = req.resolve("connect-pg-simple/table.sql");
+  await copyFile(tableSqlSrc, path.join(distDir, "table.sql"));
 }
 
 buildAll().catch((err) => {
