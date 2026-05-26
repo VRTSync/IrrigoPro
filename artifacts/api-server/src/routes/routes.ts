@@ -4842,7 +4842,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get field technicians and irrigation managers (for work order assignments)
-  app.get("/api/users/field-techs", async (req, res) => {
+  app.get("/api/users/field-techs", requireAuthentication, async (req, res) => {
     try {
       const users = await storage.getUsers();
       const assignableUsers = users
@@ -4992,7 +4992,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Original delete endpoint (kept for compatibility but updated to use soft delete by default)
-  app.delete("/api/users/:id", async (req, res) => {
+  app.delete("/api/users/:id", requireAuthentication, async (req, res) => {
     try {
       const userId = parseInt(req.params.id);
       const user = await storage.getUser(userId);
@@ -5038,7 +5038,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/users/:id", async (req, res) => {
+  app.put("/api/users/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const userData = insertUserSchema.partial().parse(req.body);
@@ -5060,7 +5060,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/users/:id", async (req, res) => {
+  app.patch("/api/users/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const userData = insertUserSchema.partial().parse(req.body);
@@ -5082,7 +5082,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/users/:id", async (req, res) => {
+  app.delete("/api/users/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const success = await storage.deleteUser(id);
