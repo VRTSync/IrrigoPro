@@ -73,13 +73,27 @@ interface BillingEstimate extends Estimate {
   completedDate: Date | null;
 }
 
+interface BillingWetCheckBilling {
+  id: number;
+  billingNumber: string;
+  wetCheckId: number;
+  laborCost: number;
+  partsCost: number;
+  description: string;
+  billedDate: Date | null;
+  completedDate: Date | null;
+  [key: string]: unknown;
+}
+
 interface CustomerBillingData {
   customer: Customer;
   workOrders: BillingWorkOrder[];
   billingSheets: BillingBillingSheet[];
   estimates: BillingEstimate[];
+  wetCheckBillings: BillingWetCheckBilling[];
   unbilledWorkOrders: BillingWorkOrder[];
   unbilledBillingSheets: BillingBillingSheet[];
+  unbilledWetCheckBillings: BillingWetCheckBilling[];
   totalUnbilledAmount: number;
 }
 
@@ -118,6 +132,7 @@ export default function CustomerBilling() {
   const [showItemSelection, setShowItemSelection] = useState(false);
   const [selectedWorkOrderIds, setSelectedWorkOrderIds] = useState<Set<number>>(new Set());
   const [selectedBillingSheetIds, setSelectedBillingSheetIds] = useState<Set<number>>(new Set());
+  const [selectedWetCheckBillingIds, setSelectedWetCheckBillingIds] = useState<Set<number>>(new Set());
   
   // Filter states
   const [dateFilter, setDateFilter] = useState<string>("last_30_days"); // Default to last 30 days
@@ -250,20 +265,34 @@ export default function CustomerBilling() {
     });
   };
 
+  const toggleWetCheckBillingSelection = (wcbId: number) => {
+    setSelectedWetCheckBillingIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(wcbId)) {
+        newSet.delete(wcbId);
+      } else {
+        newSet.add(wcbId);
+      }
+      return newSet;
+    });
+  };
+
   const selectAllUnbilledItems = () => {
     if (!customerBillingData) return;
     
     setSelectedWorkOrderIds(new Set(customerBillingData.unbilledWorkOrders.map(wo => wo.id)));
     setSelectedBillingSheetIds(new Set(customerBillingData.unbilledBillingSheets.map(bs => bs.id)));
+    setSelectedWetCheckBillingIds(new Set((customerBillingData.unbilledWetCheckBillings ?? []).map(wcb => wcb.id)));
   };
 
   const clearAllSelections = () => {
     setSelectedWorkOrderIds(new Set());
     setSelectedBillingSheetIds(new Set());
+    setSelectedWetCheckBillingIds(new Set());
   };
 
   const hasAnySelection = () => {
-    return selectedWorkOrderIds.size > 0 || selectedBillingSheetIds.size > 0;
+    return selectedWorkOrderIds.size > 0 || selectedBillingSheetIds.size > 0 || selectedWetCheckBillingIds.size > 0;
   };
 
   const deleteWorkOrderMutation = useMutation({
@@ -306,15 +335,17 @@ export default function CustomerBilling() {
 
   // Preview Invoice Mutation
   const previewInvoiceMutation = useMutation({
-    mutationFn: async ({ customerId, workOrderIds, billingSheetIds }: { 
+    mutationFn: async ({ customerId, workOrderIds, billingSheetIds, wetCheckBillingIds }: { 
       customerId: number, 
       workOrderIds: number[], 
-      billingSheetIds: number[] 
+      billingSheetIds: number[],
+      wetCheckBillingIds: number[]
     }) => {
       return await apiRequest("/api/invoices/preview", "POST", {
         customerId,
         workOrderIds,
-        billingSheetIds
+        billingSheetIds,
+        wetCheckBillingIds
       });
     },
     onSuccess: (data) => {
@@ -333,10 +364,11 @@ export default function CustomerBilling() {
 
   // Create Invoice Mutation (after preview confirmation)
   const createInvoiceMutation = useMutation({
-    mutationFn: async ({ customerId, workOrderIds, billingSheetIds, periodStart, periodEnd }: { 
+    mutationFn: async ({ customerId, workOrderIds, billingSheetIds, selectedWetCheckBillingIds: wcbIds, periodStart, periodEnd }: { 
       customerId: number, 
       workOrderIds?: number[], 
       billingSheetIds?: number[],
+      selectedWetCheckBillingIds?: number[],
       periodStart?: string,
       periodEnd?: string
     }) => {
@@ -354,6 +386,7 @@ export default function CustomerBilling() {
         customerId,
         workOrderIds,
         billingSheetIds,
+        selectedWetCheckBillingIds: wcbIds,
         periodStart,
         periodEnd
       });
@@ -363,6 +396,8 @@ export default function CustomerBilling() {
       setPreviewInvoiceData(null);
       setSelectedWorkOrderIds(new Set());
       setSelectedBillingSheetIds(new Set());
+      setSelectedWetCheckBillingIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ['/api/wet-check-billings'] });
       const qbMessage = data.quickbooksSuccess
         ? ` and synced to QuickBooks (ID: ${data.quickbooksId})`
         : data.quickbooksError
@@ -1093,7 +1128,7 @@ export default function CustomerBilling() {
                   <Tabs defaultValue="unbilled" className="w-full">
                     <TabsList className="grid w-full grid-cols-5 text-xs h-10">
                       <TabsTrigger value="unbilled" className="text-xs">
-                        Unbilled ({customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length})
+                        Unbilled ({customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length + (customerBillingData.unbilledWetCheckBillings ?? []).length})
                       </TabsTrigger>
                       <TabsTrigger value="workorders" className="text-xs">
                         Work Orders ({customerBillingData.workOrders.length})
@@ -1111,7 +1146,7 @@ export default function CustomerBilling() {
 
                     <TabsContent value="unbilled" className="mt-3">
                       <div className="space-y-2">
-                        {/* Unbilled Work Orders */}
+                        {/* Unbilled Work Orders (mobile) */}
                         {customerBillingData.unbilledWorkOrders.length > 0 && (
                           <div>
                             <h4 className="font-medium text-sm text-gray-900 mb-2">Unbilled Work Orders</h4>
@@ -1155,7 +1190,31 @@ export default function CustomerBilling() {
                           </div>
                         )}
 
-                        {customerBillingData.unbilledWorkOrders.length === 0 && customerBillingData.unbilledBillingSheets.length === 0 && (
+                        {/* Unbilled Wet Check Billings (mobile) */}
+                        {(customerBillingData.unbilledWetCheckBillings ?? []).length > 0 && (
+                          <div>
+                            <h4 className="font-medium text-sm text-gray-900 mb-2">Unbilled Wet Check Billings</h4>
+                            {(customerBillingData.unbilledWetCheckBillings ?? []).map((wcb) => (
+                              <Card key={wcb.id} className="mb-2">
+                                <CardContent className="p-3">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className="text-sm font-medium">{wcb.billingNumber}</div>
+                                      <Badge className="bg-teal-100 text-teal-800 text-xs">[WC]</Badge>
+                                    </div>
+                                  </div>
+                                  <div className="text-xs text-gray-600 mb-2">{wcb.description || 'Wet Check Billing'}</div>
+                                  <div className="flex justify-between text-sm">
+                                    <span>Total:</span>
+                                    <span className="font-medium">{formatCurrency(wcb.laborCost + wcb.partsCost)}</span>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        )}
+
+                        {customerBillingData.unbilledWorkOrders.length === 0 && customerBillingData.unbilledBillingSheets.length === 0 && (customerBillingData.unbilledWetCheckBillings ?? []).length === 0 && (
                           <div className="text-center py-6 text-gray-500 text-sm">
                             No unbilled work found
                           </div>
@@ -1728,7 +1787,7 @@ export default function CustomerBilling() {
                   <CardContent className="pt-0 px-3 pb-3">
                     <div className="space-y-2">
                       <div className="text-xs text-orange-700">
-                        {customerBillingData.unbilledWorkOrders.length} WO, {customerBillingData.unbilledBillingSheets.length} BS ready
+                        {customerBillingData.unbilledWorkOrders.length} WO, {customerBillingData.unbilledBillingSheets.length} BS, {(customerBillingData.unbilledWetCheckBillings ?? []).length} WC ready
                       </div>
                       <Button
                         onClick={() => {
@@ -1768,7 +1827,7 @@ export default function CustomerBilling() {
                       <div className="flex justify-between text-xs text-orange-600 border-t pt-1 mt-1">
                         <span className="font-medium">Unbilled Items:</span>
                         <span className="font-medium">
-                          {customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length}
+                          {customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length + (customerBillingData.unbilledWetCheckBillings ?? []).length}
                         </span>
                       </div>
                     </div>
@@ -1781,7 +1840,7 @@ export default function CustomerBilling() {
               <Tabs defaultValue="unbilled" className="w-full">
                 <TabsList className="grid w-full grid-cols-5 h-8">
                   <TabsTrigger value="unbilled" className="text-xs px-2">
-                    Unbilled ({customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length})
+                    Unbilled ({customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length + (customerBillingData.unbilledWetCheckBillings ?? []).length})
                   </TabsTrigger>
                   <TabsTrigger value="work_orders" className="text-xs px-2">
                     Work Orders ({customerBillingData.workOrders.length})
@@ -1800,7 +1859,7 @@ export default function CustomerBilling() {
                 {/* Unbilled Items Tab */}
                 <TabsContent value="unbilled">
                   <div className="space-y-2">
-                    {customerBillingData.unbilledWorkOrders.length === 0 && customerBillingData.unbilledBillingSheets.length === 0 ? (
+                    {customerBillingData.unbilledWorkOrders.length === 0 && customerBillingData.unbilledBillingSheets.length === 0 && (customerBillingData.unbilledWetCheckBillings ?? []).length === 0 ? (
                       <Card>
                         <CardContent className="p-6 text-center text-gray-500">
                           <CheckCircle className="w-8 h-8 mx-auto mb-2 text-green-500" />
@@ -1937,6 +1996,39 @@ export default function CustomerBilling() {
                                   >
                                     View
                                   </Button>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+
+                        {/* Unbilled Wet Check Billings (desktop) */}
+                        {(customerBillingData.unbilledWetCheckBillings ?? []).map((wcb) => (
+                          <Card key={`wcb-${wcb.id}`} className="border-teal-200">
+                            <CardContent className="p-3">
+                              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <Receipt className="w-4 h-4 text-teal-400" />
+                                    <span className="font-medium text-sm">{wcb.billingNumber}</span>
+                                    <Badge className="bg-teal-100 text-teal-800 text-xs">[WC]</Badge>
+                                  </div>
+                                  <div className="text-xs text-gray-600 mb-2">
+                                    {wcb.description || 'Wet Check Billing'}
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                                    {wcb.completedDate && (
+                                      <div className="flex items-center gap-1">
+                                        <Calendar className="w-3 h-3" />
+                                        {formatDate(wcb.completedDate)}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <div className="text-sm font-medium text-teal-700">
+                                    {formatCurrency(wcb.laborCost + wcb.partsCost)}
+                                  </div>
                                 </div>
                               </div>
                             </CardContent>
@@ -2670,6 +2762,7 @@ export default function CustomerBilling() {
                     customerId: selectedCustomerId!,
                     workOrderIds: Array.from(selectedWorkOrderIds),
                     billingSheetIds: Array.from(selectedBillingSheetIds),
+                    selectedWetCheckBillingIds: Array.from(selectedWetCheckBillingIds),
                     periodStart: billingPeriodStart,
                     periodEnd: billingPeriodEnd
                   })}
@@ -2757,7 +2850,7 @@ export default function CustomerBilling() {
                   </Button>
                 </div>
                 <div className="text-sm text-gray-600">
-                  {selectedWorkOrderIds.size + selectedBillingSheetIds.size} item(s) selected
+                  {selectedWorkOrderIds.size + selectedBillingSheetIds.size + selectedWetCheckBillingIds.size} item(s) selected
                 </div>
               </div>
 
@@ -2876,13 +2969,66 @@ export default function CustomerBilling() {
                 </div>
               )}
 
+              {/* Wet Check Billings Section */}
+              {(customerBillingData.unbilledWetCheckBillings ?? []).length > 0 && (
+                <div>
+                  <h3 className="font-medium text-lg mb-3 flex items-center gap-2">
+                    <Receipt className="w-5 h-5 text-teal-600" />
+                    Unbilled Wet Check Billings ({(customerBillingData.unbilledWetCheckBillings ?? []).length})
+                  </h3>
+                  <div className="space-y-2">
+                    {(customerBillingData.unbilledWetCheckBillings ?? []).map((wcb) => (
+                      <Card key={wcb.id} className={`cursor-pointer transition-all ${
+                        selectedWetCheckBillingIds.has(wcb.id) ? 'ring-2 ring-teal-500 bg-teal-50' : ''
+                      }`}>
+                        <CardContent className="p-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <Checkbox
+                                checked={selectedWetCheckBillingIds.has(wcb.id)}
+                                onCheckedChange={() => toggleWetCheckBillingSelection(wcb.id)}
+                              />
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="font-medium">{wcb.billingNumber}</span>
+                                  <Badge className="bg-teal-100 text-teal-800 text-xs">[WC]</Badge>
+                                </div>
+                                <div className="text-sm text-gray-600 mb-2">
+                                  {wcb.description || 'Wet Check Billing'}
+                                </div>
+                                {wcb.completedDate && (
+                                  <div className="text-xs text-gray-500">
+                                    Completed: {formatDate(wcb.completedDate)}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-medium text-lg">
+                                {formatCurrency(wcb.laborCost + wcb.partsCost)}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                Labor: {formatCurrency(wcb.laborCost)}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                Parts: {formatCurrency(wcb.partsCost)}
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Summary & Actions */}
               <div className="border-t pt-4">
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <div className="font-medium">Selected Items Summary</div>
                     <div className="text-sm text-gray-600">
-                      {selectedWorkOrderIds.size} Work Orders, {selectedBillingSheetIds.size} Billing Sheets
+                      {selectedWorkOrderIds.size} Work Orders, {selectedBillingSheetIds.size} Billing Sheets, {selectedWetCheckBillingIds.size} Wet Check Billings
                     </div>
                   </div>
                   <div className="text-right">
@@ -2893,7 +3039,10 @@ export default function CustomerBilling() {
                           .reduce((sum, wo) => sum + wo.laborCost + wo.partsCost, 0) +
                         customerBillingData.unbilledBillingSheets
                           .filter(bs => selectedBillingSheetIds.has(bs.id))
-                          .reduce((sum, bs) => sum + bs.laborCost + bs.partsCost, 0)
+                          .reduce((sum, bs) => sum + bs.laborCost + bs.partsCost, 0) +
+                        (customerBillingData.unbilledWetCheckBillings ?? [])
+                          .filter(wcb => selectedWetCheckBillingIds.has(wcb.id))
+                          .reduce((sum, wcb) => sum + wcb.laborCost + wcb.partsCost, 0)
                       )}
                     </div>
                   </div>
@@ -2920,7 +3069,8 @@ export default function CustomerBilling() {
                       previewInvoiceMutation.mutate({
                         customerId: selectedCustomerId!,
                         workOrderIds: Array.from(selectedWorkOrderIds),
-                        billingSheetIds: Array.from(selectedBillingSheetIds)
+                        billingSheetIds: Array.from(selectedBillingSheetIds),
+                        wetCheckBillingIds: Array.from(selectedWetCheckBillingIds)
                       });
                     }}
                     disabled={previewInvoiceMutation.isPending || !hasAnySelection()}
@@ -2934,7 +3084,7 @@ export default function CustomerBilling() {
                     ) : (
                       <>
                         <Receipt className="w-4 h-4 mr-2" />
-                        Preview Invoice ({selectedWorkOrderIds.size + selectedBillingSheetIds.size} items)
+                        Preview Invoice ({selectedWorkOrderIds.size + selectedBillingSheetIds.size + selectedWetCheckBillingIds.size} items)
                       </>
                     )}
                   </Button>
