@@ -82,37 +82,13 @@ export default function WorkOrders() {
     });
   };
 
-  // Refresh current user from API in the background to keep data fresh
+  // Check for create parameter in URL
   useEffect(() => {
-    const refreshUserData = async () => {
-      const savedUser = safeGet("user");
-      if (!savedUser) return;
-      let currentUserData: any = null;
-      try { currentUserData = JSON.parse(savedUser); } catch { return; }
-
-      try {
-        const response = await fetch(`/api/users`);
-        if (response.ok) {
-          const users = await response.json();
-          const updatedUser = users.find((u: any) => u.username === currentUserData.username);
-          if (updatedUser) {
-            safeSet("user", JSON.stringify(updatedUser));
-            setCurrentUser(updatedUser);
-          }
-        }
-      } catch (error) {
-        console.error("Error refreshing user data:", error);
-      }
-    };
-    
-    // Check for create parameter in URL
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('create') === 'true') {
       setShowWorkOrderForm(true);
       window.history.replaceState({}, '', window.location.pathname);
     }
-
-    refreshUserData();
   }, []);
 
   // Deep-link support: ?openWorkOrder=<id> opens the work-order details modal
@@ -126,7 +102,7 @@ export default function WorkOrders() {
   });
 
   // For field techs, only show work orders assigned to them
-  const { data: workOrders = [], isLoading } = useArrayQuery<WorkOrder>({
+  const { data: workOrders = [], isLoading, isError } = useArrayQuery<WorkOrder>({
     queryKey: currentUser?.role === 'field_tech' 
       ? ["/api/work-orders", "technician", currentUser?.id]
       : ["/api/work-orders"],
@@ -652,7 +628,23 @@ export default function WorkOrders() {
         )}
 
         {/* Work Orders Grid */}
-        {filteredWorkOrders?.length === 0 ? (
+        {isError ? (
+          <Card className="bg-white border-0 shadow-sm">
+            <CardContent className="p-12 text-center">
+              <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Session expired</h3>
+              <p className="text-gray-600 mb-6">
+                Your session has expired or you are not logged in. Please log in again to view work orders.
+              </p>
+              <Button
+                onClick={() => { window.location.href = "/login"; }}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg"
+              >
+                Go to Login
+              </Button>
+            </CardContent>
+          </Card>
+        ) : filteredWorkOrders?.length === 0 ? (
           <Card className="bg-white border-0 shadow-sm">
             <CardContent className="p-12 text-center">
               <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
