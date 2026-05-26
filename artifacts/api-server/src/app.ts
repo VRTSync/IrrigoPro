@@ -1,5 +1,7 @@
 import express, { type Express } from "express";
 import cors from "cors";
+import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
 import pinoHttp from "pino-http";
 import { logger } from "./lib/logger";
 import { registerRoutes } from "./routes/routes";
@@ -7,8 +9,15 @@ import marketingRouter from "./routes/marketing";
 import fileUpload from "express-fileupload";
 import type { Server } from "http";
 
+const PgSession = connectPgSimple(session);
+
 export async function createApp(): Promise<{ app: Express; httpServer: Server }> {
   const app: Express = express();
+
+  // Trust the first hop from the reverse proxy (Replit's TLS-terminating
+  // proxy) so that req.secure is true and express-session issues
+  // Secure cookies in production without them being silently dropped.
+  app.set("trust proxy", 1);
 
   app.use(
     pinoHttp({
@@ -48,6 +57,33 @@ export async function createApp(): Promise<{ app: Express; httpServer: Server }>
     limits: { fileSize: 50 * 1024 * 1024 },
     useTempFiles: false,
   }));
+
+  // Server-side session middleware. Uses PostgreSQL as the session store
+  // so sessions survive process restarts. The session cookie is httpOnly
+  // (not readable by JS) and is marked Secure in production.
+  const sessionSecret = process.env.SESSION_SECRET;
+  if (!sessionSecret && process.env.NODE_ENV === "production") {
+    throw new Error("SESSION_SECRET must be set in production");
+  }
+  app.use(
+    session({
+      store: new PgSession({
+        conString: process.env.DATABASE_URL,
+        createTableIfMissing: true,
+        tableName: "web_sessions",
+      }),
+      secret: sessionSecret ?? "dev-insecure-secret-change-me",
+      resave: false,
+      saveUninitialized: false,
+      name: "irrigopro.sid",
+      cookie: {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      },
+    }),
+  );
 
   app.use("/api", marketingRouter);
   const httpServer = await registerRoutes(app);

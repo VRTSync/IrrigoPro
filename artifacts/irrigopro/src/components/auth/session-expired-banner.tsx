@@ -24,6 +24,7 @@ export function SessionExpiredBanner() {
   if (!unauth) return null;
   const handleSignIn = () => {
     try { safeRemove("user"); } catch { /* ignore */ }
+    void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
     clearUnauthenticatedRead();
     window.location.href = "/login";
   };
@@ -60,6 +61,7 @@ export function SessionExpiredEmptyState({
 }: { message?: string }) {
   const handleSignIn = () => {
     try { safeRemove("user"); } catch { /* ignore */ }
+    void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
     clearUnauthenticatedRead();
     window.location.href = "/login";
   };

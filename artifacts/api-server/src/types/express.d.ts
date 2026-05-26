@@ -9,6 +9,7 @@ declare global {
         role?: string;
         destroy(callback: (err?: Error) => void): void;
         save(callback?: (err?: Error) => void): void;
+        regenerate(callback: (err?: Error) => void): void;
       };
       authenticatedUserId?: number;
       authenticatedUserRole?: string;

@@ -64,11 +64,11 @@ import type {
 // Production must not trust unsigned `x-user-*` identity headers/query
 // params. Routes and middleware that historically read those values
 // directly must go through these helpers so the gating is applied
-// uniformly. The bearer-token / session paths in `requireAuthentication`
-// remain the only auth surfaces in production unless the operator opts
-// back in with `ALLOW_HEADER_AUTH=1`.
+// uniformly. In production the ONLY auth surfaces are bearer tokens and
+// server-side sessions. Header-auth is dev-only and cannot be re-enabled
+// via an env flag in production.
 function isHeaderAuthAllowed(): boolean {
-  return process.env.NODE_ENV !== 'production' || process.env.ALLOW_HEADER_AUTH === '1';
+  return process.env.NODE_ENV !== 'production';
 }
 function headerUserId(req: Request): string | undefined {
   if (!isHeaderAuthAllowed()) return undefined;
@@ -814,22 +814,20 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
       }
     }
 
-    // Legacy header-based auth path (unsigned x-user-* headers). Disabled
-    // in production unless ALLOW_HEADER_AUTH=1 is explicitly set as an
-    // escape hatch. In dev this remains the primary path used by the
-    // web client until session-based auth fully replaces it.
-    const headerAuthAllowed =
-      process.env.NODE_ENV !== 'production' || process.env.ALLOW_HEADER_AUTH === '1';
+    // Legacy header-based auth path (unsigned x-user-* headers). Dev-only.
+    // In production the only auth surfaces are bearer tokens and server-side
+    // sessions; this block is entirely bypassed so unsigned headers can never
+    // be used to forge an identity in production regardless of env flags.
+    const headerAuthAllowed = process.env.NODE_ENV !== 'production';
     if (!userId && headerAuthAllowed) {
       userId = headerUserId(req);
       userRole = headerUserRole(req);
       userCompanyId = headerUserCompanyId(req);
     }
 
-    // Query parameter fallback (for PDF viewing in new tabs). Same env
-    // gating as the header path — unsigned identity in the URL is exactly
-    // as dangerous as in a header, so disable it in production unless the
-    // ALLOW_HEADER_AUTH=1 escape hatch is set.
+    // Query parameter fallback (for PDF viewing in new tabs, dev only).
+    // Unsigned identity in the URL is exactly as dangerous as in a header;
+    // disabled in production unconditionally.
     if (!userId && headerAuthAllowed && req.query['x-user-id']) {
       userId = req.query['x-user-id'];
       userRole = req.query['x-user-role'];
@@ -5480,12 +5478,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
         details: { surface: "web" },
       });
 
-      // Return user without password
+      // Write the server-side session so subsequent requests authenticate
+      // via the httpOnly cookie rather than the legacy unsigned-header path.
       const { password: _, ...userWithoutPassword } = user;
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((err?: Error) => { if (err) reject(err); else resolve(); });
+      });
+      req.session.userId = user.id;
+      await new Promise<void>((resolve, reject) => {
+        req.session.save((err?: Error) => { if (err) reject(err); else resolve(); });
+      });
       res.json(userWithoutPassword);
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Login failed" });
+    }
+  });
+
+  // POST /api/auth/logout — destroys the server-side session and clears the
+  // session cookie. The frontend should also clear its localStorage user blob.
+  app.post("/api/auth/logout", async (req: any, res) => {
+    try {
+      await new Promise<void>((resolve) => {
+        req.session.destroy((err?: Error) => {
+          if (err) {
+            logger.warn({ err }, "Session destroy error on logout");
+          }
+          resolve();
+        });
+      });
+      res.clearCookie("irrigopro.sid");
+      res.json({ ok: true });
+    } catch (error) {
+      logger.error({ error }, "Logout error");
+      res.status(500).json({ message: "Logout failed" });
     }
   });
 

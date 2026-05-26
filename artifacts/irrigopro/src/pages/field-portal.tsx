@@ -132,6 +132,7 @@ export default function FieldPortal() {
 
   const handleLogout = () => {
     safeRemove("user");
+    void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
     window.location.href = "/login";
   };
 

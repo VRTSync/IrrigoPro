@@ -418,6 +418,7 @@ export default function Navigation() {
                   <DropdownMenuItem
                     onClick={() => {
                       safeRemove("user");
+                      void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
                       window.location.href = "/login";
                     }}
                     className="text-red-600"
@@ -504,6 +505,7 @@ export default function Navigation() {
                   <DropdownMenuItem
                     onClick={() => {
                       safeRemove("user");
+                      void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
                       window.location.href = "/login";
                     }}
                     className="text-red-600"

@@ -609,6 +609,7 @@ function SidebarUserMenu({
             <DropdownMenuItem
               onClick={() => {
                 safeRemove("user");
+                void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
                 window.location.href = "/login";
               }}
               className="text-red-600"

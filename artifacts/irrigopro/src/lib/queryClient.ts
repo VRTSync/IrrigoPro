@@ -79,35 +79,11 @@ export async function apiRequest(
   method: string = "GET",
   data?: unknown | undefined,
 ): Promise<any> {
-  // Use safe storage (works in Safari private browsing too)
-  const getCurrentUser = () => {
-    const savedUser = safeGet("user");
-    if (!savedUser) return null;
-    try {
-      return JSON.parse(savedUser);
-    } catch {
-      return null;
-    }
-  };
-  
-  const user = getCurrentUser();
   const headers: Record<string, string> = data ? { "Content-Type": "application/json" } : {};
-  
-  // Add user headers if user is logged in - server will validate against session
-  if (user?.role) {
-    headers["x-user-role"] = user.role;
-    headers["x-user-id"] = user.id?.toString() || "";
-    headers["x-user-name"] = user.name || "";
-    headers["x-user-company-id"] = user.companyId?.toString() || "";
-  }
 
   // Task #554 — propagate the server-issued impersonation token on
   // every authed request so `requireAuthentication` can swap the
-  // effective identity to the target user. Without this, a super
-  // admin who clicked "Open as company admin" and was hard-reloaded
-  // to "/" would still resolve as themselves on every non-App-Health
-  // page (especially under session-auth in production), defeating
-  // the whole point of server-bound impersonation.
+  // effective identity to the target user.
   const impToken = getImpersonationToken();
   if (impToken) headers["x-impersonation-token"] = impToken;
 
@@ -133,12 +109,12 @@ export async function apiRequest(
   }
 
   // Task #556 — flag the global "session lost" signal whenever a
-  // logged-in user's read 401s through the imperative apiRequest
-  // path too. Custom queryFns built on apiRequest (field-tech
-  // dashboard, notification-system, navigation profile fetch) bypass
-  // the default getQueryFn, so we have to mark the signal here as
-  // well, otherwise the re-login banner never fires for those
-  // screens.
+  // logged-in user's read 401s through the imperative apiRequest path.
+  const user = (() => {
+    const savedUser = safeGet("user");
+    if (!savedUser) return null;
+    try { return JSON.parse(savedUser); } catch { return null; }
+  })();
   if (res.status === 401 && user?.id != null) {
     markUnauthenticatedRead();
   }
@@ -153,27 +129,7 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    // Use safe storage (works in Safari private browsing too)
-    const getCurrentUser = () => {
-      const savedUser = safeGet("user");
-      if (!savedUser) return null;
-      try {
-        return JSON.parse(savedUser);
-      } catch {
-        return null;
-      }
-    };
-    
-    const user = getCurrentUser();
     const headers: Record<string, string> = {};
-    
-    // Add user headers if user is logged in - server will validate against session
-    if (user?.role) {
-      headers["x-user-role"] = user.role;
-      headers["x-user-id"] = user.id?.toString() || "";
-      headers["x-user-name"] = user.name || "";
-      headers["x-user-company-id"] = user.companyId?.toString() || "";
-    }
 
     // Task #554 — same impersonation-token propagation as
     // `apiRequest` so default-loaded React Query reads (work orders
@@ -192,6 +148,8 @@ export const getQueryFn: <T>(options: {
       // logged-in tech's default-loaded read 401s. We only mark the
       // signal when there's actually a saved user (otherwise the
       // login screen itself can briefly probe /api/auth and trip it).
+      const savedUser = safeGet("user");
+      const user = savedUser ? (() => { try { return JSON.parse(savedUser); } catch { return null; } })() : null;
       if (user?.id != null) {
         markUnauthenticatedRead();
       }
@@ -203,51 +161,35 @@ export const getQueryFn: <T>(options: {
   };
 
 // Build an `<img src>`-friendly URL for the authenticated photo proxy.
-// Browsers cannot attach custom headers (`x-user-id`, etc.) to `<img>`
-// requests — they only send cookies — and this app authenticates via
-// headers, not session cookies. The server's `requireAuthentication`
-// middleware already accepts the same identifiers as query parameters
-// (the same fallback used for opening PDFs in new tabs), so we mirror
-// that here for thumbnails and gallery previews.
+// With real session-cookie auth, the browser sends the session cookie
+// automatically for same-origin <img> requests — no auth query params
+// needed. If an impersonation token is active we fall back to the
+// query-param channel (browsers can't attach custom headers to <img>).
 export function authedPhotoSrc(
   photoId: string,
   variant?: "thumb" | "medium" | "original",
 ): string {
-  const raw = safeGet("user");
-  let user: { id?: number | string; role?: string; companyId?: number | string; name?: string } | null = null;
-  if (raw) {
-    try { user = JSON.parse(raw); } catch { user = null; }
-  }
   const params = new URLSearchParams();
-  if (user?.id != null) params.set("x-user-id", String(user.id));
-  if (user?.role) params.set("x-user-role", user.role);
-  if (user?.companyId != null) params.set("x-user-company-id", String(user.companyId));
   if (variant) params.set("variant", variant);
+
+  // During impersonation the session belongs to the super-admin, not
+  // the target user. Pass the signed token as a query param so the
+  // server can swap identity for this resource request too.
+  const impToken = getImpersonationToken();
+  if (impToken) params.set("x-impersonation-token", impToken);
+
   const qs = params.toString();
   return `/api/photos/${encodeURIComponent(photoId)}${qs ? `?${qs}` : ""}`;
 }
 
 // Task #605 — build an authenticated URL for opening a PDF in a new tab
-// or as a download. Browsers don't attach `x-user-*` headers to top-level
-// navigations / anchor clicks, so we mirror them as query params (the
-// server's `requireAuthentication` middleware accepts the same identifiers
-// from the URL when `ALLOW_HEADER_AUTH` is set, same fallback as
-// `authedPhotoSrc` above).
+// or as a download. With real session-cookie auth the browser sends the
+// session cookie on direct navigations, so no auth query params are
+// needed. Extra params (e.g. download flag) are still forwarded.
 export function authedPdfUrl(path: string, extraParams?: Record<string, string>): string {
-  const raw = safeGet("user");
-  let user: { id?: number | string; role?: string; companyId?: number | string } | null = null;
-  if (raw) {
-    try { user = JSON.parse(raw); } catch { user = null; }
-  }
-  const params = new URLSearchParams();
-  if (user?.id != null) params.set("x-user-id", String(user.id));
-  if (user?.role) params.set("x-user-role", user.role);
-  if (user?.companyId != null) params.set("x-user-company-id", String(user.companyId));
-  if (extraParams) {
-    for (const [k, v] of Object.entries(extraParams)) params.set(k, v);
-  }
-  const qs = params.toString();
-  return `${path}${qs ? `?${qs}` : ""}`;
+  if (!extraParams || Object.keys(extraParams).length === 0) return path;
+  const params = new URLSearchParams(extraParams);
+  return `${path}?${params.toString()}`;
 }
 
 // Task #540 — null-safe array helper for list payloads.
