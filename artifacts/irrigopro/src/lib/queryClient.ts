@@ -6,7 +6,7 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
-import { safeGet } from "@/utils/safeStorage";
+import { safeGet, safeRemove } from "@/utils/safeStorage";
 import { getImpersonationToken } from "@/lib/impersonation";
 
 // Task #556 — global "read-auth lost" signal.
@@ -36,6 +36,16 @@ export function markUnauthenticatedRead(): void {
   if (_unauthenticatedAt > 0) return; // debounce: already flagged
   _unauthenticatedAt = Date.now();
   _emitUnauth();
+  // Clear the stale localStorage session and hard-redirect to login.
+  // This fires before the React tree re-renders, so it works even when
+  // the shell component that would normally show the re-login banner
+  // never mounts (e.g. all queries 401 simultaneously on first paint).
+  try {
+    if (!window.location.pathname.startsWith("/login")) {
+      safeRemove("user");
+      window.location.replace("/login");
+    }
+  } catch { /* non-browser context */ }
 }
 
 export function clearUnauthenticatedRead(): void {
