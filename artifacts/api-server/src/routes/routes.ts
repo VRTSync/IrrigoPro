@@ -25,6 +25,7 @@ import { ObjectStorageService } from "../objectStorage";
 import { InvoicePdfService } from "../invoice-pdf-service";
 import { buildWorkDescriptionPrompt, buildExpandDescriptionPrompt, TEMPLATE_VERSION, CRITICAL_FIELDS, type WorkDescriptionInputs } from "../ai-prompt-templates";
 import { makeRequireSameCompanyAsWorkOrder } from "./work-order-tenant-guard";
+import { makeRequireSameCompanyAsBillingSheet } from "./billing-sheet-tenant-guard";
 /**
  * Phase 5b — QB Harden #5: thrown when the detected credential environment
  * does not match the server environment and STRICT_QB_ENV_CHECK is set.
@@ -569,6 +570,12 @@ const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
 // so behavioral tests can import and exercise the real implementation without
 // pulling in the full registerRoutes monolith. See work-order-tenant-guard.ts.
 const requireSameCompanyAsWorkOrder = makeRequireSameCompanyAsWorkOrder(storage);
+
+// Tenant guard for single-ID billing-sheet routes — same pattern as the
+// work-order guard above. Until Slice 4 adds billing_sheets.companyId, the
+// row's tenant is derived via customerId → customers.companyId.
+// See billing-sheet-tenant-guard.ts.
+const requireSameCompanyAsBillingSheet = makeRequireSameCompanyAsBillingSheet(storage);
 
 // More granular middleware for billing sheet updates that allows field techs to submit for approval
 const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) => {
@@ -10039,7 +10046,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // can view the report. Captures the acting user + timestamp on the row.
   // Tenant-scoped: non-super-admin users may only mark sheets whose
   // technician belongs to their own company.
-  app.post("/api/billing-sheets/:id/no-photos-needed", requireAuthentication, async (req: any, res) => {
+  app.post("/api/billing-sheets/:id/no-photos-needed", requireAuthentication, requireSameCompanyAsBillingSheet, async (req: any, res) => {
     try {
       const role = req.authenticatedUserRole;
       if (role !== 'company_admin' && role !== 'super_admin' && role !== 'irrigation_manager' && role !== 'billing_manager') {
@@ -10099,7 +10106,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // Blocks on billed / invoiced sheets (returns 409). Validates the new
   // technician belongs to the same company as the billing sheet's customer.
   // Emits an audit log row with before/after technician info.
-  app.patch("/api/billing-sheets/:id/reassign-technician", requireAuthentication, async (req: any, res) => {
+  app.patch("/api/billing-sheets/:id/reassign-technician", requireAuthentication, requireSameCompanyAsBillingSheet, async (req: any, res) => {
     try {
       const role = req.authenticatedUserRole;
       if (role !== 'company_admin' && role !== 'super_admin') {
@@ -10284,7 +10291,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.get("/api/billing-sheets/:id", async (req, res) => {
+  app.get("/api/billing-sheets/:id", requireAuthentication, requireSameCompanyAsBillingSheet, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const billingSheet = await storage.getBillingSheetById(id);
@@ -10300,10 +10307,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.post("/api/billing-sheets", async (req, res) => {
+  app.post("/api/billing-sheets", requireAuthentication, async (req, res) => {
     try {
       console.log('Received billing sheet data:', req.body);
       const billingSheetData = req.body;
+
+      // Stamp the caller's companyId onto the new row for any non-super-admin.
+      // Silently ignored until Slice 4 adds the billing_sheets.companyId column.
+      if (req.authenticatedUserRole !== 'super_admin') {
+        billingSheetData.companyId = req.authenticatedUserCompanyId;
+      }
 
       // Branch enforcement: if the customer has branches configured, branchName is required
       if (billingSheetData.customerId) {
@@ -10604,7 +10617,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.patch("/api/billing-sheets/:id", requireAuthentication, requireBillingSheetUpdateAccess, async (req, res) => {
+  app.patch("/api/billing-sheets/:id", requireAuthentication, requireSameCompanyAsBillingSheet, requireBillingSheetUpdateAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
 
@@ -11012,7 +11025,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.delete("/api/billing-sheets/:id", requireAuthentication, requireWorkOrderBillingAccess, async (req, res) => {
+  app.delete("/api/billing-sheets/:id", requireAuthentication, requireSameCompanyAsBillingSheet, requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const ok = await storage.deleteBillingSheet(id);
@@ -12268,7 +12281,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Get billing sheet items
-  app.get("/api/billing-sheets/:id/items", async (req, res) => {
+  app.get("/api/billing-sheets/:id/items", requireAuthentication, requireSameCompanyAsBillingSheet, async (req, res) => {
     try {
       const billingSheetId = parseInt(req.params.id);
       
@@ -12290,7 +12303,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // 404 — billing sheet not found
   // 422 — billing sheet exists but has no wet-check findings (not a WC sheet)
   // 200 — the zone-grouped view payload
-  app.get("/api/billing-sheets/:id/wet-check-view", requireAuthentication, async (req, res) => {
+  app.get("/api/billing-sheets/:id/wet-check-view", requireAuthentication, requireSameCompanyAsBillingSheet, async (req, res) => {
     try {
       const billingSheetId = parseInt(req.params.id);
       if (isNaN(billingSheetId) || billingSheetId <= 0) {
@@ -12659,6 +12672,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get(
     "/api/billing-sheets/:id/pricing-audit-events",
     requireAuthentication,
+    requireSameCompanyAsBillingSheet,
     async (req: any, res) => pricingHistoryHandler(req, res, 'billing_sheet'),
   );
   app.get(
@@ -12749,6 +12763,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get(
     "/api/billing-sheets/:id/photo-late-additions",
     requireAuthentication,
+    requireSameCompanyAsBillingSheet,
     async (req: any, res) => photoLateAdditionsHandler(req, res, 'billing_sheet'),
   );
   app.get(

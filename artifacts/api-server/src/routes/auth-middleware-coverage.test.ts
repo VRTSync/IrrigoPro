@@ -444,6 +444,124 @@ describe("Task #927 — three GET routes that were missing requireAuthentication
   }
 });
 
+// ─── Part 6: Single-ID billing-sheet route tenant guard (Task #935) ──────────
+
+// Explicit routes that carry "/api/billing-sheets/:" but are intentionally
+// excluded from the tenant-guard requirement:
+//   - none: every single-ID billing-sheet route was wrapped in Slice 2.
+//
+// The collection list routes (/bulk, /missing-photos, /missing-photos/notify,
+// POST /api/billing-sheets create) don't contain a colon after
+// /api/billing-sheets/ and are not matched by the scan pattern below.
+// Admin audit routes live under /api/admin/billing-sheets/ and are also out
+// of pattern range. No exceptions are needed.
+const BILLING_SHEET_TENANT_GUARD_EXCEPTIONS = new Set<string>([
+  // (empty — all single-ID billing-sheet routes carry both guards after Slice 2)
+]);
+
+describe("Task #935 — all single-ID /api/billing-sheets/:id... routes carry both requireAuthentication and requireSameCompanyAsBillingSheet", () => {
+  it("every billing-sheet route with a bare :param segment has both guards", () => {
+    const METHOD_RE = /\bapp\.(get|post|patch|delete)\(/g;
+    const violations: string[] = [];
+
+    let match: RegExpExecArray | null;
+    while ((match = METHOD_RE.exec(src)) !== null) {
+      const pos = match.index;
+      const verb = match[1];
+
+      // Extract from the call start up to the async handler.
+      // 1200 chars covers multi-line registrations like photo-late-additions.
+      const chunk = src.slice(pos, pos + 1200);
+      const asyncIdx = chunk.indexOf(" async ");
+      const slice = asyncIdx >= 0 ? chunk.slice(0, asyncIdx) : chunk;
+
+      // Only care about routes that contain a single-ID billing-sheet path
+      // (the colon after /billing-sheets/ distinguishes /:id from fixed segments).
+      if (!slice.includes('"/api/billing-sheets/:')) continue;
+
+      // Extract the canonical route path for error messages.
+      const routePathMatch = slice.match(/"(\/api\/billing-sheets\/[^"]+)"/);
+      const routePath = routePathMatch ? routePathMatch[1] : "(unknown path)";
+
+      // Skip the explicitly out-of-scope exceptions.
+      if (BILLING_SHEET_TENANT_GUARD_EXCEPTIONS.has(routePath)) continue;
+
+      if (!slice.includes("requireAuthentication")) {
+        violations.push(
+          `app.${verb}("${routePath}"): missing requireAuthentication`,
+        );
+        continue;
+      }
+
+      if (!slice.includes("requireSameCompanyAsBillingSheet")) {
+        violations.push(
+          `app.${verb}("${routePath}"): missing requireSameCompanyAsBillingSheet`,
+        );
+      }
+    }
+
+    assert.deepEqual(
+      violations,
+      [],
+      `Found single-ID billing-sheet routes missing required tenant guards:\n\n` +
+        violations.map((v) => `  • ${v}`).join("\n") +
+        "\n\nFix: add [requireAuthentication, requireSameCompanyAsBillingSheet] to the route.",
+    );
+  });
+
+  it("requireSameCompanyAsBillingSheet appears AFTER requireAuthentication and BEFORE any role guard on all matched routes", () => {
+    const METHOD_RE = /\bapp\.(get|post|patch|delete)\(/g;
+    const violations: string[] = [];
+
+    let match: RegExpExecArray | null;
+    while ((match = METHOD_RE.exec(src)) !== null) {
+      const pos = match.index;
+      const verb = match[1];
+
+      const chunk = src.slice(pos, pos + 1200);
+      const asyncIdx = chunk.indexOf(" async ");
+      const slice = asyncIdx >= 0 ? chunk.slice(0, asyncIdx) : chunk;
+
+      if (!slice.includes('"/api/billing-sheets/:')) continue;
+      if (!slice.includes("requireSameCompanyAsBillingSheet")) continue;
+
+      const routePathMatch = slice.match(/"(\/api\/billing-sheets\/[^"]+)"/);
+      const routePath = routePathMatch ? routePathMatch[1] : "(unknown path)";
+      if (BILLING_SHEET_TENANT_GUARD_EXCEPTIONS.has(routePath)) continue;
+
+      const authIdx = slice.indexOf("requireAuthentication");
+      const tenantIdx = slice.indexOf("requireSameCompanyAsBillingSheet");
+
+      // Guard must come after authentication.
+      if (authIdx < 0 || tenantIdx <= authIdx) {
+        violations.push(
+          `app.${verb}("${routePath}"): requireSameCompanyAsBillingSheet (pos ${tenantIdx}) ` +
+            `is not after requireAuthentication (pos ${authIdx})`,
+        );
+        continue;
+      }
+
+      // Guard must come before any role-level guard.
+      const firstRoleGuardIdx = firstIndexOf(slice, ...ROLE_GUARDS);
+      if (firstRoleGuardIdx !== Infinity && tenantIdx > firstRoleGuardIdx) {
+        const presentGuards = ROLE_GUARDS.filter((g) => slice.indexOf(g) >= 0);
+        violations.push(
+          `app.${verb}("${routePath}"): requireSameCompanyAsBillingSheet (pos ${tenantIdx}) ` +
+            `appears AFTER role guard(s) [${presentGuards.join(", ")}] (first at pos ${firstRoleGuardIdx})`,
+        );
+      }
+    }
+
+    assert.deepEqual(
+      violations,
+      [],
+      `Found billing-sheet routes with incorrect tenant guard ordering:\n\n` +
+        violations.map((v) => `  • ${v}`).join("\n") +
+        "\n\nExpected chain: [requireAuthentication, requireSameCompanyAsBillingSheet, ...role_guard..., handler]",
+    );
+  });
+});
+
 // ─── Part 5: Task #931 — pin-patch precise message appears exactly once ───────
 
 describe("Task #931 — pin-patch precise 403 message appears exactly once in routes.ts", () => {
