@@ -13360,7 +13360,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   const httpServer = createServer(app);
   // Notification routes
-  app.get("/api/notifications/:userId", requireNotificationAccess, async (req, res) => {
+  app.get("/api/notifications/:userId", requireAuthentication, requireNotificationAccess, async (req, res) => {
     try {
       const userId = req.authenticatedUserId!;
       
@@ -13377,7 +13377,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.get("/api/notifications/:userId/count", requireNotificationAccess, async (req, res) => {
+  app.get("/api/notifications/:userId/count", requireAuthentication, requireNotificationAccess, async (req, res) => {
     try {
       const userId = req.authenticatedUserId!;
       
@@ -13807,7 +13807,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // ============================================
   
   // Get all API keys for the company (admin only)
-  app.get("/api/company/:companyId/api-keys", requireCompanyAdminAccess, async (req, res) => {
+  app.get("/api/company/:companyId/api-keys", requireAuthentication, requireCompanyAdminAccess, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
       const apiKeys = await storage.getApiKeys(companyId);

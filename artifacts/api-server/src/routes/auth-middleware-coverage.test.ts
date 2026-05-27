@@ -13,7 +13,7 @@
 //   • No credentials  →  401  (requireAuthentication fires first)
 //   • Wrong role       →  403  (role guard fires after authentication)
 //
-// This file has two halves:
+// This file has three sections:
 //
 //   1.  "Ten guarded routes" — a static-source check for each of the
 //       10 specific routes that Task #921 patched.  For every route we
@@ -27,6 +27,12 @@
 //       guard it asserts `requireAuthentication` appears and precedes it.
 //       This catches the bug class prospectively whenever a new route is
 //       added.
+//
+//   3.  "GET route coverage" — same broad scan for app.get calls.  GET
+//       routes were excluded from Part 2 because they are more varied
+//       (public catalogue endpoints, OAuth callbacks, health checks, etc.)
+//       but GET routes that carry sensitive data behind a role guard need
+//       the same 401-before-403 guarantee.
 //
 // Why static analysis?  `registerRoutes` is a 16 000-line monolith with
 // startup-time setInterval timers, IIFE side-effects, and a PostgreSQL
@@ -215,4 +221,108 @@ describe("Task #922 — all app.patch/post/delete calls with role guards have re
         "\n\nFix: add requireAuthentication as the first middleware argument (before the role guard).",
     );
   });
+});
+
+// ─── Part 3: Broad coverage over all app.get ──────────────────────────────────
+
+describe("Task #927 — all app.get calls with role guards have requireAuthentication first (broad scan)", () => {
+  it("every auth-dependent role guard on a GET route is preceded by requireAuthentication", () => {
+    // Find every `app.get(` position in the source.
+    const METHOD_RE = /\bapp\.get\(/g;
+    const violations: string[] = [];
+
+    let match: RegExpExecArray | null;
+    while ((match = METHOD_RE.exec(src)) !== null) {
+      const pos = match.index;
+
+      // Extract from the call start up to the async handler (max 800 chars).
+      const window = src.slice(pos, pos + 800);
+      const asyncIdx = window.indexOf(" async ");
+      const slice = asyncIdx >= 0 ? window.slice(0, asyncIdx) : window;
+
+      // Find the first role guard present in this call's arg list.
+      const firstGuardIdx = firstIndexOf(slice, ...ROLE_GUARDS);
+      if (firstGuardIdx === Infinity) continue; // no role guard → nothing to check
+
+      // Identify which guard(s) appear so we can produce a useful message.
+      const presentGuards = ROLE_GUARDS.filter((g) => slice.indexOf(g) >= 0);
+
+      // requireAuthentication must also be present and precede the first guard.
+      const authIdx = slice.indexOf("requireAuthentication");
+
+      if (authIdx < 0) {
+        const pathMatch = slice.match(/"\/api\/[^"]+"/);
+        const routePath = pathMatch ? pathMatch[0] : "(unknown path)";
+        violations.push(
+          `app.get(${routePath}): has role guard(s) [${presentGuards.join(", ")}] ` +
+            `but requireAuthentication is ABSENT — unauthenticated requests will get 403 not 401.`,
+        );
+      } else if (authIdx > firstGuardIdx) {
+        const pathMatch = slice.match(/"\/api\/[^"]+"/);
+        const routePath = pathMatch ? pathMatch[0] : "(unknown path)";
+        violations.push(
+          `app.get(${routePath}): requireAuthentication (pos ${authIdx}) comes AFTER ` +
+            `role guard(s) [${presentGuards.join(", ")}] (first guard at pos ${firstGuardIdx}) — ` +
+            `must be reordered so authentication runs first.`,
+        );
+      }
+    }
+
+    assert.deepEqual(
+      violations,
+      [],
+      `Found ${violations.length} GET route(s) where a role guard precedes or replaces requireAuthentication:\n\n` +
+        violations.map((v) => `  • ${v}`).join("\n") +
+        "\n\nFix: add requireAuthentication as the first middleware argument (before the role guard).",
+    );
+  });
+});
+
+// ─── Part 4: Specific GET routes from Task #927 ───────────────────────────────
+
+describe("Task #927 — three GET routes that were missing requireAuthentication now have it before their role guard", () => {
+  const NEWLY_GUARDED: Array<[string, string]> = [
+    ["GET /api/notifications/:userId", '"/api/notifications/:userId"'],
+    [
+      "GET /api/notifications/:userId/count",
+      '"/api/notifications/:userId/count"',
+    ],
+    [
+      "GET /api/company/:companyId/api-keys",
+      '"/api/company/:companyId/api-keys"',
+    ],
+  ];
+
+  for (const [label, path] of NEWLY_GUARDED) {
+    it(`${label} — requireAuthentication present and before every role guard`, () => {
+      const marker = `app.get(${path}`;
+      const slice = extractMiddlewareSlice(marker);
+
+      assert.ok(
+        slice !== null,
+        `Route registration not found: app.get(${path} — was it removed or renamed?`,
+      );
+
+      assert.ok(
+        slice.includes("requireAuthentication"),
+        `app.get(${path}) is missing requireAuthentication middleware.\n` +
+          `Without it unauthenticated requests receive 403 (from the role guard) ` +
+          `instead of the correct 401.`,
+      );
+
+      const authIdx = slice.indexOf("requireAuthentication");
+
+      for (const guard of ROLE_GUARDS) {
+        const guardIdx = slice.indexOf(guard);
+        if (guardIdx < 0) continue;
+
+        assert.ok(
+          authIdx < guardIdx,
+          `app.get(${path}): '${guard}' appears at position ${guardIdx} ` +
+            `but requireAuthentication is at ${authIdx} — role guard must come AFTER authentication.\n` +
+            `Relevant source slice:\n${slice}`,
+        );
+      }
+    });
+  }
 });
