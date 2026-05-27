@@ -3,7 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { MapPin, RotateCcw, Navigation, Loader2, AlertCircle } from "lucide-react";
+import { MapPin, RotateCcw, Navigation, Loader2, AlertCircle, RefreshCw } from "lucide-react";
 import { addSatelliteHybrid } from "@/lib/leaflet-base-layers";
 import { drawPropertyBoundary, geoJsonBounds } from "@/lib/boundary-style";
 import type { PropertyBoundary } from "@/lib/property-boundary";
@@ -89,10 +89,17 @@ export function LocationPicker({
   const watchIdRef = useRef<number | null>(null);
   const liveLocationRef = useRef<{ lat: number; lng: number } | null>(null);
   const prevAddressRef = useRef<string | undefined>(undefined);
+  // Stores geocode result from a "Try Again" retry so the init effect can
+  // use it directly without issuing a second Nominatim call.
+  const pendingGeocodedCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
+
   const [isLoading, setIsLoading] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [geocodeFailed, setGeocodeFailed] = useState(false);
+  // True when geocoding failed with no fallback anchor (no pin, no boundary).
+  // In this state the Leaflet map is NOT mounted to prevent accidental Kansas pins.
+  const [showMapless, setShowMapless] = useState(false);
 
   const trimmedAddress = (defaultAddress ?? "").trim();
   const hasAddress = trimmedAddress.length > 0;
@@ -119,10 +126,12 @@ export function LocationPicker({
     }
   }, []);
 
-  // Initialize the map. Skipped while we're in the empty-address state
-  // (re-runs when an address arrives so the map mounts at that point).
+  // Initialize the map. Skipped while we're in the empty-address state or
+  // mapless (geocode-failed with no fallback anchor) state.
+  // Re-runs when showEmptyState or showMapless flips, so the map mounts as
+  // soon as both become false (e.g. after a successful retry geocode or GPS fix).
   useEffect(() => {
-    if (showEmptyState) return;
+    if (showEmptyState || showMapless) return;
     if (!mapRef.current || mapInstanceRef.current) return;
 
     if (!document.getElementById('pulsing-dot-styles')) {
@@ -144,6 +153,8 @@ export function LocationPicker({
       let fitToBoundary = false;
 
       if (selectedLocation) {
+        // Use the existing pin even if the address couldn't be geocoded —
+        // the pin is the reliable anchor, not the address string.
         initialCenter = [selectedLocation.lat, selectedLocation.lng];
         initialZoom = 20;
         if (hasAddress) usedAddress = true;
@@ -153,13 +164,23 @@ export function LocationPicker({
         fitToBoundary = true;
         if (hasAddress) usedAddress = true;
       } else if (hasAddress) {
-        const coords = await geocodeAddress(trimmedAddress);
+        // Use coords from a prior "Try Again" retry if available so we don't
+        // issue a second Nominatim call for the same address.
+        const cached = pendingGeocodedCoordsRef.current;
+        pendingGeocodedCoordsRef.current = null;
+        const coords = cached ?? await geocodeAddress(trimmedAddress);
         if (coords) {
           initialCenter = [coords.lat, coords.lng];
           initialZoom = 18;
           usedAddress = true;
         } else {
+          // Geocoding failed and there is no pin or boundary to fall back to.
+          // Show the mapless empty state instead of initialising Leaflet at the
+          // US geographic centre (Kansas), which would silently accept clicks.
           setGeocodeFailed(true);
+          setShowMapless(true);
+          setIsLoading(false);
+          return;
         }
       }
 
@@ -233,7 +254,19 @@ export function LocationPicker({
       liveLocationMarkerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showEmptyState]);
+  }, [showEmptyState, showMapless]);
+
+  // When the component is in mapless state (geocode failed, no anchor at render
+  // time) and a valid anchor later arrives asynchronously — e.g. customerBoundary
+  // resolves from useCustomerBoundary, or the parent sets selectedLocation via GPS
+  // — clear the mapless latch so the init effect can mount the map on that anchor.
+  useEffect(() => {
+    if (!showMapless) return;
+    if (selectedLocation || customerBoundary) {
+      setShowMapless(false);
+      setGeocodeFailed(false);
+    }
+  }, [showMapless, selectedLocation, customerBoundary]);
 
   // Swap boundary overlay when it changes (e.g. switching customer).
   useEffect(() => {
@@ -300,6 +333,23 @@ export function LocationPicker({
     setIsLoading(false);
   };
 
+  // Retry geocoding after the tech corrects the address in the step above.
+  // If it succeeds, store the result and let the init effect mount the map.
+  const handleTryAgain = async () => {
+    if (!hasAddress) return;
+    setIsLoading(true);
+    setGeocodeFailed(false);
+    const coords = await geocodeAddress(trimmedAddress);
+    if (coords) {
+      pendingGeocodedCoordsRef.current = coords;
+      setShowMapless(false);
+      // isLoading stays true — the init effect will clear it once the map is ready.
+    } else {
+      setGeocodeFailed(true);
+      setIsLoading(false);
+    }
+  };
+
   const handleUseMyLocation = async () => {
     setIsLocating(true);
     setLocationError(null);
@@ -324,12 +374,21 @@ export function LocationPicker({
         }
         const address = await reverseGeocode(lat, lng);
         onLocationSelect({ lat, lng, address });
+        // If we were in mapless state, calling onLocationSelect sets selectedLocation
+        // on the parent. Dismiss mapless so the map can init centred on the pin.
+        if (showMapless) {
+          setShowMapless(false);
+          setGeocodeFailed(false);
+        }
         setIsLocating(false);
       },
       (error) => {
         switch (error.code) {
           case error.PERMISSION_DENIED:
-            setLocationError("Location permission was denied. Please enable it in your browser settings.");
+            setLocationError(
+              "Location permission was denied. Please enable it in your browser settings. " +
+              "You can still click on the map to set your location manually."
+            );
             break;
           case error.POSITION_UNAVAILABLE:
             setLocationError("Your location could not be determined.");
@@ -370,7 +429,7 @@ export function LocationPicker({
               )}
               {isLocating ? "Locating..." : "Use My Location"}
             </Button>
-            {(hasAddress || hasBoundary) && (
+            {(hasAddress || hasBoundary) && !showMapless && (
               <Button
                 type="button"
                 variant="outline"
@@ -397,7 +456,10 @@ export function LocationPicker({
             </div>
           )}
 
-          {geocodeFailed && !showEmptyState && (
+          {/* Only show the amber geocode-failed banner when the map IS showing and
+              there is no existing pin — if a pin is already valid, the warning is
+              irrelevant and confusing. */}
+          {geocodeFailed && !showEmptyState && !showMapless && !selectedLocation && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
               <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
               <p className="text-sm text-amber-800">
@@ -424,6 +486,32 @@ export function LocationPicker({
                   Add an address — or upload a property boundary on the customer profile —
                   to enable map centering.
                 </p>
+              </div>
+            </div>
+          ) : showMapless ? (
+            /* Geocoding failed with no pin or boundary anchor — do NOT mount Leaflet
+               here because a click on a Kansas-centred map would persist a wrong pin. */
+            <div className="w-full rounded-lg border border-dashed border-amber-300 bg-amber-50 flex items-center justify-center px-4 py-10">
+              <div className="text-center max-w-xs">
+                <MapPin className="w-7 h-7 text-amber-500 mx-auto mb-2" />
+                <p className="text-sm font-medium text-gray-800">Couldn't locate this address on the map</p>
+                <p className="text-xs text-gray-600 mt-1 mb-4">
+                  Correct the address above or use the button below to set your GPS location
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTryAgain}
+                  disabled={isLoading || !hasAddress}
+                >
+                  {isLoading ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                  )}
+                  {isLoading ? "Searching…" : "Try Again"}
+                </Button>
               </div>
             </div>
           ) : (
