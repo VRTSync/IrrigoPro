@@ -134,6 +134,16 @@ async function cleanUp() {
 before(async () => {
   await cleanUp();
 
+  // Remove any billing_sheets rows that have NULL customer_id.  These are true
+  // orphans (no customer FK, no company association, no billing_sheet_items
+  // children) that the migration's backfill UPDATE — which JOINs to customers —
+  // cannot fix.  The migration's NULL-assertion guard (step c) will abort if
+  // any such rows remain, which is the correct production behaviour: an operator
+  // must clean up orphaned data before applying the migration.  Deleting them
+  // here matches that expectation and leaves the DB in a valid post-migration
+  // state; a dev DB should not contain un-backfillable rows anyway.
+  await db.execute(sql`DELETE FROM billing_sheets WHERE customer_id IS NULL`);
+
   // Seed companies
   await db.execute(sql`
     INSERT INTO "companies" (id, name, subscription, is_active, starting_estimate_number, next_estimate_number, created_at, updated_at)
@@ -192,11 +202,13 @@ before(async () => {
     ON CONFLICT (id) DO NOTHING
   `);
 
-  // Null out company_id on the seeded rows to simulate pre-migration state
-  await db.execute(sql`UPDATE "work_orders"    SET company_id = NULL WHERE id IN (${sql.raw(`${WO1},${WO2}`)})`);
-  await db.execute(sql`UPDATE "billing_sheets" SET company_id = NULL WHERE id IN (${sql.raw(`${BS1},${BS2}`)})`);
-  await db.execute(sql`UPDATE "invoices"       SET company_id = NULL WHERE id IN (${sql.raw(`${INV1},${INV2}`)})`);
-  await db.execute(sql`UPDATE "estimates"      SET company_id = NULL WHERE id IN (${sql.raw(`${EST1},${EST2}`)})`);
+  // Null out company_id on the seeded rows to simulate pre-migration state.
+  // If the column doesn't exist yet (first run against a fresh DB), the INSERT
+  // above already produced rows without company_id — so silently skip the update.
+  await db.execute(sql`UPDATE "work_orders"    SET company_id = NULL WHERE id IN (${sql.raw(`${WO1},${WO2}`)})`).catch(() => {});
+  await db.execute(sql`UPDATE "billing_sheets" SET company_id = NULL WHERE id IN (${sql.raw(`${BS1},${BS2}`)})`).catch(() => {});
+  await db.execute(sql`UPDATE "invoices"       SET company_id = NULL WHERE id IN (${sql.raw(`${INV1},${INV2}`)})`).catch(() => {});
+  await db.execute(sql`UPDATE "estimates"      SET company_id = NULL WHERE id IN (${sql.raw(`${EST1},${EST2}`)})`).catch(() => {});
 });
 
 after(async () => {

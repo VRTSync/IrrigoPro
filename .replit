@@ -20,6 +20,10 @@ author = "agent"
 task = "workflow.run"
 args = "auth-middleware-coverage"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "company-id-backfill-migration"
+
 [[workflows.workflow]]
 name = "auth-middleware-coverage"
 author = "agent"
@@ -27,6 +31,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/routes/auth-middleware-coverage.test.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "company-id-backfill-migration"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server exec node --import tsx/esm --test --test-reporter=spec src/migrations/0004-company-id-backfill.test.ts"
 
 [workflows.workflow.metadata]
 isValidation = true
