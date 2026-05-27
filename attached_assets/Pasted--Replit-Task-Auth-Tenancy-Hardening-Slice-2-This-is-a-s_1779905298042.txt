@@ -1,0 +1,215 @@
+# Replit Task — Auth & Tenancy Hardening, Slice 2
+
+This is a single self-contained task. The **Design Context** is in
+`Auth-Tenancy - Slice 0 Hotfix.md` — re-read it before starting. The
+actual work for this task is in the **Slice 2** section below. Do not
+deviate from any file paths, function names, schema field names, or
+payload shapes specified.
+
+> **Architectural note.** Slice 2 is the billing-sheet counterpart to
+> Slice 1. Same pattern, different resource. A new
+> `requireSameCompanyAsBillingSheet` middleware loads the row, derives
+> companyId via the customer link, and 404s on mismatch. Mounted in
+> front of every single-ID billing-sheet route. Storage stays
+> unchanged (Slice 3). The `billing_sheets.companyId` column is added
+> in Slice 4.
+
+---
+
+## Slice 2 — Tenant guard middleware on every single-ID billing-sheet route
+
+**Scope.** Three things, in the order from Slice 1:
+
+1. Introduce `requireSameCompanyAsBillingSheet` middleware. Same shape
+   as `requireSameCompanyAsWorkOrder`: load row, derive companyId via
+   the customer link, 404 on mismatch, super-admin bypass, audit-log
+   the attempt on mismatch.
+2. Wrap every single-ID billing-sheet route with
+   `requireAuthentication` first, then the new middleware, then any
+   existing role guard, then the handler.
+3. Cover with a behavioral test plus a static-source assertion.
+
+Zero schema change. No new storage methods. No client change.
+
+**Files modified.**
+- `artifacts/api-server/src/routes/routes.ts` — add the new middleware
+  next to `requireSameCompanyAsWorkOrder` (from Slice 1). Wrap each
+  route in the list below.
+
+**Files created.**
+- `artifacts/api-server/src/routes/billing-sheet-tenant-guard.test.ts`
+  — behavioral tests.
+- New assertions appended to
+  `routes/auth-middleware-coverage.test.ts` (no new file).
+
+**Routes to wrap.**
+
+After this slice each route below has
+`[requireAuthentication, requireSameCompanyAsBillingSheet, ...existing role guard..., handler]`.
+
+| Method | Path | Current chain |
+| --- | --- | --- |
+| GET | `/api/billing-sheets/:id` | (none) |
+| PATCH | `/api/billing-sheets/:id` | `requireAuthentication, requireBillingSheetUpdateAccess` |
+| DELETE | `/api/billing-sheets/:id` | `requireAuthentication, requireWorkOrderBillingAccess` |
+| PATCH | `/api/billing-sheets/:id/reassign-technician` | `requireAuthentication` |
+| POST | `/api/billing-sheets/:id/no-photos-needed` | `requireAuthentication` |
+| GET | `/api/billing-sheets/:id/items` | (none) |
+| GET | `/api/billing-sheets/:id/wet-check-view` | `requireAuthentication` |
+
+**Out of the wrap list** — these stay as-is in Slice 2:
+
+- `GET /api/billing-sheets` (list) — list scoping is Slice 3.
+- `POST /api/billing-sheets` (create) — Slice 2 adds
+  `requireAuthentication` only, plus the inline
+  `req.authenticatedUserCompanyId` capture pattern from Slice 1's
+  `POST /api/work-orders`.
+- `DELETE /api/billing-sheets/bulk` — Slice 3.
+- `GET /api/billing-sheets/missing-photos` — already auth-gated;
+  list-shape; Slice 3 scopes the list.
+- `POST /api/billing-sheets/missing-photos/notify` — list-shape; Slice 3.
+- `GET /api/customers/:id/billing-sheets` — scoped through the
+  customer-tenant guard once Slice 2 extends the pattern; flagged in
+  Slice 3.
+- `GET /api/admin/billing-sheets/zero-price-audit` — super-admin only
+  per its handler; no row-level scoping needed.
+- `POST /api/admin/billing-sheets/zero-price-audit/repair` — same.
+- `GET /api/work-orders/:id/billing-sheets` — scoped via the
+  work-order tenant guard already added in Slice 1. Verify the
+  existing handler does not bypass the guard by reading sheets
+  directly.
+
+**Concrete changes.**
+
+### 1. Add `requireSameCompanyAsBillingSheet` middleware
+
+Place immediately after `requireSameCompanyAsWorkOrder` (introduced in
+Slice 1). Mirror its structure exactly:
+
+```ts
+// Tenant guard for billing-sheet routes. Same contract as
+// requireSameCompanyAsWorkOrder: load by req.params.id, derive
+// companyId via the customer link, 404 on mismatch, super-admin
+// bypass, audit-log cross-tenant attempts.
+//
+// Until Slice 4 lands the billing_sheets.companyId column, the row's
+// tenant is read through customerId → customers.companyId.
+const requireSameCompanyAsBillingSheet = async (req: any, res: any, next: any) => {
+  const userRole = req.authenticatedUserRole;
+  if (userRole === 'super_admin') {
+    return next();
+  }
+  const userCompanyId = req.authenticatedUserCompanyId;
+  if (userCompanyId == null) {
+    res.status(403).json({ message: "Company scope required for this action." });
+    return;
+  }
+  const billingSheetId = parseInt(req.params.id);
+  if (!Number.isFinite(billingSheetId) || billingSheetId <= 0) {
+    res.status(400).json({ message: "Invalid billing sheet ID" });
+    return;
+  }
+  try {
+    const billingSheet = await storage.getBillingSheetById(billingSheetId);
+    if (!billingSheet) {
+      res.status(404).json({ message: "Billing sheet not found" });
+      return;
+    }
+    const customer = billingSheet.customerId
+      ? await storage.getCustomer(billingSheet.customerId)
+      : null;
+    const billingSheetCompanyId = customer?.companyId ?? null;
+    if (billingSheetCompanyId == null || billingSheetCompanyId !== userCompanyId) {
+      res.status(404).json({ message: "Billing sheet not found" });
+      console.warn(
+        `[AUDIT] cross_tenant_billing_sheet_access ` +
+        `actor=${req.authenticatedUserId} actorCompany=${userCompanyId} ` +
+        `targetBillingSheet=${billingSheetId} targetCompany=${billingSheetCompanyId ?? 'null'} ` +
+        `route=${req.method} ${req.path}`
+      );
+      return;
+    }
+    req.tenantScopedBillingSheet = billingSheet;
+    next();
+  } catch (error) {
+    console.error('Error checking billing-sheet tenant scope:', error);
+    res.status(500).json({ message: "Couldn't verify tenant scope — please retry." });
+    return;
+  }
+};
+```
+
+### 2. Wrap each route in the table
+
+Same mechanical change as Slice 1. For routes that currently have
+`requireAuthentication`, insert `requireSameCompanyAsBillingSheet`
+immediately after. For routes with no auth at all, add both.
+
+For `POST /api/billing-sheets` (create) add only `requireAuthentication`
+and inside the handler add:
+
+```ts
+if (req.authenticatedUserRole !== 'super_admin') {
+  billingSheetBody.companyId = req.authenticatedUserCompanyId;
+}
+```
+
+Silently ignored until Slice 4 adds the column.
+
+### 3. Verify `GET /api/work-orders/:id/billing-sheets` doesn't bypass
+
+This route was wrapped with `requireSameCompanyAsWorkOrder` in
+Slice 1 — the parent work order is the tenant anchor. Confirm the
+handler at routes.ts:12988 reads sheets only for the scoped work order
+(via `storage.getBillingSheetsByWorkOrderId` or equivalent) and does
+not enumerate sheets across tenants. If it does, the handler is
+already correct because the parent guard rejected before it ran. No
+change required in Slice 2; flag if otherwise.
+
+**Test file.**
+
+`artifacts/api-server/src/routes/billing-sheet-tenant-guard.test.ts`:
+
+Mount the full app. Seed two companies, two billing sheets (one per
+company), one user per company. Cover:
+
+- `GET /api/billing-sheets/<A's BS id>` as a tech in B → 404.
+- `GET /api/billing-sheets/<A's BS id>` as the company admin in B → 404.
+- `PATCH /api/billing-sheets/<A's BS id>` as the billing manager in B
+  → 404.
+- `DELETE /api/billing-sheets/<A's BS id>` as the company admin in B
+  → 404.
+- All four above succeed when the caller is in Company A.
+- Super admin: all four succeed.
+- Unauthenticated request → 401.
+- Cross-tenant probe emits exactly one
+  `[AUDIT] cross_tenant_billing_sheet_access` line.
+
+`routes/auth-middleware-coverage.test.ts` — extend the new assertion
+group from Slice 1 with the billing-sheet equivalent: every
+`app.<method>("/api/billing-sheets/:id..."` registration must carry
+`requireAuthentication` followed by `requireSameCompanyAsBillingSheet`.
+Allowlist matches the explicit exception list above.
+
+**Acceptance criteria.**
+- The 7 routes listed in the wrap table carry the new chain in the
+  specified order.
+- The exception list is encoded in the static test.
+- Cross-tenant billing sheet reads, writes, and deletes from any
+  non-super-admin role return 404 with no difference in shape between
+  "doesn't exist" and "wrong tenant".
+- Behavioral and static tests pass.
+- All existing tests continue to pass.
+
+**Out of scope.**
+- Slice 3 (storage signatures).
+- Slice 4 (column + backfill).
+- Slice 5 (central policy engine).
+- Slice 6 (RLS).
+- Slice 7 (observability + cleanup).
+- Wet-check billings (`wet_check_billings`) — already have a
+  per-route `requireCompanyId` guard. Verifying it is sufficient is a
+  side-note in Slice 5, not new work in Slice 2.
+- Any client change.
+
+**Dependencies.** Slices 0 and 1 merged.

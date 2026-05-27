@@ -1,0 +1,373 @@
+# Replit Task — Auth & Tenancy Hardening, Slice 7
+
+This is a single self-contained task. The **Design Context** is in
+`Auth-Tenancy - Slice 0 Hotfix.md` — re-read it before starting. The
+actual work for this task is in the **Slice 7** section below. Do not
+deviate from any file paths, function names, schema field names, or
+payload shapes specified.
+
+> **Architectural note.** The structural work is done. Slice 7 cleans
+> up the seams left behind by Slices 0–6 and adds the observability
+> we'll need to know whether tenancy is holding in production. Four
+> concrete tasks: (1) tenant-tag every log line, (2) replace the
+> Slices 1–2 audit `console.warn` with a structured emitter + counter,
+> (3) retire the dead role strings `"admin"` and `"manager"`, (4)
+> consolidate the two `/complete` work-order endpoints down to one.
+
+---
+
+## Slice 7 — Tenant-tag logs, cross-tenant attempt counter, retire dead role strings, consolidate `/complete` endpoints
+
+**Scope.** Four independent tasks bundled into one slice because each
+is small and they share regression-test surface. Order them as listed
+— task 1 lands the log shape that task 2 emits into.
+
+1. Extend the existing `pino-http` request serializer in `app.ts` so
+   every log line carries `tenantCompanyId` and `actorRole`.
+2. Replace the two `console.warn('[AUDIT] cross_tenant_*_access ...')`
+   sites from Slices 1 and 2 with a structured emitter
+   (`recordTenantBoundaryAttempt`) that writes a row into a new
+   `tenant_boundary_attempts` table AND increments a Prometheus-style
+   counter. Add a simple `/api/admin/tenancy/attempts` super-admin
+   endpoint to list the most recent rows.
+3. Retire every occurrence of `role === "admin"` and `role ===
+   "manager"` in `routes.ts`. The canonical role set is in `lib/policy.ts`
+   (Slice 5); these strings match no real role and create dead
+   branches.
+4. Consolidate `POST /api/work-orders/complete` (body-carries-id) and
+   `POST /api/work-orders/:id/complete` (path-id) into a single
+   `POST /api/work-orders/:id/complete` endpoint. The body-form was
+   the web-side path; the path-form was the mobile-side path. Server
+   keeps both for one release cycle with a 308 redirect, then drops
+   the body-form in a follow-up cleanup.
+
+**Files modified.**
+- `artifacts/api-server/src/app.ts` — extend the pino serializer.
+- `artifacts/api-server/src/routes/routes.ts` — remove dead role
+  strings (~lines 9322, 9398), replace warn emitters with structured
+  call, register `/api/admin/tenancy/attempts`, and add the redirect
+  on `POST /api/work-orders/complete`.
+- `artifacts/irrigopro/src/components/work-orders/work-order-completion.tsx`
+  — switch the web client from `POST /api/work-orders/complete` to
+  `POST /api/work-orders/:id/complete` (the canonical form). One-line
+  change; no payload reshape needed.
+
+**Files created.**
+- `lib/db/migrations/0006_tenant_boundary_attempts.sql` — new audit
+  table.
+- `lib/db/src/schema/schema.ts` — add the matching Drizzle table.
+- `artifacts/api-server/src/lib/tenant-boundary-attempts.ts` — emitter
+  + counter.
+- `artifacts/api-server/src/routes/tenant-boundary-attempts.test.ts`
+  — behavioral tests for the emitter, the counter, and the
+  super-admin list endpoint.
+
+**Concrete changes.**
+
+### 1. Extend the pino-http serializer (app.ts)
+
+Today the request serializer (app.ts:23–34) emits `id`, `method`, and
+`url`. Add `tenantCompanyId` and `actorRole`. The serializer runs
+*before* `requireAuthentication` populates the values, so it reads from
+the request properties — they may be undefined for unauthenticated
+endpoints, which is fine.
+
+```ts
+serializers: {
+  req(req) {
+    return {
+      id: req.id,
+      method: req.method,
+      url: req.url?.split("?")[0],
+      tenantCompanyId: (req as any).authenticatedUserCompanyId ?? null,
+      actorRole: (req as any).authenticatedUserRole ?? null,
+    };
+  },
+  res(res) {
+    return { statusCode: res.statusCode };
+  },
+},
+```
+
+Pino logs every line through this serializer at request-end; child
+logs created inside the request inherit the request id. For more
+detail-rich logging inside a handler, future work can add
+`req.log.info({ tenantCompanyId, ... }, "message")` — but that's not
+required by this slice.
+
+### 2. Structured tenant-boundary attempt emitter
+
+Schema, in `lib/db/src/schema/schema.ts`, adjacent to the other audit
+tables:
+
+```ts
+export const tenantBoundaryAttempts = pgTable("tenant_boundary_attempts", {
+  id: serial("id").primaryKey(),
+  occurredAt: timestamp("occurred_at").defaultNow().notNull(),
+  // Resource the attempt targeted.
+  resourceType: text("resource_type").notNull(), // 'work_order' | 'billing_sheet' | future
+  resourceId: integer("resource_id").notNull(),
+  // Actor — never null for an authenticated attempt (Slices 1, 2
+  // require requireAuthentication before the guard).
+  actorUserId: integer("actor_user_id").references(() => users.id).notNull(),
+  actorCompanyId: integer("actor_company_id").references(() => companies.id),
+  actorRole: text("actor_role").notNull(),
+  // The tenant the resource actually belongs to. Nullable for the
+  // rare case of an orphan row (no resolvable companyId).
+  targetCompanyId: integer("target_company_id").references(() => companies.id),
+  // Route info for forensics.
+  method: text("method").notNull(),
+  path: text("path").notNull(),
+}, (table) => ({
+  occurredAtIdx: index("tenant_boundary_attempts_occurred_at_idx").on(table.occurredAt),
+  actorIdx: index("tenant_boundary_attempts_actor_idx").on(table.actorUserId),
+}));
+```
+
+Migration `0006_tenant_boundary_attempts.sql`:
+
+```sql
+-- Slice 7 — Persistent audit of cross-tenant access attempts.
+CREATE TABLE IF NOT EXISTS "tenant_boundary_attempts" (
+  "id" serial PRIMARY KEY,
+  "occurred_at" timestamp DEFAULT now() NOT NULL,
+  "resource_type" text NOT NULL,
+  "resource_id" integer NOT NULL,
+  "actor_user_id" integer NOT NULL REFERENCES "users"("id"),
+  "actor_company_id" integer REFERENCES "companies"("id"),
+  "actor_role" text NOT NULL,
+  "target_company_id" integer REFERENCES "companies"("id"),
+  "method" text NOT NULL,
+  "path" text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "tenant_boundary_attempts_occurred_at_idx"
+  ON "tenant_boundary_attempts" ("occurred_at");
+CREATE INDEX IF NOT EXISTS "tenant_boundary_attempts_actor_idx"
+  ON "tenant_boundary_attempts" ("actor_user_id");
+```
+
+Emitter, `lib/tenant-boundary-attempts.ts`:
+
+```ts
+import { db } from "../db";
+import { tenantBoundaryAttempts } from "@workspace/db";
+
+// Process-local counter. The /api/admin/tenancy/attempts endpoint
+// reads the table for forensics; the counter is for live dashboards
+// (the same shape as other in-process counters in this codebase —
+// no Prometheus client added in this slice).
+let attemptCounter = 0;
+export function getTenantBoundaryAttemptCount(): number {
+  return attemptCounter;
+}
+
+export async function recordTenantBoundaryAttempt(args: {
+  resourceType: "work_order" | "billing_sheet";
+  resourceId: number;
+  actorUserId: number;
+  actorCompanyId: number | null;
+  actorRole: string;
+  targetCompanyId: number | null;
+  method: string;
+  path: string;
+}): Promise<void> {
+  attemptCounter += 1;
+  try {
+    await db.insert(tenantBoundaryAttempts).values({
+      resourceType: args.resourceType,
+      resourceId: args.resourceId,
+      actorUserId: args.actorUserId,
+      actorCompanyId: args.actorCompanyId,
+      actorRole: args.actorRole,
+      targetCompanyId: args.targetCompanyId,
+      method: args.method,
+      path: args.path,
+    });
+  } catch (err) {
+    // Insertion failures must not block the rejection — log and
+    // continue so the original 404 still reaches the client.
+    console.error("Failed to record tenant boundary attempt:", err);
+  }
+}
+```
+
+Replace the `console.warn` in `requireSameCompanyAsWorkOrder` (Slice 1)
+and `requireSameCompanyAsBillingSheet` (Slice 2) with `await
+recordTenantBoundaryAttempt({ ... })`. Both middlewares already have
+all the values needed.
+
+Super-admin endpoint:
+
+```ts
+app.get(
+  "/api/admin/tenancy/attempts",
+  requireAuthentication,
+  async (req, res) => {
+    if (req.authenticatedUserRole !== "super_admin") {
+      res.status(403).json({ message: "Super admin only" });
+      return;
+    }
+    const limit = Math.min(parseInt(String(req.query.limit ?? "100")) || 100, 1000);
+    const rows = await db
+      .select()
+      .from(tenantBoundaryAttempts)
+      .orderBy(desc(tenantBoundaryAttempts.occurredAt))
+      .limit(limit);
+    res.json({ count: getTenantBoundaryAttemptCount(), rows });
+  },
+);
+```
+
+### 3. Retire dead role strings
+
+Two known sites: routes.ts:9322 and routes.ts:9398. Both read:
+
+```ts
+const managerUsers = managers.filter(u => u.role === "irrigation_manager" || u.role === "admin");
+```
+
+Replace with the canonical role set:
+
+```ts
+const managerUsers = managers.filter(
+  (u) => u.role === "irrigation_manager" || u.role === "company_admin",
+);
+```
+
+Also scope the `getUsers()` call to the work order's companyId so the
+notification fan-out stops crossing tenants:
+
+```ts
+// before
+const managers = await storage.getUsers();
+
+// after
+const managers = await storage.getUsers(workOrder.companyId);
+```
+
+(Slice 4 added `workOrder.companyId`; this slice consumes it.)
+
+Search-and-destroy pass for any other `=== "admin"` or `=== "manager"`
+on a role string. Grep:
+
+```
+git grep -nE '\.role\s*===\s*"(admin|manager)"'
+git grep -nE 'userRole\s*===\s*"(admin|manager)"'
+```
+
+Each hit is either dead code (replace with the canonical value or
+remove the branch) or a real bug (the branch was supposed to fire and
+hasn't been for years). Triage each on its merits; the most common
+case is dead.
+
+### 4. Consolidate `/complete` endpoints
+
+Today:
+- `POST /api/work-orders/complete` (body carries `workOrderId`) — used by web.
+- `POST /api/work-orders/:id/complete` (path id) — used by mobile.
+
+Canonical going forward: `POST /api/work-orders/:id/complete`.
+
+Step 1: bring the path-id endpoint up to parity with the body-form's
+behavior. Compare the two handlers (routes.ts:9146 vs routes.ts:9351)
+and merge any feature the path-form lacks (the path-form does not
+currently accept `usedParts`, `aiInputs`, `aiShortDescription`,
+`aiDetailedDescription`, `branchName`, `laborMode` — most of these
+are field-tech-relevant). Lift the body-form's handler body verbatim
+into the path-form, parameterized on `req.params.id`. Delete any
+duplicated logic.
+
+Step 2: the body-form route stays mounted for one release cycle as
+a 308 redirect to the canonical form:
+
+```ts
+app.post("/api/work-orders/complete", requireAuthentication, (req, res) => {
+  const workOrderId = req.body?.workOrderId;
+  if (!workOrderId || !Number.isFinite(parseInt(String(workOrderId)))) {
+    res.status(400).json({ message: "workOrderId required" });
+    return;
+  }
+  // 308 preserves the request method on redirect; clients that
+  // upgrade to the canonical form transparently. Web client is
+  // updated to the new URL in this same slice.
+  res.redirect(308, `/api/work-orders/${parseInt(String(workOrderId))}/complete`);
+});
+```
+
+Step 3: update `artifacts/irrigopro/src/components/work-orders/work-order-completion.tsx:312`:
+
+```ts
+// before
+return apiRequest("/api/work-orders/complete", "POST", data);
+
+// after
+return apiRequest(`/api/work-orders/${workOrder.id}/complete`, "POST", data);
+```
+
+The mobile client is already on the canonical form; no change there.
+
+The 308 redirect goes away in a follow-up cleanup commit once telemetry
+confirms zero traffic on the old path for a full release cycle.
+
+**Test file.**
+
+`routes/tenant-boundary-attempts.test.ts`:
+
+- Trigger a cross-tenant WO PATCH → assert one row appears in
+  `tenant_boundary_attempts` with the right resourceType, resourceId,
+  actor IDs, target companyId, method, and path.
+- Same for billing sheets.
+- `GET /api/admin/tenancy/attempts` as a super admin returns the
+  rows; same as a `company_admin` returns 403.
+- `getTenantBoundaryAttemptCount()` increments by 1 per attempt.
+- If the insert fails (mock the db.insert to throw), the original
+  middleware still responds 404 — the audit failure does not block
+  the rejection.
+
+For the `/complete` consolidation:
+
+- `POST /api/work-orders/complete` with a valid `workOrderId` body
+  returns 308 to the canonical path.
+- `POST /api/work-orders/:id/complete` accepts the full body shape
+  (`usedParts`, `aiInputs`, etc.) and produces the same result the
+  body-form handler did before.
+
+For the log serializer: add a single assertion in any one existing
+behavioral test that a pino log line for an authenticated request
+carries both `tenantCompanyId` and `actorRole`. Pino emits structured
+JSON; assert by spying on the underlying writer.
+
+**Acceptance criteria.**
+- Pino serializer emits `tenantCompanyId` and `actorRole` on every
+  request log line.
+- `tenant_boundary_attempts` table exists, RLS-safe (super_admin only
+  reads it; Slice 6's RLS does not apply because the table is not
+  tenant-scoped).
+- The Slice 1 and Slice 2 `console.warn` lines are gone; both
+  middlewares call `recordTenantBoundaryAttempt` instead.
+- `GET /api/admin/tenancy/attempts` returns rows for super admins,
+  rejects for everyone else.
+- All `role === "admin"` and `role === "manager"` strings are gone
+  from `routes.ts`. Re-run the Slice-5 policy-coverage static test
+  with the dead-string allowlist now empty.
+- The two `/complete` endpoints are consolidated: web client uses
+  `:id/complete`; legacy body-form returns 308.
+- `storage.getUsers()` no longer called without a `companyId` argument
+  inside the work-order completion handlers — Slice 7 closes this
+  cross-tenant notification leak.
+- All new tests pass.
+- All Slice 0–6 tests continue to pass.
+
+**Out of scope.**
+- Migrating any of the remaining ad-hoc middlewares to `lib/policy.ts`
+  (Slice 5b).
+- Extending RLS to additional tables (a future slice; see Slice 6 out
+  of scope).
+- Adding `tenantCompanyId` to every individual log statement inside
+  handlers. The request-level serializer is sufficient for now;
+  per-statement decoration is incremental future work.
+- Removing the 308 redirect on `POST /api/work-orders/complete` — that
+  cleanup happens after one release cycle of telemetry.
+- Replacing the in-process counter with a real Prometheus client.
+
+**Dependencies.** Slices 0, 1, 2, 3, 4, 5, and 6 merged.

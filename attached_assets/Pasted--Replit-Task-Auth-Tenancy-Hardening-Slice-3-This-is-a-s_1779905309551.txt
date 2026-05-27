@@ -1,0 +1,291 @@
+# Replit Task — Auth & Tenancy Hardening, Slice 3
+
+This is a single self-contained task. The **Design Context** is in
+`Auth-Tenancy - Slice 0 Hotfix.md` — re-read it before starting. The
+actual work for this task is in the **Slice 3** section below. Do not
+deviate from any file paths, function names, schema field names, or
+payload shapes specified.
+
+> **Architectural note.** Slices 1 and 2 added a row-level guard at the
+> route layer. Slice 3 moves the line of defense one level deeper —
+> into storage. After this slice, every read or list method on the
+> three high-risk tables (`work_orders`, `billing_sheets`, `invoices`)
+> requires an explicit `companyId` argument. The guard is enforced by a
+> static-source test that fails CI if any callsite omits the argument.
+> No schema change. No column added yet (Slice 4). Until then the
+> storage methods accept `companyId` and forward it as a join filter
+> against the customer link.
+
+---
+
+## Slice 3 — Make `companyId` a required argument on read/list methods for work_orders, billing_sheets, and invoices
+
+**Scope.** Refactor the storage layer so every read against
+`work_orders`, `billing_sheets`, and `invoices` is tenant-scoped at the
+SQL level — not just at the route layer. The end state:
+
+- `storage.getWorkOrder(id, companyId)` — both required.
+- `storage.getWorkOrders(companyId, options?)` — required.
+- `storage.getWorkOrdersByTechnician(technicianId, companyId)` — required.
+- `storage.getWorkOrdersByCustomer(customerId, companyId)` — required.
+- `storage.getWorkOrdersByStatus(status, companyId)` — required.
+- `storage.getWorkOrdersByEstimate(estimateId, companyId)` — required.
+- `storage.getBillingSheetById(id, companyId)` — required.
+- `storage.getBillingSheets(companyId, options?)` — required.
+- `storage.getBillingSheetsByCustomer(customerId, companyId)` — required.
+- `storage.getBillingSheetsByWorkOrderId(workOrderId, companyId)` — required.
+- `storage.getInvoice(id, companyId)` — required.
+- `storage.getInvoices(companyId, options?)` — required.
+- `storage.getInvoicesByCustomer(customerId, companyId)` — required.
+- `storage.getInvoicesByStatus(status, companyId)` — required.
+
+(Add any other read methods on those three tables to the list while
+working — the static-source test in this slice will fail loudly if one
+is missed.)
+
+Each method's SQL filter is `WHERE customer_id IN (SELECT id FROM
+customers WHERE company_id = $companyId) AND <existing predicate>`. This
+is a join filter, not a column filter — the column is added in Slice 4.
+
+Two callers pass `companyId = null` and skip the filter: a super-admin
+caller (the route layer has already verified `req.authenticatedUserRole
+=== 'super_admin'`) and the existing `/api/external/*` API-key paths.
+For both cases the call site passes the literal value `null` rather
+than omitting the argument, so the static-source test can still verify
+"argument was supplied." Methods accept `companyId: number | null`.
+
+**Files modified.**
+- `artifacts/api-server/src/storage.ts` — refactor the listed methods.
+- `artifacts/api-server/src/routes/routes.ts` — update every callsite.
+  Slice 1 and Slice 2 introduced the guards; this slice threads the
+  companyId through so the guard and the query agree.
+- `artifacts/api-server/src/routes/customer-routes.ts`,
+  `billing-workspace-routes.ts`,
+  `parts-routes.ts`,
+  `financial-pulse.ts`,
+  `estimate-routes.ts`,
+  `approve-routes.ts`,
+  `budget-routes.ts`,
+  `site-map-routes.ts` — these may also contain affected callsites.
+  Grep for each method name from the list above and update each.
+- `artifacts/api-server/src/storage/*.ts` — any storage submodules
+  containing the methods (e.g. `wet-check-billings-storage.ts` is
+  fine; only the three target tables are in scope this slice).
+
+**Files created.**
+- `artifacts/api-server/src/storage/companyId-required.test.ts`
+  — static-source assertion (see below).
+
+**Concrete changes.**
+
+### 1. Refactor each storage method
+
+Pattern, applied to every method in the list. Example —
+`getWorkOrders`:
+
+```ts
+// before
+async getWorkOrders(): Promise<WorkOrder[]> {
+  try {
+    return await db.select().from(workOrders).orderBy(desc(workOrders.createdAt));
+  } catch (error) {
+    console.error("Error fetching work orders:", error);
+    return [];
+  }
+}
+
+// after
+async getWorkOrders(companyId: number | null, options?: { limit?: number; offset?: number }): Promise<WorkOrder[]> {
+  try {
+    const baseQuery = db.select().from(workOrders).orderBy(desc(workOrders.createdAt));
+    const filteredQuery = companyId == null
+      ? baseQuery
+      : baseQuery.where(
+          sql`${workOrders.customerId} IN (
+            SELECT ${customers.id} FROM ${customers} WHERE ${customers.companyId} = ${companyId}
+          )`,
+        );
+    let query = filteredQuery;
+    if (options?.limit) query = query.limit(options.limit);
+    if (options?.offset) query = query.offset(options.offset);
+    return await query;
+  } catch (error) {
+    console.error("Error fetching work orders:", error);
+    return [];
+  }
+}
+```
+
+Same shape for the by-technician, by-customer, by-status, by-estimate
+variants — append the same `customerId IN (...)` predicate to the
+existing WHERE clause via `and(...)`.
+
+For single-ID reads (`getWorkOrder(id, companyId)`), the predicate is
+`AND <id eq>`:
+
+```ts
+async getWorkOrder(id: number, companyId: number | null): Promise<WorkOrder | undefined> {
+  const [workOrder] = await db.select().from(workOrders).where(
+    companyId == null
+      ? eq(workOrders.id, id)
+      : and(
+          eq(workOrders.id, id),
+          sql`${workOrders.customerId} IN (
+            SELECT ${customers.id} FROM ${customers} WHERE ${customers.companyId} = ${companyId}
+          )`,
+        ),
+  );
+  return workOrder || undefined;
+}
+```
+
+Important: the tenant guards from Slices 1 and 2 already do an
+ownership check, so this storage-layer filter is defense-in-depth, not
+the primary line. But it removes the "missing where clause" failure
+mode entirely.
+
+### 2. Update every callsite
+
+Each route handler now passes the caller's company. The pattern at the
+top of every handler that needs a list:
+
+```ts
+const callerCompanyId = req.authenticatedUserRole === 'super_admin'
+  ? null
+  : req.authenticatedUserCompanyId;
+```
+
+Use `callerCompanyId` as the argument to the storage call. For the
+tenant guard's loaded row (`req.tenantScopedWorkOrder` from Slice 1,
+`req.tenantScopedBillingSheet` from Slice 2), the handler may reuse
+the cached row instead of re-calling storage — but if it does call
+storage, it must pass `callerCompanyId`.
+
+The list endpoint `GET /api/work-orders` (routes.ts:11354) becomes:
+
+```ts
+} else {
+  workOrders = await storage.getWorkOrders(callerCompanyId);
+}
+```
+
+— no more "all companies" returns.
+
+### 3. Add the static-source test
+
+`artifacts/api-server/src/storage/companyId-required.test.ts`:
+
+The shape mirrors `auth-middleware-coverage.test.ts`. Read the target
+files as text, parse out every `storage.<method>(...)` invocation by
+regex over the source, and assert each invocation contains the
+companyId argument.
+
+```ts
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { globSync } from "glob"; // already a transitive dep; verify before use
+import { join } from "node:path";
+
+const REQUIRES_COMPANY_ID = new Set([
+  // Work orders
+  "getWorkOrder", "getWorkOrders",
+  "getWorkOrdersByTechnician", "getWorkOrdersByCustomer",
+  "getWorkOrdersByStatus", "getWorkOrdersByEstimate",
+  // Billing sheets
+  "getBillingSheetById", "getBillingSheets",
+  "getBillingSheetsByCustomer", "getBillingSheetsByWorkOrderId",
+  // Invoices
+  "getInvoice", "getInvoices",
+  "getInvoicesByCustomer", "getInvoicesByStatus",
+]);
+
+const CALLSITE_RE = /storage\.(\w+)\s*\(([\s\S]*?)\)/g;
+
+const FILES = globSync("artifacts/api-server/src/**/*.ts", {
+  ignore: ["**/*.test.ts", "**/storage.ts", "**/storage/*.ts"],
+});
+
+describe("Slice 3 — every storage callsite for the three high-risk tables passes companyId", () => {
+  for (const file of FILES) {
+    const src = readFileSync(file, "utf8");
+    let match: RegExpExecArray | null;
+    while ((match = CALLSITE_RE.exec(src)) !== null) {
+      const method = match[1];
+      if (!REQUIRES_COMPANY_ID.has(method)) continue;
+      const args = match[2];
+      it(`${file} — storage.${method}(...) supplies a companyId argument`, () => {
+        // Heuristic: the call has at least the right number of commas.
+        // Required argument count varies by method; the lookup below
+        // captures the minimum.
+        const min = MIN_ARGS[method];
+        const argList = splitTopLevelArgs(args);
+        assert.ok(
+          argList.length >= min,
+          `Expected ${method} to be called with >= ${min} arguments, got ${argList.length}. ` +
+            `Found: storage.${method}(${args.trim()}) in ${file}`,
+        );
+      });
+    }
+  }
+});
+```
+
+Helper `splitTopLevelArgs(s: string): string[]` splits on commas at
+brace-depth zero (so object literals don't break it). `MIN_ARGS` is a
+table of the minimum argument count per method:
+
+| Method | Min args |
+| --- | --- |
+| `getWorkOrder` | 2 |
+| `getWorkOrders` | 1 |
+| `getWorkOrdersByTechnician` | 2 |
+| `getWorkOrdersByCustomer` | 2 |
+| `getWorkOrdersByStatus` | 2 |
+| `getWorkOrdersByEstimate` | 2 |
+| `getBillingSheetById` | 2 |
+| `getBillingSheets` | 1 |
+| `getBillingSheetsByCustomer` | 2 |
+| `getBillingSheetsByWorkOrderId` | 2 |
+| `getInvoice` | 2 |
+| `getInvoices` | 1 |
+| `getInvoicesByCustomer` | 2 |
+| `getInvoicesByStatus` | 2 |
+
+The test deliberately checks argument count, not type. TypeScript will
+catch type mismatches at build time; this test catches "the function
+got refactored to accept companyId but a callsite still passes only
+one argument," which TypeScript also catches but the test makes
+explicit and reviewable.
+
+**Acceptance criteria.**
+- Every method in the storage signature list above has the new
+  signature.
+- Every callsite in the listed routes/ files passes a companyId (or
+  the literal `null` for super-admin or external paths).
+- The new static-source test passes.
+- `npm run typecheck` passes — TypeScript is the second line of
+  enforcement for the new argument shape.
+- All existing route-level tests continue to pass. Behavioral expected
+  changes: a non-super-admin caller hitting a list endpoint sees only
+  their own company's rows (was: all rows). Update any test fixture
+  that was implicitly relying on cross-tenant rows being returned.
+- The `GET /api/work-orders` list endpoint never returns more than the
+  caller's tenant's rows for a non-super-admin caller. Add an
+  integration test in `work-order-tenant-guard.test.ts` to assert
+  this.
+
+**Out of scope.**
+- Adding the `company_id` column to `work_orders` / `billing_sheets`
+  (Slice 4).
+- Replacing the `customerId IN (SELECT ...)` subquery with a direct
+  column filter (Slice 4, after the column lands).
+- Wet-check tables (their storage already takes companyId).
+- Estimates / parts / users / customers (already companyId-scoped at
+  schema and storage; flag any callsites that look suspicious but do
+  not rewrite as part of this slice).
+- Central policy engine (Slice 5).
+- RLS (Slice 6).
+- Any client change.
+
+**Dependencies.** Slices 0, 1, and 2 merged.

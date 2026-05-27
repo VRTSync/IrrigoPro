@@ -1,0 +1,301 @@
+# Replit Task — Auth & Tenancy Hardening, Slice 1
+
+This is a single self-contained task. The **Design Context** is in
+`Auth-Tenancy - Slice 0 Hotfix.md` — re-read it before starting. The
+actual work for this task is in the **Slice 1** section below. Do not
+deviate from any file paths, function names, schema field names, or
+payload shapes specified. If you believe a deviation is necessary,
+surface it and stop rather than proceeding.
+
+> **Architectural note.** Slice 1 closes the largest cross-tenant
+> exposure on the work-order surface without touching the schema. We
+> introduce one new middleware — `requireSameCompanyAsWorkOrder` —
+> that loads the target row, derives its companyId via the customer
+> join, and rejects when it doesn't match `req.authenticatedUserCompanyId`.
+> We also wrap every bare-auth work-order route with
+> `requireAuthentication` so unauthenticated callers stop getting
+> through. Storage is unchanged in this slice (Slice 3 refactors
+> storage signatures). The `companyId` column on `work_orders` is
+> added in Slice 4 — until then the guard derives tenancy via the
+> existing `customerId → customers.companyId` link.
+
+---
+
+## Slice 1 — Tenant guard middleware on every single-ID work-order route
+
+**Scope.** Three things, in order:
+
+1. Introduce `requireSameCompanyAsWorkOrder` middleware. It loads the
+   work order by `req.params.id`, derives its companyId via the customer
+   join, and rejects with 403 when it doesn't match
+   `req.authenticatedUserCompanyId`. Super admins
+   (`req.authenticatedUserRole === 'super_admin'`) bypass the check.
+2. Wrap every single-ID work-order route with `requireAuthentication`
+   first, then `requireSameCompanyAsWorkOrder`, then the existing role
+   guard (where one is mounted), then the existing handler.
+3. Cover the new behavior with a static-source test and a behavioral
+   test.
+
+Zero schema change. No new storage methods. No client change.
+
+**Files modified.**
+- `artifacts/api-server/src/routes/routes.ts` — add the new middleware
+  function adjacent to the other `require*` middlewares (~line 485
+  area, before `requireWorkOrderUpdateAccess`). Wrap every route in the
+  "routes to wrap" list below.
+
+**Files created.**
+- `artifacts/api-server/src/routes/work-order-tenant-guard.test.ts`
+  — behavioral tests against `createApp()`.
+- The static-source assertions go into the existing
+  `routes/auth-middleware-coverage.test.ts`; no new file for that.
+
+**Routes to wrap.**
+
+Every route below currently either has no auth at all, or has
+`requireAuthentication` but no tenant guard. After this slice, every
+one of these has the middleware chain
+`[requireAuthentication, requireSameCompanyAsWorkOrder, ...existing role guard..., handler]`.
+
+| Method | Path | Current chain |
+| --- | --- | --- |
+| GET | `/api/work-orders/:id` | (none) |
+| PATCH | `/api/work-orders/:id` | `requireAuthentication, requireWorkOrderUpdateAccess` |
+| DELETE | `/api/work-orders/:id` | `requireAuthentication, requireWorkOrderBillingAccess` |
+| POST | `/api/work-orders/:id/complete` | `requireAuthentication` |
+| POST | `/api/work-orders/:id/assign` | (none) |
+| POST | `/api/work-orders/:id/create-invoice` | (none) |
+| POST | `/api/work-orders/:id/sync-quickbooks` | (none) |
+| GET | `/api/work-orders/:id/items` | (none) |
+| POST | `/api/work-orders/:id/items` | (none) |
+| GET | `/api/work-orders/:id/billing-sheet` | (none) |
+| POST | `/api/work-orders/:id/billing-sheet` | (none) |
+| GET | `/api/work-orders/:id/billing-sheets` | `requireAuthentication` |
+| GET | `/api/work-orders/:id/wet-checks` | `requireAuthentication` |
+| GET | `/api/work-orders/:id/activity` | `requireAuthentication` |
+| POST | `/api/work-orders/:id/no-photos-needed` | `requireAuthentication` |
+| POST | `/api/work-orders/:id/no-photos-needed/clear` | `requireAuthentication` |
+
+**Out of the wrap list** — these stay as-is in Slice 1:
+
+- `POST /api/work-orders/complete` — body-carries `workOrderId`, not
+  `:id`. Slice 7 consolidates these endpoints; the body-form is
+  rewired then. Leave alone for now.
+- `POST /api/work-orders` (create) — no existing row to scope against;
+  tenant comes from `req.authenticatedUserCompanyId` directly. Add
+  `requireAuthentication` only (NOT the new guard) in this slice.
+- `GET /api/work-orders` (list) — already authenticated; list scoping
+  is Slice 3 (storage refactor).
+- `DELETE /api/work-orders/bulk` — list-shaped body; scoping is added
+  in Slice 3 once storage supports per-tenant bulk reads.
+- All `/api/external/work-orders/*` routes — separate API-key auth
+  surface; out of scope for the entire rebuild.
+
+**Concrete changes.**
+
+### 1. Add `requireSameCompanyAsWorkOrder` middleware
+
+Place adjacent to `requireWorkOrderUpdateAccess`. Exact shape — do not
+deviate:
+
+```ts
+// Tenant guard for work-order routes. Loads the work order by
+// req.params.id, derives its companyId via the customer link, and
+// rejects with 403 when it doesn't match req.authenticatedUserCompanyId.
+// Super admins (companyId === null) bypass the check.
+//
+// Until Slice 4 lands the work_orders.companyId column, the row's
+// tenant is read through the existing customerId → customers.companyId
+// path. Slice 4 swaps that one fetch for a direct column read.
+const requireSameCompanyAsWorkOrder = async (req: any, res: any, next: any) => {
+  const userRole = req.authenticatedUserRole;
+  if (userRole === 'super_admin') {
+    return next();
+  }
+  const userCompanyId = req.authenticatedUserCompanyId;
+  if (userCompanyId == null) {
+    res.status(403).json({ message: "Company scope required for this action." });
+    return;
+  }
+  const workOrderId = parseInt(req.params.id);
+  if (!Number.isFinite(workOrderId) || workOrderId <= 0) {
+    res.status(400).json({ message: "Invalid work order ID" });
+    return;
+  }
+  try {
+    const workOrder = await storage.getWorkOrder(workOrderId);
+    if (!workOrder) {
+      res.status(404).json({ message: "Work order not found" });
+      return;
+    }
+    // Derive tenant via customer link. Slice 4 will replace this with
+    // a direct workOrder.companyId read once the column is backfilled.
+    const customer = workOrder.customerId
+      ? await storage.getCustomer(workOrder.customerId)
+      : null;
+    const workOrderCompanyId = customer?.companyId ?? null;
+    if (workOrderCompanyId == null) {
+      // A work order with no resolvable tenant cannot be served
+      // safely to a non-super-admin. Treat as 404 — never reveal
+      // existence of a row outside the caller's tenant.
+      res.status(404).json({ message: "Work order not found" });
+      return;
+    }
+    if (workOrderCompanyId !== userCompanyId) {
+      // Never reveal that the row exists in another tenant. Always
+      // respond with 404 so cross-tenant probing returns the same
+      // shape as a genuinely missing ID.
+      res.status(404).json({ message: "Work order not found" });
+      // Audit the attempt — wired up properly in Slice 7. For now,
+      // a single structured console line is enough.
+      console.warn(
+        `[AUDIT] cross_tenant_work_order_access ` +
+        `actor=${req.authenticatedUserId} actorCompany=${userCompanyId} ` +
+        `targetWorkOrder=${workOrderId} targetCompany=${workOrderCompanyId} ` +
+        `route=${req.method} ${req.path}`
+      );
+      return;
+    }
+    // Cache the loaded row so the handler can reuse it without a
+    // second storage round trip. Handlers are not required to read
+    // this — they may still call storage.getWorkOrder(id) for clarity
+    // — but the field is available.
+    req.tenantScopedWorkOrder = workOrder;
+    next();
+  } catch (error) {
+    console.error('Error checking work-order tenant scope:', error);
+    res.status(500).json({ message: "Couldn't verify tenant scope — please retry." });
+    return;
+  }
+};
+```
+
+Note the **404-not-403 on cross-tenant.** This is intentional. A 403
+leaks existence ("the row exists, you just can't see it"). A 404 makes
+cross-tenant probing indistinguishable from random ID guessing. The
+single audit line still gives us server-side visibility.
+
+### 2. Wrap every route in the table above
+
+For routes that already have `requireAuthentication`, slot
+`requireSameCompanyAsWorkOrder` *immediately after* it and *before* the
+existing role guard:
+
+```ts
+// before
+app.patch("/api/work-orders/:id", requireAuthentication, requireWorkOrderUpdateAccess, async (req, res) => { ... });
+
+// after
+app.patch("/api/work-orders/:id", requireAuthentication, requireSameCompanyAsWorkOrder, requireWorkOrderUpdateAccess, async (req, res) => { ... });
+```
+
+For routes with no current auth at all, the full chain is:
+
+```ts
+// before
+app.get("/api/work-orders/:id", async (req, res) => { ... });
+
+// after
+app.get("/api/work-orders/:id", requireAuthentication, requireSameCompanyAsWorkOrder, async (req, res) => { ... });
+```
+
+For `POST /api/work-orders` (create — no `:id`), add only
+`requireAuthentication` (not the new guard) and *inside* the handler
+add the line:
+
+```ts
+// Force-tenant the new row to the caller's company. A super_admin
+// creating a work order must pass an explicit companyId in the body
+// — handled by the policy engine in Slice 5.
+if (req.authenticatedUserRole !== 'super_admin') {
+  workOrderBody.companyId = req.authenticatedUserCompanyId;
+}
+```
+
+This is harmless until Slice 4 lands the column (the field is silently
+ignored by the insert), but the line is in place so Slice 4 only has
+to add the schema column and Drizzle picks it up.
+
+### 3. Update the existing handlers that ignore tenant on read
+
+Two handlers currently re-fetch the work order and serve it without a
+tenant check. Both fall under the wrap list above, but verify after
+mounting the middleware that the handler bodies are still correct:
+
+- `GET /api/work-orders/:id` (routes.ts:11543) — handler is fine; the
+  guard runs before and returns 404 on mismatch.
+- `PATCH /api/work-orders/:id` (routes.ts:11680) — handler is fine.
+
+Do NOT remove the existing `storage.getWorkOrder(id)` calls inside
+handlers — they remain the authoritative read and may be used to
+catch races (the guard's snapshot is from before the handler ran).
+`req.tenantScopedWorkOrder` is a cache, not a replacement.
+
+**Test files.**
+
+`artifacts/api-server/src/routes/work-order-tenant-guard.test.ts`:
+
+Mount the full app via `createApp()`. Seed two companies (`A` and
+`B`), one work order in each, one user in each (`company_admin` in A,
+`field_tech` in B). Cover at minimum:
+
+- `GET /api/work-orders/<A's WO id>` as the field tech in B → 404.
+- `GET /api/work-orders/<A's WO id>` as the company admin in A → 200.
+- `GET /api/work-orders/<A's WO id>` as a super admin → 200.
+- `PATCH /api/work-orders/<A's WO id>` as the company admin in B → 404
+  (even though their role would otherwise pass `requireWorkOrderBillingAccess`).
+- `DELETE /api/work-orders/<A's WO id>` as the company admin in B → 404.
+- `POST /api/work-orders/<A's WO id>/assign` as a manager in B → 404.
+- `GET /api/work-orders/<id>` with no auth at all → 401 (proves
+  `requireAuthentication` runs first).
+- Cross-tenant attempt emits the `[AUDIT] cross_tenant_work_order_access`
+  log line. Capture stderr/stdout via Vitest's `vi.spyOn(console, 'warn')`
+  and assert the substring appears exactly once per blocked request.
+
+`routes/auth-middleware-coverage.test.ts` — extend the existing "broad
+coverage" section with two new assertions:
+
+1. For every `app.<method>("/api/work-orders/:id..."` registration in
+   `routes.ts`, the substring `requireAuthentication` AND
+   `requireSameCompanyAsWorkOrder` both appear in the middleware slice
+   between the path and the `async ` handler. Exception list (the
+   five routes called out in "out of the wrap list" above) is
+   declared explicitly in the test and may not grow without a
+   corresponding update to the assertion.
+2. `requireSameCompanyAsWorkOrder` appears *after* `requireAuthentication`
+   and *before* any other auth-dependent role guard in the chain.
+
+**Acceptance criteria.**
+- The 17 routes listed in the wrap table all carry the new middleware
+  chain, in the order specified.
+- The 5 explicit exceptions remain explicit and are listed in the
+  test's allowlist.
+- A `field_tech` in Company B who knows or guesses a Company A work
+  order ID gets 404 from every route in the wrap list — the response
+  is byte-indistinguishable from a genuinely missing ID.
+- A `company_admin` in Company A still has full access to their own
+  company's work orders. No regression.
+- A super admin still has full cross-tenant access.
+- The behavioral test file passes.
+- The two new static-source assertions in
+  `auth-middleware-coverage.test.ts` pass.
+- All existing tests continue to pass.
+
+**Out of scope.**
+- Slice 2 (the same guard for billing sheets).
+- Slice 3 (storage signatures requiring companyId).
+- Adding `companyId` column to `work_orders` (Slice 4).
+- Replacing the role guards (`requireWorkOrderUpdateAccess`,
+  `requireWorkOrderBillingAccess`) with the central policy engine
+  (Slice 5).
+- Postgres RLS on `work_orders` (Slice 6).
+- Tenant-tagging logs structurally via the pino-http serializer
+  (Slice 7) — Slice 1 emits a one-line `console.warn` in the audit
+  spot, which Slice 7 upgrades to a structured log + counter.
+- The `POST /api/work-orders/complete` endpoint (body carries
+  `workOrderId`, not `:id`). Slice 7 consolidates these two endpoints;
+  the body-form gets a corresponding guard at that point.
+- The `GET /api/work-orders` list endpoint scoping (Slice 3).
+- Any client (web or mobile) change.
+
+**Dependencies.** Slice 0 merged.

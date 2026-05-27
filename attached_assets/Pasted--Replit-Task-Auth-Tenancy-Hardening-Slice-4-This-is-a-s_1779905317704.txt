@@ -1,0 +1,327 @@
+# Replit Task — Auth & Tenancy Hardening, Slice 4
+
+This is a single self-contained task. The **Design Context** is in
+`Auth-Tenancy - Slice 0 Hotfix.md` — re-read it before starting. The
+actual work for this task is in the **Slice 4** section below. Do not
+deviate from any file paths, function names, schema field names, or
+payload shapes specified.
+
+> **Architectural note.** Slices 1–3 enforced tenancy at the route and
+> storage layers without changing the schema. Slice 4 lands the
+> structural change: `work_orders` and `billing_sheets` each get a
+> `company_id` column. Existing rows are backfilled from the customer
+> link inside a single migration. After backfill, both columns become
+> `NOT NULL`. An index on `company_id` (and a composite on `company_id,
+> status, scheduled_date` for work orders) supports the now-direct
+> tenant filter. Storage methods from Slice 3 are switched from a
+> customer-subquery to a direct column filter in the same slice. We
+> also make `estimates.company_id` `NOT NULL` while we're in the
+> migration, since it's the only existing tenant column that is
+> currently nullable.
+
+---
+
+## Slice 4 — Add `company_id` to `work_orders` and `billing_sheets`, backfill, NOT NULL, index; tighten `estimates.company_id` to NOT NULL
+
+**Scope.**
+
+1. Schema change in `lib/db/src/schema/schema.ts`:
+   - Add `companyId: integer("company_id").references(() => companies.id).notNull()` to `workOrders`.
+   - Add `companyId: integer("company_id").references(() => companies.id).notNull()` to `billingSheets`.
+   - Tighten `estimates.companyId` from nullable to `.notNull()`.
+   - Add `index("work_orders_company_idx").on(table.companyId)` to
+     `workOrders` index list.
+   - Add `index("work_orders_company_status_scheduled_idx").on(table.companyId, table.status, table.scheduledDate)` to `workOrders`.
+   - Add `index("billing_sheets_company_idx").on(table.companyId)` to
+     `billingSheets`.
+
+2. Drizzle migration SQL file in `lib/db/migrations/` (next sequence
+   number — currently up to `0003_wet_check_billings.sql`, so this is
+   `0004_company_id_columns.sql`). The migration:
+   - Adds the columns nullable first.
+   - Backfills `work_orders.company_id` from `customers.company_id` via
+     the existing `customer_id` link.
+   - Backfills `billing_sheets.company_id` the same way.
+   - Backfills any null `estimates.company_id` rows the same way (most
+     should already be populated; this is belt-and-braces).
+   - Asserts no nulls remain.
+   - Adds `NOT NULL`.
+   - Creates the indexes.
+
+3. Switch the storage-layer filter from
+   `customer_id IN (SELECT id FROM customers WHERE company_id = $1)`
+   (Slice 3) to a direct
+   `WHERE company_id = $1` filter. Faster, simpler, doesn't depend on
+   customers data being present.
+
+4. Switch the route-layer tenant guards from "load row → join customer
+   → derive companyId" to a direct `workOrder.companyId` read.
+
+5. Switch the `INSERT` paths to persist the new `companyId` column on
+   every new row. Slice 1 and Slice 2 already pre-staged the
+   `req.authenticatedUserCompanyId` capture in `POST /api/work-orders`
+   and `POST /api/billing-sheets` — Drizzle now picks it up.
+
+**Files modified.**
+- `lib/db/src/schema/schema.ts`.
+- `artifacts/api-server/src/storage.ts` — flip the filter in every
+  Slice-3 method to a direct column read.
+- `artifacts/api-server/src/routes/routes.ts` — flip
+  `requireSameCompanyAsWorkOrder` and
+  `requireSameCompanyAsBillingSheet` to read companyId from the row
+  directly. The customer fetch is removed.
+- Any handler that constructs a new work order or billing sheet
+  outside the `POST /api/work-orders` and `POST /api/billing-sheets`
+  paths (e.g. `convertWetCheckToBillingSheet`, the
+  `/api/work-orders/:id/billing-sheet` synthesizer) — set the
+  `companyId` from the parent record.
+
+**Files created.**
+- `lib/db/migrations/0004_company_id_columns.sql`.
+- `artifacts/api-server/src/migrations/0004-company-id-backfill.test.ts`
+  — backfill verification (see below).
+
+**Concrete changes.**
+
+### 1. Schema additions
+
+In `lib/db/src/schema/schema.ts`, add to `workOrders` (after the
+existing `customerId` column at ~line 654):
+
+```ts
+// Direct tenant column. Backfilled from customers.company_id by
+// migration 0004. NOT NULL after backfill — every work order belongs
+// to exactly one company.
+companyId: integer("company_id").references(() => companies.id).notNull(),
+```
+
+Same for `billingSheets` after its `customerId` column (~line 232).
+
+Add the indexes inside each table's index function:
+
+```ts
+// workOrders
+companyIdx: index("work_orders_company_idx").on(table.companyId),
+companyStatusScheduledIdx: index("work_orders_company_status_scheduled_idx")
+  .on(table.companyId, table.status, table.scheduledDate),
+
+// billingSheets
+companyIdx: index("billing_sheets_company_idx").on(table.companyId),
+```
+
+In `estimates` (~line 421), tighten:
+
+```ts
+// before
+companyId: integer("company_id").references(() => companies.id),
+
+// after
+companyId: integer("company_id").references(() => companies.id).notNull(),
+```
+
+### 2. Migration SQL — `lib/db/migrations/0004_company_id_columns.sql`
+
+Exact content (model on `0002_financial_pulse_foundation.sql` for
+style; safe to re-run via `IF NOT EXISTS` guards on the column add and
+the index create):
+
+```sql
+-- Slice 4 — Auth & Tenancy hardening.
+--
+-- Adds direct company_id columns to work_orders and billing_sheets,
+-- backfills from the customer link, asserts no nulls remain, applies
+-- NOT NULL, and indexes. Also tightens estimates.company_id to NOT
+-- NULL. Idempotent guards make the column-add re-runnable; the
+-- backfill is a single UPDATE.
+--
+-- Day-to-day this repo applies schema changes via
+-- `pnpm --filter @workspace/db run push`. This file is the explicit,
+-- hand-runnable equivalent for production rollout.
+
+-- 1. Add columns nullable so existing rows continue to satisfy the
+-- column list.
+ALTER TABLE "work_orders"
+  ADD COLUMN IF NOT EXISTS "company_id" integer REFERENCES "companies"("id");
+ALTER TABLE "billing_sheets"
+  ADD COLUMN IF NOT EXISTS "company_id" integer REFERENCES "companies"("id");
+
+-- 2. Backfill from the customer link.
+UPDATE "work_orders" wo
+SET "company_id" = c."company_id"
+FROM "customers" c
+WHERE wo."customer_id" = c."id"
+  AND wo."company_id" IS NULL;
+
+UPDATE "billing_sheets" bs
+SET "company_id" = c."company_id"
+FROM "customers" c
+WHERE bs."customer_id" = c."id"
+  AND bs."company_id" IS NULL;
+
+-- 3. Backfill estimates.company_id for any legacy null rows.
+UPDATE "estimates" e
+SET "company_id" = c."company_id"
+FROM "customers" c
+WHERE e."customer_id" = c."id"
+  AND e."company_id" IS NULL;
+
+-- 4. Assert no nulls remain. If this fails the migration aborts
+-- before NOT NULL is applied; investigate orphaned rows before
+-- retrying.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM "work_orders" WHERE "company_id" IS NULL) THEN
+    RAISE EXCEPTION 'Backfill incomplete: % work_orders rows have null company_id',
+      (SELECT count(*) FROM "work_orders" WHERE "company_id" IS NULL);
+  END IF;
+  IF EXISTS (SELECT 1 FROM "billing_sheets" WHERE "company_id" IS NULL) THEN
+    RAISE EXCEPTION 'Backfill incomplete: % billing_sheets rows have null company_id',
+      (SELECT count(*) FROM "billing_sheets" WHERE "company_id" IS NULL);
+  END IF;
+  IF EXISTS (SELECT 1 FROM "estimates" WHERE "company_id" IS NULL) THEN
+    RAISE EXCEPTION 'Backfill incomplete: % estimates rows have null company_id',
+      (SELECT count(*) FROM "estimates" WHERE "company_id" IS NULL);
+  END IF;
+END $$;
+
+-- 5. Apply NOT NULL.
+ALTER TABLE "work_orders" ALTER COLUMN "company_id" SET NOT NULL;
+ALTER TABLE "billing_sheets" ALTER COLUMN "company_id" SET NOT NULL;
+ALTER TABLE "estimates" ALTER COLUMN "company_id" SET NOT NULL;
+
+-- 6. Indexes.
+CREATE INDEX IF NOT EXISTS "work_orders_company_idx"
+  ON "work_orders" ("company_id");
+CREATE INDEX IF NOT EXISTS "work_orders_company_status_scheduled_idx"
+  ON "work_orders" ("company_id", "status", "scheduled_date");
+CREATE INDEX IF NOT EXISTS "billing_sheets_company_idx"
+  ON "billing_sheets" ("company_id");
+```
+
+### 3. Storage filter switch
+
+Inside each Slice-3 method, replace the `customerId IN (...)` predicate
+with `eq(workOrders.companyId, companyId)` (or the `billingSheets` /
+`invoices` equivalent). Example — `getWorkOrders`:
+
+```ts
+async getWorkOrders(companyId: number | null, options?: { limit?: number; offset?: number }): Promise<WorkOrder[]> {
+  try {
+    const baseQuery = db.select().from(workOrders).orderBy(desc(workOrders.createdAt));
+    const filteredQuery = companyId == null
+      ? baseQuery
+      : baseQuery.where(eq(workOrders.companyId, companyId));
+    let query = filteredQuery;
+    if (options?.limit) query = query.limit(options.limit);
+    if (options?.offset) query = query.offset(options.offset);
+    return await query;
+  } catch (error) {
+    console.error("Error fetching work orders:", error);
+    return [];
+  }
+}
+```
+
+Single-ID reads switch from the subquery-AND-eq form to a single
+`and(eq(workOrders.id, id), eq(workOrders.companyId, companyId))`.
+
+The same pattern applies to invoices — by Slice 4 they need a
+`company_id` column too. **Important:** check the invoices schema before
+applying the migration. If `invoices` has no `company_id` column today,
+add the column, backfill, and index in this same migration with the
+same pattern. Update the migration SQL above with the third table if
+so.
+
+### 4. Tenant guard switch
+
+`requireSameCompanyAsWorkOrder` (Slice 1) drops the customer fetch:
+
+```ts
+// before (Slice 1)
+const customer = workOrder.customerId
+  ? await storage.getCustomer(workOrder.customerId)
+  : null;
+const workOrderCompanyId = customer?.companyId ?? null;
+
+// after (Slice 4)
+const workOrderCompanyId = workOrder.companyId;
+```
+
+Same for `requireSameCompanyAsBillingSheet`. The cross-tenant audit
+log line stays as-is.
+
+### 5. Insert paths
+
+`POST /api/work-orders` and `POST /api/billing-sheets` already capture
+`req.authenticatedUserCompanyId` into the body (Slices 1 and 2). The
+Drizzle insert now picks up the column automatically.
+
+For derivative creates:
+- `convertWetCheckToBillingSheet` — copy `companyId` from the wet
+  check (which is already tenant-scoped).
+- `POST /api/work-orders/:id/billing-sheet` (the BS-from-WO
+  synthesizer) — copy from the parent work order.
+- Any factory in `routes/estimate-routes.ts` that creates a work order
+  from an approved estimate — copy from the estimate.
+
+Each of these is a one-line addition (`companyId: parent.companyId`).
+Grep for `await storage.createWorkOrder(` and
+`await storage.createBillingSheet(` (and any direct
+`db.insert(workOrders).values(` / `db.insert(billingSheets).values(`)
+to find every callsite.
+
+**Test file.**
+
+`artifacts/api-server/src/migrations/0004-company-id-backfill.test.ts`
+— a small, behavioral test that:
+
+- Seeds two companies, three customers (two in A, one in B), and a few
+  work orders, billing sheets, and estimates across them — pre-migration
+  shape (no `companyId` column).
+- Applies the migration SQL against a clean test DB.
+- Asserts every row's new `companyId` matches the customer's
+  `companyId`.
+- Asserts the NOT NULL constraint is in place (any attempt to insert
+  a row without `companyId` rejects).
+- Asserts the indexes exist (`SELECT indexname FROM pg_indexes WHERE
+  tablename = 'work_orders' AND indexname = ...`).
+
+Wire this test into the same harness used by the existing
+`bs-wc-migration.test.ts` so it runs against a real Postgres in CI.
+
+**Acceptance criteria.**
+- Schema additions in `schema.ts` match the spec exactly.
+- Migration SQL file `0004_company_id_columns.sql` exists, runs end-to-end
+  on a clean staging DB, and is idempotent (re-running is a no-op).
+- After migration:
+  - `work_orders.company_id`, `billing_sheets.company_id`,
+    `estimates.company_id` are all `NOT NULL`.
+  - Every existing row has a `company_id` matching its customer's
+    `company_id`.
+  - The three new indexes exist.
+- `requireSameCompanyAsWorkOrder` and
+  `requireSameCompanyAsBillingSheet` no longer perform a customer
+  fetch; they read `companyId` directly from the loaded row.
+- Storage filter uses `eq(workOrders.companyId, companyId)` (and the
+  billing-sheet / invoice equivalents).
+- All inserts persist `companyId`.
+- The new backfill test passes.
+- All Slice 1–3 tests continue to pass against the new schema.
+- `npm run typecheck` passes.
+
+**Out of scope.**
+- Central policy engine (Slice 5).
+- Postgres RLS (Slice 6).
+- Observability and cleanup (Slice 7).
+- Adding `companyId` to any other table beyond the three listed.
+- Dropping the `customerId` column or breaking the customer link —
+  the work order still belongs to a customer; the new column is
+  additional, not replacement.
+- Any client change.
+
+**Dependencies.** Slices 0, 1, 2, and 3 merged. **Before applying the
+migration to production**, run on staging against a recent prod
+snapshot to validate backfill row counts and timing. If staging
+discovers orphaned rows (work order or billing sheet with a missing
+customer), the migration's `RAISE EXCEPTION` blocks will abort —
+investigate and clean orphans separately, then re-run.

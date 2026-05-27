@@ -1,0 +1,293 @@
+# Replit Task — Auth & Tenancy Hardening, Slice 0 (Hotfix)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader auth-and-tenancy hardening — it is reference
+material so you understand the intent. The actual work for this task is in
+the **Slice 0** section at the bottom. Do not deviate from any file paths,
+function names, schema field names, or payload shapes specified. If you
+believe a deviation is necessary, surface it and stop rather than
+proceeding.
+
+> **Architectural note for this slice and the slices that follow.** The
+> auth identity layer (sessions, bearer tokens, impersonation, role
+> resolution) is in good shape. The tenancy layer is not — `work_orders`
+> and `billing_sheets` have no direct `companyId` column, several routes
+> read/write without scoping by `req.authenticatedUserCompanyId`, and a
+> handful of routes lack `requireAuthentication` entirely. This rebuild
+> is 8 slices (0–7). Slice 0 is a surgical hotfix for two field-tech
+> bugs that are blocking work-order completion in production *right now*.
+> It changes no schema, adds no tenant scoping, and does not touch the
+> policy-engine refactor in later slices. Treat any urge to start the
+> structural work in this slice as scope creep — Slices 1–7 handle each
+> of those concerns.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in conversation and are referenced by every slice in
+this rebuild. Do not deviate from any of them.
+
+**Canonical role set.** `super_admin`, `company_admin`, `irrigation_manager`,
+`billing_manager`, `field_tech`. The legacy strings `"admin"` and
+`"manager"` are dead and must not appear in any new code. (Task #643
+retired `"manager"`; `"admin"` was never a real role.) Removing existing
+stragglers belongs to Slice 7 — do not touch them in Slice 0 unless
+explicitly listed.
+
+**Identity sources.** Three production auth surfaces, evaluated in this
+order inside `requireAuthentication`:
+1. `x-impersonation-token` header (super-admin → target user).
+2. `Authorization: Bearer <token>` (mobile).
+3. `express-session` cookie (`irrigopro.sid`, PG-backed).
+
+Header-auth via unsigned `x-user-*` headers/query params is dev-only and
+hard-gated by `process.env.NODE_ENV !== 'production'`. Do not re-enable
+in any slice.
+
+**Authoritative role/companyId on `req`.** Every authenticated request
+has `req.authenticatedUserId`, `req.authenticatedUserRole`, and
+`req.authenticatedUserCompanyId` populated by `requireAuthentication`.
+These are the only trusted sources. Header-derived values
+(`headerUserRole(req)` etc.) are dev-only fallbacks and must not be used
+in authorization decisions.
+
+**Error-handling contract.** Route handlers that catch unexpected errors
+must surface them through `classifyAndLog` from
+`artifacts/api-server/src/routes/route-error-helpers.ts`, never via a
+bare `res.status(500).json({ message: "..." })`. The helper sanitizes
+Drizzle SQL leaks while preserving recognized error categories. This is
+already established in the wet-check routes; new slices propagate it.
+
+**Static-source guardrails.** The existing
+`routes/auth-middleware-coverage.test.ts` (Task #921/#922) and
+`routes/audit-coverage.test.ts` (Task #641) patterns — fast text-based
+assertions over `routes.ts` — are the canonical way to prevent
+regressions in a 16 000-line monolith. New slices add new files of this
+shape rather than trying to mount the monolith in process.
+
+**Field-tech write allowlist on PATCH /api/work-orders/:id.** Field techs
+may PATCH a work order assigned to them in one of three shapes (after
+Slice 0):
+1. `{ status: 'in_progress' }` plus an optional `startedAt` timestamp
+   (≤ 2 keys total) — the "start work" transition.
+2. `{ photos: [...] }` only — photo backfill, allowed even on tickets
+   that have already been moved to billing (per Task #191).
+3. `{ workLocationLat, workLocationLng, workLocationAddress }` only
+   — pin update, allowed only on assigned non-cancelled tickets.
+
+Any other shape is rejected with a per-branch 403 message. The pin shape
+is Slice 0's behavior change. Adding any further fields to the allowlist
+in later slices is a deliberate design decision, not a hotfix.
+
+---
+
+## Slice 0 — Hotfix the pin 403 and the bare "Failed to complete work order" 500
+
+**Scope.** Two surgical changes to unblock field techs:
+
+1. Allow field techs to save a pinned work location on a work order
+   assigned to them. Today the PATCH middleware denies any non-status,
+   non-photos edit from a field tech, and returns a misleading "can only
+   start work orders" message for *every* unsupported shape.
+2. Replace the bare `res.status(500).json({ message: "Failed to complete
+   work order" })` in `POST /api/work-orders/complete` with the
+   `classifyAndLog` helper so the real error class surfaces in server
+   logs and a curated message reaches the tech.
+
+Zero schema change. Zero new dependencies. No tenant scoping is added in
+this slice (Slice 1 handles that). No policy engine, no role catalog
+changes, no new routes.
+
+**Files modified.**
+- `artifacts/api-server/src/routes/routes.ts` — extend
+  `requireWorkOrderUpdateAccess` (~line 485–545) and swap the catch in
+  `POST /api/work-orders/complete` (~line 9345–9348). No other handler
+  is touched.
+
+**Files created.**
+- `artifacts/api-server/src/routes/work-order-pin-patch.test.ts`
+  — regression tests for the new field-tech pin branch.
+
+**Concrete changes.**
+
+### 1. Extend `requireWorkOrderUpdateAccess` (routes.ts ~line 485–545)
+
+Inside the existing `if (userRole === 'field_tech') { ... }` block, add
+a third allowed-edit branch *after* the photos-only branch and *before*
+the catch-all 403. The new branch is a sibling to the existing
+`isPhotosOnlyEdit` block — same shape, same ownership check, different
+allowed-key set.
+
+Use exactly these field names — they match the existing `work_orders`
+schema columns (`schema.ts:701–703`): `workLocationLat`,
+`workLocationLng`, `workLocationAddress`.
+
+```ts
+// Field techs may also patch ONLY the work-location pin
+// (workLocationLat, workLocationLng, workLocationAddress) on a work
+// order assigned to them. Pin updates are not allowed on cancelled
+// tickets but ARE allowed on tickets that are in_progress or further —
+// techs commonly drop the pin when they arrive on site, which is often
+// after the ticket has already been moved to in_progress.
+const PIN_KEYS = new Set(['workLocationLat', 'workLocationLng', 'workLocationAddress']);
+const isPinOnlyEdit =
+  updateKeys.length > 0 &&
+  updateKeys.length <= 3 &&
+  updateKeys.every((k) => PIN_KEYS.has(k));
+if (isPinOnlyEdit) {
+  try {
+    const workOrder = await storage.getWorkOrder(workOrderId);
+    const userIdNum = parseInt(userId as string);
+    if (workOrder && workOrder.assignedTechnicianId === userIdNum && workOrder.status !== 'cancelled') {
+      return next();
+    }
+    // Fall through with a precise 403 below.
+    res.status(403).json({
+      message: "Access denied. You can only update the pin on a work order assigned to you.",
+    });
+    return;
+  } catch (error) {
+    console.error('Error checking work order pin edit access:', error);
+    res.status(500).json({ message: "Couldn't verify ticket ownership — please retry." });
+    return;
+  }
+}
+```
+
+Replace the trailing catch-all 403 (currently at routes.ts:541–543) with
+per-branch precise messages so a user who tried to edit an unsupported
+field doesn't see a misleading "can only start" string. The
+catch-all becomes the literal "no supported branch matched" fallback,
+worded accurately:
+
+```ts
+res.status(403).json({
+  message: "Access denied. Field technicians can only start a work order, update its photos, or move its pin on tickets assigned to them.",
+});
+return;
+```
+
+Do **not** widen the allowlist further in this slice. Do **not** change
+the status-transition branch or the photos-only branch.
+
+### 2. Swap the catch in `POST /api/work-orders/complete`
+
+In `routes.ts` around line 9345, change:
+
+```ts
+} catch (error) {
+  console.error("Error completing work order:", error);
+  res.status(500).json({ message: "Failed to complete work order" });
+}
+```
+
+to:
+
+```ts
+} catch (e: any) {
+  const { status, message } = classifyAndLog(req, e, {
+    op: "completeWorkOrder",
+    ctx: { workOrderId: req.body?.workOrderId },
+    fallbackMessage: "Failed to complete work order",
+  });
+  res.status(status).json({ message });
+}
+```
+
+The `classifyAndLog` import is already present in `routes.ts` (search
+for `classifyAndLog as _classifyAndLog`). Drop the `as _classifyAndLog`
+rename — the import is unused under the underscore alias and the new
+catch uses the unprefixed name. If renaming the import breaks any other
+import line, add a second clean import rather than touching the existing
+one.
+
+Do **not** add new recognized rules to the `classifyAndLog` call. The
+fallback path is exactly what we need: log full server-side context, return
+the curated string to the field tech. Recognized rules can be added in a
+later slice once we know what categories actually surface in the logs.
+
+Do **not** swap the catch in the second `/complete` endpoint
+(`POST /api/work-orders/:id/complete`, routes.ts ~line 9351). That
+endpoint is in scope for Slice 7's consolidation, not Slice 0.
+
+**Test file.**
+
+`artifacts/api-server/src/routes/work-order-pin-patch.test.ts` —
+behavioral tests for the new branch. Mount the full Express app via
+`createApp()` (as `mobile-auth-refresh.test.ts` does), seed the DB
+fixtures via the existing test helpers, and exercise these cases:
+
+- Field tech assigned to WO #N: `PATCH /api/work-orders/N` with body
+  `{ workLocationLat: 41.5, workLocationLng: -83.6, workLocationAddress: null }`
+  → 200, row is updated.
+- Same payload with only `{ workLocationLat, workLocationLng }` (2 keys)
+  → 200 (sparse pin updates are allowed).
+- Field tech NOT assigned to WO #N: same payload → 403 with the precise
+  "you can only update the pin on a work order assigned to you" message.
+- Field tech on a cancelled ticket → 403 with the same precise message.
+- Field tech on a ticket adding any non-pin field alongside the pin
+  (e.g. `{ workLocationLat: 41.5, status: 'in_progress' }`) → 403 with
+  the catch-all "can only start, update photos, or move its pin"
+  message — confirms we did not accidentally widen the allowlist.
+- Company admin: same payload → 200 (no field-tech branch fires).
+
+Also add to
+`artifacts/api-server/src/routes/auth-middleware-coverage.test.ts`
+a static-source assertion in the existing "broad coverage" section: the
+substring `"You can only update the pin on a work order assigned to you."`
+appears exactly once in `routes.ts`. This prevents a future refactor
+from accidentally collapsing the precise pin-denied message back into
+the catch-all string.
+
+**Acceptance criteria.**
+- A field tech can hit "I'm here" on the work-order completion screen
+  (`artifacts/irrigopro/src/components/work-orders/work-order-completion.tsx`,
+  the `updatePinMutation` mutation) and the PATCH succeeds. No client
+  changes required.
+- The `requireWorkOrderUpdateAccess` middleware returns 403 for a
+  field-tech pin update on a work order *not* assigned to them, with
+  the precise message above.
+- The `requireWorkOrderUpdateAccess` middleware returns 403 with the
+  precise "you can only update the pin on a work order assigned to you"
+  message for the field-tech-pin-not-assigned case — distinguishable
+  from the generic catch-all 403.
+- `POST /api/work-orders/complete` errors surface through
+  `classifyAndLog`. The next time this 500 is hit in production, the
+  server log includes the full Drizzle/pg error chain
+  (`logRouteErrorContext` output) — not just "Error completing work
+  order".
+- The new test file passes.
+- All existing tests continue to pass without modification.
+- `routes/auth-middleware-coverage.test.ts` continues to pass; its
+  new "broad coverage" assertion for the pin-denied string also passes.
+
+**Out of scope.**
+- Adding `requireAuthentication` to the bare-auth work-order routes
+  (`GET /api/work-orders/:id`, `POST /api/work-orders`,
+  `GET /api/work-orders/:id/items`, `POST /api/work-orders/:id/items`,
+  `POST /api/work-orders/:id/assign`,
+  `POST /api/work-orders/:id/create-invoice`,
+  `POST /api/work-orders/:id/sync-quickbooks`,
+  `POST /api/work-orders/:id/billing-sheet`,
+  `GET /api/work-orders/:id/billing-sheet`,
+  `GET /api/customers/:id/work-orders`). These all currently accept
+  requests without authentication. Wrapping them with
+  `requireAuthentication` is Slice 1's job and pairs with the tenant
+  guard added in the same slice.
+- Adding `requireSameCompanyAsWorkOrder` (Slice 1).
+- Tenant scoping on `storage.getWorkOrder` (Slice 3).
+- Adding a `companyId` column to `work_orders` (Slice 4).
+- Replacing `requireWorkOrderUpdateAccess` with the central policy
+  engine (Slice 5).
+- Postgres RLS on `work_orders` (Slice 6).
+- Removing the stale `role === "admin"` strings at routes.ts:9322 and
+  9398 (Slice 7).
+- Consolidating the two `/complete` endpoints (Slice 7).
+- Surfacing `classifyAndLog` in the second `/complete` endpoint or any
+  other 500 path (Slice 7).
+- Any mobile-app client change. The mobile app already uses the
+  `/api/work-orders/:id/complete` endpoint, not `/api/work-orders/complete`,
+  and is not affected by this slice. Web is the only client touched.
+
+**Dependencies.** None — Slice 0 is the entry point.

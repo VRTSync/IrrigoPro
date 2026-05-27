@@ -1,0 +1,298 @@
+# Replit Task — Auth & Tenancy Hardening, Slice 5
+
+This is a single self-contained task. The **Design Context** is in
+`Auth-Tenancy - Slice 0 Hotfix.md` — re-read it before starting. The
+actual work for this task is in the **Slice 5** section below. Do not
+deviate from any file paths, function names, schema field names, or
+payload shapes specified.
+
+> **Architectural note.** After Slice 4 the data layer is safely
+> tenant-scoped. The authorization layer remains scattered across 30+
+> ad-hoc Express middlewares (`requireCompanyAdminAccess`,
+> `requireWorkOrderBillingAccess`, `requireBillingSheetUpdateAccess`,
+> etc.), each encoding its own allowlist. Slice 5 introduces a single
+> policy module that takes `(role, action, resource)` and returns
+> allow/deny. The existing middlewares become thin wrappers that call
+> the policy module. **No route's behavior changes in this slice.** The
+> policy module simply makes the rules legible and testable, and gives
+> us one place to add a new role or change a permission. Migrating
+> additional middlewares to the wrapper form happens incrementally;
+> Slice 5 ships the engine + the migration of the four highest-traffic
+> middlewares + the regression-test pattern for the rest.
+
+---
+
+## Slice 5 — Central policy engine + migrate the four hottest middlewares
+
+**Scope.**
+
+1. Create `artifacts/api-server/src/lib/policy.ts` — a pure function
+   `can(role, action, resource): boolean` plus a typed action catalog.
+2. Migrate four middlewares to delegate to `can(...)`:
+   - `requireWorkOrderUpdateAccess`
+   - `requireWorkOrderBillingAccess`
+   - `requireBillingSheetUpdateAccess`
+   - `requireBillingAccess`
+   Existing middleware functions stay (the route registrations don't
+   change). Their internals become a one-liner against the policy.
+3. Add a policy-coverage static test that catches "new role string
+   added but policy module not updated" and "new action added but
+   policy module not updated."
+
+Existing behavior is preserved exactly. Slice 5 is a refactor, not a
+permission change.
+
+**Files modified.**
+- `artifacts/api-server/src/routes/routes.ts` — replace the bodies of
+  the four middlewares listed above with calls into `policy.ts`.
+
+**Files created.**
+- `artifacts/api-server/src/lib/policy.ts` — the engine.
+- `artifacts/api-server/src/lib/policy.test.ts` — exhaustive
+  per-(role, action) test of the allow/deny matrix.
+- `artifacts/api-server/src/routes/policy-coverage.test.ts`
+  — static-source test (see below).
+
+**Concrete changes.**
+
+### 1. `lib/policy.ts` — the policy module
+
+Exact shape — do not deviate:
+
+```ts
+// Auth & Tenancy hardening, Slice 5.
+//
+// Central policy module. All authorization decisions for the routes
+// migrated in this slice (and incrementally those that follow) pass
+// through `can(role, action)`. The full action catalog and the
+// per-action allow list are declared statically below; new actions
+// must be added here, not invented at the call site.
+//
+// Tenant scoping is NOT this module's job — `requireSameCompanyAsX`
+// middlewares (Slices 1, 2) and the storage-layer companyId filter
+// (Slices 3, 4) handle that. This module answers only "does this
+// role have permission to perform this action?"
+
+export type Role =
+  | "super_admin"
+  | "company_admin"
+  | "irrigation_manager"
+  | "billing_manager"
+  | "field_tech";
+
+// Every authoring/permission decision in the migrated middlewares
+// maps to one of these actions. Keep the list alphabetically sorted
+// to make diffs reviewable.
+export type Action =
+  | "billing_sheet.delete"
+  | "billing_sheet.edit_full"
+  | "billing_sheet.edit_photos_only"
+  | "billing_sheet.submit_for_review"
+  | "billing_sheet.update_metadata"
+  | "invoice.pdf_view"
+  | "work_order.delete"
+  | "work_order.edit_full"
+  | "work_order.edit_photos_only"
+  | "work_order.edit_pin_only"
+  | "work_order.start_assigned"
+  | "work_order.update_metadata";
+
+// Allow list per role. Build the inverted form (role → allowed
+// actions) too for fast lookup. A missing entry means deny.
+const POLICY: Record<Role, ReadonlySet<Action>> = {
+  super_admin: new Set<Action>([
+    "billing_sheet.delete",
+    "billing_sheet.edit_full",
+    "billing_sheet.update_metadata",
+    "invoice.pdf_view",
+    "work_order.delete",
+    "work_order.edit_full",
+    "work_order.update_metadata",
+  ]),
+  company_admin: new Set<Action>([
+    "billing_sheet.delete",
+    "billing_sheet.edit_full",
+    "billing_sheet.update_metadata",
+    "invoice.pdf_view",
+    "work_order.delete",
+    "work_order.edit_full",
+    "work_order.update_metadata",
+  ]),
+  billing_manager: new Set<Action>([
+    "billing_sheet.delete",
+    "billing_sheet.edit_full",
+    "billing_sheet.update_metadata",
+    "invoice.pdf_view",
+    "work_order.delete",
+    "work_order.edit_full",
+    "work_order.update_metadata",
+  ]),
+  irrigation_manager: new Set<Action>([
+    "billing_sheet.delete",
+    "billing_sheet.edit_full",
+    "billing_sheet.update_metadata",
+    "work_order.delete",
+    "work_order.edit_full",
+    "work_order.update_metadata",
+  ]),
+  field_tech: new Set<Action>([
+    "billing_sheet.edit_photos_only",
+    "billing_sheet.submit_for_review",
+    "work_order.edit_photos_only",
+    "work_order.edit_pin_only",
+    "work_order.start_assigned",
+  ]),
+};
+
+export function can(role: Role | string | undefined, action: Action): boolean {
+  if (!role) return false;
+  const policy = POLICY[role as Role];
+  if (!policy) return false;
+  return policy.has(action);
+}
+
+// Used by the static-source test to detect drift.
+export const KNOWN_ROLES: ReadonlyArray<Role> = Object.keys(POLICY) as Role[];
+export const KNOWN_ACTIONS: ReadonlyArray<Action> = Array.from(
+  new Set(Object.values(POLICY).flatMap((s) => Array.from(s))),
+) as Action[];
+```
+
+**Important.** The matrix above must reproduce existing behavior
+exactly. Before merging, diff each migrated middleware's current
+allowlist against the policy entries below to verify no permission
+has been silently widened or narrowed.
+
+| Existing middleware | Existing allowlist | Maps to action |
+| --- | --- | --- |
+| `requireWorkOrderBillingAccess` | `company_admin`, `billing_manager`, `irrigation_manager` | `work_order.delete`, `work_order.edit_full`, `billing_sheet.delete`, `billing_sheet.edit_full` |
+| `requireBillingAccess` | `company_admin`, `billing_manager` | `invoice.pdf_view` |
+| `requireWorkOrderUpdateAccess` field-tech branch | `field_tech` (assigned) with status→in_progress, photos-only, or pin-only | `work_order.start_assigned`, `work_order.edit_photos_only`, `work_order.edit_pin_only` |
+| `requireWorkOrderUpdateAccess` manager branch | `company_admin`, `super_admin`, `billing_manager`, `irrigation_manager` | `work_order.update_metadata` |
+| `requireBillingSheetUpdateAccess` field-tech branch | `field_tech` (owner) submit-only or photos-only | `billing_sheet.submit_for_review`, `billing_sheet.edit_photos_only` |
+| `requireBillingSheetUpdateAccess` manager branch | `company_admin`, `billing_manager`, `irrigation_manager` | `billing_sheet.update_metadata` |
+
+### 2. Migrate middlewares to thin wrappers
+
+`requireWorkOrderBillingAccess` (routes.ts ~line 456–467):
+
+```ts
+const requireWorkOrderBillingAccess = (req: any, res: any, next: any) => {
+  const role = req.authenticatedUserRole;
+  if (can(role, "work_order.delete") || can(role, "work_order.edit_full")) {
+    return next();
+  }
+  res.status(403).json({
+    message: "Access denied. Only company administrators, billing managers, and irrigation managers can edit or delete work orders and billing sheets.",
+  });
+};
+```
+
+`requireBillingAccess` (routes.ts ~line 470–482):
+
+```ts
+const requireBillingAccess = (req: any, res: any, next: any) => {
+  if (can(req.authenticatedUserRole, "invoice.pdf_view")) {
+    return next();
+  }
+  res.status(403).json({
+    message: "Access denied. Only company administrators and billing managers can access invoice PDFs.",
+  });
+};
+```
+
+`requireWorkOrderUpdateAccess` (routes.ts ~line 485–545): keep the
+existing field-tech ownership branches (those are *resource-level*
+checks, not pure role checks) but replace the role-allowlist branch
+with the policy call:
+
+```ts
+// Managers + admins
+if (can(userRole, "work_order.update_metadata")) {
+  return next();
+}
+
+if (userRole === "field_tech") {
+  // ...existing ownership branches stay verbatim, but each leaf
+  // also asserts can(userRole, action) before next():
+  //   - status→in_progress branch → can(role, "work_order.start_assigned")
+  //   - photos-only branch       → can(role, "work_order.edit_photos_only")
+  //   - pin-only branch          → can(role, "work_order.edit_pin_only")
+  // ...
+}
+```
+
+(The field_tech policy set already allows all three actions; the
+`can()` calls are defense-in-depth so a future role tweak that removes
+one of those permissions instantly closes the corresponding branch.)
+
+`requireBillingSheetUpdateAccess` (routes.ts ~line 548–603): same
+pattern. Manager branch consults `can(role,
+"billing_sheet.update_metadata")`; field-tech ownership branches each
+gate on `can(role, "billing_sheet.submit_for_review")` and
+`can(role, "billing_sheet.edit_photos_only")` respectively.
+
+**Do not** migrate the other middlewares in this slice
+(`requireCompanyAdminAccess`, `requireCustomerEditAccess`,
+`requireBoundaryEditAccess`, `requireNotificationAccess`,
+`requireSiteMapViewAccess`, `requireQuickBooksAccess`,
+`requireIssueTypeAdminAccess`, the inline super-admin guards). They
+remain on the migration backlog. A follow-up slice (not numbered in
+this rebuild — call it Slice 5b if appetite exists) moves them.
+
+### 3. Tests
+
+`lib/policy.test.ts`:
+- Exhaustive matrix: for every `(role, action)` in
+  `KNOWN_ROLES × KNOWN_ACTIONS`, assert the expected outcome based on
+  the table above. The test serves as the "specification of the
+  permission system" in human-readable form.
+- Edge cases: `can(undefined, action)` → false; `can("nonexistent",
+  action)` → false; `can("field_tech", "fake_action" as Action)` →
+  false (TypeScript catches this at compile time, but the runtime
+  check is the canonical guarantee).
+
+`routes/policy-coverage.test.ts` (static-source):
+- For every `req.authenticatedUserRole` comparison literal in
+  `routes.ts` that compares against a *role string*, assert the string
+  is a member of `KNOWN_ROLES` from `policy.ts`. This catches the
+  `role === "admin"` / `role === "manager"` stragglers that Slice 7
+  will remove — Slice 5's job is to make them visible. Add an explicit
+  allowlist for the strings Slice 7 still has to remove (see Slice 7's
+  scope) so the test passes today and fails the day Slice 7's removal
+  regresses.
+- For every `can(role, "...")` callsite in the migrated middlewares,
+  assert the action string is a member of `KNOWN_ACTIONS`. TypeScript
+  enforces this at compile time; the runtime test catches malformed
+  strings inserted via `as Action` or similar workarounds.
+
+**Acceptance criteria.**
+- `lib/policy.ts` exists with the exact shape above and the
+  precomputed matrix matches the documented allow lists.
+- The four migrated middlewares behave identically before and after
+  the slice — verified by the existing
+  `auth-middleware-coverage.test.ts` plus the new behavioral tests in
+  Slices 1 and 2.
+- `lib/policy.test.ts` covers every (role, action) cell.
+- `routes/policy-coverage.test.ts` passes.
+- No route handler reads `req.authenticatedUserRole` directly inside
+  the four migrated middlewares — every decision flows through
+  `can()`.
+- The dead role strings (`"admin"`, `"manager"`) still exist at the
+  routes.ts:9322 / 9398 sites (Slice 7 removes them) — they are
+  recorded in the policy-coverage test's allowlist and do not fail CI.
+- `npm run typecheck` passes.
+- All existing tests continue to pass.
+
+**Out of scope.**
+- Migrating the other 25+ middlewares to `can()`. Slice 5b (if
+  scheduled).
+- Removing the dead `role === "admin"` / `role === "manager"` strings
+  (Slice 7).
+- Adding resource-level (companyId, ownership) into `can()` — the
+  policy module is intentionally role × action only. Tenant scoping
+  is enforced separately in Slices 1, 2, 4, 6.
+- Postgres RLS (Slice 6).
+- Any client change.
+
+**Dependencies.** Slices 0, 1, 2, 3, and 4 merged.
