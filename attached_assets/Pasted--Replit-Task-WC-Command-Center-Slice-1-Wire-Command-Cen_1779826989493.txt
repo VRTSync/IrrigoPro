@@ -1,0 +1,323 @@
+# Replit Task — WC Command Center, Slice 1 (Wire Command Center for wet check billings)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader rebuild — it is reference material so you understand
+the intent. The actual work for this task is in the **Slice 1** section at the
+bottom. Do not deviate from any file paths, function names, schema field names,
+or payload shapes specified. If you believe a deviation is necessary, surface it
+and stop rather than proceeding.
+
+> **Frontend-only slice — no backend changes.** Every endpoint this page calls
+> is already wet-check-aware from the earlier Phase 2 work (Slices 2 and 3).
+> The Billing Command Center page just hasn't been wired to consume the new
+> fields and parameters yet. If you find yourself about to modify any file
+> under `artifacts/api-server/`, stop and surface the question — backend
+> changes are out of scope.
+
+> **Pattern: mirror billing sheets exactly.** Every change in this slice does
+> for wet check billings what the page already does for billing sheets — same
+> shape state, same shape toggle handler, same shape selection logic, same
+> shape mutation payload, same shape UI row. The investigation that produced
+> this spec verified the patterns; don't invent new ones.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in conversation and are referenced by every slice in the
+broader rebuild.
+
+**Scope.** Wet check billings are now a first-class entity in their own
+`wet_check_billings` table (`WC-YYYY-NNNN` numbering), separate from
+`billing_sheets`. The backend endpoints have been wet-check-aware since
+Phase 2 Slices 2–3 deployed. This slice is purely frontend wiring of the
+Billing Command Center page to consume that already-existing capability.
+
+**Polymorphic invoice items.** `invoice_items.sourceType` accepts
+`'work_order'`, `'billing_sheet'`, or `'wet_check_billing'`. The
+`/api/invoices/monthly` endpoint creates these polymorphic items based on
+the selection IDs passed in.
+
+**Backend parameter naming convention** (verified from Phase 2 Slice 2):
+- `/api/invoices/preview` accepts `wetCheckBillingIds: number[]`
+- `/api/invoices/monthly` accepts `selectedWetCheckBillingIds: number[]`
+  (note the `selected` prefix on the create endpoint — match the existing
+  `selectedBillingSheetIds` naming convention used on that endpoint)
+
+**Response shape from `/api/customers/:id/billing`** (verified from Phase 2
+Slice 3) — already includes:
+- `wetCheckBillings: WetCheckBilling[]`
+- `unbilledWetCheckBillings: WetCheckBilling[]`
+- `totalUnbilledAmount` (already includes WCB amounts in the sum)
+
+---
+
+## Slice 1 — Command Center wet-check support
+
+**Scope.** Wire the `/billing/command-center` page (`customer-billing.tsx`)
+to consume wet check billings everywhere it currently consumes billing
+sheets. State, types, toggle handlers, select-all logic, UI rendering in
+the Unbilled tab, mutation payloads for preview and create. Mirror the
+existing billing-sheet patterns exactly. Single file change plus a tests
+file. **No backend changes** — every endpoint this page calls is already
+wet-check-aware from Phase 2.
+
+**Files modified.**
+- `artifacts/irrigopro/src/pages/customer-billing.tsx` — the only
+  production file changed
+- New: `artifacts/irrigopro/src/pages/customer-billing-wet-check.test.tsx`
+  — focused tests for the WCB wiring (do not extend any existing
+  customer-billing test file)
+
+**Concrete changes** in `customer-billing.tsx`.
+
+**(1) Add type for the WCB shape** (place near `BillingBillingSheet` ~line
+70):
+
+```typescript
+interface BillingWetCheckBilling {
+  id: number;
+  billingNumber: string;
+  wetCheckId: number;
+  customerName: string;
+  propertyAddress: string;
+  workDate: Date | string;
+  technicianName: string;
+  technicianId: number | null;
+  status: string;
+  totalAmount: string | number;
+  partsSubtotal: string | number;
+  laborSubtotal: string | number;
+  invoiceId: number | null;
+  // Mirror the same enriched fields as BillingBillingSheet
+  laborCost: number;
+  partsCost: number;
+  description: string;
+  billedDate: Date | null;
+  completedDate: Date | null;
+}
+```
+
+**(2) Extend the `CustomerBillingData` interface** (~line 76) — additive
+only, do NOT modify existing fields:
+
+```typescript
+interface CustomerBillingData {
+  customer: Customer;
+  workOrders: BillingWorkOrder[];
+  billingSheets: BillingBillingSheet[];
+  wetCheckBillings: BillingWetCheckBilling[];           // NEW
+  estimates: BillingEstimate[];
+  unbilledWorkOrders: BillingWorkOrder[];
+  unbilledBillingSheets: BillingBillingSheet[];
+  unbilledWetCheckBillings: BillingWetCheckBilling[];   // NEW
+  totalUnbilledAmount: number;
+}
+```
+
+The backend already returns these two new fields (per Phase 2 Slice 3), so
+this is just typing what's already on the wire.
+
+**(3) Add selection state** (~line 120) — additive, paralleling
+`selectedBillingSheetIds`:
+
+```typescript
+const [selectedWetCheckBillingIds, setSelectedWetCheckBillingIds] = useState<Set<number>>(new Set());
+```
+
+**(4) Add toggle handler** (~line 241, paralleling
+`toggleBillingSheetSelection`):
+
+```typescript
+const toggleWetCheckBillingSelection = (wetCheckBillingId: number) => {
+  setSelectedWetCheckBillingIds(prev => {
+    const newSet = new Set(prev);
+    if (newSet.has(wetCheckBillingId)) {
+      newSet.delete(wetCheckBillingId);
+    } else {
+      newSet.add(wetCheckBillingId);
+    }
+    return newSet;
+  });
+};
+```
+
+**(5) Extend `selectAllUnbilledItems`** (~line 253):
+
+```typescript
+const selectAllUnbilledItems = () => {
+  if (!customerBillingData) return;
+  setSelectedWorkOrderIds(new Set(customerBillingData.unbilledWorkOrders.map(wo => wo.id)));
+  setSelectedBillingSheetIds(new Set(customerBillingData.unbilledBillingSheets.map(bs => bs.id)));
+  setSelectedWetCheckBillingIds(new Set(customerBillingData.unbilledWetCheckBillings.map(wcb => wcb.id)));  // NEW
+};
+```
+
+**(6) Extend `clearAllSelections`** (~line 260):
+
+```typescript
+const clearAllSelections = () => {
+  setSelectedWorkOrderIds(new Set());
+  setSelectedBillingSheetIds(new Set());
+  setSelectedWetCheckBillingIds(new Set());  // NEW
+};
+```
+
+**(7) Extend `hasAnySelection`** (~line 265):
+
+```typescript
+const hasAnySelection = () => {
+  return selectedWorkOrderIds.size > 0
+    || selectedBillingSheetIds.size > 0
+    || selectedWetCheckBillingIds.size > 0;  // NEW
+};
+```
+
+**(8) Update `previewInvoiceMutation`** (~line 308):
+
+```typescript
+const previewInvoiceMutation = useMutation({
+  mutationFn: async ({ customerId, workOrderIds, billingSheetIds, wetCheckBillingIds }: {
+    customerId: number,
+    workOrderIds: number[],
+    billingSheetIds: number[],
+    wetCheckBillingIds: number[],
+  }) => {
+    return await apiRequest("/api/invoices/preview", "POST", {
+      customerId,
+      workOrderIds,
+      billingSheetIds,
+      wetCheckBillingIds,  // NEW — backend already accepts this per Phase 2 Slice 2
+    });
+  },
+  // onSuccess / onError unchanged
+});
+```
+
+Update all call sites that fire this mutation to pass
+`wetCheckBillingIds: Array.from(selectedWetCheckBillingIds)`.
+
+**(9) Update `createInvoiceMutation`** (~line 335):
+
+```typescript
+const createInvoiceMutation = useMutation({
+  mutationFn: async ({
+    customerId,
+    workOrderIds,
+    billingSheetIds,
+    selectedWetCheckBillingIds: wetCheckBillingIds,
+    periodStart,
+    periodEnd,
+  }: {
+    customerId: number,
+    workOrderIds?: number[],
+    billingSheetIds?: number[],
+    selectedWetCheckBillingIds?: number[],
+    periodStart?: string,
+    periodEnd?: string,
+  }) => {
+    // QuickBooks check unchanged
+    // ...
+    return await apiRequest("/api/invoices/monthly", "POST", {
+      customerId,
+      workOrderIds,
+      billingSheetIds,
+      selectedWetCheckBillingIds: wetCheckBillingIds,  // NEW — backend param name per Phase 2 Slice 2
+      periodStart,
+      periodEnd,
+    });
+  },
+  onSuccess: (data, { customerId }) => {
+    // existing logic
+    setSelectedWorkOrderIds(new Set());
+    setSelectedBillingSheetIds(new Set());
+    setSelectedWetCheckBillingIds(new Set());  // NEW
+    // toast
+    // Add WCB invalidation:
+    queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "billing"] });
+    queryClient.invalidateQueries({ queryKey: ['/api/billing-sheets'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/wet-check-billings'] });  // NEW
+    queryClient.invalidateQueries({ queryKey: ['/api/customers/billing-preview'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/invoices'] });
+  },
+});
+```
+
+Update all call sites that fire this mutation to pass
+`selectedWetCheckBillingIds: Array.from(selectedWetCheckBillingIds)`.
+
+**(10) Render WCBs in the Unbilled tab** (~line 1112+).
+
+Find the existing block that renders `customerBillingData.unbilledBillingSheets`
+(a list with a checkbox column and the billing sheet's
+customer/property/date/total). Add a parallel block immediately AFTER it that
+renders `customerBillingData.unbilledWetCheckBillings`, using the EXACT same
+row structure but with:
+- Checkbox bound to `selectedWetCheckBillingIds` /
+  `toggleWetCheckBillingSelection`
+- A small `[WC]` or `Wet Check` badge in the row to distinguish from regular
+  BS rows
+- Billing number column shows `wcb.billingNumber` (will be `WC-YYYY-NNNN`)
+- All other columns mirror the BS row's layout
+
+**Do NOT introduce a new tab in this slice.** Adding a "Wet Check Billings"
+tab parallel to the existing "Billing Sheets" tab is a separate, larger UI
+change — defer to a future slice if desired. The Unbilled tab integration is
+what's needed for the invoice creation flow.
+
+**(11) Tests** in `customer-billing-wet-check.test.tsx`:
+
+- Render the page with a mocked customer that has 1 work order, 1 billing
+  sheet, 1 wet check billing (all unbilled).
+- Assert all three rows render in the Unbilled tab with checkboxes.
+- Click the WCB row's checkbox → assert `selectedWetCheckBillingIds`
+  updates.
+- Click "Select All" → assert all three selection sets contain their
+  respective IDs.
+- Click "Clear All" → assert all three selection sets are empty.
+- Click "Preview Invoice" → assert the preview mutation fires with a
+  payload containing all three ID arrays (`workOrderIds`, `billingSheetIds`,
+  `wetCheckBillingIds`).
+- Mock the create mutation → click Confirm → assert the payload contains
+  `selectedWetCheckBillingIds` matching the user's selection.
+- Assert that after a successful create,
+  `setSelectedWetCheckBillingIds` is cleared and `/api/wet-check-billings`
+  is in the invalidated queries list.
+
+**Acceptance criteria.**
+- `CustomerBillingData` interface includes `wetCheckBillings` and
+  `unbilledWetCheckBillings` typed arrays.
+- `selectedWetCheckBillingIds` state exists and is consumed by toggle,
+  select-all, clear-all, hasAnySelection.
+- The Unbilled tab renders wet check billings alongside work orders and
+  billing sheets.
+- `previewInvoiceMutation` sends `wetCheckBillingIds` in its POST payload.
+- `createInvoiceMutation` sends `selectedWetCheckBillingIds` in its POST
+  payload (note the name difference — backend param is
+  `selectedWetCheckBillingIds`).
+- After successful invoice creation, the wet check billings query cache is
+  invalidated.
+- All tests pass.
+- **No backend changes were made** (this is purely frontend wiring).
+
+**Out of scope.**
+- Backend endpoint changes — every endpoint this page calls is already
+  wet-check-aware from Phase 2.
+- Adding a new "Wet Check Billings" tab to the page (separate future slice
+  if wanted).
+- Updating the `/billing-workspace` approval queue page to surface wet
+  check billings in pending review (separate investigation needed).
+- Designing the wet-check-native edit flow (still deferred).
+- Modifying the existing tabs (Work Orders, Billing Sheets, Estimates,
+  Monthly Invoices) — these handle their existing entity types unchanged.
+- Renaming any existing variables or fields.
+- Removing the `/api/billing-sheets` deletion mutation or any other
+  billing-sheet-specific behavior.
+- Changes to other consumers of `/api/customers/:id/billing` outside this
+  page.
+
+**Dependencies.** Phase 2 Slices 1–7 deployed and migration run. The
+backend endpoints this slice consumes have been wet-check-aware since
+Phase 2's bundled 1-4 deploy, so technically this slice could land any
+time after that — but it's most useful once wet check billings actually
+exist in production (post-migration).
