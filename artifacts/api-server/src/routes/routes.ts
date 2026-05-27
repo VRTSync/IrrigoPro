@@ -2527,8 +2527,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // owner and flips the row to `mitigated`. Re-acking a mitigated /
   // resolved row updates the owner only.
   async function ackOne(req: Request, id: number): Promise<IncidentApiRow | null> {
-    const sessionUserId = req.session?.userId;
-    const ownerUserId = sessionUserId != null ? Number(sessionUserId) : null;
+    const ownerUserId = (req as any).authenticatedUserId ?? null;
     const ownerLabel =
       typeof req.headers["x-user-name"] === "string"
         ? (req.headers["x-user-name"] as string).slice(0, 200)
@@ -2750,12 +2749,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pageSeverities,
       };
 
-      const sessionUserId = req.session?.userId;
+      const actorUserId = req.authenticatedUserId ?? null;
       const actorLabel =
         typeof req.headers["x-user-name"] === "string"
           ? (req.headers["x-user-name"] as string).slice(0, 200)
-          : sessionUserId != null
-            ? `super_admin#${sessionUserId}`
+          : actorUserId != null
+            ? `super_admin#${actorUserId}`
             : "super_admin";
       await savePagingConfig(next, actorLabel);
       await recordAuditEvent(req, {
@@ -2765,7 +2764,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetType: "app_settings",
         targetId: "oncallPaging",
         summary: `Updated on-call paging config (PD=${pdEnabled}, Slack=${slackEnabled}, sev=${pageSeverities.join(",")})`,
-        actorUserId: sessionUserId != null ? Number(sessionUserId) : null,
+        actorUserId,
         actorLabel,
         details: {
           pagerDutyEnabled: pdEnabled,
@@ -4791,11 +4790,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       // Task #551 (Phase 2) — surface role/active flips to the audit log.
       if (before) {
-        const actor = headerUserId(req);
-        const actorRole = headerUserRole(req) ?? null;
+        const actor = req.authenticatedUserId ?? (headerUserId(req) ? Number(headerUserId(req)) || null : null);
+        const actorRole = req.authenticatedUserRole ?? headerUserRole(req) ?? null;
         if (userData.role && userData.role !== before.role) {
           void recordAuditEvent(req, {
-            actorUserId: actor ? Number(actor) || null : null,
+            actorUserId: actor,
             actorRole,
             actionType: "role_change",
             action: "user.role_changed",
@@ -4808,7 +4807,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         if (userData.isActive != null && userData.isActive !== before.isActive) {
           void recordAuditEvent(req, {
-            actorUserId: actor ? Number(actor) || null : null,
+            actorUserId: actor,
             actorRole,
             actionType: "admin",
             action: userData.isActive ? "user.reactivated" : "user.deactivated",
@@ -10047,8 +10046,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         }
       }
 
-      const userId = parseInt(String(req.authenticatedUserId ?? headerUserId(req)));
-      if (!userId || isNaN(userId)) {
+      const userId = req.authenticatedUserId;
+      if (!userId) {
         res.status(401).json({ message: "Authentication required - user ID not found." });
         return;
       }
@@ -10155,7 +10154,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       // Capture who triggered the reassignment for the audit note.
-      const actorId = parseInt(String(req.authenticatedUserId ?? headerUserId(req)));
+      const actorId = req.authenticatedUserId ?? 0;
       let actorName = `user ${actorId}`;
       try {
         if (!isNaN(actorId)) {
@@ -11488,8 +11487,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
-      const userId = parseInt(String(req.authenticatedUserId ?? headerUserId(req)));
-      if (!userId || isNaN(userId)) {
+      const userId = req.authenticatedUserId;
+      if (!userId) {
         res.status(401).json({ message: "Authentication required - user ID not found." });
         return;
       }
@@ -13835,7 +13834,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/company/:companyId/api-keys", requireAuthentication, requireCompanyAdminAccess, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
-      const userId = parseInt(headerUserId(req) as string) || Number(req.session?.userId) || 0;
+      const userId = req.authenticatedUserId ?? 0;
       const { name, expiresAt } = req.body;
 
       if (!name || name.trim().length === 0) {
