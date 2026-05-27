@@ -384,79 +384,39 @@ import { logger } from "../lib/logger";
 import { coerceLatLngStrings } from "../lib/coerce-lat-lng";
 
 // Production-ready middleware to check if user has company admin permissions for site map operations
-const requireCompanyAdminAccess = async (req: any, res: any, next: any) => {
-  try {
-    // Production-ready authentication using session lookup
-    // First try header-based auth (for development compatibility)
-    let userId = headerUserId(req);
-    let userRole = headerUserRole(req);
-    
-    // If headers not available, try to get from session (production approach)
-    if (!userId && req.session?.userId) {
-      userId = req.session.userId;
-      // Get user from database to verify role
-      const user = await storage.getUser(parseInt(String(userId)));
-      if (user) {
-        userRole = user.role;
-        req.userCompanyId = user.companyId; // Store for later use
-      }
-    }
-    
-    if (!userId || !userRole) {
-      res.status(401).json({ 
-        message: "Authentication required" 
-      });
-      return;
-    }
-    
-    if (userRole !== 'company_admin') {
-      res.status(403).json({ 
-        message: "Access denied. Site map operations are restricted to company administrators only." 
-      });
-      return;
-    }
-    
-    next();
-  } catch (error) {
-    console.error('Site map authentication error:', error);
-    res.status(500).json({ 
-      message: "Authentication error" 
+const requireCompanyAdminAccess = (req: any, res: any, next: any) => {
+  const userRole = req.authenticatedUserRole;
+
+  if (!userRole) {
+    res.status(401).json({ message: "Authentication required" });
+    return;
+  }
+
+  if (userRole !== 'company_admin') {
+    res.status(403).json({
+      message: "Access denied. Only company administrators can perform this action.",
     });
     return;
   }
+
+  next();
 };
 
 // Middleware to allow company admins AND billing managers to edit customer records
-const requireCustomerEditAccess = async (req: any, res: any, next: any) => {
-  try {
-    let userId = headerUserId(req);
-    let userRole = headerUserRole(req);
+const requireCustomerEditAccess = (req: any, res: any, next: any) => {
+  const userRole = req.authenticatedUserRole;
 
-    if (!userId && req.session?.userId) {
-      userId = req.session.userId;
-      const user = await storage.getUser(parseInt(String(userId)));
-      if (user) {
-        userRole = user.role;
-        req.userCompanyId = user.companyId;
-      }
-    }
-
-    if (!userId || !userRole) {
-      res.status(401).json({ message: "Authentication required" });
-      return;
-    }
-
-    if (userRole !== 'company_admin' && userRole !== 'super_admin' && userRole !== 'billing_manager') {
-      res.status(403).json({ message: "Access denied. Customer editing is restricted to administrators and billing managers." });
-      return;
-    }
-
-    next();
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Authentication error" });
+  if (!userRole) {
+    res.status(401).json({ message: "Authentication required" });
     return;
   }
+
+  if (userRole !== 'company_admin' && userRole !== 'super_admin' && userRole !== 'billing_manager') {
+    res.status(403).json({ message: "Access denied. Customer editing is restricted to administrators and billing managers." });
+    return;
+  }
+
+  next();
 };
 
 // Middleware to check if user can edit a customer's property boundary (GIS).
@@ -469,49 +429,33 @@ const requireCustomerEditAccess = async (req: any, res: any, next: any) => {
 // The client-side allowlist in
 // `artifacts/irrigopro/src/components/customers/property-boundary.tsx`
 // (`EDIT_ROLES`) MUST stay in sync with this set.
-const requireBoundaryEditAccess = async (req: any, res: any, next: any) => {
-  try {
-    let userId = headerUserId(req);
-    let userRole = headerUserRole(req);
+const requireBoundaryEditAccess = (req: any, res: any, next: any) => {
+  const userRole = req.authenticatedUserRole;
 
-    if (!userId && req.session?.userId) {
-      userId = req.session.userId;
-      const user = await storage.getUser(parseInt(String(userId)));
-      if (user) {
-        userRole = user.role;
-        req.userCompanyId = user.companyId;
-      }
-    }
-
-    if (!userId || !userRole) {
-      res.status(401).json({ message: "Authentication required" });
-      return;
-    }
-
-    const allowed = new Set([
-      'company_admin',
-      'super_admin',
-      'irrigation_manager',
-    ]);
-    if (!allowed.has(userRole)) {
-      res.status(403).json({
-        message: "Access denied. Property boundary editing is restricted to administrators and irrigation managers.",
-      });
-      return;
-    }
-
-    next();
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Authentication error" });
+  if (!userRole) {
+    res.status(401).json({ message: "Authentication required" });
     return;
   }
+
+  const allowed = new Set([
+    'company_admin',
+    'super_admin',
+    'irrigation_manager',
+  ]);
+  if (!allowed.has(userRole)) {
+    res.status(403).json({
+      message: "Access denied. Property boundary editing is restricted to administrators and irrigation managers.",
+    });
+    return;
+  }
+
+  next();
 };
 
 // Middleware to check if user can edit/delete work orders and billing sheets
 const requireWorkOrderBillingAccess = (req: any, res: any, next: any) => {
-  const userRole = req.authenticatedUserRole || headerUserRole(req);
-  
+  const userRole = req.authenticatedUserRole;
+
   if (userRole !== 'company_admin' && userRole !== 'billing_manager' && userRole !== 'irrigation_manager') {
     res.status(403).json({ 
       message: "Access denied. Only company administrators, billing managers, and irrigation managers can edit or delete work orders and billing sheets." 
@@ -539,8 +483,8 @@ const requireBillingAccess = (req: any, res: any, next: any) => {
 
 // More granular middleware for work order updates that allows field techs to start their own work orders
 const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
-  const userRole = req.authenticatedUserRole || headerUserRole(req);
-  const userId = req.authenticatedUserId || headerUserId(req);
+  const userRole = req.authenticatedUserRole;
+  const userId = req.authenticatedUserId;
   const workOrderId = parseInt(req.params.id);
   const updateData = req.body;
   
@@ -602,8 +546,8 @@ const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
 
 // More granular middleware for billing sheet updates that allows field techs to submit for approval
 const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) => {
-  const userRole = req.authenticatedUserRole || headerUserRole(req);
-  const userId = req.authenticatedUserId || headerUserId(req);
+  const userRole = req.authenticatedUserRole;
+  const userId = req.authenticatedUserId;
   const updateData = req.body;
 
   // Managers have full access
@@ -891,59 +835,22 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
 };
 
 // Middleware to check if user has permission to view site maps (company admin and irrigation manager)
-const requireSiteMapViewAccess = async (req: any, res: any, next: any) => {
-  try {
-    let userId: string | undefined;
-    let userRole: string | undefined;
-    
-    console.log('Site map authentication check:', {
-      hasSession: !!req.session,
-      sessionUserId: req.session?.userId,
-      hasHeaders: !!(headerUserId(req) && headerUserRole(req))
-    });
-    
-    // Prioritize session authentication (production-safe)
-    if (req.session?.userId) {
-      userId = req.session.userId.toString();
-      const user = await storage.getUser(parseInt(userId!));
-      if (user) {
-        userRole = user.role;
-        console.log('Session authentication successful:', { userId, userRole });
-      }
-    }
-    
-    // Fallback to headers for development only
-    if (!userId && headerUserId(req) && headerUserRole(req)) {
-      userId = headerUserId(req) as string;
-      userRole = headerUserRole(req) as string;
-      console.log('Header authentication fallback:', { userId, userRole });
-    }
-    
-    if (!userId || !userRole) {
-      console.log('Authentication failed - missing user data');
-      res.status(401).json({ 
-        message: "Authentication required" 
-      });
-      return;
-    }
-    
-    if (userRole !== 'company_admin' && userRole !== 'irrigation_manager' && userRole !== 'field_tech') {
-      console.log('Access denied for role:', userRole);
-      res.status(403).json({ 
-        message: "Access denied. Site map viewing is restricted to company administrators, irrigation managers, and field technicians only." 
-      });
-      return;
-    }
-    
-    console.log('Site map access granted:', { userId, userRole });
-    next();
-  } catch (error) {
-    console.error('Site map view authentication error:', error);
-    res.status(500).json({ 
-      message: "Authentication error" 
+const requireSiteMapViewAccess = (req: any, res: any, next: any) => {
+  const userRole = req.authenticatedUserRole;
+
+  if (!userRole) {
+    res.status(401).json({ message: "Authentication required" });
+    return;
+  }
+
+  if (userRole !== 'company_admin' && userRole !== 'irrigation_manager' && userRole !== 'field_tech') {
+    res.status(403).json({
+      message: "Access denied. Site map viewing is restricted to company administrators, irrigation managers, and field technicians only.",
     });
     return;
   }
+
+  next();
 };
 
 // QuickBooks access control middleware - irrigation managers and field techs cannot access QuickBooks
@@ -5877,7 +5784,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Admin endpoint to resend verification for company users
-  app.post("/api/company/:companyId/users/:userId/resend-verification", requireWorkOrderBillingAccess, async (req, res) => {
+  app.post("/api/company/:companyId/users/:userId/resend-verification", requireAuthentication, requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const { companyId, userId } = req.params;
       const user = await storage.getUser(parseInt(String(userId)));
@@ -7491,7 +7398,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/customers/import-csv", requireCompanyAdminAccess, async (req, res) => {
+  app.post("/api/customers/import-csv", requireAuthentication, requireCompanyAdminAccess, async (req, res) => {
     try {
       const file = req.files?.file;
       if (!file) {
@@ -10668,7 +10575,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.patch("/api/billing-sheets/:id", requireBillingSheetUpdateAccess, async (req, res) => {
+  app.patch("/api/billing-sheets/:id", requireAuthentication, requireBillingSheetUpdateAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
 
@@ -11011,7 +10918,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.delete("/api/billing-sheets/bulk", requireWorkOrderBillingAccess, async (req, res) => {
+  app.delete("/api/billing-sheets/bulk", requireAuthentication, requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const { ids } = req.body;
       if (!Array.isArray(ids) || ids.length === 0) {
@@ -11076,7 +10983,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.delete("/api/billing-sheets/:id", requireWorkOrderBillingAccess, async (req, res) => {
+  app.delete("/api/billing-sheets/:id", requireAuthentication, requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const ok = await storage.deleteBillingSheet(id);
@@ -11771,7 +11678,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.patch("/api/work-orders/:id", requireWorkOrderUpdateAccess, async (req, res) => {
+  app.patch("/api/work-orders/:id", requireAuthentication, requireWorkOrderUpdateAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -12069,7 +11976,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.delete("/api/work-orders/bulk", requireWorkOrderBillingAccess, async (req, res) => {
+  app.delete("/api/work-orders/bulk", requireAuthentication, requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const { ids } = req.body;
       if (!Array.isArray(ids) || ids.length === 0) {
@@ -12118,7 +12025,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.delete("/api/work-orders/:id", requireWorkOrderBillingAccess, async (req, res) => {
+  app.delete("/api/work-orders/:id", requireAuthentication, requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -13925,7 +13832,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Create a new API key (admin only)
-  app.post("/api/company/:companyId/api-keys", requireCompanyAdminAccess, async (req, res) => {
+  app.post("/api/company/:companyId/api-keys", requireAuthentication, requireCompanyAdminAccess, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
       const userId = parseInt(headerUserId(req) as string) || Number(req.session?.userId) || 0;
@@ -13969,7 +13876,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Delete an API key (admin only)
-  app.delete("/api/company/:companyId/api-keys/:keyId", requireCompanyAdminAccess, async (req, res) => {
+  app.delete("/api/company/:companyId/api-keys/:keyId", requireAuthentication, requireCompanyAdminAccess, async (req, res) => {
     try {
       const keyId = parseInt(req.params.keyId);
       const deleted = await storage.deleteApiKey(keyId);
