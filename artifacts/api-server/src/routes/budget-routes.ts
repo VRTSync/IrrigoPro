@@ -83,7 +83,7 @@ export function registerBudgetRoutes(
         // dashboard "This Month Billed" rollup
         // (`getThisMonthBilledForCompany`) so the two surfaces always
         // agree on what counts as "this month".
-        const invoices = await storage.getInvoicesByCustomer(id);
+        const invoices = await storage.getInvoicesByCustomer(id, role === 'super_admin' ? null : (callerCompanyId ?? null));
 
         let monthSpend = 0;
         let yearSpend = 0;

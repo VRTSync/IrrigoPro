@@ -465,7 +465,7 @@ export async function checkBudgetThresholds(invoice: Invoice): Promise<void> {
     // Sum month-to-date and year-to-date totals for the customer,
     // excluding draft / cancelled. Mirrors the budget-usage route
     // bucketing and the "This Month Billed" dashboard rollup.
-    const allInvoices = await storage.getInvoicesByCustomer(customer.id);
+    const allInvoices = await storage.getInvoicesByCustomer(customer.id, null);
     let monthSpend = 0;
     let yearSpend = 0;
     for (const inv of allInvoices) {

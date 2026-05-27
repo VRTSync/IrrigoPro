@@ -13,7 +13,7 @@
 // read through customerId → customers.companyId.
 
 export interface StorageForBillingSheetTenantGuard {
-  getBillingSheetById(id: number): Promise<{ id: number; customerId: number | null } | null | undefined>;
+  getBillingSheetById(id: number, companyId: number | null): Promise<{ id: number; customerId: number | null } | null | undefined>;
   getCustomer(id: number): Promise<{ companyId: number | null } | null | undefined>;
 }
 
@@ -35,7 +35,12 @@ export function makeRequireSameCompanyAsBillingSheet(storage: StorageForBillingS
       return;
     }
 
-    const billingSheet = await storage.getBillingSheetById(billingSheetId);
+    // Derive caller scope before the storage read so the DB query is scoped
+    // at the storage layer (defense in depth; the subsequent company-match
+    // check remains as an application-level safety net).
+    const callerCompanyId = req.authenticatedUserCompanyId as number | null | undefined;
+
+    const billingSheet = await storage.getBillingSheetById(billingSheetId, callerCompanyId ?? null);
     if (!billingSheet) {
       res.status(404).json({ message: "Billing sheet not found" });
       return;
@@ -53,8 +58,6 @@ export function makeRequireSameCompanyAsBillingSheet(storage: StorageForBillingS
       res.status(404).json({ message: "Billing sheet not found" });
       return;
     }
-
-    const callerCompanyId = req.authenticatedUserCompanyId as number | null | undefined;
     if (!callerCompanyId || Number(callerCompanyId) !== Number(bsCompanyId)) {
       console.warn(
         `[AUDIT] cross_tenant_billing_sheet_access ` +

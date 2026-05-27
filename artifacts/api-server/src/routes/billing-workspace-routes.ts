@@ -64,8 +64,9 @@ function parseIntOr(v: unknown, dflt: number): number {
 }
 
 async function scopedBillingSheets(req: any): Promise<any[]> {
-  const all = await storage.getAllBillingSheets();
   const role = req.authenticatedUserRole;
+  const cid0: number | null = req.authenticatedUserCompanyId ?? null;
+  const all = await storage.getAllBillingSheets(role === "super_admin" ? null : cid0);
   if (role === "super_admin") return all as any[];
   const cid: number | null = req.authenticatedUserCompanyId ?? null;
   if (cid == null) return [];
@@ -87,8 +88,9 @@ async function scopedBillingSheets(req: any): Promise<any[]> {
 }
 
 async function scopedWorkOrders(req: any): Promise<any[]> {
-  const all = await storage.getWorkOrders();
   const role = req.authenticatedUserRole;
+  const cid0: number | null = req.authenticatedUserCompanyId ?? null;
+  const all = await storage.getWorkOrders(role === "super_admin" ? null : cid0);
   if (role === "super_admin") return all as any[];
   const cid: number | null = req.authenticatedUserCompanyId ?? null;
   if (cid == null) return [];

@@ -12,7 +12,7 @@ import type { LifecycleAuditOpts } from "./audit-log";
 // ─── Minimal storage surface ─────────────────────────────────────────────────
 
 export interface ApproveRoutesStorage {
-  getBillingSheetById(id: number): Promise<{
+  getBillingSheetById(id: number, companyId: number | null): Promise<{
     id: number;
     status: string;
     partsSubtotal: string | number | null;
@@ -25,7 +25,7 @@ export interface ApproveRoutesStorage {
 
   updateBillingSheet(id: number, data: Record<string, unknown>): Promise<unknown>;
 
-  getWorkOrder(id: number): Promise<{
+  getWorkOrder(id: number, companyId: number | null): Promise<{
     id: number;
     workOrderNumber: string;
     status: string;
@@ -73,7 +73,8 @@ export function registerApproveRoutes(
         return;
       }
 
-      const billingSheet = await storage.getBillingSheetById(id);
+      const callerCompanyId: number | null = userRole === 'super_admin' ? null : (req.authenticatedUserCompanyId ?? null);
+      const billingSheet = await storage.getBillingSheetById(id, callerCompanyId);
       if (!billingSheet) {
         res.status(404).json({ message: "Billing sheet not found" });
         return;
@@ -124,7 +125,8 @@ export function registerApproveRoutes(
         return;
       }
 
-      const billingSheet = await storage.getBillingSheetById(id);
+      const callerCompanyId: number | null = userRole === 'super_admin' ? null : (req.authenticatedUserCompanyId ?? null);
+      const billingSheet = await storage.getBillingSheetById(id, callerCompanyId);
       if (!billingSheet) {
         res.status(404).json({ message: "Billing sheet not found" });
         return;
@@ -163,7 +165,8 @@ export function registerApproveRoutes(
         return;
       }
 
-      const workOrder = await storage.getWorkOrder(id);
+      const callerCompanyId: number | null = userRole === 'super_admin' ? null : (req.authenticatedUserCompanyId ?? null);
+      const workOrder = await storage.getWorkOrder(id, callerCompanyId);
       if (!workOrder) {
         res.status(404).json({ message: "Work order not found" });
         return;
@@ -223,7 +226,8 @@ export function registerApproveRoutes(
         return;
       }
 
-      const workOrder = await storage.getWorkOrder(id);
+      const callerCompanyId: number | null = userRole === 'super_admin' ? null : (req.authenticatedUserCompanyId ?? null);
+      const workOrder = await storage.getWorkOrder(id, callerCompanyId);
       if (!workOrder) {
         res.status(404).json({ message: "Work order not found" });
         return;

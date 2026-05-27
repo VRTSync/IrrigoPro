@@ -39,7 +39,7 @@ function makeStubStorage(): StorageForBillingSheetTenantGuard & {
   return {
     billingSheets,
     customers,
-    async getBillingSheetById(id: number) { return billingSheets.get(id) ?? null; },
+    async getBillingSheetById(id: number, _companyId: number | null) { return billingSheets.get(id) ?? null; },
     async getCustomer(id: number) { return customers.get(id) ?? null; },
   };
 }

@@ -10,7 +10,7 @@
 // Usage in tests: pass in-memory stubs that satisfy StorageForTenantGuard.
 
 export interface StorageForTenantGuard {
-  getWorkOrder(id: number): Promise<{ id: number; customerId: number | null } | null | undefined>;
+  getWorkOrder(id: number, companyId: number | null): Promise<{ id: number; customerId: number | null } | null | undefined>;
   getCustomer(id: number): Promise<{ companyId: number | null } | null | undefined>;
 }
 
@@ -32,7 +32,12 @@ export function makeRequireSameCompanyAsWorkOrder(storage: StorageForTenantGuard
       return;
     }
 
-    const workOrder = await storage.getWorkOrder(workOrderId);
+    // Derive caller scope before the storage read so the DB query is scoped
+    // at the storage layer (defense in depth; the subsequent company-match
+    // check remains as an application-level safety net).
+    const callerCompanyId = req.authenticatedUserCompanyId as number | null | undefined;
+
+    const workOrder = await storage.getWorkOrder(workOrderId, callerCompanyId ?? null);
     if (!workOrder) {
       res.status(404).json({ message: "Work order not found" });
       return;
@@ -48,8 +53,6 @@ export function makeRequireSameCompanyAsWorkOrder(storage: StorageForTenantGuard
       res.status(404).json({ message: "Work order not found" });
       return;
     }
-
-    const callerCompanyId = req.authenticatedUserCompanyId as number | null | undefined;
     if (!callerCompanyId || Number(callerCompanyId) !== Number(woCompanyId)) {
       console.warn(
         `[AUDIT-TENANT-MISMATCH] workOrderId=${workOrderId} callerCompanyId=${callerCompanyId ?? 'none'} ` +

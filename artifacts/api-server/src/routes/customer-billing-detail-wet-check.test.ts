@@ -170,7 +170,7 @@ describe("billing-detail rollup — wet check billings integration (Task #788)",
   });
 
   it("totalUnbilledAmount = BS($100) + WCB1($75) = $175.00 (billed WCB2 excluded)", async () => {
-    const billingSheets = await storage.getBillingSheetsByCustomer(fixtureCustomerId);
+    const billingSheets = await storage.getBillingSheetsByCustomer(fixtureCustomerId, null);
     const wetCheckBillings = await storage.getWetCheckBillingsByCustomer(fixtureCustomerId);
 
     const unbilledBSs = billingSheets.filter(
@@ -192,14 +192,14 @@ describe("billing-detail rollup — wet check billings integration (Task #788)",
   });
 
   it("billingSheets field includes the fixture billing sheet (existing shape)", async () => {
-    const billingSheets = await storage.getBillingSheetsByCustomer(fixtureCustomerId);
+    const billingSheets = await storage.getBillingSheetsByCustomer(fixtureCustomerId, null);
     const ids = billingSheets.map((bs) => bs.id);
     assert.ok(ids.includes(fixtureBillingSheetId),
       "fixture billing sheet should appear in getBillingSheetsByCustomer");
   });
 
   it("unbilledBillingSheets includes the approved_passed_to_billing billing sheet", async () => {
-    const billingSheets = await storage.getBillingSheetsByCustomer(fixtureCustomerId);
+    const billingSheets = await storage.getBillingSheetsByCustomer(fixtureCustomerId, null);
     const unbilledBSs = billingSheets.filter(
       (bs) => bs.status === "approved_passed_to_billing" && !bs.invoiceId,
     );

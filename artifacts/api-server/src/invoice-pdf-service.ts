@@ -256,7 +256,7 @@ export class InvoicePdfService {
 
   async generatePdfBuffer(invoiceId: number): Promise<InvoicePdfGenerationResult> {
     try {
-      const invoice = await this.storage.getInvoiceById(invoiceId);
+      const invoice = await this.storage.getInvoiceById(invoiceId, null);
       if (!invoice) {
         return { success: false, error: 'Invoice not found' };
       }
@@ -277,7 +277,7 @@ export class InvoicePdfService {
 
       for (const item of invoice.items) {
         if (item.sourceType === 'work_order' && item.workOrderId) {
-          const workOrder = await this.storage.getWorkOrder(item.workOrderId);
+          const workOrder = await this.storage.getWorkOrder(item.workOrderId, null);
           if (workOrder) {
             const existingWo = workOrders.find(wo => wo.workOrder.id === workOrder.id);
             if (!existingWo) {
@@ -286,7 +286,7 @@ export class InvoicePdfService {
             }
           }
         } else if (item.sourceType === 'billing_sheet' && item.billingSheetId) {
-          const billingSheet = await this.storage.getBillingSheetById(item.billingSheetId);
+          const billingSheet = await this.storage.getBillingSheetById(item.billingSheetId, null);
           if (billingSheet) {
             const existingBs = billingSheets.find(bs => bs.billingSheet.id === billingSheet.id);
             if (!existingBs) {
@@ -413,7 +413,7 @@ export class InvoicePdfService {
     }
 
     try {
-      const invoice = await this.storage.getInvoiceById(invoiceId);
+      const invoice = await this.storage.getInvoiceById(invoiceId, null);
       if (!invoice) {
         return { success: false, error: 'Invoice not found' };
       }

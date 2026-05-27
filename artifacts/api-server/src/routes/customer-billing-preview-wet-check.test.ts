@@ -128,7 +128,7 @@ describe("billing-preview rollup — wet check billings integration (Task #788)"
   });
 
   it("unbilledAmount = BS($100) + WCB($50) = $150.00", async () => {
-    const billingSheets = await storage.getBillingSheetsByCustomer(fixtureCustomerId);
+    const billingSheets = await storage.getBillingSheetsByCustomer(fixtureCustomerId, null);
     const wetCheckBillings = await storage.getWetCheckBillingsByCustomer(fixtureCustomerId);
 
     const unbilledBSs = billingSheets.filter(
@@ -157,7 +157,7 @@ describe("billing-preview rollup — wet check billings integration (Task #788)"
   });
 
   it("submitted WCB contributes to unapprovedTotal", async () => {
-    const billingSheets = await storage.getBillingSheetsByCustomer(fixtureCustomerId);
+    const billingSheets = await storage.getBillingSheetsByCustomer(fixtureCustomerId, null);
     const wetCheckBillings = await storage.getWetCheckBillingsByCustomer(fixtureCustomerId);
 
     const unapprovedBSs = billingSheets.filter(

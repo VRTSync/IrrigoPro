@@ -392,7 +392,7 @@ export interface IStorage {
   
   // Customer-related data
   getEstimatesByCustomer(customerId: number): Promise<Estimate[]>;
-  getBillingSheetsByCustomer(customerId: number): Promise<BillingSheetWithItems[]>;
+  getBillingSheetsByCustomer(customerId: number, companyId: number | null): Promise<BillingSheetWithItems[]>;
   getBillingSheetsByTechnician(technicianId: number): Promise<BillingSheetWithItems[]>;
   
   // Notifications
@@ -560,12 +560,12 @@ export interface IStorage {
   deleteFieldWorkItem(id: number): Promise<boolean>;
 
   // Work Orders - Enhanced
-  getWorkOrders(): Promise<WorkOrder[]>;
-  getWorkOrdersByTechnician(technicianId: number): Promise<WorkOrder[]>;
-  getWorkOrdersByCustomer(customerId: number): Promise<WorkOrder[]>;
-  getWorkOrdersByStatus(status: string): Promise<WorkOrder[]>;
-  getWorkOrdersByEstimate(estimateId: number): Promise<WorkOrder[]>;
-  getWorkOrder(id: number): Promise<WorkOrder | undefined>;
+  getWorkOrders(companyId: number | null): Promise<WorkOrder[]>;
+  getWorkOrdersByTechnician(technicianId: number, companyId: number | null): Promise<WorkOrder[]>;
+  getWorkOrdersByCustomer(customerId: number, companyId: number | null): Promise<WorkOrder[]>;
+  getWorkOrdersByStatus(status: string, companyId: number | null): Promise<WorkOrder[]>;
+  getWorkOrdersByEstimate(estimateId: number, companyId: number | null): Promise<WorkOrder[]>;
+  getWorkOrder(id: number, companyId: number | null): Promise<WorkOrder | undefined>;
   createWorkOrder(workOrder: InsertWorkOrder, estimateItems?: EstimateItem[]): Promise<WorkOrder>;
   createWorkOrderFromEstimate(estimateId: number): Promise<WorkOrder>;
   // Task #611 — atomic "approve estimate" lifecycle action. Flips the
@@ -599,8 +599,9 @@ export interface IStorage {
   replaceWorkOrderItemsInTransaction(workOrderId: number, items: InsertWorkOrderItem[]): Promise<WorkOrderItem[]>;
   
   // Billing Sheets - for work done without work orders
-  getAllBillingSheets(): Promise<BillingSheetWithItems[]>;
-  getBillingSheetById(id: number): Promise<BillingSheetWithItems | undefined>;
+  getAllBillingSheets(companyId: number | null): Promise<BillingSheetWithItems[]>;
+  getBillingSheetById(id: number, companyId: number | null): Promise<BillingSheetWithItems | undefined>;
+  getBillingSheetsByWorkOrderId(workOrderId: number, companyId: number | null): Promise<BillingSheetWithItems[]>;
   getNextBillingNumber(): Promise<string>;
   createBillingSheet(billingSheet: InsertBillingSheet & { items?: InsertBillingSheetItem[] }): Promise<BillingSheet>;
   updateBillingSheet(id: number, billingSheet: Partial<InsertBillingSheet>): Promise<BillingSheet | undefined>;
@@ -635,7 +636,8 @@ export interface IStorage {
   updateMissingPhotosSmsStatus(messageSid: string, status: string, errorCode?: string | null): Promise<MissingPhotosNotification | undefined>;
 
   // Invoices - monthly consolidated billing
-  getInvoices(): Promise<Invoice[]>;
+  getInvoices(companyId: number | null): Promise<Invoice[]>;
+  getInvoicesByStatus(status: string, companyId: number | null): Promise<Invoice[]>;
   // Task #662 — company-scoped "This Month Billed" rollup. Joins
   // invoices to customers so the result honors customers.companyId
   // (the invoices table itself has no companyId column). Excludes
@@ -645,7 +647,7 @@ export interface IStorage {
     companyId: number | null,
     now?: Date,
   ): Promise<{ amount: number; invoiceCount: number; month: string }>;
-  getInvoiceById(id: number): Promise<InvoiceWithItems | undefined>;
+  getInvoiceById(id: number, companyId: number | null): Promise<InvoiceWithItems | undefined>;
   createInvoice(invoice: InsertInvoice & { invoiceNumber?: string }): Promise<Invoice>;
   updateInvoice(id: number, invoice: Partial<InsertInvoice> & { invoiceNumber?: string }): Promise<Invoice | undefined>;
   deleteInvoice(id: number): Promise<boolean>;
@@ -3229,20 +3231,50 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Work Orders - Enhanced
-  async getWorkOrders(): Promise<WorkOrder[]> {
+  // Returns a subquery fragment that scopes rows to a company via customer_id.
+  // When companyId is null (super_admin), returns undefined (no extra filter).
+  private _companyScope(companyId: number | null) {
+    if (companyId === null) return undefined;
+    return inArray(
+      workOrders.customerId,
+      db.select({ id: customers.id }).from(customers).where(eq(customers.companyId, companyId)),
+    );
+  }
+
+  private _companyScopeForBS(companyId: number | null) {
+    if (companyId === null) return undefined;
+    return inArray(
+      billingSheets.customerId,
+      db.select({ id: customers.id }).from(customers).where(eq(customers.companyId, companyId)),
+    );
+  }
+
+  private _companyScopeForInvoice(companyId: number | null) {
+    if (companyId === null) return undefined;
+    return inArray(
+      invoices.customerId,
+      db.select({ id: customers.id }).from(customers).where(eq(customers.companyId, companyId)),
+    );
+  }
+
+  async getWorkOrders(companyId: number | null): Promise<WorkOrder[]> {
     try {
-      return await db.select().from(workOrders).orderBy(desc(workOrders.createdAt));
+      const scope = this._companyScope(companyId);
+      return await db.select().from(workOrders)
+        .where(scope ?? undefined)
+        .orderBy(desc(workOrders.createdAt));
     } catch (error) {
       console.error("Error fetching work orders:", error);
-      // Return empty array instead of error for now
       return [];
     }
   }
 
-  async getWorkOrdersByTechnician(technicianId: number): Promise<WorkOrder[]> {
+  async getWorkOrdersByTechnician(technicianId: number, companyId: number | null): Promise<WorkOrder[]> {
     try {
+      const scope = this._companyScope(companyId);
+      const cond = scope ? and(eq(workOrders.assignedTechnicianId, technicianId), scope) : eq(workOrders.assignedTechnicianId, technicianId);
       return await db.select().from(workOrders)
-        .where(eq(workOrders.assignedTechnicianId, technicianId))
+        .where(cond)
         .orderBy(desc(workOrders.createdAt));
     } catch (error) {
       console.error("Error fetching work orders by technician:", error);
@@ -3250,10 +3282,12 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getWorkOrdersByCustomer(customerId: number): Promise<WorkOrder[]> {
+  async getWorkOrdersByCustomer(customerId: number, companyId: number | null): Promise<WorkOrder[]> {
     try {
+      const scope = this._companyScope(companyId);
+      const cond = scope ? and(eq(workOrders.customerId, customerId), scope) : eq(workOrders.customerId, customerId);
       return await db.select().from(workOrders)
-        .where(eq(workOrders.customerId, customerId))
+        .where(cond)
         .orderBy(desc(workOrders.createdAt));
     } catch (error) {
       console.error("Error fetching work orders by customer:", error);
@@ -3261,10 +3295,12 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getWorkOrdersByStatus(status: string): Promise<WorkOrder[]> {
+  async getWorkOrdersByStatus(status: string, companyId: number | null): Promise<WorkOrder[]> {
     try {
+      const scope = this._companyScope(companyId);
+      const cond = scope ? and(eq(workOrders.status, status), scope) : eq(workOrders.status, status);
       return await db.select().from(workOrders)
-        .where(eq(workOrders.status, status))
+        .where(cond)
         .orderBy(desc(workOrders.createdAt));
     } catch (error) {
       console.error("Error fetching work orders by status:", error);
@@ -3272,10 +3308,12 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getWorkOrdersByEstimate(estimateId: number): Promise<WorkOrder[]> {
+  async getWorkOrdersByEstimate(estimateId: number, companyId: number | null): Promise<WorkOrder[]> {
     try {
+      const scope = this._companyScope(companyId);
+      const cond = scope ? and(eq(workOrders.estimateId, estimateId), scope) : eq(workOrders.estimateId, estimateId);
       return await db.select().from(workOrders)
-        .where(eq(workOrders.estimateId, estimateId))
+        .where(cond)
         .orderBy(desc(workOrders.createdAt));
     } catch (error) {
       console.error("Error fetching work orders by estimate:", error);
@@ -3283,8 +3321,10 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getWorkOrder(id: number): Promise<WorkOrder | undefined> {
-    const [workOrder] = await db.select().from(workOrders).where(eq(workOrders.id, id));
+  async getWorkOrder(id: number, companyId: number | null): Promise<WorkOrder | undefined> {
+    const scope = this._companyScope(companyId);
+    const cond = scope ? and(eq(workOrders.id, id), scope) : eq(workOrders.id, id);
+    const [workOrder] = await db.select().from(workOrders).where(cond);
     return workOrder || undefined;
   }
 
@@ -3345,7 +3385,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     // Check if work order already exists for this estimate
-    const existingWorkOrders = await this.getWorkOrdersByEstimate(estimateId);
+    const existingWorkOrders = await this.getWorkOrdersByEstimate(estimateId, null);
     if (existingWorkOrders.length > 0) {
       throw new Error(`Work order already exists for estimate ${estimateId}`);
     }
@@ -3686,10 +3726,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Standalone Billing Sheets - for work done without work orders
-  async getAllBillingSheets(): Promise<BillingSheetWithItems[]> {
-    const sheets = await db.select().from(billingSheets).orderBy(desc(billingSheets.createdAt));
+  async getAllBillingSheets(companyId: number | null): Promise<BillingSheetWithItems[]> {
+    const scope = this._companyScopeForBS(companyId);
+    const sheets = await db.select().from(billingSheets)
+      .where(scope ?? undefined)
+      .orderBy(desc(billingSheets.createdAt));
     
-    // Get items for each billing sheet
     const sheetsWithItems = await Promise.all(sheets.map(async (sheet) => {
       const items = await db.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, sheet.id));
       return { ...sheet, items };
@@ -3698,12 +3740,27 @@ export class DatabaseStorage implements IStorage {
     return sheetsWithItems;
   }
 
-  async getBillingSheetById(id: number): Promise<BillingSheetWithItems | undefined> {
-    const [sheet] = await db.select().from(billingSheets).where(eq(billingSheets.id, id));
+  async getBillingSheetById(id: number, companyId: number | null): Promise<BillingSheetWithItems | undefined> {
+    const scope = this._companyScopeForBS(companyId);
+    const cond = scope ? and(eq(billingSheets.id, id), scope) : eq(billingSheets.id, id);
+    const [sheet] = await db.select().from(billingSheets).where(cond);
     if (!sheet) return undefined;
     
     const items = await db.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, id));
     return { ...sheet, items };
+  }
+
+  async getBillingSheetsByWorkOrderId(workOrderId: number, companyId: number | null): Promise<BillingSheetWithItems[]> {
+    const scope = this._companyScopeForBS(companyId);
+    const cond = scope ? and(eq(billingSheets.workOrderId, workOrderId), scope) : eq(billingSheets.workOrderId, workOrderId);
+    const sheets = await db.select().from(billingSheets)
+      .where(cond)
+      .orderBy(desc(billingSheets.createdAt));
+    const sheetsWithItems = await Promise.all(sheets.map(async (sheet) => {
+      const items = await db.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, sheet.id));
+      return { ...sheet, items };
+    }));
+    return sheetsWithItems;
   }
 
   async getNextBillingNumber(): Promise<string> {
@@ -5198,10 +5255,11 @@ export class DatabaseStorage implements IStorage {
     return rows.map((e) => ({ ...e, lifecycleStatus: computeLifecycleStatus(e) }) as Estimate);
   }
 
-  async getBillingSheetsByCustomer(customerId: number): Promise<BillingSheetWithItems[]> {
-    const sheets = await db.select().from(billingSheets).where(eq(billingSheets.customerId, customerId)).orderBy(desc(billingSheets.createdAt));
+  async getBillingSheetsByCustomer(customerId: number, companyId: number | null): Promise<BillingSheetWithItems[]> {
+    const scope = this._companyScopeForBS(companyId);
+    const cond = scope ? and(eq(billingSheets.customerId, customerId), scope) : eq(billingSheets.customerId, customerId);
+    const sheets = await db.select().from(billingSheets).where(cond).orderBy(desc(billingSheets.createdAt));
     
-    // Get items for each billing sheet
     const sheetsWithItems = await Promise.all(sheets.map(async (sheet) => {
       const items = await db.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, sheet.id));
       return { ...sheet, items };
@@ -5522,28 +5580,42 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(invoices).orderBy(desc(invoices.createdAt));
   }
 
-  async getInvoiceById(id: number): Promise<InvoiceWithItems | undefined> {
-    const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
+  async getInvoiceById(id: number, companyId: number | null): Promise<InvoiceWithItems | undefined> {
+    const scope = this._companyScopeForInvoice(companyId);
+    const cond = scope ? and(eq(invoices.id, id), scope) : eq(invoices.id, id);
+    const [invoice] = await db.select().from(invoices).where(cond);
     if (!invoice) return undefined;
     
     const items = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, id));
     return { ...invoice, items };
   }
 
-  async getInvoicesByCustomer(customerId: number): Promise<Invoice[]> {
+  async getInvoicesByCustomer(customerId: number, companyId: number | null): Promise<Invoice[]> {
     try {
+      const scope = this._companyScopeForInvoice(companyId);
+      const cond = scope ? and(eq(invoices.customerId, customerId), scope) : eq(invoices.customerId, customerId);
       return await db.select().from(invoices)
-        .where(eq(invoices.customerId, customerId))
+        .where(cond)
         .orderBy(desc(invoices.createdAt));
     } catch (error) {
-      // If invoices table doesn't exist or has schema issues, return empty array
       console.warn(`Error querying invoices for customer ${customerId}:`, error);
       return [];
     }
   }
 
-  async getInvoices(): Promise<Invoice[]> {
-    return await db.select().from(invoices).orderBy(desc(invoices.createdAt));
+  async getInvoices(companyId: number | null): Promise<Invoice[]> {
+    const scope = this._companyScopeForInvoice(companyId);
+    return await db.select().from(invoices)
+      .where(scope ?? undefined)
+      .orderBy(desc(invoices.createdAt));
+  }
+
+  async getInvoicesByStatus(status: string, companyId: number | null): Promise<Invoice[]> {
+    const scope = this._companyScopeForInvoice(companyId);
+    const cond = scope ? and(eq(invoices.status, status), scope) : eq(invoices.status, status);
+    return await db.select().from(invoices)
+      .where(cond)
+      .orderBy(desc(invoices.createdAt));
   }
 
   // Task #662 — company-scoped "This Month Billed" rollup. Sums

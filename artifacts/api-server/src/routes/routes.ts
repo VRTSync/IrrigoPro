@@ -504,12 +504,13 @@ const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
       });
       return;
     }
-    
+    const fieldTechCompanyId: number | null = (req as any).authenticatedUserCompanyId ?? null;
+
     // Check if this is just starting a work order (changing status to in_progress)
     if (updateData.status === 'in_progress' && Object.keys(updateData).length <= 2) {
       try {
         // Check if the work order is assigned to this field tech
-        const workOrder = await storage.getWorkOrder(workOrderId);
+        const workOrder = await storage.getWorkOrder(workOrderId, fieldTechCompanyId);
         const userIdNum = parseInt(userId as string);
         
         if (workOrder && workOrder.assignedTechnicianId === userIdNum) {
@@ -529,7 +530,7 @@ const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
     const isPhotosOnlyEdit = updateKeys.length === 1 && updateKeys[0] === 'photos' && Array.isArray(updateData.photos);
     if (isPhotosOnlyEdit) {
       try {
-        const workOrder = await storage.getWorkOrder(workOrderId);
+        const workOrder = await storage.getWorkOrder(workOrderId, fieldTechCompanyId);
         const userIdNum = parseInt(userId as string);
         if (workOrder && workOrder.assignedTechnicianId === userIdNum && workOrder.status !== 'cancelled') {
           return next();
@@ -545,7 +546,7 @@ const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
     const isPinOnlyEdit = updateKeys.length > 0 && updateKeys.every(k => PIN_KEYS.has(k));
     if (isPinOnlyEdit) {
       try {
-        const workOrder = await storage.getWorkOrder(workOrderId);
+        const workOrder = await storage.getWorkOrder(workOrderId, fieldTechCompanyId);
         const userIdNum = parseInt(userId as string);
         if (!workOrder || workOrder.assignedTechnicianId !== userIdNum || workOrder.status === 'cancelled') {
           res.status(403).json({
@@ -609,7 +610,8 @@ const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) =>
 
     try {
       const billingSheetId = parseInt(req.params.id);
-      const billingSheet = await storage.getBillingSheetById(billingSheetId);
+      const bsTechCompanyId: number | null = (req as any).authenticatedUserCompanyId ?? null;
+      const billingSheet = await storage.getBillingSheetById(billingSheetId, bsTechCompanyId);
       const userIdNum = parseInt(userId as string);
 
       if (billingSheet && billingSheet.technicianId === userIdNum) {
@@ -1205,7 +1207,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(400).json({ message: "Invalid work order ID" });
         return;
       }
-      const wo = await storage.getWorkOrder(id);
+      const callerCompanyIdActivity = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const wo = await storage.getWorkOrder(id, callerCompanyIdActivity);
       if (!wo) { res.status(404).json({ message: "Work order not found" }); return; }
       // Resolve the work order's company via its customer record so we can
       // apply the same per-company isolation as the estimate / wet check
@@ -5047,7 +5050,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const allUsers = await storage.getUsers();
         const activeUsers = allUsers.filter(user => user.isActive).length;
         
-        const allWorkOrders = await storage.getWorkOrders();
+        const allWorkOrders = await storage.getWorkOrders(null);
         const openWorkOrders = allWorkOrders.filter(wo => wo.status === "assigned").length;
         
         const allCustomers = await storage.getCustomers();
@@ -5062,7 +5065,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         const allCustomers = await storage.getCustomers();
         
-        const allWorkOrders = await storage.getWorkOrders();
+        const allWorkOrders = await storage.getWorkOrders(userCompanyId);
         const companyWorkOrders = allWorkOrders.filter(wo => wo.customerId && allCustomers.find(c => c.id === wo.customerId)?.companyId === userCompanyId);
         const openWorkOrders = companyWorkOrders.filter(wo => wo.status === "assigned" || wo.status === "in_progress").length;
         
@@ -5959,7 +5962,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const users = await storage.getUsers();
       const estimates = await storage.getEstimates();
-      const workOrders = await storage.getWorkOrders();
+      const workOrders = await storage.getWorkOrders(null);
       
       const stats = {
         totalUsers: users.length,
@@ -6055,9 +6058,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log(`Processing customer: ${customer.name} (ID: ${customer.id})`);
           
           // Get all four data sources for this customer
-          const workOrders = await storage.getWorkOrdersByCustomer(customer.id);
+          const callerCompanyId6058 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+          const workOrders = await storage.getWorkOrdersByCustomer(customer.id, callerCompanyId6058);
           const estimates = await storage.getEstimatesByCustomer(customer.id);
-          const billingSheets = await storage.getBillingSheetsByCustomer(customer.id);
+          const billingSheets = await storage.getBillingSheetsByCustomer(customer.id, callerCompanyId6058);
           const wetCheckBillingsForCustomer = await storage.getWetCheckBillingsByCustomer(customer.id);
 
           const approvedEstimates = estimates.filter(est => est.status === 'approved');
@@ -6317,11 +6321,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Get all work orders for the customer
-      const allWorkOrders = await storage.getWorkOrders();
+      const callerCompanyId6320 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const allWorkOrders = await storage.getWorkOrders(callerCompanyId6320);
       const rawWorkOrders = allWorkOrders.filter(wo => wo.customerId === customerId);
 
       // Get all billing sheets for the customer
-      const allBillingSheets = await storage.getAllBillingSheets();
+      const allBillingSheets = await storage.getAllBillingSheets(callerCompanyId6320);
       const rawBillingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
 
       // Get all estimates for the customer
@@ -6454,11 +6459,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Get all work orders for the customer
-      const allWorkOrders = await storage.getWorkOrders();
+      const callerCompanyId6457 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const allWorkOrders = await storage.getWorkOrders(callerCompanyId6457);
       const workOrders = allWorkOrders.filter(wo => wo.customerId === customerId);
 
       // Get all billing sheets for the customer
-      const allBillingSheets = await storage.getAllBillingSheets();
+      const allBillingSheets = await storage.getAllBillingSheets(callerCompanyId6457);
       const billingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
 
       // Query eligible wet check billings for this customer (Slice 2+)
@@ -6743,11 +6749,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Get all work orders for the customer
-      const allWorkOrders = await storage.getWorkOrders();
+      const callerCompanyId6746 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const allWorkOrders = await storage.getWorkOrders(callerCompanyId6746);
       const workOrders = allWorkOrders.filter(wo => wo.customerId === customerId);
 
       // Get all billing sheets for the customer
-      const allBillingSheets = await storage.getAllBillingSheets();
+      const allBillingSheets = await storage.getAllBillingSheets(callerCompanyId6746);
       const billingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
 
       // Query eligible wet check billings for this customer (Slice 2+)
@@ -7137,7 +7144,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const invoiceItemsForReconciliation = await storage.getInvoiceItems(invoice.id);
         for (const item of invoiceItemsForReconciliation) {
           if (item.sourceType === 'billing_sheet' && item.sourceId) {
-            const bs = await storage.getBillingSheetById(item.sourceId);
+            const bs = await storage.getBillingSheetById(item.sourceId, callerCompanyId6746);
             if (bs && !bs.invoiceId) {
               await storage.updateBillingSheet(bs.id, {
                 invoiceId: invoice.id,
@@ -7411,7 +7418,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/customers/:id/work-orders", async (req, res) => {
     try {
       const customerId = parseInt(req.params.id);
-      const workOrders = await storage.getWorkOrdersByCustomer(customerId);
+      const callerCompanyId7414 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const workOrders = await storage.getWorkOrdersByCustomer(customerId, callerCompanyId7414);
       res.json(workOrders);
     } catch (error) {
       console.error(error);
@@ -7422,7 +7430,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/customers/:id/billing-sheets", async (req, res) => {
     try {
       const customerId = parseInt(req.params.id);
-      const billingSheets = await storage.getBillingSheetsByCustomer(customerId);
+      const callerCompanyId7425 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const billingSheets = await storage.getBillingSheetsByCustomer(customerId, callerCompanyId7425);
       res.json(billingSheets);
     } catch (error) {
       console.error(error);
@@ -9197,8 +9206,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         laborMode: incomingLaborMode,
       } = req.body;
 
+      const callerCompanyIdComplete0 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+
       // Billing lock: prevent completing an already-billed work order
-      const existingWoForComplete = await storage.getWorkOrder(workOrderId);
+      const existingWoForComplete = await storage.getWorkOrder(workOrderId, callerCompanyIdComplete0);
       if (existingWoForComplete && (existingWoForComplete.invoiceId || existingWoForComplete.status === 'billed')) {
         res.status(409).json({ message: "This record has been billed and cannot be edited." });
         return;
@@ -9209,7 +9220,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const completedByUserName = completedByUser?.name || req.headers['x-user-name'];
 
       // Merge creation photos with completion photos (don't overwrite)
-      const existingWorkOrder = await storage.getWorkOrder(workOrderId);
+      const existingWorkOrder = await storage.getWorkOrder(workOrderId, callerCompanyIdComplete0);
 
       // Branch enforcement: if the customer has branches configured, branchName must be present
       if (existingWorkOrder?.customerId) {
@@ -9394,7 +9405,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const completedByUserName = completedByUser?.name || req.headers['x-user-name'];
 
       // Read existing work order to snapshot rates from customer
-      const existingWorkOrder = await storage.getWorkOrder(id);
+      const callerCompanyIdComplete1 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const existingWorkOrder = await storage.getWorkOrder(id, callerCompanyIdComplete1);
       if (!existingWorkOrder) {
         res.status(404).json({ message: "Work order not found" });
         return;
@@ -9540,7 +9552,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const customerId = req.query.customerId ? parseInt(req.query.customerId as string) : undefined;
 
-      const allInvoices = await storage.getInvoices();
+      const callerCompanyId9543 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const allInvoices = await storage.getInvoices(callerCompanyId9543);
 
       // Filter by customer if provided
       let invoices = customerId
@@ -9673,11 +9686,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const { technician } = req.query;
       
+      const callerCompanyId9680 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
       let billingSheets;
       if (technician) {
         billingSheets = await storage.getBillingSheetsByTechnician(parseInt(technician as string));
       } else {
-        billingSheets = await storage.getAllBillingSheets();
+        billingSheets = await storage.getAllBillingSheets(callerCompanyId9680);
       }
       
       // Strip pricing fields for field technicians
@@ -9707,7 +9721,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const requesterCompanyId: number | null = req.authenticatedUserCompanyId ?? null;
       const isSuperAdmin = role === 'super_admin';
 
-      const all = await storage.getAllBillingSheets();
+      const all = await storage.getAllBillingSheets(isSuperAdmin ? null : requesterCompanyId);
       const techCompanyCache = new Map<number, number | null>();
       const techCompanyId = async (techId: number | null | undefined): Promise<number | null> => {
         if (!techId) return null;
@@ -9851,7 +9865,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
-      const all = await storage.getAllBillingSheets();
+      const all = await storage.getAllBillingSheets(isSuperAdmin ? null : requesterCompanyId);
       const candidates = all.filter(s => {
         const created = s.createdAt ? new Date(s.createdAt) : null;
         if (!created || created >= PHOTO_FIX_CUTOFF) return false;
@@ -10060,7 +10074,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
-      const existing = await storage.getBillingSheetById(id);
+      const callerCompanyId10063 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const existing = await storage.getBillingSheetById(id, callerCompanyId10063);
       if (!existing) {
         res.status(404).json({ message: "Billing sheet not found" });
         return;
@@ -10127,7 +10142,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
-      const existing = await storage.getBillingSheetById(id);
+      const callerCompanyId10130 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const existing = await storage.getBillingSheetById(id, callerCompanyId10130);
       if (!existing) {
         res.status(404).json({ message: "Billing sheet not found" });
         return;
@@ -10291,10 +10307,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.get("/api/billing-sheets/:id", requireAuthentication, requireSameCompanyAsBillingSheet, async (req, res) => {
+  app.get("/api/billing-sheets/:id", requireAuthentication, requireSameCompanyAsBillingSheet, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
-      const billingSheet = await storage.getBillingSheetById(id);
+      const callerCompanyId10307 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const billingSheet = await storage.getBillingSheetById(id, callerCompanyId10307);
       if (!billingSheet) {
         res.status(404).json({ message: "Billing sheet not found" });
         return;
@@ -10572,7 +10589,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           });
           if (manualItemIndices.length > 0 && companyId) {
             // Fetch the saved items to get their IDs; match by insertion order (same order as cleanData.items)
-            const savedSheet = await storage.getBillingSheetById(billingSheet.id);
+            const savedSheet = await storage.getBillingSheetById(billingSheet.id, companyId ?? null);
             const savedItems: BillingSheetItem[] = savedSheet?.items || [];
             // Build an index of saved manual items (no partId) in order
             const savedManualItems = savedItems.filter(si => !si.partId);
@@ -10630,7 +10647,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         bsPatchKeys.length === 1 && bsPatchKeys[0] === 'photos' && Array.isArray(req.body.photos);
 
       // Billing lock: reject updates to billing sheets that have been invoiced or approved for billing
-      const existingBsForLockCheck = await storage.getBillingSheetById(id);
+      const callerCompanyId10641 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const existingBsForLockCheck = await storage.getBillingSheetById(id, callerCompanyId10641);
       if (!isBsPhotosOnlyPatch && existingBsForLockCheck && (existingBsForLockCheck.invoiceId || existingBsForLockCheck.status === 'billed')) {
         res.status(409).json({ message: "This record has been billed and cannot be edited." });
         return;
@@ -10834,7 +10852,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       // Handle items if provided — atomically replace items AND resync partsSubtotal/totalAmount in one transaction
       if (items && Array.isArray(items)) {
-        const countBefore = (await storage.getBillingSheetById(id))?.items?.length ?? 0;
+        const bsPatchCompanyId = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+        const countBefore = (await storage.getBillingSheetById(id, bsPatchCompanyId))?.items?.length ?? 0;
 
         // Server-side authoritative pricing (Task #160): rewrite catalog line items
         // with the catalog price before persisting. Manual line items pass through.
@@ -10887,7 +10906,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Submission guard: if status transitions to submitted, check items vs partsSubtotal
       if (billingSheetData.status === 'submitted') {
         const partsSubtotal = parseFloat(String(billingSheetData.partsSubtotal ?? billingSheet.partsSubtotal ?? '0'));
-        const currentSheet = await storage.getBillingSheetById(id);
+        const bsSubmitCompanyId = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+        const currentSheet = await storage.getBillingSheetById(id, bsSubmitCompanyId);
         const currentItems = currentSheet?.items ?? [];
         if (partsSubtotal > 0 && currentItems.length === 0) {
           res.status(400).json({ message: "Parts were recorded but no line items were saved — submission blocked to prevent billing data loss" });
@@ -11050,7 +11070,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get("/api/invoices/:invoiceId/audit", requireAuthentication, requireBillingAccess, async (req, res) => {
     try {
       const invoiceId = parseInt(req.params.invoiceId);
-      const invoice = await storage.getInvoiceById(invoiceId);
+      const callerCompanyId11065 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const invoice = await storage.getInvoiceById(invoiceId, callerCompanyId11065);
       if (!invoice) {
         res.status(404).json({ message: "Invoice not found" });
         return;
@@ -11099,7 +11120,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           let approvedPartsSnapshot: number | null = null;
 
           if (item.sourceType === "work_order" && item.workOrderId) {
-            const wo = await storage.getWorkOrder(item.workOrderId);
+            const wo = await storage.getWorkOrder(item.workOrderId, userCompanyId ?? null);
             if (wo) {
               status = wo.status || "billed";
               description = wo.projectName || item.description;
@@ -11132,7 +11153,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
               }
             }
           } else if (item.sourceType === "billing_sheet" && item.billingSheetId) {
-            const bs = await storage.getBillingSheetById(item.billingSheetId);
+            const bs = await storage.getBillingSheetById(item.billingSheetId, userCompanyId ?? null);
             if (bs) {
               status = bs.status || "billed";
               description = bs.workDescription || item.description;
@@ -11214,7 +11235,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get("/api/invoices/:invoiceId/pdf", requireAuthentication, requireBillingAccess, async (req, res) => {
     try {
       const invoiceId = parseInt(req.params.invoiceId);
-      const invoice = await storage.getInvoiceById(invoiceId);
+      const callerCompanyId11217 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const invoice = await storage.getInvoiceById(invoiceId, callerCompanyId11217);
       if (!invoice) {
         res.status(404).json({ message: "Invoice not found" });
         return;
@@ -11275,7 +11297,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
-      const invoice = await storage.getInvoiceById(invoiceId);
+      const callerCompanyId11278 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const invoice = await storage.getInvoiceById(invoiceId, callerCompanyId11278);
       const customer = invoice ? await storage.getCustomerById(invoice.customerId) : null;
       const periodStart = invoice ? new Date(invoice.periodStart) : new Date();
       const periodEnd = invoice ? new Date(invoice.periodEnd) : new Date();
@@ -11301,7 +11324,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/invoices/:invoiceId/pdf/send", requireAuthentication, requireBillingAccess, async (req, res) => {
     try {
       const invoiceId = parseInt(req.params.invoiceId);
-      const invoice = await storage.getInvoiceById(invoiceId);
+      const callerCompanyId11304 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const invoice = await storage.getInvoiceById(invoiceId, callerCompanyId11304);
       
       if (!invoice) {
         res.status(404).json({ message: "Invoice not found" });
@@ -11362,7 +11386,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/invoices/:invoiceId/pdf/regenerate", requireAuthentication, requireBillingAccess, async (req, res) => {
     try {
       const invoiceId = parseInt(req.params.invoiceId);
-      const invoice = await storage.getInvoiceById(invoiceId);
+      const callerCompanyId11380 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const invoice = await storage.getInvoiceById(invoiceId, callerCompanyId11380);
       
       if (!invoice) {
         res.status(404).json({ message: "Invoice not found" });
@@ -11410,7 +11435,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           res.status(401).json({ message: "Authentication required" });
           return;
         }
-        const own = await storage.getWorkOrdersByTechnician(userId);
+        const callerCompanyIdTech = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+        const own = await storage.getWorkOrdersByTechnician(userId, callerCompanyIdTech);
         // Task #532 — field techs are the most bandwidth-constrained
         // users, so the per-tech list also honors ?limit/?offset and
         // emits X-Total-Count for incremental loading.
@@ -11419,15 +11445,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
+      const callerCompanyIdWoList = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
       let workOrders;
       if (technician) {
-        workOrders = await storage.getWorkOrdersByTechnician(parseInt(technician as string));
+        workOrders = await storage.getWorkOrdersByTechnician(parseInt(technician as string), callerCompanyIdWoList);
       } else if (customer) {
-        workOrders = await storage.getWorkOrdersByCustomer(parseInt(customer as string));
+        workOrders = await storage.getWorkOrdersByCustomer(parseInt(customer as string), callerCompanyIdWoList);
       } else if (status) {
-        workOrders = await storage.getWorkOrdersByStatus(status as string);
+        workOrders = await storage.getWorkOrdersByStatus(status as string, callerCompanyIdWoList);
       } else {
-        workOrders = await storage.getWorkOrders();
+        workOrders = await storage.getWorkOrders(callerCompanyIdWoList);
       }
 
       // Task #532 — opt-in pagination so the work orders list page can
@@ -11453,7 +11480,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
-      const all = await storage.getWorkOrders();
+      const callerCompanyIdMissingWo = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const all = await storage.getWorkOrders(callerCompanyIdMissingWo);
       const missing = all.filter(wo => {
         const created = wo.createdAt ? new Date(wo.createdAt) : null;
         if (!created || created >= PHOTO_FIX_CUTOFF) return false;
@@ -11524,7 +11552,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
-      const existing = await storage.getWorkOrder(id);
+      const callerCompanyIdWoNoPhotos = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const existing = await storage.getWorkOrder(id, callerCompanyIdWoNoPhotos);
       if (!existing) {
         res.status(404).json({ message: "Work order not found" });
         return;
@@ -11565,7 +11594,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
-      const existing = await storage.getWorkOrder(id);
+      const callerCompanyIdWoClear = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const existing = await storage.getWorkOrder(id, callerCompanyIdWoClear);
       if (!existing) {
         res.status(404).json({ message: "Work order not found" });
         return;
@@ -11586,7 +11616,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get("/api/work-orders/:id", requireAuthentication, requireSameCompanyAsWorkOrder, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const workOrder = req.tenantScopedWorkOrder ?? await storage.getWorkOrder(id);
+      const callerCompanyIdWoGet = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const workOrder = req.tenantScopedWorkOrder ?? await storage.getWorkOrder(id, callerCompanyIdWoGet);
       if (!workOrder) {
         res.status(404).json({ message: "Work order not found" });
         return;
@@ -11758,7 +11789,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         woPatchKeys.length === 1 && woPatchKeys[0] === 'photos' && Array.isArray(req.body.photos);
 
       // Billing lock: reject updates to work orders that have been invoiced
-      const existingForLockCheck = await storage.getWorkOrder(id);
+      const callerCompanyIdWoPatch = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const existingForLockCheck = await storage.getWorkOrder(id, callerCompanyIdWoPatch);
       if (!isWoPhotosOnlyPatch && existingForLockCheck && (existingForLockCheck.invoiceId || existingForLockCheck.status === 'billed')) {
         res.status(409).json({ message: "This record has been billed and cannot be edited." });
         return;
@@ -11858,7 +11890,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           return;
         }
       } else {
-        workOrder = await storage.getWorkOrder(id);
+        workOrder = await storage.getWorkOrder(id, callerCompanyIdWoPatch);
         if (!workOrder) {
           res.status(404).json({ message: "Work order not found" });
           return;
@@ -11986,7 +12018,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Recompute financial totals if financial inputs were touched (totalHours, totalPartsCost, items)
       const financialFieldsTouched = 'totalHours' in workOrderData || 'totalPartsCost' in workOrderData || (items !== undefined && Array.isArray(items));
       if (financialFieldsTouched) {
-        const freshWo = await storage.getWorkOrder(id);
+        const freshWo = await storage.getWorkOrder(id, callerCompanyIdWoPatch);
         if (freshWo && freshWo.appliedLaborRate) {
           // Use the work order's own snapshotted labor rate — never the live customer record.
           const snappedLaborRate = parseFloat(freshWo.appliedLaborRate);
@@ -12057,7 +12089,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           skipped.push(id);
           continue;
         }
-        const woBefore = await storage.getWorkOrder(id);
+        const bulkDelCompanyId = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+        const woBefore = await storage.getWorkOrder(id, bulkDelCompanyId);
         await storage.deleteWorkOrderItems(id);
         const success = await storage.deleteWorkOrder(id);
         if (success) {
@@ -12100,7 +12133,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(409).json({ message: "This work order is linked to an invoice and cannot be deleted. Remove it from the invoice first." });
         return;
       }
-      const woBefore = await storage.getWorkOrder(id);
+      const singleDelCompanyId = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const woBefore = await storage.getWorkOrder(id, singleDelCompanyId);
       await storage.deleteWorkOrderItems(id);
       const success = await storage.deleteWorkOrder(id);
       if (!success) {
@@ -12196,7 +12230,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       // Recompute financial totals using stored applied rates (if available).
       // This ensures parts additions after completion keep the snapshot consistent.
-      const wo = await storage.getWorkOrder(workOrderId);
+      const wo = await storage.getWorkOrder(workOrderId, woItemCompanyId);
       if (wo && wo.appliedLaborRate) {
         const snappedLaborRate = parseFloat(wo.appliedLaborRate);
         // Recompute totalPartsCost from all items, then derive full breakdown
@@ -12240,7 +12274,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       const { technicianId, technicianName } = req.body;
       
-      const woBeforeAssign = await storage.getWorkOrder(workOrderId);
+      const assignCompanyId = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const woBeforeAssign = await storage.getWorkOrder(workOrderId, assignCompanyId);
       const success = await storage.assignWorkOrder(workOrderId, technicianId, technicianName);
       if (!success) {
         res.status(404).json({ message: "Work order not found or assignment failed" });
@@ -12248,7 +12283,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       // Get work order details for notification
-      const workOrder = await storage.getWorkOrder(workOrderId);
+      const workOrder = await storage.getWorkOrder(workOrderId, assignCompanyId);
 
       await recordLifecycleAudit(req, {
         resource: "work_order",
@@ -12312,7 +12347,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       // Verify the sheet exists before delegating to storage
-      const bs = await storage.getBillingSheetById(billingSheetId);
+      const callerCompanyId12330 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const bs = await storage.getBillingSheetById(billingSheetId, callerCompanyId12330);
       if (!bs) {
         res.status(404).json({ message: "Billing sheet not found" });
         return;
@@ -12627,7 +12663,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           return;
         }
         if (source === 'billing_sheet') {
-          const sheet = await storage.getBillingSheetById(parentId);
+          const sheet = await storage.getBillingSheetById(parentId, role === 'super_admin' ? null : scopeCompanyId);
           if (!sheet) { res.status(404).json({ message: "Billing sheet not found" }); return; }
           // If the sheet has no customer linkage, ownership cannot be proven —
           // deny rather than fall through to an unscoped read.
@@ -12641,7 +12677,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             return;
           }
         } else {
-          const wo = await storage.getWorkOrder(parentId);
+          const wo = await storage.getWorkOrder(parentId, role === 'super_admin' ? null : scopeCompanyId);
           if (!wo) { res.status(404).json({ message: "Work order not found" }); return; }
           if (!wo.customerId) {
             res.status(403).json({ message: "Access denied" });
@@ -12722,7 +12758,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           return;
         }
         if (ticketType === 'billing_sheet') {
-          const sheet = await storage.getBillingSheetById(ticketId);
+          const sheet = await storage.getBillingSheetById(ticketId, role === 'super_admin' ? null : scopeCompanyId);
           if (!sheet) { res.status(404).json({ message: "Billing sheet not found" }); return; }
           if (!sheet.customerId) {
             res.status(403).json({ message: "Access denied" });
@@ -12734,7 +12770,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             return;
           }
         } else {
-          const wo = await storage.getWorkOrder(ticketId);
+          const wo = await storage.getWorkOrder(ticketId, role === 'super_admin' ? null : scopeCompanyId);
           if (!wo) { res.status(404).json({ message: "Work order not found" }); return; }
           if (!wo.customerId) {
             res.status(403).json({ message: "Access denied" });
@@ -12786,7 +12822,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       // Fetch the work order to enrich billing sheet with required fields
-      const workOrder = await storage.getWorkOrder(workOrderId);
+      const bsCreateCompanyId = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const workOrder = await storage.getWorkOrder(workOrderId, bsCreateCompanyId);
       if (!workOrder) {
         res.status(404).json({ message: "Work order not found" });
         return;
@@ -13035,7 +13072,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(400).json({ message: "Invalid work order ID" });
         return;
       }
-      const billingSheet = await storage.getBillingSheetById(workOrderId);
+      const bsGetCompanyId = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const billingSheet = await storage.getBillingSheetById(workOrderId, bsGetCompanyId);
       if (!billingSheet) {
         res.status(404).json({ message: "Billing sheet not found" });
         return;
@@ -13059,7 +13097,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(400).json({ message: "Invalid work order ID" });
         return;
       }
-      const wo = await storage.getWorkOrder(workOrderId);
+      const wo = await storage.getWorkOrder(workOrderId, cid);
       if (!wo) {
         res.status(404).json({ message: "Work order not found" });
         return;
@@ -13101,7 +13139,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
       // Verify the work order belongs to the caller's company via its customer.
-      const wo = await storage.getWorkOrder(workOrderId);
+      const wo = await storage.getWorkOrder(workOrderId, cid);
       if (!wo) {
         res.status(404).json({ message: "Work order not found" });
         return;
@@ -14164,7 +14202,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       await storage.updateApiKeyLastUsed(apiKey.id);
 
       const workOrderId = parseInt(req.params.workOrderId);
-      const workOrder = await storage.getWorkOrder(workOrderId);
+      const workOrder = await storage.getWorkOrder(workOrderId, apiKey.companyId ?? null);
 
       if (!workOrder) {
         res.status(404).json({ 
@@ -14595,7 +14633,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       ];
 
       let correctedCount = 0;
-      const allSheets = await storage.getAllBillingSheets();
+      const allSheets = await storage.getAllBillingSheets(null);
       for (const fix of sheetsToFix) {
         const sheet = allSheets.find(s => s.billingNumber === fix.billingNumber);
         if (!sheet) continue;

@@ -39,7 +39,7 @@ function makeStubStorage(): StorageForTenantGuard & {
   return {
     workOrders,
     customers,
-    async getWorkOrder(id: number) { return workOrders.get(id) ?? null; },
+    async getWorkOrder(id: number, _companyId: number | null) { return workOrders.get(id) ?? null; },
     async getCustomer(id: number) { return customers.get(id) ?? null; },
   };
 }

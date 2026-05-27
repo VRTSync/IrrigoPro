@@ -93,7 +93,7 @@ async function startHarness(initialRole: Role = "irrigation_manager"): Promise<H
   // ── Storage stub ─────────────────────────────────────────────────────────────
   // Satisfies ApproveRoutesStorage so the REAL handler logic runs against it.
   const storage: ApproveRoutesStorage = {
-    async getBillingSheetById(id) {
+    async getBillingSheetById(id, _companyId) {
       return billingSheets.get(id);
     },
     async updateBillingSheet(id, data) {
@@ -103,7 +103,7 @@ async function startHarness(initialRole: Role = "irrigation_manager"): Promise<H
       billingSheets.set(id, updated);
       return updated;
     },
-    async getWorkOrder(id) {
+    async getWorkOrder(id, _companyId) {
       return workOrders.get(id);
     },
     async updateWorkOrder(id, data) {

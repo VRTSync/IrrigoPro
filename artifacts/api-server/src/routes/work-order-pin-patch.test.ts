@@ -34,7 +34,7 @@ type WorkOrderRow = {
 class StubStorage {
   workOrders: WorkOrderRow[] = [];
 
-  async getWorkOrder(id: number): Promise<WorkOrderRow | undefined> {
+  async getWorkOrder(id: number, _companyId: number | null): Promise<WorkOrderRow | undefined> {
     return this.workOrders.find((w) => w.id === id);
   }
 
@@ -77,7 +77,7 @@ function buildRequireWorkOrderUpdateAccess(storage: StubStorage) {
       // Start-work branch (status → in_progress only)
       if (updateData.status === "in_progress" && Object.keys(updateData).length <= 2) {
         try {
-          const workOrder = await storage.getWorkOrder(workOrderId);
+          const workOrder = await storage.getWorkOrder(workOrderId, null);
           const userIdNum = parseInt(userId as string);
           if (workOrder && workOrder.assignedTechnicianId === userIdNum) {
             return next();
@@ -95,7 +95,7 @@ function buildRequireWorkOrderUpdateAccess(storage: StubStorage) {
         updateKeys.length === 1 && updateKeys[0] === "photos" && Array.isArray(updateData.photos);
       if (isPhotosOnlyEdit) {
         try {
-          const workOrder = await storage.getWorkOrder(workOrderId);
+          const workOrder = await storage.getWorkOrder(workOrderId, null);
           const userIdNum = parseInt(userId as string);
           if (
             workOrder &&
@@ -113,7 +113,7 @@ function buildRequireWorkOrderUpdateAccess(storage: StubStorage) {
       const isPinOnlyEdit = updateKeys.length > 0 && updateKeys.every((k) => PIN_KEYS.has(k));
       if (isPinOnlyEdit) {
         try {
-          const workOrder = await storage.getWorkOrder(workOrderId);
+          const workOrder = await storage.getWorkOrder(workOrderId, null);
           const userIdNum = parseInt(userId as string);
           if (
             !workOrder ||
