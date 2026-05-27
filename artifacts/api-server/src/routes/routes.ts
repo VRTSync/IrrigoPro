@@ -24,6 +24,7 @@ import twilio from "twilio";
 import { ObjectStorageService } from "../objectStorage";
 import { InvoicePdfService } from "../invoice-pdf-service";
 import { buildWorkDescriptionPrompt, buildExpandDescriptionPrompt, TEMPLATE_VERSION, CRITICAL_FIELDS, type WorkDescriptionInputs } from "../ai-prompt-templates";
+import { makeRequireSameCompanyAsWorkOrder } from "./work-order-tenant-guard";
 /**
  * Phase 5b — QB Harden #5: thrown when the detected credential environment
  * does not match the server environment and STRICT_QB_ENV_CHECK is set.
@@ -563,6 +564,11 @@ const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
   });
   return;
 };
+
+// Tenant guard for single-ID work-order routes — extracted to its own module
+// so behavioral tests can import and exercise the real implementation without
+// pulling in the full registerRoutes monolith. See work-order-tenant-guard.ts.
+const requireSameCompanyAsWorkOrder = makeRequireSameCompanyAsWorkOrder(storage);
 
 // More granular middleware for billing sheet updates that allows field techs to submit for approval
 const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) => {
@@ -1185,7 +1191,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/work-orders/:id/activity", requireAuthentication, async (req: any, res) => {
+  app.get("/api/work-orders/:id/activity", requireAuthentication, requireSameCompanyAsWorkOrder, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       if (!Number.isFinite(id) || id <= 0) {
@@ -9372,7 +9378,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.post("/api/work-orders/:id/complete", requireAuthentication, async (req, res) => {
+  app.post("/api/work-orders/:id/complete", requireAuthentication, requireSameCompanyAsWorkOrder, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -9556,7 +9562,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.post("/api/work-orders/:id/create-invoice", async (req, res) => {
+  app.post("/api/work-orders/:id/create-invoice", requireAuthentication, requireSameCompanyAsWorkOrder, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       // This would need to be implemented in storage
@@ -9567,7 +9573,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.post("/api/work-orders/:id/sync-quickbooks", async (req, res) => {
+  app.post("/api/work-orders/:id/sync-quickbooks", requireAuthentication, requireSameCompanyAsWorkOrder, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       // This would need to be implemented for QuickBooks sync
@@ -11491,7 +11497,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // Task #185 — flag a work order as not requiring photos so it disappears
   // from the missing-photos report. Restricted to the same four roles that
   // can view the report. Captures the acting user + timestamp on the row.
-  app.post("/api/work-orders/:id/no-photos-needed", requireAuthentication, async (req: any, res) => {
+  app.post("/api/work-orders/:id/no-photos-needed", requireAuthentication, requireSameCompanyAsWorkOrder, async (req: any, res) => {
     try {
       const role = req.authenticatedUserRole;
       if (role !== 'company_admin' && role !== 'super_admin' && role !== 'irrigation_manager' && role !== 'billing_manager') {
@@ -11532,7 +11538,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // Task #187 — undo the "no photos needed" flag. Same role gate as the
   // mark endpoint. Resets noPhotosNeeded + audit fields so the work order
   // re-appears on the missing-photos report.
-  app.post("/api/work-orders/:id/no-photos-needed/clear", requireAuthentication, async (req: any, res) => {
+  app.post("/api/work-orders/:id/no-photos-needed/clear", requireAuthentication, requireSameCompanyAsWorkOrder, async (req: any, res) => {
     try {
       const role = req.authenticatedUserRole;
       if (role !== 'company_admin' && role !== 'super_admin' && role !== 'irrigation_manager' && role !== 'billing_manager') {
@@ -11564,10 +11570,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.get("/api/work-orders/:id", async (req, res) => {
+  app.get("/api/work-orders/:id", requireAuthentication, requireSameCompanyAsWorkOrder, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const workOrder = await storage.getWorkOrder(id);
+      const workOrder = req.tenantScopedWorkOrder ?? await storage.getWorkOrder(id);
       if (!workOrder) {
         res.status(404).json({ message: "Work order not found" });
         return;
@@ -11580,7 +11586,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.post("/api/work-orders", async (req, res) => {
+  app.post("/api/work-orders", requireAuthentication, async (req, res) => {
     try {
       const { items, ...workOrderBody } = req.body;
 
@@ -11599,6 +11605,25 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // JS numbers don't 400 against the decimal-typed columns.
       coerceLatLngStrings(workOrderBody);
       const workOrderData = insertWorkOrderSchema.parse(workOrderBody);
+
+      // Force-tenant: non-super-admin callers can only create work orders for
+      // their own company's customers. Fail closed — if company context is
+      // missing the request is rejected rather than silently unchecked.
+      const createRole = req.authenticatedUserRole as string | undefined;
+      const createCompanyId = req.authenticatedUserCompanyId as number | null | undefined;
+      if (createRole !== 'super_admin') {
+        if (!createCompanyId) {
+          res.status(403).json({ message: "Company context required to create a work order" });
+          return;
+        }
+        if (workOrderData.customerId) {
+          const createCustomer = await storage.getCustomer(workOrderData.customerId);
+          if (!createCustomer || Number(createCustomer.companyId) !== Number(createCompanyId)) {
+            res.status(404).json({ message: "Customer not found" });
+            return;
+          }
+        }
+      }
 
       // Branch enforcement: if the customer has branches configured, branchName is required
       if (workOrderData.customerId) {
@@ -11701,7 +11726,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.patch("/api/work-orders/:id", requireAuthentication, requireWorkOrderUpdateAccess, async (req, res) => {
+  app.patch("/api/work-orders/:id", requireAuthentication, requireSameCompanyAsWorkOrder, requireWorkOrderUpdateAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -12048,7 +12073,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.delete("/api/work-orders/:id", requireAuthentication, requireWorkOrderBillingAccess, async (req, res) => {
+  app.delete("/api/work-orders/:id", requireAuthentication, requireSameCompanyAsWorkOrder, requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -12086,7 +12111,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   // Work Order Items routes
   // Note: Pricing fields are stripped for field_tech role via applyPricingVisibility
-  app.get("/api/work-orders/:id/items", async (req, res) => {
+  app.get("/api/work-orders/:id/items", requireAuthentication, requireSameCompanyAsWorkOrder, async (req, res) => {
     try {
       const workOrderId = parseInt(req.params.id);
       
@@ -12104,7 +12129,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.post("/api/work-orders/:id/items", async (req, res) => {
+  app.post("/api/work-orders/:id/items", requireAuthentication, requireSameCompanyAsWorkOrder, async (req, res) => {
     try {
       const workOrderId = parseInt(req.params.id);
       
@@ -12191,7 +12216,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Work Order Assignment with Notification
-  app.post("/api/work-orders/:id/assign", async (req, res) => {
+  app.post("/api/work-orders/:id/assign", requireAuthentication, requireSameCompanyAsWorkOrder, async (req, res) => {
     try {
       const workOrderId = parseInt(req.params.id);
       
@@ -12639,6 +12664,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get(
     "/api/work-orders/:id/pricing-audit-events",
     requireAuthentication,
+    requireSameCompanyAsWorkOrder,
     async (req: any, res) => pricingHistoryHandler(req, res, 'work_order'),
   );
   // ─── /Pricing audit event history ────────────────────────────────────────
@@ -12728,12 +12754,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get(
     "/api/work-orders/:id/photo-late-additions",
     requireAuthentication,
+    requireSameCompanyAsWorkOrder,
     async (req: any, res) => photoLateAdditionsHandler(req, res, 'work_order'),
   );
   // ─── /Photo late-addition audit history ──────────────────────────────────
 
   // Billing Sheet routes
-  app.post("/api/work-orders/:id/billing-sheet", async (req, res) => {
+  app.post("/api/work-orders/:id/billing-sheet", requireAuthentication, requireSameCompanyAsWorkOrder, async (req, res) => {
     try {
       const workOrderId = parseInt(req.params.id);
       
@@ -12984,7 +13011,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.get("/api/work-orders/:id/billing-sheet", async (req, res) => {
+  app.get("/api/work-orders/:id/billing-sheet", requireAuthentication, requireSameCompanyAsWorkOrder, async (req, res) => {
     try {
       const workOrderId = parseInt(req.params.id);
       
@@ -13009,7 +13036,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // from a work order via the canonical billing_sheets.work_order_id
   // link populated by the conversion endpoint above. Scoped to the
   // caller's company via the parent work order's customer.
-  app.get("/api/work-orders/:id/billing-sheets", requireAuthentication, async (req, res) => {
+  app.get("/api/work-orders/:id/billing-sheets", requireAuthentication, requireSameCompanyAsWorkOrder, async (req, res) => {
     try {
       const cid = requireCompanyId(req, res); if (!cid) return;
       const workOrderId = parseInt(req.params.id);
@@ -13050,7 +13077,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // a work order via wet_check_findings.work_order_id (the canonical
   // schema link between wet checks and work orders). Scoped to the
   // caller's company by joining the parent work order's customer.
-  app.get("/api/work-orders/:id/wet-checks", requireAuthentication, async (req, res) => {
+  app.get("/api/work-orders/:id/wet-checks", requireAuthentication, requireSameCompanyAsWorkOrder, async (req, res) => {
     try {
       const cid = requireCompanyId(req, res); if (!cid) return;
       const workOrderId = parseInt(req.params.id);

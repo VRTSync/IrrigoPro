@@ -280,6 +280,123 @@ describe("Task #927 — all app.get calls with role guards have requireAuthentic
 
 // ─── Part 4: Specific GET routes from Task #927 ───────────────────────────────
 
+// ─── Part 5: Single-ID work-order route tenant guard (Task #932) ──────────────
+
+// The five explicit out-of-scope exceptions that do NOT carry :id and are
+// therefore excluded from the single-ID pattern scan.
+const WORK_ORDER_TENANT_GUARD_EXCEPTIONS = new Set([
+  "/api/work-orders/complete",    // POST — legacy "complete by number", no :id
+  "/api/work-orders",             // POST create + GET list, no :id
+  "/api/work-orders/bulk",        // DELETE bulk, no :id
+  "/api/work-orders/missing-photos", // GET collection, no :id
+  // All /api/external/work-orders/* are handled separately and excluded.
+]);
+
+describe("Task #932 — all single-ID /api/work-orders/:id... routes carry both requireAuthentication and requireSameCompanyAsWorkOrder", () => {
+  it("every work-order route with a bare :param segment has both guards", () => {
+    const METHOD_RE = /\bapp\.(get|post|patch|delete)\(/g;
+    const violations: string[] = [];
+
+    let match: RegExpExecArray | null;
+    while ((match = METHOD_RE.exec(src)) !== null) {
+      const pos = match.index;
+      const verb = match[1];
+
+      // Extract from the call start up to the async handler.
+      // Use 1200 chars to capture multi-line registrations like photo-late-additions.
+      const chunk = src.slice(pos, pos + 1200);
+      const asyncIdx = chunk.indexOf(" async ");
+      const slice = asyncIdx >= 0 ? chunk.slice(0, asyncIdx) : chunk;
+
+      // Only care about routes that contain a single-ID work-order path pattern
+      // (the colon after /work-orders/ distinguishes /:id from fixed segments).
+      if (!slice.includes('"/api/work-orders/:')) continue;
+
+      // Extract the canonical route path for error messages.
+      const routePathMatch = slice.match(/"(\/api\/work-orders\/[^"]+)"/);
+      const routePath = routePathMatch ? routePathMatch[1] : "(unknown path)";
+
+      // Skip the explicitly out-of-scope exceptions.
+      if (WORK_ORDER_TENANT_GUARD_EXCEPTIONS.has(routePath)) continue;
+
+      if (!slice.includes("requireAuthentication")) {
+        violations.push(
+          `app.${verb}("${routePath}"): missing requireAuthentication`,
+        );
+        continue;
+      }
+
+      if (!slice.includes("requireSameCompanyAsWorkOrder")) {
+        violations.push(
+          `app.${verb}("${routePath}"): missing requireSameCompanyAsWorkOrder`,
+        );
+      }
+    }
+
+    assert.deepEqual(
+      violations,
+      [],
+      `Found single-ID work-order routes missing required tenant guards:\n\n` +
+        violations.map((v) => `  • ${v}`).join("\n") +
+        "\n\nFix: add [requireAuthentication, requireSameCompanyAsWorkOrder] to the route.",
+    );
+  });
+
+  it("requireSameCompanyAsWorkOrder appears AFTER requireAuthentication and BEFORE any role guard on all matched routes", () => {
+    const METHOD_RE = /\bapp\.(get|post|patch|delete)\(/g;
+    const violations: string[] = [];
+
+    let match: RegExpExecArray | null;
+    while ((match = METHOD_RE.exec(src)) !== null) {
+      const pos = match.index;
+      const verb = match[1];
+
+      const chunk = src.slice(pos, pos + 1200);
+      const asyncIdx = chunk.indexOf(" async ");
+      const slice = asyncIdx >= 0 ? chunk.slice(0, asyncIdx) : chunk;
+
+      if (!slice.includes('"/api/work-orders/:')) continue;
+      if (!slice.includes("requireSameCompanyAsWorkOrder")) continue;
+
+      const routePathMatch = slice.match(/"(\/api\/work-orders\/[^"]+)"/);
+      const routePath = routePathMatch ? routePathMatch[1] : "(unknown path)";
+      if (WORK_ORDER_TENANT_GUARD_EXCEPTIONS.has(routePath)) continue;
+
+      const authIdx = slice.indexOf("requireAuthentication");
+      const tenantIdx = slice.indexOf("requireSameCompanyAsWorkOrder");
+
+      // Guard must come after authentication.
+      if (authIdx < 0 || tenantIdx <= authIdx) {
+        violations.push(
+          `app.${verb}("${routePath}"): requireSameCompanyAsWorkOrder (pos ${tenantIdx}) ` +
+            `is not after requireAuthentication (pos ${authIdx})`,
+        );
+        continue;
+      }
+
+      // Guard must come before any role-level guard.
+      const firstRoleGuardIdx = firstIndexOf(slice, ...ROLE_GUARDS);
+      if (firstRoleGuardIdx !== Infinity && tenantIdx > firstRoleGuardIdx) {
+        const presentGuards = ROLE_GUARDS.filter((g) => slice.indexOf(g) >= 0);
+        violations.push(
+          `app.${verb}("${routePath}"): requireSameCompanyAsWorkOrder (pos ${tenantIdx}) ` +
+            `appears AFTER role guard(s) [${presentGuards.join(", ")}] (first at pos ${firstRoleGuardIdx})`,
+        );
+      }
+    }
+
+    assert.deepEqual(
+      violations,
+      [],
+      `Found work-order routes with incorrect tenant guard ordering:\n\n` +
+        violations.map((v) => `  • ${v}`).join("\n") +
+        "\n\nExpected chain: [requireAuthentication, requireSameCompanyAsWorkOrder, ...role_guard..., handler]",
+    );
+  });
+});
+
+// ─── Part 4 (continued): Specific GET routes from Task #927 ──────────────────
+
 describe("Task #927 — three GET routes that were missing requireAuthentication now have it before their role guard", () => {
   const NEWLY_GUARDED: Array<[string, string]> = [
     ["GET /api/notifications/:userId", '"/api/notifications/:userId"'],

@@ -20,6 +20,9 @@ declare global {
       userCompanyId?: number | null;
       user?: { id: number; email: string; [key: string]: unknown };
       files?: Record<string, { data: Buffer; name: string; size: number; mimetype: string }>;
+      // Populated by requireSameCompanyAsWorkOrder middleware so downstream
+      // handlers can reuse the loaded row without a second DB round-trip.
+      tenantScopedWorkOrder?: Record<string, unknown>;
     }
   }
 }
