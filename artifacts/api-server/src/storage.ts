@@ -1068,6 +1068,7 @@ export class DatabaseStorage implements IStorage {
     // Database initialization - schema is managed by Drizzle
     this.initializeUsers();
     this.repairDivergedBillingSheets();
+    this.applyCompanyIdColumns();
   }
 
   // Startup migration (BS-2026-0023): repair uninvoiced billing sheets where partsSubtotal
@@ -1147,6 +1148,90 @@ export class DatabaseStorage implements IStorage {
         sql`INSERT INTO app_settings (key, value) VALUES (${MIGRATION_KEY}, 'completed')
             ON CONFLICT (key) DO UPDATE SET value = 'completed'`
       );
+    } catch (err) {
+      console.error(`[MIGRATION] '${MIGRATION_KEY}' failed:`, err);
+    }
+  }
+
+  // Startup DDL migration: add company_id columns to work_orders, billing_sheets, invoices.
+  // Idempotent — uses app_settings as a one-time-run marker.
+  // Runs fire-and-forget on every server start; no-ops in < 1ms after first completion.
+  private async applyCompanyIdColumns(): Promise<void> {
+    const MIGRATION_KEY = 'company-id-columns-v1';
+    try {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS app_settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      const existingMarker = await db.execute(
+        sql`SELECT value FROM app_settings WHERE key = ${MIGRATION_KEY}`
+      );
+      if (existingMarker.rows.length > 0 && existingMarker.rows[0].value === 'completed') {
+        console.log(`[MIGRATION] '${MIGRATION_KEY}': already completed, skipping`);
+        return;
+      }
+
+      // (a) Add nullable columns — IF NOT EXISTS makes this safe to re-run
+      await db.execute(sql`ALTER TABLE "work_orders"    ADD COLUMN IF NOT EXISTS "company_id" integer REFERENCES "companies"("id")`);
+      await db.execute(sql`ALTER TABLE "billing_sheets" ADD COLUMN IF NOT EXISTS "company_id" integer REFERENCES "companies"("id")`);
+      await db.execute(sql`ALTER TABLE "invoices"       ADD COLUMN IF NOT EXISTS "company_id" integer REFERENCES "companies"("id")`);
+      await db.execute(sql`ALTER TABLE "estimates"      ADD COLUMN IF NOT EXISTS "company_id" integer REFERENCES "companies"("id")`);
+      console.log(`[MIGRATION] '${MIGRATION_KEY}': columns added`);
+
+      // (b) Backfill from customer's company_id
+      await db.execute(sql`
+        UPDATE "work_orders" wo
+          SET "company_id" = c."company_id"
+          FROM "customers" c
+          WHERE wo."customer_id" = c."id" AND wo."company_id" IS NULL
+      `);
+      await db.execute(sql`
+        UPDATE "billing_sheets" bs
+          SET "company_id" = c."company_id"
+          FROM "customers" c
+          WHERE bs."customer_id" = c."id" AND bs."company_id" IS NULL
+      `);
+      await db.execute(sql`
+        UPDATE "invoices" inv
+          SET "company_id" = c."company_id"
+          FROM "customers" c
+          WHERE inv."customer_id" = c."id" AND inv."company_id" IS NULL
+      `);
+      await db.execute(sql`
+        UPDATE "estimates" est
+          SET "company_id" = c."company_id"
+          FROM "customers" c
+          WHERE est."customer_id" = c."id" AND est."company_id" IS NULL
+      `);
+      console.log(`[MIGRATION] '${MIGRATION_KEY}': backfill complete`);
+
+      // (c) Enforce NOT NULL — wrapped separately so a single orphaned row doesn't
+      //     block the column from being usable for new INSERTs
+      try {
+        await db.execute(sql`ALTER TABLE "work_orders"    ALTER COLUMN "company_id" SET NOT NULL`);
+        await db.execute(sql`ALTER TABLE "billing_sheets" ALTER COLUMN "company_id" SET NOT NULL`);
+        await db.execute(sql`ALTER TABLE "invoices"       ALTER COLUMN "company_id" SET NOT NULL`);
+        await db.execute(sql`ALTER TABLE "estimates"      ALTER COLUMN "company_id" SET NOT NULL`);
+        console.log(`[MIGRATION] '${MIGRATION_KEY}': NOT NULL constraints applied`);
+      } catch (notNullErr) {
+        console.error(`[MIGRATION] '${MIGRATION_KEY}': NOT NULL step failed (orphaned rows?), continuing:`, notNullErr);
+      }
+
+      // (d) Indexes
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS "work_orders_company_idx"                  ON "work_orders"    ("company_id")`);
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS "work_orders_company_status_scheduled_idx" ON "work_orders"    ("company_id", "status", "scheduled_date")`);
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS "billing_sheets_company_idx"               ON "billing_sheets" ("company_id")`);
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS "invoices_company_idx"                     ON "invoices"       ("company_id")`);
+
+      await db.execute(
+        sql`INSERT INTO app_settings (key, value) VALUES (${MIGRATION_KEY}, 'completed')
+            ON CONFLICT (key) DO UPDATE SET value = 'completed'`
+      );
+      console.log(`[MIGRATION] '${MIGRATION_KEY}': completed`);
     } catch (err) {
       console.error(`[MIGRATION] '${MIGRATION_KEY}' failed:`, err);
     }
