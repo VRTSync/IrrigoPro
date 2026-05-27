@@ -326,3 +326,25 @@ describe("Task #927 — three GET routes that were missing requireAuthentication
     });
   }
 });
+
+// ─── Part 5: Task #931 — pin-patch precise message appears exactly once ───────
+
+describe("Task #931 — pin-patch precise 403 message appears exactly once in routes.ts", () => {
+  it('exact string "You can only update the pin on a work order assigned to you." appears exactly once', () => {
+    const needle = "You can only update the pin on a work order assigned to you.";
+    let count = 0;
+    let pos = 0;
+    while ((pos = src.indexOf(needle, pos)) !== -1) {
+      count++;
+      pos += needle.length;
+    }
+    assert.equal(
+      count,
+      1,
+      `Expected the precise pin-patch 403 message to appear exactly once in routes.ts ` +
+        `(found ${count} occurrences). ` +
+        `If count is 0, the message was removed or renamed — update the field-tech pin branch. ` +
+        `If count is >1, it has leaked into the catch-all or a duplicate branch — consolidate.`,
+    );
+  });
+});

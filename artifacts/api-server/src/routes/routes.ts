@@ -536,10 +536,30 @@ const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
         console.error('Error checking work order photo edit access:', error);
       }
     }
+
+    // Field techs may also patch ONLY the work-location pin fields on a work order
+    // assigned to them ("I'm here" on the completion screen). Cancelled tickets remain locked.
+    const PIN_KEYS = new Set(['workLocationLat', 'workLocationLng', 'workLocationAddress']);
+    const isPinOnlyEdit = updateKeys.length > 0 && updateKeys.every(k => PIN_KEYS.has(k));
+    if (isPinOnlyEdit) {
+      try {
+        const workOrder = await storage.getWorkOrder(workOrderId);
+        const userIdNum = parseInt(userId as string);
+        if (!workOrder || workOrder.assignedTechnicianId !== userIdNum || workOrder.status === 'cancelled') {
+          res.status(403).json({
+            message: "You can only update the pin on a work order assigned to you.",
+          });
+          return;
+        }
+        return next();
+      } catch (error) {
+        console.error('Error checking work order pin edit access:', error);
+      }
+    }
   }
   
   res.status(403).json({ 
-    message: "Access denied. Field technicians can only start work orders assigned to them." 
+    message: "Field technicians can only start a work order, update its photos, or move its pin on tickets assigned to them." 
   });
   return;
 };
@@ -9343,8 +9363,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       res.json({ message: "Work order completed successfully", workOrder });
     } catch (error) {
-      console.error("Error completing work order:", error);
-      res.status(500).json({ message: "Failed to complete work order" });
+      const { status, message } = classifyAndLog(req, error, {
+        op: "completeWorkOrder",
+        ctx: { workOrderId: req.body?.workOrderId },
+        fallbackMessage: "Failed to complete work order",
+      });
+      res.status(status).json({ message });
     }
   });
 
