@@ -9,12 +9,12 @@
 //
 // Usage in tests: pass in-memory stubs that satisfy StorageForBillingSheetTenantGuard.
 //
-// Until Slice 4 lands the billing_sheets.companyId column, the row's tenant is
-// read through customerId → customers.companyId.
+// Slice 4: reads companyId directly from the billing_sheets.company_id column
+// instead of joining through customers. The getCustomer round-trip has been
+// removed; the interface no longer requires it.
 
 export interface StorageForBillingSheetTenantGuard {
-  getBillingSheetById(id: number, companyId: number | null): Promise<{ id: number; customerId: number | null } | null | undefined>;
-  getCustomer(id: number): Promise<{ companyId: number | null } | null | undefined>;
+  getBillingSheetById(id: number, companyId: number | null): Promise<{ id: number; customerId: number | null; companyId: number | null } | null | undefined>;
 }
 
 export function makeRequireSameCompanyAsBillingSheet(storage: StorageForBillingSheetTenantGuard) {
@@ -46,11 +46,9 @@ export function makeRequireSameCompanyAsBillingSheet(storage: StorageForBillingS
       return;
     }
 
-    let bsCompanyId: number | null = null;
-    if (billingSheet.customerId) {
-      const customer = await storage.getCustomer(billingSheet.customerId);
-      bsCompanyId = customer?.companyId ?? null;
-    }
+    // Slice 4: read companyId directly from the billing sheet row — no
+    // secondary customer lookup needed.
+    const bsCompanyId = billingSheet.companyId ?? null;
 
     if (bsCompanyId == null) {
       // A billing sheet with no resolvable tenant cannot be served safely to a

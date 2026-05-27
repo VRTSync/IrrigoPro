@@ -8,10 +8,13 @@
 //   const requireSameCompanyAsWorkOrder = makeRequireSameCompanyAsWorkOrder(storage);
 //
 // Usage in tests: pass in-memory stubs that satisfy StorageForTenantGuard.
+//
+// Slice 4: reads companyId directly from the work_orders.company_id column
+// instead of joining through customers. The getCustomer round-trip has been
+// removed; the interface no longer requires it.
 
 export interface StorageForTenantGuard {
-  getWorkOrder(id: number, companyId: number | null): Promise<{ id: number; customerId: number | null } | null | undefined>;
-  getCustomer(id: number): Promise<{ companyId: number | null } | null | undefined>;
+  getWorkOrder(id: number, companyId: number | null): Promise<{ id: number; customerId: number | null; companyId: number | null } | null | undefined>;
 }
 
 export function makeRequireSameCompanyAsWorkOrder(storage: StorageForTenantGuard) {
@@ -43,11 +46,9 @@ export function makeRequireSameCompanyAsWorkOrder(storage: StorageForTenantGuard
       return;
     }
 
-    let woCompanyId: number | null = null;
-    if (workOrder.customerId) {
-      const customer = await storage.getCustomer(workOrder.customerId);
-      woCompanyId = customer?.companyId ?? null;
-    }
+    // Slice 4: read companyId directly from the work order row — no
+    // secondary customer lookup needed.
+    const woCompanyId = workOrder.companyId ?? null;
 
     if (woCompanyId == null) {
       res.status(404).json({ message: "Work order not found" });

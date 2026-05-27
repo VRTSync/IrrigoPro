@@ -13,6 +13,9 @@
 //   6. super_admin → 200 on any company's billing sheet (full bypass)
 //   7. no-auth GET → 401 (requireAuthentication fires before tenant guard)
 //   8. cross-tenant probe emits exactly one [AUDIT] cross_tenant_billing_sheet_access line
+//
+// Slice 4: stubs now return companyId directly on the billing sheet row;
+// no getCustomer call is needed.
 
 import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import assert from "node:assert/strict";
@@ -25,22 +28,15 @@ import { makeRequireSameCompanyAsBillingSheet, type StorageForBillingSheetTenant
 // ── In-memory storage stubs ─────────────────────────────────────────────────
 
 function makeStubStorage(): StorageForBillingSheetTenantGuard & {
-  billingSheets: Map<number, { id: number; customerId: number | null }>;
-  customers: Map<number, { companyId: number | null }>;
+  billingSheets: Map<number, { id: number; customerId: number | null; companyId: number | null }>;
 } {
   const billingSheets = new Map([
-    [10, { id: 10, customerId: 101 }],  // Company A
-    [20, { id: 20, customerId: 201 }],  // Company B
-  ]);
-  const customers = new Map([
-    [101, { companyId: 1 }],
-    [201, { companyId: 2 }],
+    [10, { id: 10, customerId: 101, companyId: 1 }],  // Company A
+    [20, { id: 20, customerId: 201, companyId: 2 }],  // Company B
   ]);
   return {
     billingSheets,
-    customers,
     async getBillingSheetById(id: number, _companyId: number | null) { return billingSheets.get(id) ?? null; },
-    async getCustomer(id: number) { return customers.get(id) ?? null; },
   };
 }
 

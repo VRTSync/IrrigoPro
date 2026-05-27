@@ -151,6 +151,7 @@ function makeInvoice(over: Partial<StubInvoice> = {}): StubInvoice {
     id: 100,
     invoiceNumber: "INV-100",
     customerId: 1,
+    companyId: 1,
     customerName: "Big Lawn Co",
     customerEmail: "billing@biglawn.test",
     customerPhone: null as any,

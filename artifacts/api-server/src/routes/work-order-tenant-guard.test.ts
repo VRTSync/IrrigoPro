@@ -13,6 +13,9 @@
 //   6. cross-company POST assign → 404
 //   7. no-auth GET → 401 (requireAuthentication fires before tenant guard)
 //   8. console.warn audit line appears exactly once per blocked request
+//
+// Slice 4: stubs now return companyId directly on the work order row;
+// no getCustomer call is needed.
 
 import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import assert from "node:assert/strict";
@@ -25,22 +28,15 @@ import { makeRequireSameCompanyAsWorkOrder, type StorageForTenantGuard } from ".
 // ── In-memory storage stubs ─────────────────────────────────────────────────
 
 function makeStubStorage(): StorageForTenantGuard & {
-  workOrders: Map<number, { id: number; customerId: number | null }>;
-  customers: Map<number, { companyId: number | null }>;
+  workOrders: Map<number, { id: number; customerId: number | null; companyId: number | null }>;
 } {
   const workOrders = new Map([
-    [1, { id: 1, customerId: 101 }],  // Company A
-    [2, { id: 2, customerId: 201 }],  // Company B
-  ]);
-  const customers = new Map([
-    [101, { companyId: 1 }],
-    [201, { companyId: 2 }],
+    [1, { id: 1, customerId: 101, companyId: 1 }],  // Company A
+    [2, { id: 2, customerId: 201, companyId: 2 }],  // Company B
   ]);
   return {
     workOrders,
-    customers,
     async getWorkOrder(id: number, _companyId: number | null) { return workOrders.get(id) ?? null; },
-    async getCustomer(id: number) { return customers.get(id) ?? null; },
   };
 }
 

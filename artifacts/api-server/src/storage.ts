@@ -3231,30 +3231,23 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Work Orders - Enhanced
-  // Returns a subquery fragment that scopes rows to a company via customer_id.
+  // Returns a direct column-equality fragment that scopes rows to a company.
+  // Replaced the previous customer-subquery approach (Slice 4) with a direct
+  // eq() on the dedicated companyId column for a single-index seek.
   // When companyId is null (super_admin), returns undefined (no extra filter).
   private _companyScope(companyId: number | null) {
     if (companyId === null) return undefined;
-    return inArray(
-      workOrders.customerId,
-      db.select({ id: customers.id }).from(customers).where(eq(customers.companyId, companyId)),
-    );
+    return eq(workOrders.companyId, companyId);
   }
 
   private _companyScopeForBS(companyId: number | null) {
     if (companyId === null) return undefined;
-    return inArray(
-      billingSheets.customerId,
-      db.select({ id: customers.id }).from(customers).where(eq(customers.companyId, companyId)),
-    );
+    return eq(billingSheets.companyId, companyId);
   }
 
   private _companyScopeForInvoice(companyId: number | null) {
     if (companyId === null) return undefined;
-    return inArray(
-      invoices.customerId,
-      db.select({ id: customers.id }).from(customers).where(eq(customers.companyId, companyId)),
-    );
+    return eq(invoices.companyId, companyId);
   }
 
   async getWorkOrders(companyId: number | null): Promise<WorkOrder[]> {
@@ -3357,7 +3350,7 @@ export class DatabaseStorage implements IStorage {
     return newWorkOrder;
   }
 
-  async createWorkOrder(workOrder: InsertWorkOrder, estimateItemsList?: EstimateItem[]): Promise<WorkOrder> {
+  async createWorkOrder(workOrder: InsertWorkOrder & { companyId: number }, estimateItemsList?: EstimateItem[]): Promise<WorkOrder> {
     const workOrderNumber = `WO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     return this._writeWorkOrderWithItems(
       db,
@@ -3394,10 +3387,11 @@ export class DatabaseStorage implements IStorage {
     const workOrderNumber = `WO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     
     // Create the work order with full pricing snapshot from estimate
-    const workOrderData: InsertWorkOrder & { workOrderNumber: string } = {
+    const workOrderData: InsertWorkOrder & { workOrderNumber: string; companyId: number } = {
       workOrderNumber,
       estimateId: estimateId,
       customerId: estimate.customerId!,
+      companyId: estimate.companyId!,
       customerName: estimate.customerName,
       customerEmail: estimate.customerEmail,
       customerPhone: estimate.customerPhone,
@@ -3537,10 +3531,11 @@ export class DatabaseStorage implements IStorage {
       // and location context exactly like createWorkOrderFromEstimate
       // does (the two paths must stay equivalent).
       const workOrderNumber = `WO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-      const workOrderData: InsertWorkOrder & { workOrderNumber: string } = {
+      const workOrderData: InsertWorkOrder & { workOrderNumber: string; companyId: number } = {
         workOrderNumber,
         estimateId,
         customerId: approvedEstimate.customerId!,
+        companyId: approvedEstimate.companyId!,
         customerName: approvedEstimate.customerName,
         customerEmail: approvedEstimate.customerEmail,
         customerPhone: approvedEstimate.customerPhone,
@@ -3898,7 +3893,7 @@ export class DatabaseStorage implements IStorage {
     await db.delete(wetCheckBillings).where(eq(wetCheckBillings.id, id));
   }
 
-  async createBillingSheet(billingSheetData: InsertBillingSheet & { items?: InsertBillingSheetItem[] }): Promise<BillingSheet> {
+  async createBillingSheet(billingSheetData: InsertBillingSheet & { items?: InsertBillingSheetItem[]; companyId: number }): Promise<BillingSheet> {
     // Extract items from the data
     const { items, ...sheetData } = billingSheetData;
     
@@ -5506,6 +5501,7 @@ export class DatabaseStorage implements IStorage {
     const [newInvoice] = await db.insert(invoices).values({
       invoiceNumber,
       customerId,
+      companyId: customer.companyId!,
       customerName: customer.name,
       customerEmail: customer.email,
       customerPhone: customer.phone,
@@ -5662,7 +5658,7 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async createInvoice(invoice: InsertInvoice & { invoiceNumber?: string }): Promise<Invoice> {
+  async createInvoice(invoice: InsertInvoice & { invoiceNumber?: string; companyId: number }): Promise<Invoice> {
     const [newInvoice] = await db.insert(invoices).values(toDrizzleInsert<DrizzleInvoiceInsert>(invoice)).returning();
     return newInvoice;
   }
@@ -8539,6 +8535,7 @@ export class DatabaseStorage implements IStorage {
             {
               workOrderNumber: woNumber,
               customerId: wc.customerId,
+              companyId: companyId,
               customerName: cust.name,
               customerEmail: cust.email,
               customerPhone: cust.phone ?? null,

@@ -230,6 +230,7 @@ export const billingSheets = pgTable("billing_sheets", {
   id: serial("id").primaryKey(),
   billingNumber: text("billing_number").notNull().unique(),
   customerId: integer("customer_id").references(() => customers.id),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
   customerName: text("customer_name").notNull(),
   propertyAddress: text("property_address").notNull(),
   workLocationLat: decimal("work_location_lat", { precision: 10, scale: 7 }),
@@ -292,6 +293,7 @@ export const billingSheets = pgTable("billing_sheets", {
   // that show up at the top of pg_stat_statements once the table is more
   // than a few hundred rows.
   customerIdx: index("billing_sheets_customer_idx").on(table.customerId),
+  companyIdx: index("billing_sheets_company_idx").on(table.companyId),
   technicianIdx: index("billing_sheets_technician_idx").on(table.technicianId),
   workOrderIdx: index("billing_sheets_work_order_idx").on(table.workOrderId),
   invoiceIdx: index("billing_sheets_invoice_idx").on(table.invoiceId),
@@ -418,7 +420,7 @@ export const estimates = pgTable("estimates", {
   // (companyId, estimateNumber) — see `estimatesCompanyNumberIdx`
   // below.
   estimateNumber: text("estimate_number").notNull(),
-  companyId: integer("company_id").references(() => companies.id), // Company ownership
+  companyId: integer("company_id").references(() => companies.id).notNull(), // Company ownership
   customerId: integer("customer_id").references(() => customers.id),
   customerName: text("customer_name").notNull(),
   customerEmail: text("customer_email").notNull(),
@@ -652,6 +654,7 @@ export const workOrders = pgTable("work_orders", {
   workOrderNumber: text("work_order_number").notNull().unique(),
   estimateId: integer("estimate_id").references(() => estimates.id), // Optional - null for direct work orders
   customerId: integer("customer_id").references(() => customers.id).notNull(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
   customerName: text("customer_name").notNull(),
   customerEmail: text("customer_email").notNull(),
   customerPhone: text("customer_phone"),
@@ -730,6 +733,8 @@ export const workOrders = pgTable("work_orders", {
   // sort, while the assignedTechnicianId / customerId indexes speed up
   // the per-tech and per-customer views.
   customerIdx: index("work_orders_customer_idx").on(table.customerId),
+  companyIdx: index("work_orders_company_idx").on(table.companyId),
+  companyStatusScheduledIdx: index("work_orders_company_status_scheduled_idx").on(table.companyId, table.status, table.scheduledDate),
   assignedTechIdx: index("work_orders_assigned_tech_idx").on(table.assignedTechnicianId),
   invoiceIdx: index("work_orders_invoice_idx").on(table.invoiceId),
   estimateIdx: index("work_orders_estimate_idx").on(table.estimateId),
@@ -759,6 +764,7 @@ export const invoices = pgTable("invoices", {
   id: serial("id").primaryKey(),
   invoiceNumber: text("invoice_number").notNull().unique(),
   customerId: integer("customer_id").references(() => customers.id).notNull(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
   customerName: text("customer_name").notNull(),
   customerEmail: text("customer_email").notNull(),
   customerPhone: text("customer_phone"),
@@ -779,7 +785,9 @@ export const invoices = pgTable("invoices", {
   quickbooksInvoiceId: text("quickbooks_invoice_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => ({
+  companyIdx: index("invoices_company_idx").on(table.companyId),
+}));
 
 // Line items for monthly invoices - can come from work orders OR billing sheets
 export const invoiceItems = pgTable("invoice_items", {
@@ -965,6 +973,9 @@ export const insertWorkOrderSchema = createInsertSchema(workOrders)
   .omit({
     id: true,
     workOrderNumber: true,
+    // companyId is always stamped server-side from the authenticated user's
+    // company; clients must never send it directly.
+    companyId: true,
     createdAt: true,
     updatedAt: true,
     // No-photos-needed audit fields are stamped only via the dedicated
@@ -980,13 +991,15 @@ export const insertWorkOrderSchema = createInsertSchema(workOrders)
     completedAt: z.union([z.string(), z.date()]).transform(val => val instanceof Date ? val : val ? new Date(val) : undefined).optional().nullable(),
   });
 export const insertWorkOrderItemSchema = createInsertSchema(workOrderItems).omit({ id: true });
-export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true, invoiceNumber: true, createdAt: true, updatedAt: true });
+export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true, invoiceNumber: true, companyId: true, createdAt: true, updatedAt: true });
 export const insertInvoiceItemSchema = createInsertSchema(invoiceItems).omit({ id: true });
 export const insertInvoicePdfSchema = createInsertSchema(invoicePdfs).omit({ id: true, createdAt: true });
 export const insertBillingSheetSchema = createInsertSchema(billingSheets)
   .omit({
     id: true,
     billingNumber: true,
+    // companyId is always stamped server-side; clients must never send it directly.
+    companyId: true,
     createdAt: true,
     updatedAt: true,
     // Task #197 — no-photos-needed audit fields are stamped only via the

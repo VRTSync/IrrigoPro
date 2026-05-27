@@ -6862,6 +6862,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let invoice = await storage.createInvoice({
         invoiceNumber,
         customerId,
+        companyId: customer.companyId!,
         customerName: customer.name,
         customerEmail: customer.email,
         customerPhone: customer.phone || null,
@@ -10485,6 +10486,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       const cleanData = {
         customerId: billingSheetData.customerId,
+        companyId: (req.authenticatedUserCompanyId as number | null | undefined)
+          ?? (billingSheetData.customerId ? (await storage.getCustomer(billingSheetData.customerId))?.companyId ?? 0 : 0),
         customerName: billingSheetData.customerName,
         customerEmail: billingSheetData.customerEmail,
         propertyAddress: billingSheetData.propertyAddress || '',
@@ -11704,7 +11707,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         }));
       }
 
-      const workOrder = await storage.createWorkOrder(workOrderData);
+      // Inject companyId — super_admin derives it from the customer; non-super_admin
+      // is already validated to match their own company above.
+      let woCreateCompanyId_final: number | undefined;
+      if (createRole === 'super_admin' && workOrderData.customerId) {
+        const custForCo = await storage.getCustomer(workOrderData.customerId);
+        woCreateCompanyId_final = custForCo?.companyId ?? undefined;
+      } else {
+        woCreateCompanyId_final = createCompanyId ?? undefined;
+      }
+      if (!woCreateCompanyId_final) {
+        res.status(400).json({ message: "Could not determine company for this work order" });
+        return;
+      }
+      const workOrder = await storage.createWorkOrder({ ...workOrderData, companyId: woCreateCompanyId_final });
 
       // Save items if provided at creation time (now that the work order exists).
       if (resolvedWoCreateItems.length > 0) {
@@ -12991,6 +13007,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         customerName: workOrder.customerName,
         propertyAddress: workOrder.projectAddress || "",
         customerId: workOrder.customerId,
+        companyId: workOrder.companyId,
         // Task #488 (M3) — canonical link back to the parent WO so the
         // mobile detail screen can list attached billing sheets.
         workOrderId,
@@ -14116,6 +14133,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Create the work order with all required fields
       const newWorkOrder = await storage.createWorkOrder({
         customerId,
+        companyId: customerData?.companyId ?? companyId,
         customerName: customerData?.name || customer.name,
         customerEmail: customerData?.email || customer.email || '',
         customerPhone: customer.phone || customerData?.phone || null,

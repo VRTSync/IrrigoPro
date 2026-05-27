@@ -56,6 +56,7 @@ async function seedEstimate(): Promise<EstimateWithItems> {
     .insert(estimates)
     .values({
       estimateNumber: `EST-TEST-671-${stamp}`,
+      companyId: 1,
       customerName: "Test Customer 671",
       customerEmail: "test671@example.com",
       projectName: SEED_PROJECT_NAME,
@@ -185,6 +186,7 @@ describe("Task #671 — inline estimate approve/reject dual-stamp lifecycle (beh
         .insert(estimates)
         .values({
           estimateNumber: `EST-TEST-671-${label}-${stamp}`,
+          companyId: 1,
           customerName: "Test Customer 671",
           customerEmail: "test671@example.com",
           projectName: SEED_PROJECT_NAME,

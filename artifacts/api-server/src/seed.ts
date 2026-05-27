@@ -217,6 +217,7 @@ export async function seedDatabase() {
       {
         workOrderNumber: "WO-2024-001",
         customerId: insertedCustomers[0].id,
+        companyId: insertedCustomers[0].companyId!,
         customerName: insertedCustomers[0].name,
         customerEmail: insertedCustomers[0].email,
         customerPhone: insertedCustomers[0].phone,
@@ -240,6 +241,7 @@ export async function seedDatabase() {
       {
         workOrderNumber: "WO-2024-002",
         customerId: insertedCustomers[1].id,
+        companyId: insertedCustomers[1].companyId!,
         customerName: insertedCustomers[1].name,
         customerEmail: insertedCustomers[1].email,
         customerPhone: insertedCustomers[1].phone,
@@ -263,6 +265,7 @@ export async function seedDatabase() {
       {
         workOrderNumber: "WO-2024-003",
         customerId: insertedCustomers[2].id,
+        companyId: insertedCustomers[2].companyId!,
         customerName: insertedCustomers[2].name,
         customerEmail: insertedCustomers[2].email,
         customerPhone: insertedCustomers[2].phone,
@@ -323,6 +326,7 @@ export async function seedBillingMonth() {
       {
         workOrderNumber: `WO-SEED-${currentYear}${String(currentMonth+1).padStart(2,'0')}-A`,
         customerId: customer.id,
+        companyId: customer.companyId!,
         customerName: customer.name,
         customerEmail: customer.email,
         customerPhone: customer.phone,
@@ -350,6 +354,7 @@ export async function seedBillingMonth() {
       {
         workOrderNumber: `WO-SEED-${currentYear}${String(currentMonth+1).padStart(2,'0')}-B`,
         customerId: customer.id,
+        companyId: customer.companyId!,
         customerName: customer.name,
         customerEmail: customer.email,
         customerPhone: customer.phone,
@@ -421,6 +426,7 @@ export async function seedBillingMonth() {
       {
         billingNumber: `BS-SEED-${currentYear}${String(currentMonth+1).padStart(2,'0')}-A`,
         customerId: customer.id,
+        companyId: customer.companyId!,
         customerName: customer.name,
         propertyAddress: customer.address || "123 Oak Street",
         workDate: bsDate,
