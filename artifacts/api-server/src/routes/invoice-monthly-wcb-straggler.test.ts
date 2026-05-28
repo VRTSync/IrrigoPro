@@ -59,8 +59,8 @@ describe("WCB straggler reconciliation — branch structure (Task #987)", () => 
     );
   });
 
-  it("calls getWetCheckBillingById with only the sourceId (no companyId)", () => {
-    assert.match(reconcileSrc, /getWetCheckBillingById\s*\(\s*item\.sourceId\s*\)/);
+  it("calls getWetCheckBillingById with sourceId and null companyId (system bypass)", () => {
+    assert.match(reconcileSrc, /getWetCheckBillingById\s*\(\s*item\.sourceId\s*,\s*null\s*\)/);
   });
 
   it("lives inside the existing try block (catch mentions both source types)", () => {

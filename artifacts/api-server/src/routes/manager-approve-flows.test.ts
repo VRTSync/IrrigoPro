@@ -113,6 +113,12 @@ async function startHarness(initialRole: Role = "irrigation_manager"): Promise<H
       workOrders.set(id, updated);
       return updated;
     },
+    async getWetCheckBillingById(_id, _companyId) {
+      return undefined;
+    },
+    async updateWetCheckBilling(_id, _data) {
+      return {};
+    },
     async getUser(_id) {
       return { name: "Alice Manager" };
     },

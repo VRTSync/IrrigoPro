@@ -304,7 +304,7 @@ export class InvoicePdfService {
         } else if (item.sourceType === 'wet_check_billing' && item.wetCheckBillingId) {
           const existing = wetCheckBillingRows.find(r => r.wetCheckBillingId === item.wetCheckBillingId);
           if (!existing) {
-            const wcb = await this.storage.getWetCheckBillingById(item.wetCheckBillingId);
+            const wcb = await this.storage.getWetCheckBillingById(item.wetCheckBillingId, null);
             if (wcb) {
               const wetCheckView = await this.storage.getWetCheckBillingViewById(
                 wcb.id,

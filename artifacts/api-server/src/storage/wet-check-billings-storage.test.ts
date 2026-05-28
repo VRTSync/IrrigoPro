@@ -96,7 +96,7 @@ describe("wetCheckBillings CRUD storage methods", () => {
   });
 
   it("getWetCheckBillingById retrieves the created row", async () => {
-    const row = await storage.getWetCheckBillingById(createdBillingId);
+    const row = await storage.getWetCheckBillingById(createdBillingId, null);
     assert.ok(row !== undefined, "row should be found");
     assert.equal(row!.id, createdBillingId);
     assert.equal(row!.billingNumber, TEST_BILLING_NUMBER);
@@ -116,7 +116,7 @@ describe("wetCheckBillings CRUD storage methods", () => {
   });
 
   it("updateWetCheckBilling mutates status, advances updatedAt, and returns a non-optional row", async () => {
-    const before = await storage.getWetCheckBillingById(createdBillingId);
+    const before = await storage.getWetCheckBillingById(createdBillingId, null);
     assert.ok(before !== undefined);
 
     await new Promise((r) => setTimeout(r, 10));
@@ -136,7 +136,7 @@ describe("wetCheckBillings CRUD storage methods", () => {
   it("deleteWetCheckBilling removes the row; subsequent getById returns undefined", async () => {
     await storage.deleteWetCheckBilling(createdBillingId);
 
-    const row = await storage.getWetCheckBillingById(createdBillingId);
+    const row = await storage.getWetCheckBillingById(createdBillingId, null);
     assert.equal(row, undefined, "row should be gone after delete");
 
     createdBillingId = 0;

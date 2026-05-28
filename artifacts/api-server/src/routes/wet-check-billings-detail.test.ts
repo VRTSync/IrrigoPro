@@ -44,7 +44,7 @@ async function startServer(): Promise<{ baseUrl: string; close: () => Promise<vo
         res.status(400).json({ message: "Invalid wet check billing id" });
         return;
       }
-      const wetCheckBilling = await storage.getWetCheckBillingById(id);
+      const wetCheckBilling = await storage.getWetCheckBillingById(id, null);
       if (!wetCheckBilling) {
         res.status(404).json({ message: "Wet check billing not found" });
         return;

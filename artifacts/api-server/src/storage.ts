@@ -1047,7 +1047,7 @@ export interface IStorage {
   createWetCheckBilling(data: InsertWetCheckBilling): Promise<WetCheckBilling>;
   getAllWetCheckBillings(): Promise<WetCheckBilling[]>;
   getAllWetCheckBillingsWithCounts(): Promise<WetCheckBillingListItem[]>;
-  getWetCheckBillingById(id: number): Promise<WetCheckBilling | undefined>;
+  getWetCheckBillingById(id: number, companyId: number | null): Promise<WetCheckBilling | undefined>;
   getWetCheckBillingsByCustomer(customerId: number): Promise<WetCheckBilling[]>;
   getWetCheckBillingsByTechnician(technicianId: number): Promise<WetCheckBilling[]>;
   getWetCheckBillingsByWetCheckId(wetCheckId: number): Promise<WetCheckBilling[]>;
@@ -3942,7 +3942,17 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
-  async getWetCheckBillingById(id: number): Promise<WetCheckBilling | undefined> {
+  async getWetCheckBillingById(id: number, companyId: number | null): Promise<WetCheckBilling | undefined> {
+    // Mirror the BS/WO pattern: scope to caller's company via customers join.
+    // companyId=null means super_admin (any tenant).
+    if (companyId != null) {
+      const [row] = await db
+        .select({ wcb: wetCheckBillings })
+        .from(wetCheckBillings)
+        .innerJoin(customers, eq(wetCheckBillings.customerId, customers.id))
+        .where(and(eq(wetCheckBillings.id, id), eq(customers.companyId, companyId)));
+      return row?.wcb;
+    }
     const [row] = await db.select().from(wetCheckBillings).where(eq(wetCheckBillings.id, id));
     return row;
   }
@@ -7451,11 +7461,24 @@ export class DatabaseStorage implements IStorage {
       const partsSubtotal = existingPartsSubtotal + newPartsSubtotal;
       const laborSubtotal = totalLaborHours * snapshotRate;
       const total = partsSubtotal + laborSubtotal;
+      // Slice 7 — refresh snapshot columns alongside totals so the forensic
+      // record always reflects the latest computed amounts. approvedAt is
+      // intentionally NOT overwritten (preserves the original approval timestamp).
       await tx.update(wetCheckBillings).set({
         totalHours: totalLaborHours.toFixed(2),
         laborSubtotal: laborSubtotal.toFixed(2),
         partsSubtotal: partsSubtotal.toFixed(2),
         totalAmount: total.toFixed(2),
+        approvedTotal: total.toFixed(2),
+        approvedLaborSnapshot: JSON.stringify({
+          laborSubtotal: laborSubtotal.toFixed(2),
+          totalHours: totalLaborHours.toFixed(2),
+          appliedLaborRate: snapshotRate.toFixed(2),
+        }),
+        approvedPartsSnapshot: JSON.stringify({
+          partsSubtotal: partsSubtotal.toFixed(2),
+          totalAmount: total.toFixed(2),
+        }),
       }).where(eq(wetCheckBillings.id, priorWcbId));
       wcbId = priorWcbId;
     } else {
@@ -7466,6 +7489,12 @@ export class DatabaseStorage implements IStorage {
       // top-level db handle; the counter is atomically incremented so
       // concurrent submissions never collide.
       const billingNumber = await this.getNextWetCheckBillingNumber();
+      // Slice 7 — auto-bill WCBs are immediately approved (the manager
+      // explicitly routed each finding to "repaired_in_field" before
+      // triggering the conversion, so the billing is pre-sanctioned).
+      // Write snapshot fields alongside approvedAt/approvedTotal so the
+      // financial-pulse audit endpoint can surface them without a
+      // separate approval step.
       const [wcb] = await tx.insert(wetCheckBillings).values({
         billingNumber,
         customerId: wc.customerId,
@@ -7475,13 +7504,24 @@ export class DatabaseStorage implements IStorage {
         technicianName: wc.technicianName,
         technicianId: wc.technicianId,
         wetCheckId: wc.id,
-        status: "submitted",
+        status: "approved_passed_to_billing",
         totalHours: newLaborHours.toFixed(2),
         laborRate: customerLaborRate.toFixed(2),
         laborSubtotal: laborSubtotal.toFixed(2),
         partsSubtotal: newPartsSubtotal.toFixed(2),
         totalAmount: total.toFixed(2),
         appliedLaborRate: customerLaborRate.toFixed(2),
+        approvedAt: now,
+        approvedTotal: total.toFixed(2),
+        approvedLaborSnapshot: JSON.stringify({
+          laborSubtotal: laborSubtotal.toFixed(2),
+          totalHours: newLaborHours.toFixed(2),
+          appliedLaborRate: customerLaborRate.toFixed(2),
+        }),
+        approvedPartsSnapshot: JSON.stringify({
+          partsSubtotal: newPartsSubtotal.toFixed(2),
+          totalAmount: total.toFixed(2),
+        }),
       } as typeof wetCheckBillings.$inferInsert).returning();
       wcbId = wcb.id;
     }

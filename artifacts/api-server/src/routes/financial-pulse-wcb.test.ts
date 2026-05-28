@@ -564,8 +564,68 @@ describe("invoice audit — WCB enrichment branch (Slice 2)", () => {
       wcbItem.workDate !== null && String(wcbItem.workDate).startsWith("2026-04-10"),
       "workDate must be sourced from the WCB row (2026-04-10)",
     );
-    // Slice 7 snapshot columns not yet present on wet_check_billings — must be null
-    assert.equal(wcbItem.approvedLaborSnapshot, null, "approvedLaborSnapshot must be null before Slice 7");
-    assert.equal(wcbItem.approvedPartsSnapshot, null, "approvedPartsSnapshot must be null before Slice 7");
+    // Legacy WCB inserted without snapshot columns — both must be null
+    assert.equal(wcbItem.approvedLaborSnapshot, null, "approvedLaborSnapshot must be null for legacy WCB without snapshots");
+    assert.equal(wcbItem.approvedPartsSnapshot, null, "approvedPartsSnapshot must be null for legacy WCB without snapshots");
+  });
+
+  it("post-Slice-7 WCB: approvedLaborSnapshot and approvedPartsSnapshot are parsed numeric values when present", async () => {
+    // Insert a post-Slice-7 WCB that has snapshot columns populated
+    const laborSnap = JSON.stringify({ laborSubtotal: "240.00", totalHours: "3.00", appliedLaborRate: "80.00" });
+    const partsSnap = JSON.stringify({ partsSubtotal: "55.00", totalAmount: "295.00" });
+    const postRows = await db.execute(sql`
+      INSERT INTO wet_check_billings (
+        billing_number, customer_id, customer_name, property_address,
+        work_date, technician_name, technician_id, wet_check_id,
+        status, total_hours, labor_rate, labor_subtotal, parts_subtotal,
+        total_amount, approved_labor_snapshot, approved_parts_snapshot, photos
+      ) VALUES (
+        ${`WC-FP-SNAP-${AUDIT_TAG}`}, ${auditCustomerId}, 'FP WCB Snap Customer', '99 Snap Ave',
+        '2026-04-10T00:00:00Z', 'FP WCB Snap Tech', ${auditTechId}, ${auditWcId},
+        'approved_passed_to_billing', '3.00', '80.00', '240.00', '55.00', '295.00',
+        ${laborSnap}, ${partsSnap}, '{}'
+      ) RETURNING id
+    `);
+    const postWcbId = Number((postRows.rows[0] as { id: number }).id);
+
+    // Link it to the existing invoice via an invoice item
+    const postItemRows = await db.execute(sql`
+      INSERT INTO invoice_items (
+        invoice_id, source_type, source_id, wet_check_billing_id,
+        work_date, description, total_price, labor_total
+      ) VALUES (
+        ${auditInvoiceId}, 'wet_check_billing', ${postWcbId},
+        ${postWcbId}, '2026-04-10', 'post-slice-7 snap item', '295.00', '240.00'
+      ) RETURNING id
+    `);
+    const postItemId = Number((postItemRows.rows[0] as { id: number }).id);
+
+    try {
+      const res = await auditFetch();
+      assert.equal(res.status, 200, "Expected HTTP 200");
+      const body = await res.json() as { invoiceId: number; items: EnrichedItem[] };
+      const snapItem = body.items.find(
+        (i) => i.sourceType === "wet_check_billing" && i.wetCheckBillingId === postWcbId,
+      );
+      assert.ok(snapItem, "Must find the post-Slice-7 WCB item");
+      assert.equal(snapItem.approvedLaborSnapshot, 240, "approvedLaborSnapshot must be parsed to numeric laborSubtotal (240)");
+      assert.equal(snapItem.approvedPartsSnapshot, 55, "approvedPartsSnapshot must be parsed to numeric partsSubtotal (55)");
+    } finally {
+      await db.execute(sql`DELETE FROM invoice_items WHERE id = ${postItemId}`);
+      await db.execute(sql`DELETE FROM wet_check_billings WHERE id = ${postWcbId}`);
+    }
+  });
+
+  it("legacy WCB without snapshot columns returns null for both snapshot fields", async () => {
+    // The existing auditWcbId WCB was inserted without snapshot columns — verify null is returned
+    const res = await auditFetch();
+    assert.equal(res.status, 200, "Expected HTTP 200");
+    const body = await res.json() as { invoiceId: number; items: EnrichedItem[] };
+    const legacyItem = body.items.find(
+      (i) => i.sourceType === "wet_check_billing" && i.wetCheckBillingId === auditWcbId,
+    );
+    assert.ok(legacyItem, "Must find the legacy WCB item");
+    assert.equal(legacyItem.approvedLaborSnapshot, null, "Legacy WCB: approvedLaborSnapshot must be null");
+    assert.equal(legacyItem.approvedPartsSnapshot, null, "Legacy WCB: approvedPartsSnapshot must be null");
   });
 });

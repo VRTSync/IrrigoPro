@@ -40,6 +40,19 @@ export interface ApproveRoutesStorage {
 
   updateWorkOrder(id: number, data: Record<string, unknown>): Promise<unknown>;
 
+  getWetCheckBillingById(id: number, companyId: number | null): Promise<{
+    id: number;
+    status: string;
+    partsSubtotal: string | number | null;
+    totalHours: string | number | null;
+    laborRate: string | number | null;
+    appliedLaborRate?: string | number | null;
+    laborSubtotal: string | number | null;
+    totalAmount: string | number | null;
+  } | undefined>;
+
+  updateWetCheckBilling(id: number, data: Record<string, unknown>): Promise<unknown>;
+
   getUser(id: number): Promise<{ name?: string | null } | undefined>;
 }
 
@@ -260,6 +273,67 @@ export function registerApproveRoutes(
     } catch (error) {
       console.error("Error returning work order for correction:", error);
       res.status(500).json({ message: "Failed to return work order for correction" });
+    }
+  });
+
+  // ── POST /api/wet-check-billings/:id/approve ──────────────────────────────
+  // Transitions submitted OR pending_manager_review → approved_passed_to_billing.
+  // Writes approval stamp (approvedBy/At/Total) and JSON snapshots of
+  // labor and parts totals at approval time (Slice 7).
+  app.post("/api/wet-check-billings/:id/approve", requireAuthentication, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const userRole = req.authenticatedUserRole;
+      const userId = req.authenticatedUserId;
+
+      if (
+        userRole !== "irrigation_manager" &&
+        userRole !== "billing_manager" &&
+        userRole !== "company_admin" &&
+        userRole !== "super_admin"
+      ) {
+        res.status(403).json({ message: "Only managers can approve wet check billings." });
+        return;
+      }
+
+      const callerCompanyId: number | null = userRole === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
+      const wcb = await storage.getWetCheckBillingById(id, callerCompanyId);
+      if (!wcb) {
+        res.status(404).json({ message: "Wet check billing not found" });
+        return;
+      }
+      if (wcb.status !== "submitted" && wcb.status !== "pending_manager_review") {
+        res.status(400).json({ message: "Wet check billing must be in Submitted or Pending Manager Review to approve." });
+        return;
+      }
+
+      const approverUser = userId ? await storage.getUser(userId) : undefined;
+      const approverName = approverUser?.name || "Manager";
+
+      const partsSnapshot = JSON.stringify({
+        partsSubtotal: wcb.partsSubtotal,
+        totalAmount: wcb.totalAmount,
+      });
+      const laborSnapshot = JSON.stringify({
+        laborSubtotal: wcb.laborSubtotal,
+        totalHours: wcb.totalHours,
+        appliedLaborRate: wcb.appliedLaborRate ?? wcb.laborRate,
+      });
+
+      const updated = await storage.updateWetCheckBilling(id, {
+        status: "approved_passed_to_billing",
+        approvedBy: approverName,
+        approvedByUserId: userId || undefined,
+        approvedAt: new Date(),
+        approvedTotal: wcb.totalAmount,
+        approvedLaborSnapshot: laborSnapshot,
+        approvedPartsSnapshot: partsSnapshot,
+      });
+
+      res.json({ message: "Wet check billing approved and passed to billing", wetCheckBilling: updated });
+    } catch (error) {
+      console.error("Error approving wet check billing:", error);
+      res.status(500).json({ message: "Failed to approve wet check billing" });
     }
   });
 }

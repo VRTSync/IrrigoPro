@@ -7159,7 +7159,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               console.log(`Reconciliation: marked billing sheet ${bs.id} as billed for invoice ${invoice.id}`);
             }
           } else if (item.sourceType === 'wet_check_billing' && item.sourceId) {
-            const wcb = await storage.getWetCheckBillingById(item.sourceId);
+            const wcb = await storage.getWetCheckBillingById(item.sourceId, null);
             if (wcb && !wcb.invoiceId) {
               await storage.updateWetCheckBilling(wcb.id, {
                 invoiceId: invoice.id,
@@ -9643,7 +9643,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(400).json({ message: "Invalid wet check billing id" });
         return;
       }
-      const wetCheckBilling = await storage.getWetCheckBillingById(id);
+      const wetCheckBilling = await storage.getWetCheckBillingById(id, null);
       if (!wetCheckBilling) {
         res.status(404).json({ message: "Wet check billing not found" });
         return;
@@ -11206,16 +11206,27 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
               }
             }
           } else if (item.sourceType === "wet_check_billing" && item.wetCheckBillingId) {
-            const wcb = await storage.getWetCheckBillingById(item.wetCheckBillingId);
+            const wcb = await storage.getWetCheckBillingById(item.wetCheckBillingId, null);
             if (wcb) {
               status = wcb.status || "billed";
               description = wcb.billingNumber || item.description;
               workDate = wcb.workDate || item.workDate;
               createdAt = wcb.createdAt ? wcb.createdAt.toISOString() : null;
               billedAt = wcb.billedAt ? wcb.billedAt.toISOString() : null;
-              // Slice 7 will add snapshot columns; cast until then
-              approvedLaborSnapshot = (wcb as any).approvedLaborSnapshot ?? null;
-              approvedPartsSnapshot = (wcb as any).approvedPartsSnapshot ?? null;
+              if (wcb.approvedLaborSnapshot) {
+                try {
+                  const snap = JSON.parse(wcb.approvedLaborSnapshot);
+                  const parsed = typeof snap === "number" ? snap : parseFloat(snap?.laborSubtotal ?? snap?.total ?? "");
+                  approvedLaborSnapshot = isNaN(parsed) ? null : parsed;
+                } catch { approvedLaborSnapshot = null; }
+              }
+              if (wcb.approvedPartsSnapshot) {
+                try {
+                  const snap = JSON.parse(wcb.approvedPartsSnapshot);
+                  const parsed = typeof snap === "number" ? snap : parseFloat(snap?.partsSubtotal ?? snap?.total ?? "");
+                  approvedPartsSnapshot = isNaN(parsed) ? null : parsed;
+                } catch { approvedPartsSnapshot = null; }
+              }
               // Use authoritative source totals when available
               const wcbLabor = parseFloat(wcb.laborSubtotal || "0");
               const wcbParts = parseFloat(wcb.partsSubtotal || "0");

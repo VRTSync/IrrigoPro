@@ -1434,6 +1434,8 @@ export const wetCheckBillings = pgTable("wet_check_billings", {
   approvedByUserId: integer("approved_by_user_id").references(() => users.id),
   approvedAt: timestamp("approved_at"),
   approvedTotal: decimal("approved_total", { precision: 10, scale: 2 }),
+  approvedPartsSnapshot: text("approved_parts_snapshot"), // JSON snapshot of parts at approval
+  approvedLaborSnapshot: text("approved_labor_snapshot"), // JSON snapshot of labor details at approval
   // "No photos needed" audit flag — mirrors billing_sheets.no_photos_needed.
   noPhotosNeeded: boolean("no_photos_needed").notNull().default(false),
   noPhotosNeededBy: integer("no_photos_needed_by").references(() => users.id),
