@@ -110,7 +110,7 @@ function CustomerCard({ customer, status, onClick }: CustomerCardProps) {
     <button
       onClick={onClick}
       className={[
-        "w-full text-left rounded-xl border bg-white p-4 shadow-sm transition-all",
+        "w-full max-w-full text-left rounded-xl border bg-white p-4 shadow-sm transition-all",
         "hover:shadow-md hover:-translate-y-px active:translate-y-0 active:shadow-sm",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
         isInProgress
@@ -226,7 +226,7 @@ export default function CustomerPickerPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto py-4 space-y-4 px-3 sm:px-4 pb-safe">
+    <div className="max-w-4xl mx-auto py-4 space-y-4 px-4 sm:px-4 pb-safe overflow-x-hidden w-full">
       <OfflineStrip />
 
       <div className="flex items-center gap-3">
