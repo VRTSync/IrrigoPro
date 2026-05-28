@@ -1,0 +1,565 @@
+# Replit Task — Unified Parts Picker, Slice 1
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions — reference material so you understand the intent. The actual work
+is in the **Slice 1** section at the bottom. Do not deviate from any file
+paths, function names, prop names, or behavior specified. If you believe a
+deviation is necessary, surface it and stop rather than proceeding.
+
+> **Architectural note.** Today there are four part-selection UIs in the app
+> with three distinct implementations — one of them (`PartsSearchModal`)
+> already shared across billing and estimates, and two more rolled by hand
+> inside `work-order-completion.tsx` and `manager/finding-card.tsx`. This
+> slice collapses all of them into one component (`PartPicker`) with a single
+> upgraded search ranking. Zero behavior change for callers that already use
+> the shared modal — those are pure rename + import path. The work-order
+> completion and wet-check FindingCard pickers are replaced.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in conversation and are referenced throughout the slice.
+Do not deviate from any of them.
+
+**Scope.** Every parts-selection UI in the IrrigoPro web client is migrated.
+Specifically:
+
+1. `artifacts/irrigopro/src/components/billing/billing-sheet-wizard.tsx` —
+   already uses `PartsSearchModal` (sheet, multi, chips, kb-nav).
+2. `artifacts/irrigopro/src/components/billing/edit-parts-modal.tsx` —
+   already uses `PartsSearchModal` (dialog, single).
+3. `artifacts/irrigopro/src/components/estimates/wizard/estimate-wizard-line-items-step.tsx` —
+   already uses `PartsSearchModal` (sheet, multi for "add" / single for
+   "change", chips, kb-nav).
+4. `artifacts/irrigopro/src/pages/field-tech.tsx` — already uses
+   `PartsSearchModal` (dialog, single, default opts).
+5. `artifacts/irrigopro/src/components/work-orders/work-order-completion.tsx` —
+   inline search + list, replace with PartPicker (sheet, multi).
+6. `artifacts/irrigopro/src/components/manager/finding-card.tsx` — inline
+   Dialog picker with hard-category filter and a "— No part —" clear option;
+   replace with PartPicker (dialog, single, `allowClear`, `categoryFilter`).
+
+**No backwards-compat shim.** The old export name `PartsSearchModal` is
+removed from the codebase. There are exactly five import sites; update all of
+them in this slice. Do not leave a re-export.
+
+**File location.** New home: `artifacts/irrigopro/src/components/parts/`,
+alongside the existing `part-form-dialog.tsx` and `bulk-import.tsx`. The old
+file `artifacts/irrigopro/src/components/estimates/parts-search-modal.tsx` is
+deleted in this slice.
+
+**Search.** Token-based ranking over a normalised projection of the part —
+not Levenshtein, not a fuzzy library. Every whitespace-delimited token in
+the query must match somewhere on the part for it to qualify (AND semantics,
+same as today). The fields searched and their weights are locked in the
+"Search algorithm" subsection below.
+
+**No new dependencies.** Don't add Fuse.js, FlexSearch, MiniSearch, or any
+other library. The ranking is ~50 lines of pure functions.
+
+**Mobile-first sizing.** Tap targets ≥44px (the iOS minimum); row min-height
+56px; sheet variant is full-screen below `sm` and right-side-panel at `sm+`.
+
+**Recents.** The `/api/parts/popular?limit=` endpoint already exists and is
+company-scoped. Surface up to 6 recents on an empty query, in BOTH the sheet
+and dialog presentations (today only the dialog showed them).
+
+**Category filter.** Two flavors: (a) the existing chip row (`showCategoryChips`),
+user-driven; (b) a new hard filter prop `categoryFilter?: string | null`,
+caller-driven. When a hard filter is set, chips only offer categories that
+match the hard filter, and the user cannot select "All".
+
+**Clear option.** New prop `allowClear?: boolean` + `onClear?: () => void`.
+When true, the result list shows a "— No part —" row at the top that calls
+`onClear` and closes the picker. This is the wet-check FindingCard's
+existing affordance, preserved in the unified API.
+
+**No "create part from search query" affordance.** Out of scope for this
+slice. Adding a missing part still goes through the catalog management UI.
+
+**Intentional UX deltas vs today.** These are deliberate, not regressions —
+do not "fix" them back to the old behavior:
+
+1. **Dialog default title.** The old `PartsSearchModal` defaulted to
+   `"Add Parts to Billing Sheet"` for the dialog presentation. That string
+   was misleading at the `edit-parts-modal` (which can wrap any parts list,
+   not just billing) and `field-tech` callsites. The new dialog default is
+   `"Add Parts"`. Callsites that need something specific pass `title`.
+
+2. **Work-order completion swaps inline browse for a picker.** Today
+   `work-order-completion.tsx` renders an always-visible "Quick Add Parts"
+   list inside the form; techs can scroll the catalog without opening a
+   modal. After this slice, that list is gone — replaced by an "Add Part"
+   button that opens the unified sheet picker. This is the same pattern
+   billing-sheet-wizard already uses. The used-parts list (Estimate vs
+   Field-Added subsections, quantity steppers) below the button is
+   **preserved unchanged**.
+
+3. **Recents appear on the sheet presentation too.** Previously recents were
+   dialog-only. After this slice they appear in both presentations on an
+   empty query, capped at 6.
+
+**Popular endpoint shape constraint.** The `/api/parts/popular` route
+returns a narrower projection than `Part`:
+`{ id, companyId, name, description, sku, category, price, usageCount }`.
+It does **not** return `brand`, `material`, `size`, `fittingType`, `detail`,
+`cost`, `isActive`, or `approvalStatus`. The recents tiles in the picker
+must render only fields the endpoint actually returns (the spec below
+limits them to `name`, `usageCount`, and `sku`). Do not extend the recents
+tile to show e.g. `brand` without first extending the endpoint.
+
+---
+
+## Slice 1 — Build PartPicker, migrate all five callsites, delete the old file
+
+**Files added.**
+
+- `artifacts/irrigopro/src/components/parts/part-search.ts` — pure search /
+  ranking functions (no React imports).
+- `artifacts/irrigopro/src/components/parts/part-search.test.ts` — vitest
+  unit tests for the search functions. Spec for the test cases is in the
+  "Tests" subsection below.
+- `artifacts/irrigopro/src/components/parts/part-picker.tsx` — the unified
+  component.
+
+**Files modified.**
+
+- `artifacts/irrigopro/src/components/billing/edit-parts-modal.tsx` —
+  rename import + JSX (`PartsSearchModal` → `PartPicker`).
+- `artifacts/irrigopro/src/components/billing/billing-sheet-wizard.tsx` —
+  rename import + JSX + comment.
+- `artifacts/irrigopro/src/components/estimates/wizard/estimate-wizard-line-items-step.tsx` —
+  rename import + JSX.
+- `artifacts/irrigopro/src/pages/field-tech.tsx` — rename import + JSX.
+- `artifacts/irrigopro/src/components/work-orders/work-order-completion.tsx` —
+  replace the inline parts-search block with a `<PartPicker>` and the
+  associated state.
+- `artifacts/irrigopro/src/components/manager/finding-card.tsx` — replace
+  the inline `<Dialog>`-based picker with a `<PartPicker>` invocation.
+
+**Files deleted.**
+
+- `artifacts/irrigopro/src/components/estimates/parts-search-modal.tsx`
+
+---
+
+### 1a. Search algorithm — `part-search.ts`
+
+Pure functions, no React. The component imports `normalisePart`, `searchParts`,
+and the `NormalisedPart` type from this file.
+
+**Field weights** (highest first; locked):
+
+| Field         | Max weight |
+| ------------- | ---------- |
+| name          | 100        |
+| sku           | 80         |
+| brand         | 50         |
+| category      | 40         |
+| description   | 25         |
+| material      | 20         |
+| size          | 20         |
+| fittingType   | 20         |
+| detail        | 15         |
+
+**Normalisation.** For both query and each searched field on the part:
+lowercase → NFKD → strip combining marks → replace any run of
+non-`[a-z0-9\s]` with a space → collapse repeated whitespace → trim. This
+collapses `"Rain-Bird"`, `"rainbird"`, and `"RAIN BIRD"` into a consistent
+token stream.
+
+**Tokenisation.** The normalised query is split on whitespace. Empty queries
+yield `[]`, which the caller treats as "match everything" with equal score
+(stable secondary sort by name).
+
+**Token-vs-field score** (returns a number in `[0, 1]`, multiplied by the
+field's weight):
+
+- field equals token exactly → `1.0`
+- any word in the field equals the token → `0.95`
+- any word in the field starts with the token → `0.8`
+- the field as a whole contains the token (handles SKU fragments like
+  `1804` inside `BCV-1804-2`) → `0.5`
+- otherwise → `0`
+
+**Part score across all tokens.** AND semantics: if any token scores `0`
+across every field, the part is dropped entirely. Otherwise the part's
+total score is the sum of `bestPerToken × fieldWeight` across tokens. Add
+a `+1` tie-break bonus when the best field for a token is `name`.
+
+**Sort.** Descending by score, with a stable secondary alphabetical sort by
+normalised name (so an empty query produces a calm, predictable list).
+
+**Public API.**
+
+```typescript
+export function normaliseForSearch(raw: string | null | undefined): string;
+export function tokeniseQuery(query: string): string[];
+export interface NormalisedPart { part: Part; fields: Record<SearchableField, string>; }
+export function normalisePart(part: Part): NormalisedPart;
+export interface SearchPartsOptions {
+  categoryFilter?: string | null;   // case-insensitive exact match
+  maxResults?: number;              // hard cap; sort first, then slice
+}
+export function searchParts(
+  normalisedParts: NormalisedPart[],
+  query: string,
+  options?: SearchPartsOptions,
+): Part[];
+```
+
+The component must memoise `normalisedParts` against the `/api/parts` query
+result so the ~5ms-per-1k-parts normalisation pass only runs when the catalog
+changes, not every keystroke.
+
+---
+
+### 1b. Component — `part-picker.tsx`
+
+**Public API (locked).**
+
+```typescript
+export type PartPickerPresentation = "dialog" | "sheet";
+export type PartPickerSelectMode = "single" | "multi";
+
+export interface PartPickerProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSelectPart: (part: Part, quantity?: number) => void;
+
+  presentation?: PartPickerPresentation;        // default "dialog"
+  selectMode?: PartPickerSelectMode;            // default "single"
+  showCategoryChips?: boolean;                  // default false
+  keyboardNav?: boolean;                        // default false
+  showRecents?: boolean;                        // default true
+  title?: string;
+  categoryFilter?: string | null;               // hard filter, default null
+  allowClear?: boolean;                         // default false
+  onClear?: () => void;
+}
+
+export function PartPicker(props: PartPickerProps): JSX.Element;
+```
+
+**Behaviour rules.**
+
+- On `open` going `false → true`: reset `searchQuery`, debounced query,
+  category chip selection, active row index, "just added" confirmation. Focus
+  the search input after a ~60ms timeout (lets the Sheet/Dialog mount).
+- Debounce keystrokes by **150ms** before re-ranking the catalog. (Old
+  modal used 200ms; tightening because the new ranker is faster.)
+- `RENDER_CAP = 200`. Pass `maxResults: RENDER_CAP + 1` to `searchParts` so
+  the component can detect overflow and surface "Showing first 200 of N
+  matches — refine your search". Sort first, then cap (this is already how
+  `searchParts` is specified above).
+- `RECENTS_LIMIT = 6`. Recents are hidden whenever `debouncedSearch` is
+  non-empty, and filtered to obey `categoryFilter` when set.
+- Multi mode: on each select, fire `onSelectPart(part, 1)`, set
+  `justAdded = part.name` for a 1400ms transient confirmation, keep the
+  picker open. Done button at the bottom dismisses.
+- Single mode: on select, fire `onSelectPart(part, 1)`, close the picker,
+  clear the search query.
+- `allowClear`: prepends a "— No part —" row at the top of the result list
+  (not affected by search or category). Clicking calls `onClear?.()` then
+  closes the picker.
+- Keyboard nav (only when `keyboardNav` prop is true):
+  - ArrowDown / ArrowUp navigate `activeIdx` (clamped to `[0, visible.length-1]`)
+  - Enter selects the active row
+  - Escape: `e.stopPropagation()` so an outer wizard never sees it and
+    opens its discard dialog. The Sheet/Dialog's own Escape handler still
+    fires.
+  - Each navigated row is scrolled into view via
+    `rowRefs.current[activeIdx]?.scrollIntoView({ block: "nearest" })`.
+- Row content: name (1 line, truncate), then a wrapping metadata row with
+  category Badge, brand, SKU (mono), and size — separated by gaps, all
+  text-xs. Price right-aligned, semibold.
+
+**Sizing and chrome.**
+
+- Sheet presentation: `side="right"`, `className="p-0 w-screen sm:max-w-md md:max-w-lg sm:w-full flex flex-col h-full"`.
+  Sticky header (Package icon + title + close X), sticky search row
+  (search + chips + count line), scrollable body. Multi-mode footer
+  (justAdded inline live region + Done button).
+- Dialog presentation:
+  `className="max-w-2xl max-h-[85vh] overflow-hidden p-0 flex flex-col"`,
+  same sticky header (DialogTitle), search row, scrollable body, optional
+  multi-mode footer.
+- Search Input: `h-11` (44px), placeholder `"Name, SKU, brand, size…"`,
+  pl-10 with a left Search icon.
+- Result rows: `min-h-[56px]`, `px-4 py-3`, full-width left-aligned button.
+- Recents tiles: `min-h-[56px]`, 1-col grid on `<sm`, 2-col grid on `sm+`.
+
+**data-testid contract.** The old modal exposed
+`part-picker-title`, `part-picker-search`, `part-picker-row-<id>`,
+`part-picker-cat-all`, `part-picker-cat-<category>`, `part-picker-count`,
+`part-picker-added`, `part-picker-done`, `part-picker-close`. These names
+are kept identically. Add new ones for the new affordances:
+`part-picker-recents`, `part-picker-recent-<id>`, `part-picker-results`,
+`part-picker-empty`, `part-picker-clear`.
+
+**Data fetching.** Use `useArrayQuery<Part>({ queryKey: ["/api/parts"], enabled: open })`
+and `useArrayQuery<Part & { usageCount: number }>({ queryKey: ["/api/parts/popular"], enabled: open && recentsEnabled })`
+— same imports the old modal uses (`@/lib/queryClient`).
+
+**Loading state.** Show 5 skeleton rows in the result body while
+`isLoading` is true. The search input remains usable; ranking just operates
+on an empty list until the catalog arrives.
+
+**Empty state.** Package icon + "No parts match `\"<query>\"`." when there's
+a search query; "No parts in catalog." otherwise.
+
+---
+
+### 1c. Callsite migrations
+
+For each callsite, the JSX swap is mechanical unless noted. **Preserve every
+existing prop** on the old `<PartsSearchModal>` invocations exactly as-is —
+just rename the component and the import path.
+
+**(1) billing/edit-parts-modal.tsx** — 1 import, 1 JSX site, no other
+changes:
+
+```diff
+- import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
++ import { PartPicker } from "@/components/parts/part-picker";
+…
+-      <PartsSearchModal
++      <PartPicker
+         open={showLibrary}
+         onOpenChange={setShowLibrary}
+         onSelectPart={handleSelectFromLibrary}
+       />
+```
+
+**(2) billing/billing-sheet-wizard.tsx** — 1 import, 1 comment, 1 JSX site:
+
+```diff
+- import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
++ import { PartPicker } from "@/components/parts/part-picker";
+…
+-      {/* Parts catalog picker — uses shared PartsSearchModal (estimate wizard pattern) */}
++      {/* Parts catalog picker — uses the unified PartPicker. */}
+…
+-      <PartsSearchModal
++      <PartPicker
+         open={partsPickerOpen}
+         onOpenChange={setPartsPickerOpen}
+         presentation="sheet"
+         selectMode="multi"
+         showCategoryChips
+         keyboardNav
+         onSelectPart={(part, qty) => addPart(part, qty ?? 1)}
+       />
+```
+
+**(3) estimates/wizard/estimate-wizard-line-items-step.tsx** — 1 import,
+1 JSX site, preserve all existing props:
+
+```diff
+- import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
++ import { PartPicker } from "@/components/parts/part-picker";
+…
+-      <PartsSearchModal
++      <PartPicker
+         open={pickerOpen}
+         onOpenChange={(open) => {
+           setPickerOpen(open);
+           if (!open) setChangeRowId(null);
+         }}
+         onSelectPart={handlePartPicked}
+         presentation="sheet"
+         selectMode={pickerMode === "add" ? "multi" : "single"}
+         showCategoryChips
+         keyboardNav
+         title={pickerMode === "add" ? "Add part" : "Change part"}
+       />
+```
+
+**(4) pages/field-tech.tsx** — 1 import, 1 JSX site:
+
+```diff
+- import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
++ import { PartPicker } from "@/components/parts/part-picker";
+…
+-      <PartsSearchModal
++      <PartPicker
+         open={showPartsModal}
+         onOpenChange={setShowPartsModal}
+         onSelectPart={addPartToSession}
+       />
+```
+
+**(5) work-orders/work-order-completion.tsx** — replace the inline parts
+search block (currently lines ~896–968, inside the `Card` titled "Parts Used"
+that contains the `Search`-icon Input + the "Quick Add Parts" list).
+
+Replace with:
+
+- Remove the `partsSearchQuery` state (currently line 224), the
+  `setPartsSearchQuery("")` reset (currently line 467), and the
+  `filteredParts` derivation (currently lines 362–364).
+- Add a new state: `const [partsPickerOpen, setPartsPickerOpen] = useState(false);`
+- Replace the search-bar + Quick-Add-Parts JSX block with an "Add part"
+  button styled like billing-sheet-wizard's:
+
+  ```tsx
+  <div className="flex justify-end">
+    <Button
+      type="button"
+      onClick={() => setPartsPickerOpen(true)}
+      className="bg-blue-600 hover:bg-blue-700 text-white min-h-[44px]"
+      size="sm"
+      data-testid="wo-complete-add-part"
+    >
+      <Plus className="w-4 h-4 mr-1" /> Add Part
+    </Button>
+  </div>
+  ```
+
+- Below the existing "Used Parts List" section (still using
+  `usedParts` state, `addUsedPart`, `updatePartQuantity`, and the
+  Estimate-vs-Field-Added subsections), render:
+
+  ```tsx
+  <PartPicker
+    open={partsPickerOpen}
+    onOpenChange={setPartsPickerOpen}
+    presentation="sheet"
+    selectMode="multi"
+    showCategoryChips
+    keyboardNav
+    onSelectPart={(part) => addUsedPart(part)}
+  />
+  ```
+
+- The empty-state message ("No parts added yet…") stays — it now shows
+  whenever `usedParts.length === 0`.
+- Add `import { PartPicker } from "@/components/parts/part-picker";` near
+  the other component imports.
+- Remove the unused `Search` icon import if no other site in the file uses
+  it.
+
+**(6) manager/finding-card.tsx** — replace the inline Dialog picker:
+
+- Remove the inline `<Dialog open={partPickerOpen}…>` block at lines
+  213–258, the `partSearch` state, the `setPartSearch("")` call inside the
+  Change button's onClick, and the `filteredParts` useMemo (lines 58–67).
+- Keep `partPickerOpen` state and the `choosePart` callback.
+- Add at the top of the imports:
+  `import { PartPicker } from "@/components/parts/part-picker";`
+- Replace the inline Dialog block with:
+
+  ```tsx
+  <PartPicker
+    open={partPickerOpen}
+    onOpenChange={setPartPickerOpen}
+    presentation="dialog"
+    selectMode="single"
+    keyboardNav
+    title="Pick a part"
+    categoryFilter={issueConfig?.partCategoryFilter ?? null}
+    allowClear
+    onClear={() => choosePart(null)}
+    onSelectPart={(p) => choosePart(p)}
+  />
+  ```
+
+- Remove the now-unused `Search`, `Dialog`, `DialogContent`, `DialogHeader`,
+  `DialogTitle` imports if no other site in the file uses them.
+
+**(7) Delete** `artifacts/irrigopro/src/components/estimates/parts-search-modal.tsx`.
+
+Run a final `grep -r "PartsSearchModal\|parts-search-modal" artifacts/` to
+verify zero remaining references in `artifacts/irrigopro/src/`. (References
+under `.migration-backup/` are fine — that's a backup tree.)
+
+---
+
+### 1d. Tests — `part-search.test.ts`
+
+Standard vitest. The author ran a standalone smoke test of this exact
+algorithm in Node and got 18/18 passing assertions. Port these into the
+vitest file:
+
+```typescript
+import { describe, it, expect } from "vitest";
+import type { Part } from "@workspace/db/schema";
+import {
+  normaliseForSearch,
+  tokeniseQuery,
+  normalisePart,
+  searchParts,
+} from "./part-search";
+```
+
+Fixture parts to use (locked — the assertions below depend on these exact
+IDs and field values):
+
+| id | name                                  | sku          | brand     | category   | size    | material | fittingType  | description                       |
+| -- | ------------------------------------- | ------------ | --------- | ---------- | ------- | -------- | ------------ | --------------------------------- |
+| 1  | Rain Bird 1804 4-inch Spray Head      | RB-1804      | Rain Bird | Sprinkler  | 4 inch  |          |              |                                   |
+| 2  | Hunter PGP Ultra Rotor                | HNT-PGP      | Hunter    | Rotor      |         |          |              |                                   |
+| 3  | Febco 765 PVB                         | FB-765       | Febco     | Backflow   | 1 inch  | Brass    |              |                                   |
+| 4  | Backflow Repair Kit                   | BCV-1804-2   | Febco     | Backflow   |         |          |              | Compatible with 1804 series       |
+| 5  | PVC 90° Elbow                         | PVC-EL-1     | Spears    | Fitting    | 1 inch  | PVC      | 90° Coupler  |                                   |
+
+Required assertions (each maps to a real-world tech workflow):
+
+- `normaliseForSearch("Rain-Bird 1804!")` === `"rain bird 1804"`
+- `normaliseForSearch("   foo    bar  ")` === `"foo bar"`
+- `normaliseForSearch(null)` === `""` and `normaliseForSearch(undefined)` === `""`
+- `tokeniseQuery("Rain-Bird 1804")` === `["rain","bird","1804"]`
+- `tokeniseQuery("")` === `[]` and `tokeniseQuery("   ")` === `[]`
+- `searchParts(NP, "")` returns all parts, sorted by name (first entry: "Backflow Repair Kit")
+- `searchParts(NP, "hunter")[0].id === 2`
+- `searchParts(NP, "fb-765")[0].id === 3`
+- `searchParts(NP, "rotor")[0].id === 2` (category match)
+- `searchParts(NP, "spears")[0].id === 5` (brand match)
+- `searchParts(NP, "1804")` returns id 1 first, id 4 included (name beats description)
+- `searchParts(NP, "hunter rotor")` returns exactly `[id 2]` (AND semantics)
+- `searchParts(NP, "hunter pgp")[0].id === 2`
+- `searchParts(NP, "brass 1 inch")[0].id === 3` (cross-field token match: material + size)
+- `searchParts(NP, "bcv 1804")` includes id 4 (SKU-contains fallback)
+- `searchParts(NP, "", { categoryFilter: "Backflow" })` returns ids `[3, 4]`
+  in some order
+- `searchParts(NP, "xyzzy")` === `[]`
+- `searchParts(NP, "", { maxResults: 2 }).length` === `2`
+
+---
+
+### 1e. Acceptance checklist
+
+- [ ] `grep -r "PartsSearchModal\|parts-search-modal" artifacts/irrigopro/src/` returns no hits.
+- [ ] `find artifacts/irrigopro/src -path "*parts-search-modal*"` returns no hits.
+- [ ] `find artifacts/irrigopro/src/components/parts -name "part-picker.tsx" -o -name "part-search.ts" -o -name "part-search.test.ts"` returns all three files.
+- [ ] `pnpm --filter @workspace/irrigopro typecheck` passes.
+- [ ] `pnpm --filter @workspace/irrigopro test` passes (including the new
+      `part-search.test.ts`).
+- [ ] Manual smoke test on all five callsites:
+  - Billing wizard: open "Add Part", type "hunter pgp", select — adds to items, picker stays open in multi mode.
+  - Edit-parts modal (from a completed-work view): "Add from Library" opens dialog, selecting closes immediately.
+  - Estimate wizard line items: "Change" on a row opens single-mode picker; "Add Part" opens multi-mode picker.
+  - Field tech session page: parts modal opens, selection closes it.
+  - Work order completion: "Add Part" opens sheet picker, multi-select works, used-parts list updates with Estimate/Field-Added grouping intact.
+  - Wet check FindingCard: "Change" opens dialog with `categoryFilter`
+    honoured (only parts of the issue's category visible); "— No part —"
+    row clears the selection.
+- [ ] On a mobile-sized viewport (≤ 640px) the sheet variant is full-screen
+      and the dialog variant uses the responsive `max-h-[85vh]` cap.
+- [ ] Recently used parts appear at the top of all pickers on an empty
+      query (both sheet and dialog).
+
+---
+
+### Out of scope (do not include in this slice)
+
+- Server-side search via `/api/parts/search?q=` — the catalog comfortably
+  fits in memory client-side. Revisit if catalog size exceeds ~3000 parts.
+- "Create a new part from the current query" affordance in empty state.
+- Levenshtein / typo correction (e.g. `"rainbrd" → "rainbird"`). The
+  normalisation already handles punctuation/case; true edit-distance is a
+  follow-up if the tokeniser proves insufficient in the field.
+- Reorganising the parts schema or the `/api/parts/popular` endpoint.
+- The `companyId`-scoped popular endpoint already returns per-company data;
+  no auth changes needed.
