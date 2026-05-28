@@ -952,7 +952,8 @@ export const insertAssemblyPartSchema = createInsertSchema(assemblyParts).omit({
   }),
 });
 
-export const insertEstimateSchema = createInsertSchema(estimates).omit({ id: true, estimateNumber: true, createdAt: true, updatedAt: true });
+// companyId is always stamped server-side; clients must never send it directly.
+export const insertEstimateSchema = createInsertSchema(estimates).omit({ id: true, estimateNumber: true, createdAt: true, updatedAt: true, companyId: true });
 export const insertEstimateItemSchema = createInsertSchema(estimateItems).omit({ id: true });
 export const insertPropertyZoneSchema = createInsertSchema(propertyZones).omit({ id: true });
 export const insertZoneSchema = createInsertSchema(zones).omit({ id: true });

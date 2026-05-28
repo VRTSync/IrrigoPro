@@ -2378,7 +2378,7 @@ export class DatabaseStorage implements IStorage {
   // ordering, snapshot semantics, and any future side effects.
   async _writeEstimateWithItems(
     executor: DbExecutor,
-    estimate: InsertEstimate,
+    estimate: InsertEstimate & { companyId?: number | null },
     items: InsertEstimateItem[],
     explicitEstimateNumber?: string,
   ): Promise<EstimateWithItems> {
@@ -2409,9 +2409,11 @@ export class DatabaseStorage implements IStorage {
       status: (estimate as { status?: string | null }).status,
       internalStatus: (estimate as { internalStatus?: string | null }).internalStatus,
     });
+    // companyId is guaranteed to be a non-null number here — the route
+    // stamps it from req.authenticatedUserCompanyId before calling storage.
     const [newEstimate] = await executor
       .insert(estimates)
-      .values([{ ...estimate, estimateNumber, lifecycle }])
+      .values([{ ...estimate, estimateNumber, lifecycle } as typeof estimates.$inferInsert])
       .returning();
     const createdItems: EstimateItem[] = [];
     for (let i = 0; i < items.length; i++) {
@@ -2426,7 +2428,7 @@ export class DatabaseStorage implements IStorage {
     return { ...newEstimate, lifecycleStatus: computeLifecycleStatus(newEstimate), items: createdItems };
   }
 
-  async createEstimate(estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems> {
+  async createEstimate(estimate: InsertEstimate & { companyId?: number | null }, items: InsertEstimateItem[]): Promise<EstimateWithItems> {
     return await db.transaction(async (tx) => this._writeEstimateWithItems(tx, estimate, items));
   }
 
