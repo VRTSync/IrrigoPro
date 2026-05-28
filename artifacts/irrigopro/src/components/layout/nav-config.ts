@@ -4,6 +4,7 @@ import {
   Briefcase,
   Wrench,
   ClipboardList,
+  ClipboardCheck,
   Droplets,
   ShieldCheck,
   Users,
@@ -158,6 +159,36 @@ export const billingManagerNav: NavConfig = {
       items: [
         { type: "leaf", label: "QuickBooks", path: "/quickbooks", icon: Calculator },
         { type: "leaf", label: "Wet Check Issue Types", path: "/admin/issue-types", icon: Droplets },
+      ],
+    },
+  ],
+};
+
+export const managerNav: NavConfig = {
+  items: [
+    { type: "leaf", label: "Manager Dashboard", path: "/manager-workspace", icon: ClipboardCheck },
+    wetCheckGroup,
+    {
+      type: "group",
+      label: "Operations",
+      icon: Briefcase,
+      defaultOpen: true,
+      items: [
+        { type: "leaf", label: "Work Orders", path: "/work-orders", icon: Wrench },
+        { type: "leaf", label: "Billing Sheets", path: "/billing-sheets", icon: ClipboardList },
+        { type: "leaf", label: "Estimates", path: "/estimates", icon: ClipboardList },
+        { type: "leaf", label: "Customers", path: "/customers", icon: Users },
+        { type: "leaf", label: "Site Maps", path: "/site-maps", icon: MapIcon },
+        { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
+      ],
+    },
+    {
+      type: "group",
+      label: "Parts",
+      icon: Package,
+      items: [
+        { type: "leaf", label: "Parts Catalog", path: "/parts", icon: Package },
+        { type: "leaf", label: "Parts Settings", path: "/parts-settings", icon: Settings },
       ],
     },
   ],

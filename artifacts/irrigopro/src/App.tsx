@@ -82,7 +82,7 @@ import { NotificationPermissionBanner } from "@/components/notifications/notific
 import CompanyAdminApp from "@/components/company-admin-app";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 import { DesktopShell } from "@/components/layout/desktop-shell";
-import { billingManagerNav, superAdminNav } from "@/components/layout/nav-config";
+import { billingManagerNav, managerNav, superAdminNav } from "@/components/layout/nav-config";
 import { ServiceWorkerRegistration, ServiceWorkerUpdatePrompt } from "@/components/offline/service-worker-update-prompt";
 import { ConflictToastBridge } from "@/components/offline/conflict-toast-bridge";
 import { SessionExpiredBanner } from "@/components/auth/session-expired-banner";
@@ -298,9 +298,8 @@ function Router() {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
-          <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0 flex flex-col">
-            <Navigation />
-            <div className="px-4 flex-1">
+          <DesktopShell navConfig={managerNav}>
+            <div className="px-4">
               <Suspense fallback={<RouteSuspenseFallback />}>
                 <Switch>
                   <Route path="/" component={ManagerDashboard} />
@@ -347,8 +346,7 @@ function Router() {
                 </Switch>
               </Suspense>
             </div>
-            <PoweredByFooter />
-          </div>
+          </DesktopShell>
           <Toaster />
         </QueryClientProvider>
       </TooltipProvider>

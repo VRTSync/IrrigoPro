@@ -196,6 +196,7 @@ export function DesktopShell({ navConfig, children }: DesktopShellProps) {
   );
 
   return (
+    <div data-testid="desktop-shell">
     <PageActionsContext.Provider value={actionsContextValue}>
       <SidebarProvider open={open} onOpenChange={setOpen}>
         <div className="hidden lg:contents">
@@ -222,6 +223,7 @@ export function DesktopShell({ navConfig, children }: DesktopShellProps) {
         </SidebarInset>
       </SidebarProvider>
     </PageActionsContext.Provider>
+    </div>
   );
 }
 
