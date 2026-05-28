@@ -587,8 +587,8 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
         </Link>
       )}
       <div className="flex items-center justify-between gap-2">
-        <Button variant="ghost" onClick={() => navigate("/wet-checks")}>
-          <ChevronLeft className="w-4 h-4 mr-1" /> All Wet Checks
+        <Button variant="ghost" onClick={() => navigate(wc.customerId ? `/wet-checks/c/${wc.customerId}` : "/wet-checks")}>
+          <ChevronLeft className="w-4 h-4 mr-1" /> Back to Customer
         </Button>
         <div className="flex items-center gap-2">
           {typeof wc.id === "number" && (
