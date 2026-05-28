@@ -10,6 +10,7 @@ import { Search, ChevronDown, ChevronRight } from "lucide-react";
 import { useArrayQuery } from "@/lib/queryClient";
 import { BilledBadge } from "@/components/ui/billed-indicator";
 import { WetCheckBillingViewModal } from "@/components/wet-check-billings/wet-check-billing-view-modal";
+import { WetCheckBillingStatusBadge } from "@/components/wet-check-billings/status-badge";
 import type { WetCheckBilling } from "@workspace/db/schema";
 
 // ── Local types ───────────────────────────────────────────────────────────────
@@ -30,20 +31,6 @@ function formatDate(date: string | Date | null | undefined) {
   });
 }
 
-function getStatusBadge(status: string) {
-  switch (status) {
-    case "submitted":
-      return <Badge className="bg-blue-100 text-blue-800">Submitted</Badge>;
-    case "pending_manager_review":
-      return <Badge className="bg-orange-100 text-orange-800">Pending Review</Badge>;
-    case "approved_passed_to_billing":
-      return <Badge className="bg-teal-100 text-teal-800">Approved</Badge>;
-    case "billed":
-      return <Badge className="bg-purple-100 text-purple-800">Billed</Badge>;
-    default:
-      return <Badge variant="outline">{status}</Badge>;
-  }
-}
 
 function isBilled(wcb: WetCheckBilling): boolean {
   return wcb.status === "billed" || wcb.invoiceId != null;
@@ -101,7 +88,7 @@ function WcbRow({
         {item.issuesCount} across {item.zonesCount} zone{item.zonesCount !== 1 ? "s" : ""}
       </td>
       {/* Status */}
-      <td className="px-4 py-3 whitespace-nowrap">{getStatusBadge(item.status)}</td>
+      <td className="px-4 py-3 whitespace-nowrap"><WetCheckBillingStatusBadge status={item.status} /></td>
       {/* Billed */}
       <td className="px-4 py-3 whitespace-nowrap">
         {isBilled(item) ? <BilledBadge /> : null}

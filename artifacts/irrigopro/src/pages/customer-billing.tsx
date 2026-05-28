@@ -35,7 +35,8 @@ import {
   X,
   Edit,
   Trash2,
-  ArrowRight
+  ArrowRight,
+  Droplets
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
@@ -45,6 +46,8 @@ import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integr
 import { InvoiceList } from "@/components/billing/invoice-list";
 import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
 import { FinancialPulseWidget } from "@/components/financial-pulse/financial-pulse-widget";
+import { WetCheckBillingViewModal } from "@/components/wet-check-billings/wet-check-billing-view-modal";
+import { WetCheckBillingStatusBadge } from "@/components/wet-check-billings/status-badge";
 
 // Extended interfaces for billing data with transformed fields
 interface BillingWorkOrder extends WorkOrder {
@@ -114,6 +117,58 @@ interface CustomerPreview {
   contractType?: string;
 }
 
+function WetCheckBillingRow({
+  wcb,
+  onClick,
+}: {
+  wcb: BillingWetCheckBilling;
+  onClick: () => void;
+}) {
+  const status = String((wcb as any).status ?? "");
+  const totalAmount =
+    parseFloat(String((wcb as any).totalAmount ?? "0")) ||
+    wcb.laborCost + wcb.partsCost;
+  const invoiceId = (wcb as any).invoiceId ?? null;
+  const workDate = (wcb as any).workDate ?? wcb.completedDate;
+  const billed = status === "billed" || invoiceId != null;
+
+  return (
+    <Card
+      className="cursor-pointer hover:shadow-md transition-shadow border border-gray-200"
+      onClick={onClick}
+      data-testid={`wcb-row-${wcb.id}`}
+    >
+      <CardContent className="p-3">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1">
+              <Droplets className="w-4 h-4 text-teal-400" />
+              <span className="font-medium text-sm">{wcb.billingNumber}</span>
+              {status && <WetCheckBillingStatusBadge status={status} />}
+              {billed && <BilledBadge />}
+            </div>
+            <div className="text-xs text-gray-600 mb-1">
+              {wcb.description || "Wet Check Billing"}
+            </div>
+            {workDate && (
+              <div className="flex items-center gap-1 text-xs text-gray-500">
+                <Calendar className="w-3 h-3" />
+                {new Date(workDate as string).toLocaleDateString()}
+              </div>
+            )}
+          </div>
+          <div className="text-sm font-medium text-teal-700 whitespace-nowrap">
+            {new Intl.NumberFormat("en-US", {
+              style: "currency",
+              currency: "USD",
+            }).format(totalAmount)}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function CustomerBilling() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
@@ -121,6 +176,7 @@ export default function CustomerBilling() {
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<BillingWorkOrder | null>(null);
   const [selectedBillingSheet, setSelectedBillingSheet] = useState<BillingBillingSheet | null>(null);
   const [selectedEstimate, setSelectedEstimate] = useState<BillingEstimate | null>(null);
+  const [openWcbId, setOpenWcbId] = useState<number | null>(null);
   const [showWorkOrderDetail, setShowWorkOrderDetail] = useState(false);
   const [showBillingSheetDetail, setShowBillingSheetDetail] = useState(false);
   const [showEditWorkOrder, setShowEditWorkOrder] = useState(false);
@@ -1126,7 +1182,7 @@ export default function CustomerBilling() {
 
                   {/* Mobile Tabs for Work Orders, Billing Sheets, etc. */}
                   <Tabs defaultValue="unbilled" className="w-full">
-                    <TabsList className="grid w-full grid-cols-5 text-xs h-10">
+                    <TabsList className="grid w-full grid-cols-6 text-xs h-10">
                       <TabsTrigger value="unbilled" className="text-xs">
                         Unbilled ({customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length + (customerBillingData.unbilledWetCheckBillings ?? []).length})
                       </TabsTrigger>
@@ -1135,6 +1191,9 @@ export default function CustomerBilling() {
                       </TabsTrigger>
                       <TabsTrigger value="billing" className="text-xs">
                         Billing ({customerBillingData.billingSheets.length})
+                      </TabsTrigger>
+                      <TabsTrigger value="wet-check-billings" className="text-xs" data-testid="tab-trigger-wet-check-billings">
+                        WC Billings ({(customerBillingData.wetCheckBillings ?? []).length})
                       </TabsTrigger>
                       <TabsTrigger value="estimates" className="text-xs">
                         Estimates ({customerBillingData.estimates.length})
@@ -1353,6 +1412,28 @@ export default function CustomerBilling() {
                               </div>
                             )}
                           </div>
+                        )}
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="wet-check-billings" className="mt-3">
+                      <div className="space-y-2">
+                        {(customerBillingData.wetCheckBillings ?? []).length === 0 ? (
+                          <Card>
+                            <CardContent className="p-6 text-center text-gray-500">
+                              <Droplets className="w-8 h-8 mx-auto mb-2 text-teal-300" />
+                              <div className="font-medium mb-1">No wet check billings</div>
+                              <div className="text-sm">No wet check billings found for this customer.</div>
+                            </CardContent>
+                          </Card>
+                        ) : (
+                          (customerBillingData.wetCheckBillings ?? []).map((wcb) => (
+                            <WetCheckBillingRow
+                              key={wcb.id}
+                              wcb={wcb}
+                              onClick={() => setOpenWcbId(wcb.id)}
+                            />
+                          ))
                         )}
                       </div>
                     </TabsContent>
@@ -1820,6 +1901,10 @@ export default function CustomerBilling() {
                         <span className="text-gray-600">Billing Sheets:</span>
                         <span className="font-medium">{customerBillingData.billingSheets.length}</span>
                       </div>
+                      <div className="flex justify-between text-xs" data-testid="total-work-wcb-row">
+                        <span className="text-gray-600">Wet Check Billings:</span>
+                        <span className="font-medium">{(customerBillingData.wetCheckBillings ?? []).length}</span>
+                      </div>
                       <div className="flex justify-between text-xs">
                         <span className="text-gray-600">Estimates:</span>
                         <span className="font-medium">{customerBillingData.estimates.length}</span>
@@ -1838,7 +1923,7 @@ export default function CustomerBilling() {
               {/* Work Orders and Billing Data Tabs - Mobile optimized */}
               <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-2 md:p-4">
               <Tabs defaultValue="unbilled" className="w-full">
-                <TabsList className="grid w-full grid-cols-5 h-8">
+                <TabsList className="grid w-full grid-cols-6 h-8">
                   <TabsTrigger value="unbilled" className="text-xs px-2">
                     Unbilled ({customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length + (customerBillingData.unbilledWetCheckBillings ?? []).length})
                   </TabsTrigger>
@@ -1847,6 +1932,9 @@ export default function CustomerBilling() {
                   </TabsTrigger>
                   <TabsTrigger value="billing_sheets" className="text-xs px-2">
                     Billing ({customerBillingData.billingSheets.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="wet_check_billings" className="text-xs px-2" data-testid="tab-trigger-wet-check-billings-desktop">
+                    WC Billings ({(customerBillingData.wetCheckBillings ?? []).length})
                   </TabsTrigger>
                   <TabsTrigger value="estimates" className="text-xs px-2">
                     Estimates ({customerBillingData.estimates.length})
@@ -2350,6 +2438,29 @@ export default function CustomerBilling() {
                           );
                         })()}
                       </>
+                    )}
+                  </div>
+                </TabsContent>
+
+                {/* WC Billings Tab */}
+                <TabsContent value="wet_check_billings">
+                  <div className="space-y-2 mt-2">
+                    {(customerBillingData.wetCheckBillings ?? []).length === 0 ? (
+                      <Card>
+                        <CardContent className="p-6 text-center text-gray-500">
+                          <Droplets className="w-8 h-8 mx-auto mb-2 text-teal-300" />
+                          <div className="font-medium mb-1">No wet check billings</div>
+                          <div className="text-sm">No wet check billings found for this customer.</div>
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      (customerBillingData.wetCheckBillings ?? []).map((wcb) => (
+                        <WetCheckBillingRow
+                          key={wcb.id}
+                          wcb={wcb}
+                          onClick={() => setOpenWcbId(wcb.id)}
+                        />
+                      ))
                     )}
                   </div>
                 </TabsContent>
@@ -3103,6 +3214,15 @@ export default function CustomerBilling() {
           customerEmail={selectedPdfInvoice.customerEmail}
           open={showPdfModal}
           onOpenChange={setShowPdfModal}
+        />
+      )}
+
+      {/* WCB View Modal */}
+      {openWcbId != null && (
+        <WetCheckBillingViewModal
+          wetCheckBillingId={openWcbId}
+          open={openWcbId != null}
+          onOpenChange={(open) => { if (!open) setOpenWcbId(null); }}
         />
       )}
     </div>
