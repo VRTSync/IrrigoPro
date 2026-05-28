@@ -85,6 +85,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
   const queryClient = useQueryClient();
   const woPhotoList: string[] = Array.isArray(workOrder.photos) ? (workOrder.photos as string[]) : [];
   const { getUrl: getWoPhotoUrl } = usePhotoSignedUrls(woPhotoList, "thumb");
+  const { getUrl: getWoMediumUrl } = usePhotoSignedUrls(woPhotoList, "medium");
 
   // When the server's photo list catches up with our in-flight
   // additions, drop the entries that have been confirmed.
@@ -1200,7 +1201,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
             {lightboxPhoto && (
               <Dialog open={!!lightboxPhoto} onOpenChange={() => setLightboxPhoto(null)}>
                 <DialogContent className="max-w-3xl p-2 bg-black border-0">
-                  <PhotoImage photoUrl={lightboxPhoto} alt="Full size" className="w-full h-auto max-h-[85vh] object-contain rounded" />
+                  <PhotoImage photoUrl={lightboxPhoto} alt="Full size" className="w-full h-auto max-h-[85vh] object-contain rounded" variant="medium" batchManaged signedUrlOverride={getWoMediumUrl(lightboxPhoto)} />
                 </DialogContent>
               </Dialog>
             )}

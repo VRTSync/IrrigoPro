@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { safeGet } from "@/utils/safeStorage";
 import { ImageOff, Loader2 } from "lucide-react";
 
@@ -135,9 +135,48 @@ export function PhotoImage({
       ? signedUrlOverride
       : (data?.url ?? null);
 
-  const showLoading = !isBlobOrDirect && signedUrlOverride === undefined && (batchManaged || isLoading);
+  // When the batch (or single) signed-URL path falls back to a relative
+  // `/api/photos/…` URL, a plain <img src> cannot carry the x-user-*
+  // auth headers and will 401. Detect that case and exchange the relative
+  // URL for an authenticated blob URL instead.
+  const isApiFallback = typeof resolvedUrl === "string" && resolvedUrl.startsWith("/api/photos/");
+  const [blobUrl, setBlobUrl] = useState<string | null | "loading">(null);
+
+  useEffect(() => {
+    if (!isApiFallback || !resolvedUrl) return;
+    setBlobUrl("loading");
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    fetch(resolvedUrl, { headers: getAuthHeaders(), credentials: "include" })
+      .then(r => r.ok ? r.blob() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(blob => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setBlobUrl(null);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  // resolvedUrl captures the specific fallback URL; re-run if it changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedUrl, isApiFallback]);
+
+  const finalUrl = isApiFallback
+    ? (typeof blobUrl === "string" ? blobUrl : null)
+    : resolvedUrl;
+
+  const showLoading = !isBlobOrDirect && (
+    (signedUrlOverride === undefined && (batchManaged || isLoading)) ||
+    (isApiFallback && blobUrl === "loading")
+  );
   const showError = !isBlobOrDirect && !showLoading && (
-    signedUrlOverride === null || (signedUrlOverride === undefined && (isError || !resolvedUrl))
+    signedUrlOverride === null ||
+    (isApiFallback && blobUrl === null) ||
+    (signedUrlOverride === undefined && !isApiFallback && (isError || !resolvedUrl))
   );
 
   if (showLoading) {
@@ -148,7 +187,7 @@ export function PhotoImage({
     );
   }
 
-  if (showError || !resolvedUrl) {
+  if (showError || !finalUrl) {
     return (
       <div className={`flex items-center justify-center bg-gray-100 ${className}`} onClick={onClick}>
         <ImageOff className="w-5 h-5 text-gray-400" />
@@ -156,5 +195,5 @@ export function PhotoImage({
     );
   }
 
-  return <img src={resolvedUrl} alt={alt} className={className} onClick={onClick} loading="lazy" />;
+  return <img src={finalUrl} alt={alt} className={className} onClick={onClick} loading="lazy" />;
 }
