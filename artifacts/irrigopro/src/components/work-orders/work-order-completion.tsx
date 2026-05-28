@@ -52,6 +52,8 @@ import {
   Navigation,
 } from "lucide-react";
 import { ToastAction } from "@/components/ui/toast";
+import { LocationPicker } from "@/components/ui/location-picker";
+import { useCustomerBoundary } from "@/hooks/use-customer-boundary";
 import type { WorkOrder, Part, Customer } from "@workspace/db/schema";
 
 const workOrderCompletionSchema = z.object({
@@ -231,6 +233,32 @@ export function WorkOrderCompletion({
     queryKey: ["/api/customers", workOrder.customerId],
     enabled: !!workOrder.customerId,
   });
+
+  const { data: customerBoundary } = useCustomerBoundary(workOrder.customerId);
+
+  const handleLocationSelect = (location: { lat: number; lng: number; address?: string }) => {
+    const previous: PinFields = livePin;
+    const next: PinFields = {
+      workLocationLat: location.lat,
+      workLocationLng: location.lng,
+      workLocationAddress: location.address ?? null,
+    };
+    applyOptimisticPin(next);
+    updatePinMutation.mutate(next, {
+      onError: (err: unknown) => {
+        applyOptimisticPin(previous);
+        const message =
+          err instanceof Error
+            ? err.message
+            : "We restored your old pin. Please try again.";
+        toast({
+          title: "Couldn't save the new pin",
+          description: message,
+          variant: "destructive",
+        });
+      },
+    });
+  };
 
   const customerBranches: string[] = Array.isArray(customer?.branches) ? customer.branches : [];
   const needsBranchSelection = customerBranches.length > 0 && !workOrder.branchName;
@@ -681,78 +709,75 @@ export function WorkOrderCompletion({
               </Card>
             )}
 
-            {/* Pinned Location + "I'm here" affordance */}
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div className="flex items-start gap-2 min-w-0 flex-1">
-                    <MapPin className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                    <div className="min-w-0">
-                      <div className="text-xs font-medium text-gray-500">Pinned work location</div>
-                      {livePin.workLocationLat != null && livePin.workLocationLng != null ? (
-                        <div className="text-sm text-gray-900 truncate">
-                          {livePin.workLocationAddress ||
-                            `${livePin.workLocationLat.toFixed(6)}, ${livePin.workLocationLng.toFixed(6)}`}
-                        </div>
-                      ) : (
-                        <div className="text-sm text-gray-500 italic">No pin yet — drop one from where you are.</div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {(() => {
-                      const mapsUrl = buildMapsUrl({
+            {/* Interactive map + location controls */}
+            <div className="space-y-2">
+              <LocationPicker
+                selectedLocation={
+                  livePin.workLocationLat != null && livePin.workLocationLng != null
+                    ? {
                         lat: livePin.workLocationLat,
                         lng: livePin.workLocationLng,
-                        address: livePin.workLocationAddress,
-                        label:
-                          livePin.workLocationAddress ||
-                          workOrder.projectAddress ||
-                          workOrder.customerName,
-                      });
-                      const hasPin =
-                        livePin.workLocationLat != null &&
-                        livePin.workLocationLng != null;
-                      if (!hasPin || !mapsUrl) return null;
-                      return (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          asChild
-                          className="border-blue-600 text-blue-700 hover:bg-blue-50"
-                        >
-                          <a
-                            href={mapsUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            data-testid="link-get-directions"
-                          >
-                            <Navigation className="w-3.5 h-3.5 mr-1.5" />
-                            Get directions
-                          </a>
-                        </Button>
-                      );
-                    })()}
+                        address: livePin.workLocationAddress ?? undefined,
+                      }
+                    : null
+                }
+                defaultAddress={workOrder.projectAddress || customer?.address || undefined}
+                customerBoundary={customerBoundary}
+                onLocationSelect={handleLocationSelect}
+              />
+              {/* Get directions + I'm here — kept alongside the map */}
+              <div className="flex items-center gap-2 justify-end">
+                {(() => {
+                  const mapsUrl = buildMapsUrl({
+                    lat: livePin.workLocationLat,
+                    lng: livePin.workLocationLng,
+                    address: livePin.workLocationAddress,
+                    label:
+                      livePin.workLocationAddress ||
+                      workOrder.projectAddress ||
+                      workOrder.customerName,
+                  });
+                  const hasPin =
+                    livePin.workLocationLat != null &&
+                    livePin.workLocationLng != null;
+                  if (!hasPin || !mapsUrl) return null;
+                  return (
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={handleImHere}
-                      disabled={pinningHere || updatePinMutation.isPending}
+                      asChild
                       className="border-blue-600 text-blue-700 hover:bg-blue-50"
                     >
-                      {pinningHere || updatePinMutation.isPending ? (
-                        <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                      ) : (
-                        <Crosshair className="w-3.5 h-3.5 mr-1.5" />
-                      )}
-                      I'm here
+                      <a
+                        href={mapsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        data-testid="link-get-directions"
+                      >
+                        <Navigation className="w-3.5 h-3.5 mr-1.5" />
+                        Get directions
+                      </a>
                     </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                  );
+                })()}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleImHere}
+                  disabled={pinningHere || updatePinMutation.isPending}
+                  className="border-blue-600 text-blue-700 hover:bg-blue-50"
+                >
+                  {pinningHere || updatePinMutation.isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Crosshair className="w-3.5 h-3.5 mr-1.5" />
+                  )}
+                  I'm here
+                </Button>
+              </div>
+            </div>
 
             {/* Work Summary */}
             <Card>

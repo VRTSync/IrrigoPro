@@ -268,6 +268,34 @@ export function LocationPicker({
     }
   }, [showMapless, selectedLocation, customerBoundary]);
 
+  // Sync the pin marker whenever the parent changes `selectedLocation` from
+  // outside — e.g. when the host component's "I'm here" GPS button fires and
+  // updates the prop. Without this effect, the map shows a stale marker
+  // because the init effect only places the marker once at mount.
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (selectedLocation) {
+      const { lat, lng } = selectedLocation;
+      if (markerRef.current) {
+        markerRef.current.setLatLng([lat, lng]);
+      } else {
+        markerRef.current = L.marker([lat, lng]).addTo(map);
+      }
+      // Fly to the new pin so the tech can see where it landed.
+      map.flyTo([lat, lng], Math.max(map.getZoom(), 18), { duration: 0.8 });
+    } else {
+      // Pin was cleared externally — remove the marker.
+      if (markerRef.current) {
+        map.removeLayer(markerRef.current);
+        markerRef.current = null;
+      }
+    }
+    // selectedLocation is an object — depend on the primitive values to avoid
+    // spurious re-runs from reference inequality.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLocation?.lat, selectedLocation?.lng]);
+
   // Swap boundary overlay when it changes (e.g. switching customer).
   useEffect(() => {
     const map = mapInstanceRef.current;
