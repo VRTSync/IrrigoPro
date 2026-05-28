@@ -7141,8 +7141,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Reconciliation: ensure any billing sheet that is an invoice line item
-      // but was missed by the status update loop is also marked as billed.
+      // Reconciliation: ensure any billing sheet OR wet check billing that is
+      // an invoice line item but was missed by the primary stamping loops above
+      // is also marked as billed. The primary loops are the correctness
+      // mechanism; this block is a purely defensive safety net.
       try {
         const invoiceItemsForReconciliation = await storage.getInvoiceItems(invoice.id);
         for (const item of invoiceItemsForReconciliation) {
@@ -7156,10 +7158,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
               });
               console.log(`Reconciliation: marked billing sheet ${bs.id} as billed for invoice ${invoice.id}`);
             }
+          } else if (item.sourceType === 'wet_check_billing' && item.sourceId) {
+            const wcb = await storage.getWetCheckBillingById(item.sourceId);
+            if (wcb && !wcb.invoiceId) {
+              await storage.updateWetCheckBilling(wcb.id, {
+                invoiceId: invoice.id,
+                billedAt: currentDate,
+                status: 'billed',
+              });
+              console.log(`Reconciliation: marked wet check billing ${wcb.id} as billed for invoice ${invoice.id}`);
+            }
           }
         }
       } catch (reconcileError) {
-        console.error('Error during billing sheet reconciliation:', reconcileError);
+        console.error('Error during billing sheet / wet check billing reconciliation:', reconcileError);
       }
 
       // Task #693 — Financial Pulse Slice 4. Fire budget threshold
