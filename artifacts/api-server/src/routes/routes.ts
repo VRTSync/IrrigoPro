@@ -360,10 +360,12 @@ import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
 import { registerBudgetRoutes } from "./budget-routes";
 import { registerFinancialPulseRoutes } from "./financial-pulse";
+import { registerAdminMigrationsRoutes } from "./admin-migrations-routes";
 import { registerCleanupInvoice71256Routes } from "./cleanup-invoice-71256";
 import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
 import { scrubEvent, setScrubCustomerNames } from "../lib/scrubEvent";
 import { setTelemetrySink, withTelemetry, type TelemetryEvent } from "../lib/withTelemetry";
+import { assertCompanyId } from "../lib/migrations/assert-company-id";
 import {
   companyThrottleMiddleware,
   loadCompanyThrottles,
@@ -7211,6 +7213,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Task #687 — Financial Pulse Slice 1: per-customer budget usage.
   registerBudgetRoutes(app, { requireAuthentication });
   registerFinancialPulseRoutes(app, { requireAuthentication });
+  // Slice 4a — Super-admin DB migration management page.
+  registerAdminMigrationsRoutes(app, requireAuthentication);
   // Task #760 — Temporary one-time cleanup: delete test invoice #71256.
   // Remove this registration (and cleanup-invoice-71256.ts) after successful run.
   registerCleanupInvoice71256Routes(app, { requireAuthentication });
@@ -13000,6 +13004,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const workOrderSourceItemCount = (await storage.getWorkOrderItems(workOrderId)).length;
       // Use branchName from request body (tech may have selected it) or fall back to the work order's stored branch
       const effectiveBranchName = req.body.branchName || workOrder.branchName || null;
+      // Slice 4a: companyId is transitionally nullable in schema.ts; assert it is
+      // populated (the migration admin page ensures this at the DB level).
+      assertCompanyId(workOrder, `work order ${workOrderId} → create billing sheet`);
       const newBillingSheet = await storage.createBillingSheet({
         technicianName: techName || workOrder.assignedTechnicianName || "",
         workDescription: workPerformed || "",

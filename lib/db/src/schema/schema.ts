@@ -230,7 +230,11 @@ export const billingSheets = pgTable("billing_sheets", {
   id: serial("id").primaryKey(),
   billingNumber: text("billing_number").notNull().unique(),
   customerId: integer("customer_id").references(() => customers.id),
-  companyId: integer("company_id").references(() => companies.id).notNull(),
+  // Slice 4a transitional: nullable while the migration admin page
+  // applies NOT NULL at the DB level via the company-id-columns-v1
+  // migration. Slice 4b will flip this back to .notNull() once
+  // production has the constraint in place.
+  companyId: integer("company_id").references(() => companies.id),
   customerName: text("customer_name").notNull(),
   propertyAddress: text("property_address").notNull(),
   workLocationLat: decimal("work_location_lat", { precision: 10, scale: 7 }),
@@ -420,7 +424,11 @@ export const estimates = pgTable("estimates", {
   // (companyId, estimateNumber) — see `estimatesCompanyNumberIdx`
   // below.
   estimateNumber: text("estimate_number").notNull(),
-  companyId: integer("company_id").references(() => companies.id).notNull(), // Company ownership
+  // Slice 4a transitional: nullable while the migration admin page
+  // applies NOT NULL at the DB level via the company-id-columns-v1
+  // migration. Slice 4b will flip this back to .notNull() once
+  // production has the constraint in place.
+  companyId: integer("company_id").references(() => companies.id), // Company ownership
   customerId: integer("customer_id").references(() => customers.id),
   customerName: text("customer_name").notNull(),
   customerEmail: text("customer_email").notNull(),
@@ -654,7 +662,11 @@ export const workOrders = pgTable("work_orders", {
   workOrderNumber: text("work_order_number").notNull().unique(),
   estimateId: integer("estimate_id").references(() => estimates.id), // Optional - null for direct work orders
   customerId: integer("customer_id").references(() => customers.id).notNull(),
-  companyId: integer("company_id").references(() => companies.id).notNull(),
+  // Slice 4a transitional: nullable while the migration admin page
+  // applies NOT NULL at the DB level via the company-id-columns-v1
+  // migration. Slice 4b will flip this back to .notNull() once
+  // production has the constraint in place.
+  companyId: integer("company_id").references(() => companies.id),
   customerName: text("customer_name").notNull(),
   customerEmail: text("customer_email").notNull(),
   customerPhone: text("customer_phone"),
@@ -764,7 +776,11 @@ export const invoices = pgTable("invoices", {
   id: serial("id").primaryKey(),
   invoiceNumber: text("invoice_number").notNull().unique(),
   customerId: integer("customer_id").references(() => customers.id).notNull(),
-  companyId: integer("company_id").references(() => companies.id).notNull(),
+  // Slice 4a transitional: nullable while the migration admin page
+  // applies NOT NULL at the DB level via the company-id-columns-v1
+  // migration. Slice 4b will flip this back to .notNull() once
+  // production has the constraint in place.
+  companyId: integer("company_id").references(() => companies.id),
   customerName: text("customer_name").notNull(),
   customerEmail: text("customer_email").notNull(),
   customerPhone: text("customer_phone"),
@@ -1573,3 +1589,4 @@ export const appSettings = pgTable("app_settings", {
   value: text("value").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+

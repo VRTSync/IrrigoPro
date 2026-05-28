@@ -562,6 +562,76 @@ describe("Task #935 — all single-ID /api/billing-sheets/:id... routes carry bo
   });
 });
 
+// ─── Part 7: Slice 4a — admin migrations routes all carry requireAuthentication + requireSuperAdmin ──
+
+describe("Slice 4a — admin-migrations-routes.ts: all routes carry requireAuthentication + requireSuperAdmin", () => {
+  const migrationsRouteSrc = readFileSync(
+    join(__dirname, "admin-migrations-routes.ts"),
+    "utf8",
+  );
+
+  it("requireSuperAdmin helper is defined and checks super_admin role", () => {
+    assert.ok(
+      migrationsRouteSrc.includes("requireSuperAdmin"),
+      "requireSuperAdmin not found in admin-migrations-routes.ts",
+    );
+    assert.ok(
+      migrationsRouteSrc.includes("super_admin"),
+      "super_admin role check not found",
+    );
+    assert.ok(
+      migrationsRouteSrc.includes("403"),
+      "403 response not found",
+    );
+  });
+
+  it("every app.get / app.post in admin-migrations-routes.ts calls requireSuperAdmin", () => {
+    const routeRe = /app\.(get|post)\(['"]/g;
+    let match: RegExpExecArray | null;
+    const missing: string[] = [];
+    while ((match = routeRe.exec(migrationsRouteSrc)) !== null) {
+      const pos = match.index;
+      const chunk = migrationsRouteSrc.slice(pos, pos + 600);
+      if (!chunk.includes("requireSuperAdmin")) {
+        const pathMatch = chunk.match(/['"]([^'"]+)['"]/);
+        missing.push(pathMatch?.[1] ?? "(unknown)");
+      }
+    }
+    assert.deepEqual(
+      missing,
+      [],
+      `Routes missing requireSuperAdmin: ${missing.join(", ")}`,
+    );
+  });
+
+  it("every app.get / app.post in admin-migrations-routes.ts is passed requireAuthentication", () => {
+    const routeRe = /app\.(get|post)\(['"]/g;
+    let match: RegExpExecArray | null;
+    const missing: string[] = [];
+    while ((match = routeRe.exec(migrationsRouteSrc)) !== null) {
+      const pos = match.index;
+      // Check far enough to capture the middleware list (before the async handler)
+      const chunk = migrationsRouteSrc.slice(pos, pos + 300);
+      if (!chunk.includes("requireAuthentication")) {
+        const pathMatch = chunk.match(/['"]([^'"]+)['"]/);
+        missing.push(pathMatch?.[1] ?? "(unknown)");
+      }
+    }
+    assert.deepEqual(
+      missing,
+      [],
+      `Routes missing requireAuthentication: ${missing.join(", ")}`,
+    );
+  });
+
+  it("registerAdminMigrationsRoutes is imported and called in routes.ts", () => {
+    assert.ok(
+      src.includes("registerAdminMigrationsRoutes"),
+      "registerAdminMigrationsRoutes not found in routes.ts",
+    );
+  });
+});
+
 // ─── Part 5: Task #931 — pin-patch precise message appears exactly once ───────
 
 describe("Task #931 — pin-patch precise 403 message appears exactly once in routes.ts", () => {
