@@ -445,6 +445,22 @@ function BillingHeaderVariant({ className }: { className?: string }) {
 }
 
 // ─── Variant: customer-detail ─────────────────────────────────────────────
+//
+// Task #1003 — audit + fix: "Billed MTD" and "Billed YTD" renamed to
+// "Invoiced MTD" / "Invoiced YTD" so the label matches the underlying
+// formula (invoice createdAt window, not cash collected). infoTips added
+// to all four tiles so first-time viewers can understand each number.
+
+const CUSTOMER_DETAIL_TIPS = {
+  invoicedMtd:
+    "Invoices created for this customer this month · anchored on invoice date · excludes draft and cancelled · includes tax and markup.",
+  invoicedYtd:
+    "Invoices created for this customer this calendar year · anchored on invoice date · excludes draft and cancelled · includes uninvoiced wet-check billings by work date.",
+  moneyOwed:
+    "Unpaid invoices for this customer · point-in-time balance · excludes draft, cancelled, and paid invoices · accuracy depends on QuickBooks payment sync.",
+  avgTimeToPay:
+    "Average days from invoice creation to payment · measured over the last 90 days · shows '—' when no paid invoices exist in that window.",
+} as const;
 
 function statusColor(status: BudgetBucket["status"]): string {
   switch (status) {
@@ -508,20 +524,24 @@ function CustomerDetailVariant({ customerId }: { customerId: number }) {
         <div className="space-y-4">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <MetricTile
-              label="Billed MTD"
+              label="Invoiced MTD"
               value={data?.billedMtd ?? null}
               format="currency"
               isLoading={isLoading}
               testId="fp-tile-cust-billed-mtd"
               accent="blue"
+              windowBadge="MTD"
+              infoTip={CUSTOMER_DETAIL_TIPS.invoicedMtd}
             />
             <MetricTile
-              label="Billed YTD"
+              label="Invoiced YTD"
               value={data?.billedYtd ?? null}
               format="currency"
               isLoading={isLoading}
               testId="fp-tile-cust-billed-ytd"
               accent="blue"
+              windowBadge="YTD"
+              infoTip={CUSTOMER_DETAIL_TIPS.invoicedYtd}
             />
             <MetricTile
               label="Money Owed"
@@ -530,6 +550,7 @@ function CustomerDetailVariant({ customerId }: { customerId: number }) {
               isLoading={isLoading}
               testId="fp-tile-cust-outstanding-ar"
               accent="amber"
+              infoTip={CUSTOMER_DETAIL_TIPS.moneyOwed}
             />
             <MetricTile
               label="Avg. Time to Get Paid"
@@ -537,6 +558,7 @@ function CustomerDetailVariant({ customerId }: { customerId: number }) {
               format="days"
               isLoading={isLoading}
               testId="fp-tile-cust-avg-days-to-pay"
+              infoTip={CUSTOMER_DETAIL_TIPS.avgTimeToPay}
             />
           </div>
           {data?.monthly && <BudgetMeter bucket={data.monthly} />}
