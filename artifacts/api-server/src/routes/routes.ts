@@ -9697,6 +9697,40 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // Task #977 — billing-manager-tier labor-rate override on an unbilled WCB.
+  // Body: { newRate: number } — finite, ≥0, ≤1000.
+  // Returns 409 for billed or invoiced WCBs; 403 for field_tech or cross-company.
+  const wcbLaborRateBody = z.object({
+    newRate: z.coerce.number().finite("newRate must be a finite number").min(0, "newRate must be ≥ 0").max(1000, "newRate must be ≤ 1000"),
+  });
+  app.patch("/api/wet-check-billings/:id/labor-rate", requireAuthentication, async (req, res) => {
+    const role = req.authenticatedUserRole;
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin") {
+      res.status(403).json({ message: "Forbidden" }); return;
+    }
+    const parsed = wcbLaborRateBody.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
+    const wcbId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(wcbId)) { res.status(400).json({ message: "Invalid id" }); return; }
+    // super_admin bypasses tenant-scope (companyId null = no tenant filter).
+    const companyId: number | null = role === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
+    try {
+      const result = await storage.recomputeWcbTotalsForLaborRate(wcbId, parsed.data.newRate, companyId);
+      res.json(result);
+    } catch (e: any) {
+      if (e?.code === "WCB_LOCKED") { res.status(409).json({ message: e.message }); return; }
+      if (e?.code === "WCB_CROSS_COMPANY") { res.status(403).json({ message: "Access denied" }); return; }
+      if (e?.code === "WCB_NOT_FOUND") { res.status(404).json({ message: e.message }); return; }
+      const { status, message } = classifyAndLog(req, e, {
+        op: "recomputeWcbTotalsForLaborRate",
+        ctx: { wcbId, newRate: parsed.data.newRate },
+        fallbackStatus: 500,
+        fallbackMessage: "Couldn't update labor rate",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
   // Billing Sheets API - for work done without work orders
   // Note: Pricing fields are stripped for field_tech role via applyPricingVisibility
   app.get("/api/billing-sheets", async (req, res) => {

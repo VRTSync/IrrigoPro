@@ -12,13 +12,14 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Pencil } from "lucide-react";
 import { WetCheckBillingViewComponent } from "@/components/billing/wet-check-billing-view";
 import type { WetCheckBillingView, WcvZone } from "@/components/billing/wet-check-billing-view";
 import type { WetCheckBilling } from "@workspace/db/schema";
 import { safeGet } from "@/utils/safeStorage";
 import { useToast } from "@/hooks/use-toast";
 import { LaborHoursStepper } from "@/components/ui/labor-hours-stepper";
+import { WcbLaborRateEdit } from "./wcb-labor-rate-edit";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -42,7 +43,19 @@ function canEditZoneLabor(): boolean {
   return role === "billing_manager" || role === "company_admin" || role === "super_admin";
 }
 
-// ── Zone labor editor (billing-manager tier, Task #891) ───────────────────────
+/**
+ * Returns true when the WCB is unlocked and the current user has the billing-
+ * manager tier needed to edit labor fields (rate and zone hours).
+ * Locked = status "billed" OR invoiceId != null.
+ */
+function canEditLaborFields(wcb: WetCheckBilling): boolean {
+  if (!canEditZoneLabor()) return false;
+  if (wcb.invoiceId != null) return false;
+  if (wcb.status === "billed") return false;
+  return true;
+}
+
+// ── Zone labor editor (billing-manager tier, Task #891 / #977) ───────────────
 
 function ZoneLaborEditorRow({
   zone,
@@ -145,6 +158,94 @@ function ZoneLaborEditorPanel({
   );
 }
 
+// ── Edit affordances panel (Task #977) ────────────────────────────────────────
+// Shown only for billing_manager+ on unlocked (not billed / invoiced) WCBs.
+
+function EditAffordancesPanel({
+  wcb,
+  view,
+  onLabourSaved,
+}: {
+  wcb: WetCheckBilling;
+  view: WetCheckBillingView;
+  onLabourSaved: () => void;
+}) {
+  const [editingLaborRate, setEditingLaborRate] = useState(false);
+  const [showZoneLabor, setShowZoneLabor] = useState(false);
+
+  const hasZones = view.zones.length > 0;
+  const currentRate = String(wcb.laborRate ?? "0");
+
+  return (
+    <div className="space-y-3" data-testid="wcb-edit-affordances">
+      {/* Labor rate row */}
+      <div className="rounded-lg border border-gray-200 bg-white p-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-700">Labor Rate</span>
+            <span
+              className="text-sm text-gray-900 font-semibold"
+              data-testid="wcb-labor-rate-display"
+            >
+              ${parseFloat(currentRate).toFixed(2)}/hr
+            </span>
+          </div>
+          {!editingLaborRate && (
+            <button
+              type="button"
+              onClick={() => setEditingLaborRate(true)}
+              className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"
+              data-testid="wcb-labor-rate-pencil"
+              aria-label="Edit labor rate"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {editingLaborRate && (
+          <div className="mt-3">
+            <WcbLaborRateEdit
+              wcbId={wcb.id}
+              currentRate={currentRate}
+              onSuccess={onLabourSaved}
+              onClose={() => setEditingLaborRate(false)}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Zone labor row (only when there are zones) */}
+      {hasZones && (
+        <div className="rounded-lg border border-gray-200 bg-white p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-gray-700">Zone Repair Labor</span>
+            <button
+              type="button"
+              onClick={() => setShowZoneLabor((v) => !v)}
+              className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"
+              data-testid="wcb-zone-labor-pencil"
+              aria-label={showZoneLabor ? "Hide zone labor editor" : "Edit zone labor hours"}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {showZoneLabor && (
+            <div className="mt-3">
+              <ZoneLaborEditorPanel
+                view={view}
+                wcbId={wcb.id}
+                onSaved={onLabourSaved}
+              />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface WetCheckBillingViewModalProps {
@@ -172,7 +273,7 @@ export function WetCheckBillingViewModal({
 
   const wcb = data?.wetCheckBilling;
   const view = data?.view ?? null;
-  const showLaborEditor = canEditZoneLabor() && !!view && view.zones.length > 0;
+  const showEditAffordances = !!wcb && !!view && canEditLaborFields(wcb);
 
   function handleViewOriginating(e: React.MouseEvent) {
     e.preventDefault();
@@ -183,6 +284,8 @@ export function WetCheckBillingViewModal({
 
   function handleLaborSaved() {
     queryClient.invalidateQueries({ queryKey: ["/api/wet-check-billings", wetCheckBillingId] });
+    queryClient.invalidateQueries({ queryKey: ["/api/wet-check-billings"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
   }
 
   return (
@@ -235,11 +338,15 @@ export function WetCheckBillingViewModal({
             </p>
           )}
 
-          {!isLoading && !isError && view && (
+          {!isLoading && !isError && view && wcb && (
             <>
-              {/* Task #891 — billing-manager zone labor editor (shown before view for prominence) */}
-              {showLaborEditor && (
-                <ZoneLaborEditorPanel view={view} wcbId={wetCheckBillingId} onSaved={handleLaborSaved} />
+              {/* Task #977 — billing-manager edit affordances for unlocked WCBs */}
+              {showEditAffordances && (
+                <EditAffordancesPanel
+                  wcb={wcb}
+                  view={view}
+                  onLabourSaved={handleLaborSaved}
+                />
               )}
               <WetCheckBillingViewComponent
                 view={view}

@@ -1052,6 +1052,16 @@ export interface IStorage {
   getWetCheckBillingsByTechnician(technicianId: number): Promise<WetCheckBilling[]>;
   getWetCheckBillingsByWetCheckId(wetCheckId: number): Promise<WetCheckBilling[]>;
   updateWetCheckBilling(id: number, data: Partial<InsertWetCheckBilling>): Promise<WetCheckBilling>;
+  /**
+   * Task #977 — billing-manager-tier labor-rate override on an unbilled WCB.
+   * Recomputes laborSubtotal (= totalHours × newRate) and totalAmount
+   * (= laborSubtotal + partsSubtotal) in one atomic db.update call.
+   * Throws with code "WCB_LOCKED" for billed or invoiced WCBs.
+   * Throws with code "WCB_CROSS_COMPANY" on cross-tenant access.
+   * Throws with code "WCB_NOT_FOUND" when the row is missing.
+   * Passes companyId=null to bypass tenant-scope (super_admin).
+   */
+  recomputeWcbTotalsForLaborRate(id: number, newRate: number, companyId: number | null): Promise<WetCheckBilling>;
   deleteWetCheckBilling(id: number): Promise<void>;
   /** Returns the URL strings of all photos attached to a wet check (both zone-level and finding-level). */
   getWetCheckPhotoUrls(wetCheckId: number): Promise<string[]>;
@@ -3982,6 +3992,46 @@ export class DatabaseStorage implements IStorage {
       .returning();
     if (!row) throw new Error(`WetCheckBilling id=${id} not found`);
     return row;
+  }
+
+  // Task #977 — billing-manager-tier labor-rate override on an unbilled WCB.
+  // Reads the existing WCB, enforces lock/tenant guards, then recomputes
+  // laborSubtotal (= totalHours × newRate) and totalAmount (= laborSubtotal +
+  // partsSubtotal) in one atomic UPDATE … RETURNING call.
+  async recomputeWcbTotalsForLaborRate(id: number, newRate: number, companyId: number | null): Promise<WetCheckBilling> {
+    return db.transaction(async (tx) => {
+      const [wcb] = await tx.select().from(wetCheckBillings).where(eq(wetCheckBillings.id, id));
+      if (!wcb) {
+        throw Object.assign(new Error(`Wet check billing ${id} not found`), { code: "WCB_NOT_FOUND" });
+      }
+      // Tenant-scope: verify the WCB's wet check belongs to this company.
+      // companyId=null means super_admin bypass.
+      if (companyId != null) {
+        const [wc] = await tx.select({ companyId: wetChecks.companyId }).from(wetChecks).where(eq(wetChecks.id, wcb.wetCheckId));
+        if (!wc || wc.companyId !== companyId) {
+          throw Object.assign(new Error("Access denied"), { code: "WCB_CROSS_COMPANY" });
+        }
+      }
+      // Block billed or invoiced WCBs.
+      if (wcb.status === "billed" || wcb.invoiceId != null) {
+        throw Object.assign(
+          new Error(`Wet check billing ${id} is locked (status=${wcb.status}) and cannot have its labor rate changed`),
+          { code: "WCB_LOCKED" },
+        );
+      }
+      const totalHours = parseFloat(String(wcb.totalHours ?? "0")) || 0;
+      const laborSubtotal = totalHours * newRate;
+      const partsSubtotal = parseFloat(String(wcb.partsSubtotal ?? "0")) || 0;
+      const totalAmount = laborSubtotal + partsSubtotal;
+      const [updated] = await tx.update(wetCheckBillings).set({
+        laborRate: newRate.toFixed(2),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
+        updatedAt: new Date(),
+      }).where(eq(wetCheckBillings.id, id)).returning();
+      if (!updated) throw new Error(`WetCheckBilling id=${id} update failed`);
+      return updated;
+    });
   }
 
   async deleteWetCheckBilling(id: number): Promise<void> {
@@ -7754,14 +7804,14 @@ export class DatabaseStorage implements IStorage {
       // Tenant-scope: verify the WCB's wet check belongs to this company.
       const [wc] = await tx.select().from(wetChecks).where(eq(wetChecks.id, wcb.wetCheckId));
       if (!wc || wc.companyId !== companyId) return undefined;
-      // Block approved or invoiced WCBs — both are immutable to labor edits.
-      // approved_passed_to_billing signals the WCB has been reviewed and is
-      // queued for invoicing; invoiceId != null means it is already on an invoice.
+      // Block invoiced or billed WCBs — both are terminal states for labor edits.
+      // approved_passed_to_billing is intentionally allowed: billing managers
+      // may still correct zone repair hours before invoicing (Task #977).
       if (wcb.invoiceId != null) {
         throw new Error(`Wet check billing ${wcbId} is already invoiced and cannot be edited`);
       }
-      if (wcb.status === "approved_passed_to_billing") {
-        throw new Error(`Wet check billing ${wcbId} has been approved for billing and can no longer be edited`);
+      if (wcb.status === "billed") {
+        throw new Error(`Wet check billing ${wcbId} is billed and cannot be edited`);
       }
       // Verify the zone record is actually part of this WCB's findings.
       // This is a tighter scope than "same wet check" — a zone that exists on

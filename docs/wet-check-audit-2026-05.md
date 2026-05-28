@@ -157,7 +157,8 @@ No regressions introduced by this task — the only storage change
 All routes call `requireAuthentication` first, then storage re-verifies
 company scoping via `assertWetCheckBelongsToCompany`. Field-tech editing
 is additionally gated by `assertWetCheckEditableByTech` (status =
-`in_progress` AND tech is assignee).
+`in_progress` AND tech is assignee). Except for labor-rate override and
+per-zone repair labor on unbilled WCBs (Slice 5).
 
 ## 5. Data integrity invariants
 
