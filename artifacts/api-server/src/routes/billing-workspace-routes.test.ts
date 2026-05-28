@@ -15,6 +15,7 @@ import type { AddressInfo } from "node:net";
 import {
   registerBillingWorkspaceRoutes,
   _resetOverdueCacheForTests,
+  _resetFlagsForTests,
 } from "./billing-workspace-routes";
 import { storage } from "../storage";
 
@@ -37,6 +38,27 @@ describe("billing-workspace routes", () => {
   let companyId: number | null = 1;
   const now = Date.now();
   const iso = (offsetMs: number) => new Date(now - offsetMs).toISOString();
+
+  // WCB seed fixture — two WCBs in two different companies.
+  // wcb id=1 (company 1, submitted — active)
+  // wcb id=2 (company 2, submitted — active, out-of-scope for co1)
+  // wcb id=3 (company 1, approved_passed_to_billing — counts toward approvedThisWeek)
+  function seedWcbs() {
+    patch("getAllWetCheckBillingsWithCounts", async () => [
+      { id: 1, billingNumber: "WCB-1", customerId: 10, customerName: "Acme",
+        technicianId: 100, technicianName: "Tech A", wetCheckId: 50,
+        status: "submitted", totalAmount: "200.00",
+        createdAt: iso(2 * 86400_000), updatedAt: iso(2 * 86400_000) },
+      { id: 2, billingNumber: "WCB-2", customerId: 20, customerName: "BetaCo",
+        technicianId: 200, technicianName: "Tech B", wetCheckId: 51,
+        status: "submitted", totalAmount: "300.00",
+        createdAt: iso(1 * 86400_000), updatedAt: iso(1 * 86400_000) },
+      { id: 3, billingNumber: "WCB-3", customerId: 10, customerName: "Acme",
+        technicianId: 100, technicianName: "Tech A", wetCheckId: 52,
+        status: "approved_passed_to_billing", totalAmount: "150.00",
+        createdAt: iso(5 * 86400_000), updatedAt: iso(4 * 86400_000) },
+    ]);
+  }
 
   before(async () => {
     patch("getAllBillingSheets", async () => [
@@ -66,6 +88,7 @@ describe("billing-workspace routes", () => {
       id === 100 ? { id: 100, companyId: 1, fullName: "Tech A" } :
       id === 200 ? { id: 200, companyId: 2, fullName: "Tech B" } : null,
     );
+    patch("getAllWetCheckBillingsWithCounts", async () => []);
     patch("getPendingParts", async (_cid: number) => []);
     patch("getManualPartReviews", async (_cid: number) => []);
     patch("getCustomer", async (id: number) => ({
@@ -221,5 +244,80 @@ describe("billing-workspace routes", () => {
     const body = (await r.json()) as any;
     const refIds = body.items.map((x: any) => x.refId).sort();
     assert.deepEqual(refIds, [1, 2]);
+  });
+
+  describe("queue — WCB rows (Slice 6)", () => {
+    beforeEach(() => {
+      role = "billing_manager";
+      companyId = 1;
+      _resetOverdueCacheForTests();
+      _resetFlagsForTests();
+      seedWcbs();
+    });
+
+    it("type=wcb returns only active WCB rows scoped to caller's company", async () => {
+      const r = await fetch(`${base}/api/billing-workspace/queue?type=wcb`);
+      assert.equal(r.status, 200);
+      const body = (await r.json()) as any;
+      const refIds = body.items.map((x: any) => x.refId).sort((a: number, b: number) => a - b);
+      assert.deepEqual(refIds, [1], "co1 has only WCB-1 in active status");
+    });
+
+    it("non-active WCB statuses are excluded from the queue", async () => {
+      const r = await fetch(`${base}/api/billing-workspace/queue?type=wcb`);
+      const body = (await r.json()) as any;
+      const numbers = body.items.map((x: any) => x.number);
+      assert.ok(!numbers.includes("WCB-3"), "approved WCB should not appear in queue");
+    });
+
+    it("WCB queue item carries wetCheckId", async () => {
+      const r = await fetch(`${base}/api/billing-workspace/queue?type=wcb`);
+      const body = (await r.json()) as any;
+      const row = body.items.find((x: any) => x.number === "WCB-1");
+      assert.ok(row, "WCB-1 row should be present");
+      assert.equal(row.wetCheckId, 50, "wetCheckId should be the wet check's id");
+      assert.equal(row.type, "wet_check_billing");
+    });
+
+    it("type=all includes WCB rows alongside BS and WO rows", async () => {
+      const r = await fetch(`${base}/api/billing-workspace/queue?type=all`);
+      const body = (await r.json()) as any;
+      const types = new Set(body.items.map((x: any) => x.type));
+      assert.ok(types.has("billing_sheet"), "should include billing sheets");
+      assert.ok(types.has("work_order"), "should include work orders");
+      assert.ok(types.has("wet_check_billing"), "should include wet check billings");
+    });
+
+    it("type=bs does not include WCB rows", async () => {
+      const r = await fetch(`${base}/api/billing-workspace/queue?type=bs`);
+      const body = (await r.json()) as any;
+      const types = body.items.map((x: any) => x.type);
+      assert.ok(!types.includes("wet_check_billing"), "bs filter should exclude WCBs");
+    });
+
+    it("status-strip awaitingApproval and approvedThisWeek include WCBs; draftsLast24h does not", async () => {
+      const r = await fetch(`${base}/api/billing-workspace/status-strip`);
+      assert.equal(r.status, 200);
+      const body = (await r.json()) as any;
+      // BS-1 + WO-9 + WCB-1 = 3 awaiting (co1 only)
+      assert.equal(body.awaitingApproval, 3, "awaitingApproval should include 1 active WCB");
+      // BS-3 approved + WCB-3 approved this week = 2
+      assert.equal(body.approvedThisWeek, 2, "approvedThisWeek should include 1 approved WCB");
+      // draftsLast24h stays at 1 (BS-4), no WCB drafts
+      assert.equal(body.draftsLast24h, 1, "draftsLast24h should not include WCBs");
+    });
+
+    it("tenant scoping: co1 sees 1 active WCB, super_admin sees 2", async () => {
+      // co1 — already covered above (id=1)
+      const r1 = await fetch(`${base}/api/billing-workspace/queue?type=wcb`);
+      const b1 = (await r1.json()) as any;
+      assert.equal(b1.items.length, 1, "co1 should see 1 active WCB");
+
+      role = "super_admin";
+      companyId = null;
+      const r2 = await fetch(`${base}/api/billing-workspace/queue?type=wcb`);
+      const b2 = (await r2.json()) as any;
+      assert.equal(b2.items.length, 2, "super_admin should see 2 active WCBs");
+    });
   });
 });

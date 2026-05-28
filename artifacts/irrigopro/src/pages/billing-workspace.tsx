@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   ClipboardList,
   DollarSign,
+  Droplets,
   Flag,
   Info,
   Keyboard,
@@ -60,17 +61,19 @@ import {
 } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { FinancialPulseWidget } from "@/components/financial-pulse/financial-pulse-widget";
+import { getCurrentUser } from "@/lib/impersonation";
 
 type QueueType =
   | "all"
   | "billing_sheet"
   | "work_order"
+  | "wet_check_billing"
   | "part"
   | "manual_review";
 
 interface QueueItem {
   id: string;
-  type: "billing_sheet" | "work_order" | "part" | "manual_review";
+  type: "billing_sheet" | "work_order" | "wet_check_billing" | "part" | "manual_review";
   refId: number;
   number: string | null;
   customerId: number | null;
@@ -84,6 +87,7 @@ interface QueueItem {
   ageDays: number | null;
   createdAt: string | null;
   href: string;
+  wetCheckId?: number | null;
 }
 
 interface QueueResponse {
@@ -156,6 +160,7 @@ const TYPE_FILTER_PARAM: Record<QueueType, string> = {
   all: "all",
   billing_sheet: "bs",
   work_order: "wo",
+  wet_check_billing: "wcb",
   part: "part",
   manual_review: "review",
 };
@@ -164,6 +169,7 @@ const TYPE_LABEL: Record<QueueType, string> = {
   all: "All",
   billing_sheet: "Billing Sheets",
   work_order: "Work Orders",
+  wet_check_billing: "Wet Check Billings",
   part: "Parts",
   manual_review: "Reviews",
 };
@@ -171,6 +177,7 @@ const TYPE_LABEL: Record<QueueType, string> = {
 const TYPE_ICON: Record<QueueItem["type"], React.ReactNode> = {
   billing_sheet: <ClipboardList className="w-4 h-4 text-blue-600" />,
   work_order: <Wrench className="w-4 h-4 text-purple-600" />,
+  wet_check_billing: <Droplets className="w-4 h-4 text-cyan-600" />,
   part: <Package className="w-4 h-4 text-amber-600" />,
   manual_review: <Tag className="w-4 h-4 text-amber-600" />,
 };
@@ -381,6 +388,7 @@ function ShortcutsCheatSheet({ open, onClose }: { open: boolean; onClose: () => 
 export default function BillingWorkspacePage() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const userRole = getCurrentUser()?.role ?? "";
   const [type, setType] = useState<QueueType>("all");
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
@@ -538,7 +546,9 @@ export default function BillingWorkspacePage() {
       let path: string | null = null;
       if (active.type === "billing_sheet") path = `/api/billing-sheets/${active.refId}/approve`;
       else if (active.type === "work_order") path = `/api/work-orders/${active.refId}/approve`;
-      else {
+      else if (active.type === "wet_check_billing" && active.wetCheckId) {
+        path = `/api/wet-checks/${active.wetCheckId}/approve`;
+      } else {
         window.location.href = "/parts-pending-approval";
         return;
       }
@@ -917,7 +927,7 @@ export default function BillingWorkspacePage() {
                 </button>
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {(["all", "billing_sheet", "work_order", "part", "manual_review"] as QueueType[]).map((t) => (
+                {(["all", "billing_sheet", "work_order", "wet_check_billing", "part", "manual_review"] as QueueType[]).map((t) => (
                   <button
                     key={t}
                     type="button"
@@ -1055,6 +1065,7 @@ export default function BillingWorkspacePage() {
               {active ? (
                 <DetailPane
                   item={active}
+                  userRole={userRole}
                   approving={approving}
                   kickingBack={kickingBack}
                   saving={saving}
@@ -1096,6 +1107,7 @@ export default function BillingWorkspacePage() {
             <div className="mt-4">
               <DetailPane
                 item={active}
+                userRole={userRole}
                 approving={approving}
                 kickingBack={kickingBack}
                 saving={saving}
@@ -1227,6 +1239,7 @@ export default function BillingWorkspacePage() {
 
 function DetailPane({
   item,
+  userRole,
   approving,
   kickingBack,
   saving,
@@ -1241,6 +1254,7 @@ function DetailPane({
   onChangeNote,
 }: {
   item: QueueItem;
+  userRole: string;
   approving: boolean;
   kickingBack: boolean;
   saving: boolean;
@@ -1254,7 +1268,10 @@ function DetailPane({
   onChangeKickbackReason: (v: string) => void;
   onChangeNote: (v: string) => void;
 }) {
-  const canApprove = item.type === "billing_sheet" || item.type === "work_order";
+  const canApprove =
+    item.type === "billing_sheet" ||
+    item.type === "work_order" ||
+    (item.type === "wet_check_billing" && userRole !== "billing_manager");
   const activityUrl =
     item.type === "billing_sheet"
       ? `/api/billing-sheets/${item.refId}/activity`

@@ -45,9 +45,14 @@ const ACTIVE_WO = new Set([
   "pending_manager_review",
   "work_completed",
 ]);
+const ACTIVE_WCB = new Set([
+  "submitted",
+  "pending_manager_review",
+]);
 // Approved (this week tile).
 const APPROVED_BS = new Set(["approved", "billed", "invoiced"]);
 const APPROVED_WO = new Set(["approved", "billed", "invoiced", "completed_approved"]);
+const APPROVED_WCB = new Set(["approved_passed_to_billing", "billed"]);
 // Draft states (last 24h tile).
 const DRAFT_BS = new Set(["draft", "in_progress"]);
 const DRAFT_WO = new Set(["draft", "scheduled", "in_progress"]);
@@ -61,6 +66,29 @@ function numOr0(v: unknown): number {
 function parseIntOr(v: unknown, dflt: number): number {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? Math.trunc(n) : dflt;
+}
+
+async function scopedWetCheckBillings(req: any): Promise<any[]> {
+  const role = req.authenticatedUserRole;
+  const all = await storage.getAllWetCheckBillingsWithCounts();
+  if (role === "super_admin") return all as any[];
+  const cid: number | null = req.authenticatedUserCompanyId ?? null;
+  if (cid == null) return [];
+  const cache = new Map<number, number | null>();
+  const custCid = async (id: number | null | undefined) => {
+    if (!id) return null;
+    if (cache.has(id)) return cache.get(id) ?? null;
+    const c = await storage.getCustomer(id);
+    const companyId = c?.companyId ?? null;
+    cache.set(id, companyId);
+    return companyId;
+  };
+  const out: any[] = [];
+  for (const w of all as any[]) {
+    const c = await custCid(w.customerId);
+    if (c === cid) out.push(w);
+  }
+  return out;
 }
 
 async function scopedBillingSheets(req: any): Promise<any[]> {
@@ -113,7 +141,7 @@ async function scopedWorkOrders(req: any): Promise<any[]> {
 
 interface QueueItem {
   id: string;
-  type: "billing_sheet" | "work_order" | "part" | "manual_review";
+  type: "billing_sheet" | "work_order" | "wet_check_billing" | "part" | "manual_review";
   refId: number;
   number: string | null;
   customerId: number | null;
@@ -127,6 +155,7 @@ interface QueueItem {
   ageDays: number | null;
   createdAt: string | null;
   href: string;
+  wetCheckId?: number | null;
 }
 
 // ---------------------------------------------------------------
@@ -455,6 +484,7 @@ export function registerBillingWorkspaceRoutes(
         const pageSize = Math.min(200, Math.max(1, parseIntOr(req.query.pageSize, 50)));
 
         const wantBs = type === "all" || type === "bs";
+        const wantWcb = type === "all" || type === "wcb";
         const wantWo = type === "all" || type === "wo";
         const wantParts = type === "all" || type === "part";
         const wantReview = type === "all" || type === "review";
@@ -494,6 +524,34 @@ export function registerBillingWorkspaceRoutes(
               ageDays: age,
               createdAt: created,
               href: `/billing-sheets?id=${s.id}`,
+            });
+          }
+        }
+
+        if (wantWcb) {
+          for (const w of await scopedWetCheckBillings(req)) {
+            if (!ACTIVE_WCB.has(w.status)) continue;
+            const created = w.createdAt ? new Date(w.createdAt).toISOString() : null;
+            const age = ageDays(created);
+            const flags: string[] = [];
+            if (age != null && age > 7) flags.push("stale");
+            items.push({
+              id: `wcb-${w.id}`,
+              type: "wet_check_billing",
+              refId: w.id,
+              number: w.billingNumber ?? null,
+              customerId: w.customerId ?? null,
+              customerName: w.customerName ?? null,
+              technicianId: w.technicianId ?? null,
+              technicianName: w.technicianName ?? null,
+              total: numOr0(w.totalAmount),
+              status: w.status,
+              hasPhotos: null,
+              flags,
+              ageDays: age,
+              createdAt: created,
+              href: `/wet-check-billings/${w.id}`,
+              wetCheckId: w.wetCheckId ?? null,
             });
           }
         }
@@ -653,9 +711,10 @@ export function registerBillingWorkspaceRoutes(
           res.status(403).json({ message: "Access denied." });
           return;
         }
-        const [sheets, orders] = await Promise.all([
+        const [sheets, orders, wcbs] = await Promise.all([
           scopedBillingSheets(req),
           scopedWorkOrders(req),
+          scopedWetCheckBillings(req),
         ]);
 
         const now = Date.now();
@@ -669,7 +728,8 @@ export function registerBillingWorkspaceRoutes(
 
         const awaitingApproval =
           sheets.filter((s) => ACTIVE_BS.has(s.status)).length +
-          orders.filter((w) => ACTIVE_WO.has(w.status)).length;
+          orders.filter((w) => ACTIVE_WO.has(w.status)).length +
+          wcbs.filter((w) => ACTIVE_WCB.has(w.status)).length;
 
         const approvedThisWeek =
           sheets.filter((s) =>
@@ -677,6 +737,9 @@ export function registerBillingWorkspaceRoutes(
           ).length +
           orders.filter((w) =>
             APPROVED_WO.has(w.status) && tsOf(w.approvedAt ?? w.updatedAt) >= weekAgo,
+          ).length +
+          wcbs.filter((w) =>
+            APPROVED_WCB.has(w.status) && tsOf(w.updatedAt ?? w.createdAt) >= weekAgo,
           ).length;
 
         const draftsLast24h =
