@@ -1,0 +1,595 @@
+# Replit Task — WC Billing Integration, Slice 6 (Billing-workspace WCB queue support)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader integration audit — it is reference material so
+you understand the intent. The actual work for this task is in the **Slice 6**
+section at the bottom. Do not deviate from any file paths, function names,
+schema field names, or payload shapes specified. If you believe a deviation
+is necessary, surface it and stop rather than proceeding.
+
+> **This slice expands the billing manager's daily dashboard surface.**
+> Today, `/billing-workspace` is invisible to the wet check pipeline —
+> every WCB awaiting approval lives on `/wet-checks/pending-review`
+> (a manager-level surface). After this slice, the billing manager sees
+> WCBs at the same lifecycle stages they see billing sheets: pending
+> approval, approved this week, and unbilled WCBs queued for invoice.
+
+> **Pattern: mirror the billing-sheet flow in this file exactly.** The
+> backend route file (`billing-workspace-routes.ts`) and frontend page
+> (`billing-workspace.tsx`) already model `billing_sheet` and
+> `work_order` as parallel branches in every helper, queue collector,
+> status-strip aggregator, and dispatch handler. The WCB branch slots
+> in next to them with the same shape.
+
+> **Read-first, write-second.** This slice surfaces WCBs in the queue
+> (read) and dispatches approve/kickback through the existing
+> wet-check-level endpoints (`POST /api/wet-checks/:id/approve` and the
+> finding-route flow). It does NOT add parallel WCB-level approve/
+> kickback endpoints — the approval flow stays single-sourced through
+> the wet check itself. This matches the WC Separate System design
+> context and keeps the audit trail in one place.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in the audit
+(`WC Billing Integration - Slice 0 End-of-Month Audit.md`) and the WC
+Separate System slices, and apply to every slice in this family.
+
+**WCB approval flows through the parent wet check.** A WCB is created
+when a wet check is auto-billed or routed-to-billing by a manager. Its
+status transitions (`submitted` → `pending_manager_review` →
+`approved_passed_to_billing` → `billed`) are driven by the wet check's
+own approval path at `POST /api/wet-checks/:id/approve`
+(`routes.ts:16015`). No parallel `/wet-check-billings/:id/approve` or
+`/kickback` endpoint exists, and this slice does not introduce one.
+
+**Status mapping.** For the queue, WCBs in
+`{'submitted', 'pending_manager_review'}` are "active" (awaiting
+approval), parallel to BS `ACTIVE_BS` and WO `ACTIVE_WO`. WCBs in
+`{'approved_passed_to_billing', 'billed'}` are "approved" parallel to
+BS `APPROVED_BS`. WCBs have no concept of "draft" — they auto-submit
+on creation per WC Separate System Slice 6's design context —
+so the "Drafts 24h" tile does not include WCBs.
+
+**Billing-manager approval scope.** Per the May 2026 audit, the billing
+manager is read-only on wet checks. The queue surfaces WCBs and lets
+the billing manager click through to the wet check itself, where the
+manager-role users do the approval. Slice 5 (parallel) decides
+whether billing managers gain narrow edit rights (labor rate +
+per-zone labor). The approve/kickback buttons in the queue stay
+disabled for billing managers on WCB rows.
+
+**Approve / kickback dispatch.** When a manager-role user (not a
+billing manager) clicks Approve on a WCB queue row, the frontend
+fires `POST /api/wet-checks/{wcb.wetCheckId}/approve` — the parent
+wet check's endpoint. Kickback fires the existing finding-route
+endpoint pattern. No new endpoints.
+
+---
+
+## Slice 6 — Add wet_check_billing to the billing-workspace queue and status strip
+
+### Scope
+
+Backend: extend `billing-workspace-routes.ts` to source WCBs in the
+queue collector and the status-strip aggregator. Frontend: extend
+`billing-workspace.tsx`'s `QueueType`, filter UI, row dispatch, and
+status-strip rendering. Tests: extend
+`billing-workspace-routes.test.ts` and `billing-workspace.tsx` tests
+(create siblings if needed).
+
+This slice is the largest in the family — touch ~3 files, add ~120
+lines of code, ~80 lines of test.
+
+### Files modified
+
+**Backend.**
+- `artifacts/api-server/src/routes/billing-workspace-routes.ts`:
+  - Add WCB state sets adjacent to `ACTIVE_BS`/`ACTIVE_WO` at `:42–51`.
+  - Add `scopedWetCheckBillings` helper adjacent to
+    `scopedBillingSheets` at `:66+`.
+  - Add `'wet_check_billing'` to the `QueueItem.type` union at
+    `:116`.
+  - Add the WCB queue collector block in the queue handler at `:472+`
+    parallel to the BS block.
+  - Add WCB counts to the status-strip aggregator at `:670+`.
+- `artifacts/api-server/src/routes/billing-workspace-routes.test.ts`:
+  extend with WCB cases.
+
+**Frontend.**
+- `artifacts/irrigopro/src/pages/billing-workspace.tsx`:
+  - Extend `QueueType` at `:64+` to include `'wet_check_billing'`.
+  - Extend `TYPE_FILTER_PARAM` at `:155`, `TYPE_LABEL` at `:163`, and
+    the icon map at `:172` with the WCB entry.
+  - Extend the `QueueItem.type` union at `:73` and `:116`.
+  - Add WCB to the type-filter chip list at `:920`.
+  - Add the WCB dispatch arm in the approve/kickback/delete switches
+    at `:539`, `:575`, `:608`.
+  - Render an additional status tile or extend an existing one — see
+    "Status strip" below.
+- `artifacts/irrigopro/src/pages/billing-workspace-wet-check.test.tsx`
+  (NEW) — focused tests for the WCB wiring.
+
+### Concrete changes
+
+#### Backend
+
+**(B1) Add WCB state sets** at `billing-workspace-routes.ts:42+`,
+adjacent to the existing `ACTIVE_BS`/`ACTIVE_WO`/`APPROVED_BS`/`APPROVED_WO`/`DRAFT_BS`/`DRAFT_WO` constants:
+
+```typescript
+// Statuses considered "active" / awaiting approval on a WCB.
+const ACTIVE_WCB = new Set([
+  "submitted",
+  "pending_manager_review",
+]);
+// Approved (this week tile).
+const APPROVED_WCB = new Set([
+  "approved_passed_to_billing",
+  "billed",
+]);
+// WCBs have no "draft" state — they auto-submit on creation
+// (per WC Separate System Slice 6 design context). Intentionally omitted.
+```
+
+**(B2) Add `scopedWetCheckBillings` helper** at
+`billing-workspace-routes.ts:66+` (place adjacent to
+`scopedBillingSheets`).
+
+**Tenant-scoping note (important):** `wet_check_billings` has no
+`companyId` column — verified at `schema.ts:1391+`. Scoping must go
+through the customer join. The current `GET /api/wet-check-billings`
+list endpoint at `routes.ts:9610` does NOT scope by company (a
+pre-existing gap flagged in the audit but out of scope here); do not
+copy that pattern. Instead, use a direct join query:
+
+```typescript
+async function scopedWetCheckBillings(req: any): Promise<any[]> {
+  const role = req.authenticatedUserRole;
+  const cid0 = req.authenticatedUserCompanyId ?? null;
+  if (role === "super_admin") {
+    return (await storage.getAllWetCheckBillingsWithCounts()) as any[];
+  }
+  if (cid0 == null) return [];
+  // Join wet_check_billings -> customers and filter by companyId.
+  // wet_check_billings.customerId is nullable (schema.ts:1394); any
+  // row with a null customerId is dropped (it has no tenant anchor).
+  const rows = await db
+    .select({ wcb: wetCheckBillings })
+    .from(wetCheckBillings)
+    .innerJoin(customers, eq(wetCheckBillings.customerId, customers.id))
+    .where(eq(customers.companyId, cid0))
+    .orderBy(desc(wetCheckBillings.createdAt));
+  return rows.map(r => r.wcb) as any[];
+}
+```
+
+Import `wetCheckBillings` and `customers` at the top of the file
+(they're already imported above for status-strip query patterns;
+verify). Do NOT load every wet check separately — that's an N+1.
+
+**(B3) Add `wet_check_billing` to the `QueueItem` type union** at
+`billing-workspace-routes.ts:116`:
+
+```typescript
+interface QueueItem {
+  id: string;
+  type: "billing_sheet" | "work_order" | "wet_check_billing" | "part" | "manual_review"; // ADDED
+  // … rest unchanged
+}
+```
+
+**(B4) Add the WCB queue-collector block** at
+`billing-workspace-routes.ts:498+` (after the existing BS block at
+`:472+`, before the WO block at `:501+`):
+
+```typescript
+if (wantWcb) {
+  for (const w of await scopedWetCheckBillings(req)) {
+    if (!ACTIVE_WCB.has(w.status)) continue;
+    const flags: string[] = [];
+    const created = w.createdAt ? new Date(w.createdAt).toISOString() : null;
+    const age = ageDays(created);
+    if (age != null && age > 7) flags.push("stale");
+    items.push({
+      id: `wcb-${w.id}`,
+      type: "wet_check_billing",
+      refId: w.id,
+      number: w.billingNumber ?? null,
+      customerId: w.customerId ?? null,
+      customerName: w.customerName ?? null,
+      technicianId: w.technicianId ?? null,
+      technicianName: w.technicianName ?? null,
+      total: numOr0(w.totalAmount),
+      status: w.status,
+      hasPhotos: null,         // WCBs derive photos through wet_check_photos; not surfaced here
+      flags,
+      ageDays: age,
+      createdAt: created,
+      wetCheckId: w.wetCheckId ?? null,     // NEW — used by frontend dispatch (F5)
+      href: `/wet-check-billings?id=${w.id}`,
+    });
+  }
+}
+```
+
+And add a corresponding `wantWcb` derivation alongside the existing
+`wantBs`/`wantWo`/etc. at `:457+`:
+
+```typescript
+const wantBs = type === "all" || type === "bs";
+const wantWo = type === "all" || type === "wo";
+const wantWcb = type === "all" || type === "wcb";      // NEW
+const wantParts = type === "all" || type === "part";
+const wantReview = type === "all" || type === "review";
+```
+
+**(B5) Extend the status-strip aggregator** at
+`billing-workspace-routes.ts:656+`. Today the aggregator
+`Promise.all`s `scopedBillingSheets` and `scopedWorkOrders`. Add
+the WCB source:
+
+```typescript
+const [sheets, orders, wcbs] = await Promise.all([
+  scopedBillingSheets(req),
+  scopedWorkOrders(req),
+  scopedWetCheckBillings(req),
+]);
+```
+
+Update each of the three derived counts to include WCB contributions:
+
+```typescript
+const awaitingApproval =
+  sheets.filter((s) => ACTIVE_BS.has(s.status)).length +
+  orders.filter((w) => ACTIVE_WO.has(w.status)).length +
+  wcbs.filter((w) => ACTIVE_WCB.has(w.status)).length;     // NEW
+
+const approvedThisWeek =
+  sheets.filter((s) =>
+    APPROVED_BS.has(s.status) && tsOf(s.approvedAt ?? s.updatedAt) >= weekAgo,
+  ).length +
+  orders.filter((w) =>
+    APPROVED_WO.has(w.status) && tsOf(w.approvedAt ?? w.updatedAt) >= weekAgo,
+  ).length +
+  wcbs.filter((w) =>                                        // NEW
+    APPROVED_WCB.has(w.status) && tsOf(w.approvedAt ?? w.updatedAt ?? w.createdAt) >= weekAgo,
+  ).length;
+```
+
+WCB approval timestamp note: `approvedAt` is not yet a populated
+column on `wet_check_billings` (Slice 7 will add it). Until then, the
+fallback uses `updatedAt ?? createdAt`. This is the same fallback
+sheets and orders already use.
+
+The "Drafts last 24h" tile is unchanged — WCBs have no draft state.
+
+#### Frontend
+
+**(F1) Extend `QueueType`** at `billing-workspace.tsx:64+`:
+
+```typescript
+type QueueType =
+  | "all"
+  | "billing_sheet"
+  | "work_order"
+  | "wet_check_billing"   // NEW
+  | "part"
+  | "manual_review";
+```
+
+**(F2) Extend type-mapping constants** at `:155+`:
+
+```typescript
+const TYPE_FILTER_PARAM: Record<QueueType, string> = {
+  all: "all",
+  billing_sheet: "bs",
+  work_order: "wo",
+  wet_check_billing: "wcb",   // NEW
+  part: "part",
+  manual_review: "review",
+};
+
+const TYPE_LABEL: Record<QueueType, string> = {
+  all: "All",
+  billing_sheet: "Billing Sheets",
+  work_order: "Work Orders",
+  wet_check_billing: "Wet Check Billings", // NEW
+  part: "Parts",
+  manual_review: "Manual Reviews",
+};
+
+// Icon for the type chip. Use Droplets to stay consistent with the Wet
+// Check nav group from WC Separate System Slice 7. Import at top of file.
+import { Droplets } from "lucide-react";
+
+const TYPE_ICON: Record<QueueType, React.ReactNode> = {
+  // … existing entries unchanged
+  wet_check_billing: <Droplets className="w-4 h-4 text-cyan-600" />,  // NEW
+};
+```
+
+**(F3) Extend the `QueueItem.type` union** in the local frontend type
+at `:73` and `:116` (both occurrences):
+
+```typescript
+type: "billing_sheet" | "work_order" | "wet_check_billing" | "part" | "manual_review"; // ADDED in both places
+```
+
+**(F4) Add WCB chip to the type-filter row** at `:920+`. The
+existing list is `["all", "billing_sheet", "work_order", "part",
+"manual_review"]`. Add `"wet_check_billing"` between `"work_order"`
+and `"part"`:
+
+```typescript
+{(["all", "billing_sheet", "work_order", "wet_check_billing", "part", "manual_review"] as QueueType[]).map((t) => (
+  // … existing chip render code unchanged
+))}
+```
+
+**(F5) Update approve/kickback/delete dispatch** at `:539`, `:575`,
+`:608`. The current code is:
+
+```typescript
+let path = "";
+if (active.type === "billing_sheet") path = `/api/billing-sheets/${active.refId}/approve`;
+else if (active.type === "work_order") path = `/api/work-orders/${active.refId}/approve`;
+```
+
+For WCB, the approve path is **the parent wet check's approve
+endpoint**, not a WCB endpoint. Add the wet-check id to `QueueItem`
+on the backend (B4 above already returns `refId = wcb.id`, but the
+approve dispatch needs the wet check id). The cleanest add: surface
+`wcb.wetCheckId` on the queue item as an optional field:
+
+```typescript
+interface QueueItem {
+  // … existing fields
+  wetCheckId?: number | null;  // NEW — only populated for wet_check_billing rows
+}
+```
+
+And in the WCB collector block (B4), include
+`wetCheckId: w.wetCheckId ?? null`.
+
+The frontend dispatch then becomes:
+
+```typescript
+let path = "";
+if (active.type === "billing_sheet") path = `/api/billing-sheets/${active.refId}/approve`;
+else if (active.type === "work_order") path = `/api/work-orders/${active.refId}/approve`;
+else if (active.type === "wet_check_billing" && active.wetCheckId) {
+  path = `/api/wet-checks/${active.wetCheckId}/approve`;
+}
+```
+
+If `active.wetCheckId` is null (defensive), the path stays empty and
+the existing "no path" fallback handles the no-op. **Do NOT add a
+parallel WCB-level approve/kickback endpoint** — the wet check is the
+source of truth for the approval transition.
+
+**Important: hide the approve/kickback buttons for billing managers
+on WCB rows.** The audit policy says billing managers are read-only
+on wet checks. The existing approve button visibility is gated by
+`canApprove` at `billing-workspace.tsx:1257`:
+
+```typescript
+const canApprove = item.type === "billing_sheet" || item.type === "work_order";
+```
+
+Extend it:
+
+```typescript
+const canApprove =
+  item.type === "billing_sheet" ||
+  item.type === "work_order" ||
+  (item.type === "wet_check_billing" && userRole !== "billing_manager");
+```
+
+Use the existing role hook (whatever supplies `userRole` to this
+component). Verify the hook name by reading the top of
+`billing-workspace.tsx`. Do NOT invent a new hook.
+
+For kickback, similarly gate by role.
+
+**(F6) Status strip — keep four tiles, update counts.** The existing
+four tiles (`Awaiting Approval`, `Approved This Week`, `Drafts 24h`,
+`QuickBooks`) all already get their numbers from
+`/api/billing-workspace/status-strip`, which Slice B5 has already
+extended to include WCB counts. No frontend status-strip code change
+is needed beyond the `Droplets` icon import — the numbers are
+automatically inclusive after B5 ships. Confirm by spot-rendering the
+page after the backend change lands.
+
+The "Drafts 24h" tile does NOT include WCBs (no draft state). This is
+intentional; do not alter the tile copy.
+
+### Tests
+
+**Backend.** Extend `billing-workspace-routes.test.ts` with the
+following cases (the file already has helper setup for BS/WO; reuse
+it):
+
+```typescript
+describe("queue — WCB rows (Slice 6)", () => {
+  it("includes WCBs in 'submitted' status when type=all", async () => {
+    await seedWcb({ status: "submitted" });
+    const res = await asBillingManager(request(app)).get("/api/billing-workspace/queue?type=all");
+    expect(res.status).toBe(200);
+    expect(res.body.items.some((i: any) => i.type === "wet_check_billing" && i.status === "submitted")).toBe(true);
+  });
+
+  it("includes WCBs in 'pending_manager_review' status", async () => {
+    await seedWcb({ status: "pending_manager_review" });
+    const res = await asBillingManager(request(app)).get("/api/billing-workspace/queue?type=wcb");
+    expect(res.body.items.length).toBeGreaterThan(0);
+  });
+
+  it("excludes WCBs in 'approved_passed_to_billing' status (not active)", async () => {
+    await seedWcb({ status: "approved_passed_to_billing" });
+    const res = await asBillingManager(request(app)).get("/api/billing-workspace/queue?type=wcb");
+    expect(res.body.items.length).toBe(0);
+  });
+
+  it("excludes WCBs in 'billed' status", async () => {
+    await seedWcb({ status: "billed" });
+    const res = await asBillingManager(request(app)).get("/api/billing-workspace/queue?type=wcb");
+    expect(res.body.items.length).toBe(0);
+  });
+
+  it("surfaces wetCheckId on each WCB queue row so the frontend can dispatch approve", async () => {
+    const wc = await seedWetCheck();
+    await seedWcb({ status: "submitted", wetCheckId: wc.id });
+    const res = await asBillingManager(request(app)).get("/api/billing-workspace/queue?type=wcb");
+    const wcbItem = res.body.items[0];
+    expect(wcbItem.wetCheckId).toBe(wc.id);
+  });
+
+  it("status-strip awaitingApproval includes WCBs in active statuses", async () => {
+    await seedWcb({ status: "submitted" });
+    await seedWcb({ status: "pending_manager_review" });
+    const res = await asBillingManager(request(app)).get("/api/billing-workspace/status-strip");
+    // Whatever the base count is, +2 from the two WCBs we seeded.
+    expect(res.body.indicators.awaitingApproval).toBeGreaterThanOrEqual(2);
+  });
+
+  it("status-strip approvedThisWeek includes WCBs approved in the last 7 days", async () => {
+    await seedWcb({ status: "approved_passed_to_billing", updatedAt: new Date() });
+    const res = await asBillingManager(request(app)).get("/api/billing-workspace/status-strip");
+    expect(res.body.indicators.approvedThisWeek).toBeGreaterThanOrEqual(1);
+  });
+
+  it("status-strip draftsLast24h does NOT include WCBs (no draft state)", async () => {
+    // Seed only a WCB, no BS/WO drafts; assert the count is 0.
+    await seedWcb({ status: "submitted", createdAt: new Date() });
+    const res = await asBillingManager(request(app)).get("/api/billing-workspace/status-strip");
+    expect(res.body.indicators.draftsLast24h).toBe(0);
+  });
+
+  it("scopes WCBs by company for non-super_admin", async () => {
+    await seedWcb({ status: "submitted", companyId: 1 });
+    await seedWcb({ status: "submitted", companyId: 2 });
+    const res1 = await asBillingManagerOfCompany(1, request(app)).get("/api/billing-workspace/queue?type=wcb");
+    expect(res1.body.items.length).toBe(1);
+    const resAll = await asSuperAdmin(request(app)).get("/api/billing-workspace/queue?type=wcb");
+    expect(resAll.body.items.length).toBe(2);
+  });
+});
+```
+
+**Frontend.** New: `billing-workspace-wet-check.test.tsx` —
+modeled after `customer-billing-wet-check.test.tsx` from WC Command
+Center Slice 1:
+
+```typescript
+describe("Billing Workspace — WCB rows (Slice 6)", () => {
+  it("renders the 'Wet Check Billings' chip in the type filter", async () => {
+    renderPage({ queueItems: [] });
+    expect(await screen.findByTestId("filter-chip-wet_check_billing")).toBeInTheDocument();
+  });
+
+  it("clicking the WCB chip filters the queue to type=wcb", async () => {
+    const apiSpy = mockQueueEndpoint();
+    renderPage({ queueItems: [] });
+    fireEvent.click(screen.getByTestId("filter-chip-wet_check_billing"));
+    await waitFor(() => {
+      expect(apiSpy.mock.calls.at(-1)?.[0]).toMatch(/type=wcb/);
+    });
+  });
+
+  it("renders a WCB queue row with the Droplets icon and 'Wet Check Billings' label", async () => {
+    renderPage({
+      queueItems: [{
+        id: "wcb-42",
+        type: "wet_check_billing",
+        refId: 42,
+        number: "WC-2026-1042",
+        customerName: "Acme",
+        technicianName: "J. Smith",
+        total: 350,
+        status: "submitted",
+        ageDays: 1,
+        wetCheckId: 100,
+        href: "/wet-check-billings?id=42",
+      }],
+    });
+    expect(await screen.findByText("WC-2026-1042")).toBeInTheDocument();
+  });
+
+  it("hides the Approve button on a WCB row for billing_manager role", async () => {
+    renderPage({
+      userRole: "billing_manager",
+      queueItems: [{ ...wcbBaseItem, type: "wet_check_billing" }],
+    });
+    fireEvent.click(screen.getByTestId(`queue-row-${wcbBaseItem.id}`));
+    expect(screen.queryByTestId("approve-button")).not.toBeInTheDocument();
+  });
+
+  it("dispatches approve to /api/wet-checks/{wetCheckId}/approve when manager clicks Approve", async () => {
+    const apiSpy = mockApiRequest();
+    renderPage({
+      userRole: "manager",
+      queueItems: [{ ...wcbBaseItem, type: "wet_check_billing", wetCheckId: 100 }],
+    });
+    fireEvent.click(screen.getByTestId(`queue-row-${wcbBaseItem.id}`));
+    fireEvent.click(screen.getByTestId("approve-button"));
+    await waitFor(() => {
+      expect(apiSpy).toHaveBeenCalledWith("/api/wet-checks/100/approve", "POST", expect.any(Object));
+    });
+  });
+});
+```
+
+### Acceptance criteria
+
+- `GET /api/billing-workspace/queue?type=wcb` returns only WCB rows
+  in `ACTIVE_WCB` statuses; `type=all` returns the union.
+- `GET /api/billing-workspace/status-strip` includes WCBs in
+  `awaitingApproval` and `approvedThisWeek`, but NOT in
+  `draftsLast24h`.
+- Every WCB queue row carries a `wetCheckId` field for frontend
+  dispatch.
+- The page renders a `Wet Check Billings` chip in the type filter
+  with a `Droplets` icon.
+- A WCB row in the queue is clickable and renders the same row
+  shape (number, customer, tech, total, status, age) as BS/WO rows.
+- For a `billing_manager` role, the Approve and Kickback buttons are
+  hidden on WCB rows.
+- For `manager` / `company_admin` / `super_admin`, clicking Approve
+  on a WCB row fires
+  `POST /api/wet-checks/{wcb.wetCheckId}/approve` — the parent wet
+  check's endpoint, not a new WCB endpoint.
+- Tenant scoping is preserved: non-super-admin sees only their
+  company's WCBs.
+- All new and updated tests pass.
+- `pnpm typecheck` and `pnpm test` pass.
+
+### Out of scope
+
+- Adding `/api/wet-check-billings/:id/approve` or
+  `/api/wet-check-billings/:id/kickback` endpoints. The parent wet
+  check is the source of truth.
+- Adding WCBs to "Drafts last 24h" — no draft state exists.
+- Adding a separate "WCB pending review" status tile parallel to the
+  four existing tiles. The four-tile contract is intentional and
+  shipped as Task #709. Adding a fifth tile is its own product
+  decision.
+- The QuickBooks tile's overdue logic — WCB invoicing flows through
+  the same `/api/invoices/monthly` path as BS, so once invoiced the
+  QB tile already reflects WCB-contributed totals.
+- Changing the `/wet-checks/pending-review` page (the manager-role
+  queue) — that surface stays as the WC-level review.
+- Slice 5's edit affordances. The queue links out to
+  `/wet-check-billings?id=…` (the list page), which itself opens the
+  view modal where Slice 5's edit pencil lives. The two slices are
+  independent surfaces.
+
+### Dependencies
+
+- Independent of Slice 1–4 and Slice 7.
+- Soft dependency on Slice 5: if Slice 5 ships first, the queue's
+  "Open" click-through lands on a modal that supports editing. If
+  this slice ships first, the click-through opens the existing
+  read-only modal. Either order is fine.

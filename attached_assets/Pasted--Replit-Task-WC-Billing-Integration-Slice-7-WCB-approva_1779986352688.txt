@@ -1,0 +1,371 @@
+# Replit Task — WC Billing Integration, Slice 7 (WCB approval snapshots)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader integration audit — it is reference material so
+you understand the intent. The actual work for this task is in the **Slice 7**
+section at the bottom. Do not deviate from any file paths, function names,
+schema field names, or payload shapes specified. If you believe a deviation
+is necessary, surface it and stop rather than proceeding.
+
+> **Schema slice + approval-path write + audit consume — all small,
+> bundled because they are coupled.** The two new columns
+> (`approvedLaborSnapshot`, `approvedPartsSnapshot`) on
+> `wet_check_billings` only have value once the approval path writes
+> them and a consumer reads them. The financial-pulse audit endpoint
+> (already prepared in Slice 2 via the `(wcb as any).approvedLaborSnapshot`
+> read with a safe-cast) is the consumer.
+
+> **Pattern: mirror the billing-sheet snapshot model exactly.**
+> `billing_sheets` has identical columns at `schema.ts:281–282`,
+> populated on approval, and consumed by the same audit endpoint
+> (`routes.ts:11167–11180`). Both column types are nullable `text` (JSON
+> blob), and the JSON shape is `{ laborSubtotal: number }` /
+> `{ partsSubtotal: number }` per the parsing code at
+> `routes.ts:11134–11147`. The WCB columns use the same shape so the
+> downstream consumer needs zero special-casing.
+
+> **Rule of thumb for this slice:** lowest priority in the family. The
+> snapshot fields are forensic — they exist to answer "what did the
+> manager approve at the time, vs what got billed?" If the close week
+> is upcoming, ship Slices 1, 2, 5, 6 first and let this one wait.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in the audit
+(`WC Billing Integration - Slice 0 End-of-Month Audit.md`) and apply to
+every slice in this family.
+
+**What already exists on `wet_check_billings`:** `approvedAt`,
+`approvedBy`, `approvedByUserId`, `approvedTotal` — verified at
+`schema.ts:1417–1420`. The approval path at
+`POST /api/wet-checks/:id/approve` (`routes.ts:16015`) already writes
+these four fields when it transitions a WCB to
+`approved_passed_to_billing`.
+
+**What this slice adds:** two more nullable text columns
+(`approvedLaborSnapshot`, `approvedPartsSnapshot`) and the
+approval-path writes that populate them. The audit endpoint's parsing
+logic (Slice 2) reads them once they exist.
+
+**Backfill policy.** WCBs already approved before this slice ships do
+NOT get backfilled snapshots — there is no source of truth for their
+"at approval time" labor and parts breakdown. They stay `null`, and
+the audit endpoint already handles null (the parse blocks at
+`routes.ts:11167–11180` short-circuit on `if (bs.approvedLaborSnapshot) { … }`).
+The WCB branch in Slice 2 uses the same null-tolerant pattern.
+
+**JSON shape.** The snapshot is `JSON.stringify({ laborSubtotal,
+partsSubtotal, totalAmount, totalHours, appliedLaborRate })` — a
+single object that captures the financial state of the row at
+approval time. The audit endpoint parses the relevant key per column.
+This is the same shape `billing_sheets` uses (verified at the BS
+approval path in `routes.ts:~10530` and the parse at `:11167`).
+
+---
+
+## Slice 7 — Add snapshot columns + populate on approval + consume in audit
+
+### Scope
+
+Three coordinated changes, all bundled because their value is coupled:
+
+1. **Schema.** Add two nullable `text` columns to
+   `wet_check_billings`.
+2. **Approval path.** Update the WCB approval path to write the
+   snapshot columns alongside the existing
+   `approvedAt`/`approvedBy`/`approvedTotal` writes.
+3. **Audit consume.** Replace the temporary `(wcb as any).…` casts
+   in the Slice 2 audit branch with the real typed column reads, now
+   that the columns exist.
+
+A migration is required.
+
+### Files modified
+
+- `lib/db/src/schema/schema.ts` — add two columns to the
+  `wetCheckBillings` table at `:1391+`.
+- New: `lib/db/migrations/NNNN_wcb_approval_snapshots.sql` —
+  Drizzle-generated migration adding the columns. Follow the existing
+  migration naming convention in `lib/db/migrations/`.
+- `artifacts/api-server/src/storage.ts` — extend the approval-stamp
+  writes in the WCB approval helper (the function called from
+  `POST /api/wet-checks/:id/approve`). Search for the helper that
+  writes `approvedAt` on `wet_check_billings`; the audit at the top
+  of this file pointed to `routes.ts:16015` for the route, but the
+  actual write is in storage.ts (find with grep for
+  `wetCheckBillings).set({` plus `approvedAt`).
+- `artifacts/api-server/src/routes/routes.ts` — at `~line 11191+`
+  (the WCB branch added in Slice 2), drop the `(wcb as any).…` casts
+  now that the typed columns exist.
+- `artifacts/api-server/src/routes/financial-pulse-wcb.test.ts` —
+  extend with a case that exercises non-null snapshot reads.
+- New: `artifacts/api-server/src/wcb-approval-snapshot.test.ts` — a
+  pure storage test that the approval path writes the JSON.
+
+### Concrete changes
+
+#### Schema
+
+**(S1) Extend the `wetCheckBillings` table definition** at
+`schema.ts:1417+`. Add immediately after `approvedTotal`:
+
+```typescript
+// Manager approval stamp fields.
+approvedBy: text("approved_by"),
+approvedByUserId: integer("approved_by_user_id").references(() => users.id),
+approvedAt: timestamp("approved_at"),
+approvedTotal: decimal("approved_total", { precision: 10, scale: 2 }),
+// Slice 7 — snapshot of labor / parts financial state at approval time.
+// Both nullable; WCBs approved before this slice ships read as null and
+// are handled by the audit endpoint's null-tolerant parser.
+approvedLaborSnapshot: text("approved_labor_snapshot"),   // NEW
+approvedPartsSnapshot: text("approved_parts_snapshot"),   // NEW
+```
+
+Re-run `pnpm drizzle-kit generate:pg` (or the equivalent Drizzle
+generation command used in this repo — check `package.json`) to
+produce the migration SQL. The generated file should add:
+
+```sql
+ALTER TABLE wet_check_billings
+  ADD COLUMN approved_labor_snapshot text,
+  ADD COLUMN approved_parts_snapshot text;
+```
+
+No `NOT NULL`, no default. Existing rows stay `null`.
+
+#### Approval path
+
+**(P1) Find the WCB approval-stamp write in storage.ts.**
+
+Grep for `wetCheckBillings).set({` to locate writes. The audit
+identified four candidate sites (`storage.ts:3969`, `:7634`, `:7951`,
+plus the `updateWetCheckBilling` general write at `:3968+`). The
+relevant one is the write that sets `approvedAt` —
+visit each candidate and identify the approval path. (The WC
+Separate System Slice 6 design context names the helper:
+`convertWetCheckToWetCheckBilling`, renamed in Slice 7 — search the
+file for the rename.)
+
+**(P2) At that approval-stamp site, extend the `set({ ... })` block.**
+
+Old (sample shape — actual call may differ in detail):
+
+```typescript
+await tx.update(wetCheckBillings).set({
+  approvedAt: now,
+  approvedBy: manager.name,
+  approvedByUserId: manager.id,
+  approvedTotal: row.totalAmount,
+  status: "approved_passed_to_billing",
+  updatedAt: now,
+}).where(eq(wetCheckBillings.id, row.id));
+```
+
+New (additive):
+
+```typescript
+const snapshotEnvelope = {
+  laborSubtotal: parseFloat(row.laborSubtotal || "0"),
+  partsSubtotal: parseFloat(row.partsSubtotal || "0"),
+  totalAmount: parseFloat(row.totalAmount || "0"),
+  totalHours: parseFloat(row.totalHours || "0"),
+  appliedLaborRate: parseFloat(row.appliedLaborRate || row.laborRate || "0"),
+};
+const approvedLaborSnapshot = JSON.stringify({
+  laborSubtotal: snapshotEnvelope.laborSubtotal,
+  totalHours: snapshotEnvelope.totalHours,
+  appliedLaborRate: snapshotEnvelope.appliedLaborRate,
+});
+const approvedPartsSnapshot = JSON.stringify({
+  partsSubtotal: snapshotEnvelope.partsSubtotal,
+  totalAmount: snapshotEnvelope.totalAmount,
+});
+await tx.update(wetCheckBillings).set({
+  approvedAt: now,
+  approvedBy: manager.name,
+  approvedByUserId: manager.id,
+  approvedTotal: row.totalAmount,
+  approvedLaborSnapshot,   // NEW
+  approvedPartsSnapshot,   // NEW
+  status: "approved_passed_to_billing",
+  updatedAt: now,
+}).where(eq(wetCheckBillings.id, row.id));
+```
+
+**Do not write the snapshots from any other site.** The approval
+path is the only site that should ever set these columns. The
+auto-bill path (which transitions a WCB straight to
+`approved_passed_to_billing` without manager intervention) should
+also write them — locate that path (audit pointed to
+`_writeRepairedInFieldBilling` at storage.ts:6964, refactored in WC
+Separate System Slice 6) and apply the same block. The snapshot in
+that case captures the auto-bill computed totals.
+
+#### Audit consume
+
+**(A1) Update the Slice 2 WCB branch** in `routes.ts:~11191+` to
+remove the temporary `(wcb as any)` casts:
+
+Old (from Slice 2):
+
+```typescript
+if ((wcb as any).approvedLaborSnapshot) {
+  try {
+    const snap = JSON.parse((wcb as any).approvedLaborSnapshot);
+    // …
+  } catch { approvedLaborSnapshot = null; }
+}
+```
+
+New:
+
+```typescript
+if (wcb.approvedLaborSnapshot) {
+  try {
+    const snap = JSON.parse(wcb.approvedLaborSnapshot);
+    const parsed = typeof snap === "number" ? snap : parseFloat(snap?.laborSubtotal ?? snap?.total ?? "");
+    approvedLaborSnapshot = isNaN(parsed) ? null : parsed;
+  } catch { approvedLaborSnapshot = null; }
+}
+if (wcb.approvedPartsSnapshot) {
+  try {
+    const snap = JSON.parse(wcb.approvedPartsSnapshot);
+    const parsed = typeof snap === "number" ? snap : parseFloat(snap?.partsSubtotal ?? snap?.total ?? "");
+    approvedPartsSnapshot = isNaN(parsed) ? null : parsed;
+  } catch { approvedPartsSnapshot = null; }
+}
+```
+
+The casts come off naturally because the typed `WetCheckBilling`
+shape now includes these columns after the schema add. If
+`pnpm typecheck` still complains, the schema regeneration step (S1)
+wasn't fully run — re-run drizzle-kit.
+
+### Tests
+
+**Storage approval test** — new
+`wcb-approval-snapshot.test.ts`:
+
+```typescript
+describe("WCB approval writes labor/parts snapshots (Slice 7)", () => {
+  it("populates approvedLaborSnapshot and approvedPartsSnapshot on the manager-approval path", async () => {
+    const { wc, wcb } = await seedSubmittedWcb({
+      laborSubtotal: "255",
+      partsSubtotal: "100",
+      totalAmount: "355",
+      totalHours: "3",
+      appliedLaborRate: "85",
+    });
+    await storage.approveWetCheck(wc.id, /* manager */ { id: 7, name: "Mary" });
+    const after = await storage.getWetCheckBillingById(wcb.id);
+    expect(after.approvedLaborSnapshot).toBeTruthy();
+    expect(after.approvedPartsSnapshot).toBeTruthy();
+    const labor = JSON.parse(after.approvedLaborSnapshot!);
+    const parts = JSON.parse(after.approvedPartsSnapshot!);
+    expect(labor.laborSubtotal).toBe(255);
+    expect(labor.totalHours).toBe(3);
+    expect(labor.appliedLaborRate).toBe(85);
+    expect(parts.partsSubtotal).toBe(100);
+    expect(parts.totalAmount).toBe(355);
+  });
+
+  it("populates snapshots on the auto-bill path too", async () => {
+    const { wc, wcb } = await seedAutoBilledWcb({
+      laborSubtotal: "180",
+      partsSubtotal: "60",
+      totalAmount: "240",
+      totalHours: "2",
+      appliedLaborRate: "90",
+    });
+    // The auto-bill path runs synchronously during submit; no separate
+    // approve call is needed — just read after submit.
+    const after = await storage.getWetCheckBillingById(wcb.id);
+    expect(after.approvedLaborSnapshot).toBeTruthy();
+    expect(after.approvedPartsSnapshot).toBeTruthy();
+  });
+
+  it("does NOT populate snapshots for a WCB that has not been approved yet", async () => {
+    const { wcb } = await seedSubmittedWcb({}); // submitted, no approval yet
+    expect(wcb.approvedLaborSnapshot).toBeNull();
+    expect(wcb.approvedPartsSnapshot).toBeNull();
+  });
+});
+```
+
+**Audit consume test** — extend `financial-pulse-wcb.test.ts`:
+
+```typescript
+it("the invoice audit returns parsed snapshot values for approved WCBs (post Slice 7)", async () => {
+  const { invoice } = await setupInvoiceWithApprovedWcb({
+    approvedLaborSubtotal: 250,
+    approvedPartsSubtotal: 75,
+  });
+  const res = await request(app).get(`/api/invoices/${invoice.id}/audit`);
+  const wcbItem = res.body.items.find((i: any) => i.sourceType === "wet_check_billing");
+  expect(wcbItem.approvedLaborSnapshot).toBe(250);
+  expect(wcbItem.approvedPartsSnapshot).toBe(75);
+});
+
+it("the invoice audit returns null snapshots for pre-Slice-7 WCBs (legacy rows)", async () => {
+  const { invoice } = await setupInvoiceWithApprovedWcb({
+    approvedLaborSnapshot: null,
+    approvedPartsSnapshot: null,
+  });
+  const res = await request(app).get(`/api/invoices/${invoice.id}/audit`);
+  const wcbItem = res.body.items.find((i: any) => i.sourceType === "wet_check_billing");
+  expect(wcbItem.approvedLaborSnapshot).toBeNull();
+  expect(wcbItem.approvedPartsSnapshot).toBeNull();
+});
+```
+
+### Acceptance criteria
+
+- `wet_check_billings` has two new nullable text columns:
+  `approved_labor_snapshot` and `approved_parts_snapshot`.
+- The migration SQL is committed under `lib/db/migrations/` with a
+  monotonically-increasing prefix matching the existing convention.
+- The WCB approval-stamp write (both manager-approval and auto-bill
+  paths) populates the two snapshot columns with the JSON envelopes
+  specified above.
+- Slice 2's Slice 5-style `(wcb as any).…` casts are removed —
+  TypeScript sees the typed columns directly.
+- The financial-pulse audit endpoint returns parsed numeric values
+  for `approvedLaborSnapshot` and `approvedPartsSnapshot` on WCB
+  items that were approved post-deploy, and `null` for WCBs
+  approved pre-deploy.
+- WCBs that have not yet been approved have both columns `null`.
+- `pnpm typecheck`, `pnpm test`, and `pnpm drizzle-kit migrate`
+  (against a test database) pass.
+- No backfill is run. Legacy approved WCBs keep their `null`
+  snapshots — the audit endpoint already handles this case.
+
+### Out of scope
+
+- Backfilling snapshots for legacy approved WCBs. There is no source
+  of truth for "what was approved" historically.
+- Surfacing the snapshot deltas in a UI. The audit endpoint exposes
+  them; if a UI consumer is wanted, that's its own slice.
+- Equivalent snapshot fields on `wet_check_findings`. The findings
+  themselves are version-controlled by the `convertedAt` /
+  `wetCheckBillingId` stamping; per-finding snapshots are not in
+  scope.
+- Changing the BS snapshot shape or migration. BS is the model;
+  WCB conforms.
+- Restricting the snapshot envelope further (e.g. omitting
+  `totalHours`). Carrying the extra fields in the JSON now is cheap
+  and avoids a future re-write if the audit ever wants to display
+  the breakdown.
+
+### Dependencies
+
+- **Hard dependency on Slice 2.** Slice 2 added the audit branch
+  with `(wcb as any)` casts as a placeholder. This slice removes
+  those casts. If Slice 2 has not landed, write its branch as part
+  of this slice — but consider that a sign you should land Slice 2
+  first as its own PR.
+- Independent of Slices 1, 3, 4, 5, 6.
+- Lowest priority in the family. If close week is imminent and
+  triage is needed, defer this slice.

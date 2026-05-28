@@ -1,0 +1,494 @@
+# Replit Task — WC Billing Integration, Slice 5 (Billing-manager WCB edit surface)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader integration audit — it is reference material so
+you understand the intent. The actual work for this task is in the **Slice 5**
+section at the bottom. Do not deviate from any file paths, function names,
+schema field names, or payload shapes specified. If you believe a deviation
+is necessary, surface it and stop rather than proceeding.
+
+> **Product decision required before specing further.** Two paths are
+> viable; the rest of this document assumes Path A. If the team chooses
+> Path B, this slice is replaced wholesale with a much smaller "request
+> edit" handoff flow. Path A is the recommended path because it
+> matches the billing manager's actual close-day workflow (override a
+> labor rate, adjust per-zone labor) without giving them parts-pricing
+> or finding-deletion privileges that belong to manager+. The two
+> paths are documented at the top of the **Slice 5** section below.
+
+> **Pattern: reuse the existing endpoints, don't invent new edit
+> surfaces.** The wet check separate system's source-of-truth model
+> (Slice 6 of WC Separate System) put line items on
+> `wet_check_findings`. Any edit that flows through "parts" must touch
+> findings, not a non-existent `wet_check_billing_items` table. This
+> slice is therefore narrow on purpose: per-zone labor (existing) and
+> labor-rate override (new). Parts and finding edits stay manager+.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in the audit
+(`WC Billing Integration - Slice 0 End-of-Month Audit.md`) and the WC
+Separate System slices, and apply to every slice in this family.
+
+**Source-of-truth model.** Wet check billings have no `items` table.
+Line items are derived from `wet_check_findings` directly. Per-zone
+repair labor lives on `wet_check_zone_records.repairLaborHours`.
+The WCB row carries computed/snapshot totals (`laborSubtotal`,
+`partsSubtotal`, `totalAmount`) plus the applied labor rate
+(`appliedLaborRate`).
+
+**Billing-manager scope.** Per the May 2026 wet-check audit
+(`docs/wet-check-audit-2026-05.md` §4), `billing_manager` is read-only
+on wet checks. This slice deliberately keeps that scope tight: only
+two narrowly-typed edits are added to the role. Anything broader
+(adding/removing findings, changing part assignments, changing part
+prices, deleting a WCB) requires a manager+ role.
+
+**Editable-when-not-billed.** Edits are only legal while the WCB is in
+`approved_passed_to_billing` and has not been invoiced. A WCB with
+`status === 'billed'` or `invoiceId != null` is locked. The locked
+state is enforced server-side; the client also hides edit affordances
+on locked rows.
+
+**No retro-edit of already-billed WCBs.** If a billing manager spots a
+wrong labor rate on a row that has already been invoiced, the path is
+"void the invoice and re-create" (out-of-scope), not "edit the
+billed WCB." This is the same constraint that applies to billing
+sheets.
+
+---
+
+## Slice 5 — Billing-manager limited inline edit for WCBs
+
+### Decision: Path A vs Path B
+
+**Path A — Limited inline edit (recommended, assumed below).**
+Add two narrowly-scoped edit surfaces accessible to billing managers
+from the existing WCB view modal:
+1. **Override the applied labor rate.** New endpoint:
+   `PATCH /api/wet-check-billings/:id/labor-rate`. Triggers a recompute
+   of `laborSubtotal` (= `totalHours × newRate`) and `totalAmount`
+   (= `laborSubtotal + partsSubtotal`).
+2. **Adjust per-zone repair labor hours.** Surface the existing
+   `PATCH /api/wet-check-billings/:id/zone-labor` endpoint
+   (`routes.ts:9653`) from the modal. Note: this endpoint is **already
+   gated to `billing_manager`, `company_admin`, `super_admin`** (verified
+   at `routes.ts:9656`). No backend role-list change is needed; the
+   work is purely surfacing the existing capability in the UI.
+
+Parts changes, finding deletes, dispositions, and any field on
+`wet_check_findings` remain manager+.
+
+**Path B — Read-only with handoff (alternative).** Add a "Request
+edit" button to the WCB view modal that opens a small dialog where
+the billing manager describes the requested change and submits a
+"Pending Manager Action" item that surfaces on the manager wet-check
+review queue. No edit endpoint is added.
+
+If Path B is chosen, **stop here and surface a question.** The rest
+of this document covers Path A.
+
+### Scope (Path A)
+
+Backend: one new endpoint, one role-list extension on the existing
+endpoint. Frontend: a small edit form in the WCB view modal, gated to
+billing-manager-and-above. Tests for the new endpoint, the recompute
+logic, and the role gates.
+
+### Files modified (Path A)
+
+**Backend.**
+- `artifacts/api-server/src/routes/routes.ts` — add
+  `PATCH /api/wet-check-billings/:id/labor-rate` (place adjacent to the
+  existing `PATCH /api/wet-check-billings/:id/zone-labor` at `:9653`).
+  The existing `/zone-labor` endpoint already accepts billing_manager;
+  no role-gate change needed there.
+- `artifacts/api-server/src/storage.ts` — add a small recompute helper
+  `recomputeWcbTotalsForLaborRate` adjacent to
+  `updateWetCheckBilling` at `:3968+`. The helper updates the WCB row
+  in a single transaction.
+- New: `artifacts/api-server/src/routes/wcb-labor-rate-route.test.ts`
+  — endpoint test.
+- New (or extend existing):
+  `artifacts/api-server/src/wcb-labor-rate-recompute.test.ts` — pure
+  unit test on the recompute math.
+
+**Frontend.**
+- `artifacts/irrigopro/src/components/wet-check-billings/wet-check-billing-view-modal.tsx`
+  — add an "Edit" pencil affordance next to the labor-rate row and
+  the zone-labor row. Only renders for billing-manager-and-above AND
+  when the WCB is unlocked (`status === 'approved_passed_to_billing'
+  && !invoiceId`).
+- New: `artifacts/irrigopro/src/components/wet-check-billings/wcb-labor-rate-edit.tsx`
+  — a small inline form component for the labor-rate edit.
+- New: `artifacts/irrigopro/src/components/wet-check-billings/wcb-labor-rate-edit.test.tsx`
+  — component test.
+- `artifacts/irrigopro/src/pages/customer-billing.tsx` — none if the
+  modal is consumed from there; verify by re-reading the import path
+  for `WetCheckBillingViewModal`.
+
+### Concrete changes (Path A)
+
+#### Backend
+
+**(B1) Add `recomputeWcbTotalsForLaborRate` helper to storage.ts**
+adjacent to `updateWetCheckBilling` at `:3968+`:
+
+```typescript
+/**
+ * Recompute laborSubtotal and totalAmount on a WCB after a labor-rate
+ * change. Total hours and parts subtotal are unchanged — only the
+ * rate-derived columns move. Returns the updated WCB row.
+ *
+ * The caller is expected to be inside a transaction OR to call this
+ * as a single atomic operation. The endpoint at /labor-rate calls it
+ * atomically (no surrounding tx); the route handler is the only
+ * caller for now.
+ */
+async recomputeWcbTotalsForLaborRate(id: number, newRate: number): Promise<WetCheckBilling> {
+  const [existing] = await db.select().from(wetCheckBillings).where(eq(wetCheckBillings.id, id));
+  if (!existing) {
+    throw new Error(`WetCheckBilling ${id} not found`);
+  }
+  if (existing.status === 'billed' || existing.invoiceId != null) {
+    throw new Error(`WetCheckBilling ${id} is locked (status=${existing.status}, invoiceId=${existing.invoiceId})`);
+  }
+  const totalHours = parseFloat(String(existing.totalHours || '0'));
+  const partsSubtotal = parseFloat(String(existing.partsSubtotal || '0'));
+  const laborSubtotal = totalHours * newRate;
+  const totalAmount = laborSubtotal + partsSubtotal;
+  const [updated] = await db.update(wetCheckBillings)
+    .set({
+      appliedLaborRate: newRate.toFixed(2),
+      laborSubtotal: laborSubtotal.toFixed(2),
+      totalAmount: totalAmount.toFixed(2),
+      updatedAt: new Date(),
+    })
+    .where(eq(wetCheckBillings.id, id))
+    .returning();
+  return updated;
+}
+```
+
+Add the matching declaration on `IStorage` next to `updateWetCheckBilling`
+at `storage.ts:1054`:
+
+```typescript
+recomputeWcbTotalsForLaborRate(id: number, newRate: number): Promise<WetCheckBilling>;
+```
+
+**(B2) Add the new endpoint** `PATCH /api/wet-check-billings/:id/labor-rate`
+in `routes.ts`, immediately AFTER the existing `/zone-labor` endpoint at
+`:9653+`:
+
+```typescript
+// Slice 5 — billing-manager labor-rate override on an unbilled WCB.
+// Triggers a recompute of laborSubtotal and totalAmount. Parts and
+// findings are untouched. Locked WCBs return 409.
+app.patch("/api/wet-check-billings/:id/labor-rate", requireAuthentication, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      res.status(400).json({ message: "Invalid wet check billing id" });
+      return;
+    }
+    const role = (req as any).authenticatedUserRole;
+    // Match the role list on the sibling /zone-labor endpoint
+    // (routes.ts:9656) — billing_manager, company_admin, super_admin.
+    // The "manager" role is intentionally NOT in this list; manager-role
+    // edits to WCBs flow through the wet-check-level endpoints, not
+    // through this WCB-level patch.
+    if (!["billing_manager", "company_admin", "super_admin"].includes(role)) {
+      res.status(403).json({ message: "Role not permitted to edit WCB labor rate" });
+      return;
+    }
+    const newRateRaw = (req.body && (req.body.newRate ?? req.body.laborRate));
+    const newRate = typeof newRateRaw === "number" ? newRateRaw : parseFloat(String(newRateRaw));
+    if (!Number.isFinite(newRate) || newRate < 0 || newRate > 1000) {
+      res.status(400).json({ message: "newRate must be a non-negative number ≤ 1000" });
+      return;
+    }
+    // Tenant scope: re-resolve the WCB and check companyId.
+    const callerCompanyId = (req as any).authenticatedUserRole === "super_admin"
+      ? null
+      : ((req as any).authenticatedUserCompanyId ?? null);
+    const wcb = await storage.getWetCheckBillingById(id);
+    if (!wcb) {
+      res.status(404).json({ message: "Wet check billing not found" });
+      return;
+    }
+    if (callerCompanyId != null && (wcb as any).companyId !== callerCompanyId) {
+      res.status(403).json({ message: "Cross-company access denied" });
+      return;
+    }
+    if (wcb.status === "billed" || wcb.invoiceId != null) {
+      res.status(409).json({
+        message: "Wet check billing is locked (already invoiced). Void the invoice first.",
+      });
+      return;
+    }
+    const updated = await storage.recomputeWcbTotalsForLaborRate(id, newRate);
+    res.json(updated);
+  } catch (error) {
+    logger.error({ err: error }, "PATCH /api/wet-check-billings/:id/labor-rate failed");
+    res.status(500).json({ message: "Failed to update wet check billing labor rate" });
+  }
+});
+```
+
+**(B3) No role-gate change to `/zone-labor`.** The existing endpoint
+at `routes.ts:9653` already gates to `billing_manager`,
+`company_admin`, `super_admin` (verified at `routes.ts:9656`). This
+slice surfaces the capability in the UI but does not modify the
+endpoint. Skip this step and proceed to F1.
+
+#### Frontend
+
+**(F1) Add the labor-rate edit form** as a small focused component
+at `wcb-labor-rate-edit.tsx`:
+
+```typescript
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+interface WcbLaborRateEditProps {
+  wcbId: number;
+  currentRate: string;
+  onClose: () => void;
+}
+
+export function WcbLaborRateEdit({ wcbId, currentRate, onClose }: WcbLaborRateEditProps) {
+  const [rate, setRate] = useState(currentRate);
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: async (newRate: number) => {
+      return await apiRequest(`/api/wet-check-billings/${wcbId}/labor-rate`, "PATCH", { newRate });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-check-billings", wcbId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-check-billings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
+      onClose();
+    },
+  });
+  return (
+    <form
+      data-testid={`wcb-labor-rate-edit-${wcbId}`}
+      onSubmit={(e) => {
+        e.preventDefault();
+        const n = parseFloat(rate);
+        if (!Number.isFinite(n) || n < 0) return;
+        mutation.mutate(n);
+      }}
+      className="flex items-center gap-2"
+    >
+      <Input
+        type="number"
+        step="0.01"
+        min="0"
+        max="1000"
+        value={rate}
+        onChange={(e) => setRate(e.target.value)}
+        data-testid={`wcb-labor-rate-input-${wcbId}`}
+        className="w-24"
+      />
+      <Button type="submit" size="sm" disabled={mutation.isPending} data-testid={`wcb-labor-rate-save-${wcbId}`}>
+        Save
+      </Button>
+      <Button type="button" size="sm" variant="ghost" onClick={onClose} data-testid={`wcb-labor-rate-cancel-${wcbId}`}>
+        Cancel
+      </Button>
+      {mutation.isError ? (
+        <span className="text-xs text-red-600" data-testid={`wcb-labor-rate-error-${wcbId}`}>
+          Failed
+        </span>
+      ) : null}
+    </form>
+  );
+}
+```
+
+**(F2) Wire it into the modal** at
+`wet-check-billing-view-modal.tsx`. The current modal is read-only;
+find the labor-rate display row inside the financial-breakdown area
+and add a pencil-icon button next to the value. The button is
+visible only when:
+- `userRole` ∈ {`billing_manager`, `company_admin`, `super_admin`} (use the existing role hook — match the backend role list exactly), AND
+- `wcb.status === 'approved_passed_to_billing' && wcb.invoiceId == null`.
+
+Clicking the pencil swaps the value display for the
+`WcbLaborRateEdit` form. After save (the mutation's `onSuccess` calls
+`onClose`), the modal re-renders against the invalidated cache and
+shows the new rate + recomputed totals.
+
+Do the same for the zone-labor row(s) — re-use the existing
+`WcbZoneLaborEdit` component if one already exists for the
+`/zone-labor` endpoint; otherwise, write a parallel component.
+(Check `artifacts/irrigopro/src/components/wet-check-billings/`
+for any existing zone-labor edit component first.)
+
+**(F3) Do NOT add an "Edit" pencil to the parts table.** Parts edits
+remain manager+ and live on the wet-check-detail page, not on the
+billing-manager surface. The audit explicitly defers this.
+
+### Tests
+
+#### Backend tests
+
+`wcb-labor-rate-route.test.ts`:
+
+```typescript
+describe("PATCH /api/wet-check-billings/:id/labor-rate (Slice 5)", () => {
+  it("recomputes labor subtotal and total when rate changes", async () => {
+    const { wcb } = await setupWcb({
+      totalHours: "4",
+      laborRate: "75",
+      laborSubtotal: "300",
+      partsSubtotal: "50",
+      totalAmount: "350",
+      status: "approved_passed_to_billing",
+    });
+    const res = await asBillingManager(request(app))
+      .patch(`/api/wet-check-billings/${wcb.id}/labor-rate`)
+      .send({ newRate: 85 });
+    expect(res.status).toBe(200);
+    expect(parseFloat(res.body.appliedLaborRate)).toBe(85);
+    expect(parseFloat(res.body.laborSubtotal)).toBe(340);
+    expect(parseFloat(res.body.totalAmount)).toBe(390);
+    expect(parseFloat(res.body.partsSubtotal)).toBe(50); // unchanged
+  });
+
+  it("rejects with 409 when the WCB is already invoiced", async () => {
+    const { wcb } = await setupWcb({ status: "billed", invoiceId: 999 });
+    const res = await asBillingManager(request(app))
+      .patch(`/api/wet-check-billings/${wcb.id}/labor-rate`)
+      .send({ newRate: 85 });
+    expect(res.status).toBe(409);
+  });
+
+  it("rejects with 403 when called by a field tech", async () => {
+    const { wcb } = await setupWcb({ status: "approved_passed_to_billing" });
+    const res = await asFieldTech(request(app))
+      .patch(`/api/wet-check-billings/${wcb.id}/labor-rate`)
+      .send({ newRate: 85 });
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects with 400 on invalid newRate", async () => {
+    const { wcb } = await setupWcb({ status: "approved_passed_to_billing" });
+    const res = await asBillingManager(request(app))
+      .patch(`/api/wet-check-billings/${wcb.id}/labor-rate`)
+      .send({ newRate: -5 });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects cross-company access with 403", async () => {
+    const { wcb } = await setupWcb({ companyId: 1, status: "approved_passed_to_billing" });
+    const res = await asBillingManagerOfCompany(2, request(app))
+      .patch(`/api/wet-check-billings/${wcb.id}/labor-rate`)
+      .send({ newRate: 85 });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("PATCH /api/wet-check-billings/:id/zone-labor (Slice 5 — role gate widened)", () => {
+  it("accepts a billing_manager (previously rejected)", async () => {
+    const { wcb } = await setupWcbWithZone({ status: "approved_passed_to_billing" });
+    const res = await asBillingManager(request(app))
+      .patch(`/api/wet-check-billings/${wcb.id}/zone-labor`)
+      .send({ zoneRecordId: 1, repairLaborHours: 1.5 });
+    expect(res.status).toBe(200);
+  });
+});
+```
+
+#### Frontend tests
+
+`wcb-labor-rate-edit.test.tsx`:
+
+```typescript
+describe("WcbLaborRateEdit (Slice 5)", () => {
+  it("submits the new rate to the labor-rate endpoint", async () => {
+    const apiSpy = vi.spyOn(...).mockResolvedValue(/* updated WCB */);
+    render(<WcbLaborRateEdit wcbId={42} currentRate="75" onClose={() => {}} />);
+    fireEvent.change(screen.getByTestId("wcb-labor-rate-input-42"), { target: { value: "85" } });
+    fireEvent.click(screen.getByTestId("wcb-labor-rate-save-42"));
+    await waitFor(() => {
+      expect(apiSpy).toHaveBeenCalledWith("/api/wet-check-billings/42/labor-rate", "PATCH", { newRate: 85 });
+    });
+  });
+
+  it("calls onClose on successful save and invalidates the WCB query", async () => {
+    // ... assert queryClient.invalidateQueries and onClose were called
+  });
+
+  it("renders a Failed indicator when the mutation errors", async () => {
+    // ... mock the mutation to reject; assert the error data-testid renders
+  });
+});
+```
+
+Extend `wet-check-billing-view-modal.test.tsx`:
+
+```typescript
+it("renders the labor-rate edit pencil for billing_manager on an unbilled WCB", () => {
+  renderModal({ role: "billing_manager", wcb: { status: "approved_passed_to_billing", invoiceId: null } });
+  expect(screen.getByTestId("wcb-labor-rate-edit-pencil")).toBeInTheDocument();
+});
+
+it("hides the labor-rate edit pencil on a billed WCB even for billing_manager", () => {
+  renderModal({ role: "billing_manager", wcb: { status: "billed", invoiceId: 999 } });
+  expect(screen.queryByTestId("wcb-labor-rate-edit-pencil")).not.toBeInTheDocument();
+});
+
+it("hides the labor-rate edit pencil for field_tech regardless of WCB status", () => {
+  renderModal({ role: "field_tech", wcb: { status: "approved_passed_to_billing", invoiceId: null } });
+  expect(screen.queryByTestId("wcb-labor-rate-edit-pencil")).not.toBeInTheDocument();
+});
+```
+
+### Acceptance criteria
+
+- The new `PATCH /api/wet-check-billings/:id/labor-rate` endpoint
+  exists, is role-gated to `billing_manager`+`manager`+`company_admin`+`super_admin`,
+  recomputes `laborSubtotal` and `totalAmount`, and rejects locked
+  WCBs with 409.
+- The existing `/zone-labor` endpoint now also accepts
+  `billing_manager`.
+- `recomputeWcbTotalsForLaborRate` is on `IStorage` and works
+  atomically.
+- The WCB view modal renders an edit pencil next to labor-rate and
+  zone-labor rows for billing manager and above, only when the WCB
+  is unlocked.
+- The pencil-to-form swap works; saving fires the mutation; success
+  invalidates the relevant caches; cancel restores the read-only
+  view.
+- All new and updated tests pass.
+- The May 2026 audit's "billing_manager is read-only on wet checks"
+  note in `docs/wet-check-audit-2026-05.md` §4 is updated with a
+  brief note: "Except for labor-rate override and per-zone repair
+  labor on unbilled WCBs (Slice 5)."
+
+### Out of scope
+
+- Parts edits, finding edits, finding adds/deletes, dispositions —
+  all stay manager+.
+- A general "edit anything on a WCB" PATCH endpoint.
+- A new `wet_check_billing_items` table.
+- Retro-editing already-invoiced WCBs (path is void+re-create, out of
+  scope here).
+- Surfacing the edit affordances anywhere outside the WCB view modal
+  (e.g. directly on the customer-billing row).
+- An audit log of who-changed-the-rate-when. Worth a follow-up but
+  not in this slice.
+
+### Dependencies
+
+- Path A vs Path B decision must be made before starting.
+- This slice can land before or after Slice 6. They touch different
+  files; no shared symbols.
