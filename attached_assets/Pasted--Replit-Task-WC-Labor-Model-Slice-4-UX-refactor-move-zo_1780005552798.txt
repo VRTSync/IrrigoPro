@@ -1,0 +1,456 @@
+# Replit Task — WC Labor Model, Slice 4 (UX refactor — move zone labor edit into Zone Details)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from `WC Labor Model - Slice 0 Per-Finding Labor Audit and Plan.md`.
+The actual work for this task is in the **Slice 4** section at the bottom.
+Do not deviate from any file paths, function names, schema field names, or
+payload shapes specified. If you believe a deviation is necessary, surface
+it and stop rather than proceeding.
+
+> **Frontend-only slice. No schema, no backend changes.** The endpoint
+> stays at `PATCH /api/wet-check-billings/:id/zone-labor`
+> (`routes.ts:9653`). The model stays per-zone authoritative. Only the
+> edit affordance moves from the misplaced top panel to inline near
+> each zone's subtotal.
+
+> **Pattern: editor next to data.** The "Zone Repair Labor" panel today
+> is a list at the top of the modal, far from the zones it describes.
+> The user reports it "means nothing to them" because it requires
+> mental cross-referencing. Inline editing next to the zone subtotal
+> in the Zone Details section keeps the labor edit visually adjacent
+> to the parts that compose it.
+
+---
+
+## Design Context (locked decisions)
+
+Inherited from WC Labor Model Slice 0.
+
+**The current top panel is at `wet-check-billing-view-modal.tsx:222`**
+with header "Zone Repair Labor" and an inline `EditZoneRepairLabor`
+component at `:70+`. Delete both.
+
+**The Zone Details section is at
+`wet-check-billing-view.tsx:~280`** (the zone block iteration that
+ends with each zone's `ZONE SUBTOTAL` row). The new inline editor
+goes one row above the ZONE SUBTOTAL in each zone block.
+
+**The Repairs Summary table at `wet-check-billing-view.tsx:375`**
+currently renders the per-zone "auto" badge + Repair Hrs cell. Keep
+the display; remove any edit affordance from this surface. Editing
+is exclusive to the inline Zone Details editor after this slice.
+
+**Role gate matches today's `/zone-labor` endpoint:**
+billing_manager / company_admin / super_admin. Locked when the WCB
+is already invoiced (`status === 'billed' || invoiceId != null`).
+
+**Soft dependency on WC Manager Experience Slice 3.** That slice
+(currently in spec) added an overflow-menu item "Edit zone labor"
+that opens the modal with `initialAction="zone-labor"`. After this
+slice lands, that prop should scroll the modal to the Zone Details
+section with the first inline editor focused. Five-line follow-up;
+add it to whichever PR lands second.
+
+---
+
+## Slice 4 — UX refactor
+
+### Scope
+
+Five coherent changes. All frontend.
+
+### Files modified
+
+- `artifacts/irrigopro/src/components/wet-check-billings/wet-check-billing-view-modal.tsx`
+  — delete the top panel and the `EditZoneRepairLabor` inline
+  component.
+- `artifacts/irrigopro/src/components/billing/wet-check-billing-view.tsx`
+  — add the inline zone-labor row in each zone block; convert the
+  Repairs Summary cell to display-only.
+- New: `artifacts/irrigopro/src/components/wet-check-billings/zone-labor-edit-inline.tsx`
+  — the new inline editor component.
+- New: `artifacts/irrigopro/src/components/wet-check-billings/zone-labor-edit-inline.test.tsx`
+  — focused tests for the inline editor.
+- `artifacts/irrigopro/src/components/wet-check-billings/wet-check-billing-view-modal.test.tsx`
+  — extend with assertions that the top panel is gone.
+
+### Concrete changes
+
+#### (1) Delete the "Zone Repair Labor" panel
+
+In `wet-check-billing-view-modal.tsx`:
+
+- Delete the `EditZoneRepairLabor` inline component at `:70+`
+  (the `localHours` / `setLocalHours` state, the `useEffect` that
+  syncs it, the `apiRequest` call that fires the PATCH).
+- Delete the panel render block at `:222` — the wrapper, the header
+  "Zone Repair Labor", and the list of `EditZoneRepairLabor` rows.
+- Remove any imports that become unused after deletion.
+
+Verify by grep that no other component imports
+`EditZoneRepairLabor` before the delete.
+
+#### (2) Build the inline editor
+
+```typescript
+// artifacts/irrigopro/src/components/wet-check-billings/zone-labor-edit-inline.tsx
+//
+// Inline per-zone repair labor editor. Lives in each zone's block in
+// the WCB view's Zone Details section, immediately above the
+// ZONE SUBTOTAL row.
+
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { Pencil, RotateCcw } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+
+interface ZoneLaborEditInlineProps {
+  wcbId: number;
+  zoneRecordId: number;
+  valueHours: string;
+  manuallySet: boolean;
+  laborRate: number;
+  canEdit: boolean;
+}
+
+export function ZoneLaborEditInline({
+  wcbId,
+  zoneRecordId,
+  valueHours,
+  manuallySet,
+  laborRate,
+  canEdit,
+}: ZoneLaborEditInlineProps) {
+  const [editing, setEditing] = useState(false);
+  const [local, setLocal] = useState(valueHours);
+  const queryClient = useQueryClient();
+
+  const saveMut = useMutation({
+    mutationFn: (hours: string) =>
+      apiRequest(`/api/wet-check-billings/${wcbId}/zone-labor`, "PATCH", {
+        zoneRecordId,
+        repairLaborHours: hours,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-check-billings", wcbId] });
+      setEditing(false);
+    },
+  });
+
+  const resetMut = useMutation({
+    // If the backend doesn't have a reset-to-auto endpoint yet, add one
+    // as part of this slice — small addition, same role gate. Pattern
+    // from storage.ts:7737 (resetZoneRepairLabor — field-tech tier).
+    // The billing-tier version is a parallel method that skips
+    // assertWetCheckEditableByTech and only checks
+    // wcb.invoiceId IS NULL.
+    mutationFn: () =>
+      apiRequest(`/api/wet-check-billings/${wcbId}/zone-labor/reset`, "POST", { zoneRecordId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-check-billings", wcbId] });
+    },
+  });
+
+  const hoursNum = parseFloat(valueHours || "0");
+  const formattedHours = `${hoursNum.toFixed(2)} hr${hoursNum === 1 ? "" : "s"}`;
+  const dollarValue = (hoursNum * laborRate).toFixed(2);
+
+  if (!canEdit) {
+    return (
+      <div
+        className="grid grid-cols-12 text-sm py-2 border-t border-gray-100"
+        data-testid={`zone-labor-readonly-${zoneRecordId}`}
+      >
+        <div className="col-span-7 flex items-center gap-2 text-gray-700">
+          <span>Zone Labor</span>
+          {!manuallySet ? <Badge variant="outline" className="text-xs">auto</Badge> : null}
+        </div>
+        <div className="col-span-3 text-right text-gray-700">{formattedHours}</div>
+        <div className="col-span-2 text-right text-gray-700">${dollarValue}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="grid grid-cols-12 text-sm py-2 border-t border-gray-100 items-center"
+      data-testid={`zone-labor-row-${zoneRecordId}`}
+    >
+      <div className="col-span-7 flex items-center gap-2 text-gray-700">
+        <span>Zone Labor</span>
+        <Badge variant="outline" className="text-xs">
+          {manuallySet ? "manual" : "auto"}
+        </Badge>
+        {manuallySet ? (
+          <button
+            onClick={() => resetMut.mutate()}
+            disabled={resetMut.isPending}
+            className="text-xs text-gray-500 hover:text-gray-700 inline-flex items-center gap-1"
+            data-testid={`zone-labor-reset-${zoneRecordId}`}
+          >
+            <RotateCcw className="w-3 h-3" /> Reset to auto
+          </button>
+        ) : null}
+      </div>
+      <div className="col-span-3 text-right">
+        {editing ? (
+          <form
+            onSubmit={(e) => { e.preventDefault(); saveMut.mutate(local); }}
+            className="inline-flex items-center gap-1 justify-end"
+            data-testid={`zone-labor-form-${zoneRecordId}`}
+          >
+            <Input
+              type="number"
+              step="0.25"
+              min="0"
+              value={local}
+              onChange={(e) => setLocal(e.target.value)}
+              className="w-20 h-7 text-right"
+              autoFocus
+              data-testid={`zone-labor-input-${zoneRecordId}`}
+            />
+            <Button type="submit" size="sm" disabled={saveMut.isPending}>Save</Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => { setEditing(false); setLocal(valueHours); }}>
+              Cancel
+            </Button>
+          </form>
+        ) : (
+          <button
+            onClick={() => { setLocal(valueHours); setEditing(true); }}
+            className="text-gray-700 hover:underline underline-offset-2"
+            data-testid={`zone-labor-edit-${zoneRecordId}`}
+          >
+            {formattedHours}
+            <Pencil className="inline w-3 h-3 ml-1 text-gray-400" />
+          </button>
+        )}
+      </div>
+      <div className="col-span-2 text-right text-gray-700">${dollarValue}</div>
+    </div>
+  );
+}
+```
+
+#### (3) Add the inline editor to each zone block in Zone Details
+
+In `wet-check-billing-view.tsx` (around `:280+`, the zone block
+iteration), find the `ZONE SUBTOTAL` row at the end of each zone's
+block. Immediately ABOVE it, render the `ZoneLaborEditInline`:
+
+```jsx
+{/* …finding rows… */}
+
+<ZoneLaborEditInline
+  wcbId={wcbId}
+  zoneRecordId={zone.zoneRecordId}
+  valueHours={zone.repairLaborHours}
+  manuallySet={zone.repairLaborManuallySet}
+  laborRate={parseFloat(wcb.appliedLaborRate || wcb.laborRate || "0")}
+  canEdit={canEditLabor && !isLocked}
+/>
+
+<div className="zone-subtotal-row">
+  <span>ZONE SUBTOTAL</span>
+  <span>{currency(zone.zoneLaborSubtotal /* should include labor now */)}</span>
+</div>
+```
+
+`canEditLabor` derives from the page's user role
+(`billing_manager` / `company_admin` / `super_admin`).
+`isLocked` is `wcb.status === "billed" || wcb.invoiceId != null`.
+
+**Important: the Zone Subtotal must now include labor.** Today the
+zone subtotal is parts-only (per the screenshot — Zone C-1 = $7.00
+parts = $7.00 subtotal). After this slice the subtotal is
+`partsSubtotal + (repairLaborHours × appliedLaborRate)`. Verify the
+math at the WCB total level matches the existing
+`wcb.totalAmount` (which already includes labor) — if it does, the
+zone subtotal change is purely visual; if it doesn't, the audit
+revealed a separate labor-not-flowing-to-total bug and Slice 2 is the
+right place to fix it.
+
+#### (4) Convert the Repairs Summary cell to display-only
+
+In `wet-check-billing-view.tsx:375`, the cell rendering
+`toNum(zone.repairLaborHours).toFixed(2)` with the "auto" badge
+already exists. Remove any inline edit affordance from this cell
+(if one exists), and keep the read-only display.
+
+The "auto" badge logic at this surface is unchanged: show "auto"
+when `!zone.repairLaborManuallySet`, otherwise show no badge.
+
+#### (5) Add the reset-to-auto endpoint (small backend addition)
+
+If `POST /api/wet-check-billings/:id/zone-labor/reset` doesn't
+already exist, add it as a small backend additive change in this
+slice. Mirror the existing field-tier `resetZoneRepairLabor` at
+`storage.ts:7737`, but:
+
+- Role gate: billing_manager / company_admin / super_admin (per the
+  edit endpoint at `routes.ts:9656`).
+- Lock check: refuse when `wcb.status === 'billed' || invoiceId != null`.
+- After reset, recompute the WCB's `laborSubtotal` and `totalAmount`
+  (same way `setWcbZoneRepairLabor` does).
+
+```typescript
+// routes.ts — alongside the existing /zone-labor PATCH
+app.post("/api/wet-check-billings/:id/zone-labor/reset", requireAuthentication, async (req, res) => {
+  const cid = requireCompanyId(req, res); if (!cid) return;
+  const role = req.authenticatedUserRole;
+  if (!["billing_manager", "company_admin", "super_admin"].includes(role)) {
+    res.status(403).json({ message: "Forbidden" }); return;
+  }
+  const wcbId = parseInt(req.params.id, 10);
+  const zoneRecordId = parseInt(req.body?.zoneRecordId, 10);
+  if (!Number.isFinite(wcbId) || !Number.isFinite(zoneRecordId)) {
+    res.status(400).json({ message: "Invalid ids" }); return;
+  }
+  try {
+    const result = await storage.resetWcbZoneRepairLabor(wcbId, zoneRecordId, cid);
+    if (!result) { res.status(404).json({ message: "Not found" }); return; }
+    res.json(result);
+  } catch (e: any) {
+    // classify + log following the existing pattern
+    res.status(500).json({ message: "Couldn't reset zone labor" });
+  }
+});
+```
+
+Storage method:
+
+```typescript
+async resetWcbZoneRepairLabor(
+  wcbId: number,
+  zoneRecordId: number,
+  companyId: number,
+): Promise<WetCheckBilling | undefined> {
+  // 1. Verify WCB belongs to company and is unlocked.
+  // 2. Clear repairLaborManuallySet on the zone.
+  // 3. Re-run _recomputeZoneRepairLaborIfAuto.
+  // 4. Recompute the WCB's laborSubtotal and totalAmount.
+  // 5. Return the updated WCB row.
+}
+```
+
+### Tests
+
+`zone-labor-edit-inline.test.tsx`:
+
+```typescript
+describe("ZoneLaborEditInline (Slice 4)", () => {
+  it("renders the read-only row for non-editable role", () => {
+    render(<ZoneLaborEditInline {...baseProps} canEdit={false} />);
+    expect(screen.getByTestId(`zone-labor-readonly-${baseProps.zoneRecordId}`)).toBeInTheDocument();
+    expect(screen.queryByTestId(`zone-labor-edit-${baseProps.zoneRecordId}`)).not.toBeInTheDocument();
+  });
+
+  it("renders the pencil-button display by default for editable role", () => {
+    render(<ZoneLaborEditInline {...baseProps} canEdit />);
+    expect(screen.getByTestId(`zone-labor-edit-${baseProps.zoneRecordId}`)).toBeInTheDocument();
+  });
+
+  it("clicking the pencil opens an inline form", () => {
+    render(<ZoneLaborEditInline {...baseProps} canEdit />);
+    fireEvent.click(screen.getByTestId(`zone-labor-edit-${baseProps.zoneRecordId}`));
+    expect(screen.getByTestId(`zone-labor-input-${baseProps.zoneRecordId}`)).toBeInTheDocument();
+  });
+
+  it("submitting fires PATCH /api/wet-check-billings/:id/zone-labor with the new hours", async () => {
+    const apiSpy = mockApiRequest();
+    render(<ZoneLaborEditInline {...baseProps} canEdit />);
+    fireEvent.click(screen.getByTestId(`zone-labor-edit-${baseProps.zoneRecordId}`));
+    fireEvent.change(screen.getByTestId(`zone-labor-input-${baseProps.zoneRecordId}`), { target: { value: "1.50" } });
+    fireEvent.submit(screen.getByTestId(`zone-labor-form-${baseProps.zoneRecordId}`));
+    await waitFor(() => {
+      expect(apiSpy).toHaveBeenCalledWith(
+        `/api/wet-check-billings/${baseProps.wcbId}/zone-labor`,
+        "PATCH",
+        { zoneRecordId: baseProps.zoneRecordId, repairLaborHours: "1.50" },
+      );
+    });
+  });
+
+  it("renders the manual badge + reset-to-auto link when manuallySet is true", () => {
+    render(<ZoneLaborEditInline {...baseProps} canEdit manuallySet />);
+    expect(screen.getByText("manual")).toBeInTheDocument();
+    expect(screen.getByTestId(`zone-labor-reset-${baseProps.zoneRecordId}`)).toBeInTheDocument();
+  });
+
+  it("renders the auto badge when manuallySet is false (no reset link)", () => {
+    render(<ZoneLaborEditInline {...baseProps} canEdit manuallySet={false} />);
+    expect(screen.getByText("auto")).toBeInTheDocument();
+    expect(screen.queryByTestId(`zone-labor-reset-${baseProps.zoneRecordId}`)).not.toBeInTheDocument();
+  });
+
+  it("reset-to-auto link fires the POST /zone-labor/reset endpoint", async () => {
+    const apiSpy = mockApiRequest();
+    render(<ZoneLaborEditInline {...baseProps} canEdit manuallySet />);
+    fireEvent.click(screen.getByTestId(`zone-labor-reset-${baseProps.zoneRecordId}`));
+    await waitFor(() => {
+      expect(apiSpy).toHaveBeenCalledWith(
+        `/api/wet-check-billings/${baseProps.wcbId}/zone-labor/reset`,
+        "POST",
+        { zoneRecordId: baseProps.zoneRecordId },
+      );
+    });
+  });
+});
+```
+
+Extend the modal test to assert the top panel is gone:
+
+```typescript
+it("does NOT render the 'Zone Repair Labor' panel at the top of the modal (Slice 4)", () => {
+  renderModal({ wcb: /* … */ });
+  expect(screen.queryByText("Zone Repair Labor")).not.toBeInTheDocument();
+});
+
+it("renders an inline ZoneLaborEditInline row in each zone block", () => {
+  renderModal({ wcb: /* with 3 zones */ });
+  expect(screen.getAllByTestId(/^zone-labor-(row|readonly)-/)).toHaveLength(3);
+});
+```
+
+### Acceptance criteria
+
+- The "Zone Repair Labor" panel and the `EditZoneRepairLabor`
+  component are deleted.
+- A `ZoneLaborEditInline` row appears in each zone block in Zone
+  Details, immediately above the ZONE SUBTOTAL.
+- The row shows the hours, the dollar value, and an auto/manual
+  badge. The reset-to-auto link appears only when `manuallySet`.
+- The Repairs Summary cell is display-only (no edit affordance).
+- The role gate matches the existing endpoint
+  (billing_manager+); field tech and read-only roles see the
+  display only.
+- Locked WCBs (`billed` / has `invoiceId`) show display only,
+  regardless of role.
+- The `POST /api/wet-check-billings/:id/zone-labor/reset` endpoint
+  exists and recomputes WCB totals on success.
+- All new tests pass; existing modal tests pass.
+- `pnpm typecheck` and `pnpm test` pass.
+
+### Out of scope
+
+- Per-finding labor editing (Slice 0 explicitly rejected this — the
+  model stays per-zone).
+- Changing the labor rate ($/hr) edit at the top of the modal — that
+  stays as WC Billing Integration Slice 5 left it.
+- Modifying the auto-compute logic (Slice 2 owns that).
+- The PDF / invoice line rendering — labor flows through the same
+  WCB totals; no PDF change needed.
+
+### Dependencies
+
+- Slice 2 (forward fix) — soft dependency. The UI works fine even
+  if Slice 2 hasn't landed, but auto-defaults will still be wrong
+  until then.
+- Slice 3 (backfill) — soft dependency. Same reasoning — UI works,
+  but existing zero-labor WCBs stay that way until Slice 3 runs.
+- Independent of Slice 1.
+- Soft dependency on WC Manager Experience Slice 3's overflow-menu
+  wiring — the `initialAction="zone-labor"` prop should scroll to
+  the first inline editor after this slice lands.

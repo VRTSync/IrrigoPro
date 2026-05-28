@@ -1,0 +1,351 @@
+# Replit Task — WC Labor Model, Slice 3 (Safe backfill of existing data)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from `WC Labor Model - Slice 0 Per-Finding Labor Audit and Plan.md`.
+The actual work for this task is in the **Slice 3** section at the bottom.
+Do not deviate from any file paths, function names, schema field names, or
+payload shapes specified. If you believe a deviation is necessary, surface
+it and stop rather than proceeding.
+
+> **Hard rule: never modify an already-invoiced WCB's data.** Backfilling
+> a WCB that's on a shipped QuickBooks invoice silently desynchronizes our
+> totals from QB's. The invoiced bucket gets a REPORT, not an update.
+> The user makes the per-row accounting decision.
+
+> **Two buckets, two policies.** Bucket A = unbilled WCBs
+> (`invoice_id IS NULL`): re-run the (now-fixed) auto-compute, persist,
+> recompute WCB totals. Bucket B = invoiced WCBs with zero labor:
+> compute the "what it should have been" labor and surface in a report.
+
+> **Idempotent and resumable.** Same pattern as WC Separate System
+> Slice 5b's admin migration page. Per-row transactional, checkpointed
+> via `app_settings`, with a dry-run mode and reconciliation queries.
+
+---
+
+## Design Context (locked decisions)
+
+Inherited from WC Labor Model Slice 0.
+
+**Slice 2's fix must be deployed and stable for ≥ 1 week** before this
+backfill runs in production. The forward fix is the precondition;
+backfilling on a still-broken auto-compute would re-introduce the
+zero-labor problem.
+
+**Manually-overridden zones are never touched.** If
+`zone.repairLaborManuallySet === true` on any zone of any WCB, the
+backfill skips that zone (manual edits are user intent). On unbilled
+WCBs with mixed manual + auto zones, only the auto zones are
+recomputed.
+
+**The backfill writes BOTH:**
+- `wet_check_zone_records.repairLaborHours` per zone (auto only).
+- `wet_check_billings.laborSubtotal` and `totalAmount` per WCB
+  (recomputed from the new zone sums × `appliedLaborRate`).
+- `wet_check_billings.approvedLaborSnapshot` and
+  `approvedPartsSnapshot` are NOT modified — those captured the
+  state at approval time and are historical artifacts (per
+  WC Billing Integration Slice 7).
+
+**The runner is per-WCB transactional.** Each WCB's zones + totals are
+updated in one transaction. A failed WCB rolls back; other WCBs in the
+batch are unaffected. The runner records progress in `app_settings`
+so a partial run can resume.
+
+---
+
+## Slice 3 — Safe backfill
+
+### Scope
+
+A one-shot migration script + admin endpoints + admin UI page,
+following the WC Separate System Slice 5b pattern. Two operating
+modes:
+
+- **Bucket A — Recompute unbilled WCBs (writes to DB).**
+- **Bucket B — Report invoiced WCBs with zero labor (read-only,
+  produces `docs/wc-labor-affected-invoices.md`).**
+
+Each bucket runs independently and idempotently.
+
+### Files modified
+
+- New:
+  `artifacts/api-server/src/migrations/wc-labor-backfill.ts` — the
+  backfill module.
+- New: `artifacts/api-server/src/scripts/run-wc-labor-backfill.ts`
+  — CLI wrapper for emergency / non-UI use.
+- `artifacts/api-server/src/routes/routes.ts` — register four admin
+  endpoints (start, status, cancel, reset) following the Slice 5b
+  pattern.
+- New: `artifacts/irrigopro/src/pages/admin-wc-labor-backfill.tsx`
+  — admin page.
+- `artifacts/irrigopro/src/App.tsx` — register the route under
+  super-admin only.
+- `artifacts/irrigopro/src/components/layout/nav-config.ts` — add a
+  super-admin nav entry under "Admin → Data migrations."
+- New tests:
+  `artifacts/api-server/src/migrations/wc-labor-backfill.test.ts`,
+  `artifacts/api-server/src/routes/admin-wc-labor-backfill-routes.test.ts`,
+  `artifacts/irrigopro/src/pages/admin-wc-labor-backfill.test.tsx`.
+
+### Concrete changes
+
+#### (1) Backfill module
+
+```typescript
+// artifacts/api-server/src/migrations/wc-labor-backfill.ts
+//
+// WC Labor Model Slice 3 — backfill existing WCBs whose zones have
+// stale or zero `repairLaborHours` due to the Slice 2-fixed
+// auto-compute bug.
+//
+// Bucket A: invoice_id IS NULL → recompute and persist.
+// Bucket B: invoice_id IS NOT NULL AND labor_subtotal = 0 → REPORT,
+//          never write.
+
+export interface BackfillOptions {
+  bucket: "unbilled" | "invoiced_report";
+  dryRun: boolean;
+  batchSize: number;
+  abortOnError: boolean;
+  /** Returns true to cancel; called between WCBs. */
+  cancelToken?: () => boolean;
+  onProgress?: (p: BackfillProgress) => void;
+}
+
+export interface BackfillProgress {
+  bucket: "unbilled" | "invoiced_report";
+  totalCandidates: number;
+  processed: number;
+  zonesUpdated: number;
+  wcbsUpdated: number;
+  errors: number;
+  currentWcbId: number | null;
+}
+
+export interface BackfillResult {
+  bucket: "unbilled" | "invoiced_report";
+  totalCandidates: number;
+  zonesUpdated: number;
+  wcbsUpdated: number;
+  errors: number;
+  invoicedReport?: InvoicedWcbReport[];  // only for bucket B
+  dryRun: boolean;
+  durationMs: number;
+}
+
+export interface InvoicedWcbReport {
+  wcbId: number;
+  billingNumber: string;
+  customerId: number | null;
+  customerName: string;
+  invoiceId: number;
+  invoiceNumber: string;
+  invoiceCreatedAt: string;
+  partsSubtotal: number;
+  computedLaborSubtotal: number;       // what labor WOULD have been
+  totalAmount: number;                  // current (shipped) total
+  recommendedTotal: number;             // current + computedLaborSubtotal
+  computedZoneBreakdown: Array<{ zoneRecordId: number; controller: string; zoneNumber: number; computedHours: number }>;
+}
+
+export async function runUnbilledBackfill(opts: BackfillOptions): Promise<BackfillResult> {
+  // 1. Collect candidate WCBs: invoice_id IS NULL AND labor_subtotal = 0
+  // 2. For each: in a transaction, for each zone where
+  //    repairLaborManuallySet = false, call the same auto-compute
+  //    logic Slice 2 fixed (i.e., invoke storage._recomputeZoneRepairLaborIfAuto
+  //    or its extracted equivalent).
+  // 3. After zones are updated, recompute the WCB:
+  //    laborSubtotal = Σ zone.repairLaborHours × appliedLaborRate
+  //    totalAmount = laborSubtotal + partsSubtotal
+  //    Persist to the wcb row.
+  // 4. dry-run mode: log the would-be updates but rollback the tx.
+  // 5. Update progress / checkpoint after each WCB.
+  // 6. Return BackfillResult with counts.
+}
+
+export async function runInvoicedReport(opts: BackfillOptions): Promise<BackfillResult> {
+  // 1. Collect candidate WCBs: invoice_id IS NOT NULL AND labor_subtotal = 0
+  // 2. For each: COMPUTE what labor WOULD have been if the auto-compute
+  //    had worked at the time of invoicing. Use the live catalog
+  //    + the WCB's appliedLaborRate.
+  // 3. Build InvoicedWcbReport[] with both current and recommended totals.
+  // 4. NEVER write to the database in this bucket.
+  // 5. Return BackfillResult with the report array populated.
+}
+```
+
+The implementation reuses
+`storage._recomputeZoneRepairLaborIfAuto` for zone-level math —
+the same function Slice 2 fixed — so there's no risk of math drift
+between the runtime path and the backfill.
+
+#### (2) Admin endpoints
+
+Mirror the WC Separate System Slice 5b pattern. Endpoints (super-admin
+only):
+
+- `POST /api/admin/wc-labor-backfill/start` — body
+  `{ bucket: "unbilled" | "invoiced_report", dryRun: boolean,
+    batchSize?: number }`. Returns `{ jobId: string }`. Job runs in
+  background; polling endpoint provides progress.
+- `GET /api/admin/wc-labor-backfill/status` — returns the active job
+  status, or the last completed job's result.
+- `POST /api/admin/wc-labor-backfill/cancel` — sets the cancel token.
+- `POST /api/admin/wc-labor-backfill/reset` — clears the in-process
+  job state so a new run can start.
+
+For the invoiced-report bucket, the status response includes the
+`InvoicedWcbReport[]` payload so the UI can render it as a table.
+
+#### (3) Admin UI
+
+`admin-wc-labor-backfill.tsx`:
+
+- A tab strip with two tabs: **"Recompute unbilled"** and
+  **"Invoiced WCBs report."**
+- Each tab has a "Dry run" button and a "Run for real" button. Dry
+  run is the default-highlighted action.
+- A progress card shows `{processed}/{totalCandidates}`, the current
+  WCB id, the running counts of zonesUpdated / wcbsUpdated / errors.
+- The invoiced-report tab additionally renders the report table once
+  the run completes, with columns: WCB #, Customer, Invoice #,
+  Parts $, Computed labor $, Current total, Recommended total, plus a
+  per-row "Notes" textarea so the user can capture per-row decisions
+  for accounting follow-up. The full report exports as CSV.
+- The page itself does NOT take accounting action. It surfaces the
+  data and lets the user export it for their accounting workflow.
+
+Super-admin only. Route registered at `/admin/wc-labor-backfill`.
+
+#### (4) Reconciliation queries
+
+After Bucket A runs, the UI / a script asserts:
+
+```sql
+-- Every unbilled WCB that was previously zero now has labor.
+SELECT COUNT(*) FROM wet_check_billings
+WHERE invoice_id IS NULL
+  AND CAST(labor_subtotal AS NUMERIC) = 0
+  AND id IN (
+    -- WCBs that were in the candidate set before the run
+    SELECT id FROM wet_check_billings WHERE invoice_id IS NULL  -- run-time snapshot
+  );
+-- Expected: 0 (after run) UNLESS the WCB has no chargeable findings.
+
+-- The total $ delta written by Bucket A
+SELECT
+  COUNT(*) AS wcbs_recomputed,
+  SUM(CAST(labor_subtotal AS NUMERIC)) AS labor_total_added
+FROM wet_check_billings
+WHERE invoice_id IS NULL
+  AND CAST(labor_subtotal AS NUMERIC) > 0
+  AND updated_at >= :backfill_run_started_at;
+```
+
+Capture both in the admin UI's post-run summary.
+
+### Tests
+
+`wc-labor-backfill.test.ts`:
+
+```typescript
+describe("WC labor backfill — Bucket A (unbilled)", () => {
+  it("recomputes auto zones on an unbilled WCB and updates totals", async () => {
+    const { wcb } = await seedUnbilledWcbWithZeroLabor({ findings: [
+      { issueType: "nozzle_replacement", quantity: 2 },  // 2 × 0.25 = 0.50
+    ], appliedLaborRate: "50.00" });
+    await runUnbilledBackfill({ bucket: "unbilled", dryRun: false, batchSize: 10, abortOnError: true });
+    const [after] = await db.select().from(wetCheckBillings).where(eq(wetCheckBillings.id, wcb.id));
+    expect(parseFloat(after.laborSubtotal)).toBeCloseTo(25.00, 2); // 0.50 hr × $50/hr
+  });
+
+  it("dry-run does not modify the database", async () => {
+    const { wcb } = await seedUnbilledWcbWithZeroLabor(/* … */);
+    await runUnbilledBackfill({ bucket: "unbilled", dryRun: true, batchSize: 10, abortOnError: true });
+    const [after] = await db.select().from(wetCheckBillings).where(eq(wetCheckBillings.id, wcb.id));
+    expect(parseFloat(after.laborSubtotal)).toBeCloseTo(0, 2);
+  });
+
+  it("does NOT touch manually-set zones", async () => {
+    const { wcb, manualZone } = await seedUnbilledWcbWithMixedZones(/* one manual, one auto */);
+    await runUnbilledBackfill({ bucket: "unbilled", dryRun: false, batchSize: 10, abortOnError: true });
+    const [after] = await db.select().from(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.id, manualZone.id));
+    expect(after.repairLaborHours).toBe(manualZone.repairLaborHours);  // unchanged
+  });
+
+  it("never touches invoiced WCBs", async () => {
+    const { wcb } = await seedInvoicedWcbWithZeroLabor(/* … */);
+    const before = parseFloat(wcb.laborSubtotal);
+    await runUnbilledBackfill({ bucket: "unbilled", dryRun: false, batchSize: 10, abortOnError: true });
+    const [after] = await db.select().from(wetCheckBillings).where(eq(wetCheckBillings.id, wcb.id));
+    expect(parseFloat(after.laborSubtotal)).toBeCloseTo(before, 2);
+  });
+
+  it("is idempotent: running twice produces the same result", async () => {
+    const { wcb } = await seedUnbilledWcbWithZeroLabor(/* … */);
+    const r1 = await runUnbilledBackfill({ /* … */ });
+    const r2 = await runUnbilledBackfill({ /* … */ });
+    expect(r2.zonesUpdated).toBe(0);  // nothing left to do
+  });
+});
+
+describe("WC labor backfill — Bucket B (invoiced report)", () => {
+  it("computes the would-be labor for invoiced WCBs", async () => {
+    const { wcb } = await seedInvoicedWcbWithZeroLabor({
+      findings: [{ issueType: "nozzle_replacement", quantity: 2 }],
+      appliedLaborRate: "50.00",
+    });
+    const result = await runInvoicedReport({ bucket: "invoiced_report", dryRun: false, batchSize: 10, abortOnError: true });
+    const row = result.invoicedReport?.find((r) => r.wcbId === wcb.id);
+    expect(row?.computedLaborSubtotal).toBeCloseTo(25.00, 2);
+    expect(row?.recommendedTotal).toBeCloseTo(row!.totalAmount + 25.00, 2);
+  });
+
+  it("never writes to the database", async () => {
+    const { wcb } = await seedInvoicedWcbWithZeroLabor(/* … */);
+    const beforeAll = await snapshotAllWcbs();
+    await runInvoicedReport(/* … */);
+    const afterAll = await snapshotAllWcbs();
+    expect(afterAll).toEqual(beforeAll);
+  });
+});
+```
+
+### Acceptance criteria
+
+- Bucket A recomputes zone repair labor on unbilled WCBs with
+  `repairLaborManuallySet = false`, persists, and recomputes WCB
+  totals.
+- Bucket B produces a typed `InvoicedWcbReport[]` payload but writes
+  NOTHING to the database. Verified by a snapshot-before /
+  snapshot-after equality check in tests.
+- Manually-set zones are untouched in both buckets.
+- Already-invoiced WCBs are untouched in Bucket A.
+- Dry-run mode works for both buckets.
+- The admin UI shows progress, supports cancel, and exports the
+  invoiced report as CSV.
+- Reconciliation queries from "Concrete changes (4)" run after a
+  real Bucket A and confirm zero residual zero-labor unbilled WCBs.
+- `pnpm typecheck` and `pnpm test` pass.
+
+### Out of scope
+
+- Modifying any already-invoiced WCB's data. Hard rule.
+- Sending corrected invoices to QuickBooks. The user handles
+  accounting follow-up out-of-band.
+- Automating any "recover labor on next invoice" workflow. The
+  invoiced-report CSV is the input to a human process, not an
+  automated remediation.
+- Changing the labor model (Slice 4 handles UX; the model stays
+  per-zone-authoritative).
+- Backfilling fields other than `wet_check_zone_records.repairLaborHours`
+  and the WCB totals. Snapshots (`approvedLaborSnapshot`,
+  `approvedPartsSnapshot`) are NOT modified.
+
+### Dependencies
+
+- Slice 2 (forward fix) must be deployed and stable for ≥ 1 week
+  before Slice 3 runs in production.
+- Independent of Slice 4 (UX refactor) — they touch different files.
