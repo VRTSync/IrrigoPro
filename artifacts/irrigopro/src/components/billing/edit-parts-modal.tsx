@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Package, Plus, Trash2, BookOpen } from "lucide-react";
-import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
+import { PartPicker } from "@/components/parts/part-picker";
 import type { Part } from "@workspace/db/schema";
 
 export interface EditPartRow {
@@ -257,7 +257,7 @@ export function EditPartsModal({
         </DialogContent>
       </Dialog>
 
-      <PartsSearchModal
+      <PartPicker
         open={showLibrary}
         onOpenChange={setShowLibrary}
         onSelectPart={handleSelectFromLibrary}

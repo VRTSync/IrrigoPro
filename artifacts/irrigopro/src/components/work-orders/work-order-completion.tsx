@@ -30,7 +30,7 @@ import { Separator } from "@/components/ui/separator";
 import { FileUpload } from "@/components/ui/file-upload";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, useArrayQuery } from "@/lib/queryClient";
+import { apiRequest } from "@/lib/queryClient";
 import { buildMapsUrl } from "@/lib/maps-url";
 import {
   CheckCircle,
@@ -41,9 +41,7 @@ import {
   AlertCircle,
   Wrench,
   Edit,
-  Search,
   Check,
-  ShoppingCart,
   Activity,
   User,
   MapPin,
@@ -51,6 +49,7 @@ import {
   Loader2,
   Navigation,
 } from "lucide-react";
+import { PartPicker } from "@/components/parts/part-picker";
 import { ToastAction } from "@/components/ui/toast";
 import { LocationPicker } from "@/components/ui/location-picker";
 import { useCustomerBoundary } from "@/hooks/use-customer-boundary";
@@ -223,7 +222,7 @@ export function WorkOrderCompletion({
     );
   };
   const [completionData, setCompletionData] = useState<WorkOrderCompletionData | null>(null);
-  const [partsSearchQuery, setPartsSearchQuery] = useState("");
+  const [partsPickerOpen, setPartsPickerOpen] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<string>(workOrder.branchName || "");
   const { toast } = useToast();
@@ -278,10 +277,6 @@ export function WorkOrderCompletion({
       }
     }
   }, []);
-
-  const { data: parts = [] } = useArrayQuery<Part>({
-    queryKey: ["/api/parts"],
-  });
 
   // Get work order items and estimate zones for prefilling
   const { data: workOrderItems } = useQuery({
@@ -387,10 +382,6 @@ export function WorkOrderCompletion({
 
 
 
-  const filteredParts = parts?.filter(part =>
-    part.name.toLowerCase().includes(partsSearchQuery.toLowerCase())
-  ) || [];
-
   const updatePartQuantity = (id: number, quantity: number) => {
     if (quantity <= 0) {
       setUsedParts(prev => prev.filter(up => up.id !== id));
@@ -492,7 +483,6 @@ export function WorkOrderCompletion({
   const handleClose = () => {
     setShowSummary(false);
     setCompletionData(null);
-    setPartsSearchQuery("");
     form.reset();
     setUsedParts([]);
     setPhotos([]);
@@ -918,80 +908,26 @@ export function WorkOrderCompletion({
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Redesigned Parts Selection */}
-                <div className="space-y-4">
-                  {/* Search Bar */}
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                    <Input
-                      placeholder="Search parts by name..."
-                      value={partsSearchQuery}
-                      onChange={(e) => setPartsSearchQuery(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
+                {/* Add Part button */}
+                <Button
+                  type="button"
+                  onClick={() => setPartsPickerOpen(true)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white min-h-[44px]"
+                  data-testid="wo-complete-add-part"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Part
+                </Button>
 
-                  {/* Quick Add Parts - Simple List */}
-                  <div className="border rounded-lg bg-white">
-                    <div className="p-3 border-b bg-gray-50">
-                      <h4 className="font-medium text-gray-900">Quick Add Parts</h4>
-                      <p className="text-sm text-gray-600">Tap + to add parts</p>
-                    </div>
-                    
-                    <div>
-                      {filteredParts.length > 0 ? (
-                        <div className="divide-y">
-                          {filteredParts.map((part) => {
-                            const isAlreadyUsed = usedParts.some(up => up.partId === part.id);
-                            
-                            return (
-                              <div
-                                key={part.id}
-                                className={`
-                                  flex items-center justify-between p-3 hover:bg-gray-50 transition-colors
-                                  ${isAlreadyUsed ? 'bg-green-50' : ''}
-                                `}
-                              >
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-medium text-sm text-gray-900">{part.name}</div>
-                                  {currentUser?.role !== 'field_tech' && (
-                                    <div className="text-xs text-gray-500">${part.price}</div>
-                                  )}
-                                </div>
-                                
-                                <div className="flex items-center gap-2">
-                                  {isAlreadyUsed && (
-                                    <div className="flex items-center gap-1 text-xs text-green-600">
-                                      <Check className="w-3 h-3" />
-                                      <span>Added</span>
-                                    </div>
-                                  )}
-                                  
-                                  <Button
-                                    type="button"
-                                    onClick={() => addUsedPart(part)}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white h-11 w-11 p-0 flex-shrink-0"
-                                    title="Add part"
-                                  >
-                                    <Plus className="w-5 h-5" />
-                                  </Button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : partsSearchQuery ? (
-                        <div className="p-6 text-center text-gray-500">
-                          <p>No parts found matching "{partsSearchQuery}"</p>
-                        </div>
-                      ) : (
-                        <div className="p-6 text-center text-gray-500">
-                          <p>Start typing to search for parts</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                <PartPicker
+                  open={partsPickerOpen}
+                  onOpenChange={setPartsPickerOpen}
+                  presentation="sheet"
+                  selectMode="multi"
+                  showCategoryChips
+                  keyboardNav
+                  onSelectPart={(part) => addUsedPart(part)}
+                />
 
                 {/* Used Parts List */}
                 {usedParts.length > 0 ? (

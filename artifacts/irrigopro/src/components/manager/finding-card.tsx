@@ -3,9 +3,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { authedPhotoSrc } from "@/lib/queryClient";
-import { Wrench, MapPin, StickyNote, Pencil, Search, Camera, type LucideIcon } from "lucide-react";
+import { Wrench, MapPin, StickyNote, Pencil, Camera, type LucideIcon } from "lucide-react";
+import { PartPicker } from "@/components/parts/part-picker";
 import type {
   Part, WetCheckFinding, WetCheckPhoto, WetCheckZoneRecord, IssueTypeConfig,
 } from "@workspace/db/schema";
@@ -53,18 +53,6 @@ export function FindingCard({
   }, [edits, customerLaborRate]);
 
   const [partPickerOpen, setPartPickerOpen] = useState(false);
-  const [partSearch, setPartSearch] = useState("");
-
-  const filteredParts = useMemo(() => {
-    const q = partSearch.trim().toLowerCase();
-    let list = parts;
-    if (issueConfig?.partCategoryFilter) {
-      const f = issueConfig.partCategoryFilter.toLowerCase();
-      list = list.filter(p => (p.category ?? "").toLowerCase() === f);
-    }
-    if (q) list = list.filter(p => p.name.toLowerCase().includes(q) || (p.sku ?? "").toLowerCase().includes(q));
-    return list.slice(0, 50);
-  }, [parts, partSearch, issueConfig]);
 
   const choosePart = (p: Part | null) => {
     onChange({
@@ -162,7 +150,7 @@ export function FindingCard({
                 </div>
                 <Button
                   type="button" variant="outline" size="sm"
-                  onClick={() => { setPartSearch(""); setPartPickerOpen(true); }}
+                  onClick={() => setPartPickerOpen(true)}
                   data-testid={`wizard-finding-${finding.id}-pick-part`}
                 >
                   <Pencil className="w-3 h-3 mr-1" /> Change
@@ -210,52 +198,18 @@ export function FindingCard({
         </div>
       </CardContent>
 
-      <Dialog open={partPickerOpen} onOpenChange={setPartPickerOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Pick a part</DialogTitle>
-          </DialogHeader>
-          <div className="relative">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-            <Input
-              autoFocus placeholder="Search parts..."
-              value={partSearch}
-              onChange={e => setPartSearch(e.target.value)}
-              className="pl-10"
-              data-testid={`wizard-finding-${finding.id}-part-search`}
-            />
-          </div>
-          <div className="max-h-80 overflow-y-auto divide-y border rounded">
-            <button
-              type="button"
-              onClick={() => choosePart(null)}
-              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-              data-testid={`wizard-finding-${finding.id}-part-none`}
-            >
-              <span className="text-gray-500 italic">— No part —</span>
-            </button>
-            {filteredParts.length === 0 ? (
-              <div className="px-3 py-4 text-sm text-gray-500 text-center">No matches</div>
-            ) : filteredParts.map(p => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => choosePart(p)}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50"
-                data-testid={`wizard-finding-${finding.id}-part-${p.id}`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="font-medium truncate">{p.name}</div>
-                    <div className="text-xs text-gray-500 truncate">{p.sku ?? "—"} · {p.category ?? "—"}</div>
-                  </div>
-                  <div className="text-xs font-semibold shrink-0">${parseFloat(String(p.price ?? "0")).toFixed(2)}</div>
-                </div>
-              </button>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <PartPicker
+        open={partPickerOpen}
+        onOpenChange={setPartPickerOpen}
+        presentation="dialog"
+        selectMode="single"
+        keyboardNav
+        title="Pick a part"
+        categoryFilter={issueConfig?.partCategoryFilter ?? null}
+        allowClear
+        onClear={() => choosePart(null)}
+        onSelectPart={(p) => choosePart(p)}
+      />
     </Card>
   );
 }

@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Clock, MapPin, Plus, Trash2, Wrench, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, useArrayQuery } from "@/lib/queryClient";
-import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
+import { PartPicker } from "@/components/parts/part-picker";
 import type { Part } from "@workspace/db/schema";
 
 interface PropertyZone {
@@ -407,7 +407,7 @@ export default function FieldTech() {
       )}
 
       {/* Parts Search Modal */}
-      <PartsSearchModal
+      <PartPicker
         open={showPartsModal}
         onOpenChange={setShowPartsModal}
         onSelectPart={addPartToSession}

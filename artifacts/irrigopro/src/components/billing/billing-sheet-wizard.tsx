@@ -45,7 +45,7 @@ import {
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
 import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
-import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
+import { PartPicker } from "@/components/parts/part-picker";
 import {
   WizardLocationStep,
   type WizardLocationValue,
@@ -575,7 +575,7 @@ function PartsLaborStep({
         </CardContent>
       </Card>
 
-      {/* Parts catalog picker — uses shared PartsSearchModal (estimate wizard pattern) */}
+      {/* Parts catalog picker */}
       <Card>
         <CardContent className="p-4 sm:p-5 space-y-3">
           <div className="flex items-center justify-between gap-2">
@@ -603,7 +603,7 @@ function PartsLaborStep({
         </CardContent>
       </Card>
 
-      <PartsSearchModal
+      <PartPicker
         open={partsPickerOpen}
         onOpenChange={setPartsPickerOpen}
         presentation="sheet"

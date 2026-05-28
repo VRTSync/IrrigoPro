@@ -14,7 +14,7 @@ import {
   ChevronLeft,
 } from "lucide-react";
 import type { Part } from "@workspace/db/schema";
-import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
+import { PartPicker } from "@/components/parts/part-picker";
 
 // Task #399 — shared default so the helper text in this file, the review
 // step, and the parent wizard's `deriveCustomerLaborRate` can never drift
@@ -615,7 +615,7 @@ export function EstimateWizardLineItemsStep({
         </div>
       </div>
 
-      <PartsSearchModal
+      <PartPicker
         open={pickerOpen}
         onOpenChange={(open) => {
           setPickerOpen(open);
