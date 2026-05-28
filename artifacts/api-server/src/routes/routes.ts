@@ -11193,6 +11193,27 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
                 partsTotal = bsParts;
               }
             }
+          } else if (item.sourceType === "wet_check_billing" && item.wetCheckBillingId) {
+            const wcb = await storage.getWetCheckBillingById(item.wetCheckBillingId);
+            if (wcb) {
+              status = wcb.status || "billed";
+              description = wcb.billingNumber || item.description;
+              workDate = wcb.workDate || item.workDate;
+              createdAt = wcb.createdAt ? wcb.createdAt.toISOString() : null;
+              billedAt = wcb.billedAt ? wcb.billedAt.toISOString() : null;
+              // Slice 7 will add snapshot columns; cast until then
+              approvedLaborSnapshot = (wcb as any).approvedLaborSnapshot ?? null;
+              approvedPartsSnapshot = (wcb as any).approvedPartsSnapshot ?? null;
+              // Use authoritative source totals when available
+              const wcbLabor = parseFloat(wcb.laborSubtotal || "0");
+              const wcbParts = parseFloat(wcb.partsSubtotal || "0");
+              const wcbTotal = parseFloat(wcb.totalAmount || "0");
+              if (wcbTotal > 0) {
+                ticketTotal = wcbTotal;
+                laborTotal = wcbLabor;
+                partsTotal = wcbParts;
+              }
+            }
           }
 
           return {
@@ -11201,6 +11222,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             sourceId: item.sourceId,
             workOrderId: item.workOrderId,
             billingSheetId: item.billingSheetId,
+            wetCheckBillingId: item.wetCheckBillingId,
             description,
             status,
             laborTotal,
@@ -14533,12 +14555,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   const realRefreshFn: QbRefreshFn = (refreshToken: string, signal: AbortSignal) =>
     refreshQuickBooksToken(refreshToken, signal, { calledFrom: 'health-job' });
 
-  startQbTokenHealthJob(
+  const _qbHealthTimer = startQbTokenHealthJob(
     () => storage.getAllActiveQuickBooksIntegrations(),
     realRefreshFn,
     qbStorageAdapter,
     24 * 60 * 60 * 1000
   );
+  if (typeof _qbHealthTimer.unref === "function") _qbHealthTimer.unref();
 
   // ─────────────────────────────────────────────────────────────────────────
   // QB Harden #4 — External daily health probe

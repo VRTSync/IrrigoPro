@@ -341,3 +341,231 @@ describe("Financial Pulse WCB endpoint integration (Task #815)", () => {
     );
   });
 });
+
+// ── Slice 2: Invoice Audit Enrichment (WCB branch) ────────────────────────────
+//
+// Tests the wet_check_billing enrichment branch added to
+// GET /api/invoices/:invoiceId/audit.
+//
+// Strategy: mount the *real* registerRoutes on a fresh Express app so the
+// tests hit the production endpoint exactly as it runs in the API server.
+// Header-based auth (x-user-role / x-user-company-id) is used — it is the
+// documented dev-mode auth path in requireAuthentication and does not require
+// a DB-backed session. All fixture rows are inserted into the real test DB.
+// storage.getWetCheckBillingById is never mocked.
+
+interface EnrichedItem {
+  id: number;
+  sourceType: string;
+  sourceId: number;
+  workOrderId: number | null;
+  billingSheetId: number | null;
+  wetCheckBillingId: number | null;
+  description: string;
+  status: string;
+  laborTotal: number;
+  partsTotal: number;
+  ticketTotal: number;
+  workDate: unknown;
+  createdAt: string | null;
+  approvedAt: string | null;
+  billedAt: string | null;
+  approvedLaborSnapshot: number | null;
+  approvedPartsSnapshot: number | null;
+}
+
+const AUDIT_TAG = `fp-wcb-audit-${Date.now()}`;
+let auditCompanyId: number;
+let auditCustomerId: number;
+let auditTechId: number;
+let auditWcId: number;
+let auditWcbId: number;
+let auditInvoiceId: number;
+let auditInvoiceItemId: number;
+let auditBaseUrl: string;
+let closeAuditServer: () => Promise<void>;
+
+async function setupInvoiceWithWcb() {
+  const companyRows = await db.execute(sql`
+    INSERT INTO companies (name, subscription, is_active)
+    VALUES (${`FP WCB Audit Co ${AUDIT_TAG}`}, 'basic', true)
+    RETURNING id
+  `);
+  auditCompanyId = Number((companyRows.rows[0] as { id: number }).id);
+
+  const customerRows = await db.execute(sql`
+    INSERT INTO customers (company_id, name, email)
+    VALUES (${auditCompanyId}, 'FP WCB Audit Customer', ${`fp-wcb-audit-${AUDIT_TAG}@example.com`})
+    RETURNING id
+  `);
+  auditCustomerId = Number((customerRows.rows[0] as { id: number }).id);
+
+  const userRows = await db.execute(sql`
+    INSERT INTO users (username, password, name, role, company_id, is_active)
+    VALUES (${`fp-wcb-audit-tech-${AUDIT_TAG}`}, 'hashed', 'FP WCB Audit Tech', 'field_tech', ${auditCompanyId}, true)
+    RETURNING id
+  `);
+  auditTechId = Number((userRows.rows[0] as { id: number }).id);
+
+  const wcRows = await db.execute(sql`
+    INSERT INTO wet_checks (company_id, customer_id, technician_id, technician_name,
+      customer_name, num_controllers, status, labor_mode)
+    VALUES (${auditCompanyId}, ${auditCustomerId}, ${auditTechId},
+      'FP WCB Audit Tech', 'FP WCB Audit Customer', 1, 'submitted', 'flat')
+    RETURNING id
+  `);
+  auditWcId = Number((wcRows.rows[0] as { id: number }).id);
+
+  const wcbRows = await db.execute(sql`
+    INSERT INTO wet_check_billings (
+      billing_number, customer_id, customer_name, property_address,
+      work_date, technician_name, technician_id, wet_check_id,
+      status, total_hours, labor_rate, labor_subtotal, parts_subtotal,
+      total_amount, billed_at, photos
+    ) VALUES (
+      ${`WC-FP-AUDIT-${AUDIT_TAG}`}, ${auditCustomerId}, 'FP WCB Audit Customer', '42 Audit Ave',
+      '2026-04-10T00:00:00Z', 'FP WCB Audit Tech', ${auditTechId}, ${auditWcId},
+      'approved_passed_to_billing', '3.00', '80.00', '240.00', '55.00', '295.00',
+      '2026-04-15T12:00:00Z', '{}'
+    ) RETURNING id
+  `);
+  auditWcbId = Number((wcbRows.rows[0] as { id: number }).id);
+
+  const invoiceRows = await db.execute(sql`
+    INSERT INTO invoices (
+      invoice_number, customer_id, company_id, customer_name, customer_email,
+      invoice_month, invoice_year, period_start, period_end,
+      status, parts_subtotal, labor_subtotal, total_amount
+    ) VALUES (
+      ${`INV-FP-AUDIT-${AUDIT_TAG}`}, ${auditCustomerId}, ${auditCompanyId},
+      'FP WCB Audit Customer', ${`fp-wcb-audit-${AUDIT_TAG}@example.com`},
+      4, 2026, '2026-04-01', '2026-04-30',
+      'draft', '55.00', '240.00', '295.00'
+    ) RETURNING id
+  `);
+  auditInvoiceId = Number((invoiceRows.rows[0] as { id: number }).id);
+
+  // Invoice item with intentionally different amounts from the WCB row
+  // (total_price=100, labor_total=50) — the enrichment branch must override these.
+  const itemRows = await db.execute(sql`
+    INSERT INTO invoice_items (
+      invoice_id, source_type, source_id,
+      wet_check_billing_id, work_date, description,
+      total_price, labor_total
+    ) VALUES (
+      ${auditInvoiceId}, 'wet_check_billing', ${auditWcbId},
+      ${auditWcbId}, '2026-04-10', 'original item description',
+      '100.00', '50.00'
+    ) RETURNING id
+  `);
+  auditInvoiceItemId = Number((itemRows.rows[0] as { id: number }).id);
+}
+
+describe("invoice audit — WCB enrichment branch (Slice 2)", () => {
+  before(async () => {
+    await setupInvoiceWithWcb();
+    // Mount the real production app. registerRoutes is imported dynamically to
+    // avoid tsx/esm compiling the entire 16k-line routes.ts dependency tree at
+    // module-load time, which would hang the test process before any tests run.
+    // The dynamic import is fast because tsx caches the compiled output.
+    const { registerRoutes } = await import("./routes");
+    const app: Express = express();
+    app.use(express.json());
+    const httpServer = await registerRoutes(app);
+    await new Promise<void>((resolve) => httpServer.listen(0, resolve));
+    const port = (httpServer.address() as AddressInfo).port;
+    auditBaseUrl = `http://127.0.0.1:${port}`;
+    closeAuditServer = () => new Promise<void>((resolve) => httpServer.close(() => resolve()));
+  });
+
+  after(async () => {
+    await closeAuditServer?.();
+    if (auditInvoiceItemId) {
+      await db.execute(sql`DELETE FROM invoice_items WHERE id = ${auditInvoiceItemId}`);
+    }
+    if (auditInvoiceId) {
+      await db.execute(sql`DELETE FROM invoices WHERE id = ${auditInvoiceId}`);
+    }
+    if (auditWcbId) {
+      await db.execute(sql`DELETE FROM wet_check_billings WHERE id = ${auditWcbId}`);
+    }
+    if (auditWcId) {
+      await db.execute(sql`DELETE FROM wet_checks WHERE id = ${auditWcId}`);
+    }
+    if (auditTechId) {
+      await db.execute(sql`DELETE FROM users WHERE id = ${auditTechId}`);
+    }
+    if (auditCustomerId) {
+      await db.execute(sql`DELETE FROM customers WHERE id = ${auditCustomerId}`);
+    }
+    if (auditCompanyId) {
+      await db.execute(sql`DELETE FROM companies WHERE id = ${auditCompanyId}`);
+    }
+  });
+
+  // Dev-mode header auth: billing_manager in the test company, no DB user lookup.
+  // requireBillingAccess allows company_admin and billing_manager.
+  // x-user-company-id scopes getInvoiceById and the tenant guard to auditCompanyId.
+  function auditFetch(): Promise<Response> {
+    return fetch(`${auditBaseUrl}/api/invoices/${auditInvoiceId}/audit`, {
+      headers: {
+        "x-user-id": "1",
+        "x-user-role": "billing_manager",
+        "x-user-company-id": String(auditCompanyId),
+      },
+    });
+  }
+
+  it("wetCheckBillingId is present and matches the WCB row on every enriched WCB item", async () => {
+    const res = await auditFetch();
+    assert.equal(res.status, 200, "Expected HTTP 200");
+    const body = await res.json() as { invoiceId: number; items: EnrichedItem[] };
+    assert.ok(Array.isArray(body.items), "items must be an array");
+    assert.ok(body.items.length > 0, "items must be non-empty");
+    const wcbItem = body.items.find((i) => i.sourceType === "wet_check_billing");
+    assert.ok(wcbItem, "Must have at least one enriched item with sourceType='wet_check_billing'");
+    assert.equal(
+      wcbItem.wetCheckBillingId,
+      auditWcbId,
+      `wetCheckBillingId should equal ${auditWcbId}`,
+    );
+  });
+
+  it("authoritative totals (ticketTotal / laborTotal / partsTotal) are sourced from the WCB row", async () => {
+    const res = await auditFetch();
+    assert.equal(res.status, 200, "Expected HTTP 200");
+    const body = await res.json() as { invoiceId: number; items: EnrichedItem[] };
+    const wcbItem = body.items.find((i) => i.sourceType === "wet_check_billing");
+    assert.ok(wcbItem, "Must have at least one WCB enriched item");
+    // WCB row: total_amount=295, labor_subtotal=240, parts_subtotal=55
+    // Invoice item: total_price=100, labor_total=50 — must be overridden by WCB
+    assert.equal(wcbItem.ticketTotal, 295, "ticketTotal must come from WCB totalAmount (295)");
+    assert.equal(wcbItem.laborTotal, 240, "laborTotal must come from WCB laborSubtotal (240)");
+    assert.equal(wcbItem.partsTotal, 55, "partsTotal must come from WCB partsSubtotal (55)");
+  });
+
+  it("status, description, billedAt, and workDate are sourced from the WCB row", async () => {
+    const res = await auditFetch();
+    assert.equal(res.status, 200, "Expected HTTP 200");
+    const body = await res.json() as { invoiceId: number; items: EnrichedItem[] };
+    const wcbItem = body.items.find((i) => i.sourceType === "wet_check_billing");
+    assert.ok(wcbItem, "Must have at least one WCB enriched item");
+    assert.equal(wcbItem.status, "approved_passed_to_billing", "status must come from WCB row");
+    assert.equal(
+      wcbItem.description,
+      `WC-FP-AUDIT-${AUDIT_TAG}`,
+      "description must be the WCB billingNumber",
+    );
+    assert.ok(
+      typeof wcbItem.billedAt === "string" && wcbItem.billedAt.startsWith("2026-04-15"),
+      "billedAt must be sourced from the WCB row (2026-04-15)",
+    );
+    assert.ok(
+      wcbItem.workDate !== null && String(wcbItem.workDate).startsWith("2026-04-10"),
+      "workDate must be sourced from the WCB row (2026-04-10)",
+    );
+    // Slice 7 snapshot columns not yet present on wet_check_billings — must be null
+    assert.equal(wcbItem.approvedLaborSnapshot, null, "approvedLaborSnapshot must be null before Slice 7");
+    assert.equal(wcbItem.approvedPartsSnapshot, null, "approvedPartsSnapshot must be null before Slice 7");
+  });
+});
