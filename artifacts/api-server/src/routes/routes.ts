@@ -386,6 +386,7 @@ import {
 } from "../lib/integration-catalog";
 import { logger } from "../lib/logger";
 import { coerceLatLngStrings } from "../lib/coerce-lat-lng";
+import { buildWoLineDescription, buildBsLineDescription, buildWcbLineDescription } from "../lib/qb-line-description";
 
 // Production-ready middleware to check if user has company admin permissions for site map operations
 const requireCompanyAdminAccess = (req: any, res: any, next: any) => {
@@ -6983,7 +6984,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 UnitPrice: totalLineAmount,
                 Qty: 1
               },
-              Description: `WO-${workOrder.workOrderNumber} - ${workOrder.projectName} (${workOrder.totalHours}h labor @ $${appliedLaborRate.toFixed(2)}/h, $${partsAmount.toFixed(2)} parts)`
+              Description: buildWoLineDescription({ workOrderNumber: workOrder.workOrderNumber, projectName: workOrder.projectName, totalHours: workOrder.totalHours, appliedLaborRate, partsAmount })
             });
           }
         }
@@ -7002,7 +7003,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 UnitPrice: lineTotal,
                 Qty: 1
               },
-              Description: `BS-${billingSheet.billingNumber} - ${parseFloat(billingSheet.totalHours || '0')}h labor @ $${parseFloat(billingSheet.laborRate || '0').toFixed(2)}/h, $${parseFloat(billingSheet.partsSubtotal || '0').toFixed(2)} parts`
+              Description: buildBsLineDescription({ billingNumber: billingSheet.billingNumber, totalHours: billingSheet.totalHours, laborRate: billingSheet.laborRate, partsSubtotal: billingSheet.partsSubtotal })
             });
           }
         }
@@ -7021,7 +7022,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 UnitPrice: lineTotal,
                 Qty: 1
               },
-              Description: `WCB-${wcb.billingNumber} - ${parseFloat(wcb.totalHours || '0')}h labor @ $${parseFloat(wcb.appliedLaborRate || wcb.laborRate || '0').toFixed(2)}/h, $${parseFloat(wcb.partsSubtotal || '0').toFixed(2)} parts`,
+              Description: buildWcbLineDescription({ billingNumber: wcb.billingNumber, totalHours: wcb.totalHours, appliedLaborRate: wcb.appliedLaborRate, laborRate: wcb.laborRate, partsSubtotal: wcb.partsSubtotal }),
             });
           }
         }

@@ -95,8 +95,8 @@ describe("POST /api/invoices/monthly — invoice items creation (Task #787)", ()
 });
 
 describe("POST /api/invoices/monthly — QuickBooks line items (Task #787)", () => {
-  it("builds QB line items for WCBs with WCB-prefixed description", () => {
-    assert.match(monthlySrc, /WCB-\$\{wcb\.billingNumber\}/);
+  it("builds QB line items for WCBs via buildWcbLineDescription helper", () => {
+    assert.match(monthlySrc, /buildWcbLineDescription/);
   });
 
   it("QB line amount uses WCB totalAmount", () => {
