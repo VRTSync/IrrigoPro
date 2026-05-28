@@ -13,12 +13,15 @@ import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-hea
 import { FAB } from "@/components/ui/fab";
 import { BillingSheetWizard } from "@/components/billing/billing-sheet-wizard";
 import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
-import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2, ChevronRight, ChevronDown, MapPin, Camera, AlertTriangle } from "lucide-react";
+import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2, ChevronRight, ChevronDown, MapPin, Camera, AlertTriangle, ClipboardList } from "lucide-react";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import type { BillingSheet } from "@workspace/db/schema";
 import { BilledIndicator, BilledBadge } from "@/components/ui/billed-indicator";
+import { WetCheckBillingStatusBadge } from "@/components/wet-check-billings/status-badge";
+import { ListRowOverflowMenu } from "@/components/shared/list-row-overflow-menu";
+import { ListPageEmptyState } from "@/components/shared/list-page-empty-state";
 
 export default function BillingSheets() {
   const [showBillingModal, setShowBillingModal] = useState(false);
@@ -152,22 +155,7 @@ export default function BillingSheets() {
     }).format(numAmount);
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'draft':
-        return <Badge className="bg-gray-100 text-gray-800">Draft</Badge>;
-      case 'submitted':
-        return <Badge className="bg-blue-100 text-blue-800">Submitted</Badge>;
-      case 'pending_manager_review':
-        return <Badge className="bg-orange-100 text-orange-800">Pending Manager Review</Badge>;
-      case 'approved_passed_to_billing':
-        return <Badge className="bg-teal-100 text-teal-800">Approved / Passed to Billing</Badge>;
-      case 'billed':
-        return <Badge className="bg-purple-100 text-purple-800">Billed</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
-    }
-  };
+  const getStatusBadge = (status: string) => <WetCheckBillingStatusBadge status={status} />;
 
   const formatDate = (date: string | Date) => {
     return new Date(date).toLocaleDateString('en-US', {
@@ -500,25 +488,17 @@ export default function BillingSheets() {
           ))}
         </div>
       ) : (filteredActive.length === 0 && filteredCompleted.length === 0 && filteredBilled.length === 0) ? (
-        <Card>
-          <CardContent className="text-center py-12">
-            <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">No billing sheets found</h3>
-            <p className="text-gray-600 mb-6">
-              {searchQuery 
-                ? "No billing sheets match your search criteria." 
-                : "Get started by creating your first billing sheet for work performed without a work order."
-              }
-            </p>
-            <Button 
-              onClick={() => setShowBillingModal(true)}
-              className="bg-blue-600 hover:bg-blue-700"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Create First Billing Sheet
-            </Button>
-          </CardContent>
-        </Card>
+        <ListPageEmptyState
+          icon={ClipboardList}
+          title="No billing sheets found"
+          description={
+            searchQuery
+              ? "No billing sheets match your search criteria."
+              : "Get started by creating your first billing sheet for work performed without a work order."
+          }
+          cta={searchQuery ? undefined : { label: "Create First Billing Sheet", onClick: () => setShowBillingModal(true) }}
+          testId="bs-empty-state"
+        />
       ) : (
         <>
           {/* Selection Toolbar */}
@@ -685,16 +665,15 @@ export default function BillingSheets() {
                                 </Button>
                               </div>
                             )}
-                            {/* Edit and Delete buttons for admins */}
+                            {/* Edit / Delete via overflow menu for admins */}
                             {canEditDelete && (
-                              <div className="flex gap-2 w-full sm:w-auto">
-                                <Button size="sm" variant="outline" onClick={() => setEditingDraft(sheet)} className="border-blue-300 text-blue-600 hover:bg-blue-50 flex-1 sm:flex-none">
-                                  <Edit className="w-3 h-3 mr-1" />Edit
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => { setDeleteBlockedMessage(null); setPendingDeleteSheet(sheet); }} className="border-red-300 text-red-600 hover:bg-red-50 flex-1 sm:flex-none">
-                                  <Trash2 className="w-3 h-3 mr-1" />Delete
-                                </Button>
-                              </div>
+                              <ListRowOverflowMenu
+                                triggerTestId={`bs-overflow-menu-active-${sheet.id}`}
+                                actions={[
+                                  { label: "Edit", icon: <Edit className="w-3.5 h-3.5" />, onClick: () => setEditingDraft(sheet) },
+                                  { label: "Delete", icon: <Trash2 className="w-3.5 h-3.5" />, onClick: () => { setDeleteBlockedMessage(null); setPendingDeleteSheet(sheet); }, destructive: true, separator: true },
+                                ]}
+                              />
                             )}
                             <div className="text-xs text-gray-500">
                               {sheet.status === 'draft' ? `Last saved: ${formatDate(sheet.updatedAt)}` : `Created: ${formatDate(sheet.createdAt)}`}
@@ -814,14 +793,13 @@ export default function BillingSheets() {
                               <Eye className="w-3 h-3 mr-1" />View
                             </Button>
                             {canEditDelete && (
-                              <div className="flex gap-2 w-full sm:w-auto">
-                                <Button size="sm" variant="outline" onClick={() => setEditingDraft(sheet)} className="border-blue-300 text-blue-600 hover:bg-blue-50 flex-1 sm:flex-none">
-                                  <Edit className="w-3 h-3 mr-1" />Edit
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => { setDeleteBlockedMessage(null); setPendingDeleteSheet(sheet); }} className="border-red-300 text-red-600 hover:bg-red-50 flex-1 sm:flex-none">
-                                  <Trash2 className="w-3 h-3 mr-1" />Delete
-                                </Button>
-                              </div>
+                              <ListRowOverflowMenu
+                                triggerTestId={`bs-overflow-menu-completed-${sheet.id}`}
+                                actions={[
+                                  { label: "Edit", icon: <Edit className="w-3.5 h-3.5" />, onClick: () => setEditingDraft(sheet) },
+                                  { label: "Delete", icon: <Trash2 className="w-3.5 h-3.5" />, onClick: () => { setDeleteBlockedMessage(null); setPendingDeleteSheet(sheet); }, destructive: true, separator: true },
+                                ]}
+                              />
                             )}
                             <div className="text-xs text-gray-500">
                               Created: {formatDate(sheet.createdAt)}

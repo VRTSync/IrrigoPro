@@ -1,15 +1,17 @@
 /**
- * wet-check-billings.test.tsx (Task #791 — Slice 4)
+ * wet-check-billings.test.tsx (Task #791 — Slice 4, extended in Task #1008 — Slice 3)
  *
  * Unit tests for the WetCheckBillings page component.
  *
  * Scenarios:
  *   1. Page header renders
- *   2. "Awaiting Invoice" section shows 2 rows, "Billed" section shows 1 row
+ *   2. All rows appear under "All" filter chip (count badge)
  *   3. Issues cell format: "N across M zone(s)"
  *   4. Row click opens WetCheckBillingViewModal
  *   5. WC # link has correct href
- *   6. Empty state renders when no data matches
+ *   6. Empty state renders when no data matches search
+ *   7. Filter chip narrows rows by status (Task #1008)
+ *   8. Empty state renders when filter chip has no matches (Task #1008)
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -35,6 +37,16 @@ vi.mock("wouter", async (importActual) => {
     ),
   };
 });
+
+// ── Mock safeStorage ──────────────────────────────────────────────────────────
+
+vi.mock("@/utils/safeStorage", () => ({
+  safeGet: (key: string) => {
+    if (key === "user") return JSON.stringify({ id: 1, role: "billing_manager" });
+    return null;
+  },
+  safeSet: vi.fn(),
+}));
 
 // ── Fixture data ───────────────────────────────────────────────────────────────
 
@@ -74,10 +86,8 @@ function makeWcb(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 const FIXTURE_ROWS = [
-  // Two awaiting invoice
   makeWcb({ id: 1, billingNumber: "WC-2026-1001", status: "submitted", invoiceId: null }),
   makeWcb({ id: 2, billingNumber: "WC-2026-1002", status: "approved_passed_to_billing", invoiceId: null, wetCheckId: 56 }),
-  // One billed
   makeWcb({ id: 3, billingNumber: "WC-2026-1003", status: "billed", invoiceId: 99, wetCheckId: 57 }),
 ];
 
@@ -97,7 +107,7 @@ function buildClient(data: unknown[]) {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe("WetCheckBillings page (Task #791)", () => {
+describe("WetCheckBillings page", () => {
   it("renders the page header", () => {
     const qc = buildClient(FIXTURE_ROWS);
     render(<WetCheckBillings />, { wrapper: wrapper(qc) });
@@ -105,18 +115,13 @@ describe("WetCheckBillings page (Task #791)", () => {
     expect(screen.getByText(/auto-generated from wet check submissions/i)).toBeDefined();
   });
 
-  it("Awaiting Invoice section has 2 rows, Billed section has 1 row", () => {
+  it("All filter chip shows total count across all statuses", () => {
     const qc = buildClient(FIXTURE_ROWS);
     render(<WetCheckBillings />, { wrapper: wrapper(qc) });
 
-    // Awaiting Invoice section header badge shows 2
-    const awaitingSection = screen.getByTestId("section-toggle-awaiting-invoice");
-    expect(awaitingSection.textContent).toContain("2");
-
-    // Billed section starts collapsed — toggle it
-    const billedToggle = screen.getByTestId("section-toggle-billed");
-    fireEvent.click(billedToggle);
-    expect(billedToggle.textContent).toContain("1");
+    // "All" chip is active by default and its count badge shows 3
+    const allChip = screen.getByTestId("filter-chip-all");
+    expect(allChip.textContent).toContain("3");
   });
 
   it("Issues cell shows 'N across M zone(s)' format", () => {
@@ -127,7 +132,7 @@ describe("WetCheckBillings page (Task #791)", () => {
     expect(issueCell.textContent).toBe("3 across 2 zones");
   });
 
-  it("clicking a row (outside WC # link) opens modal", () => {
+  it("clicking a row opens modal", () => {
     const qc = buildClient(FIXTURE_ROWS);
     render(<WetCheckBillings />, { wrapper: wrapper(qc) });
 
@@ -152,6 +157,33 @@ describe("WetCheckBillings page (Task #791)", () => {
     const search = screen.getByTestId("input-search-wcb");
     fireEvent.change(search, { target: { value: "XYZNONEXISTENTQUERY12345" } });
 
-    expect(screen.getByTestId("empty-awaiting-invoice")).toBeDefined();
+    expect(screen.getByTestId("wcb-empty-state")).toBeDefined();
+  });
+
+  it("filter chip narrows visible rows by status (Task #1008)", () => {
+    const qc = buildClient(FIXTURE_ROWS);
+    render(<WetCheckBillings />, { wrapper: wrapper(qc) });
+
+    // Click the "Submitted" chip — only row 1 should remain
+    const submittedChip = screen.getByTestId("filter-chip-submitted");
+    fireEvent.click(submittedChip);
+
+    // Row 1 (submitted) should be visible
+    expect(screen.getByTestId("wcb-row-1")).toBeDefined();
+    // Row 2 (approved) should NOT be in the table
+    expect(screen.queryByTestId("wcb-row-2")).toBeNull();
+  });
+
+  it("shows empty state when filter chip has no matches (Task #1008)", () => {
+    // Only one row with status "submitted" — selecting "pending_manager_review" yields empty
+    const qc = buildClient([
+      makeWcb({ id: 1, status: "submitted", invoiceId: null }),
+    ]);
+    render(<WetCheckBillings />, { wrapper: wrapper(qc) });
+
+    const pendingChip = screen.getByTestId("filter-chip-pending-review");
+    fireEvent.click(pendingChip);
+
+    expect(screen.getByTestId("wcb-empty-state")).toBeDefined();
   });
 });

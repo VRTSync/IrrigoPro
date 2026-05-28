@@ -165,13 +165,15 @@ function EditAffordancesPanel({
   wcb,
   view,
   onLabourSaved,
+  initialAction,
 }: {
   wcb: WetCheckBilling;
   view: WetCheckBillingView;
   onLabourSaved: () => void;
+  initialAction?: "labor-rate" | "zone-labor";
 }) {
-  const [editingLaborRate, setEditingLaborRate] = useState(false);
-  const [showZoneLabor, setShowZoneLabor] = useState(false);
+  const [editingLaborRate, setEditingLaborRate] = useState(initialAction === "labor-rate");
+  const [showZoneLabor, setShowZoneLabor] = useState(initialAction === "zone-labor");
 
   const hasZones = view.zones.length > 0;
   const currentRate = String(wcb.laborRate ?? "0");
@@ -252,12 +254,14 @@ interface WetCheckBillingViewModalProps {
   wetCheckBillingId: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  initialAction?: "labor-rate" | "zone-labor";
 }
 
 export function WetCheckBillingViewModal({
   wetCheckBillingId,
   open,
   onOpenChange,
+  initialAction,
 }: WetCheckBillingViewModalProps) {
   const [, navigate] = useLocation();
   const queryClient = useQueryClient();
@@ -346,6 +350,7 @@ export function WetCheckBillingViewModal({
                   wcb={wcb}
                   view={view}
                   onLabourSaved={handleLaborSaved}
+                  initialAction={initialAction}
                 />
               )}
               <WetCheckBillingViewComponent
