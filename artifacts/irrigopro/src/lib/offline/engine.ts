@@ -1025,3 +1025,9 @@ export function getSyncEngine(): SyncEngine {
 export function __resetEngineForTests() {
   singleton = null;
 }
+
+// Test-only — inject a specific engine as the singleton so functions that
+// call getSyncEngine() (e.g. queuePhotoUpload) use a controlled instance.
+export function __setEngineForTests(engine: SyncEngine) {
+  singleton = engine;
+}

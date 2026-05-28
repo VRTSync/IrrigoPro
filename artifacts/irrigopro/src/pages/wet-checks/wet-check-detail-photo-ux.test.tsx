@@ -362,7 +362,7 @@ describe("Task #829 — Bug 1 regression: finding-linked photo filter", () => {
           zoneCount={4}
           zoneRecord={zoneRecord}
           photos={photos}
-          readOnly={true}
+          readOnly={false}
           onBack={vi.fn()}
           onAdvance={vi.fn()}
         />

@@ -1,0 +1,2 @@
+- [Testable route extraction pattern](route-extraction-pattern.md) — extract inline handlers to separate modules for storage-spy tests; never mirror handler logic in tests.
+- [offline-photo-FK-anchor](offline-photo-FK-anchor.md) — queuePhotoUpload body must include zoneRecordId/findingId; absence causes every photo to land loose.

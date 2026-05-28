@@ -12,8 +12,8 @@ import {
   WetCheckFindingNotEditableError,
   WetCheckFindingAlreadyConvertedError,
 } from "../storage";
-import { classifyWetCheckPhotoError as _classifyWetCheckPhotoError, logPhotoErrorContext as _logPhotoErrorContext } from "./wet-check-photo-errors";
 import { classifyAndLog as _classifyAndLog } from "./route-error-helpers";
+import { registerWetCheckPhotoAttachRoutes } from "./wet-check-photo-attach-route";
 import type { InsertInvoice, InsertCustomer } from "@workspace/db";
 import { PRICING_FIELDS_TO_STRIP } from "@workspace/db";
 import bcrypt from 'bcrypt';
@@ -15982,122 +15982,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  const photoBody = z.object({
-    zoneRecordId: z.coerce.number().int().nullish(),
-    findingId: z.coerce.number().int().nullish(),
-    // Canonical photoId from /api/upload/photo (e.g. "photos/<uuid>"), or
-    // a fully-qualified URL. Accepted as a non-empty string and validated at
-    // the storage layer.
-    url: z.string().min(1),
-    caption: z.string().nullish(),
-    // Client-supplied capture timestamp (ms or ISO). Falls back to NOW() in
-    // the schema default if absent — preserves true camera time on offline sync.
-    takenAt: z.union([z.string().datetime(), z.number(), z.date()]).nullish(),
-    clientId: z.string().uuid().nullish(),
-  });
-
-  // Task #495 — Wet check photo handlers must NEVER leak Drizzle's
-  // raw "Failed query: select ..." string to the field tech. The
-  // classify + log helpers live in ./wet-check-photo-errors so they can
-  // be exercised by route-level regression tests without mounting
-  // the whole 10k-line routes file.
-  const classifyWetCheckPhotoError = _classifyWetCheckPhotoError;
-  const logPhotoErrorContext = _logPhotoErrorContext;
-  // Task #502 — Generalized SQL-leak guard for the rest of the
-  // wet-check / finding / zone-record / submit handlers.
+  // Task #495 / #502 — Generalized SQL-leak guard used throughout the rest
+  // of the wet-check / finding / zone-record / submit handlers.
   const classifyAndLog = _classifyAndLog;
 
-  app.post("/api/wet-checks/:id/photos", requireAuthentication, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
-    const parsed = photoBody.safeParse(req.body ?? {});
-    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
-    const body = parsed.data;
-    const takenBy = req.authenticatedUserId;
-    if (!takenBy) { res.status(401).json({ message: "Authentication required" }); return; }
-    const wetCheckId = parseInt(req.params.id);
-    if (!Number.isFinite(wetCheckId)) {
-      res.status(400).json({ message: "Invalid wet check id" });
-      return;
-    }
-    try {
-      const takenAt = body.takenAt != null ? new Date(body.takenAt as string | number | Date) : new Date();
-      const created = await storage.attachWetCheckPhoto(wetCheckId, cid, {
-        zoneRecordId: body.zoneRecordId ?? null,
-        findingId: body.findingId ?? null,
-        url: body.url,
-        caption: body.caption ?? null,
-        takenAt,
-        takenBy,
-        clientId: body.clientId ?? null,
-      });
-      res.status(201).json(created);
-    } catch (e: any) {
-      const { status, message } = classifyWetCheckPhotoError(e);
-      logPhotoErrorContext(req, e, {
-        op: "attachWetCheckPhoto",
-        wetCheckId,
-        photoClientId: body.clientId ?? null,
-        zoneRecordId: body.zoneRecordId ?? null,
-        findingId: body.findingId ?? null,
-      });
-      res.status(status).json({ message });
-    }
-  });
-
-  const photoLinkBody = z.object({
-    findingId: z.number().int().positive(),
-  }).strict();
-
-  app.patch("/api/wet-checks/photos/:id", requireAuthentication, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
-    const parsed = photoLinkBody.safeParse(req.body ?? {});
-    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
-    const photoId = parseInt(req.params.id);
-    if (!Number.isFinite(photoId)) {
-      res.status(400).json({ message: "Invalid photo id" });
-      return;
-    }
-    try {
-      const updated = await storage.linkWetCheckPhotoToFinding(
-        photoId,
-        parsed.data.findingId,
-        cid,
-      );
-      if (!updated) { res.status(404).json({ message: "Not found" }); return; }
-      res.json(updated);
-    } catch (e: any) {
-      const cls = classifyWetCheckPhotoError(e);
-      // PATCH-specific message override so the toast reads naturally.
-      const message = cls.status === 500 ? "Couldn't attach photo — please retry" : cls.message;
-      logPhotoErrorContext(req, e, {
-        op: "linkWetCheckPhotoToFinding",
-        photoId,
-        findingId: parsed.data.findingId,
-      });
-      res.status(cls.status).json({ message });
-    }
-  });
-
-  app.delete("/api/wet-checks/photos/:id", requireAuthentication, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
-    const photoId = parseInt(req.params.id);
-    if (!Number.isFinite(photoId)) {
-      res.status(400).json({ message: "Invalid photo id" });
-      return;
-    }
-    try {
-      const ok = await storage.deleteWetCheckPhoto(photoId, cid);
-      res.json({ ok });
-    } catch (e: any) {
-      const cls = classifyWetCheckPhotoError(e);
-      const message = cls.status === 500 ? "Couldn't remove photo — please retry" : cls.message;
-      logPhotoErrorContext(req, e, { op: "deleteWetCheckPhoto", photoId });
-      res.status(cls.status).json({ message });
-    }
-  });
+  // Photo attach / link / delete routes extracted to a testable module so
+  // the FK-anchor write path (zoneRecordId / findingId survive Zod-parse →
+  // handler → storage.attachWetCheckPhoto) is locked in by a regression
+  // test that imports the REAL production code (not a mirrored copy).
+  // See artifacts/api-server/src/routes/wet-check-photo-attach-route.ts
+  // and wet-check-photo-attach-regression.test.ts.
+  registerWetCheckPhotoAttachRoutes(app, { requireAuthentication, requireCompanyId, isFieldRole });
 
   // ─── Manager review / routing / approve / convert ────────────────────────
   app.post("/api/wet-checks/:id/approve", requireAuthentication, async (req, res) => {
