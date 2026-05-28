@@ -1,0 +1,2 @@
+company_id,company_name,is_active,company_created,wet_check_count,wcb_count
+(none — all active companies have issue_type_configs rows; Hypothesis 1 ruled out)

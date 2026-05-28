@@ -1,0 +1,16 @@
+wcb_id,billing_number,customer_name,status,parts_subtotal,labor_subtotal,total_hours,total_amount,created_date,company_id,company_name
+35,WC-2026-1034,First_Bank,submitted,47.65,0.00,0.00,47.65,2026-05-22,1,High Plains Property Maintenance
+34,WC-2026-1033,First Bank of Colorado,submitted,0.79,0.00,0.00,0.79,2026-05-22,1,High Plains Property Maintenance
+33,WC-2026-1032,First Bank of Colorado,submitted,0.79,0.00,0.00,0.79,2026-05-22,1,High Plains Property Maintenance
+32,WC-2026-1031,First Bank,submitted,34.84,0.00,0.00,34.84,2026-05-22,1,High Plains Property Maintenance
+31,WC-2026-1030,First Bank of Colorado,submitted,0.79,0.00,0.00,0.79,2026-05-22,1,High Plains Property Maintenance
+30,WC-2026-1029,First Bank of Colorado,submitted,0.79,0.00,0.00,0.79,2026-05-22,1,High Plains Property Maintenance
+29,WC-2026-1028,First Bank of Colorado,submitted,117.90,0.00,0.00,117.90,2026-05-22,1,High Plains Property Maintenance
+28,WC-2026-1027,Villas at the Boulders,submitted,428.06,0.00,0.00,428.06,2026-05-22,1,High Plains Property Maintenance
+27,WC-2026-1026,First Bank of Colorado,submitted,18.28,0.00,0.00,18.28,2026-05-22,1,High Plains Property Maintenance
+26,WC-2026-1025,First Bank of Colorado,submitted,5.30,0.00,0.00,5.30,2026-05-22,1,High Plains Property Maintenance
+25,WC-2026-1024,First Bank of Colorado,submitted,26.50,0.00,0.00,26.50,2026-05-22,1,High Plains Property Maintenance
+24,WC-2026-1023,Westlake Townhomes,submitted,208.44,0.00,0.00,208.44,2026-05-22,1,High Plains Property Maintenance
+23,WC-2026-1022,Vista West,submitted,101.40,0.00,0.00,101.40,2026-05-22,1,High Plains Property Maintenance
+22,WC-2026-1021,Rolling Hills,submitted,91.45,0.00,0.00,91.45,2026-05-22,1,High Plains Property Maintenance
+1,WC-2026-1000,First_Bank,submitted,5.30,0.00,0.00,5.30,2026-05-21,1,High Plains Property Maintenance

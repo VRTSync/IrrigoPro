@@ -1,0 +1,2 @@
+wcb_id,billing_number,customer_name,status,parts_subtotal,labor_subtotal,total_hours,total_amount,invoice_id,billed_date,company_id,company_name
+(none — no WCBs have been invoiced with zero labor as of 2026-05-28)

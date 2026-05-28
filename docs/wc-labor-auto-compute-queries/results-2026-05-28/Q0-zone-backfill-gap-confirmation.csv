@@ -1,0 +1,16 @@
+zone_record_id,wet_check_id,repair_labor_hours,repair_labor_manually_set,finding_count,issue_types,configs_for_company
+1,1,0.00,false,1,head_replacement,10
+2,2,0.00,false,1,head_replacement,10
+3,3,0.00,false,1,head_replacement,10
+4,4,0.00,false,1,head_replacement,10
+105,6,0.00,false,2,head_replacement,10
+106,7,0.00,false,1,head_replacement,10
+107,8,0.00,false,1,head_replacement,10
+108,9,0.00,false,1,head_replacement,10
+109,10,0.00,false,1,head_replacement,10
+110,11,0.00,false,1,head_replacement,10
+211,13,0.00,false,2,head_replacement,10
+212,14,0.00,false,1,head_replacement,10
+213,15,0.00,false,1,head_replacement,10
+214,16,0.00,false,1,head_replacement,10
+215,17,0.00,false,1,head_replacement,10

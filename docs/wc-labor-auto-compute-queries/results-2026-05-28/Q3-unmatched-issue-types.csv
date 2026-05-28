@@ -1,0 +1,2 @@
+issue_type,company_id,company_name,finding_count,affected_wcb_count
+(none — all findings use issue_type strings present in the company catalog; Hypothesis 2 ruled out)
