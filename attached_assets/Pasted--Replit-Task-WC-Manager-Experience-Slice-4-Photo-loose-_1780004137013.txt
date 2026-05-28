@@ -1,0 +1,292 @@
+# Replit Task — WC Manager Experience, Slice 4 (Photo "loose" bug: investigation + root-cause fix)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from `WC Manager Experience - Slice 0 Unification Audit and Plan.md`
+— it is reference material so you understand the intent. The actual work for
+this task is in the **Slice 4** section at the bottom. Do not deviate from any
+file paths, function names, schema field names, or payload shapes specified.
+If you believe a deviation is necessary, surface it and stop rather than
+proceeding.
+
+> **Diagnostic-and-fix slice. Diagnose first, fix second.** The user reports
+> "every photo entry says loose" in the wet check system. The architecture
+> supports per-finding and per-zone linking — see the existing fixture-based
+> test `wet-check-detail-photo-ux.test.tsx` (Task #829) and the schema's
+> `wet_check_photos.findingId` / `zoneRecordId` columns. That means the bug
+> is a regression somewhere on the write path, not a missing feature. The
+> slice MUST start with a reproducing test before any code change.
+
+> **Do NOT introduce a "force-link" workaround.** If a photo arrives with
+> null FKs that should have been populated, the fix is to populate them at
+> source — not to retroactively guess the link in a UI layer or a
+> background re-link job.
+
+---
+
+## Design Context (locked decisions)
+
+These are inherited from prior slices and the wet check audit.
+
+**The photo capture client component is
+`artifacts/irrigopro/src/pages/wet-checks/PhotoCaptureButton.tsx`.** It
+has two code paths: a 4C "offline-photos" path via `queuePhotoUpload`
+(lines 64–122) and a legacy direct-upload path (lines 123–150). Both
+paths pass `zoneRecordId` and `findingId` to the server.
+
+**The server endpoint is `POST /api/wet-checks/:id/photos`** at
+`routes.ts:16010`. It calls `storage.attachWetCheckPhoto` at `:16025`
+with the FK fields verbatim. No transformation happens in the handler.
+
+**Three caller call sites** in the web app:
+- `FindingSheet.tsx:429` — passes `findingId={editing.id}` AND
+  `zoneRecordId={zoneRecordId}` (finding-anchored).
+- `FindingSheet.tsx:463` — passes `findingId={null}` AND
+  `zoneRecordId={zoneRecordId}` (zone-anchored, used when the tech
+  hasn't picked a finding yet).
+- `ZoneScreen.tsx:1070` — passes `zoneRecordId={zoneRecord.id}` only
+  (zone-anchored).
+- `WetCheckDetail.tsx:710` — passes NEITHER (intentionally
+  wet-check-level / loose).
+
+**Mobile capture is a separate component** at
+`artifacts/irrigopro-mobile/lib/photo-upload.ts`. Mobile has its own
+test `wet-check-loose-photos.test.ts`. If the bug reproduces ONLY on
+mobile, the fix surface is mobile-only.
+
+**The "loose photo" label is correct behavior for some photos.** The
+`LoosePhotosSection` component (`artifacts/irrigopro/src/pages/wet-checks/LoosePhotosSection`)
+is designed to surface photos that the tech intentionally captured
+without an anchor (e.g., at the wet-check-level "before tagging" step).
+The bug is that photos that SHOULD have anchors are arriving without
+them, so the LoosePhotosSection is over-populating.
+
+---
+
+## Slice 4 — Photo "loose" bug
+
+### Scope
+
+Three coherent steps, in this order:
+
+1. **Reproduce** the bug with an end-to-end test that captures a photo
+   inside a `FindingSheet` and asserts the resulting `wet_check_photos`
+   row has the expected `findingId`. If the test passes on `main`, the
+   web path is correct and the bug is mobile-only — pivot to step 1b.
+2. **Identify root cause.** The most likely culprits, in order of
+   suspicion:
+   - The offline queue's `queuePhotoUpload` is persisting the FK
+     fields to IndexedDB but NOT including them in the eventual
+     server POST when it drains.
+   - The mobile upload path is constructing the multipart body
+     without the FK fields.
+   - The server is receiving the FK fields but writing them as null
+     because the `photoBody` zod schema validates them away
+     (e.g., `.optional()` becomes `null` instead of being preserved).
+   - A recent regression in `FindingSheet.tsx` or `ZoneScreen.tsx`
+     dropped the prop pass-through.
+3. **Fix at source** and lock with the reproducing test from step 1.
+
+### Files modified (per likely cause; finalized after step 2)
+
+- New: `artifacts/api-server/src/wet-check-photo-attach-regression.test.ts`
+  — the reproducing test from step 1.
+- Likely candidates for the fix file (resolved after diagnosis):
+  - `artifacts/irrigopro/src/lib/offline/api.ts` (`queuePhotoUpload`
+    drain handler) — if the offline queue is dropping FKs.
+  - `artifacts/irrigopro-mobile/lib/photo-upload.ts` — if mobile is
+    the source.
+  - `artifacts/api-server/src/routes/routes.ts` (`photoBody` zod
+    schema at `:~16005`, called at `:16013`) — if validation is
+    transforming FKs.
+  - `artifacts/api-server/src/storage.ts`
+    (`attachWetCheckPhoto`) — if the storage write is dropping
+    FKs.
+
+### Concrete changes
+
+#### Step 1 — Reproducing test (DO THIS FIRST)
+
+Write `wet-check-photo-attach-regression.test.ts`:
+
+```typescript
+// artifacts/api-server/src/wet-check-photo-attach-regression.test.ts
+//
+// Slice 4 — Reproducing test for the "every photo shows as loose" bug.
+// A photo captured from inside a FindingSheet should arrive at the
+// server with findingId populated, and the wet_check_photos row should
+// have that findingId on disk.
+
+describe("POST /api/wet-checks/:id/photos preserves findingId (Slice 4)", () => {
+  it("persists findingId when the client posts a finding-anchored photo", async () => {
+    const { wc, zoneRecord, finding } = await seedWetCheckWithFinding();
+    const res = await asFieldTech(request(app))
+      .post(`/api/wet-checks/${wc.id}/photos`)
+      .send({
+        url: "https://storage.example/abc.jpg",
+        takenAt: new Date().toISOString(),
+        zoneRecordId: zoneRecord.id,
+        findingId: finding.id,
+        clientId: "test-client-1",
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.findingId).toBe(finding.id);
+    expect(res.body.zoneRecordId).toBe(zoneRecord.id);
+
+    // Read the row back directly to confirm persistence.
+    const [row] = await db.select().from(wetCheckPhotos).where(eq(wetCheckPhotos.id, res.body.id));
+    expect(row.findingId).toBe(finding.id);
+    expect(row.zoneRecordId).toBe(zoneRecord.id);
+  });
+
+  it("persists zoneRecordId when the client posts a zone-only photo", async () => {
+    const { wc, zoneRecord } = await seedWetCheckWithZone();
+    const res = await asFieldTech(request(app))
+      .post(`/api/wet-checks/${wc.id}/photos`)
+      .send({
+        url: "https://storage.example/def.jpg",
+        zoneRecordId: zoneRecord.id,
+        findingId: null,
+        clientId: "test-client-2",
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.zoneRecordId).toBe(zoneRecord.id);
+    expect(res.body.findingId).toBeNull();
+  });
+
+  it("persists null FKs for an intentionally-loose photo (wet-check-level capture)", async () => {
+    const { wc } = await seedWetCheck();
+    const res = await asFieldTech(request(app))
+      .post(`/api/wet-checks/${wc.id}/photos`)
+      .send({
+        url: "https://storage.example/ghi.jpg",
+        clientId: "test-client-3",
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.findingId).toBeNull();
+    expect(res.body.zoneRecordId).toBeNull();
+  });
+});
+```
+
+Run the test against `main`. Three outcomes:
+
+- **All three pass** → the server-side write path is correct. The bug
+  is in a client path. Pivot to step 1b: write a Playwright /
+  component-level test that exercises `PhotoCaptureButton` →
+  `apiRequest` and verifies the request body includes the FK fields.
+- **First two fail** → the server is dropping FKs. Step 2 finds where.
+- **First and third pass, second fails** → only the
+  zone-without-finding path is broken. Step 2 narrows to the
+  zone-handling branch.
+
+#### Step 1b — Client-side reproducing test (only if step 1 passes)
+
+```typescript
+// artifacts/irrigopro/src/pages/wet-checks/photo-capture-button.test.tsx
+it("posts findingId and zoneRecordId in the request body when both are provided", async () => {
+  const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ id: 1, findingId: 42, zoneRecordId: 7 }), { status: 201 })
+  );
+  render(<PhotoCaptureButton wetCheckId={100} zoneRecordId={7} findingId={42} />);
+  await capturePhotoViaInput(); // helper that simulates file pick
+  await waitFor(() => {
+    expect(fetchSpy).toHaveBeenCalled();
+    const body = JSON.parse(fetchSpy.mock.calls.at(-1)?.[1]?.body as string);
+    expect(body.findingId).toBe(42);
+    expect(body.zoneRecordId).toBe(7);
+  });
+});
+
+it("offline-queue path persists findingId and zoneRecordId in the queued payload", async () => {
+  // Mock isOfflinePhotosEnabled() = true; mock queuePhotoUpload to capture args.
+  const queueSpy = vi.spyOn(offlineApi, "queuePhotoUpload");
+  render(<PhotoCaptureButton wetCheckId={100} wetCheckClientId="wc-abc" zoneRecordId={7} findingId={42} />);
+  await capturePhotoViaInput();
+  await waitFor(() => {
+    expect(queueSpy).toHaveBeenCalledWith(expect.objectContaining({
+      findingId: 42,
+      zoneRecordId: 7,
+    }));
+  });
+  // Then drain the queue and assert the eventual POST body contains the FKs.
+  await drainQueue();
+  expect(globalThis.fetch).toHaveBeenCalledWith(
+    expect.stringContaining("/api/wet-checks/100/photos"),
+    expect.objectContaining({
+      body: expect.stringContaining('"findingId":42'),
+    }),
+  );
+});
+```
+
+The drain-side assertion is the critical one — if `queuePhotoUpload`
+captures the FKs correctly but the drain handler later POSTs without
+them, the regression is in `offline/api.ts` engine logic, NOT in
+`queuePhotoUpload` itself.
+
+#### Step 2 — Root cause identification
+
+Once steps 1 / 1b have produced a failing test, read the failing path
+end-to-end. Document the bug in the PR description with file:line of
+the broken code.
+
+Common patterns to look for:
+
+- A zod schema that uses `.transform(v => v ?? undefined)` and then
+  silently drops the field downstream.
+- An `attachWetCheckPhoto` implementation that destructures only some
+  fields from its argument and forgets `findingId` / `zoneRecordId`.
+- An offline-queue drain handler that constructs the POST body from a
+  serialized representation that omitted the FKs at queue time.
+- A recent commit that added an "optimistic loose photo" code path
+  that fires before the FK pass-through.
+
+#### Step 3 — Fix
+
+Fix at the identified root cause. ONE place. If two places need
+changes, that's two slices (or two PRs against this slice) — surface
+the question.
+
+After the fix:
+- The failing test from Step 1 / 1b passes.
+- All existing photo-related tests continue to pass
+  (`wet-check-photo-attach.test.ts`, `wet-check-detail-photo-ux.test.tsx`,
+  `wet-check-loose-photos.test.ts`).
+- Manually verify on a dev environment: capture one photo from a
+  FindingSheet, one from a ZoneScreen, one from the wet-check header.
+  Confirm the DB rows have the expected FK populations.
+
+### Acceptance criteria
+
+- A reproducing test exists at
+  `artifacts/api-server/src/wet-check-photo-attach-regression.test.ts`
+  AND/OR `photo-capture-button.test.tsx`.
+- The reproducing test fails on `main` (or its parent commit if the
+  regression is recent) and passes after the fix.
+- The fix is a single root-cause change, not a workaround.
+- No production photo is left in a "should have FKs but has null"
+  state by the slice. (Backfill of existing orphaned photos is OUT of
+  scope — see "Out of scope" below.)
+- All existing photo tests pass.
+- Manual verification: capture three photos from three different
+  anchors on a dev wet check; confirm DB rows have the expected
+  FK columns set.
+
+### Out of scope
+
+- Backfilling existing orphan photos. Once the bug is fixed,
+  pre-existing rows with null FKs that should have anchors will
+  remain orphaned. A separate slice can address backfill if needed,
+  but only after the bleeding has stopped.
+- Refactoring the photo capture / upload architecture more broadly.
+- Adding a UI "re-link" affordance for orphaned photos (the existing
+  `LoosePhotosSection` already supports manual re-linking; that's
+  enough).
+- The mobile shell Slice 10 — if the bug is mobile-side, fix it here
+  in this slice; do not roll it into Slice 10.
+
+### Dependencies
+
+- Independent of all other WC Manager Experience slices.
+- Pair with Slice 1 in close-week priority (Slice 1 makes the WCB
+  surface; Slice 4 makes the review page usable).

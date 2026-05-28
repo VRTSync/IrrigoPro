@@ -1,0 +1,492 @@
+# Replit Task — WC Manager Experience, Slice 8 (/manager-workspace dashboard — parallel to /billing-workspace)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from `WC Manager Experience - Slice 0 Unification Audit and Plan.md`
+— it is reference material so you understand the intent. The actual work for
+this task is in the **Slice 8** section at the bottom. Do not deviate from any
+file paths, function names, schema field names, or payload shapes specified.
+If you believe a deviation is necessary, surface it and stop rather than
+proceeding.
+
+> **PARALLEL to /billing-workspace, NOT a replacement.** The
+> `/billing-workspace` page is the billing manager's daily home and stays
+> untouched. This slice builds a NEW page at `/manager-workspace` that
+> shares the same visual vocabulary (same status strip, same queue + filter
+> + sort, same chrome) but serves the irrigation manager's queue: wet
+> checks awaiting review, work orders awaiting manager approval,
+> findings needing routing.
+
+> **Pattern: mirror billing-workspace.tsx structure.** Copy the page's
+> shape into a new file; swap the data sources and the tile / filter
+> defaults; preserve the layout. If you find yourself diverging from
+> `billing-workspace.tsx`'s structure in a way that's not strictly
+> required by the manager-specific data, stop and surface the question.
+
+---
+
+## Design Context (locked decisions)
+
+Inherited from WC Manager Experience Slice 0 (Slice 8 section).
+
+**`/billing-workspace` is the billing manager's home** at
+`artifacts/irrigopro/src/pages/billing-workspace.tsx` (1405 LOC, Task #709).
+Status strip (4 tiles) + queue (filter+sort+pagination) + sticky
+filters. This slice's job is to ship a sibling for the irrigation
+manager — NOT modify billing-workspace.
+
+**The role lands here by default.** Once Slice 5 (`managerNav`) is
+landed, the irrigation manager's role block in App.tsx routes them to
+`/manager-workspace` as their default `/`. Until then, they continue
+to land on the existing ManagerDashboard.
+
+**Tile semantics for the irrigation manager:**
+- Tile 1: "Wet Checks Pending Review" — count of WCs in
+  `submitted` + `pending_manager_review` statuses.
+- Tile 2: "WOs Awaiting Manager Approval" — count of WOs in
+  `pending_manager_review` status.
+- Tile 3: "Findings Needing Routing" — count of `wet_check_findings`
+  with `techDisposition === "needs_review"` and no `target` set.
+- Tile 4: "This Week's Approved" — count of WCs + WOs + BS with
+  approvedAt in the current ISO week.
+
+**Queue defaults for the irrigation manager:** show wet checks first
+(type=wc), then work orders (type=wo), then billing sheets (type=bs).
+Sort by oldest first (`age_desc`).
+
+**Endpoint pattern matches `/billing-workspace`.** The backend gets
+`/api/manager-workspace/queue` and `/api/manager-workspace/status-strip`
+that mirror the billing-workspace endpoints exactly. Role-gated to
+irrigation_manager / company_admin / super_admin.
+
+---
+
+## Slice 8 — /manager-workspace dashboard
+
+### Scope
+
+Backend: two new endpoints. Frontend: one new page. Tests: parity with
+billing-workspace tests.
+
+### Files modified
+
+**Backend.**
+- New: `artifacts/api-server/src/routes/manager-workspace-routes.ts`
+  — mirrors `billing-workspace-routes.ts` (915 LOC). Expected new file
+  ~600-700 LOC because we don't need the QuickBooks tile.
+- `artifacts/api-server/src/routes/routes.ts` — register the new
+  routes (find the existing `registerBillingWorkspaceRoutes` call;
+  add a parallel `registerManagerWorkspaceRoutes` call adjacent).
+- New: `artifacts/api-server/src/routes/manager-workspace-routes.test.ts`
+  — endpoint tests mirroring `billing-workspace-routes.test.ts`.
+
+**Frontend.**
+- New: `artifacts/irrigopro/src/pages/manager-workspace.tsx`
+  — the page. Mirrors `billing-workspace.tsx` structure.
+- `artifacts/irrigopro/src/App.tsx`:
+  - In the `irrigation_manager` block (`:297+`), add
+    `<Route path="/" component={ManagerWorkspace} />` and
+    `<Route path="/manager-workspace" component={ManagerWorkspace} />`.
+    Remove the existing `Route path="/" component={ManagerDashboard}`
+    if the user wants the new dashboard as the default landing
+    (preserve the old route at `/manager-dashboard` as a legacy
+    bookmark).
+- New: `artifacts/irrigopro/src/pages/manager-workspace.test.tsx`
+  — page-level tests.
+
+### Concrete changes
+
+#### Backend
+
+**(B1) Create `manager-workspace-routes.ts`** by:
+
+1. Copy `billing-workspace-routes.ts` as the starting structure.
+2. Remove the QuickBooks status / overdue / sync helpers (the
+   irrigation manager doesn't care about QB on this page).
+3. Replace the four BS+WO active/approved/draft sets with the
+   manager-relevant equivalents:
+
+```typescript
+// Wet checks awaiting irrigation manager review.
+const ACTIVE_WC = new Set([
+  "submitted",
+  "pending_manager_review",
+]);
+// Work orders awaiting manager approval.
+const ACTIVE_WO_FOR_MANAGER = new Set([
+  "pending_manager_review",
+  "work_completed",
+]);
+// Findings needing routing.
+function isFindingPendingRouting(f: WetCheckFinding): boolean {
+  return f.techDisposition === "needs_review" && !f.target;
+}
+// Approved this week — across WCs, WOs, BS.
+const APPROVED_WC = new Set(["approved", "billed"]);
+```
+
+4. Replace `scopedBillingSheets` / `scopedWorkOrders` with helpers that
+   pull manager-relevant data:
+
+```typescript
+async function scopedWetChecks(req: any): Promise<any[]> {
+  // Reuse the existing storage.getAllWetChecks (verify signature in
+  // storage.ts). Tenant scope: company_id filter for non-super_admin.
+  const role = req.authenticatedUserRole;
+  const cid = req.authenticatedUserCompanyId ?? null;
+  if (role === "super_admin") return await storage.getAllWetChecks();
+  if (cid == null) return [];
+  return await storage.getWetChecksByCompany(cid);
+}
+
+async function scopedFindingsNeedingRouting(req: any): Promise<any[]> {
+  // Join wet_check_findings → wet_checks → customers and filter by
+  // company_id, techDisposition = 'needs_review', target IS NULL.
+  // Inline a drizzle query; do not load all findings.
+}
+
+async function scopedWorkOrdersForManager(req: any): Promise<any[]> {
+  // Same as scopedWorkOrders in billing-workspace-routes.ts.
+  // Reuse via direct import if the existing helper is exported,
+  // otherwise duplicate.
+}
+```
+
+5. Build the new queue endpoint mirroring the billing-workspace
+   queue at `billing-workspace-routes.ts:436+`. Sources: wet checks,
+   work orders, findings-needing-routing. Filter / sort / paginate
+   identically.
+
+```typescript
+app.get("/api/manager-workspace/queue", requireAuthentication, async (req, res) => {
+  try {
+    if (!isManagerAllowed(req)) {
+      res.status(403).json({ message: "Access denied." });
+      return;
+    }
+    const type = String(req.query.type ?? "all").toLowerCase();
+    // ... parse other params identically to billing-workspace ...
+
+    const items: QueueItem[] = [];
+
+    if (type === "all" || type === "wc") {
+      for (const w of await scopedWetChecks(req)) {
+        if (!ACTIVE_WC.has(w.status)) continue;
+        items.push({
+          id: `wc-${w.id}`,
+          type: "wet_check",
+          refId: w.id,
+          number: `WC-${w.id}`,
+          customerId: w.customerId ?? null,
+          customerName: w.customerName ?? null,
+          technicianId: w.technicianId ?? null,
+          technicianName: w.technicianName ?? null,
+          total: 0, // wet checks don't carry a $ yet — show — in UI
+          status: w.status,
+          flags: [],
+          ageDays: ageDays(w.createdAt),
+          createdAt: w.createdAt?.toISOString() ?? null,
+          href: `/wet-checks/${w.id}`,
+        });
+      }
+    }
+
+    if (type === "all" || type === "wo") {
+      for (const wo of await scopedWorkOrdersForManager(req)) {
+        if (!ACTIVE_WO_FOR_MANAGER.has(wo.status)) continue;
+        items.push({
+          id: `wo-${wo.id}`,
+          type: "work_order",
+          refId: wo.id,
+          number: wo.workOrderNumber,
+          customerId: wo.customerId ?? null,
+          customerName: wo.customerName ?? null,
+          technicianId: wo.assignedTechnicianId ?? null,
+          technicianName: wo.assignedTechnicianName ?? null,
+          total: numOr0(wo.totalAmount),
+          status: wo.status,
+          flags: [],
+          ageDays: ageDays(wo.createdAt),
+          createdAt: wo.createdAt?.toISOString() ?? null,
+          href: `/work-orders?id=${wo.id}`,
+        });
+      }
+    }
+
+    if (type === "all" || type === "finding") {
+      for (const f of await scopedFindingsNeedingRouting(req)) {
+        items.push({
+          id: `finding-${f.id}`,
+          type: "finding",
+          refId: f.id,
+          number: `F-${f.id}`,
+          customerId: null,
+          customerName: f.wetCheckCustomerName ?? null,
+          technicianId: null,
+          technicianName: null,
+          total: 0,
+          status: "needs_review",
+          flags: ["unrouted"],
+          ageDays: ageDays(f.createdAt),
+          createdAt: f.createdAt?.toISOString() ?? null,
+          href: `/wet-checks/${f.wetCheckId}#finding-${f.id}`,
+        });
+      }
+    }
+
+    // Filter / sort / paginate identically.
+    // ...
+
+    res.json({ items: slice, page, pageSize, total });
+  } catch (error) {
+    // ...
+  }
+});
+```
+
+**(B2) Status-strip endpoint** mirrors
+`billing-workspace-routes.ts:647+`:
+
+```typescript
+app.get("/api/manager-workspace/status-strip", requireAuthentication, async (req, res) => {
+  if (!isManagerAllowed(req)) {
+    res.status(403).json({ message: "Access denied." });
+    return;
+  }
+  const [wetChecks, workOrders, findings, billingSheets] = await Promise.all([
+    scopedWetChecks(req),
+    scopedWorkOrdersForManager(req),
+    scopedFindingsNeedingRouting(req),
+    scopedBillingSheets(req), // imported from billing-workspace-routes
+  ]);
+
+  const now = Date.now();
+  const weekAgo = now - 7 * 86_400_000;
+  const tsOf = (v: any) => (v ? new Date(v).getTime() : NaN);
+
+  const wcsPendingReview = wetChecks.filter((w) => ACTIVE_WC.has(w.status)).length;
+  const wosAwaitingApproval = workOrders.filter((w) => ACTIVE_WO_FOR_MANAGER.has(w.status)).length;
+  const findingsNeedingRouting = findings.length;
+  const approvedThisWeek =
+    wetChecks.filter((w) => APPROVED_WC.has(w.status) && tsOf(w.approvedAt ?? w.updatedAt) >= weekAgo).length +
+    workOrders.filter((w) => ["approved", "billed", "invoiced", "completed_approved"].includes(w.status) && tsOf(w.approvedAt ?? w.updatedAt) >= weekAgo).length +
+    billingSheets.filter((s) => ["approved", "billed", "invoiced"].includes(s.status) && tsOf(s.approvedAt ?? s.updatedAt) >= weekAgo).length;
+
+  res.json({
+    indicators: {
+      wcsPendingReview,
+      wosAwaitingApproval,
+      findingsNeedingRouting,
+      approvedThisWeek,
+    },
+  });
+});
+```
+
+**(B3) Role gate.** `isManagerAllowed` lets in irrigation_manager,
+company_admin, super_admin. NOT billing_manager (they have their own
+workspace).
+
+**(B4) Register** the new routes in `routes.ts` by finding the
+existing `registerBillingWorkspaceRoutes` call and adding the
+parallel `registerManagerWorkspaceRoutes` call adjacent.
+
+#### Frontend
+
+**(F1) Create `manager-workspace.tsx`** by:
+
+1. Copy `billing-workspace.tsx` as the starting structure.
+2. Replace the data sources (`/api/billing-workspace/queue` →
+   `/api/manager-workspace/queue`; same for status strip).
+3. Replace the four tiles with the manager-relevant tiles:
+
+```typescript
+<StatusTile
+  testId="status-wcs-pending"
+  label="Wet checks pending review"
+  value={strip?.indicators?.wcsPendingReview ?? 0}
+  href="/wet-checks?status=submitted,pending_manager_review"
+/>
+<StatusTile
+  testId="status-wos-awaiting"
+  label="WOs awaiting your approval"
+  value={strip?.indicators?.wosAwaitingApproval ?? 0}
+  href="/work-orders?status=pending_manager_review"
+/>
+<StatusTile
+  testId="status-findings-routing"
+  label="Findings needing routing"
+  value={strip?.indicators?.findingsNeedingRouting ?? 0}
+  href="/wet-checks/pending-review"
+/>
+<StatusTile
+  testId="status-approved-this-week"
+  label="Approved this week"
+  value={strip?.indicators?.approvedThisWeek ?? 0}
+/>
+```
+
+4. Replace `QueueType` enum with the manager-relevant set:
+
+```typescript
+type QueueType = "all" | "wet_check" | "work_order" | "finding";
+const TYPE_FILTER_PARAM: Record<QueueType, string> = {
+  all: "all",
+  wet_check: "wc",
+  work_order: "wo",
+  finding: "finding",
+};
+```
+
+5. Update the row navigation to send wet check rows to
+   `/wet-checks/:id`, work-order rows to `/work-orders?id=:id`,
+   finding rows to `/wet-checks/:wcId#finding-:id`.
+
+6. Default sort: `age_desc`. Default filter: `type=all`. These match
+   billing-workspace.
+
+#### Routing
+
+**(F2) Update App.tsx:**
+
+In the `irrigation_manager` block (`:297+`), add:
+
+```typescript
+<Route path="/" component={ManagerWorkspace} />          // NEW default landing
+<Route path="/manager-workspace" component={ManagerWorkspace} />  // NEW canonical
+<Route path="/manager-dashboard" component={ManagerDashboard} />  // PRESERVED legacy
+// ... rest unchanged
+```
+
+The old ManagerDashboard component stays accessible at
+`/manager-dashboard` so existing bookmarks don't break. After 2
+weeks in production with no traffic on the legacy path, delete it
+(separate slice).
+
+### Tests
+
+`manager-workspace-routes.test.ts` mirrors
+`billing-workspace-routes.test.ts` with the new tile names and queue
+types:
+
+```typescript
+describe("/api/manager-workspace/queue", () => {
+  it("returns wet checks in 'submitted' and 'pending_manager_review' statuses", async () => {
+    await seedWetCheck({ status: "submitted" });
+    await seedWetCheck({ status: "pending_manager_review" });
+    await seedWetCheck({ status: "approved" }); // should NOT appear
+    const res = await asIrrigationManager(request(app)).get("/api/manager-workspace/queue?type=wc");
+    expect(res.body.items.length).toBe(2);
+  });
+
+  it("returns work orders awaiting manager approval", async () => {
+    await seedWorkOrder({ status: "pending_manager_review" });
+    const res = await asIrrigationManager(request(app)).get("/api/manager-workspace/queue?type=wo");
+    expect(res.body.items.length).toBe(1);
+  });
+
+  it("returns findings with techDisposition=needs_review and no target", async () => {
+    const wc = await seedWetCheck({});
+    await seedFinding({ wetCheckId: wc.id, techDisposition: "needs_review", target: null });
+    await seedFinding({ wetCheckId: wc.id, techDisposition: "needs_review", target: "billing" }); // not unrouted
+    const res = await asIrrigationManager(request(app)).get("/api/manager-workspace/queue?type=finding");
+    expect(res.body.items.length).toBe(1);
+  });
+
+  it("denies billing_manager (they have their own workspace)", async () => {
+    const res = await asBillingManager(request(app)).get("/api/manager-workspace/queue");
+    expect(res.status).toBe(403);
+  });
+
+  it("scopes by company for non-super_admin", async () => {
+    await seedWetCheck({ status: "submitted", companyId: 1 });
+    await seedWetCheck({ status: "submitted", companyId: 2 });
+    const res1 = await asIrrigationManagerOfCompany(1, request(app)).get("/api/manager-workspace/queue?type=wc");
+    expect(res1.body.items.length).toBe(1);
+  });
+});
+
+describe("/api/manager-workspace/status-strip", () => {
+  it("returns the four manager-relevant indicator counts", async () => {
+    await seedWetCheck({ status: "submitted" });
+    await seedWorkOrder({ status: "pending_manager_review" });
+    const res = await asIrrigationManager(request(app)).get("/api/manager-workspace/status-strip");
+    expect(res.body.indicators.wcsPendingReview).toBe(1);
+    expect(res.body.indicators.wosAwaitingApproval).toBe(1);
+    expect(res.body.indicators.findingsNeedingRouting).toBe(0);
+  });
+});
+```
+
+`manager-workspace.test.tsx`:
+
+```typescript
+describe("ManagerWorkspace page", () => {
+  it("renders the four status tiles", () => {
+    renderPage();
+    expect(screen.getByTestId("status-wcs-pending")).toBeInTheDocument();
+    expect(screen.getByTestId("status-wos-awaiting")).toBeInTheDocument();
+    expect(screen.getByTestId("status-findings-routing")).toBeInTheDocument();
+    expect(screen.getByTestId("status-approved-this-week")).toBeInTheDocument();
+  });
+
+  it("queue defaults to type=all and sort=age_desc", () => {
+    const fetchSpy = vi.spyOn(global, "fetch");
+    renderPage();
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("/api/manager-workspace/queue"),
+      expect.any(Object)
+    );
+  });
+
+  it("clicking the 'Wet checks pending' tile filters the queue to type=wc", async () => {
+    renderPage();
+    fireEvent.click(screen.getByTestId("status-wcs-pending"));
+    await waitFor(() => expect(global.fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("type=wc"),
+      expect.any(Object)
+    ));
+  });
+
+  it("visual parity with /billing-workspace — same outer chrome classes", () => {
+    // Snapshot test: render both pages with no data and compare the
+    // outer container's class string + structure.
+    const mw = render(<ManagerWorkspace />);
+    const bw = render(<BillingWorkspace />);
+    expect(mw.container.querySelector("[data-testid='workspace-shell']")?.className).toBe(
+      bw.container.querySelector("[data-testid='workspace-shell']")?.className
+    );
+  });
+});
+```
+
+### Acceptance criteria
+
+- `/api/manager-workspace/queue` and `/api/manager-workspace/status-strip`
+  exist, role-gated to irrigation_manager / company_admin / super_admin.
+- billing_manager receives 403 from both endpoints.
+- The page renders four manager-relevant status tiles + a queue with
+  the same chrome as `/billing-workspace`.
+- App.tsx routes the irrigation_manager to `/manager-workspace` by
+  default at `/`.
+- Legacy `/manager-dashboard` continues to work as a backward
+  compatibility path.
+- Visual parity snapshot test passes (manager-workspace and
+  billing-workspace share outer chrome).
+- All tests pass; existing billing-workspace tests are unchanged.
+
+### Out of scope
+
+- Modifying `/billing-workspace` or its routes.
+- Building a third "admin workspace" for super_admin (super_admin
+  uses `/manager-workspace` with elevated scope; can be revisited).
+- Adding new tile concepts beyond the four specified.
+- Bulk actions on the queue rows.
+- Mobile equivalent (Slice 10).
+
+### Dependencies
+
+- Slice 5 (`managerNav`) — soft dependency; the slice can land first
+  and route via the existing manager block.
+- WC Billing Integration Slice 6 (the billing-workspace WCB queue
+  type) — independent.
+- Slices 1, 2, 3, 4, 6, 7, 9, 10, 11 — all independent.

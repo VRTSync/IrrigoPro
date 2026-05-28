@@ -1,0 +1,430 @@
+# Replit Task — WC Manager Experience, Slice 6 (Review page feels-fast + DismissibleHelp primitive)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from `WC Manager Experience - Slice 0 Unification Audit and Plan.md`
+— it is reference material so you understand the intent. The actual work for
+this task is in the **Slice 6** section at the bottom. Do not deviate from any
+file paths, function names, schema field names, or payload shapes specified.
+If you believe a deviation is necessary, surface it and stop rather than
+proceeding.
+
+> **This slice introduces a primitive that Slice 7 reuses.** The
+> `DismissibleHelp` component is owned here. Slice 7 (unified WC list
+> page) consumes it without redefining. If Slice 7 lands first by
+> accident, surface the question and stop.
+
+> **"Feels fast" is a measured criterion, not a vibe.** The acceptance
+> criteria at the bottom of this slice include explicit numeric targets
+> for first interactive paint, optimistic mutation latency, and
+> keyboard flow length. The slice ships with a performance test that
+> locks them.
+
+---
+
+## Design Context (locked decisions)
+
+Inherited from WC Manager Experience Slice 0 (Slice 6 section).
+
+**The page is `artifacts/irrigopro/src/pages/wet-check-review.tsx`.** It
+is registered at multiple paths in `App.tsx`:
+`/manager/wet-checks/:id` (`:331`), `/wet-checks/pending-review`
+(`:334`), `/wet-checks/:id/review` (`:338`) — within the
+irrigation_manager block. The same routes are registered in the
+billing_manager / company_admin / super_admin blocks at lines
+384/385, 432/433, 497/498.
+
+**Existing components used by the review page:** `WetCheckWizard`
+(`@/components/manager/wet-check-wizard`), `StatusBadge` (defined
+inline at the top of `wet-check-review.tsx`), and an array-query
+hook from `@/lib/queryClient`.
+
+**The approve endpoint is `POST /api/wet-checks/:id/approve`**
+(`routes.ts:16103`), gated to `isWetCheckManagerRole(authenticatedUserRole)`
+(i.e., irrigation_manager / company_admin / super_admin).
+`billing_manager` is read-only on this page.
+
+**Status enum context.** Wet checks have statuses including
+`submitted`, `partially_converted`, `approved` (per the inline
+`StatusBadge` switch). The "all-green / ready to approve" state is when
+every zone is reviewed and every finding is routed — surface
+condition, not a status field.
+
+---
+
+## Slice 6 — Review page + DismissibleHelp primitive
+
+### Scope
+
+Two coherent deliverables:
+1. **DismissibleHelp primitive.** A small reusable component that
+   renders a step-specific tooltip / popover anchored to a target
+   element with per-user `localStorage` dismissal.
+2. **Review page feels-fast refactor.** Numbered workflow indicator,
+   all-green empty-state CTA, keyboard shortcuts (`A` / `R` / `J` /
+   `K`), optimistic approve mutation, dismissible first-timer guides
+   consuming the primitive.
+
+### Files modified
+
+- New:
+  `artifacts/irrigopro/src/components/shared/dismissible-help.tsx`
+  — the primitive.
+- New:
+  `artifacts/irrigopro/src/components/shared/dismissible-help.test.tsx`
+  — primitive tests.
+- `artifacts/irrigopro/src/pages/wet-check-review.tsx` — workflow
+  indicator, all-green CTA, keyboard shortcuts, optimistic approve.
+- `artifacts/irrigopro/src/components/manager/wet-check-wizard.tsx`
+  — minor read-only banner when `userRole === "billing_manager"` (if
+  it doesn't already render one).
+- New:
+  `artifacts/irrigopro/src/pages/wet-check-review.test.tsx` — review
+  page workflow + shortcut tests (extend if a file already exists).
+- New:
+  `artifacts/irrigopro/src/pages/wet-check-review-perf.test.tsx` —
+  perf assertions (see "Feels-fast lock" below).
+
+### Concrete changes
+
+#### (1) Build the DismissibleHelp primitive
+
+```typescript
+// artifacts/irrigopro/src/components/shared/dismissible-help.tsx
+//
+// Slice 6 — Dismissible per-user help tooltip / popover. Persistence:
+// per-user localStorage key. The toggle in the page header re-summons
+// dismissed guides (handled by the parent page, not this primitive).
+//
+// Used by:
+//   - Wet Check Review page (Slice 6)
+//   - Unified Wet Checks list page (Slice 7)
+
+import { useEffect, useState } from "react";
+import { X, HelpCircle } from "lucide-react";
+
+export interface DismissibleHelpProps {
+  /** Unique id used as the localStorage key suffix. */
+  guideId: string;
+  /** When true, the guide is rendered. When false, it is fully unmounted. */
+  open?: boolean;
+  /** Position relative to the trigger. Default: 'bottom'. */
+  side?: "top" | "bottom" | "left" | "right";
+  /** Variant — affects color treatment. Default: 'info'. */
+  variant?: "info" | "success" | "warning";
+  /** Body content. Plain text or React node. */
+  children: React.ReactNode;
+  /** Called when the user dismisses the guide. */
+  onDismiss?: () => void;
+  /** When true (default), localStorage is consulted on mount to decide visibility. */
+  persistDismissal?: boolean;
+}
+
+const KEY_PREFIX = "irrigopro:help-dismissed:";
+
+export function isHelpDismissed(guideId: string): boolean {
+  try {
+    return localStorage.getItem(KEY_PREFIX + guideId) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function resetHelpDismissal(guideId: string): void {
+  try {
+    localStorage.removeItem(KEY_PREFIX + guideId);
+  } catch {}
+}
+
+export function DismissibleHelp({
+  guideId,
+  open = true,
+  side = "bottom",
+  variant = "info",
+  children,
+  onDismiss,
+  persistDismissal = true,
+}: DismissibleHelpProps) {
+  const [dismissed, setDismissed] = useState(() =>
+    persistDismissal ? isHelpDismissed(guideId) : false
+  );
+  // Re-check localStorage when guideId changes (page navigation).
+  useEffect(() => {
+    if (persistDismissal) setDismissed(isHelpDismissed(guideId));
+  }, [guideId, persistDismissal]);
+
+  if (dismissed || !open) return null;
+
+  const dismiss = () => {
+    if (persistDismissal) {
+      try { localStorage.setItem(KEY_PREFIX + guideId, "true"); } catch {}
+    }
+    setDismissed(true);
+    onDismiss?.();
+  };
+
+  // Close on Esc.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") dismiss();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  const variantClasses = {
+    info: "bg-blue-50 border-blue-200 text-blue-900",
+    success: "bg-green-50 border-green-200 text-green-900",
+    warning: "bg-amber-50 border-amber-200 text-amber-900",
+  }[variant];
+
+  return (
+    <div
+      role="status"
+      data-testid={`help-${guideId}`}
+      data-side={side}
+      className={`rounded-md border px-3 py-2 flex items-start gap-2 text-sm ${variantClasses}`}
+    >
+      <HelpCircle className="w-4 h-4 mt-0.5 flex-shrink-0" aria-hidden />
+      <div className="flex-1">{children}</div>
+      <button
+        type="button"
+        onClick={dismiss}
+        aria-label="Dismiss help"
+        className="opacity-70 hover:opacity-100"
+        data-testid={`help-dismiss-${guideId}`}
+      >
+        <X className="w-4 h-4" aria-hidden />
+      </button>
+    </div>
+  );
+}
+```
+
+Tests for the primitive: assert that (a) the guide renders when not
+dismissed, (b) clicking dismiss writes the localStorage key and
+unmounts, (c) `Esc` dismisses, (d) `isHelpDismissed` reflects state,
+(e) `resetHelpDismissal` clears the key.
+
+#### (2) Workflow indicator at the top of the review page
+
+In `wet-check-review.tsx` (around the page header), add:
+
+```jsx
+<div className="flex items-center gap-2 text-xs mb-4">
+  <Step n={1} label="Review zones" complete={allZonesReviewed} current={!allZonesReviewed} />
+  <ChevronRight className="w-3 h-3 text-gray-300" />
+  <Step n={2} label="Resolve findings" complete={allFindingsResolved} current={allZonesReviewed && !allFindingsResolved} />
+  <ChevronRight className="w-3 h-3 text-gray-300" />
+  <Step n={3} label="Approve & route" complete={false} current={allZonesReviewed && allFindingsResolved} />
+</div>
+```
+
+Where `Step` is a local helper:
+
+```jsx
+function Step({ n, label, complete, current }: { n: number; label: string; complete: boolean; current: boolean }) {
+  return (
+    <div className={`flex items-center gap-1 ${complete ? "text-green-700" : current ? "text-blue-700 font-medium" : "text-gray-500"}`}>
+      {complete ? <CheckCircle2 className="w-3.5 h-3.5" /> : <span>{n}.</span>}
+      <span>{label}</span>
+    </div>
+  );
+}
+```
+
+`allZonesReviewed` and `allFindingsResolved` derive from the wet-check
+data already in scope (zones with non-pending status; findings with
+non-pending disposition or routing target). If the derivation helpers
+don't exist, write them inline as small functions in this file.
+
+#### (3) All-green CTA + DismissibleHelp guide
+
+When `allZonesReviewed && allFindingsResolved`, render a compact
+all-green block above the approve button:
+
+```jsx
+{allGreen ? (
+  <DismissibleHelp guideId="wc-review-ready-to-approve" variant="info">
+    <strong>All clear — ready to approve.</strong> Press{" "}
+    <kbd className="font-mono text-xs px-1.5 py-0.5 border rounded bg-white">A</kbd> or
+    click "Approve & pass to billing" below. The WC will pass to billing
+    and a wet-check billing row (WC-YYYY-NNNN) will be created.
+  </DismissibleHelp>
+) : null}
+```
+
+Place it inside the existing review card, just above the action button
+row.
+
+#### (4) Keyboard shortcuts
+
+Add a `useEffect` that registers a `keydown` listener on the document:
+
+```typescript
+useEffect(() => {
+  if (userRole === "billing_manager") return; // read-only roles skip
+  const onKey = (e: KeyboardEvent) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "a" || e.key === "A") {
+      if (allGreen) handleApprove();
+    } else if (e.key === "r" || e.key === "R") {
+      if (focusedFindingId != null) openRouteDialog(focusedFindingId);
+    } else if (e.key === "j" || e.key === "J") {
+      focusNextFinding();
+    } else if (e.key === "k" || e.key === "K") {
+      focusPrevFinding();
+    }
+  };
+  window.addEventListener("keydown", onKey);
+  return () => window.removeEventListener("keydown", onKey);
+}, [allGreen, focusedFindingId, userRole]);
+```
+
+`focusNextFinding` / `focusPrevFinding` advance through the page's
+finding cards using a focused-id state. `openRouteDialog` triggers the
+existing route dialog the wizard surface provides. If the wizard owns
+those handlers (it does, per
+`components/manager/wet-check-wizard.tsx`), expose them via a callback
+prop or via a ref, do NOT reimplement.
+
+#### (5) Optimistic approve mutation
+
+Find the existing approve mutation in `wet-check-review.tsx` (it calls
+`POST /api/wet-checks/:id/approve`). Convert to use react-query's
+`onMutate` for an optimistic state flip:
+
+```typescript
+const approveMutation = useMutation({
+  mutationFn: async () => apiRequest(`/api/wet-checks/${id}/approve`, "POST", {}),
+  onMutate: async () => {
+    // Cancel inflight queries that could overwrite optimistic state.
+    await queryClient.cancelQueries({ queryKey: ["/api/wet-checks", id] });
+    const previous = queryClient.getQueryData(["/api/wet-checks", id]);
+    queryClient.setQueryData(["/api/wet-checks", id], (old: any) => ({
+      ...old,
+      status: "approved",
+      approvedAt: new Date().toISOString(),
+    }));
+    return { previous };
+  },
+  onError: (_err, _vars, ctx) => {
+    if (ctx?.previous) queryClient.setQueryData(["/api/wet-checks", id], ctx.previous);
+    toast({ title: "Approve failed", description: "Reverted. Please try again.", variant: "destructive" });
+  },
+  onSettled: () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", id] });
+    queryClient.invalidateQueries({ queryKey: ["/api/wet-check-billings"] });
+  },
+});
+```
+
+The UI flips to "approved" instantly; if the server rejects, state
+rolls back and a toast surfaces the failure.
+
+#### (6) Read-only banner for billing_manager
+
+If the wet-check-wizard component doesn't already render a "view only"
+banner when `userRole === "billing_manager"`, add one at the top of
+the wizard:
+
+```jsx
+{userRole === "billing_manager" ? (
+  <div className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs text-gray-700 mb-3">
+    View only — billing managers can review but cannot approve or route.
+  </div>
+) : null}
+```
+
+#### (7) "Show help" toggle in the page header
+
+Add a small button in the page header that calls
+`resetHelpDismissal("wc-review-ready-to-approve")` and any other guide
+IDs introduced in this slice, then forces re-render. Label: "Show
+help" with the `HelpCircle` icon.
+
+```jsx
+<button onClick={() => {
+  resetHelpDismissal("wc-review-ready-to-approve");
+  resetHelpDismissal("wc-review-keyboard-shortcuts");
+  setTick((t) => t + 1); // force re-render so DismissibleHelp recomputes
+}}>
+  <HelpCircle className="w-4 h-4 mr-1" /> Show help
+</button>
+```
+
+### Feels-fast lock — `wet-check-review-perf.test.tsx`
+
+```typescript
+describe("wet-check-review page — feels-fast contract (Slice 6)", () => {
+  it("first interactive paint < 800ms on a primed cache", async () => {
+    primeCache({ wetCheckId: 42, allGreen: true });
+    const t0 = performance.now();
+    render(<WetCheckReviewPage params={{ id: "42" }} />);
+    await screen.findByText("Approve & pass to billing");
+    const t1 = performance.now();
+    expect(t1 - t0).toBeLessThan(800);
+  });
+
+  it("approve mutation flips UI before server resolves (optimistic)", async () => {
+    const slowFetch = mockFetchWithDelay(200);
+    primeCache({ wetCheckId: 42, allGreen: true });
+    render(<WetCheckReviewPage params={{ id: "42" }} />);
+    fireEvent.keyDown(window, { key: "A" });
+    // Within 50ms of keypress, the status badge should already read "approved"
+    await waitFor(() => {
+      expect(screen.getByTestId("status-badge")).toHaveTextContent(/approved/i);
+    }, { timeout: 50 });
+  });
+
+  it("keyboard-only review flow takes ≤ 3 keystrokes from an all-green load", async () => {
+    primeCache({ wetCheckId: 42, allGreen: true });
+    render(<WetCheckReviewPage params={{ id: "42" }} />);
+    await screen.findByText("Approve & pass to billing");
+    let keystrokes = 0;
+    fireEvent.keyDown(window, { key: "A" }); keystrokes++;
+    await waitFor(() => expect(screen.getByTestId("status-badge")).toHaveTextContent(/approved/i));
+    expect(keystrokes).toBeLessThanOrEqual(3);
+  });
+});
+```
+
+The 800ms target assumes a primed query cache (i.e., the user has
+visited /wet-checks/pending-review immediately before). If the test
+runs slower than 800ms on CI hardware, raise the bound — but the
+relative target stays "fast enough that there's no skeleton flash."
+
+### Acceptance criteria
+
+- `DismissibleHelp` exists at `components/shared/dismissible-help.tsx`
+  with `isHelpDismissed` / `resetHelpDismissal` helpers exported.
+- The primitive tests cover open/dismiss/Esc/persistence.
+- The review page renders a 3-step workflow indicator that highlights
+  the current step.
+- An all-green DismissibleHelp banner appears when zones and findings
+  are all resolved, mentioning the `A` shortcut.
+- Keyboard shortcuts `A` / `R` / `J` / `K` work as specified, with
+  input fields and modifier keys excluded.
+- Approve mutation is optimistic — UI flips to "approved" before the
+  server confirms; rollback on failure with a toast.
+- `billing_manager` role sees a "View only" banner and cannot trigger
+  approve via keyboard or button.
+- "Show help" toggle resets dismissed guides on demand.
+- All perf-test bounds in `wet-check-review-perf.test.tsx` pass on
+  CI hardware. (Adjust the 800ms bound if needed for CI variance, but
+  document the adjustment in the PR.)
+- All existing review page tests pass.
+
+### Out of scope
+
+- The unified WC list page (Slice 7).
+- Adding new actions to the wizard beyond what already exists.
+- Changing the approve endpoint, status enum, or any backend code.
+- Mobile review surface (the review page is web-only by design).
+- Persisting keyboard-shortcut training across users (per-user
+  localStorage is enough).
+
+### Dependencies
+
+- Must land before Slice 7 (Slice 7 imports `DismissibleHelp`).
+- Independent of Slices 1–5 and 8–11.

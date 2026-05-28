@@ -1,0 +1,161 @@
+# Replit Task — WC Manager Experience, Slice 11 (Document the role-vs-shell distinction)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from `WC Manager Experience - Slice 0 Unification Audit and Plan.md`
+— it is reference material so you understand the intent. The actual work for
+this task is in the **Slice 11** section at the bottom. Do not deviate from any
+file paths, function names, schema field names, or payload shapes specified.
+If you believe a deviation is necessary, surface it and stop rather than
+proceeding.
+
+> **Documentation-only slice. No code changes.** The user-confirmed
+> decision is that manager-tier roles use device-appropriate shells, not
+> separate roles. Slices 8 (web manager dashboard) and 10 (mobile
+> manager dashboard) implement this in code. This slice writes it down
+> so future contributors do not re-litigate the question.
+
+---
+
+## Design Context (locked decisions)
+
+Inherited from WC Manager Experience Slice 0 (Slice 11 section) and
+the user's explicit confirmation on the role-split question.
+
+**The decision.** The irrigation manager role stays a single role with
+full field+management permissions. Mobile and web shells render
+different home dashboards for that role based on the device class:
+mobile = field-action launches; web = `/manager-workspace`. Same
+identity, same permissions, two presentations.
+
+**Documents updated.**
+- `docs/wet-check-audit-2026-05.md` — the May 2026 wet check audit,
+  §4 Permissions matrix. Add a short callout below the matrix.
+- `replit.md` — the project's central onboarding doc. Add a section
+  in whichever architecture or roles section already exists.
+
+---
+
+## Slice 11 — Document role-vs-shell distinction
+
+### Scope
+
+Two documentation updates. Word-level edits. No code.
+
+### Files modified
+
+- `docs/wet-check-audit-2026-05.md` — append a "Role vs shell" note
+  to §4.
+- `replit.md` — append a "Manager-tier roles" section to the existing
+  Architecture or Roles area.
+
+### Concrete changes
+
+**(1) `docs/wet-check-audit-2026-05.md` — §4 addendum.** Find the
+existing §4 Permissions matrix block. Below the matrix, append:
+
+```markdown
+
+### Role vs shell — locked decision (2026 May, post-WC Manager Experience family)
+
+The five roles above are the source of truth for permissions. They do
+NOT change based on device. However, the irrigation manager role
+specifically has TWO shell-appropriate presentations:
+
+- **Web shell** (`artifacts/irrigopro/src/App.tsx:297+`) routes the
+  irrigation manager to `/manager-workspace` (WC Manager Experience
+  Slice 8) as their daily home. The page mirrors the billing
+  manager's `/billing-workspace` visual vocabulary while serving the
+  manager's queue (wet checks pending review, work orders awaiting
+  approval, findings needing routing).
+- **Mobile shell** (`artifacts/irrigopro-mobile/app/(tabs)/index.tsx`)
+  routes the same role to a field-action dashboard (WC Manager
+  Experience Slice 10) with launches for Start Wet Check, Create
+  Work Order, Assign Tech, Today's Schedule.
+
+The same person, with the same role, sees the management dashboard on
+their laptop and the field-action launches on their phone. There is
+NO separate "mobile irrigation manager" role.
+
+This pattern extends to company_admin and super_admin: same role,
+shell-appropriate landing page. The field tech role has only the
+mobile shell.
+
+This decision was made and locked in the WC Manager Experience
+family planning. Do not introduce a parallel "irrigation_manager_field"
+or "irrigation_manager_web" role to "fix" presentation differences —
+that's the wrong lever. Open a follow-up slice in the WC Manager
+Experience family or its successor instead.
+```
+
+**(2) `replit.md` — Manager-tier roles section.** Find the existing
+roles or architecture section in `replit.md`. Append (or insert at
+the appropriate location):
+
+```markdown
+
+### Manager-tier roles use device-appropriate shells
+
+The IrrigoPro role model has five roles: `super_admin`, `company_admin`,
+`billing_manager`, `irrigation_manager`, `field_tech`. These define
+permissions and never split by device.
+
+However, the irrigation manager role specifically has two
+shell-appropriate presentations:
+- Web shell → `/manager-workspace` (status strip + queue of items
+  awaiting their action).
+- Mobile shell → field-action dashboard (one-tap launches for Start
+  Wet Check, Create Work Order, Assign Tech).
+
+This is implemented in:
+- Web: `artifacts/irrigopro/src/App.tsx` role block at the
+  irrigation_manager case.
+- Mobile: `artifacts/irrigopro-mobile/app/(tabs)/index.tsx` checks
+  user role and renders ManagerTodayScreen vs FieldTechTodayScreen.
+
+The same logic applies to company_admin and super_admin: same role,
+device-appropriate landing page. The billing manager has only a web
+shell (mobile billing is not in scope). The field tech has only a
+mobile shell.
+
+If you find yourself wanting to add a "mobile-only" or "web-only" role
+to solve a presentation problem, stop and surface the question — that
+is the wrong lever and was specifically considered and rejected during
+the WC Manager Experience planning (Slice 0 of that family).
+
+See:
+- `WC Manager Experience - Slice 0 Unification Audit and Plan.md` —
+  the planning document where this decision was made.
+- `WC Manager Experience - Slice 8 Manager Workspace Dashboard.md` —
+  the web implementation.
+- `WC Manager Experience - Slice 10 Mobile Shell Role-Aware Dashboard.md`
+  — the mobile implementation.
+```
+
+### Tests
+
+Documentation-only. No tests. Verification is by review.
+
+### Acceptance criteria
+
+- `docs/wet-check-audit-2026-05.md` §4 ends with the "Role vs shell"
+  callout exactly as specified.
+- `replit.md` contains the "Manager-tier roles use
+  device-appropriate shells" section either appended to or inserted
+  in the existing roles / architecture section.
+- Both updates reference the slice files by name so future readers
+  can find the original planning context.
+- No code is modified.
+
+### Out of scope
+
+- Updating any other documentation file.
+- Updating the API documentation.
+- Updating user-facing onboarding content.
+- Writing a separate architecture diagram for the role-vs-shell
+  distinction (the prose is enough).
+
+### Dependencies
+
+- Slices 8 and 10 must have landed; this doc references them.
+- Independent of Slices 1–7, 9.
+- This is the last slice in the family.
