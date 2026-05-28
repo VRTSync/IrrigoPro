@@ -1,0 +1,409 @@
+# Replit Task — WC Labor Model, Slice 2 (Forward fix: make new WCBs compute labor correctly)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from `WC Labor Model - Slice 0 Per-Finding Labor Audit and Plan.md`
+and findings from Slice 1's audit (`docs/wc-labor-auto-compute-audit.md`).
+The actual work for this task is in the **Slice 2** section at the bottom.
+Do not deviate from any file paths, function names, schema field names, or
+payload shapes specified. If you believe a deviation is necessary, surface
+it and stop rather than proceeding.
+
+> **Slice 2 SHAPE depends on Slice 1's findings.** This spec covers the
+> three branches the audit may recommend (catalog seed missing, issue
+> type normalization, arithmetic regression) plus the secondary
+> quantity-multiplier bug. Implement only the branches Slice 1 named.
+> Where the audit recommends multiple branches, ship them in a
+> single PR if cohesive, or split into B2a / B2b if not.
+
+> **Forward fix only — does NOT touch existing data.** A new WCB
+> created after this slice ships computes labor correctly. Existing
+> WCBs with $0 labor stay broken until Slice 3 backfills them. This
+> separation keeps the change reversible and lets each part be
+> verified before the next ships.
+
+---
+
+## Design Context (locked decisions)
+
+Inherited from WC Labor Model Slice 0.
+
+**The auto-compute method is `_recomputeZoneRepairLaborIfAuto` at
+`storage.ts:7673`.** It is called from `createWetCheckFinding`
+(`:7924`), `updateWetCheckFinding` (`:7973`), and the various reset
+paths. The call sites are correct; the body's correctness depends on
+catalog rows and key matching.
+
+**Quantity multiplication is missing from the body.** Line 7700 reads
+`if (raw) totalHours += parseFloat(String(raw)) || 0;` — adds the
+catalog default once per finding, not once per unit. A finding with
+quantity=3 nozzles still contributes 0.25 hr instead of 0.75 hr.
+This is a secondary bug that the audit confirms (Slice 1 Step A,
+note 5). Fix it here.
+
+**The startup seed is at `schema.ts:1494+`** with the comment "applied
+per company on startup." Slice 1 Step A locates the actual seed
+application call — find that code path and verify whether it runs
+on company-create or only on app boot.
+
+---
+
+## Slice 2 — Forward fix
+
+### Scope
+
+Apply the fixes Slice 1's audit recommends, plus the quantity-
+multiplier bug. After this slice ships, new findings and edits on any
+wet check should produce a non-zero `repairLaborHours` value on the
+zone (assuming the wet check has any chargeable findings).
+
+Three branches, applied as the audit names them:
+
+- **B2a — Seed missing for some companies.** Add a one-shot seeder
+  that ensures every existing company has the standard
+  `issue_type_configs` rows. Wire the seed to also run on
+  company-create so future companies aren't missing it.
+- **B2b — Issue type key mismatch.** Normalize `issueType` strings in
+  the auto-compute lookup so legacy/capitalized/spaced values map
+  to the catalog keys.
+- **B2c — Arithmetic fixes inside `_recomputeZoneRepairLaborIfAuto`.**
+  Add quantity multiplication. Fix any other arithmetic issue Step A
+  surfaced.
+
+Each branch's spec is below. Ship only the branches Slice 1
+recommended.
+
+### Files modified (per branch)
+
+**B2a (seed):**
+- New: `artifacts/api-server/src/scripts/seed-issue-type-configs.ts`
+  — the one-shot seeder.
+- `artifacts/api-server/src/storage.ts` (around `createCompany` —
+  grep) — call the seeder on company-create.
+- New: `artifacts/api-server/src/seed-issue-type-configs.test.ts`
+  — verifies the seeder is idempotent and seeds the expected rows.
+
+**B2b (normalization):**
+- `artifacts/api-server/src/storage.ts` — modify the configMap
+  build at `_recomputeZoneRepairLaborIfAuto` (`:7697`) to normalize
+  keys; add a normalization helper.
+- New: `artifacts/api-server/src/wc-labor-issue-type-normalize.test.ts`
+  — pins the normalization rules.
+
+**B2c (arithmetic):**
+- `artifacts/api-server/src/storage.ts` — fix
+  `_recomputeZoneRepairLaborIfAuto` at `:7698–7701`.
+- New: `artifacts/api-server/src/wc-labor-quantity-multiplier.test.ts`
+  — pins the quantity-multiplied math.
+
+### Concrete changes
+
+#### B2a — Seed `issue_type_configs` for missing companies
+
+**(1) Extract the seed data** into a shared module. Currently it
+lives inline at `schema.ts:1494+`. Move it (or re-export it) from
+`artifacts/api-server/src/seeds/issue-type-configs.ts`:
+
+```typescript
+// artifacts/api-server/src/seeds/issue-type-configs.ts
+//
+// Single source of truth for the seeded issue type catalog. The
+// schema.ts inline list at :1494+ is the historical reference; this
+// module is what the runtime uses.
+export interface IssueTypeConfigSeed {
+  issueType: string;
+  issueGroup: string;
+  displayLabel: string;
+  defaultLaborHours: string;
+  partCategoryFilter: string | null;
+  sortOrder: number;
+}
+
+export const ISSUE_TYPE_CONFIG_SEEDS: IssueTypeConfigSeed[] = [
+  { issueType: "head_replacement",   issueGroup: "quick_fix", displayLabel: "Head Replace",     defaultLaborHours: "0.25", partCategoryFilter: "Head",       sortOrder: 10 },
+  { issueType: "nozzle_replacement", issueGroup: "quick_fix", displayLabel: "Nozzle Replace",   defaultLaborHours: "0.25", partCategoryFilter: "Nozzle",     sortOrder: 20 },
+  { issueType: "head_adjustment",    issueGroup: "quick_fix", displayLabel: "Adjust",           defaultLaborHours: "0.25", partCategoryFilter: null,         sortOrder: 30 },
+  { issueType: "leak_repair",        issueGroup: "advanced",  displayLabel: "Leak",             defaultLaborHours: "1.00", partCategoryFilter: "Fitting",    sortOrder: 40 },
+  { issueType: "pressure_issue",     issueGroup: "advanced",  displayLabel: "Pressure Issue",   defaultLaborHours: "0.50", partCategoryFilter: null,         sortOrder: 50 },
+  { issueType: "coverage_issue",     issueGroup: "advanced",  displayLabel: "Coverage Issue",   defaultLaborHours: "0.50", partCategoryFilter: null,         sortOrder: 60 },
+  // Any additional rows the audit identified from production data go here.
+];
+```
+
+The existing inline seed at `schema.ts:1494+` becomes a re-export from
+this module if it's currently used by the startup seeder, so no
+runtime behavior changes on its existing path.
+
+**(2) Write the seeder.** New script:
+
+```typescript
+// artifacts/api-server/src/scripts/seed-issue-type-configs.ts
+//
+// Idempotent. For each company, ensures every row in
+// ISSUE_TYPE_CONFIG_SEEDS exists. Inserts missing rows; never updates
+// existing rows (a company may have legitimately customized
+// defaultLaborHours).
+
+import { db } from "../db";
+import { issueTypeConfigs, companies } from "@workspace/db/schema";
+import { eq, and, inArray } from "drizzle-orm";
+import { ISSUE_TYPE_CONFIG_SEEDS } from "../seeds/issue-type-configs";
+
+export interface SeedResult {
+  companiesProcessed: number;
+  rowsInserted: number;
+  rowsSkipped: number;
+}
+
+export async function seedIssueTypeConfigsForAllCompanies(): Promise<SeedResult> {
+  const allCompanies = await db.select({ id: companies.id }).from(companies);
+  let rowsInserted = 0;
+  let rowsSkipped = 0;
+  for (const c of allCompanies) {
+    const result = await seedIssueTypeConfigsForCompany(c.id);
+    rowsInserted += result.rowsInserted;
+    rowsSkipped += result.rowsSkipped;
+  }
+  return { companiesProcessed: allCompanies.length, rowsInserted, rowsSkipped };
+}
+
+export async function seedIssueTypeConfigsForCompany(companyId: number): Promise<{ rowsInserted: number; rowsSkipped: number }> {
+  const existing = await db
+    .select({ issueType: issueTypeConfigs.issueType })
+    .from(issueTypeConfigs)
+    .where(eq(issueTypeConfigs.companyId, companyId));
+  const existingKeys = new Set(existing.map((r) => r.issueType));
+  const toInsert = ISSUE_TYPE_CONFIG_SEEDS.filter((s) => !existingKeys.has(s.issueType));
+  if (toInsert.length === 0) return { rowsInserted: 0, rowsSkipped: ISSUE_TYPE_CONFIG_SEEDS.length };
+  await db.insert(issueTypeConfigs).values(
+    toInsert.map((s) => ({
+      companyId,
+      issueType: s.issueType,
+      issueGroup: s.issueGroup,
+      displayLabel: s.displayLabel,
+      defaultLaborHours: s.defaultLaborHours,
+      partCategoryFilter: s.partCategoryFilter,
+      sortOrder: s.sortOrder,
+    })),
+  );
+  return { rowsInserted: toInsert.length, rowsSkipped: existingKeys.size };
+}
+
+// CLI usage: `npx tsx scripts/seed-issue-type-configs.ts` from the api-server.
+if (require.main === module) {
+  seedIssueTypeConfigsForAllCompanies().then((r) => {
+    console.log(`Seeded: ${JSON.stringify(r)}`);
+    process.exit(0);
+  }).catch((e) => { console.error(e); process.exit(1); });
+}
+```
+
+**(3) Wire the per-company seeder into company-create.** Find the
+storage method that creates companies (grep
+`createCompany|insert(companies)`). After insertion, call
+`seedIssueTypeConfigsForCompany(newCompany.id)` inside the same
+transaction. Future companies auto-seed.
+
+**(4) Add an admin endpoint** to trigger the bulk seeder from the UI:
+
+```typescript
+// In routes.ts, alongside the migration admin endpoints
+app.post("/api/admin/seed-issue-type-configs", requireAuthentication, async (req: any, res) => {
+  if (req.authenticatedUserRole !== "super_admin") {
+    res.status(403).json({ message: "Super-admin only" });
+    return;
+  }
+  const { seedIssueTypeConfigsForAllCompanies } = await import("../scripts/seed-issue-type-configs");
+  const result = await seedIssueTypeConfigsForAllCompanies();
+  res.json(result);
+});
+```
+
+Run this once via the admin migration page (or curl with super-admin
+auth) on production to seed every existing company.
+
+#### B2b — Normalize `issueType` strings
+
+If Slice 1's audit shows mismatched keys (e.g., findings carry
+`"Nozzle Replace"` while the catalog has `"nozzle_replacement"`),
+normalize both sides of the lookup.
+
+Add a helper at the top of `storage.ts` (or in a shared util):
+
+```typescript
+function normalizeIssueTypeKey(s: string): string {
+  return s.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+```
+
+Update `_recomputeZoneRepairLaborIfAuto` at `:7697` to use it:
+
+```typescript
+const configMap = new Map(configs.map((c) => [normalizeIssueTypeKey(c.issueType), c.defaultLaborHours]));
+for (const f of findings) {
+  const raw = configMap.get(normalizeIssueTypeKey(f.issueType));
+  if (raw) totalHours += parseFloat(String(raw)) || 0;
+}
+```
+
+Pin the normalization rules:
+
+```typescript
+// wc-labor-issue-type-normalize.test.ts
+describe("normalizeIssueTypeKey", () => {
+  it.each([
+    ["nozzle_replacement", "nozzle_replacement"],
+    ["Nozzle Replacement", "nozzle_replacement"],
+    ["Nozzle Replace", "nozzle_replace"],            // semantic mismatch, won't match — flag in audit
+    ["nozzle-replacement", "nozzle_replacement"],
+    ["  HEAD_REPLACEMENT ", "head_replacement"],
+  ])("normalizes %s → %s", (input, expected) => {
+    expect(normalizeIssueTypeKey(input)).toBe(expected);
+  });
+});
+```
+
+If the audit found semantic (not formatting) mismatches like
+`"Nozzle Replace"` vs `"nozzle_replacement"`, normalization alone
+won't fix them. Add an explicit alias map:
+
+```typescript
+const ISSUE_TYPE_ALIASES: Record<string, string> = {
+  "nozzle_replace": "nozzle_replacement",
+  "head_replace": "head_replacement",
+  // Add from audit findings
+};
+
+function resolveIssueTypeKey(s: string): string {
+  const normalized = normalizeIssueTypeKey(s);
+  return ISSUE_TYPE_ALIASES[normalized] ?? normalized;
+}
+```
+
+Audit must list the aliases explicitly. Do not guess — surface a
+question to the user.
+
+#### B2c — Add quantity multiplication + other arithmetic
+
+Edit `_recomputeZoneRepairLaborIfAuto` at `storage.ts:7686–7706`:
+
+```typescript
+// Fetch all findings for this zone — now ALSO grab quantity.
+const findings = await tx.select({
+  issueType: wetCheckFindings.issueType,
+  quantity: wetCheckFindings.quantity,        // NEW
+}).from(wetCheckFindings)
+  .where(eq(wetCheckFindings.zoneRecordId, zoneRecordId));
+
+let totalHours = 0;
+if (findings.length > 0) {
+  const configs = await tx.select({
+    issueType: issueTypeConfigs.issueType,
+    defaultLaborHours: issueTypeConfigs.defaultLaborHours,
+  }).from(issueTypeConfigs).where(eq(issueTypeConfigs.companyId, companyId));
+  const configMap = new Map(configs.map((c) => [
+    // If B2b also ships: use resolveIssueTypeKey here.
+    c.issueType,
+    c.defaultLaborHours,
+  ]));
+  for (const f of findings) {
+    const raw = configMap.get(f.issueType);
+    if (raw) {
+      const perUnit = parseFloat(String(raw)) || 0;
+      const qty = f.quantity ?? 1;                // NEW
+      totalHours += perUnit * qty;                // NEW
+    }
+  }
+}
+
+await tx.update(wetCheckZoneRecords)
+  .set({ repairLaborHours: totalHours.toFixed(2) })
+  .where(eq(wetCheckZoneRecords.id, zoneRecordId));
+```
+
+Pin with the test:
+
+```typescript
+// wc-labor-quantity-multiplier.test.ts
+it("zone auto-labor sums Σ defaultLaborHours × quantity for the zone's findings", async () => {
+  const { company } = await seedCompanyWithCatalog();
+  const { zone } = await seedZoneWithFindings(company.id, [
+    { issueType: "nozzle_replacement", quantity: 2 },  // 2 × 0.25 = 0.50
+    { issueType: "head_replacement",   quantity: 1 },  // 1 × 0.25 = 0.25
+    { issueType: "leak_repair",        quantity: 1 },  // 1 × 1.00 = 1.00
+  ]);
+  await storage._recomputeZoneRepairLaborIfAuto(db, zone.id, company.id);
+  const [after] = await db.select().from(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.id, zone.id));
+  expect(parseFloat(after.repairLaborHours)).toBeCloseTo(1.75, 2);
+});
+
+it("auto-recompute fires after adding a finding", async () => {
+  const { company, zone } = await seedZoneAuto(company.id, [{ issueType: "nozzle_replacement", quantity: 1 }]);
+  expect(parseFloat((await getZone(zone.id)).repairLaborHours)).toBeCloseTo(0.25, 2);
+  await storage.createWetCheckFinding({ /* leak_repair quantity 1 */ });
+  expect(parseFloat((await getZone(zone.id)).repairLaborHours)).toBeCloseTo(1.25, 2);
+});
+
+it("auto-recompute does NOT run when repairLaborManuallySet is true", async () => {
+  const { company, zone } = await seedZoneAuto(company.id, [{ issueType: "nozzle_replacement", quantity: 1 }]);
+  await storage.setZoneRepairLabor(zone.id, company.id, "3.50");  // marks manual
+  await storage.createWetCheckFinding({ /* leak_repair quantity 1 */ });
+  expect(parseFloat((await getZone(zone.id)).repairLaborHours)).toBeCloseTo(3.50, 2);
+});
+
+it("wet check page and WCB page show the same labor for the same zone (post-fix)", async () => {
+  const { company, zone, wcb } = await seedWcbWithKnownLabor(company.id, /* … */);
+  const wcLabor = await getZoneLaborFromWetCheckPage(wcb.wetCheckId, zone.id);
+  const wcbLabor = await getZoneLaborFromWcbPage(wcb.id, zone.id);
+  expect(wcLabor).toBe(wcbLabor);
+});
+```
+
+### Tests
+
+Per-branch tests above. Plus one cross-cutting smoke test that
+exercises the full path end-to-end:
+
+```typescript
+it("end-to-end: new wet check with 2 nozzle findings has $25 labor at $50/hr (regression for WC-2026-1027 class)", async () => {
+  const { company } = await seedCompanyWithCatalog();
+  await ensureLaborRate(company.id, "50.00");
+  const { wcb } = await submitWetCheckAndAutoBill(company.id, {
+    zones: [
+      { controllerLetter: "C", zoneNumber: 1, findings: [
+        { issueType: "nozzle_replacement", quantity: 2, partPrice: "3.50" },
+      ]},
+    ],
+  });
+  expect(parseFloat(wcb.partsSubtotal)).toBeCloseTo(7.00, 2);
+  expect(parseFloat(wcb.laborSubtotal)).toBeCloseTo(25.00, 2);   // 2 × 0.25 hr × $50/hr
+  expect(parseFloat(wcb.totalAmount)).toBeCloseTo(32.00, 2);
+});
+```
+
+### Acceptance criteria
+
+- The branches Slice 1's audit named are implemented.
+- The quantity multiplier is in place at `_recomputeZoneRepairLaborIfAuto`.
+- A new wet check / finding on a properly-seeded company produces a
+  non-zero `repairLaborHours` value.
+- All new tests pass.
+- Existing wet-check / WCB tests continue to pass — pay close
+  attention to any tests that previously asserted "labor = 0" on a
+  new wet check; those are now wrong and need updating.
+- `pnpm typecheck` and `pnpm test` pass across the workspace.
+- The bulk seeder endpoint has been called on production (via the
+  admin migration page or via curl with super-admin auth) to seed
+  any missing companies — if B2a is in scope.
+
+### Out of scope
+
+- Backfilling existing WCBs. That's Slice 3.
+- Modifying any already-invoiced WCB. Hard rule.
+- Changing the labor rate ($/hr) model.
+- Changing where the user edits labor — that's Slice 4 (UX refactor).
+
+### Dependencies
+
+- Slice 1 (the audit) — hard prerequisite. Slice 2's branch selection
+  depends on Slice 1's recommendation.
+- Independent of Slice 3 and Slice 4. Both can land after this.
