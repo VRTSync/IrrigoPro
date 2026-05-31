@@ -160,6 +160,37 @@ is additionally gated by `assertWetCheckEditableByTech` (status =
 `in_progress` AND tech is assignee). Except for labor-rate override and
 per-zone repair labor on unbilled WCBs (Slice 5).
 
+### Role vs shell — locked decision (2026 May, post-WC Manager Experience family)
+
+The five roles above are the source of truth for permissions. They do
+NOT change based on device. However, the irrigation manager role
+specifically has TWO shell-appropriate presentations:
+
+- **Web shell** (`artifacts/irrigopro/src/App.tsx:297+`) routes the
+  irrigation manager to `/manager-workspace` (WC Manager Experience
+  Slice 8) as their daily home. The page mirrors the billing
+  manager's `/billing-workspace` visual vocabulary while serving the
+  manager's queue (wet checks pending review, work orders awaiting
+  approval, findings needing routing).
+- **Mobile shell** (`artifacts/irrigopro-mobile/app/(tabs)/index.tsx`)
+  routes the same role to a field-action dashboard (WC Manager
+  Experience Slice 10) with launches for Start Wet Check, Create
+  Work Order, Assign Tech, Today's Schedule.
+
+The same person, with the same role, sees the management dashboard on
+their laptop and the field-action launches on their phone. There is
+NO separate "mobile irrigation manager" role.
+
+This pattern extends to company_admin and super_admin: same role,
+shell-appropriate landing page. The field tech role has only the
+mobile shell.
+
+This decision was made and locked in the WC Manager Experience
+family planning. Do not introduce a parallel "irrigation_manager_field"
+or "irrigation_manager_web" role to "fix" presentation differences —
+that's the wrong lever. Open a follow-up slice in the WC Manager
+Experience family or its successor instead.
+
 ## 5. Data integrity invariants
 
 | # | Invariant | Status |

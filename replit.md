@@ -48,6 +48,43 @@ Production irrigation company management app: estimates → work orders → wet 
 - Parts catalog, assembly management, bulk CSV import
 - Interactive site maps with controller and zone management
 
+## Manager-tier roles use device-appropriate shells
+
+The IrrigoPro role model has five roles: `super_admin`, `company_admin`,
+`billing_manager`, `irrigation_manager`, `field_tech`. These define
+permissions and never split by device.
+
+However, the irrigation manager role specifically has two
+shell-appropriate presentations:
+- Web shell → `/manager-workspace` (status strip + queue of items
+  awaiting their action).
+- Mobile shell → field-action dashboard (one-tap launches for Start
+  Wet Check, Create Work Order, Assign Tech).
+
+This is implemented in:
+- Web: `artifacts/irrigopro/src/App.tsx` role block at the
+  irrigation_manager case.
+- Mobile: `artifacts/irrigopro-mobile/app/(tabs)/index.tsx` checks
+  user role and renders ManagerTodayScreen vs FieldTechTodayScreen.
+
+The same logic applies to company_admin and super_admin: same role,
+device-appropriate landing page. The billing manager has only a web
+shell (mobile billing is not in scope). The field tech has only a
+mobile shell.
+
+If you find yourself wanting to add a "mobile-only" or "web-only" role
+to solve a presentation problem, stop and surface the question — that
+is the wrong lever and was specifically considered and rejected during
+the WC Manager Experience planning (Slice 0 of that family).
+
+See:
+- `WC Manager Experience - Slice 0 Unification Audit and Plan.md` —
+  the planning document where this decision was made.
+- `WC Manager Experience - Slice 8 Manager Workspace Dashboard.md` —
+  the web implementation.
+- `WC Manager Experience - Slice 10 Mobile Shell Role-Aware Dashboard.md`
+  — the mobile implementation.
+
 ## Gotchas
 
 - Express 5 rejects inline regex route params — never use `/:param(\d+)` or `/:param(*)` patterns
