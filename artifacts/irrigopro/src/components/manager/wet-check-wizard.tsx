@@ -8,7 +8,16 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import {
   ChevronLeft, Loader2, FileText, Wrench, FileCheck, CheckCircle2, ListChecks, X, Lightbulb,
+  HelpCircle,
 } from "lucide-react";
+import { DismissibleHelp, isHelpDismissed, resetHelpDismissal } from "@/components/shared/dismissible-help";
+import { safeGet } from "@/utils/safeStorage";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type {
   Customer, IssueTypeConfig, Part, WetCheckFinding, WetCheckPhoto,
   WetCheckWithDetails, WetCheckZoneRecord,
@@ -197,10 +206,97 @@ function AllResolvedPanel({ onConvert, id }: { onConvert: () => void; id: number
   );
 }
 
+// ─── 3-step workflow indicator ────────────────────────────────────────────────
+function WorkflowStep({
+  step,
+  label,
+  done,
+  active,
+}: {
+  step: number;
+  label: string;
+  done: boolean;
+  active: boolean;
+}) {
+  return (
+    <div
+      className={`flex items-center gap-1.5 text-xs font-medium ${
+        done ? "text-emerald-600" : active ? "text-blue-700" : "text-gray-400"
+      }`}
+      data-testid={`workflow-step-${step}`}
+      aria-current={active ? "step" : undefined}
+    >
+      <span
+        className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+          done
+            ? "bg-emerald-100 text-emerald-700"
+            : active
+            ? "bg-blue-100 text-blue-700"
+            : "bg-gray-100 text-gray-400"
+        }`}
+      >
+        {done ? <CheckCircle2 className="w-3 h-3" /> : step}
+      </span>
+      <span className="hidden sm:inline">{label}</span>
+    </div>
+  );
+}
+
+function WorkflowIndicator({
+  allZonesReviewed,
+  allFindingsResolved,
+}: {
+  allZonesReviewed: boolean;
+  allFindingsResolved: boolean;
+}) {
+  const allGreen = allZonesReviewed && allFindingsResolved;
+  return (
+    <div
+      className="flex items-center gap-3"
+      data-testid="workflow-indicator"
+      role="list"
+      aria-label="Review workflow steps"
+    >
+      <WorkflowStep
+        step={1}
+        label="Review zones"
+        done={allZonesReviewed}
+        active={!allZonesReviewed}
+      />
+      <span className="text-gray-300 text-xs" aria-hidden="true">›</span>
+      <WorkflowStep
+        step={2}
+        label="Resolve findings"
+        done={allFindingsResolved}
+        active={allZonesReviewed && !allFindingsResolved}
+      />
+      <span className="text-gray-300 text-xs" aria-hidden="true">›</span>
+      <WorkflowStep
+        step={3}
+        label="Approve & route"
+        done={false}
+        active={allGreen}
+      />
+    </div>
+  );
+}
+
 // ─── Main wizard ──────────────────────────────────────────────────────────────
 export function WetCheckWizard({ id }: { id: number }) {
   const [location, navigate] = useLocation();
   const { toast } = useToast();
+
+  const isBillingManager = useMemo(() => {
+    try {
+      const raw = safeGet("user");
+      if (!raw) return false;
+      const u: unknown = JSON.parse(raw);
+      if (u !== null && typeof u === "object" && "role" in u) {
+        return (u as Record<string, unknown>).role === "billing_manager";
+      }
+    } catch { /* ignore */ }
+    return false;
+  }, []);
 
   const editFindingId = useMemo(() => {
     if (typeof window === "undefined") return null;
@@ -265,6 +361,15 @@ export function WetCheckWizard({ id }: { id: number }) {
   const totalDecisions = decisionFindings.length;
   const completedDecisions = totalDecisions - pendingFindings.length;
   const progressPct = totalDecisions === 0 ? 100 : Math.round((completedDecisions / totalDecisions) * 100);
+
+  const allZonesReviewed = useMemo(() => {
+    const zones = asArray(wc?.zoneRecords);
+    if (zones.length === 0) return allFindings.length === 0;
+    return zones.every(zr => zr.status !== "not_checked");
+  }, [wc, allFindings.length]);
+
+  const allFindingsResolved = pendingFindings.length === 0;
+  const allGreen = allZonesReviewed && allFindingsResolved;
 
   const [activeId, setActiveId] = useState<number | null>(null);
   const [edits, setEdits] = useState<FindingEdits | null>(null);
@@ -349,6 +454,46 @@ export function WetCheckWizard({ id }: { id: number }) {
     if (ae && node.contains(ae)) return;
     node.focus({ preventScroll: false });
   }, [active?.f.id]);
+
+  // ── Route dialog (R shortcut) ──────────────────────────────────────
+  const [routeDialogOpen, setRouteDialogOpen] = useState(false);
+
+  // ── "Show help" tick counter forces DismissibleHelp remount ──────────
+  const [tick, setTick] = useState(0);
+  const handleShowHelp = useCallback(() => {
+    resetHelpDismissal("wc-review-ready-to-approve");
+    resetHelpDismissal("wc-review-keyboard-shortcuts");
+    setTick(t => t + 1);
+  }, []);
+
+  // ── Optimistic approve mutation ────────────────────────────────────────
+  const approveMut = useMutation({
+    mutationFn: () => apiRequest(`/api/wet-checks/${id}/approve`, "POST"),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ["/api/wet-checks", id] });
+      const prev = queryClient.getQueryData(["/api/wet-checks", id]);
+      queryClient.setQueryData(["/api/wet-checks", id], (old: WetCheckWithDetails | undefined) => {
+        if (!old) return old;
+        return { ...old, status: "approved", approvedAt: new Date().toISOString() };
+      });
+      return { prev };
+    },
+    onError: (err: any, _vars, ctx: { prev: unknown } | undefined) => {
+      if (ctx?.prev !== undefined) {
+        queryClient.setQueryData(["/api/wet-checks", id], ctx.prev);
+      }
+      toast({ title: "Approve failed", description: err?.message, variant: "destructive" });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks/pending-review"] });
+    },
+  });
+
+  const handleApprove = useCallback(() => {
+    if (!allGreen || isBillingManager || approveMut.isPending) return;
+    approveMut.mutate();
+  }, [allGreen, isBillingManager, approveMut]);
 
   const editMut = useMutation({
     mutationFn: (vars: { fid: number; patch: FindingEdits }) =>
@@ -456,25 +601,51 @@ export function WetCheckWizard({ id }: { id: number }) {
 
       switch (e.key) {
         case "1":
-          if (!active || isActiveFindingAutoBilled) return;
+          if (!active || isActiveFindingAutoBilled || isBillingManager) return;
           e.preventDefault();
           handleDecision("sent_to_estimate");
           break;
         case "2":
-          if (!active || isActiveFindingAutoBilled) return;
+          if (!active || isActiveFindingAutoBilled || isBillingManager) return;
           e.preventDefault();
           handleDecision("deferred_to_work_order");
           break;
         case "3":
-          if (!active || isActiveFindingAutoBilled) return;
+          if (!active || isActiveFindingAutoBilled || isBillingManager) return;
           e.preventDefault();
           handleDecision("documented_only");
           break;
         case "4":
-          if (!active || isActiveFindingAutoBilled) return;
+          if (!active || isActiveFindingAutoBilled || isBillingManager) return;
           e.preventDefault();
           handleDecision("repaired_in_field");
           break;
+        case "a":
+        case "A":
+          if (isBillingManager) return;
+          if (!allGreen) return;
+          e.preventDefault();
+          handleApprove();
+          break;
+        case "j":
+        case "J":
+          if (editMode || !active) return;
+          e.preventDefault();
+          handleSkip();
+          break;
+        case "k":
+        case "K":
+          if (editMode || !active) return;
+          e.preventDefault();
+          handlePrev();
+          break;
+        case "r":
+        case "R": {
+          if (editMode || !active || isActiveFindingAutoBilled || isBillingManager) return;
+          e.preventDefault();
+          setRouteDialogOpen(true);
+          break;
+        }
         case "ArrowRight":
           if (editMode || !active) return;
           e.preventDefault();
@@ -494,7 +665,7 @@ export function WetCheckWizard({ id }: { id: number }) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [active, advancing, editMode, isActiveFindingAutoBilled, handleDecision, handleSkip, handlePrev, navigate, id]);
+  }, [active, advancing, editMode, isActiveFindingAutoBilled, handleDecision, handleSkip, handlePrev, navigate, id, allGreen, isBillingManager, handleApprove]);
 
   // ── Tutorial tip ──────────────────────────────────────────────────────
   const [showTutorial, setShowTutorial] = useState(false);
@@ -642,6 +813,19 @@ export function WetCheckWizard({ id }: { id: number }) {
   // ── Two-panel triage layout ───────────────────────────────────────────
   return (
     <div className="flex flex-col h-full" data-testid="wizard-two-panel">
+      {/* ── Billing manager read-only banner ─────────────────────────── */}
+      {isBillingManager && (
+        <div
+          className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center gap-2 text-sm text-blue-800"
+          data-testid="wizard-billing-manager-banner"
+          role="status"
+        >
+          <span className="font-medium">View only</span>
+          <span className="text-blue-600">—</span>
+          <span>Billing managers can review but cannot approve or route.</span>
+        </div>
+      )}
+
       {/* ── Top header ───────────────────────────────────────────────── */}
       <div
         className="sticky top-0 z-20 bg-white border-b px-4 py-3 space-y-2"
@@ -653,10 +837,33 @@ export function WetCheckWizard({ id }: { id: number }) {
               <ChevronLeft className="w-4 h-4 mr-1" aria-hidden="true" /> Back to inbox
             </Button>
           </Link>
-          <div className="text-xs text-gray-500 shrink-0">
-            {wc.customerName} · <span className="font-mono">WC-{wc.id}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="text-xs text-gray-500">
+              {wc.customerName} · <span className="font-mono">WC-{wc.id}</span>
+            </div>
+            {!editMode && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleShowHelp}
+                data-testid="wizard-show-help"
+                className="text-gray-400 hover:text-gray-600 h-7 px-2"
+                title="Show help"
+              >
+                <HelpCircle className="w-4 h-4" aria-hidden="true" />
+                <span className="sr-only">Show help</span>
+              </Button>
+            )}
           </div>
         </div>
+
+        {/* 3-step workflow indicator */}
+        {!editMode && (
+          <WorkflowIndicator
+            allZonesReviewed={allZonesReviewed}
+            allFindingsResolved={allFindingsResolved}
+          />
+        )}
 
         {/* Progress bar */}
         {!editMode && (
@@ -825,9 +1032,9 @@ export function WetCheckWizard({ id }: { id: number }) {
                     title="Estimate"
                     helper="Customer must approve before work starts"
                     shortcutLabel="1"
-                    disabled={advancing}
+                    disabled={advancing || isBillingManager}
                     loading={advancing}
-                    onClick={() => handleDecision("sent_to_estimate")}
+                    onClick={() => !isBillingManager && handleDecision("sent_to_estimate")}
                   />
                   <DecisionCard
                     testId="wizard-decision-work-order"
@@ -836,8 +1043,8 @@ export function WetCheckWizard({ id }: { id: number }) {
                     title="Work Order"
                     helper="Adds to the work queue, schedule any time"
                     shortcutLabel="2"
-                    disabled={advancing}
-                    onClick={() => handleDecision("deferred_to_work_order")}
+                    disabled={advancing || isBillingManager}
+                    onClick={() => !isBillingManager && handleDecision("deferred_to_work_order")}
                   />
                   <DecisionCard
                     testId="wizard-decision-document"
@@ -846,8 +1053,8 @@ export function WetCheckWizard({ id }: { id: number }) {
                     title="Documented Only"
                     helper="Logged for the record, no work scheduled"
                     shortcutLabel="3"
-                    disabled={advancing}
-                    onClick={() => handleDecision("documented_only")}
+                    disabled={advancing || isBillingManager}
+                    onClick={() => !isBillingManager && handleDecision("documented_only")}
                   />
                   <DecisionCard
                     testId="wizard-decision-repaired"
@@ -856,8 +1063,8 @@ export function WetCheckWizard({ id }: { id: number }) {
                     title="Already Repaired — Bill It"
                     helper="Tech repaired on-site, add to billing"
                     shortcutLabel="4"
-                    disabled={advancing}
-                    onClick={() => handleDecision("repaired_in_field")}
+                    disabled={advancing || isBillingManager}
+                    onClick={() => !isBillingManager && handleDecision("repaired_in_field")}
                   />
                 </div>
               </div>
@@ -896,6 +1103,22 @@ export function WetCheckWizard({ id }: { id: number }) {
         </div>
       </div>
 
+      {/* ── All-green DismissibleHelp guide ──────────────────────────── */}
+      {!editMode && allGreen && !isBillingManager && (
+        <div className="px-4 pt-3" data-testid="wizard-all-green-section">
+          <DismissibleHelp
+            key={tick}
+            guideId="wc-review-ready-to-approve"
+            variant="info"
+          >
+            All zones reviewed and all findings resolved — this wet check is ready to approve.
+            Press <kbd className="px-1 border border-emerald-300 rounded text-xs">A</kbd> to approve instantly, or click{" "}
+            <strong>Approve &amp; Convert</strong> below. The billing row will be created as{" "}
+            <span className="font-mono text-xs">WC-{new Date().getFullYear()}-{String(id).padStart(4, "0")}</span>.
+          </DismissibleHelp>
+        </div>
+      )}
+
       {/* ── Bottom CTA bar ───────────────────────────────────────────── */}
       {!editMode && (
         <div
@@ -907,16 +1130,59 @@ export function WetCheckWizard({ id }: { id: number }) {
               ? `${pendingFindings.length} finding${pendingFindings.length === 1 ? "" : "s"} remaining`
               : "All findings resolved"}
           </div>
-          <Button
-            onClick={handleConvert}
-            disabled={!allResolved}
-            data-testid="wizard-approve-convert"
-            className="min-h-[44px]"
-          >
-            Approve &amp; Convert
-          </Button>
+          {allGreen && !isBillingManager ? (
+            <Button
+              onClick={handleApprove}
+              disabled={approveMut.isPending}
+              data-testid="wizard-approve-convert"
+              className="min-h-[44px] bg-emerald-600 hover:bg-emerald-700"
+            >
+              {approveMut.isPending && <Loader2 className="w-4 h-4 mr-1 animate-spin" aria-hidden="true" />}
+              Approve <kbd className="ml-1 opacity-70 text-xs border border-emerald-300 rounded px-1">A</kbd>
+            </Button>
+          ) : (
+            <Button
+              onClick={handleConvert}
+              disabled={!allResolved || isBillingManager}
+              data-testid="wizard-approve-convert"
+              className="min-h-[44px]"
+            >
+              Approve &amp; Convert
+            </Button>
+          )}
         </div>
       )}
+
+      {/* ── Route dialog (R shortcut) ─────────────────────────────────── */}
+      <Dialog open={routeDialogOpen} onOpenChange={setRouteDialogOpen}>
+        <DialogContent data-testid="wizard-route-dialog">
+          <DialogHeader>
+            <DialogTitle>Route this finding</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-1 gap-3 pt-2">
+            {[
+              { label: "Estimate — customer approves first", value: "sent_to_estimate" as const, accent: "blue" },
+              { label: "Work Order — schedule any time", value: "deferred_to_work_order" as const, accent: "purple" },
+              { label: "Documented Only — log with no work", value: "documented_only" as const, accent: "gray" },
+              { label: "Already Repaired — bill it", value: "repaired_in_field" as const, accent: "green" },
+            ].map(({ label, value }) => (
+              <Button
+                key={value}
+                variant="outline"
+                className="justify-start min-h-[44px] text-left"
+                data-testid={`route-dialog-option-${value}`}
+                disabled={advancing}
+                onClick={() => {
+                  setRouteDialogOpen(false);
+                  handleDecision(value);
+                }}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
