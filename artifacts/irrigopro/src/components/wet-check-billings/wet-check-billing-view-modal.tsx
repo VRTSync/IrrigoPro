@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { useLocation } from "wouter";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import {
   Dialog,
@@ -14,11 +14,9 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExternalLink, Pencil } from "lucide-react";
 import { WetCheckBillingViewComponent } from "@/components/billing/wet-check-billing-view";
-import type { WetCheckBillingView, WcvZone } from "@/components/billing/wet-check-billing-view";
+import type { WetCheckBillingView } from "@/components/billing/wet-check-billing-view";
 import type { WetCheckBilling } from "@workspace/db/schema";
 import { safeGet } from "@/utils/safeStorage";
-import { useToast } from "@/hooks/use-toast";
-import { LaborHoursStepper } from "@/components/ui/labor-hours-stepper";
 import { WcbLaborRateEdit } from "./wcb-labor-rate-edit";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -55,127 +53,21 @@ function canEditLaborFields(wcb: WetCheckBilling): boolean {
   return true;
 }
 
-// ── Zone labor editor (billing-manager tier, Task #891 / #977) ───────────────
-
-function ZoneLaborEditorRow({
-  zone,
-  wcbId,
-  onSaved,
-}: {
-  zone: WcvZone;
-  wcbId: number;
-  onSaved: () => void;
-}) {
-  const { toast } = useToast();
-  const [localHours, setLocalHours] = useState(zone.repairLaborHours);
-  useEffect(() => { setLocalHours(zone.repairLaborHours); }, [zone.repairLaborHours]);
-
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const saveMut = useMutation({
-    mutationFn: (hours: string) =>
-      apiRequest(`/api/wet-check-billings/${wcbId}/zone-labor`, "PATCH", {
-        zoneRecordId: zone.zoneRecordId,
-        repairLaborHours: hours,
-      }),
-    onSuccess: () => onSaved(),
-    onError: (e: any) => {
-      toast({
-        title: "Couldn't save zone labor",
-        description: e?.message ?? "Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleChange = (val: string) => {
-    setLocalHours(val);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => saveMut.mutate(val), 600);
-  };
-
-  const isManual = zone.repairLaborManuallySet;
-  const hrs = parseFloat(localHours) || 0;
-
-  return (
-    <div
-      className="flex items-center justify-between gap-4 py-2 border-b border-gray-100 last:border-0"
-      data-testid={`wcb-zone-labor-row-${zone.zoneLabel}`}
-    >
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="text-sm font-medium text-gray-700 whitespace-nowrap">
-          Zone {zone.zoneLabel}
-        </span>
-        {isManual ? (
-          <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-300 text-[10px] font-semibold shrink-0">
-            manual
-          </span>
-        ) : (
-          <span className="px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200 text-[10px] font-semibold shrink-0">
-            auto
-          </span>
-        )}
-      </div>
-      <div className="flex items-center gap-3">
-        <span className="text-xs text-gray-500 whitespace-nowrap">
-          {hrs === 0 ? "—" : `${hrs.toFixed(2)} hr`}
-        </span>
-        <div className="w-36">
-          <LaborHoursStepper
-            value={localHours}
-            onChange={handleChange}
-            min="0.00"
-            disabled={saveMut.isPending}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ZoneLaborEditorPanel({
-  view,
-  wcbId,
-  onSaved,
-}: {
-  view: WetCheckBillingView;
-  wcbId: number;
-  onSaved: () => void;
-}) {
-  if (view.zones.length === 0) return null;
-  return (
-    <div
-      className="rounded-lg border border-amber-200 bg-amber-50 p-4"
-      data-testid="wcb-zone-labor-editor"
-    >
-      <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide mb-3">
-        Edit Zone Repair Labor
-      </p>
-      {view.zones.map((z) => (
-        <ZoneLaborEditorRow key={z.zoneRecordId} zone={z} wcbId={wcbId} onSaved={onSaved} />
-      ))}
-    </div>
-  );
-}
-
-// ── Edit affordances panel (Task #977) ────────────────────────────────────────
+// ── Edit affordances panel (Task #977 / #1027) ────────────────────────────────
 // Shown only for billing_manager+ on unlocked (not billed / invoiced) WCBs.
+// Contains only the labor rate editor — zone labor is now inline per-zone.
 
 function EditAffordancesPanel({
   wcb,
-  view,
   onLabourSaved,
   initialAction,
 }: {
   wcb: WetCheckBilling;
-  view: WetCheckBillingView;
   onLabourSaved: () => void;
   initialAction?: "labor-rate" | "zone-labor";
 }) {
   const [editingLaborRate, setEditingLaborRate] = useState(initialAction === "labor-rate");
-  const [showZoneLabor, setShowZoneLabor] = useState(initialAction === "zone-labor");
 
-  const hasZones = view.zones.length > 0;
   const currentRate = String(wcb.laborRate ?? "0");
 
   return (
@@ -216,34 +108,6 @@ function EditAffordancesPanel({
           </div>
         )}
       </div>
-
-      {/* Zone labor row (only when there are zones) */}
-      {hasZones && (
-        <div className="rounded-lg border border-gray-200 bg-white p-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700">Zone Repair Labor</span>
-            <button
-              type="button"
-              onClick={() => setShowZoneLabor((v) => !v)}
-              className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"
-              data-testid="wcb-zone-labor-pencil"
-              aria-label={showZoneLabor ? "Hide zone labor editor" : "Edit zone labor hours"}
-            >
-              <Pencil className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {showZoneLabor && (
-            <div className="mt-3">
-              <ZoneLaborEditorPanel
-                view={view}
-                wcbId={wcb.id}
-                onSaved={onLabourSaved}
-              />
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -291,6 +155,8 @@ export function WetCheckBillingViewModal({
     queryClient.invalidateQueries({ queryKey: ["/api/wet-check-billings"] });
     queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
   }
+
+  const appliedRate = String(wcb?.appliedLaborRate ?? wcb?.laborRate ?? "0");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -344,18 +210,21 @@ export function WetCheckBillingViewModal({
 
           {!isLoading && !isError && view && wcb && (
             <>
-              {/* Task #977 — billing-manager edit affordances for unlocked WCBs */}
+              {/* Task #977 — billing-manager edit affordances (labor rate) for unlocked WCBs */}
               {showEditAffordances && (
                 <EditAffordancesPanel
                   wcb={wcb}
-                  view={view}
                   onLabourSaved={handleLaborSaved}
                   initialAction={initialAction}
                 />
               )}
+              {/* Task #1027 — zone labor inline editing wired through view props */}
               <WetCheckBillingViewComponent
                 view={view}
                 canSeePricing={canSeePricing()}
+                wcbId={wcb.id}
+                canEditLabor={canEditLaborFields(wcb)}
+                laborRate={appliedRate}
               />
             </>
           )}

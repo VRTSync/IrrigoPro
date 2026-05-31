@@ -9719,6 +9719,37 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // Task #1027 — billing-manager-tier reset of zone repair labor on a WCB.
+  // Body: { zoneRecordId: number }
+  // Clears repairLaborManuallySet, re-runs auto-compute, recomputes WCB totals.
+  const wcbZoneLaborResetBody = z.object({
+    zoneRecordId: z.coerce.number().int().positive(),
+  });
+  app.post("/api/wet-check-billings/:id/zone-labor/reset", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    const role = req.authenticatedUserRole;
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin") {
+      res.status(403).json({ message: "Forbidden" }); return;
+    }
+    const parsed = wcbZoneLaborResetBody.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
+    const wcbId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(wcbId)) { res.status(400).json({ message: "Invalid id" }); return; }
+    try {
+      const result = await storage.resetWcbZoneRepairLabor(wcbId, parsed.data.zoneRecordId, cid);
+      if (!result) { res.status(404).json({ message: "Not found" }); return; }
+      res.json(result);
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "resetWcbZoneRepairLabor",
+        ctx: { cid, wcbId, zoneRecordId: parsed.data.zoneRecordId },
+        fallbackStatus: 500,
+        fallbackMessage: "Couldn't reset zone labor",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
   // Task #977 — billing-manager-tier labor-rate override on an unbilled WCB.
   // Body: { newRate: number } — finite, ≥0, ≤1000.
   // Returns 409 for billed or invoiced WCBs; 403 for field_tech or cross-company.

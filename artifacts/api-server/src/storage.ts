@@ -982,6 +982,13 @@ export interface IStorage {
     companyId: number,
   ): Promise<{ zoneRecord: WetCheckZoneRecord; wcb: WetCheckBilling } | undefined>;
 
+  /** Task #1027 — billing-manager-tier reset of zone repair labor on a finalised WCB. */
+  resetWcbZoneRepairLabor(
+    wcbId: number,
+    zoneRecordId: number,
+    companyId: number,
+  ): Promise<{ zoneRecord: WetCheckZoneRecord; wcb: WetCheckBilling } | undefined>;
+
   createWetCheckFinding(
     zoneRecordId: number,
     companyId: number,
@@ -7885,6 +7892,73 @@ export class DatabaseStorage implements IStorage {
       const wcBaseLaborHours = parseFloat(String(wc.totalLaborHours ?? "0")) || 0;
       const totalLaborHours = wcBaseLaborHours + allZoneRepairHours;
       // Use the snapshot rate on the WCB to avoid repricing.
+      const snapshotRate = parseFloat(String(wcb.appliedLaborRate ?? wcb.laborRate ?? "45"));
+      const laborSubtotal = totalLaborHours * snapshotRate;
+      const partsSubtotal = parseFloat(String(wcb.partsSubtotal ?? "0")) || 0;
+      const total = laborSubtotal + partsSubtotal;
+      const [updatedWcb] = await tx.update(wetCheckBillings).set({
+        totalHours: totalLaborHours.toFixed(2),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        totalAmount: total.toFixed(2),
+      }).where(eq(wetCheckBillings.id, wcbId)).returning();
+      return { zoneRecord: zoneRow, wcb: updatedWcb };
+    });
+  }
+
+  // Task #1027 — billing-manager-tier reset of zone repair labor on a finalised WCB.
+  // Clears repairLaborManuallySet, re-runs auto-compute, then recomputes the WCB's
+  // laborSubtotal / totalAmount — same pattern as setWcbZoneRepairLabor.
+  async resetWcbZoneRepairLabor(
+    wcbId: number,
+    zoneRecordId: number,
+    companyId: number,
+  ): Promise<{ zoneRecord: WetCheckZoneRecord; wcb: WetCheckBilling } | undefined> {
+    return db.transaction(async (tx) => {
+      const [wcb] = await tx.select().from(wetCheckBillings).where(eq(wetCheckBillings.id, wcbId));
+      if (!wcb) return undefined;
+      const [wc] = await tx.select().from(wetChecks).where(eq(wetChecks.id, wcb.wetCheckId));
+      if (!wc || wc.companyId !== companyId) return undefined;
+      if (wcb.invoiceId != null) {
+        throw new Error(`Wet check billing ${wcbId} is already invoiced and cannot be edited`);
+      }
+      if (wcb.status === "billed") {
+        throw new Error(`Wet check billing ${wcbId} is billed and cannot be edited`);
+      }
+      // Verify the zone record is part of this WCB's findings.
+      const [wcbFindingForZone] = await tx
+        .select({ zoneRecordId: wetCheckFindings.zoneRecordId })
+        .from(wetCheckFindings)
+        .where(
+          and(
+            eq(wetCheckFindings.wetCheckBillingId, wcbId),
+            eq(wetCheckFindings.zoneRecordId, zoneRecordId),
+          ),
+        )
+        .limit(1);
+      if (!wcbFindingForZone) return undefined;
+      // Clear the manual flag so auto-compute will run.
+      await tx.update(wetCheckZoneRecords)
+        .set({ repairLaborManuallySet: false })
+        .where(eq(wetCheckZoneRecords.id, zoneRecordId));
+      // Re-run auto-compute (repairLaborManuallySet is now false so it won't short-circuit).
+      await this._recomputeZoneRepairLaborIfAuto(tx, zoneRecordId, companyId);
+      const [zoneRow] = await tx.select().from(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.id, zoneRecordId));
+      if (!zoneRow) return undefined;
+      // Recompute WCB totals: collect all zone IDs with findings tied to this WCB.
+      const findingRows = await tx.select({ zoneRecordId: wetCheckFindings.zoneRecordId })
+        .from(wetCheckFindings)
+        .where(eq(wetCheckFindings.wetCheckBillingId, wcbId));
+      const allZoneIds = Array.from(new Set(findingRows.map((f) => f.zoneRecordId)));
+      const allZoneRows = allZoneIds.length > 0
+        ? await tx.select({ repairLaborHours: wetCheckZoneRecords.repairLaborHours })
+            .from(wetCheckZoneRecords)
+            .where(inArray(wetCheckZoneRecords.id, allZoneIds))
+        : [];
+      const allZoneRepairHours = allZoneRows.reduce(
+        (s, zr) => s + parseFloat(String(zr.repairLaborHours ?? "0")), 0,
+      );
+      const wcBaseLaborHours = parseFloat(String(wc.totalLaborHours ?? "0")) || 0;
+      const totalLaborHours = wcBaseLaborHours + allZoneRepairHours;
       const snapshotRate = parseFloat(String(wcb.appliedLaborRate ?? wcb.laborRate ?? "45"));
       const laborSubtotal = totalLaborHours * snapshotRate;
       const partsSubtotal = parseFloat(String(wcb.partsSubtotal ?? "0")) || 0;

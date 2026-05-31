@@ -13,6 +13,7 @@
 import { format } from "date-fns";
 import { Wrench, MapPin, ClipboardList, DollarSign, CloudSun, Camera } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
+import { ZoneLaborEditInline } from "@/components/wet-check-billings/zone-labor-edit-inline";
 
 // ─── Mirrored types (match artifacts/api-server/src/wet-check-billing-view.ts) ─
 
@@ -153,9 +154,15 @@ function PhotoStrip({
 function ZoneSection({
   zone,
   canSeePricing,
+  wcbId,
+  canEditLabor,
+  laborRate,
 }: {
   zone: WcvZone;
   canSeePricing: boolean;
+  wcbId?: number;
+  canEditLabor?: boolean;
+  laborRate?: string;
 }) {
   const visibleItems = zone.lineItems.filter(shouldShowLineItem);
   const repairLaborNum = toNum(zone.repairLaborHours);
@@ -272,16 +279,31 @@ function ZoneSection({
           <p className="text-xs text-gray-400 italic">No billable parts for this zone.</p>
         )}
 
-        {/* Zone labor row */}
-        {canSeePricing && repairLaborNum > 0 && (
-          <div className="flex items-center justify-between pt-1 border-t border-dashed border-gray-200 mt-1">
-            <span className="text-xs text-gray-500">
-              Repair labor ({repairLaborNum.toFixed(2)} hr{repairLaborNum !== 1 ? "s" : ""})
-            </span>
-            <span className="text-sm font-medium text-gray-700">
-              {currency(zone.zoneLaborSubtotal)}
-            </span>
-          </div>
+        {/* Zone labor row — inline editor when in billing modal context (wcbId present),
+            read-only display otherwise. Always rendered regardless of canSeePricing so
+            field_tech can see hours and auto/manual badge; dollar value is suppressed
+            when canSeePricing=false via the canSeePricing prop on ZoneLaborEditInline. */}
+        {wcbId != null ? (
+          <ZoneLaborEditInline
+            wcbId={wcbId}
+            zoneRecordId={zone.zoneRecordId}
+            valueHours={zone.repairLaborHours}
+            manuallySet={zone.repairLaborManuallySet}
+            laborRate={laborRate ?? "0"}
+            canEdit={!!canEditLabor}
+            canSeePricing={canSeePricing}
+          />
+        ) : (
+          canSeePricing && repairLaborNum > 0 && (
+            <div className="flex items-center justify-between pt-1 border-t border-dashed border-gray-200 mt-1">
+              <span className="text-xs text-gray-500">
+                Repair labor ({repairLaborNum.toFixed(2)} hr{repairLaborNum !== 1 ? "s" : ""})
+              </span>
+              <span className="text-sm font-medium text-gray-700">
+                {currency(zone.zoneLaborSubtotal)}
+              </span>
+            </div>
+          )
         )}
 
         {/* Zone subtotal */}
@@ -301,11 +323,20 @@ function ZoneSection({
 interface WetCheckBillingViewProps {
   view: WetCheckBillingView;
   canSeePricing: boolean;
+  /** When present, the zone-labor inline editor is rendered (billing-manager modal context). */
+  wcbId?: number;
+  /** True when the current user can edit zone labor (billing_manager+ on unlocked WCB). */
+  canEditLabor?: boolean;
+  /** Applied labor rate for the inline dollar-value calculation, e.g. "80.00". */
+  laborRate?: string;
 }
 
 export function WetCheckBillingViewComponent({
   view,
   canSeePricing,
+  wcbId,
+  canEditLabor,
+  laborRate,
 }: WetCheckBillingViewProps) {
   const totalFindings = view.zones.reduce((s, z) => s + z.lineItems.length, 0);
 
@@ -427,6 +458,9 @@ export function WetCheckBillingViewComponent({
                 key={zone.zoneLabel}
                 zone={zone}
                 canSeePricing={canSeePricing}
+                wcbId={wcbId}
+                canEditLabor={canEditLabor}
+                laborRate={laborRate}
               />
             ))}
           </div>
