@@ -865,7 +865,7 @@ export interface IStorage {
   // Admin-only company-wide list with per-row aggregate counts (zone
   // records, findings, photos). Used by the company-admin Wet Checks
   // management page.
-  listWetChecksForAdmin(companyId: number, opts?: { status?: string }): Promise<Array<WetCheck & {
+  listWetChecksForAdmin(companyId: number, opts?: { status?: string | string[] }): Promise<Array<WetCheck & {
     zoneRecordCount: number;
     findingCount: number;
     photoCount: number;
@@ -6628,10 +6628,17 @@ export class DatabaseStorage implements IStorage {
 
   async listWetChecksForAdmin(
     companyId: number,
-    opts?: { status?: string },
+    opts?: { status?: string | string[] },
   ): Promise<Array<WetCheck & { zoneRecordCount: number; findingCount: number; photoCount: number }>> {
     const conds = [eq(wetChecks.companyId, companyId)];
-    if (opts?.status) conds.push(eq(wetChecks.status, opts.status));
+    if (opts?.status) {
+      const statuses = Array.isArray(opts.status) ? opts.status : [opts.status];
+      if (statuses.length === 1) {
+        conds.push(eq(wetChecks.status, statuses[0]));
+      } else if (statuses.length > 1) {
+        conds.push(inArray(wetChecks.status, statuses));
+      }
+    }
     // Admin list is the canonical "show every wet check" surface for
     // company admins (used to find and delete records). Returning the
     // full set avoids silently hiding older rows; callers narrow the

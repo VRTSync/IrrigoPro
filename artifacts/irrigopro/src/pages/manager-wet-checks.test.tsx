@@ -1,87 +1,44 @@
 /**
- * manager-wet-checks.test.tsx (Task #803 — Slice 7)
+ * manager-wet-checks.test.tsx — rewired to WetChecksListPage (Slice 7)
  *
- * Asserts:
- *   1. Page queries /api/wet-check-billings (not /api/billing-sheets)
- *   2. "auto-billed today" KPI counts only entries whose workDate is today
- *   3. The drill-in KPI tile href points to /wet-check-billings
+ * Verifies that irrigation_manager's default status filter is 'submitted'
+ * and that the unified list page renders correctly for that role.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import ManagerWetChecksPage from "./manager-wet-checks";
 
-vi.mock("@/components/admin-dashboard/header-strip", () => ({
-  HeaderStrip: ({ name, health, healthLabel }: any) => (
-    <div data-testid="header-strip">{healthLabel}</div>
-  ),
-}));
-
-vi.mock("@/components/admin-dashboard/kpi-tile", () => ({
-  KpiTile: ({ label, value, href, testId }: any) => (
-    <div data-testid={testId}>
-      <span data-testid={`${testId}-label`}>{label}</span>
-      <span data-testid={`${testId}-value`}>{value}</span>
-      {href && <a data-testid={`${testId}-href`} href={href}>{href}</a>}
-    </div>
-  ),
-}));
-
-vi.mock("@/components/manager/wet-check-card", () => ({
-  WetCheckCard: ({ wc }: any) => <div data-testid={`wc-card-${wc.id}`} />,
-}));
-
-vi.mock("@/utils/safeStorage", () => ({
-  safeGet: () => null,
-}));
-
-function todayIso(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}T12:00:00.000Z`;
-}
-
-function yesterday(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return d.toISOString();
-}
-
-function makeWcb(overrides: Record<string, unknown> = {}) {
+vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock("@/lib/queryClient", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/queryClient")>(
+    "@/lib/queryClient",
+  );
+  return { ...actual, apiRequest: vi.fn(async () => []) };
+});
+vi.mock("wouter", async () => {
+  const actual = await vi.importActual<typeof import("wouter")>("wouter");
   return {
-    id: 1,
-    billingNumber: "WCB-2026-001",
-    customerId: 10,
-    customerName: "Acme",
-    propertyAddress: "1 Main St",
-    technicianName: "Jordan",
-    technicianId: 5,
-    wetCheckId: 20,
-    status: "submitted",
-    workDate: todayIso(),
-    totalAmount: "150.00",
-    laborRate: "75.00",
-    laborSubtotal: "75.00",
-    partsSubtotal: "75.00",
-    totalHours: "1.00",
-    invoiceId: null,
-    billedAt: null,
-    photos: [],
-    notes: null,
-    branchName: null,
-    approvedBy: null,
-    approvedByUserId: null,
-    approvedAt: null,
-    approvedTotal: null,
-    appliedLaborRate: null,
-    noPhotosNeeded: false,
-    createdAt: new Date(todayIso()),
-    updatedAt: new Date(todayIso()),
-    ...overrides,
+    ...actual,
+    useLocation: () => ["/wet-checks", vi.fn()],
+    Link: ({ href, children }: any) => <a href={href}>{children}</a>,
   };
+});
+
+const mockGetCurrentUser = vi.fn();
+vi.mock("./wet-checks/helpers", () => ({
+  getCurrentUser: () => mockGetCurrentUser(),
+}));
+
+import WetChecksListPage from "./wet-checks/WetChecksListPage";
+import { resetHelpDismissal } from "@/components/shared/dismissible-help";
+
+function buildQc(rows: unknown[] = []) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  qc.setQueryData(["/api/wet-checks/admin", "submitted,pending_manager_review"], rows);
+  qc.setQueryData(["/api/wet-checks/admin", "all"], rows);
+  qc.setQueryData(["/api/customers", { active: true }], []);
+  return qc;
 }
 
 function wrapper(qc: QueryClient) {
@@ -90,60 +47,52 @@ function wrapper(qc: QueryClient) {
   );
 }
 
-function buildClient(
-  wetCheckBillings: unknown[],
-  pendingReviews: unknown[] = [],
-) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  qc.setQueryData(["/api/wet-check-billings"], wetCheckBillings);
-  qc.setQueryData(["/api/wet-checks/pending-review"], pendingReviews);
-  return qc;
-}
+beforeEach(() => {
+  mockGetCurrentUser.mockReturnValue({ id: 1, role: "irrigation_manager", name: "Manager" });
+  window.localStorage.clear();
+});
+afterEach(() => {
+  window.localStorage.clear();
+  vi.clearAllMocks();
+  resetHelpDismissal("wc-list-first-time");
+});
 
-describe("ManagerWetChecksPage (Task #803)", () => {
-  it("renders the page wrapper", () => {
-    const qc = buildClient([]);
-    render(<ManagerWetChecksPage />, { wrapper: wrapper(qc) });
-    expect(screen.getByTestId("manager-wet-checks-page")).toBeDefined();
+describe("WetChecksListPage — irrigation_manager role (rewired from manager-wet-checks)", () => {
+  it("renders the unified page wrapper", () => {
+    const qc = buildQc([]);
+    render(<WetChecksListPage />, { wrapper: wrapper(qc) });
+    expect(screen.getByTestId("page-wet-checks-list")).toBeDefined();
   });
 
-  it("queries /api/wet-check-billings and shows today's total", () => {
-    const todayRow = makeWcb({ id: 1, totalAmount: "200.00" });
-    const qc = buildClient([todayRow]);
-    render(<ManagerWetChecksPage />, { wrapper: wrapper(qc) });
-
-    const valueEl = screen.getByTestId("kpi-completed-today-value");
-    expect(valueEl.textContent).toContain("200.00");
-  });
-
-  it("auto-billed today counts only entries whose workDate is today", () => {
-    const todayA = makeWcb({ id: 1, totalAmount: "100.00", workDate: todayIso() });
-    const todayB = makeWcb({ id: 2, totalAmount: "50.00", workDate: todayIso() });
-    const notToday = makeWcb({ id: 3, totalAmount: "999.00", workDate: yesterday() });
-    const qc = buildClient([todayA, todayB, notToday]);
-    render(<ManagerWetChecksPage />, { wrapper: wrapper(qc) });
-
-    const valueEl = screen.getByTestId("kpi-completed-today-value");
-    expect(valueEl.textContent).toContain("150.00");
-    expect(valueEl.textContent).not.toContain("999");
-  });
-
-  it("does not query /api/billing-sheets", () => {
-    const qc = buildClient([]);
+  it("seeds status=submitted,pending_manager_review as the default filter", () => {
+    const qc = buildQc([]);
     const spy = vi.spyOn(qc, "getQueryData");
-    render(<ManagerWetChecksPage />, { wrapper: wrapper(qc) });
-
-    const billingSheetsCalls = spy.mock.calls.filter(
-      (args) => JSON.stringify(args[0]).includes("/api/billing-sheets"),
+    render(<WetChecksListPage />, { wrapper: wrapper(qc) });
+    const submittedCalls = spy.mock.calls.filter(
+      (args) => JSON.stringify(args[0]).includes("submitted,pending_manager_review"),
     );
-    expect(billingSheetsCalls).toHaveLength(0);
+    expect(submittedCalls.length).toBeGreaterThan(0);
   });
 
-  it("drill-in KPI href points to /wet-check-billings", () => {
-    const qc = buildClient([makeWcb()]);
-    render(<ManagerWetChecksPage />, { wrapper: wrapper(qc) });
+  it("does NOT show bulk select checkbox for irrigation_manager", () => {
+    const qc = buildQc([{
+      id: 1, customerName: "Acme", propertyAddress: null,
+      technicianName: "Tech", status: "submitted",
+      startedAt: "2026-05-01T10:00:00Z", submittedAt: null, approvedAt: null,
+    }]);
+    render(<WetChecksListPage />, { wrapper: wrapper(qc) });
+    expect(screen.queryByTestId("checkbox-wc-select-all")).toBeNull();
+  });
 
-    const hrefEl = screen.getByTestId("kpi-completed-today-href") as HTMLAnchorElement;
-    expect(hrefEl.getAttribute("href")).toBe("/wet-check-billings");
+  it("does NOT show company column filter for irrigation_manager", () => {
+    const qc = buildQc([]);
+    render(<WetChecksListPage />, { wrapper: wrapper(qc) });
+    expect(screen.queryByTestId("select-wc-company-filter")).toBeNull();
+  });
+
+  it("shows empty-state picker when no wet checks are found", () => {
+    const qc = buildQc([]);
+    render(<WetChecksListPage />, { wrapper: wrapper(qc) });
+    expect(screen.getByTestId("wc-empty-state-picker")).toBeTruthy();
   });
 });

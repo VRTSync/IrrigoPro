@@ -93,14 +93,14 @@ export function DismissibleHelp({
   return (
     <div
       role="note"
-      data-testid={`dismissible-help-${guideId}`}
+      data-testid={`help-${guideId}`}
       className={`rounded-lg px-4 py-3 flex items-start gap-3 ${cls.container}`}
     >
       <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${cls.iconColor}`} aria-hidden="true" />
       <div className="flex-1 text-sm">{children}</div>
       <button
         type="button"
-        data-testid={`dismissible-help-${guideId}-dismiss`}
+        data-testid={`help-dismiss-${guideId}`}
         aria-label="Dismiss"
         onClick={handleDismiss}
         className={`shrink-0 ${cls.dismissColor}`}

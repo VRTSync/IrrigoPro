@@ -15130,14 +15130,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     if (
       req.authenticatedUserRole !== "company_admin" &&
       req.authenticatedUserRole !== "super_admin" &&
-      req.authenticatedUserRole !== "irrigation_manager"
+      req.authenticatedUserRole !== "irrigation_manager" &&
+      req.authenticatedUserRole !== "billing_manager"
     ) {
       res.status(403).json({ message: "Forbidden" });
       return;
     }
     try {
-      const opts: { status?: string } = {};
-      if (req.query.status) opts.status = String(req.query.status);
+      const statusParam = req.query.status;
+      const opts: { status?: string | string[] } = {};
+      if (Array.isArray(statusParam)) {
+        opts.status = statusParam.map(String);
+      } else if (statusParam) {
+        opts.status = String(statusParam);
+      }
       const rows = await storage.listWetChecksForAdmin(cid, opts);
       res.json(rows);
     } catch (e: any) {

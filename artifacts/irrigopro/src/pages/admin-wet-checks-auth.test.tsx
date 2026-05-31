@@ -1,16 +1,13 @@
-// Task #555 — regression for the irrigation manager landing on
-// /wet-checks/admin and seeing a red "Authentication required" card in
-// place of the wet-checks list. Two angles are covered here:
-//
-//  1. A 401 from the list endpoint must NOT render the
-//     "Authentication required" / "Failed to load wet checks" card.
-//     Instead the page degrades like every other list (silently empty)
-//     and routes the user through the normal re-login flow. This is
-//     the same returnNull contract the rest of the app uses.
-//  2. A static guard against the previous regression: the page must
-//     not ship a custom queryFn that calls `apiRequest` without a 401
-//     escape hatch — otherwise the raw server message would leak back
-//     into the UI on a transient session lapse.
+/**
+ * admin-wet-checks-auth.test.tsx — rewired to WetChecksListPage (Slice 7)
+ *
+ * Task #555 regression: a 401 from the list endpoint must NOT render
+ * "Authentication required" or "Failed to load wet checks" in the UI.
+ * The page degrades silently and redirects to /login.
+ *
+ * The static guard (no un-escaped apiRequest in queryFn) now targets
+ * WetChecksListPage instead of the deleted admin-wet-checks.tsx.
+ */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -19,12 +16,20 @@ import fs from "node:fs";
 import path from "node:path";
 
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
-vi.mock("@/utils/safeStorage", () => ({ safeGet: () => null }));
+vi.mock("wouter", async () => {
+  const actual = await vi.importActual<typeof import("wouter")>("wouter");
+  return {
+    ...actual,
+    useLocation: () => ["/wet-checks", vi.fn()],
+    Link: ({ href, children }: any) => <a href={href}>{children}</a>,
+  };
+});
 
-// Stub `apiRequest` to throw the exact `${status}: ${json}` shape the
-// real fetch wrapper produces on a 401 — mirroring the production
-// crash payload. Keep `asArray`, `parseApiError`, and `queryClient`
-// from the real module so the page logic is otherwise untouched.
+const mockGetCurrentUser = vi.fn();
+vi.mock("./wet-checks/helpers", () => ({
+  getCurrentUser: () => mockGetCurrentUser(),
+}));
+
 vi.mock("@/lib/queryClient", async () => {
   const actual = await vi.importActual<typeof import("@/lib/queryClient")>(
     "@/lib/queryClient",
@@ -37,16 +42,18 @@ vi.mock("@/lib/queryClient", async () => {
   };
 });
 
-import AdminWetChecksPage from "./admin-wet-checks";
+import WetChecksListPage from "./wet-checks/WetChecksListPage";
 
-describe("Task #555 — admin wet checks page degrades on 401", () => {
+describe("WetChecksListPage — 401 degradation (Slice 7, Task #555 regression)", () => {
   let originalLocation: Location;
   beforeEach(() => {
+    mockGetCurrentUser.mockReturnValue({ id: 1, role: "company_admin" });
+    window.localStorage.clear();
     originalLocation = window.location;
     Object.defineProperty(window, "location", {
       configurable: true,
       writable: true,
-      value: { ...originalLocation, href: "/wet-checks/admin" } as Location,
+      value: { ...originalLocation, href: "/wet-checks" } as Location,
     });
   });
   afterEach(() => {
@@ -55,52 +62,39 @@ describe("Task #555 — admin wet checks page degrades on 401", () => {
       writable: true,
       value: originalLocation,
     });
+    vi.clearAllMocks();
   });
 
-  it("does not render an 'Authentication required' card when the list endpoint returns 401", async () => {
+  it("does not render 'Authentication required' when the list endpoint returns 401", async () => {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: 0 } },
     });
     render(
       <QueryClientProvider client={qc}>
-        <AdminWetChecksPage />
+        <WetChecksListPage />
       </QueryClientProvider>,
     );
-    // Wait for the query to settle so the page picks a render branch.
     await waitFor(() => {
-      expect(screen.getByTestId("page-admin-wet-checks")).toBeTruthy();
+      expect(screen.getByTestId("page-wet-checks-list")).toBeTruthy();
     });
-    // The exact regression: the red card from `parseApiError(error,
-    // "Failed to load wet checks.")` rendering "Authentication
-    // required" verbatim must NOT appear, and neither should the
-    // generic fallback that the previous version of this page would
-    // surface on the same 401.
     await waitFor(() => {
       expect(screen.queryByText(/Authentication required/i)).toBeNull();
       expect(screen.queryByText(/Failed to load wet checks/i)).toBeNull();
     });
-    // The re-login redirect should have been kicked off by the
-    // useEffect that watches for `data === null`.
     await waitFor(() => {
       expect(window.location.href).toBe("/login");
     });
   });
 
-  it("does not call apiRequest from a queryFn without a 401 escape hatch (static guard)", () => {
+  it("WetChecksListPage ships 401 escape hatch in its queryFn (static guard)", () => {
     const file = fs.readFileSync(
-      path.resolve(__dirname, "admin-wet-checks.tsx"),
+      path.resolve(__dirname, "wet-checks/WetChecksListPage.tsx"),
       "utf8",
     );
-    // The previous regression was a queryFn that did
-    // `return await apiRequest(url, "GET")` with no try/catch — any
-    // 401 thrown by apiRequest would land in `isError` and the page
-    // would render the server's "Authentication required" message
-    // verbatim. Make sure the queryFn either has a try/catch around
-    // apiRequest OR the file doesn't ship a queryFn at all.
     if (/queryFn:\s*async/.test(file)) {
       expect(
         /\/\^401:\//.test(file),
-        "admin-wet-checks.tsx ships a custom queryFn but is missing the 401 returnNull escape hatch (look for `/^401:/`).",
+        "WetChecksListPage.tsx ships a custom queryFn but is missing the 401 returnNull escape hatch (look for `/^401:/`).",
       ).toBe(true);
     }
   });
