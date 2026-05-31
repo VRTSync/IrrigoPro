@@ -490,13 +490,13 @@ export function registerManagerWorkspaceRoutes(
           return Number.isFinite(t) ? t : NaN;
         };
 
-        const wcsPendingReview = wcs.filter((w) => ACTIVE_WC.has(w.status)).length;
-        const wosAwaitingApproval = wos.filter((w) =>
-          ACTIVE_WO_FOR_MANAGER.has(w.status),
-        ).length;
-        const findingsNeedingRouting = findings.filter((f) =>
-          isFindingPendingRouting(f),
-        ).length;
+        const activeWcs = wcs.filter((w) => ACTIVE_WC.has(w.status));
+        const activeWos = wos.filter((w) => ACTIVE_WO_FOR_MANAGER.has(w.status));
+        const activeFindings = findings.filter((f) => isFindingPendingRouting(f));
+
+        const wcsPendingReview = activeWcs.length;
+        const wosAwaitingApproval = activeWos.length;
+        const findingsNeedingRouting = activeFindings.length;
 
         const approvedThisWeek =
           wcs.filter(
@@ -515,12 +515,30 @@ export function registerManagerWorkspaceRoutes(
               tsOf(s.approvedAt ?? s.updatedAt) >= isoWeekStart,
           ).length;
 
+        // Compute oldest createdAt for each active indicator bucket,
+        // expressed as fractional hours ago.  null means no rows.
+        const oldestHours = (rows: any[]): number | null => {
+          let oldest: number | null = null;
+          for (const r of rows) {
+            const t = tsOf(r.createdAt);
+            if (!Number.isFinite(t)) continue;
+            if (oldest === null || t < oldest) oldest = t;
+          }
+          if (oldest === null) return null;
+          return (now - oldest) / 3_600_000;
+        };
+
         res.json({
           indicators: {
             wcsPendingReview,
             wosAwaitingApproval,
             findingsNeedingRouting,
             approvedThisWeek,
+          },
+          oldestAgeHours: {
+            wcsPendingReview: oldestHours(activeWcs),
+            wosAwaitingApproval: oldestHours(activeWos),
+            findingsNeedingRouting: oldestHours(activeFindings),
           },
         });
       } catch (error) {
