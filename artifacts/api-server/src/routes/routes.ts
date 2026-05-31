@@ -387,6 +387,7 @@ import {
 import { logger } from "../lib/logger";
 import { coerceLatLngStrings } from "../lib/coerce-lat-lng";
 import { buildWoLineDescription, buildBsLineDescription, buildWcbLineDescription } from "../lib/qb-line-description";
+import { seedIssueTypeConfigsForActiveCompanies } from "../seed-issue-type-configs";
 
 // Production-ready middleware to check if user has company admin permissions for site map operations
 const requireCompanyAdminAccess = (req: any, res: any, next: any) => {
@@ -7228,6 +7229,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerFinancialPulseRoutes(app, { requireAuthentication });
   // Slice 4a — Super-admin DB migration management page.
   registerAdminMigrationsRoutes(app, requireAuthentication);
+
+  // WC Labor Slice 2 — bulk seeder endpoint (super_admin only).
+  // Triggers seedIssueTypeConfigsForActiveCompanies() on demand so companies
+  // that were created before the auto-seed was wired in can be backfilled
+  // without a server restart.
+  app.post("/api/admin/seed-issue-type-configs", requireAuthentication, async (req: any, res: Response) => {
+    if (req.authenticatedUserRole !== "super_admin") {
+      res.status(403).json({ message: "Super admin access required" });
+      return;
+    }
+    try {
+      const companiesSeeded = await seedIssueTypeConfigsForActiveCompanies();
+      res.json({ ok: true, companiesSeeded });
+    } catch (err) {
+      logger.error({ err }, "POST /api/admin/seed-issue-type-configs failed");
+      res.status(500).json({ message: "Seed failed", error: String(err) });
+    }
+  });
   // Task #760 — Temporary one-time cleanup: delete test invoice #71256.
   // Remove this registration (and cleanup-invoice-71256.ts) after successful run.
   registerCleanupInvoice71256Routes(app, { requireAuthentication });

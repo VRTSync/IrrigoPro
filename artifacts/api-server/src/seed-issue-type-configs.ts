@@ -1,5 +1,10 @@
 import { pool } from "./db";
 import { WET_CHECK_ISSUE_TYPE_SEED } from "@workspace/db";
+import { seedIssueTypeConfigsForCompany } from "./seeds/issue-type-configs";
+
+// Re-export per-company seeder so callers (createCompany, admin endpoint,
+// scripts) all share the same implementation.
+export { seedIssueTypeConfigsForCompany };
 
 // Exported so tests can prove the seed is genuinely re-run safe — each
 // invocation must leave every active company at exactly SEED.length rows

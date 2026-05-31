@@ -154,6 +154,7 @@ import {
 import { computeEstimateSummary } from "./estimate-summary";
 import type { EstimateSummary } from "@workspace/db";
 import { ObjectStorageService } from "./objectStorage";
+import { resolveIssueTypeKey, seedIssueTypeConfigsForCompany } from "./seeds/issue-type-configs";
 
 // ── WC Billing list item type (Slice 4) ────────────────────────────────────
 // Extends WetCheckBilling with aggregate counts derived via LEFT JOIN in
@@ -1271,7 +1272,14 @@ export class DatabaseStorage implements IStorage {
         ? ({ ...company, nextEstimateNumber: start } as InsertCompany)
         : company;
     const result = await db.insert(companies).values(payload).returning();
-    return result[0];
+    const newCompany = result[0];
+    // Auto-seed issue_type_configs for the new company so wet check labor
+    // recompute works immediately without requiring an admin trigger.
+    // Fire-and-forget: a seed failure must never block company creation.
+    void seedIssueTypeConfigsForCompany(newCompany.id).catch((err) => {
+      console.warn(`[seedIssueTypeConfigs] failed for company ${newCompany.id}:`, err);
+    });
+    return newCompany;
   }
 
   async updateCompany(id: number, company: Partial<InsertCompany>): Promise<Company | undefined> {
@@ -7684,22 +7692,36 @@ export class DatabaseStorage implements IStorage {
     if (!zr) return;
     if (zr.repairLaborManuallySet) return; // human override — leave it alone
 
-    // Fetch all findings for this zone
-    const findings = await tx.select({ issueType: wetCheckFindings.issueType })
+    // Fetch all findings for this zone — also select quantity so we can
+    // multiply the per-unit labor hours by the finding count (B2c fix).
+    const findings = await tx
+      .select({ issueType: wetCheckFindings.issueType, quantity: wetCheckFindings.quantity })
       .from(wetCheckFindings)
       .where(eq(wetCheckFindings.zoneRecordId, zoneRecordId));
 
     let totalHours = 0;
     if (findings.length > 0) {
-      // Load the company's issue type configs once
+      // Load the company's issue type configs once.
       const configs = await tx.select({
         issueType: issueTypeConfigs.issueType,
         defaultLaborHours: issueTypeConfigs.defaultLaborHours,
       }).from(issueTypeConfigs).where(eq(issueTypeConfigs.companyId, companyId));
-      const configMap = new Map(configs.map((c) => [c.issueType, c.defaultLaborHours]));
+
+      // B2b fix — normalize every catalog key so mixed-case or
+      // space/dash variants in the DB (legacy data) still resolve.
+      const configMap = new Map(
+        configs.map((c) => [resolveIssueTypeKey(c.issueType), c.defaultLaborHours]),
+      );
+
       for (const f of findings) {
-        const raw = configMap.get(f.issueType);
-        if (raw) totalHours += parseFloat(String(raw)) || 0;
+        // B2b fix — resolve the finding's issueType before lookup.
+        const raw = configMap.get(resolveIssueTypeKey(f.issueType));
+        if (raw) {
+          const perUnit = parseFloat(String(raw)) || 0;
+          // B2c fix — multiply by quantity (was previously missing).
+          const qty = typeof f.quantity === "number" ? f.quantity : parseInt(String(f.quantity ?? "1"), 10);
+          totalHours += perUnit * (isNaN(qty) || qty < 1 ? 1 : qty);
+        }
       }
     }
 
