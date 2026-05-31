@@ -361,6 +361,7 @@ import { registerCustomerRoutes } from "./customer-routes";
 import { registerBudgetRoutes } from "./budget-routes";
 import { registerFinancialPulseRoutes } from "./financial-pulse";
 import { registerAdminMigrationsRoutes } from "./admin-migrations-routes";
+import { registerWcLaborBackfillRoutes } from "./admin-wc-labor-backfill-routes";
 import { registerCleanupInvoice71256Routes } from "./cleanup-invoice-71256";
 import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
 import { scrubEvent, setScrubCustomerNames } from "../lib/scrubEvent";
@@ -7247,6 +7248,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Seed failed", error: String(err) });
     }
   });
+  // WC Labor Slice 3 — WC labor backfill (start / status / cancel / reset).
+  registerWcLaborBackfillRoutes(app, requireAuthentication);
   // Task #760 — Temporary one-time cleanup: delete test invoice #71256.
   // Remove this registration (and cleanup-invoice-71256.ts) after successful run.
   registerCleanupInvoice71256Routes(app, { requireAuthentication });

@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   UserCog,
   Repeat,
+  Database,
   type LucideIcon,
 } from "lucide-react";
 
@@ -226,6 +227,15 @@ export const superAdminNav: NavConfig = {
         { type: "leaf", label: "App Health", path: "/super-admin/app-health", icon: Activity },
         { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
         { type: "leaf", label: "Client Errors", path: "/admin/client-errors", icon: AlertTriangle },
+      ],
+    },
+    {
+      type: "group",
+      label: "Data migrations",
+      icon: Database,
+      items: [
+        { type: "leaf", label: "DB Migrations", path: "/admin/migrations", icon: Database },
+        { type: "leaf", label: "WC Labor Backfill", path: "/admin/wc-labor-backfill", icon: Droplets },
       ],
     },
   ],

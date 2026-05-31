@@ -76,6 +76,7 @@ const ManagerWetCheckDetailPage = lazyPage(() => import("@/pages/wet-checks/Mana
 
 const SiteMapsPage = lazyPage(() => import("@/pages/site-maps"));
 const AdminMigrationsPage = lazyPage(() => import("@/pages/admin/migrations"));
+const AdminWcLaborBackfillPage = lazyPage(() => import("@/pages/admin-wc-labor-backfill"));
 const CustomerSiteMapsPage = lazyPage(() => import("@/pages/customer-site-maps-page"));
 const FieldTechMaps = lazyPage(() => import("@/pages/field-tech-maps"));
 import { NotificationPermissionBanner } from "@/components/notifications/notification-permission-banner";
@@ -441,6 +442,7 @@ function Router() {
                   <Route path="/admin/client-errors" component={AdminClientErrorsPage} />
                   <Route path="/super-admin/app-health" component={SuperAdminAppHealthPage} />
                   <Route path="/admin/migrations" component={AdminMigrationsPage} />
+                  <Route path="/admin/wc-labor-backfill" component={AdminWcLaborBackfillPage} />
                   <Route path="/financial-pulse" component={FinancialPulsePage} />
                   <Route path="/user-manager" component={UserManager} />
                   <Route path="/switch-user" component={SwitchUser} />
