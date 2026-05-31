@@ -356,6 +356,7 @@ import { paginate } from "./pagination";
 import { registerSiteMapRoutes } from "./site-map-routes";
 import { registerPartRoutes } from "./parts-routes";
 import { registerBillingWorkspaceRoutes } from "./billing-workspace-routes";
+import { registerManagerWorkspaceRoutes } from "./manager-workspace-routes";
 import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
 import { registerBudgetRoutes } from "./budget-routes";
@@ -7584,6 +7585,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Task #709 — Billing Workspace endpoints.
   registerBillingWorkspaceRoutes(app, { requireAuthentication });
+
+  // Task #1005 — Manager Workspace endpoints.
+  registerManagerWorkspaceRoutes(app, { requireAuthentication });
 
   // Assembly routes — extracted to ./assembly-routes.ts
   registerAssemblyRoutes(app, { requireAuthentication });

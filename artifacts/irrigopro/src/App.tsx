@@ -24,6 +24,7 @@ const lazyPage = <T extends ComponentType<any>>(loader: () => Promise<{ default:
   lazy(loader);
 
 const Dashboard = lazyPage(() => import("@/pages/dashboard"));
+const ManagerWorkspace = lazyPage(() => import("@/pages/manager-workspace"));
 const Estimates = lazyPage(() => import("@/pages/estimates"));
 const PartsCatalog = lazyPage(() => import("@/pages/parts-catalog"));
 const PartsList = lazyPage(() => import("@/pages/parts-list"));
@@ -308,7 +309,9 @@ function Router() {
             <div className="px-4">
               <Suspense fallback={<RouteSuspenseFallback />}>
                 <Switch>
-                  <Route path="/" component={ManagerDashboard} />
+                  <Route path="/" component={ManagerWorkspace} />
+                  <Route path="/manager-workspace" component={ManagerWorkspace} />
+                  <Route path="/manager-dashboard" component={ManagerDashboard} />
                   <Route path="/manager" component={ManagerDashboard} />
                   <Route path="/estimates" component={Estimates} />
                   <Route path="/parts" component={PartsCatalog} />
