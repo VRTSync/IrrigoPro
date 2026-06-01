@@ -362,6 +362,54 @@ describe("WCB Approval Snapshots — Slice 7", () => {
     }
   });
 
+  // ── Test 5: approveWetCheck accepts partially_converted status ───────────
+  it("approveWetCheck: partially_converted wet check transitions to approved without error", async () => {
+    const sd = new Date().toISOString();
+    const rows = await db.execute(
+      sql`INSERT INTO wet_checks
+            (company_id, customer_id, technician_id, technician_name,
+             customer_name, num_controllers, status, labor_mode,
+             total_labor_hours, started_at, created_at, updated_at)
+          VALUES
+            (${TEST_COMPANY_ID}, ${SCRATCH_CUSTOMER_ID}, ${SCRATCH_USER_ID},
+             ${"WCB Snap Tech 91001"}, ${"WCB Snap Customer 91001"},
+             1, ${"partially_converted"}, ${"flat"},
+             ${"1.00"}, ${sd}, ${sd}, ${sd})
+          RETURNING id`,
+    );
+    const wcId = Number((rows.rows[0] as { id: number }).id);
+
+    const mgr = { id: SCRATCH_USER_ID, name: "WCB Snap Tech 91001" };
+    const updated = await storage.approveWetCheck(wcId, TEST_COMPANY_ID, mgr);
+    assert.ok(updated, "approveWetCheck must return the updated row");
+    assert.equal(updated.status, "approved", "partially_converted wet check must transition to approved");
+  });
+
+  // ── Test 6: approveWetCheck still rejects converted status ───────────────
+  it("approveWetCheck: converted wet check still throws (guard unchanged)", async () => {
+    const sd = new Date().toISOString();
+    const rows = await db.execute(
+      sql`INSERT INTO wet_checks
+            (company_id, customer_id, technician_id, technician_name,
+             customer_name, num_controllers, status, labor_mode,
+             total_labor_hours, started_at, created_at, updated_at)
+          VALUES
+            (${TEST_COMPANY_ID}, ${SCRATCH_CUSTOMER_ID}, ${SCRATCH_USER_ID},
+             ${"WCB Snap Tech 91001"}, ${"WCB Snap Customer 91001"},
+             1, ${"converted"}, ${"flat"},
+             ${"1.00"}, ${sd}, ${sd}, ${sd})
+          RETURNING id`,
+    );
+    const wcId = Number((rows.rows[0] as { id: number }).id);
+
+    const mgr = { id: SCRATCH_USER_ID, name: "WCB Snap Tech 91001" };
+    await assert.rejects(
+      () => storage.approveWetCheck(wcId, TEST_COMPANY_ID, mgr),
+      /Cannot approve wet check in status converted/,
+      "approveWetCheck must throw for converted status",
+    );
+  });
+
   // ── Test 4: unapproved WCBs keep snapshot columns null ────────────────────
   it("unapproved WCBs (submitted status) keep both snapshot columns null", async () => {
     // Create a wet check to satisfy the FK, then insert a WCB manually
