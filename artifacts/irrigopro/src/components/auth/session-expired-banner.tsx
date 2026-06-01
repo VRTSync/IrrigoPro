@@ -15,18 +15,16 @@
 import { AlertTriangle } from "lucide-react";
 import {
   clearUnauthenticatedRead,
+  clearSessionAndLogout,
   useUnauthenticatedReads,
 } from "@/lib/queryClient";
-import { safeRemove } from "@/utils/safeStorage";
 
 export function SessionExpiredBanner() {
   const unauth = useUnauthenticatedReads();
   if (!unauth) return null;
   const handleSignIn = () => {
-    try { safeRemove("user"); } catch { /* ignore */ }
-    void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
     clearUnauthenticatedRead();
-    window.location.href = "/login";
+    clearSessionAndLogout();
   };
   return (
     <div
@@ -60,10 +58,8 @@ export function SessionExpiredEmptyState({
   message = "Your session expired — sign in to load this list.",
 }: { message?: string }) {
   const handleSignIn = () => {
-    try { safeRemove("user"); } catch { /* ignore */ }
-    void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
     clearUnauthenticatedRead();
-    window.location.href = "/login";
+    clearSessionAndLogout();
   };
   return (
     <div

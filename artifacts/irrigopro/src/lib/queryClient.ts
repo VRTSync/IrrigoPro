@@ -285,6 +285,20 @@ export function adaptiveRefetchInterval(baseMs: number): number | false {
   return baseMs;
 }
 
+// Shared logout teardown. Every logout path in the app calls this
+// instead of duplicating the three-line inline block. Calling
+// `queryClient.clear()` first guarantees that the next user who logs
+// in on this device always sees a clean loading state — no leftover
+// dashboard data from the previous session leaks through staleTime:Infinity.
+// `replace` instead of `href` keeps the login page out of browser history
+// so the back button can't return to a stale dashboard.
+export function clearSessionAndLogout(): void {
+  try { queryClient.clear(); } catch { /* non-browser / test context */ }
+  try { safeRemove("user"); } catch { /* ignore */ }
+  void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
+  try { window.location.replace("/login"); } catch { /* non-browser context */ }
+}
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

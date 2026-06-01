@@ -1,4 +1,4 @@
-import { safeGet, safeRemove } from "@/utils/safeStorage";
+import { safeGet } from "@/utils/safeStorage";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Clock, MapPin, Plus, Trash2, Wrench, LogOut, Play, Square, CheckCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, useArrayQuery } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery, clearSessionAndLogout } from "@/lib/queryClient";
 import companyLogo from "@assets/IrrigoPro_2026-03_1778193170303.png";
 
 interface User {
@@ -130,11 +130,7 @@ export default function FieldPortal() {
     },
   });
 
-  const handleLogout = () => {
-    safeRemove("user");
-    void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
-    window.location.href = "/login";
-  };
+  const handleLogout = clearSessionAndLogout;
 
   const handleStartWork = () => {
     if (!selectedProperty || !selectedZone || !workDescription) {

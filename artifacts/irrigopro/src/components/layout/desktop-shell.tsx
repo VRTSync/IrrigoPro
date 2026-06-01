@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, createContext, useContext } from 
 import { createPortal } from "react-dom";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { clearSessionAndLogout } from "@/lib/queryClient";
 import {
   Sidebar,
   SidebarContent,
@@ -52,7 +53,7 @@ import {
 import Navigation from "@/components/layout/navigation";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 import { NotificationSystem } from "@/components/notifications/notification-system";
-import { safeGet, safeSet, safeRemove } from "@/utils/safeStorage";
+import { safeGet, safeSet } from "@/utils/safeStorage";
 import irrigoProLogo from "@assets/IrrigoPro_2026-03_1778193170303.png";
 import irrigoProMark from "@assets/IrrigoPro_2026-05_1778193170303.png";
 import { resolveRouteMeta } from "./route-meta";
@@ -609,11 +610,7 @@ function SidebarUserMenu({
             </Link>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              onClick={() => {
-                safeRemove("user");
-                void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
-                window.location.href = "/login";
-              }}
+              onClick={clearSessionAndLogout}
               className="text-red-600"
             >
               <LogOut className="mr-2 h-4 w-4" />
