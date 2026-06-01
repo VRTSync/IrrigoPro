@@ -357,7 +357,7 @@ export default function AdminWcLaborBackfillPage() {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
-        const resp = await apiRequest("GET", "/api/admin/wc-labor-backfill/status");
+        const resp = await apiRequest("/api/admin/wc-labor-backfill/status", "GET");
         const data: BackfillProgress = await resp.json();
         setProgress(data);
         if (data.state !== "running") stopPolling();
@@ -376,7 +376,7 @@ export default function AdminWcLaborBackfillPage() {
 
   useEffect(() => {
     // Load initial status on mount.
-    apiRequest("GET", "/api/admin/wc-labor-backfill/status")
+    apiRequest("/api/admin/wc-labor-backfill/status", "GET")
       .then((r) => r.json())
       .then((data: BackfillProgress) => {
         setProgress(data);
@@ -391,7 +391,7 @@ export default function AdminWcLaborBackfillPage() {
     setError(null);
     setIsStarting(true);
     try {
-      const resp = await apiRequest("POST", "/api/admin/wc-labor-backfill/start", {
+      const resp = await apiRequest("/api/admin/wc-labor-backfill/start", "POST", {
         dryRun,
       });
       if (!resp.ok) {
@@ -409,7 +409,7 @@ export default function AdminWcLaborBackfillPage() {
 
   async function handleCancel() {
     try {
-      await apiRequest("POST", "/api/admin/wc-labor-backfill/cancel");
+      await apiRequest("/api/admin/wc-labor-backfill/cancel", "POST");
     } catch {
       // Ignore.
     }
@@ -418,7 +418,7 @@ export default function AdminWcLaborBackfillPage() {
   async function handleReset() {
     setError(null);
     try {
-      const resp = await apiRequest("POST", "/api/admin/wc-labor-backfill/reset");
+      const resp = await apiRequest("/api/admin/wc-labor-backfill/reset", "POST");
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({}));
         setError((body as any).message ?? "Reset failed");
