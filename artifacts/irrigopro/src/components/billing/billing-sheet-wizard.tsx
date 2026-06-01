@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
+import { PhotoImage } from "@/components/ui/photo-image";
 import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
 import { PartPicker } from "@/components/parts/part-picker";
 import {
@@ -1074,11 +1075,20 @@ function ReviewStep({
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
               {photosToShow.map((p, i) => (
                 <div key={i} className="aspect-square bg-gray-100 rounded overflow-hidden">
-                  <img
-                    src={p.previewUrl || p.url}
-                    alt={`Photo ${i + 1}`}
-                    className="w-full h-full object-cover"
-                  />
+                  {p.previewUrl ? (
+                    <img
+                      src={p.previewUrl}
+                      alt={`Photo ${i + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <PhotoImage
+                      photoUrl={p.url}
+                      alt={`Photo ${i + 1}`}
+                      className="w-full h-full object-cover"
+                      variant="thumb"
+                    />
+                  )}
                 </div>
               ))}
             </div>
