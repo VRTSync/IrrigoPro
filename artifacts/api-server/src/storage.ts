@@ -152,18 +152,14 @@ import {
   type LifecycleStatus,
 } from "./lifecycle";
 import { computeEstimateSummary } from "./estimate-summary";
-import type { EstimateSummary } from "@workspace/db";
+import type { EstimateSummary, WetCheckBillingListItem } from "@workspace/db";
 import { ObjectStorageService } from "./objectStorage";
 import { resolveIssueTypeKey, seedIssueTypeConfigsForCompany } from "./seeds/issue-type-configs";
 
-// ── WC Billing list item type (Slice 4) ────────────────────────────────────
-// Extends WetCheckBilling with aggregate counts derived via LEFT JOIN in
-// getAllWetCheckBillingsWithCounts(). Kept adjacent to BillingSheetWithItems
-// (imported above) as the analogous type for the wet-check billing table.
-export type WetCheckBillingListItem = WetCheckBilling & {
-  issuesCount: number;
-  zonesCount: number;
-};
+// WetCheckBillingListItem is defined in @workspace/db (schema.ts) so both the
+// API server and the frontend can import it from the same source. Re-exported
+// here for callers that import from storage.ts directly.
+export type { WetCheckBillingListItem };
 
 // Executor accepted by storage helpers that may run inside a caller's
 // transaction. Both `db` and a Drizzle PgTransaction satisfy this
@@ -3957,15 +3953,26 @@ export class DatabaseStorage implements IStorage {
         wcb: wetCheckBillings,
         issuesCount: sql<number>`cast(count(${wetCheckFindings.id}) as int)`,
         zonesCount: sql<number>`cast(count(distinct ${wetCheckFindings.zoneRecordId}) as int)`,
+        wetCheckStatus: wetChecks.status,
+        daysInQueue: sql<number>`cast(extract(epoch from (now() - ${wetCheckBillings.createdAt})) / 86400 as int)`,
+        findingsRepaired: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'repaired_in_field' then 1 end) as int)`,
+        findingsToEstimate: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'sent_to_estimate' then 1 end) as int)`,
+        findingsDeferred: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'deferred_to_work_order' then 1 end) as int)`,
       })
       .from(wetCheckBillings)
       .leftJoin(wetCheckFindings, eq(wetCheckFindings.wetCheckBillingId, wetCheckBillings.id))
-      .groupBy(wetCheckBillings.id)
+      .leftJoin(wetChecks, eq(wetChecks.id, wetCheckBillings.wetCheckId))
+      .groupBy(wetCheckBillings.id, wetChecks.status)
       .orderBy(desc(wetCheckBillings.workDate), desc(wetCheckBillings.id));
     return rows.map((r) => ({
       ...r.wcb,
       issuesCount: r.issuesCount ?? 0,
       zonesCount: r.zonesCount ?? 0,
+      wetCheckStatus: r.wetCheckStatus ?? null,
+      daysInQueue: r.daysInQueue ?? 0,
+      findingsRepaired: r.findingsRepaired ?? 0,
+      findingsToEstimate: r.findingsToEstimate ?? 0,
+      findingsDeferred: r.findingsDeferred ?? 0,
     }));
   }
 

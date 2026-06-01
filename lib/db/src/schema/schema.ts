@@ -1441,6 +1441,20 @@ export const insertWetCheckBillingSchema = createInsertSchema(wetCheckBillings).
 export type WetCheckBilling = typeof wetCheckBillings.$inferSelect;
 export type InsertWetCheckBilling = z.infer<typeof insertWetCheckBillingSchema>;
 
+// Shared list-item type: WetCheckBilling extended with aggregate counts
+// computed in getAllWetCheckBillingsWithCounts() and consumed by the billing
+// list page. Defined here so both the API server and the frontend can import
+// from @workspace/db without duplicating the shape.
+export type WetCheckBillingListItem = WetCheckBilling & {
+  issuesCount: number;
+  zonesCount: number;
+  wetCheckStatus: string | null;
+  daysInQueue: number;
+  findingsRepaired: number;
+  findingsToEstimate: number;
+  findingsDeferred: number;
+};
+
 export const wetCheckPhotos = pgTable("wet_check_photos", {
   id: serial("id").primaryKey(),
   wetCheckId: integer("wet_check_id").references(() => wetChecks.id, { onDelete: "cascade" }).notNull(),

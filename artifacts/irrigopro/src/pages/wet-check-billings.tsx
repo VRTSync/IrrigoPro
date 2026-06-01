@@ -10,17 +10,13 @@ import { Search, Droplets, Eye, Edit2, ExternalLink, DollarSign } from "lucide-r
 import { useArrayQuery } from "@/lib/queryClient";
 import { WetCheckBillingViewModal } from "@/components/wet-check-billings/wet-check-billing-view-modal";
 import { WetCheckBillingStatusBadge } from "@/components/wet-check-billings/status-badge";
+import { PartialBadge, StaleBadge, RoutingSummary, QbSyncIcon } from "@/components/wet-check-billings/row-badges";
 import { ListRowOverflowMenu } from "@/components/shared/list-row-overflow-menu";
 import { ListPageEmptyState } from "@/components/shared/list-page-empty-state";
-import type { WetCheckBilling } from "@workspace/db/schema";
+import type { WetCheckBillingListItem } from "@workspace/db/schema";
 import { safeGet } from "@/utils/safeStorage";
 
 // ── Local types ───────────────────────────────────────────────────────────────
-
-type WetCheckBillingListItem = WetCheckBilling & {
-  issuesCount: number;
-  zonesCount: number;
-};
 
 type FilterChipKey = "all" | "submitted" | "pending_manager_review" | "approved_passed_to_billing" | "billed";
 type SortKey = "billingNumber" | "customerName" | "technicianName" | "workDate" | "totalAmount" | "status";
@@ -47,7 +43,7 @@ function canEditZoneLabor(): boolean {
   return canEditLaborRate();
 }
 
-function isLocked(item: WetCheckBilling): boolean {
+function isLocked(item: WetCheckBillingListItem): boolean {
   return item.status === "billed" || item.invoiceId != null;
 }
 
@@ -229,11 +225,24 @@ function WcbRow({
       </td>
       {/* Issues */}
       <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap" data-testid={`wcb-issues-${item.id}`}>
-        {item.issuesCount} across {item.zonesCount} zone{item.zonesCount !== 1 ? "s" : ""}
+        <RoutingSummary
+          issuesCount={item.issuesCount}
+          zonesCount={item.zonesCount}
+          findingsRepaired={item.findingsRepaired}
+          findingsToEstimate={item.findingsToEstimate}
+          findingsDeferred={item.findingsDeferred}
+        />
       </td>
       {/* Status */}
       <td className="px-4 py-3 whitespace-nowrap">
-        <WetCheckBillingStatusBadge status={item.status} />
+        <div className="flex flex-col gap-1 items-start">
+          <div className="flex items-center">
+            <WetCheckBillingStatusBadge status={item.status} />
+            {item.invoiceId != null && <QbSyncIcon />}
+          </div>
+          {item.wetCheckStatus === "partially_converted" && <PartialBadge />}
+          <StaleBadge daysInQueue={item.daysInQueue} status={item.status} />
+        </div>
       </td>
       {/* Total */}
       <td className="px-4 py-3 text-sm font-medium text-gray-900 whitespace-nowrap text-right">
