@@ -32,6 +32,10 @@ import {
 vi.mock("@/lib/queryClient", () => ({
   apiRequest: vi.fn(() => Promise.resolve({})),
   queryClient: { invalidateQueries: vi.fn() },
+  authedPhotoSrc: (photoId: string, variant?: string) => {
+    const qs = variant ? `?variant=${variant}` : "";
+    return `/api/photos/${encodeURIComponent(photoId)}${qs}`;
+  },
 }));
 
 vi.mock("@/hooks/use-toast", () => ({
@@ -352,5 +356,58 @@ describe("WetCheckBillingViewComponent — inline zone labor (Task #1027)", () =
     // Falls back to legacy display-only row — no ZoneLaborEditInline
     expect(screen.queryByTestId(/zone-labor-row-/)).not.toBeInTheDocument();
     expect(screen.queryByTestId(/zone-labor-readonly-/)).not.toBeInTheDocument();
+  });
+});
+
+// ─── Fixture with photos ──────────────────────────────────────────────────────
+
+const ZONE_PHOTO_ID = "zone-photo-abc123";
+const FINDING_PHOTO_ID = "finding-photo-def456";
+
+const FIXTURE_WITH_PHOTOS: WetCheckBillingView = {
+  ...FIXTURE,
+  zones: [
+    {
+      ...FIXTURE.zones[0],
+      zonePhotoUrls: [ZONE_PHOTO_ID],
+      lineItems: [
+        {
+          ...FIXTURE.zones[0].lineItems[0],
+          findingPhotoUrls: [FINDING_PHOTO_ID],
+        },
+        FIXTURE.zones[0].lineItems[1],
+      ],
+    },
+    FIXTURE.zones[1],
+  ],
+};
+
+describe("PhotoStrip — authenticated URL transform (Slice 4b)", () => {
+  it("(a) zone-level photo <img src> contains /api/photos/ and variant=thumb", () => {
+    render(<WetCheckBillingViewComponent view={FIXTURE_WITH_PHOTOS} canSeePricing={true} />);
+    const strips = screen.getAllByTestId("photo-strip");
+    const img = strips[0].querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute("src")).toContain("/api/photos/");
+    expect(img!.getAttribute("src")).toContain("variant=thumb");
+  });
+
+  it("(b) zone-level photo <a href> contains variant=medium", () => {
+    render(<WetCheckBillingViewComponent view={FIXTURE_WITH_PHOTOS} canSeePricing={true} />);
+    const strips = screen.getAllByTestId("photo-strip");
+    const anchor = strips[0].querySelector("a");
+    expect(anchor).not.toBeNull();
+    expect(anchor!.getAttribute("href")).toContain("variant=medium");
+  });
+
+  it("(c) per-finding photo <img src> also contains /api/photos/ and variant=thumb", () => {
+    render(<WetCheckBillingViewComponent view={FIXTURE_WITH_PHOTOS} canSeePricing={true} />);
+    const strips = screen.getAllByTestId("photo-strip");
+    // First strip is zone-level; second strip is the finding-level one
+    const findingStrip = strips[1];
+    const img = findingStrip.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute("src")).toContain("/api/photos/");
+    expect(img!.getAttribute("src")).toContain("variant=thumb");
   });
 });

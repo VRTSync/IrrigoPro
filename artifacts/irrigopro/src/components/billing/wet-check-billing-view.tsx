@@ -14,6 +14,7 @@ import { format } from "date-fns";
 import { Wrench, MapPin, ClipboardList, DollarSign, CloudSun, Camera } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { ZoneLaborEditInline } from "@/components/wet-check-billings/zone-labor-edit-inline";
+import { authedPhotoSrc } from "@/lib/queryClient";
 
 // ─── Mirrored types (match artifacts/api-server/src/wet-check-billing-view.ts) ─
 
@@ -132,14 +133,14 @@ function PhotoStrip({
         {urls.map((url, i) => (
           <a
             key={i}
-            href={url}
+            href={authedPhotoSrc(url, "medium")}
             target="_blank"
             rel="noopener noreferrer"
             className="block flex-shrink-0"
             data-testid={`photo-thumb-${i}`}
           >
             <img
-              src={url}
+              src={authedPhotoSrc(url, "thumb")}
               alt={`Photo ${i + 1}`}
               className="w-20 h-20 object-cover rounded border border-gray-200 hover:opacity-90 transition-opacity"
               loading="lazy"
