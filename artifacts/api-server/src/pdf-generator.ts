@@ -282,8 +282,9 @@ export class PDFGenerator {
         displayHeaderFooter: true,
         headerTemplate: '<span></span>',
         footerTemplate: `
-          <div style="width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;font-size:10px;color:#6b7280;text-align:center;padding:0 0.5in;">
-            Page <span class="pageNumber"></span> of <span class="totalPages"></span>
+          <div style="width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;font-size:10px;color:#9ca3af;display:flex;justify-content:space-between;align-items:center;padding:0 0.5in;box-sizing:border-box;">
+            <span style="color:#9ca3af;">Powered by VRT &middot; vrtsync.com</span>
+            <span style="color:#9ca3af;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
           </div>
         `,
         margin: {
