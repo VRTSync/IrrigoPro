@@ -19,7 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type {
-  Customer, IssueTypeConfig, Part, WetCheckFinding, WetCheckPhoto,
+  Customer, IssueTypeConfig, Part, WetCheckFindingWithReason, WetCheckPhoto,
   WetCheckWithDetails, WetCheckZoneRecord,
 } from "@workspace/db/schema";
 import { FindingCard, type FindingEdits } from "./finding-card";
@@ -30,7 +30,7 @@ import { LoosePhotosSection, type LooseFindingOption } from "@/pages/wet-checks/
 type Resolution =
   | "pending" | "repaired_in_field" | "sent_to_estimate" | "deferred_to_work_order" | "documented_only";
 
-interface FindingItem { f: WetCheckFinding; zr: WetCheckZoneRecord; }
+interface FindingItem { f: WetCheckFindingWithReason; zr: WetCheckZoneRecord; }
 
 const TUTORIAL_STORAGE_PREFIX = "wet-check-wizard-tutorial-dismissed-v1";
 
@@ -54,13 +54,13 @@ function lineTotal(edits: FindingEdits, laborRate: number): number {
   return partPrice * (edits.quantity ?? 0) + labor * laborRate;
 }
 
-function lineTotalFinding(f: WetCheckFinding, laborRate: number): number {
+function lineTotalFinding(f: WetCheckFindingWithReason, laborRate: number): number {
   const partPrice = parseFloat(String(f.partPrice ?? "0")) || 0;
   const labor = parseFloat(String(f.laborHours ?? "0")) || 0;
   return partPrice * Number(f.quantity ?? 0) + labor * laborRate;
 }
 
-function makeEdits(f: WetCheckFinding, configs: IssueTypeConfig[]): FindingEdits {
+function makeEdits(f: WetCheckFindingWithReason, configs: IssueTypeConfig[]): FindingEdits {
   const cfg = configs.find(c => c.issueType === f.issueType);
   const laborFromTech = parseFloat(String(f.laborHours ?? "0"));
   const fallback = cfg ? parseFloat(String(cfg.defaultLaborHours)) : 0;
@@ -148,6 +148,15 @@ function SidebarFindingCard({
               {f.techDisposition === "completed_in_field" ? "Completed in field" : "Needs review"}
             </span>
           )}
+          {f.pendingReason && (
+            <div
+              className="mt-1 text-[10px] text-gray-500 leading-snug truncate"
+              data-testid={`sidebar-finding-${f.id}-reason`}
+              title={f.pendingReason}
+            >
+              {f.pendingReason}
+            </div>
+          )}
         </div>
         <Badge
           variant="outline"
@@ -165,6 +174,7 @@ function SidebarFindingCard({
 function AutoBilledPanel({ item, customerLaborRate }: { item: FindingItem; customerLaborRate: number }) {
   const { f, zr } = item;
   const total = lineTotalFinding(f, customerLaborRate);
+  const reason = f.pendingReason ?? "Auto-billed when tech submitted";
   return (
     <div className="flex flex-col items-center justify-center h-full py-12 text-center space-y-3 px-4">
       <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
@@ -178,6 +188,13 @@ function AutoBilledPanel({ item, customerLaborRate }: { item: FindingItem; custo
         {total > 0 && (
           <div className="text-sm font-medium text-green-700 mt-1">${total.toFixed(2)}</div>
         )}
+      </div>
+      <div
+        className="inline-flex items-center gap-1.5 rounded-md border border-green-200 bg-green-50 px-3 py-1.5 text-xs text-green-700"
+        data-testid={`auto-billed-reason-${f.id}`}
+      >
+        <CheckCircle2 className="w-3 h-3 shrink-0" aria-hidden />
+        {reason}
       </div>
       <p className="text-xs text-gray-500 max-w-xs">
         The tech repaired this issue and billed it on-site. No manager decision is required.

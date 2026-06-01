@@ -7117,10 +7117,10 @@ export class DatabaseStorage implements IStorage {
     const photos = await db.select().from(wetCheckPhotos)
       .where(eq(wetCheckPhotos.wetCheckId, id))
       .orderBy(desc(wetCheckPhotos.takenAt));
-    const findingsByZone = new Map<number, WetCheckFinding[]>();
+    const findingsByZone = new Map<number, (WetCheckFinding & { pendingReason?: string | null })[]>();
     for (const f of findings) {
       const list = findingsByZone.get(f.zoneRecordId) ?? [];
-      list.push(f);
+      list.push({ ...f, pendingReason: computeFindingPendingReason(f, wc.submittedAt) });
       findingsByZone.set(f.zoneRecordId, list);
     }
     return {
@@ -8713,6 +8713,30 @@ export class DatabaseStorage implements IStorage {
       return { wetCheck: updated, billingSheetId, estimateId, workOrderId };
     });
   }
+}
+
+// ─── Per-finding pending reason (manager review explainer) ────────────────────
+// Computed server-side in getWetCheck so the manager UI can render a
+// plain-language explanation without any client-side logic.
+export function computeFindingPendingReason(
+  f: WetCheckFinding,
+  submittedAt: Date | string | null | undefined,
+): string {
+  if (f.convertedAt != null) {
+    return "Auto-billed when tech submitted";
+  }
+  if (f.techDisposition === "completed_in_field") {
+    if (submittedAt != null && new Date(f.createdAt) > new Date(submittedAt)) {
+      return "Tech completed in field, but finding was added after submission";
+    }
+    if (f.partId == null && !f.noPartNeeded) {
+      return "Tech completed in field, but no part was assigned at submission";
+    }
+  }
+  if (f.techDisposition === "needs_review") {
+    return "Tech marked this for manager review";
+  }
+  return "Not yet reviewed by field tech";
 }
 
 export const storage = new DatabaseStorage();

@@ -4,10 +4,10 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { authedPhotoSrc } from "@/lib/queryClient";
-import { Wrench, MapPin, StickyNote, Pencil, Camera, type LucideIcon } from "lucide-react";
+import { Wrench, MapPin, StickyNote, Pencil, Camera, Info, type LucideIcon } from "lucide-react";
 import { PartPicker } from "@/components/parts/part-picker";
 import type {
-  Part, WetCheckFinding, WetCheckPhoto, WetCheckZoneRecord, IssueTypeConfig,
+  Part, WetCheckFindingWithReason, WetCheckPhoto, WetCheckZoneRecord, IssueTypeConfig,
 } from "@workspace/db/schema";
 
 export interface FindingEdits {
@@ -19,7 +19,7 @@ export interface FindingEdits {
 }
 
 interface FindingCardProps {
-  finding: WetCheckFinding;
+  finding: WetCheckFindingWithReason;
   zone: WetCheckZoneRecord;
   photos: WetCheckPhoto[];
   parts: Part[];
@@ -35,7 +35,7 @@ const ISSUE_ICON: Record<string, { icon: LucideIcon; bg: string; text: string }>
   zone_issue: { icon: Wrench, bg: "bg-purple-100", text: "text-purple-700" },
 };
 
-function displayLabel(finding: WetCheckFinding, config: IssueTypeConfig | null): string {
+function displayLabel(finding: WetCheckFindingWithReason, config: IssueTypeConfig | null): string {
   return config?.displayLabel ?? finding.partName ?? finding.issueType;
 }
 
@@ -113,6 +113,24 @@ export function FindingCard({
             )}
           </div>
         </div>
+
+        {finding.pendingReason && (
+          <div
+            className="rounded-md border border-amber-200 bg-amber-50 p-3 space-y-1"
+            data-testid={`wizard-finding-${finding.id}-pending-reason`}
+          >
+            <div className="flex items-center gap-1.5 text-xs font-medium text-amber-800">
+              <Info className="w-3.5 h-3.5 shrink-0" aria-hidden />
+              Why is this pending?
+            </div>
+            <p className="text-xs text-amber-700 leading-snug">{finding.pendingReason}</p>
+            {finding.partId == null && !finding.noPartNeeded && finding.techDisposition === "completed_in_field" && (
+              <p className="text-xs text-amber-600 italic">
+                Assign a part above before routing to billing.
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="rounded-md border bg-gray-50 p-3 text-sm flex items-center gap-2">
           <MapPin className="w-4 h-4 text-gray-500 shrink-0" />

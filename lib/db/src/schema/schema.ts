@@ -1487,8 +1487,12 @@ export type InsertWetCheckZoneRecord = z.infer<typeof insertWetCheckZoneRecordSc
 export type InsertWetCheckFinding = z.infer<typeof insertWetCheckFindingSchema>;
 export type InsertWetCheckPhoto = z.infer<typeof insertWetCheckPhotoSchema>;
 
+export type WetCheckFindingWithReason = WetCheckFinding & {
+  pendingReason?: string | null;
+};
+
 export type WetCheckWithDetails = WetCheck & {
-  zoneRecords: (WetCheckZoneRecord & { findings: WetCheckFinding[] })[];
+  zoneRecords: (WetCheckZoneRecord & { findings: WetCheckFindingWithReason[] })[];
   photos: WetCheckPhoto[];
 };
 
