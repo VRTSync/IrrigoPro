@@ -1,0 +1,215 @@
+# Replit Task — WC Manager Experience, Slice 4b (WCB view photo display auth fix)
+
+This is a small, focused bug fix. The actual work is ≤ 5 LOC of
+production change plus a regression test. Do not deviate from the
+file paths or the helper names specified.
+
+> **Bug:** Every photo in the WCB view (modal, detail, and any
+> surface that renders the `WetCheckBillingViewComponent`) shows as a
+> broken-image icon. Confirmed across all surfaces, both old and new
+> photos, on all roles. The OS-native broken-image placeholder
+> appears next to "Photo N" labels.
+
+> **Root cause:** `PhotoStrip` inside `wet-check-billing-view.tsx`
+> uses a raw `<img src={url}>` whose URL points at the authenticated
+> `/api/photos/{*photoId}` route. A bare `<img>` tag cannot carry the
+> `x-user-*` headers our auth middleware checks for, so the GET
+> returns 401 and the browser shows broken-image. The codebase
+> already solves this exactly the same shape in
+> `finding-card.tsx:153` via `authedPhotoSrc` from `@/lib/queryClient`,
+> which uses session-cookie auth plus an optional impersonation-token
+> query param.
+
+> **Distinction from WC ME Slice 4:** Slice 4 (`ed1b7cc`) fixed photo
+> **attachment** — the FK fields riding through the offline queue's
+> metadata POST. This slice fixes photo **display** — the
+> `<img src>` not carrying auth. Different chain, different fix.
+
+---
+
+## Design Context (locked decisions)
+
+**Use the existing helper, do not invent a new one.**
+`authedPhotoSrc(photoId, variant)` is at
+`artifacts/irrigopro/src/lib/queryClient.ts:178`. It URI-encodes the
+photoId, adds the variant query param, and adds the impersonation
+token when super-admin is impersonating. Same helper
+`finding-card.tsx:153` already uses successfully.
+
+**Two variants, two call sites.** The `<a href>` opens the full-size
+photo in a new tab — use `"medium"`. The `<img src>` is the inline
+thumbnail — use `"thumb"`. This matches `finding-card.tsx:152–153`
+exactly.
+
+**Surfaces affected by this fix.**
+`PhotoStrip` is consumed by `ZoneSection` (the zone block) for both
+zone-level photos (`zone.zonePhotoUrls`) and per-finding photos
+(`item.findingPhotoUrls`). The `WetCheckBillingViewComponent` is
+rendered by the WCB view modal, the wet check detail page's WCB
+preview, and any other consumer of the shared component — all of
+them are fixed by the single change below.
+
+**The PDF path is unaffected.** PDF rendering goes through
+`invoice-pdf-service.ts` → `resolveZonePhotoGroups` which downloads
+and base64s each photo into a data URI server-side. PDF photo issues
+have their own diagnostic; this slice is screen-display only.
+
+---
+
+## Slice 4b — Photo display auth fix
+
+### Scope
+
+Wrap two URLs in `PhotoStrip` with `authedPhotoSrc`. Add one regression
+test that asserts the rendered `<img src>` contains
+`/api/photos/` and a `variant=thumb` query param.
+
+### Files modified
+
+- `artifacts/irrigopro/src/components/billing/wet-check-billing-view.tsx`
+  — add one import, change two attribute values inside `PhotoStrip`.
+- `artifacts/irrigopro/src/components/billing/wet-check-billing-view.test.tsx`
+  (existing) — add one regression test in a new `describe` block.
+
+### Concrete changes
+
+**(1) Add the import** at the top of
+`wet-check-billing-view.tsx`. Find the existing `import` block; add:
+
+```tsx
+import { authedPhotoSrc } from "@/lib/queryClient";
+```
+
+**(2) Replace the two URL attributes** inside `PhotoStrip` at
+`wet-check-billing-view.tsx:132–148`. Before:
+
+```tsx
+{urls.map((url, i) => (
+  <a
+    key={i}
+    href={url}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="block flex-shrink-0"
+    data-testid={`photo-thumb-${i}`}
+  >
+    <img
+      src={url}
+      alt={`Photo ${i + 1}`}
+      className="w-20 h-20 object-cover rounded border border-gray-200 hover:opacity-90 transition-opacity"
+      loading="lazy"
+    />
+  </a>
+))}
+```
+
+After:
+
+```tsx
+{urls.map((url, i) => (
+  <a
+    key={i}
+    href={authedPhotoSrc(url, "medium")}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="block flex-shrink-0"
+    data-testid={`photo-thumb-${i}`}
+  >
+    <img
+      src={authedPhotoSrc(url, "thumb")}
+      alt={`Photo ${i + 1}`}
+      className="w-20 h-20 object-cover rounded border border-gray-200 hover:opacity-90 transition-opacity"
+      loading="lazy"
+    />
+  </a>
+))}
+```
+
+The rest of `PhotoStrip` (the wrapper `<div>`, the label, the gap
+styling) is unchanged.
+
+### Tests
+
+Extend `wet-check-billing-view.test.tsx` with a new `describe` block:
+
+```tsx
+describe("PhotoStrip — authenticated URL transform (Slice 4b)", () => {
+  it("wraps img src with authedPhotoSrc 'thumb' variant", () => {
+    const wcbView: WetCheckBillingView = makeViewFixture({
+      zones: [makeZoneFixture({
+        zonePhotoUrls: ["photos/abc-123"],
+      })],
+    });
+    render(<WetCheckBillingViewComponent view={wcbView} />);
+    const img = screen.getByAltText("Photo 1") as HTMLImageElement;
+    expect(img.src).toContain("/api/photos/");
+    expect(img.src).toContain("variant=thumb");
+  });
+
+  it("wraps anchor href with authedPhotoSrc 'medium' variant", () => {
+    const wcbView: WetCheckBillingView = makeViewFixture({
+      zones: [makeZoneFixture({
+        zonePhotoUrls: ["photos/def-456"],
+      })],
+    });
+    render(<WetCheckBillingViewComponent view={wcbView} />);
+    const anchor = screen.getByTestId("photo-thumb-0") as HTMLAnchorElement;
+    expect(anchor.href).toContain("/api/photos/");
+    expect(anchor.href).toContain("variant=medium");
+  });
+
+  it("renders correctly for per-finding photos too (not just zone-level)", () => {
+    const wcbView: WetCheckBillingView = makeViewFixture({
+      zones: [makeZoneFixture({
+        zonePhotoUrls: [],
+        lineItems: [makeLineItemFixture({ findingPhotoUrls: ["photos/ghi-789"] })],
+      })],
+    });
+    render(<WetCheckBillingViewComponent view={wcbView} />);
+    const img = screen.getByAltText("Photo 1") as HTMLImageElement;
+    expect(img.src).toContain("variant=thumb");
+  });
+});
+```
+
+If the file's existing fixture helpers (`makeViewFixture`,
+`makeZoneFixture`, `makeLineItemFixture`) don't exist with those
+exact names, use whatever convention is already there. The
+assertions are what matter; the harness shape can adapt.
+
+### Acceptance criteria
+
+- The import for `authedPhotoSrc` exists at the top of
+  `wet-check-billing-view.tsx`.
+- Both the `<a href>` and `<img src>` inside `PhotoStrip` are wrapped
+  with `authedPhotoSrc`, with `"medium"` and `"thumb"` variants
+  respectively.
+- The new three-test regression block passes.
+- A manual spot check on a real WCB in the dev environment (any of
+  the ones with photos from the recent backfill, e.g.
+  `WC-2026-1027`) shows actual photo thumbnails instead of the
+  broken-image icon, AND clicking a thumbnail opens the full-size
+  photo in a new tab.
+- All existing tests for `wet-check-billing-view.tsx` continue to pass.
+- `pnpm typecheck` and `pnpm test` pass.
+
+### Out of scope
+
+- PDF photo rendering. The PDF path goes through
+  `resolveZonePhotoGroups` server-side and base64-embeds photos as
+  data URIs — different chain, not affected by this fix.
+- The `PhotoImage` component refactor. Replacing `PhotoStrip`'s
+  inline `<img>` with `<PhotoImage>` is a larger refactor that buys
+  loading states and explicit error handling, but it's not the
+  minimum fix. Use `authedPhotoSrc` here; consider `PhotoImage`
+  later if loading-state polish is wanted.
+- Mobile screens. Mobile uses a different photo display chain
+  (`expo-image` with native auth handling) and is not affected.
+- Any other component that uses raw `<img src={url}>` for
+  user-uploaded photos. If you find one during this work, surface
+  it as a separate slice rather than bundling.
+
+### Dependencies
+
+None. Pure frontend, ≤ 5 LOC production change, single file.
+Can land any time.
