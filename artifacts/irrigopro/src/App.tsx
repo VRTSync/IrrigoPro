@@ -14,7 +14,6 @@ import NotFound from "@/pages/not-found";
 import FieldTechDashboard from "@/pages/field-tech-dashboard";
 import ManagerDashboard from "@/pages/manager-dashboard";
 import AdminDashboard from "@/pages/admin-dashboard";
-import SuperAdminDashboard from "@/pages/super-admin-dashboard";
 import BillingWorkspace from "@/pages/billing-workspace";
 
 // Task #532 — every other page is route-split via React.lazy. Vite emits
@@ -107,6 +106,12 @@ function RedirectToBillingWorkspace() {
 function RedirectToWetChecks() {
   const [, navigate] = useLocation();
   useEffect(() => { navigate("/wet-checks", { replace: true }); }, [navigate]);
+  return null;
+}
+
+function RedirectToAppHealth() {
+  const [, navigate] = useLocation();
+  useEffect(() => { navigate("/super-admin/app-health", { replace: true }); }, [navigate]);
   return null;
 }
 
@@ -429,8 +434,8 @@ function Router() {
             <div className="px-4">
               <Suspense fallback={<RouteSuspenseFallback />}>
                 <Switch>
-                  <Route path="/" component={SuperAdminDashboard} />
-                  <Route path="/super-admin" component={SuperAdminDashboard} />
+                  <Route path="/" component={RedirectToAppHealth} />
+                  <Route path="/super-admin" component={SuperAdminAppHealthPage} />
                   <Route path="/manager/wet-checks" component={RedirectToWetChecks} />
                   <Route path="/manager/wet-checks/:id/confirm">
                     {(params) => <WetCheckConfirm id={parseInt(params.id)} />}

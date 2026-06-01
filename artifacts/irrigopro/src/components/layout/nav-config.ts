@@ -197,7 +197,7 @@ export const managerNav: NavConfig = {
 
 export const superAdminNav: NavConfig = {
   items: [
-    { type: "leaf", label: "Dashboard", path: "/", icon: Home },
+    { type: "leaf", label: "App Health", path: "/super-admin/app-health", icon: Activity },
     { type: "leaf", label: "Companies", path: "/super-admin", icon: Building2 },
     {
       type: "group",
@@ -224,7 +224,6 @@ export const superAdminNav: NavConfig = {
       label: "System",
       icon: Settings,
       items: [
-        { type: "leaf", label: "App Health", path: "/super-admin/app-health", icon: Activity },
         { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
         { type: "leaf", label: "Client Errors", path: "/admin/client-errors", icon: AlertTriangle },
       ],
