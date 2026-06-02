@@ -4359,8 +4359,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       console.log(`[LOGO-SERVE] Logo file found, downloading...`);
       
-      // Serve the image directly
-      objectStorageService.downloadObject(file, res);
+      // Serve the image directly.
+      // Use a 1-hour public cache with a 24-hour stale-while-revalidate window
+      // so the browser skips the network round-trip on repeated navigations
+      // (important on slow field-LTE connections). The logoId in the URL is the
+      // object-storage filename, so a new upload always produces a new URL —
+      // no cache-busting query string is needed.
+      objectStorageService.downloadObject(file, res, 3600, {
+        cacheControlOverride: "public, max-age=3600, stale-while-revalidate=86400",
+      });
       
     } catch (error) {
       console.error(`[LOGO-SERVE] Error serving logo ${logoId}:`, error);

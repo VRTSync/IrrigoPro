@@ -111,12 +111,15 @@ export class ObjectStorageService {
   }
 
   // Downloads an object to the response. Optionally streams as a long-cache
-  // public-display variant when `displayVariant` is true.
+  // public-display variant when `displayVariant` is true. Pass
+  // `cacheControlOverride` to emit an exact Cache-Control string instead of
+  // the computed default (useful for endpoints like company-logo that need
+  // `public` + `stale-while-revalidate` without the year-long `immutable` TTL).
   async downloadObject(
     file: File,
     res: Response,
     cacheTtlSec: number = 3600,
-    options: { displayVariant?: boolean } = {}
+    options: { displayVariant?: boolean; cacheControlOverride?: string } = {}
   ) {
     try {
       const [metadata] = await file.getMetadata();
@@ -131,9 +134,10 @@ export class ObjectStorageService {
         // HEIC bytes can be served as a public, long-cached display variant
         // (galleries) OR as a private, authenticated original — pick the
         // matching cache-control so we never leak originals through a CDN.
-        const heicCacheControl = options.displayVariant
-          ? `public, max-age=${VARIANT_CACHE_TTL_SECONDS}, immutable`
-          : `private, max-age=${cacheTtlSec}`;
+        const heicCacheControl = options.cacheControlOverride
+          ?? (options.displayVariant
+            ? `public, max-age=${VARIANT_CACHE_TTL_SECONDS}, immutable`
+            : `private, max-age=${cacheTtlSec}`);
         const heicCacheKey = heicCachePath(this.canonicalKeyForFile(file));
         const cached = await this.searchPublicObject(heicCacheKey);
         if (cached) {
@@ -174,9 +178,10 @@ export class ObjectStorageService {
         return;
       }
 
-      const cacheControl = options.displayVariant
-        ? `public, max-age=${VARIANT_CACHE_TTL_SECONDS}, immutable`
-        : `private, max-age=${cacheTtlSec}`;
+      const cacheControl = options.cacheControlOverride
+        ?? (options.displayVariant
+          ? `public, max-age=${VARIANT_CACHE_TTL_SECONDS}, immutable`
+          : `private, max-age=${cacheTtlSec}`);
 
       res.set({
         "Content-Type": contentType,
