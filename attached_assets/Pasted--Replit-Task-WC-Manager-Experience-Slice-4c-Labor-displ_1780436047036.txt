@@ -1,0 +1,498 @@
+# Replit Task — WC Manager Experience, Slice 4c (Labor display reconciliation + Approve button on WC Billings tab)
+
+This is a single self-contained task addressing three related bugs surfaced
+in production on the WCB detail modal. Do not deviate from the file paths,
+function names, or formula shapes specified. If you believe a deviation is
+necessary, surface it and stop.
+
+> **TL;DR.** The customer-billing card shows `wcb.total_amount` (the
+> snapshot — correct). The detail modal re-derives totals through
+> `buildWetCheckBillingView`, which **only sums zone-level repair labor
+> and ignores `wc.totalLaborHours`** entirely. Two divergence sources
+> compound: a missing formula term, and stale `zone.repair_labor_hours`
+> values on legacy records. This slice fixes the formula in one place,
+> adds the missing Approve button, and stamps zone repair-labor on every
+> new WCB so the divergence can't reopen.
+
+> **Existing infrastructure to NOT rebuild.**
+> - `POST /api/wet-check-billings/:id/approve` already exists at
+>   `approve-routes.ts:283`. Use it as-is.
+> - The role gate on that endpoint already includes `billing_manager`
+>   (`approve-routes.ts:289–294`). No permission change needed.
+> - `isWetCheckManagerRole` (`routes.ts:14851`) already includes
+>   `billing_manager`. Do NOT widen it.
+> - The slice's audit doc reference doesn't need updating either —
+>   the model already grants billing_manager approve authority.
+
+---
+
+## Design Context (locked decisions)
+
+**Source-of-truth for WCB totals is the WCB row's snapshot columns.** Any
+view, modal, PDF, or audit endpoint that needs the *total* labor /
+parts / amount must read `wcb.labor_subtotal`, `wcb.parts_subtotal`, and
+`wcb.total_amount` directly — these are the numbers QuickBooks sees,
+the customer is billed, and the financial-pulse audit reconciles
+against. Re-deriving totals from upstream tables produces drift any
+time the upstream tables disagree with the snapshot.
+
+**Per-zone breakdown is a best-effort presentation, not a source of
+truth.** Zone records can have stale `repair_labor_hours` (Task #891's
+hook didn't backfill legacy findings). When the data is fresh, show it.
+When it's clearly stale (zone = 0 but the WCB row has labor), surface
+that gracefully — show the zone parts subtotal, omit the zone labor
+breakdown, and lean on the WCB snapshot at the totals card. Never
+pretend a zone has zero labor when the snapshot proves it doesn't.
+
+**The Approve button must call the WCB-level endpoint, NOT the wet-check
+level one.** `POST /api/wet-check-billings/:id/approve`
+(`approve-routes.ts:283`) is the right path. The wet-check-level
+`/api/wet-checks/:id/approve` exists for a different flow (the
+manager-review queue surface) and is not the right call here.
+
+**`billing_manager` can approve.** Already in the role list on both the
+endpoint (`approve-routes.ts:291`) and the `isWetCheckManagerRole`
+helper (`routes.ts:14852`). The Approve button renders for all four
+manager-tier roles: `irrigation_manager`, `billing_manager`,
+`company_admin`, `super_admin`. Field tech sees no button.
+
+---
+
+## Slice 4c — Three changes
+
+### Change 1 — Use the WCB snapshot for totals in the view assembler
+
+The current view assembler at
+`artifacts/api-server/src/wet-check-billing-view.ts:284–290` does:
+
+```typescript
+let partsSubtotal = 0;
+let laborSubtotal = 0;
+for (const z of zones) {
+  partsSubtotal += toNum(z.zonePartsSubtotal);
+  laborSubtotal += toNum(z.zoneLaborSubtotal);
+}
+const grandTotal = partsSubtotal + laborSubtotal;
+```
+
+Replace with snapshot-trusting logic that falls back to the live derive
+only when no snapshot exists (WCB hasn't been created yet — e.g., the
+legacy `getBillingSheetWetCheckView` path):
+
+```typescript
+// Slice 4c — Snapshot-first totals.
+//
+// When a wet_check_billings row exists for this view, its snapshot
+// columns are authoritative — that's what gets billed, snapshotted at
+// approval time, pushed to QuickBooks, and reconciled in the financial
+// pulse audit. Re-deriving totals from zone records can disagree with
+// the snapshot for two reasons:
+//   1. Legacy zones whose `repair_labor_hours` was never recomputed
+//      (Task #891 hook didn't fire on findings created pre-deploy).
+//   2. The wet-check-level `wc.totalLaborHours` overhead (inspection +
+//      travel) that gets included in `_writeRepairedInFieldBilling`
+//      (storage.ts:7499) but is silently dropped here.
+//
+// Snapshot-first eliminates both classes of drift.
+let partsSubtotal: number;
+let laborSubtotal: number;
+let totalsSource: "wcb_snapshot" | "live_derive";
+
+if (wcb && wcb.totalAmount != null) {
+  // WCB snapshot path — what the customer is actually billed.
+  partsSubtotal = toNum(wcb.partsSubtotal);
+  laborSubtotal = toNum(wcb.laborSubtotal);
+  totalsSource = "wcb_snapshot";
+} else {
+  // Legacy BS-WC path or pre-creation preview — derive live.
+  partsSubtotal = 0;
+  laborSubtotal = 0;
+  for (const z of zones) {
+    partsSubtotal += toNum(z.zonePartsSubtotal);
+    laborSubtotal += toNum(z.zoneLaborSubtotal);
+  }
+  totalsSource = "live_derive";
+}
+const grandTotal = partsSubtotal + laborSubtotal;
+```
+
+**Add `totalsSource` to the `WetCheckBillingView` return type** so
+consumers (modal, PDF, tests) can render a small "Showing stored total
+— per-zone breakdown is approximate" hint when divergence is detected.
+That hint is rendered by the modal in Change 1b below.
+
+**For the per-zone display**, leave each zone's `zonePartsSubtotal` and
+`zoneLaborSubtotal` as-is — those come from the live derive and are
+already correct for fresh data. When `totalsSource === "wcb_snapshot"`
+AND the sum of zone labor subtotals is meaningfully less than the WCB
+snapshot's labor subtotal (delta > $0.01), the per-zone display has
+known drift. Set a new top-level `zonesHaveStaleLaborData: true` flag
+on the view payload to signal this to the UI.
+
+```typescript
+const liveZoneLaborSum = zones.reduce((s, z) => s + toNum(z.zoneLaborSubtotal), 0);
+const zonesHaveStaleLaborData =
+  totalsSource === "wcb_snapshot" &&
+  Math.abs(laborSubtotal - liveZoneLaborSum) > 0.01;
+```
+
+Return both new fields:
+
+```typescript
+return {
+  // ... existing fields ...
+  partsSubtotal: fmt(partsSubtotal),
+  laborSubtotal: fmt(laborSubtotal),
+  grandTotal: fmt(grandTotal),
+  totalsSource,                    // NEW
+  zonesHaveStaleLaborData,         // NEW
+  zones,
+};
+```
+
+**`buildWetCheckBillingView`'s signature must accept the WCB row.** Find
+the two call sites in `storage.ts`:
+
+- `getBillingSheetWetCheckView` (legacy BS-WC path) — passes `wcb:
+  undefined` (no WCB exists in this code path).
+- `getWetCheckBillingViewById` — already has the WCB in scope; pass it
+  through.
+
+### Change 1b — Modal renders the new fields cleanly
+
+In `artifacts/irrigopro/src/components/billing/wet-check-billing-view.tsx`:
+
+The "WC Sheet Totals" card at line 519 reads `view.partsSubtotal`,
+`view.laborSubtotal`, and `view.grandTotal` already — those values are
+now correct on snapshot-backed views. No changes there.
+
+Add a subtle one-line hint when `view.zonesHaveStaleLaborData === true`,
+placed above the "WC Sheet Totals" header:
+
+```tsx
+{view.zonesHaveStaleLaborData ? (
+  <div className="px-4 py-2 text-xs text-amber-700 bg-amber-50 rounded-md mb-3 flex items-start gap-2">
+    <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+    <span>
+      Per-zone labor breakdown is approximate for this WCB. The total
+      shown below comes from the stored billing snapshot and is what
+      the customer is invoiced.
+    </span>
+  </div>
+) : null}
+```
+
+The Repair Hrs cell on each zone row (`wet-check-billing-view.tsx:375`)
+stays the same — it displays the zone's actual `repair_labor_hours`
+(0.00 for stale zones, which is honest). No fabricated per-zone
+numbers.
+
+### Change 2 — Approve button on the WC Billings tab row
+
+In `artifacts/irrigopro/src/pages/customer-billing.tsx`, find the
+`WetCheckBillingRow` render in the WC Billings tab — there are two
+copies, one in the mobile tab strip (~line 1434) and one in the
+desktop strip (~line 2461). Both consume the same row component.
+
+Inside the row component, add an Approve button that renders only
+when:
+- `wcb.status === "submitted" || wcb.status === "pending_manager_review"`, AND
+- `userRole` is one of `irrigation_manager`, `billing_manager`,
+  `company_admin`, `super_admin` (use the existing role hook on the
+  page).
+
+Wire to the existing endpoint:
+
+```tsx
+const approveMutation = useMutation({
+  mutationFn: () =>
+    apiRequest(`/api/wet-check-billings/${wcb.id}/approve`, "POST", {}),
+  onSuccess: () => {
+    // Invalidate the billing data so the unbilled card, total work
+    // counts, and tab counts update.
+    queryClient.invalidateQueries({
+      queryKey: ["/api/customers", customerId, "billing"],
+    });
+    queryClient.invalidateQueries({ queryKey: ["/api/wet-check-billings"] });
+    toast({
+      title: "Wet check billing approved",
+      description: `${wcb.billingNumber} is now ready to invoice.`,
+    });
+  },
+  onError: (error) => {
+    toast({
+      title: "Approve failed",
+      description: error instanceof Error ? error.message : "Try again",
+      variant: "destructive",
+    });
+  },
+});
+```
+
+Render the button at the right edge of the row (alongside the
+existing action area, if there is one). Keep it small — Tailwind
+`size="sm"` — and use the green-success variant to read as an
+affirmative action:
+
+```tsx
+{showApprove ? (
+  <Button
+    size="sm"
+    onClick={(e) => { e.stopPropagation(); approveMutation.mutate(); }}
+    disabled={approveMutation.isPending}
+    data-testid={`approve-wcb-${wcb.id}`}
+  >
+    {approveMutation.isPending ? (
+      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+    ) : (
+      <CheckCircle2 className="w-4 h-4 mr-1" />
+    )}
+    Approve
+  </Button>
+) : null}
+```
+
+The `e.stopPropagation()` is required — the row's outer click handler
+opens the modal, and we don't want the modal opening when the user
+intends to click Approve.
+
+### Change 3 — Conversion path: stamp zone repair labor before WCB creation
+
+In `_writeRepairedInFieldBilling` (`storage.ts:7424+`), the function
+**reads** `zone.repair_labor_hours` at line 7491–7496 but does NOT
+**recompute** it from findings beforehand. For wet checks whose findings
+were created before Task #891's auto-compute hook existed, the zone
+column is 0 and the WCB inherits the gap.
+
+Add a recompute step just before the read at line 7489. Reuse the
+existing `_recomputeZoneRepairLaborIfAuto` helper (`storage.ts:7673`,
+the Slice 2-fixed quantity-aware version):
+
+```typescript
+// Slice 4c — Make sure zone repair labor is current before reading it.
+// Defensive: Task #891's hook is supposed to keep zone records fresh
+// on every finding create/update, but legacy wet checks (and any
+// future code path that inserts findings without going through
+// createWetCheckFinding / updateWetCheckFinding) can leave zones
+// stale. Recompute every affected zone here so the WCB snapshot is
+// guaranteed to include real per-zone labor.
+const newZoneIds = Array.from(new Set(repaired.map(f => f.zoneRecordId)));
+for (const zoneId of newZoneIds) {
+  await this._recomputeZoneRepairLaborIfAuto(tx, zoneId, wc.companyId);
+}
+
+// (existing code that reads zone records — now sees fresh data)
+const newZoneRows = newZoneIds.length > 0
+  ? await tx.select({ id: wetCheckZoneRecords.id, repairLaborHours: wetCheckZoneRecords.repairLaborHours })
+      .from(wetCheckZoneRecords)
+      .where(inArray(wetCheckZoneRecords.id, newZoneIds))
+  : [];
+```
+
+This closes the door on new WCBs being created with stale zones. It
+does not retroactively fix existing WCBs — those still rely on the
+snapshot-first read in Change 1 to display correctly.
+
+### Tests
+
+**Backend — `buildWetCheckBillingView` snapshot path:**
+
+```typescript
+// artifacts/api-server/src/wet-check-billing-view.test.ts (extend)
+describe("buildWetCheckBillingView — snapshot-first totals (Slice 4c)", () => {
+  it("uses wcb snapshot when wcb is provided", () => {
+    const view = buildWetCheckBillingView({
+      wetCheck: { totalLaborHours: "14.30" } as any,
+      wcb: {
+        partsSubtotal: "1002.66",
+        laborSubtotal: "1072.50",
+        totalAmount: "2075.16",
+      } as any,
+      zones: [
+        { id: 1, repairLaborHours: "0.00" } as any,
+        { id: 2, repairLaborHours: "0.00" } as any,
+      ],
+      findings: [],
+      // ... other required inputs
+    });
+    expect(view.partsSubtotal).toBe("1002.66");
+    expect(view.laborSubtotal).toBe("1072.50");   // ← was 0.00 pre-fix
+    expect(view.grandTotal).toBe("2075.16");
+    expect(view.totalsSource).toBe("wcb_snapshot");
+    expect(view.zonesHaveStaleLaborData).toBe(true);
+  });
+
+  it("falls back to live derive when wcb is undefined (legacy BS-WC path)", () => {
+    const view = buildWetCheckBillingView({
+      wetCheck: { totalLaborHours: "0.00" } as any,
+      wcb: undefined,
+      zones: [{ id: 1, repairLaborHours: "0.50" } as any],
+      findings: [{ zoneRecordId: 1, /* ... */ } as any],
+      // ...
+    });
+    expect(view.totalsSource).toBe("live_derive");
+  });
+
+  it("does NOT flag stale data when snapshot agrees with live derive", () => {
+    const view = buildWetCheckBillingView({
+      wcb: { partsSubtotal: "100", laborSubtotal: "50", totalAmount: "150" } as any,
+      zones: [{ id: 1, repairLaborHours: "0.50" /* × $100/hr = $50 labor */ } as any],
+      // ...
+    });
+    expect(view.zonesHaveStaleLaborData).toBe(false);
+  });
+});
+```
+
+**Backend — conversion path recomputes zones (Change 3):**
+
+```typescript
+// artifacts/api-server/src/wet-check-convert-zone-labor-stamp.test.ts (new)
+it("_writeRepairedInFieldBilling recomputes zone repair labor before reading", async () => {
+  const { wc, zone, findings } = await seedZoneWithFindings({
+    issueType: "nozzle_replacement",
+    quantity: 2,
+  });
+  // Force the zone to a stale value to simulate pre-fix state.
+  await db.update(wetCheckZoneRecords)
+    .set({ repairLaborHours: "0.00" })
+    .where(eq(wetCheckZoneRecords.id, zone.id));
+
+  // Trigger WCB creation via the public submit-with-autobill path.
+  const wcb = await submitAndAutobill(wc.id);
+
+  // After conversion the zone should have been recomputed to 0.50.
+  const [zr] = await db.select().from(wetCheckZoneRecords)
+    .where(eq(wetCheckZoneRecords.id, zone.id));
+  expect(parseFloat(zr.repairLaborHours)).toBeCloseTo(0.50, 2);
+
+  // And the WCB snapshot reflects it.
+  expect(parseFloat(wcb.laborSubtotal)).toBeGreaterThan(0);
+});
+```
+
+**Frontend — Approve button on WC Billings tab:**
+
+```typescript
+// artifacts/irrigopro/src/pages/customer-billing-wcb-approve.test.tsx (new)
+describe("Customer billing — Approve button on WC Billings tab (Slice 4c)", () => {
+  it("renders Approve button for submitted WCB to billing_manager", () => {
+    renderPage({
+      userRole: "billing_manager",
+      wetCheckBillings: [makeWcb({ id: 1, status: "submitted" })],
+    });
+    fireEvent.click(screen.getByRole("tab", { name: /WC Billings/ }));
+    expect(screen.getByTestId("approve-wcb-1")).toBeInTheDocument();
+  });
+
+  it("does NOT render Approve button on approved_passed_to_billing WCB", () => {
+    renderPage({
+      userRole: "billing_manager",
+      wetCheckBillings: [makeWcb({ id: 2, status: "approved_passed_to_billing" })],
+    });
+    fireEvent.click(screen.getByRole("tab", { name: /WC Billings/ }));
+    expect(screen.queryByTestId("approve-wcb-2")).not.toBeInTheDocument();
+  });
+
+  it("does NOT render Approve button for field_tech role", () => {
+    renderPage({
+      userRole: "field_tech",
+      wetCheckBillings: [makeWcb({ id: 3, status: "submitted" })],
+    });
+    fireEvent.click(screen.getByRole("tab", { name: /WC Billings/ }));
+    expect(screen.queryByTestId("approve-wcb-3")).not.toBeInTheDocument();
+  });
+
+  it("clicking Approve POSTs to /api/wet-check-billings/:id/approve", async () => {
+    const apiSpy = mockApiRequest();
+    renderPage({
+      userRole: "billing_manager",
+      wetCheckBillings: [makeWcb({ id: 42, status: "submitted" })],
+    });
+    fireEvent.click(screen.getByRole("tab", { name: /WC Billings/ }));
+    fireEvent.click(screen.getByTestId("approve-wcb-42"));
+    await waitFor(() => {
+      expect(apiSpy).toHaveBeenCalledWith(
+        "/api/wet-check-billings/42/approve",
+        "POST",
+        {},
+      );
+    });
+  });
+
+  it("clicking Approve does NOT open the modal (stopPropagation)", () => {
+    renderPage({
+      userRole: "billing_manager",
+      wetCheckBillings: [makeWcb({ id: 7, status: "submitted" })],
+    });
+    fireEvent.click(screen.getByRole("tab", { name: /WC Billings/ }));
+    fireEvent.click(screen.getByTestId("approve-wcb-7"));
+    expect(screen.queryByTestId("wcb-view-modal")).not.toBeInTheDocument();
+  });
+});
+```
+
+### Acceptance criteria
+
+- `buildWetCheckBillingView` returns `totalsSource: "wcb_snapshot"`
+  when a WCB row is provided and `"live_derive"` when not. The
+  totals (`partsSubtotal`, `laborSubtotal`, `grandTotal`) come from the
+  snapshot in the former case.
+- `view.zonesHaveStaleLaborData` is `true` when the snapshot's labor
+  subtotal disagrees with the live-derived zone labor sum by more
+  than $0.01.
+- The WCB detail modal renders a small amber info hint above "WC Sheet
+  Totals" when `zonesHaveStaleLaborData` is true. The "WC Sheet
+  Totals" card itself shows the snapshot numbers — for WCB-1008 in
+  the screenshot, that means Parts $1,002.66, Repair Labor $1,072.50
+  (approx), Grand Total $2,075.16.
+- A new Approve button renders on each WC Billings tab row whose
+  status is `submitted` or `pending_manager_review`, for manager-tier
+  roles only.
+- Clicking Approve POSTs to `/api/wet-check-billings/:id/approve`,
+  invalidates the relevant query caches, and surfaces a success or
+  failure toast.
+- After a successful approve, the unbilled card's "0 WC ready" updates
+  to "1 WC ready" and the approve button is replaced by the existing
+  modal row chrome (no second click required to confirm).
+- `_writeRepairedInFieldBilling` recomputes zone repair labor for
+  every affected zone before reading it, so new WCBs never carry the
+  stale-zone gap.
+- All new tests pass. Existing `wet-check-billing-view.test.ts`,
+  `wcb-approval-snapshot.test.ts`, and
+  `wet-check-submit-autobill.test.ts` continue to pass.
+- `pnpm typecheck` and `pnpm test` pass.
+
+### Out of scope
+
+- Permission widening — already done, do NOT touch
+  `isWetCheckManagerRole` or the `approve-routes.ts` role check.
+- Adding a `POST /api/wet-checks/:id/approve` call from the customer
+  billing page — wrong endpoint for this surface (the WCB-level one
+  is correct and exists).
+- A retroactive backfill of stale `zone.repair_labor_hours` columns.
+  Slice 3 of the WC Labor Model family ships that capability via
+  `/admin/wc-labor-backfill`; if the user wants to clean the data
+  beyond what the snapshot-first display covers, they can run that
+  separately with widened scope (drop the `wcb.labor_subtotal = 0`
+  filter on Q1's collector).
+- Changing how `wcb.labor_subtotal` is computed at creation.
+  `_writeRepairedInFieldBilling`'s formula
+  `(wc.totalLaborHours + Σ zone.repair_labor_hours) × labor_rate` is
+  the right contract; Change 3 ensures the zone term is fresh, the
+  overhead term is unchanged.
+- The PDF — already consumes `WetCheckBillingView`, so it gets the
+  snapshot-first totals for free.
+- The Financial Pulse audit endpoint enrichment — already reads
+  `wcb.labor_subtotal` directly via WC Billing Integration Slice 2,
+  unaffected by the modal/view divergence.
+
+### Dependencies
+
+- WC ME Slice 1 (WC Billings tab in customer-billing.tsx) — shipped.
+- WC ME Slice 4b (photo display) — shipped.
+- WC Labor Model Slices 2 + 3 — shipped. The conversion-path recompute
+  in Change 3 uses Slice 2's quantity-aware
+  `_recomputeZoneRepairLaborIfAuto`.
+
+Independent of all other slices in flight.
