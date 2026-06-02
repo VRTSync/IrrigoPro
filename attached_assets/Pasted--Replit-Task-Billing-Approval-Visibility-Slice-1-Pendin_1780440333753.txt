@@ -1,0 +1,482 @@
+# Replit Task — Billing Approval Visibility, Slice 1 (Pending Approval List + Irrigation Manager access + drill-down from Command Center totals)
+
+This is a single self-contained task. Do not deviate from the file paths,
+endpoint paths, role lists, or status sets specified. If you believe a
+deviation is necessary, surface it and stop.
+
+> **TL;DR.** The Command Center page at `/billing/command-center`
+> (`pages/customer-billing.tsx`) displays a header summary including
+> `Unapproved: $17,233.49`, but there is no way to click into that figure
+> to see *which* items make it up. The unified approval queue that
+> already exists at `/billing-workspace` (Task #709,
+> `pages/billing-workspace.tsx`) is the right list to show, but it is
+> currently gated to `billing_manager` / `company_admin` / `super_admin`
+> only — the irrigation manager who actually owns approvals for
+> billing sheets, work orders, and wet-check billings cannot reach it.
+> This slice (a) makes the Unapproved/Approved totals on the Command
+> Center clickable drill-downs into a deep-linked pending-approval view,
+> (b) grants `irrigation_manager` access to the same unified queue with
+> a role-appropriate sidebar entry and badge, and (c) adds a new
+> `awaitingApproval` sidebar badge that counts pending items for both
+> roles so the irrigation manager gets a passive nudge without an
+> additional email or notification system.
+
+> **Existing infrastructure to NOT rebuild.**
+>
+> - `pages/billing-workspace.tsx` already implements: filter bar
+>   (type/customer/tech/age/status), sort, sticky 50/page table,
+>   right-hand detail drawer with **Approve**, **Save edits**,
+>   **Kickback (reason)**, **Flag**, activity log, and J/K/A/B/F/Esc/?
+>   keyboard shortcuts. Reuse it as the destination page — do not fork
+>   it. Slice changes are role-gating, URL-state plumbing, badge
+>   wiring, and a new bulk-approve action on top.
+> - `GET /api/billing-workspace/queue` already returns the unified item
+>   list with filters (`artifacts/api-server/src/routes/billing-workspace-routes.ts`
+>   lines ~449–500). Reuse as-is for company_admin and billing_manager.
+>   Add `irrigation_manager` to the role gate; do NOT widen the queue
+>   contents.
+> - `POST /api/billing-sheets/:id/approve`, `POST /api/work-orders/:id/approve`,
+>   and `POST /api/wet-check-billings/:id/approve` already exist
+>   (`artifacts/api-server/src/routes/approve-routes.ts:78, :170, :283`)
+>   and already accept `irrigation_manager`. No new approve endpoint is
+>   needed. The bulk endpoint introduced in this slice fans out to
+>   these three.
+> - The Command Center totals (`approvedTotal`, `unapprovedTotal`) are
+>   computed in `GET /api/customers/billing-preview`
+>   (`artifacts/api-server/src/routes/routes.ts:6019` ff.). Do NOT
+>   reshape that endpoint. The drill-down uses the existing definitions
+>   verbatim so the figure on the card and the row count on the list
+>   page can never disagree.
+
+---
+
+## Design Context (locked decisions)
+
+**One canonical "unapproved" definition, shared by the card and the list.**
+The card-level `unapprovedTotal` is the sum of these three sets, all
+filtered to rows where `invoiceId IS NULL`:
+
+| Source | Status values counted as unapproved |
+|--------|--------------------------------------|
+| Billing Sheets | `pending_manager_review`, `completed`, `submitted` |
+| Work Orders | `pending_manager_review`, `work_completed` |
+| Wet Check Billings | `submitted`, `pending_manager_review` |
+
+These are the exact sets used in `routes.ts` at the
+`/api/customers/billing-preview` rollup (`unapprovedWorkOrders`,
+`unapprovedBillingSheets`, `unapprovedWetCheckBillings`). They are
+also identical to the `ACTIVE_BS` / `ACTIVE_WO` / `ACTIVE_WCB` sets in
+`billing-workspace-routes.ts` (lines ~38–50). **Do not introduce a
+fourth list.** If a definition needs to change later, it changes in
+those two files at the same time, with a regression test that the card
+total equals `SUM(items.total)` from the queue endpoint for the same
+filter window.
+
+**The destination is the existing Billing Workspace page, not a new page.**
+The user-facing surface is `/billing-workspace` with a deep-linked URL
+that pre-applies a "type=all, status=unapproved" filter and (when
+drilled in from a customer card) a `customer=<id>` filter. A separate
+`/pending-approval` page would either duplicate the table or diverge
+from it; we have already paid that price once with the legacy
+`/estimates/pending-approval` → `/estimates/command-center` migration
+(`pages/estimate-command-center.tsx` header comment). Don't pay it
+again.
+
+**Irrigation manager gets the full queue, not a subset.** Approvals for
+billing sheets and wet-check billings are explicitly an irrigation
+manager responsibility in this codebase: `MANAGER_ROLES` in
+`pages/customer-billing.tsx:122` and the role gate on
+`POST /api/wet-check-billings/:id/approve` both include
+`irrigation_manager`. The existing `manager-workspace-routes.ts` queue
+covers wet checks and work-order routing but **excludes billing sheets
+and wet-check billings** by design (see `MW_ROLES` and the item-type
+switch around lines ~287–360). The right fix is to grant irrigation
+manager access to `billing-workspace`, not to widen
+`manager-workspace`.
+
+**No email/digest in this slice.** The user chose "sidebar badge count"
+only. Do not add a notification endpoint, cron, or email template.
+
+**Bulk and per-customer approve are new; per-row Approve and edit-then-
+approve already work.** The existing Billing Workspace drawer already
+does per-row Approve and Save-then-Approve. The two additions in this
+slice are:
+
+1. **Bulk approve selected rows** — a checkbox column, an "Approve N
+   selected" button, and a server-side bulk endpoint that fans out to
+   the existing per-item approve handlers (so audit, status guards,
+   and lifecycle hooks are unchanged).
+2. **Approve all for a customer** — a one-click action available when
+   the queue is filtered to a single `customer=<id>`. Same fan-out.
+
+---
+
+## Slice 1 — File-level changes
+
+### Files added
+
+| File | Purpose |
+|------|---------|
+| `artifacts/api-server/src/routes/billing-workspace-bulk-approve.ts` | New `POST /api/billing-workspace/bulk-approve` handler. Accepts `{ items: Array<{ type: 'billing_sheet'\|'work_order'\|'wet_check_billing'; id: number }> }`. Fans out to the existing `/approve` endpoints in the same tenant scope, returning `{ approved: number; skipped: Array<{ id: number; type: string; reason: string }> }`. Tenant scoping + role gate identical to `billing-workspace-routes.ts`. |
+| `artifacts/api-server/src/routes/billing-workspace-bulk-approve.test.ts` | Unit tests: (a) approves a mix of bs/wo/wcb; (b) skips items whose status isn't in the active set with `reason: 'status_not_active'`; (c) 403s for `field_tech`; (d) 200s for `irrigation_manager`. |
+| `artifacts/irrigopro/src/components/billing-workspace/bulk-approve-bar.tsx` | Sticky-bottom selection bar shown when ≥1 row is selected. Renders "Approve N selected" and "Clear selection". Pure presentation; mutation comes from the parent. |
+
+### Files modified
+
+| File | Change |
+|------|--------|
+| `artifacts/api-server/src/routes/billing-workspace-routes.ts` | Add `"irrigation_manager"` to `BW_ROLES` (line ~27). No other change to `/queue` or `/status-strip`. |
+| `artifacts/api-server/src/routes/routes.ts` | Register the new bulk-approve route via `registerBillingWorkspaceBulkApproveRoutes(app, { requireAuthentication })`. Keep the registration adjacent to the existing `registerBillingWorkspaceRoutes(...)` call. |
+| `artifacts/irrigopro/src/components/layout/nav-config.ts` | (1) Add a new `NavBadgeKey` literal: `"awaitingApproval"`. (2) On `companyAdminNav` and `billingManagerNav`, add `badgeKey: "awaitingApproval"` to the existing **Billing Workspace** leaf (do NOT change its `path` or `icon`). (3) On `managerNav`, add a new Billing group containing a **Billing Workspace** leaf at `/billing-workspace` with `badgeKey: "awaitingApproval"`, placed immediately after the existing **Operations** group. |
+| `artifacts/irrigopro/src/components/layout/desktop-shell.tsx` | In `useNavBadges`, add a `useQuery` against `/api/billing-workspace/queue?type=all&pageSize=1` reading the `total` field from the response (already returned, see `billing-workspace-routes.ts:462`). Return `awaitingApproval: total` in the badge map. Gate the query with the existing `enabled` parameter so logged-out probes still return 0. Use `Array.isArray` coercion is N/A here (response is an object) — coerce via `typeof total === 'number' ? total : 0`. |
+| `artifacts/irrigopro/src/App.tsx` | In the `user.role === "irrigation_manager"` branch (lines 309 ff.), add `<Route path="/billing-workspace" component={BillingWorkspace} />` and the matching legacy redirects `/billing`, `/billing/dashboard`, `/billing-dashboard` → `BillingWorkspace`. Import `BillingWorkspace` at the top of the file if not already in scope for that branch. |
+| `artifacts/irrigopro/src/pages/billing-workspace.tsx` | (1) Read URL state on mount: `status=unapproved` is sugar for "type=all and ACTIVE status set" (the page's current default — make the URL form explicit so deep-linking works). `customer=<id>` sets the customer dropdown. Persist these to the existing filter state, do not bypass it. (2) Add a checkbox column on the queue table (`<th>` with a select-all checkbox, `<td>` with per-row checkboxes keyed by `item.id` — note this is the `type-refId` composite already returned by the API). (3) Wire the `BulkApproveBar` component: it appears when `selected.size > 0`, shows count, and on click POSTs to `/api/billing-workspace/bulk-approve` with the selected items, then invalidates `["/api/billing-workspace/queue"]`, `["/api/customers/billing-preview"]`, and `["/api/billing-workspace/status-strip"]`. (4) Add an "Approve all for this customer" button to the filter bar, visible only when `customer` filter is set and the current page has ≥1 active row. Same mutation path as bulk approve; the body is the union of all current `items` in the table filtered to the active customer. |
+| `artifacts/irrigopro/src/pages/customer-billing.tsx` | Wrap the existing header-summary "Approved" and "Unapproved" amounts (and the per-customer card "Approved/Unapproved" lines, lines ~1014–1095 and ~1773–1780) in clickable links that route to `/billing-workspace?status=unapproved` (for the Unapproved figure) or `/billing-workspace?status=approved` (for the Approved figure), with a `customer=<id>` query param appended when clicked from a customer card. Use `<Link>` from `wouter`, not an `<a>` — see `pages/billing-workspace.tsx:782` for the existing convention in this file family. Visually: underline-on-hover only; do not change color/weight, since these amounts are used as financial summaries and must not look like buttons. |
+
+### Files deleted
+
+None.
+
+---
+
+## Concrete changes — verbatim shapes
+
+### 1. Role gate widening (`billing-workspace-routes.ts:27`)
+
+```typescript
+// BEFORE
+const BW_ROLES = new Set([
+  "billing_manager",
+  "company_admin",
+  "super_admin",
+]);
+
+// AFTER
+const BW_ROLES = new Set([
+  "billing_manager",
+  "company_admin",
+  "super_admin",
+  "irrigation_manager",
+]);
+```
+
+No other change to that file. The `isAllowed(req)` helper, the
+`/queue`, `/status-strip`, and QuickBooks overdue handlers all
+participate automatically.
+
+### 2. Bulk approve endpoint (`billing-workspace-bulk-approve.ts`)
+
+```typescript
+// POST /api/billing-workspace/bulk-approve
+//
+// Body: { items: Array<{ type: 'billing_sheet' | 'work_order' | 'wet_check_billing'; id: number }> }
+//
+// Behaviour: for each item, invoke the existing per-item approve
+// handler **as if a separate request had been made**. We do this by
+// calling the underlying storage transitions directly (the same
+// functions `approve-routes.ts` calls), NOT by re-issuing HTTP
+// requests. Audit + lifecycle hooks fire once per item.
+//
+// Response: { approved: number; skipped: Array<{ id: number; type: string; reason: string }> }
+//
+// Skip reasons:
+//   - "status_not_active"  — item's current status isn't in the active set
+//   - "not_found"          — item doesn't exist or isn't in caller's tenant
+//   - "already_invoiced"   — invoiceId is set
+//
+// Failures during a single item's transition are recorded as a skip
+// with reason: "transition_failed: <message>" — the whole call still
+// returns 200 so the UI can show "Approved 7 of 10, 3 skipped".
+```
+
+The handler MUST reuse the same status-set constants
+(`ACTIVE_BS` / `ACTIVE_WO` / `ACTIVE_WCB`) imported from
+`billing-workspace-routes.ts`, so the "what counts as approvable"
+contract stays single-sourced.
+
+### 3. Nav-config additions (`nav-config.ts`)
+
+Add to the `NavBadgeKey` union:
+
+```typescript
+export type NavBadgeKey =
+  | "partsPendingApproval"
+  | "wetCheckReviews"
+  | "estimatesPendingApproval"
+  | "awaitingApproval";
+```
+
+In `companyAdminNav` and `billingManagerNav`, change the existing
+Billing Workspace leaf from:
+
+```typescript
+{ type: "leaf", label: "Billing Workspace", path: "/billing-workspace", icon: LayoutDashboard },
+```
+
+to:
+
+```typescript
+{
+  type: "leaf",
+  label: "Billing Workspace",
+  path: "/billing-workspace",
+  icon: LayoutDashboard,
+  badgeKey: "awaitingApproval",
+},
+```
+
+In `managerNav`, insert this new group immediately after the existing
+**Operations** group (before **Parts**):
+
+```typescript
+{
+  type: "group",
+  label: "Billing",
+  icon: DollarSign,
+  defaultOpen: true,
+  items: [
+    {
+      type: "leaf",
+      label: "Billing Workspace",
+      path: "/billing-workspace",
+      icon: LayoutDashboard,
+      badgeKey: "awaitingApproval",
+    },
+  ],
+},
+```
+
+### 4. Badge query (`desktop-shell.tsx:107` ff.)
+
+Add a fourth `useQuery` inside `useNavBadges`:
+
+```typescript
+const { data: queueProbeRaw } = useQuery<{ total?: number } | null>({
+  queryKey: ["/api/billing-workspace/queue", { pageSize: 1, badgeProbe: true }],
+  enabled,
+  refetchInterval: 60000,
+});
+const awaitingApprovalCount =
+  queueProbeRaw && typeof queueProbeRaw.total === "number" ? queueProbeRaw.total : 0;
+```
+
+Extend the return object:
+
+```typescript
+return {
+  partsPendingApproval: pendingParts.length + pendingReviews.length,
+  wetCheckReviews: wetCheckPending.length,
+  estimatesPendingApproval: pendingEstimates.length,
+  awaitingApproval: awaitingApprovalCount,
+};
+```
+
+**Why a separate probe with `pageSize: 1`:** the queue list pages are
+50 rows; we only need `total`. Keeping the badge query out of the
+table cache means navigating to `/billing-workspace` doesn't have to
+wait on a no-filter probe for SSR-style staleness. The query key
+includes `{ badgeProbe: true }` solely so the cache key never collides
+with the table's own list query.
+
+### 5. URL state in `billing-workspace.tsx`
+
+Add a one-time read of `URLSearchParams` at the top of the component
+(mirror the pattern in `pages/estimate-command-center.tsx` lines
+~50–63):
+
+```typescript
+function readSearchOnce(): URLSearchParams {
+  if (typeof window === "undefined") return new URLSearchParams();
+  return new URLSearchParams(window.location.search);
+}
+
+// inside the component, alongside the existing filter state setup:
+const initialSearch = useMemo(readSearchOnce, []);
+const initialStatus = initialSearch.get("status"); // "unapproved" | "approved" | null
+const initialCustomer = initialSearch.get("customer"); // numeric string or null
+```
+
+Then, in the existing `useState` initializer for the customer filter,
+seed it from `initialCustomer`. For `initialStatus === "unapproved"`,
+the existing default already applies (the queue endpoint only returns
+items in the active status sets), so no extra param is needed —
+but write the URL back with `status=unapproved` after first apply, so
+sharing the URL is round-trip-stable. For `initialStatus === "approved"`,
+set the type filter to `all` and the status filter to the literal
+string `"approved_passed_to_billing"` (this filter slot already exists
+in the queue endpoint via `req.query.status`).
+
+### 6. Bulk approve UI wiring (`billing-workspace.tsx`)
+
+Add a `selected: Set<string>` state alongside the existing
+`activeId` / `kickbackReason` / `editPanelOpen` state. The keys are
+the item `id` values returned by the queue endpoint (the
+`type-refId` composite). The table head gets a checkbox that
+selects/deselects all currently-rendered rows; each row gets a
+checkbox. Selection survives page changes (do NOT clear on next-page).
+
+The mutation:
+
+```typescript
+const bulkApproveMutation = useMutation({
+  mutationFn: async (ids: string[]) => {
+    const items = ids
+      .map((id) => itemsById.get(id))
+      .filter((i): i is QueueItem => Boolean(i))
+      .map((i) => ({ type: i.type, id: i.refId }));
+    return apiRequest("POST", "/api/billing-workspace/bulk-approve", { items });
+  },
+  onSuccess: (res) => {
+    toast({
+      title: `Approved ${res.approved}`,
+      description: res.skipped.length
+        ? `${res.skipped.length} skipped — see details`
+        : undefined,
+    });
+    setSelected(new Set());
+    qc.invalidateQueries({ queryKey: ["/api/billing-workspace/queue"] });
+    qc.invalidateQueries({ queryKey: ["/api/billing-workspace/status-strip"] });
+    qc.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
+  },
+});
+```
+
+The `BulkApproveBar` component receives `count={selected.size}`,
+`onApprove={() => bulkApproveMutation.mutate([...selected])}`,
+`onClear={() => setSelected(new Set())}`, and a `pending` flag.
+
+### 7. "Approve all for this customer" affordance
+
+In the filter bar (`billing-workspace.tsx`), when `customerFilter` is
+set and the queue response has `total > 0`, render an outline button
+next to the filter chip:
+
+```tsx
+<Button
+  variant="outline"
+  size="sm"
+  onClick={() => bulkApproveMutation.mutate(items.map((i) => i.id))}
+  disabled={bulkApproveMutation.isPending || items.length === 0}
+  data-testid="approve-all-for-customer"
+>
+  Approve all for {customerName} ({items.length})
+</Button>
+```
+
+`items` here means the items currently rendered (which, when a single
+customer is selected, IS all that customer's active items because the
+queue is server-filtered). If the customer has >50 active rows, the
+button is hidden and replaced with a one-line note: "Showing first 50
+— refine filter to bulk-approve."
+
+### 8. Command Center drill-down (`customer-billing.tsx`)
+
+Wrap the existing currency spans, not the labels:
+
+```tsx
+// BEFORE (header summary, around line 829)
+<span className="text-xs text-yellow-700 font-medium">Unapproved</span>
+<span className="text-lg font-semibold text-yellow-800">
+  {formatCurrency(summaryUnapproved)}
+</span>
+
+// AFTER
+<span className="text-xs text-yellow-700 font-medium">Unapproved</span>
+<Link
+  href="/billing-workspace?status=unapproved"
+  data-testid="drill-unapproved-summary"
+  className="text-lg font-semibold text-yellow-800 hover:underline"
+>
+  {formatCurrency(summaryUnapproved)}
+</Link>
+```
+
+For the per-customer card lines (~1042–1045 and ~1777–1780), the same
+wrap applies but the href includes the customer id:
+
+```tsx
+href={`/billing-workspace?status=unapproved&customer=${preview.id}`}
+data-testid={`drill-unapproved-card-${preview.id}`}
+```
+
+Apply the same pattern to the Approved figure with
+`status=approved`. **Do not** add icon decoration, chevrons, or color
+changes — the figures are read as currency totals first, links
+second.
+
+---
+
+## Tests
+
+### Server (`*.test.ts`)
+
+1. **`billing-workspace-bulk-approve.test.ts`** (new):
+   - Approves 1 BS + 1 WO + 1 WCB in one call → `approved === 3`, `skipped === []`. Verifies each row's status moved to `approved_passed_to_billing`.
+   - Skips BS in `draft` → `skipped` contains `{ type: 'billing_sheet', reason: 'status_not_active' }`.
+   - Skips item with `invoiceId` set → `reason: 'already_invoiced'`.
+   - 403 for `field_tech`.
+   - 200 for `irrigation_manager`.
+
+2. **`billing-workspace-routes.test.ts`** (extend existing if present, else add focused test):
+   - `irrigation_manager` GET `/api/billing-workspace/queue` returns 200.
+   - `field_tech` still 403.
+
+3. **`customer-billing-preview-vs-queue-parity.test.ts`** (new): for a seeded tenant with a known mix of BS/WO/WCB across statuses, assert that `SUM(items.total)` from `GET /api/billing-workspace/queue?type=all` equals `SUM(unapprovedTotal)` across customer previews returned by `GET /api/customers/billing-preview?dateFilter=all`. Tolerance: `< $0.01` aggregate. This is the regression test that protects against future drift between the card definition and the list definition.
+
+### Client (`*.test.tsx`)
+
+1. **`pages/billing-workspace-bulk-approve.test.tsx`** (new):
+   - Selecting 2 rows shows the BulkApproveBar with "Approve 2 selected".
+   - Clicking Approve fires the mutation with the right `items[]` body.
+   - After success, selection clears.
+
+2. **`pages/billing-workspace-url-state.test.tsx`** (new):
+   - Visiting `/billing-workspace?status=unapproved&customer=42` mounts the page with the customer filter pre-set to 42.
+   - Visiting `/billing-workspace?status=approved` mounts with the status filter set to `approved_passed_to_billing`.
+
+3. **`pages/customer-billing-drilldown.test.tsx`** (new):
+   - The header `data-testid="drill-unapproved-summary"` link's `href` is `/billing-workspace?status=unapproved`.
+   - A card's `data-testid="drill-unapproved-card-<id>"` link includes `customer=<id>`.
+
+4. **`components/layout/desktop-shell-badge.test.tsx`** (extend if present):
+   - For all four roles in `MANAGER_ROLES` plus `billing_manager`, the Billing Workspace sidebar leaf renders the `awaitingApproval` badge when the queue probe returns `{ total: 7 }`.
+   - The badge does not render when `total === 0`.
+
+---
+
+## Acceptance criteria
+
+- Logging in as `irrigation_manager`:
+  - The sidebar shows a **Billing** group with a **Billing Workspace** leaf below Operations.
+  - The leaf shows a numeric badge equal to the count of unapproved BS + WO + WCB across the user's tenant.
+  - Clicking it opens `/billing-workspace` and the queue renders without a 403.
+  - Per-row Approve, edit-then-Approve, kickback, and the new bulk-approve and per-customer-approve actions all work.
+
+- Logging in as `company_admin` at `/billing/command-center`:
+  - The header "Unapproved $X" amount is now an underline-on-hover link that navigates to `/billing-workspace?status=unapproved`.
+  - The per-customer-card "Unapproved" amount navigates to `/billing-workspace?status=unapproved&customer=<id>`.
+  - The same is true for "Approved" amounts, routing to `?status=approved`.
+  - The destination page applies the customer filter on first paint (no flash of unfiltered queue).
+  - The sidebar Billing Workspace leaf carries the same `awaitingApproval` badge as the irrigation manager sees.
+
+- Bulk approve:
+  - Selecting N rows and clicking "Approve N selected" closes the toast as `Approved K — M skipped` where `K + M === N`.
+  - Underlying status transitions match what a per-row Approve would have done (verified by snapshot assertions on each row's audit log).
+
+- Card / list parity:
+  - For a freshly-seeded tenant fixture, the dollar amount in the Command Center "Unapproved" summary equals `SUM(items.total)` from `GET /api/billing-workspace/queue?type=all` for the same tenant, to within $0.01.
+
+- No regression:
+  - `field_tech` still 403s on `/api/billing-workspace/*`.
+  - `billing_manager` and `company_admin` see the page unchanged except for the new checkbox column, bulk bar, and per-customer-approve button.
+  - The existing keyboard shortcuts (J/K/A/B/F/Esc/?) still work; selection state does not consume any of them. (Recommended: bind `Shift+A` to bulk-approve only when `selected.size > 0`, documented in the `?` cheat sheet.)
+
+---
+
+## Out of scope
+
+- Reshaping the `/api/customers/billing-preview` rollup or the customer-billing.tsx layout beyond wrapping the currency spans.
+- Adding email or daily-digest notifications.
+- Adding billing-sheet or wet-check-billing entries to `manager-workspace-routes.ts`. The irrigation manager gets the unified queue via `billing-workspace`, not via a second source in `manager-workspace`.
+- Estimates. They have their own approval surface at `/estimates/command-center`; not part of this slice's scope per the user's item-type selection.
+- Changing the `approved` vs `approved_passed_to_billing` vocabulary anywhere. The drill-down filter uses the existing literal `"approved_passed_to_billing"` because that is the status the queue endpoint accepts.
