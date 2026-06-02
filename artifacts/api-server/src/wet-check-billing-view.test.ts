@@ -508,4 +508,108 @@ describe("buildWetCheckBillingView", () => {
     assert.equal(view.inspection.notes, "All zones checked");
     assert.equal(view.inspection.inspectionDate, "2026-05-01T07:00:00.000Z");
   });
+
+  // Slice 4c — existing tests have no wcb passed → live_derive, zonesHaveStaleLaborData: false
+  it("Slice 4c: totalsSource is live_derive when no wcb provided", () => {
+    const view = buildWetCheckBillingView(baseInput());
+    assert.equal(view.totalsSource, "live_derive");
+    assert.equal(view.zonesHaveStaleLaborData, false);
+  });
+});
+
+describe("buildWetCheckBillingView — snapshot-first totals (Slice 4c)", () => {
+  it("uses wcb snapshot when wcb is provided", () => {
+    // Zone has stale repairLaborHours=0.00 but WCB snapshot has real labor.
+    const zr1 = makeZoneRecord(1, "A", 1, { repairLaborHours: "0.00" });
+    const zr2 = makeZoneRecord(2, "A", 2, { repairLaborHours: "0.00" });
+    const f1 = makeFinding(1, 1, "head_replacement");
+    const f2 = makeFinding(2, 2, "valve_repair");
+
+    const view = buildWetCheckBillingView(baseInput({
+      wetCheck: makeWetCheck({ totalLaborHours: "14.30" }),
+      findings: [f1, f2],
+      zoneRecords: [zr1, zr2],
+      wcb: {
+        partsSubtotal: "1002.66",
+        laborSubtotal: "1072.50",
+        totalAmount: "2075.16",
+      },
+    }));
+
+    assert.equal(view.partsSubtotal, "1002.66");
+    assert.equal(view.laborSubtotal, "1072.50");
+    assert.equal(view.grandTotal, "2075.16");
+    assert.equal(view.totalsSource, "wcb_snapshot");
+    // Zone labor sum from zones with repairLaborHours=0.00 → 0, but snapshot has 1072.50 → stale flag
+    assert.equal(view.zonesHaveStaleLaborData, true);
+  });
+
+  it("falls back to live derive when wcb is undefined (legacy BS-WC path)", () => {
+    const zr = makeZoneRecord(1, "A", 1, { repairLaborHours: "0.50" });
+    const f = makeFinding(1, 1, "head_replacement");
+
+    const view = buildWetCheckBillingView(baseInput({
+      wetCheck: makeWetCheck({ totalLaborHours: "0.00" }),
+      findings: [f],
+      zoneRecords: [zr],
+      wcb: undefined,
+    }));
+
+    assert.equal(view.totalsSource, "live_derive");
+    assert.equal(view.zonesHaveStaleLaborData, false);
+  });
+
+  it("falls back to live derive when wcb.totalAmount is null", () => {
+    const zr = makeZoneRecord(1, "A", 1, { repairLaborHours: "0.50" });
+    const f = makeFinding(1, 1, "head_replacement");
+
+    const view = buildWetCheckBillingView(baseInput({
+      findings: [f],
+      zoneRecords: [zr],
+      wcb: { partsSubtotal: null, laborSubtotal: null, totalAmount: null },
+    }));
+
+    assert.equal(view.totalsSource, "live_derive");
+  });
+
+  it("does NOT flag stale data when snapshot labor agrees with live derive", () => {
+    // Zone has repairLaborHours=0.50, laborRate=55 → live zone labor = 27.50
+    const zr = makeZoneRecord(1, "A", 1, { repairLaborHours: "0.50" });
+    const f = makeFinding(1, 1, "head_replacement");
+
+    const view = buildWetCheckBillingView(baseInput({
+      billingSheet: makeBS({ laborRate: "55.00" }),
+      findings: [f],
+      zoneRecords: [zr],
+      // Snapshot labor matches live: 0.50h × 55 = 27.50
+      wcb: {
+        partsSubtotal: "24.00",
+        laborSubtotal: "27.50",
+        totalAmount: "51.50",
+      },
+    }));
+
+    assert.equal(view.totalsSource, "wcb_snapshot");
+    assert.equal(view.zonesHaveStaleLaborData, false);
+  });
+
+  it("grandTotal invariant holds on snapshot path (parts + labor = grand)", () => {
+    const zr = makeZoneRecord(1, "A", 1, { repairLaborHours: "0.00" });
+    const f = makeFinding(1, 1, "head_replacement");
+
+    const view = buildWetCheckBillingView(baseInput({
+      findings: [f],
+      zoneRecords: [zr],
+      wcb: {
+        partsSubtotal: "500.00",
+        laborSubtotal: "250.00",
+        totalAmount: "750.00",
+      },
+    }));
+
+    assert.equal(view.partsSubtotal, "500.00");
+    assert.equal(view.laborSubtotal, "250.00");
+    assert.equal(view.grandTotal, "750.00");
+    assertGrandTotalInvariant(view);
+  });
 });

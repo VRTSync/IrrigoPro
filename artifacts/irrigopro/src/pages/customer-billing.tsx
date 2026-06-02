@@ -36,7 +36,8 @@ import {
   Edit,
   Trash2,
   ArrowRight,
-  Droplets
+  Droplets,
+  Loader2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
@@ -117,13 +118,21 @@ interface CustomerPreview {
   contractType?: string;
 }
 
+const MANAGER_ROLES = new Set(["irrigation_manager", "billing_manager", "company_admin", "super_admin"]);
+
 function WetCheckBillingRow({
   wcb,
   onClick,
+  userRole,
+  customerId,
 }: {
   wcb: BillingWetCheckBilling;
   onClick: () => void;
+  userRole?: string;
+  customerId?: number | null;
 }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const status = String((wcb as any).status ?? "");
   const totalAmount =
     parseFloat(String((wcb as any).totalAmount ?? "0")) ||
@@ -131,6 +140,32 @@ function WetCheckBillingRow({
   const invoiceId = (wcb as any).invoiceId ?? null;
   const workDate = (wcb as any).workDate ?? wcb.completedDate;
   const billed = status === "billed" || invoiceId != null;
+
+  const showApprove =
+    (status === "submitted" || status === "pending_manager_review") &&
+    !!userRole && MANAGER_ROLES.has(userRole);
+
+  const approveMutation = useMutation({
+    mutationFn: () =>
+      apiRequest(`/api/wet-check-billings/${wcb.id}/approve`, "POST", {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["/api/customers", customerId, "billing"],
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-check-billings"] });
+      toast({
+        title: "Wet check billing approved",
+        description: `${wcb.billingNumber} is now ready to invoice.`,
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Approve failed",
+        description: error instanceof Error ? error.message : "Try again",
+        variant: "destructive",
+      });
+    },
+  });
 
   return (
     <Card
@@ -157,11 +192,28 @@ function WetCheckBillingRow({
               </div>
             )}
           </div>
-          <div className="text-sm font-medium text-teal-700 whitespace-nowrap">
-            {new Intl.NumberFormat("en-US", {
-              style: "currency",
-              currency: "USD",
-            }).format(totalAmount)}
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-medium text-teal-700 whitespace-nowrap">
+              {new Intl.NumberFormat("en-US", {
+                style: "currency",
+                currency: "USD",
+              }).format(totalAmount)}
+            </div>
+            {showApprove && (
+              <Button
+                size="sm"
+                onClick={(e) => { e.stopPropagation(); approveMutation.mutate(); }}
+                disabled={approveMutation.isPending}
+                data-testid={`approve-wcb-${wcb.id}`}
+              >
+                {approveMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 mr-1" />
+                )}
+                Approve
+              </Button>
+            )}
           </div>
         </div>
       </CardContent>
@@ -236,6 +288,16 @@ export default function CustomerBilling() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // User role — read from localStorage (same pattern as financial-pulse.tsx)
+  const userRole = (() => {
+    try {
+      const raw = localStorage.getItem("user");
+      if (!raw) return undefined;
+      const u = JSON.parse(raw);
+      return u?.role as string | undefined;
+    } catch { return undefined; }
+  })();
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -1432,6 +1494,8 @@ export default function CustomerBilling() {
                               key={wcb.id}
                               wcb={wcb}
                               onClick={() => setOpenWcbId(wcb.id)}
+                              userRole={userRole}
+                              customerId={selectedCustomerId}
                             />
                           ))
                         )}
@@ -2459,6 +2523,8 @@ export default function CustomerBilling() {
                           key={wcb.id}
                           wcb={wcb}
                           onClick={() => setOpenWcbId(wcb.id)}
+                          userRole={userRole}
+                          customerId={selectedCustomerId}
                         />
                       ))
                     )}

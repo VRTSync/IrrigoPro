@@ -11,7 +11,7 @@
  */
 
 import { format } from "date-fns";
-import { Wrench, MapPin, ClipboardList, DollarSign, CloudSun, Camera } from "lucide-react";
+import { Wrench, MapPin, ClipboardList, DollarSign, CloudSun, Camera, Info } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { ZoneLaborEditInline } from "@/components/wet-check-billings/zone-labor-edit-inline";
 import { authedPhotoSrc } from "@/lib/queryClient";
@@ -80,6 +80,10 @@ export interface WetCheckBillingView {
   partsSubtotal: string;
   laborSubtotal: string;
   grandTotal: string;
+  /** Slice 4c — "wcb_snapshot" | "live_derive" */
+  totalsSource?: "wcb_snapshot" | "live_derive";
+  /** Slice 4c — true when zone labor breakdown is stale vs the snapshot */
+  zonesHaveStaleLaborData?: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -514,6 +518,16 @@ export function WetCheckBillingViewComponent({
       {/* Totals footer */}
       {canSeePricing && (
         <div className="border border-gray-100 rounded-xl overflow-hidden">
+          {view.zonesHaveStaleLaborData && (
+            <div className="px-4 py-2 text-xs text-amber-700 bg-amber-50 rounded-t-xl flex items-start gap-2">
+              <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+              <span>
+                Per-zone labor breakdown is approximate for this WCB. The total
+                shown below comes from the stored billing snapshot and is what
+                the customer is invoiced.
+              </span>
+            </div>
+          )}
           <div className="flex items-center gap-2 px-4 py-3 bg-gray-50 border-b border-gray-100">
             <DollarSign className="w-4 h-4 text-gray-500" />
             <h3 className="text-sm font-semibold text-gray-800">WC Sheet Totals</h3>

@@ -4266,6 +4266,8 @@ export class DatabaseStorage implements IStorage {
     // 6b. Load photos for in-app grouped display
     const photos = await this.getWetCheckPhotosGrouped(wc.id);
 
+    // Slice 4c — legacy BS-WC path has no WCB row; pass wcb: undefined so
+    // buildWetCheckBillingView falls back to the live-derive totals path.
     return buildWetCheckBillingView({
       billingSheet: bs,
       customer,
@@ -4274,6 +4276,7 @@ export class DatabaseStorage implements IStorage {
       wetCheck: wc,
       photos,
       issueTypeConfigs: configs,
+      wcb: undefined,
     });
   }
 
@@ -4366,6 +4369,8 @@ export class DatabaseStorage implements IStorage {
     //    needs. Only `id`, `billingNumber`, `workDate`, `appliedLaborRate`, and
     //    `laborRate` are read from the billingSheet parameter — WetCheckBilling
     //    carries all of those fields.
+    // Slice 4c — pass wcb snapshot so buildWetCheckBillingView uses
+    // snapshot-first totals instead of re-deriving from zone records.
     const viewRaw = buildWetCheckBillingView({
       billingSheet: wcb as unknown as import("@workspace/db").BillingSheet,
       customer,
@@ -4374,6 +4379,11 @@ export class DatabaseStorage implements IStorage {
       wetCheck: wc,
       issueTypeConfigs: configs,
       photos,
+      wcb: {
+        partsSubtotal: wcb.partsSubtotal,
+        laborSubtotal: wcb.laborSubtotal,
+        totalAmount: wcb.totalAmount,
+      },
     });
 
     // Replace billingSheetId (set to wcb.id by buildWetCheckBillingView) with
@@ -7486,7 +7496,18 @@ export class DatabaseStorage implements IStorage {
     // once regardless of how many findings it contributed (no per-finding sum).
     const wcBaseLaborHours = parseFloat(String(wc.totalLaborHours ?? "0")) || 0;
 
+    // Slice 4c — Make sure zone repair labor is current before reading it.
+    // Defensive: Task #891's hook is supposed to keep zone records fresh
+    // on every finding create/update, but legacy wet checks (and any
+    // future code path that inserts findings without going through
+    // createWetCheckFinding / updateWetCheckFinding) can leave zones
+    // stale. Recompute every affected zone here so the WCB snapshot is
+    // guaranteed to include real per-zone labor.
     const newZoneIds = Array.from(new Set(repaired.map(f => f.zoneRecordId)));
+    for (const zoneId of newZoneIds) {
+      await this._recomputeZoneRepairLaborIfAuto(tx, zoneId, wc.companyId);
+    }
+
     const newZoneRows = newZoneIds.length > 0
       ? await tx.select({ id: wetCheckZoneRecords.id, repairLaborHours: wetCheckZoneRecords.repairLaborHours })
           .from(wetCheckZoneRecords)

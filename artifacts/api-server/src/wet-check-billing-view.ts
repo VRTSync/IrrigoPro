@@ -18,6 +18,13 @@ import type {
   IssueTypeConfig,
 } from "@workspace/db";
 
+// Minimal WCB snapshot fields needed for snapshot-first totals (Slice 4c).
+export interface WcbSnapshot {
+  partsSubtotal: string | null | undefined;
+  laborSubtotal: string | null | undefined;
+  totalAmount: string | null | undefined;
+}
+
 // ─── Public interfaces ───────────────────────────────────────────────────────
 
 /** One finding's combined parts + labor cost on the billing view. */
@@ -110,6 +117,18 @@ export interface WetCheckBillingView {
   partsSubtotal: string;
   laborSubtotal: string;
   grandTotal: string;
+  /**
+   * Slice 4c — "wcb_snapshot" when totals were read from the WCB row's
+   * snapshot columns (authoritative); "live_derive" when derived from
+   * zone records (legacy BS-WC path or pre-creation preview).
+   */
+  totalsSource: "wcb_snapshot" | "live_derive";
+  /**
+   * Slice 4c — true when totalsSource is "wcb_snapshot" AND the live
+   * zone-level labor sum differs from the snapshot labor subtotal by
+   * more than $0.01 (stale zone repair_labor_hours).
+   */
+  zonesHaveStaleLaborData: boolean;
 }
 
 // ─── Assembler input ─────────────────────────────────────────────────────────
@@ -132,6 +151,13 @@ export interface BuildWetCheckBillingViewInput {
    * When provided, each zone and line item will carry the relevant photo URLs.
    */
   photos?: Array<{ url: string; zoneRecordId: number | null; findingId: number | null }>;
+  /**
+   * Slice 4c — snapshot columns from the wet_check_billings row.
+   * When provided and totalAmount is non-null, totals are read from the
+   * snapshot rather than re-derived from zone records, eliminating drift
+   * from stale zone labor data. Pass undefined on the legacy BS-WC path.
+   */
+  wcb?: WcbSnapshot;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -160,7 +186,7 @@ function titleCase(issueType: string): string {
 export function buildWetCheckBillingView(
   input: BuildWetCheckBillingViewInput,
 ): WetCheckBillingView {
-  const { billingSheet: bs, customer, findings, zoneRecords, wetCheck, issueTypeConfigs, photos = [] } = input;
+  const { billingSheet: bs, customer, findings, zoneRecords, wetCheck, issueTypeConfigs, photos = [], wcb } = input;
 
   // ── Labor rate precedence ────────────────────────────────────────────────
   // Nullish precedence: appliedLaborRate ?? laborRate ?? customer.laborRate.
@@ -281,13 +307,47 @@ export function buildWetCheckBillingView(
   });
 
   // ── Totals ───────────────────────────────────────────────────────────────
-  let partsSubtotal = 0;
-  let laborSubtotal = 0;
-  for (const z of zones) {
-    partsSubtotal += toNum(z.zonePartsSubtotal);
-    laborSubtotal += toNum(z.zoneLaborSubtotal);
+  // Slice 4c — Snapshot-first totals.
+  //
+  // When a wet_check_billings row exists for this view, its snapshot
+  // columns are authoritative — that's what gets billed, snapshotted at
+  // approval time, pushed to QuickBooks, and reconciled in the financial
+  // pulse audit. Re-deriving totals from zone records can disagree with
+  // the snapshot for two reasons:
+  //   1. Legacy zones whose `repair_labor_hours` was never recomputed
+  //      (Task #891 hook didn't fire on findings created pre-deploy).
+  //   2. The wet-check-level `wc.totalLaborHours` overhead (inspection +
+  //      travel) that gets included in `_writeRepairedInFieldBilling`
+  //      but is silently dropped here.
+  //
+  // Snapshot-first eliminates both classes of drift.
+  let partsSubtotal: number;
+  let laborSubtotal: number;
+  let totalsSource: "wcb_snapshot" | "live_derive";
+
+  if (wcb && wcb.totalAmount != null) {
+    // WCB snapshot path — what the customer is actually billed.
+    partsSubtotal = toNum(wcb.partsSubtotal);
+    laborSubtotal = toNum(wcb.laborSubtotal);
+    totalsSource = "wcb_snapshot";
+  } else {
+    // Legacy BS-WC path or pre-creation preview — derive live.
+    partsSubtotal = 0;
+    laborSubtotal = 0;
+    for (const z of zones) {
+      partsSubtotal += toNum(z.zonePartsSubtotal);
+      laborSubtotal += toNum(z.zoneLaborSubtotal);
+    }
+    totalsSource = "live_derive";
   }
   const grandTotal = partsSubtotal + laborSubtotal;
+
+  // Detect stale zone labor data: when we have a WCB snapshot, check whether
+  // the live zone-level labor sum meaningfully disagrees with the snapshot.
+  const liveZoneLaborSum = zones.reduce((s, z) => s + toNum(z.zoneLaborSubtotal), 0);
+  const zonesHaveStaleLaborData =
+    totalsSource === "wcb_snapshot" &&
+    Math.abs(laborSubtotal - liveZoneLaborSum) > 0.01;
 
   // ── Summary ───────────────────────────────────────────────────────────────
   const repairCount = findings.length;
@@ -319,5 +379,7 @@ export function buildWetCheckBillingView(
     partsSubtotal: fmt(partsSubtotal),
     laborSubtotal: fmt(laborSubtotal),
     grandTotal: fmt(grandTotal),
+    totalsSource,
+    zonesHaveStaleLaborData,
   };
 }

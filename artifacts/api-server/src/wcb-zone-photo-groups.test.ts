@@ -33,6 +33,7 @@ function makeLineItem(findingId: number, issueDisplayLabel: string, opts: Partia
     lineTotal: '50.00',
     noPartNeeded: opts.noPartNeeded ?? false,
     notes: null,
+    findingPhotoUrls: [] as string[],
   };
 }
 
@@ -57,31 +58,39 @@ function makeView(zones: WetCheckBillingView['zones']): WetCheckBillingView {
     partsSubtotal: '10.00',
     laborSubtotal: '40.00',
     grandTotal: '50.00',
+    totalsSource: 'live_derive',
+    zonesHaveStaleLaborData: false,
   };
 }
 
 // ── two-zone fixture ───────────────────────────────────────────────────────────
 
 const ZONE_A1 = {
+  zoneRecordId: 1,
   controllerLetter: 'A',
   zoneNumber: 1,
   zoneLabel: 'A-1',
   repairLaborHours: '1.00',
+  repairLaborManuallySet: false,
   lineItems: [makeLineItem(1, 'Head Replacement'), makeLineItem(2, 'Adjustment', { noPartNeeded: true })],
   zonePartsSubtotal: '10.00',
   zoneLaborSubtotal: '80.00',
   zoneTotal: '90.00',
+  zonePhotoUrls: [],
 };
 
 const ZONE_B2 = {
+  zoneRecordId: 2,
   controllerLetter: 'B',
   zoneNumber: 2,
   zoneLabel: 'B-2',
   repairLaborHours: '0.50',
+  repairLaborManuallySet: false,
   lineItems: [makeLineItem(3, 'Valve Repair')],
   zonePartsSubtotal: '20.00',
   zoneLaborSubtotal: '40.00',
   zoneTotal: '60.00',
+  zonePhotoUrls: [],
 };
 
 const TWO_ZONE_VIEW = makeView([ZONE_A1, ZONE_B2]);
