@@ -89,7 +89,7 @@ export function CompanyLogoBanner({ className = "" }: CompanyLogoBannerProps) {
           <img 
             src={logoApiUrl}
             alt={`${company?.name ?? 'Company'} Logo`}
-            className="h-12 max-w-48 object-contain"
+            className="h-16 max-w-xs object-contain"
             onError={(e) => {
               e.currentTarget.style.display = 'none';
             }}
