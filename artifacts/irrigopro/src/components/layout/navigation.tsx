@@ -7,7 +7,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest, adaptiveRefetchInterval, clearSessionAndLogout } from "@/lib/queryClient";
 import irrigoProLogo from "@assets/IrrigoPro_2026-03_1778514028553.png";
-import { useState, useEffect } from "react";
+import { useMemo } from "react";
 import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, Receipt, Droplets, Cpu, Activity, type LucideIcon } from "lucide-react";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 import type { Part, ManualPartReview, Estimate } from "@workspace/db/schema";
@@ -91,36 +91,17 @@ export default function Navigation() {
     refetchOnWindowFocus: true,
   });
 
-  // State for signed logo URL
-  const [signedLogoUrl, setSignedLogoUrl] = useState<string | null>(null);
-
-  // Company logo for banner (separate from navigation logo)
-  const companyLogoUrl = company?.logo && company.logo.trim() !== '' && company.logo !== 'null' 
-    ? `${company.logo}${company.logo.includes('?') ? '&' : '?'}v=${Date.now()}` 
-    : null;
-
-
-
-  // Generate direct API URL for the company logo when company data changes
-  useEffect(() => {
-    const generateDirectLogoUrl = () => {
-      if (company?.logo) {
-        // Extract logo ID from the stored logo URL
-        const logoIdMatch = company.logo.match(/company-logos\/([^?]+)/);
-        if (logoIdMatch) {
-          const logoId = logoIdMatch[1];
-          // Use the direct API endpoint that serves the image binary
-          const directUrl = `/api/company-logo/${logoId}`;
-          setSignedLogoUrl(directUrl);
-
-        }
-      } else {
-        setSignedLogoUrl(null);
-      }
-    };
-
-    generateDirectLogoUrl();
-  }, [company]);
+  // Compute the public logo API URL synchronously. /api/company-logo/:id is a
+  // public route (no requireAuthentication), so <img src> works without any
+  // custom headers. Routing through the API endpoint avoids exposing the raw
+  // object-storage URL and keeps the fallback from ever pointing at a
+  // potentially inaccessible direct storage path.
+  const logoApiUrl = useMemo(() => {
+    const logo = company?.logo;
+    if (!logo || logo.trim() === '' || logo === 'null') return null;
+    const m = logo.match(/company-logos\/([^?]+)/);
+    return m ? `/api/company-logo/${m[1]}` : null;
+  }, [company?.logo]);
 
   // Define navigation items based on user role
   const getNavItems = () => {
@@ -429,12 +410,12 @@ export default function Navigation() {
         </div>
         
         {/* Company Logo Banner - Below IrrigoPro Header */}
-        {companyLogoUrl && (
+        {logoApiUrl && (
           <div className="border-b border-gray-200 bg-gray-50">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
               <div className="flex justify-center items-center py-3">
                 <img 
-                  src={signedLogoUrl || companyLogoUrl} 
+                  src={logoApiUrl} 
                   alt="Company Logo"
                   className="h-20 w-auto object-contain"
                 />
@@ -512,11 +493,11 @@ export default function Navigation() {
         </div>
 
         {/* Mobile Company Logo Banner */}
-        {companyLogoUrl && (
+        {logoApiUrl && (
           <div className="border-b border-gray-200 bg-gray-50">
             <div className="flex justify-center items-center py-3 px-4">
               <img 
-                src={signedLogoUrl || companyLogoUrl} 
+                src={logoApiUrl} 
                 alt="Company Logo"
                 className="h-16 w-auto object-contain"
               />

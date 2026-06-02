@@ -1,6 +1,6 @@
 import { safeGet } from "@/utils/safeStorage";
 import { useQuery } from "@tanstack/react-query";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 
 interface CompanyLogoBannerProps {
   className?: string;
@@ -23,7 +23,7 @@ export function CompanyLogoBanner({ className = "" }: CompanyLogoBannerProps) {
   }, []);
 
   // Fetch company profile using the authenticated user's company ID from session
-  const { data: company, error } = useQuery<{ logo?: string; name?: string }>({
+  const { data: company } = useQuery<{ logo?: string; name?: string }>({
     queryKey: [`/api/company/${user?.companyId}/profile`],
     enabled: !!user?.companyId && !isNaN(user?.companyId), // Only fetch when we have a valid numeric company ID
     retry: false,
@@ -57,7 +57,18 @@ export function CompanyLogoBanner({ className = "" }: CompanyLogoBannerProps) {
   }, [user?.companyId]);
 
 
-  if (!company?.logo) {
+  // Route through /api/company-logo/:id — a public route (no requireAuthentication)
+  // that serves the binary from object storage. Using the API URL avoids exposing
+  // or depending on the raw object-storage URL, which may not be publicly reachable,
+  // and lets <img src> work without any custom auth headers.
+  const logoApiUrl = useMemo(() => {
+    const logo = company?.logo;
+    if (!logo || logo.trim() === '' || logo === 'null') return null;
+    const m = logo.match(/company-logos\/([^?]+)/);
+    return m ? `/api/company-logo/${m[1]}` : null;
+  }, [company?.logo]);
+
+  if (!logoApiUrl) {
     return (
       <div className={`bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-950 dark:to-blue-900 border-b p-4 ${className}`}>
         <div className="flex items-center justify-center">
@@ -76,11 +87,10 @@ export function CompanyLogoBanner({ className = "" }: CompanyLogoBannerProps) {
       <div className="flex items-center justify-center">
         <div className="bg-white dark:bg-gray-800 p-3 rounded-lg shadow-sm border">
           <img 
-            src={company.logo}
-            alt={`${company.name} Logo`}
+            src={logoApiUrl}
+            alt={`${company?.name ?? 'Company'} Logo`}
             className="h-12 max-w-48 object-contain"
             onError={(e) => {
-              // Hide broken logo images gracefully in production
               e.currentTarget.style.display = 'none';
             }}
           />
