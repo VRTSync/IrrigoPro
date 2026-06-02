@@ -87,7 +87,8 @@ export function WetCheckList() {
   }, [techWorkOrders]);
 
   const { data: allCustomers = [] } = useArrayQuery<Customer>({
-    queryKey: ["/api/customers"],
+    queryKey: ["/api/customers", { active: true }],
+    queryFn: () => apiRequest("/api/customers?active=true"),
     enabled: !!search.trim(),
   });
 
