@@ -28,7 +28,8 @@ import {
 export type NavBadgeKey =
   | "partsPendingApproval"
   | "wetCheckReviews"
-  | "estimatesPendingApproval";
+  | "estimatesPendingApproval"
+  | "awaitingApproval";
 
 export type NavBadgeMap = Partial<Record<NavBadgeKey, number>>;
 
@@ -112,7 +113,7 @@ export const billingManagerNav: NavConfig = {
       icon: DollarSign,
       defaultOpen: true,
       items: [
-        { type: "leaf", label: "Billing Workspace", path: "/billing-workspace", icon: LayoutDashboard },
+        { type: "leaf", label: "Billing Workspace", path: "/billing-workspace", icon: LayoutDashboard, badgeKey: "awaitingApproval" },
         { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
         { type: "leaf", label: "Command Center", path: "/billing/command-center", icon: ClipboardList },
         { type: "leaf", label: "Billing Sheets", path: "/billing-sheets", icon: ClipboardList },
@@ -181,6 +182,14 @@ export const managerNav: NavConfig = {
         { type: "leaf", label: "Customers", path: "/customers", icon: Users },
         { type: "leaf", label: "Site Maps", path: "/site-maps", icon: MapIcon },
         { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
+      ],
+    },
+    {
+      type: "group",
+      label: "Billing",
+      icon: DollarSign,
+      items: [
+        { type: "leaf", label: "Billing Workspace", path: "/billing-workspace", icon: LayoutDashboard, badgeKey: "awaitingApproval" },
       ],
     },
     {
@@ -277,7 +286,7 @@ export const companyAdminNav: NavConfig = {
       label: "Billing",
       icon: DollarSign,
       items: [
-        { type: "leaf", label: "Billing Workspace", path: "/billing-workspace", icon: LayoutDashboard },
+        { type: "leaf", label: "Billing Workspace", path: "/billing-workspace", icon: LayoutDashboard, badgeKey: "awaitingApproval" },
         { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
         { type: "leaf", label: "Command Center", path: "/billing/command-center", icon: ClipboardList },
         { type: "leaf", label: "Invoices", path: "/invoices", icon: Receipt },

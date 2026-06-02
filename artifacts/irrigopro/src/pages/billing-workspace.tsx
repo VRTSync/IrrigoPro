@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   Camera,
   CheckCircle2,
+  CheckSquare,
   ClipboardList,
   DollarSign,
   Droplets,
@@ -32,10 +33,12 @@ import {
   RotateCcw,
   Save,
   Search,
+  Square,
   Tag,
   Wrench,
   X,
 } from "lucide-react";
+import { BulkApproveBar } from "@/components/billing-workspace/bulk-approve-bar";
 import {
   Sheet,
   SheetContent,
@@ -296,20 +299,54 @@ function QueueRow({
   item,
   active,
   onSelect,
+  selected,
+  onToggle,
 }: {
   item: QueueItem;
   active: boolean;
   onSelect: (item: QueueItem) => void;
+  selected?: boolean;
+  onToggle?: (item: QueueItem) => void;
 }) {
+  const isSelectable =
+    item.type === "billing_sheet" ||
+    item.type === "work_order" ||
+    item.type === "wet_check_billing";
   return (
     <button
       type="button"
       onClick={() => onSelect(item)}
       className={`w-full text-left px-3 py-2.5 border-b border-gray-100 flex items-center gap-3 transition-colors ${
-        active ? "bg-blue-50" : "hover:bg-gray-50"
+        active ? "bg-blue-50" : selected ? "bg-green-50" : "hover:bg-gray-50"
       }`}
       data-testid={`queue-row-${item.id}`}
     >
+      {isSelectable && onToggle && (
+        <span
+          role="checkbox"
+          aria-checked={selected}
+          data-testid={`queue-row-checkbox-${item.id}`}
+          className="shrink-0 text-gray-400 hover:text-blue-600 cursor-pointer"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle(item);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === " " || e.key === "Enter") {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggle(item);
+            }
+          }}
+          tabIndex={0}
+        >
+          {selected ? (
+            <CheckSquare className="w-4 h-4 text-blue-600" />
+          ) : (
+            <Square className="w-4 h-4" />
+          )}
+        </span>
+      )}
       <div className="shrink-0">{TYPE_ICON[item.type]}</div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
@@ -367,6 +404,7 @@ function ShortcutsCheatSheet({ open, onClose }: { open: boolean; onClose: () => 
             ["J", "Next row"],
             ["K", "Previous row (or Kickback when drawer is open)"],
             ["A", "Approve highlighted item"],
+            ["Shift+A", "Bulk-approve all selected items (checkboxes)"],
             ["B", "Open kickback drawer"],
             ["F", "Open detail drawer"],
             ["/", "Focus search"],
@@ -389,13 +427,31 @@ export default function BillingWorkspacePage() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const userRole = getCurrentUser()?.role ?? "";
+
+  // Seed initial filter state from URL search params so that drill-down
+  // links from Command Center / Customer Billing land with the correct
+  // preset.  We read the params once at construction time — no reactive
+  // subscription needed because the user stays on this page.
+  const _initParams = useMemo(() => new URLSearchParams(
+    typeof window !== "undefined" ? window.location.search : ""
+  ), []);
+  const _initStatusRaw = _initParams.get("status");
+  const _initCustomer = _initParams.get("customer") ?? "";
+  // status=approved → approved_passed_to_billing; status=unapproved → "" (default pending view)
+  const _initStatus =
+    _initStatusRaw === "approved"
+      ? "approved_passed_to_billing"
+      : _initStatusRaw === "unapproved"
+        ? ""
+        : "";
+
   const [type, setType] = useState<QueueType>("all");
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
-  const [customer, setCustomer] = useState<string>("");
+  const [customer, setCustomer] = useState<string>(_initCustomer);
   const [tech, setTech] = useState<string>("");
   const [age, setAge] = useState<AgeBucket>("");
-  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>(_initStatus);
   const [sort, setSort] = useState<string>("age_desc");
   const [page, setPage] = useState(1);
   const [minTotal, setMinTotal] = useState<number>(0);
@@ -405,12 +461,37 @@ export default function BillingWorkspacePage() {
   const [qbDrawerOpen, setQbDrawerOpen] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [approving, setApproving] = useState(false);
+  const [bulkApproving, setBulkApproving] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // selectedItemsMap persists full QueueItem metadata across page turns so that
+  // bulkApprove can resolve IDs that are no longer in the current items slice.
+  const [selectedItemsMap, setSelectedItemsMap] = useState<Map<string, QueueItem>>(new Map());
   const [kickingBack, setKickingBack] = useState(false);
   const [saving, setSaving] = useState(false);
   const [kickbackReason, setKickbackReason] = useState("");
   const [editedNote, setEditedNote] = useState("");
   const [isDirty, setIsDirty] = useState(false);
   const searchRef = useRef<HTMLInputElement | null>(null);
+
+  const toggleSelected = useCallback((item: QueueItem) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(item.id)) next.delete(item.id);
+      else next.add(item.id);
+      return next;
+    });
+    setSelectedItemsMap((prev) => {
+      const next = new Map(prev);
+      if (next.has(item.id)) next.delete(item.id);
+      else next.set(item.id, item);
+      return next;
+    });
+  }, []);
+
+  const clearSelected = useCallback(() => {
+    setSelected(new Set());
+    setSelectedItemsMap(new Map());
+  }, []);
 
   // Debounce free-text search.
   useEffect(() => {
@@ -425,6 +506,32 @@ export default function BillingWorkspacePage() {
   useEffect(() => {
     setPage(1);
   }, [type, customer, tech, age, statusFilter, sort]);
+
+  // Sync statusFilter + customer back to the URL so drill-down links remain
+  // bookmarkable after the user changes filters (canonical round-trip).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (statusFilter === "approved_passed_to_billing") {
+      params.set("status", "approved");
+    } else if (statusFilter === "") {
+      // Canonicalize empty statusFilter as status=unapproved so drill-down
+      // URLs remain bookmarkable and round-trip correctly.
+      params.set("status", "unapproved");
+    } else {
+      params.delete("status");
+    }
+    if (customer.trim()) {
+      params.set("customer", customer.trim());
+    } else {
+      params.delete("customer");
+    }
+    const search = params.toString();
+    const newUrl = search
+      ? `${window.location.pathname}?${search}`
+      : window.location.pathname;
+    window.history.replaceState(null, "", newUrl);
+  }, [statusFilter, customer]);
 
   const queueUrl = useMemo(() => {
     const params = new URLSearchParams();
@@ -655,6 +762,51 @@ export default function BillingWorkspacePage() {
     }
   }, [active, invalidateAll, toast]);
 
+  // Task #1083 — Bulk approve all selected items via the dedicated endpoint.
+  const bulkApprove = useCallback(async (overrideItems?: QueueItem[]) => {
+    if (bulkApproving) return;
+    // Use selectedItemsMap so cross-page selections survive a page turn;
+    // overrideItems (per-customer approve-all) bypasses the selection set.
+    const targets = overrideItems ?? Array.from(selectedItemsMap.values());
+    const eligible = targets.filter(
+      (it) =>
+        it.type === "billing_sheet" ||
+        it.type === "work_order" ||
+        it.type === "wet_check_billing",
+    );
+    if (eligible.length === 0) {
+      toast({ title: "Nothing to approve", description: "No eligible items selected." });
+      return;
+    }
+    setBulkApproving(true);
+    try {
+      const result = (await apiRequest(
+        "/api/billing-workspace/bulk-approve",
+        "POST",
+        { items: eligible.map((it) => ({ type: it.type, id: it.refId })) },
+      )) as { approved: number; skipped: { id: number; type: string; reason: string }[] };
+      const n = result.approved;
+      toast({
+        title: `Approved ${n} item${n === 1 ? "" : "s"}`,
+        description:
+          result.skipped.length > 0
+            ? `${result.skipped.length} item${result.skipped.length === 1 ? "" : "s"} skipped.`
+            : undefined,
+      });
+      setSelected(new Set());
+      setSelectedItemsMap(new Map());
+      invalidateAll();
+    } catch (err) {
+      toast({
+        title: "Bulk approve failed",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setBulkApproving(false);
+    }
+  }, [bulkApproving, selectedItemsMap, toast, invalidateAll]);
+
   // Zone D — keyboard shortcuts. Spec:
   //   J=next, K=previous, A=approve, B=kickback, F=open drawer,
   //   "/"=focus search, Esc=close, ?=help, Ctrl+S=save edits.
@@ -698,6 +850,10 @@ export default function BillingWorkspacePage() {
         } else {
           moveSelection(-1);
         }
+      } else if ((e.key === "A") && e.shiftKey) {
+        // Shift+A — bulk-approve all selected items.
+        e.preventDefault();
+        void bulkApprove();
       } else if (e.key === "a" || e.key === "A") {
         e.preventDefault();
         void approveActive();
@@ -732,10 +888,13 @@ export default function BillingWorkspacePage() {
   }, [
     moveSelection,
     approveActive,
+    bulkApprove,
     saveActiveEdits,
     cheatsheetOpen,
     drawerOpen,
     active,
+    kickbackReason,
+    kickbackActive,
   ]);
 
   const qbState = strip?.quickbooks?.state ?? "unknown";
@@ -925,6 +1084,33 @@ export default function BillingWorkspacePage() {
                 >
                   &gt; $1,000
                 </button>
+                {/* Task #1083 — per-customer bulk approve */}
+                {customer.trim() !== "" && items.length > 0 && total <= PAGE_SIZE && (
+                  <button
+                    type="button"
+                    onClick={() => void bulkApprove(items)}
+                    disabled={bulkApproving}
+                    className="px-2.5 py-1 rounded-md text-xs font-medium border border-green-300 bg-green-50 text-green-800 hover:bg-green-100 disabled:opacity-50"
+                    data-testid="preset-approve-all-customer"
+                  >
+                    {bulkApproving ? (
+                      <span className="flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Approving…
+                      </span>
+                    ) : (
+                      `Approve all (${items.length})`
+                    )}
+                  </button>
+                )}
+                {customer.trim() !== "" && total > PAGE_SIZE && (
+                  <span
+                    className="px-2.5 py-1 text-xs text-amber-700 italic"
+                    data-testid="preset-approve-all-refine-note"
+                  >
+                    Showing first {PAGE_SIZE} — refine filter to bulk-approve.
+                  </span>
+                )}
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {(["all", "billing_sheet", "work_order", "wet_check_billing", "part", "manual_review"] as QueueType[]).map((t) => (
@@ -1012,17 +1198,90 @@ export default function BillingWorkspacePage() {
                   Inbox zero. Nothing to approve.
                 </div>
               ) : (
-                items.map((it) => (
-                  <QueueRow
-                    key={it.id}
-                    item={it}
-                    active={it.id === activeId}
-                    onSelect={(x) => {
-                      setActiveId(x.id);
-                      setDrawerOpen(true);
-                    }}
-                  />
-                ))
+                <>
+                  {/* Select-all header row */}
+                  {(() => {
+                    const selectable = items.filter(
+                      (it) =>
+                        it.type === "billing_sheet" ||
+                        it.type === "work_order" ||
+                        it.type === "wet_check_billing",
+                    );
+                    const allSelected =
+                      selectable.length > 0 &&
+                      selectable.every((it) => selected.has(it.id));
+                    const handleSelectAll = () => {
+                      if (allSelected) {
+                        // Deselect only current-page selectable items
+                        setSelected((prev) => {
+                          const next = new Set(prev);
+                          selectable.forEach((it) => next.delete(it.id));
+                          return next;
+                        });
+                        setSelectedItemsMap((prev) => {
+                          const next = new Map(prev);
+                          selectable.forEach((it) => next.delete(it.id));
+                          return next;
+                        });
+                      } else {
+                        setSelected((prev) => {
+                          const next = new Set(prev);
+                          selectable.forEach((it) => next.add(it.id));
+                          return next;
+                        });
+                        setSelectedItemsMap((prev) => {
+                          const next = new Map(prev);
+                          selectable.forEach((it) => next.set(it.id, it));
+                          return next;
+                        });
+                      }
+                    };
+                    return (
+                      <div className="px-3 py-1.5 border-b border-gray-200 bg-gray-50 flex items-center gap-2 text-xs text-gray-600 select-none">
+                        <span
+                          role="checkbox"
+                          aria-checked={allSelected}
+                          aria-label="Select all on this page"
+                          tabIndex={0}
+                          data-testid="select-all-checkbox"
+                          className="cursor-pointer text-gray-400 hover:text-blue-600"
+                          onClick={handleSelectAll}
+                          onKeyDown={(e) => {
+                            if (e.key === " " || e.key === "Enter") {
+                              e.preventDefault();
+                              handleSelectAll();
+                            }
+                          }}
+                        >
+                          {allSelected ? (
+                            <CheckSquare className="w-4 h-4 text-blue-600" />
+                          ) : (
+                            <Square className="w-4 h-4" />
+                          )}
+                        </span>
+                        <span>Select page</span>
+                        {selected.size > 0 && (
+                          <span className="text-blue-600 font-medium" data-testid="selected-count-label">
+                            {selected.size} selected
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  {items.map((it) => (
+                    <QueueRow
+                      key={it.id}
+                      item={it}
+                      active={it.id === activeId}
+                      onSelect={(x) => {
+                        setActiveId(x.id);
+                        setDrawerOpen(true);
+                      }}
+                      selected={selected.has(it.id)}
+                      onToggle={toggleSelected}
+                    />
+                  ))}
+                </>
               )}
             </div>
 
@@ -1233,6 +1492,14 @@ export default function BillingWorkspacePage() {
       </Sheet>
 
       <ShortcutsCheatSheet open={cheatsheetOpen} onClose={() => setCheatsheetOpen(false)} />
+
+      {/* Task #1083 — floating bulk-approve bar */}
+      <BulkApproveBar
+        selectedCount={selected.size}
+        approving={bulkApproving}
+        onApprove={() => void bulkApprove()}
+        onClear={clearSelected}
+      />
     </div>
   );
 }

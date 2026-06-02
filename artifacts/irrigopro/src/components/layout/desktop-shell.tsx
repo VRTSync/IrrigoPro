@@ -130,14 +130,31 @@ function useNavBadges(enabled: boolean): NavBadgeMap {
     enabled,
     refetchInterval: 60000,
   });
+  const { data: bwQueueProbeRaw } = useQuery<{ total?: number } | null>({
+    queryKey: ["/api/billing-workspace/queue", { badgeProbe: true }],
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/billing-workspace/queue?pageSize=1&badgeProbe=true");
+        if (!res.ok) return null;
+        return (await res.json()) as { total?: number };
+      } catch {
+        return null;
+      }
+    },
+    enabled,
+    refetchInterval: 60000,
+  });
   const pendingParts = Array.isArray(pendingPartsRaw) ? pendingPartsRaw : [];
   const pendingReviews = Array.isArray(pendingReviewsRaw) ? pendingReviewsRaw : [];
   const wetCheckPending = Array.isArray(wetCheckPendingRaw) ? wetCheckPendingRaw : [];
   const pendingEstimates = Array.isArray(pendingEstimatesRaw) ? pendingEstimatesRaw : [];
+  const awaitingApprovalCount =
+    typeof bwQueueProbeRaw?.total === "number" ? bwQueueProbeRaw.total : 0;
   return {
     partsPendingApproval: pendingParts.length + pendingReviews.length,
     wetCheckReviews: wetCheckPending.length,
     estimatesPendingApproval: pendingEstimates.length,
+    awaitingApproval: awaitingApprovalCount,
   };
 }
 
@@ -185,7 +202,9 @@ export function DesktopShell({ navConfig, children }: DesktopShellProps) {
   }, []);
   const userRole = user.role;
   const enableBadges =
-    userRole === "company_admin" || userRole === "billing_manager";
+    userRole === "company_admin" ||
+    userRole === "billing_manager" ||
+    userRole === "irrigation_manager";
   const badges = useNavBadges(enableBadges);
 
   const [actionsTarget, setActionsTarget] = useState<HTMLDivElement | null>(

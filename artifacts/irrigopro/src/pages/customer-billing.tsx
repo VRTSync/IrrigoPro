@@ -822,15 +822,19 @@ export default function CustomerBilling() {
                   <div className="bg-orange-50 p-3 rounded-lg">
                     <div className="flex justify-between items-center mb-1">
                       <span className="text-xs text-green-700 font-medium">Approved</span>
-                      <span className="text-xs font-bold text-green-800">
-                        {formatCurrency(summaryApproved)}
-                      </span>
+                      <Link href="/billing-workspace?status=approved" data-testid="drill-approved-summary">
+                        <span className="text-xs font-bold text-green-800 hover:underline cursor-pointer">
+                          {formatCurrency(summaryApproved)}
+                        </span>
+                      </Link>
                     </div>
                     <div className="flex justify-between items-center mb-1">
                       <span className="text-xs text-yellow-700 font-medium">Unapproved</span>
-                      <span className="text-xs font-bold text-yellow-800">
-                        {formatCurrency(summaryUnapproved)}
-                      </span>
+                      <Link href="/billing-workspace?status=unapproved" data-testid="drill-unapproved-summary">
+                        <span className="text-xs font-bold text-yellow-800 hover:underline cursor-pointer">
+                          {formatCurrency(summaryUnapproved)}
+                        </span>
+                      </Link>
                     </div>
                     <div className="flex justify-between items-center border-t border-orange-200 pt-1 mt-1">
                       <span className="text-xs text-orange-700 font-semibold">Total</span>
@@ -1037,11 +1041,15 @@ export default function CustomerBilling() {
                                   <>
                                     <div className="flex items-center justify-between text-xs mb-0.5">
                                       <span className="text-green-700">Approved:</span>
-                                      <span className="font-medium text-green-800">{formatCurrency(cardApproved)}</span>
+                                      <Link href={`/billing-workspace?status=approved&customer=${customer.id}`} data-testid={`drill-approved-card-${customer.id}`}>
+                                        <span className="font-medium text-green-800 hover:underline cursor-pointer">{formatCurrency(cardApproved)}</span>
+                                      </Link>
                                     </div>
                                     <div className="flex items-center justify-between text-xs mb-0.5">
                                       <span className="text-yellow-700">Unapproved:</span>
-                                      <span className="font-medium text-yellow-800">{formatCurrency(cardUnapproved)}</span>
+                                      <Link href={`/billing-workspace?status=unapproved&customer=${customer.id}`} data-testid={`drill-unapproved-card-${customer.id}`}>
+                                        <span className="font-medium text-yellow-800 hover:underline cursor-pointer">{formatCurrency(cardUnapproved)}</span>
+                                      </Link>
                                     </div>
                                     <div className="flex items-center justify-between text-xs border-t border-gray-100 pt-1 mt-0.5">
                                       <span className="text-orange-700 font-medium">Total:</span>
@@ -1565,15 +1573,19 @@ export default function CustomerBilling() {
               <div className="bg-orange-50 p-3 rounded-lg">
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-xs text-green-700 font-medium">Approved</span>
-                  <span className="text-xs font-bold text-green-800">
-                    {formatCurrency(summaryApproved)}
-                  </span>
+                  <Link href="/billing-workspace?status=approved" data-testid="drill-approved-summary">
+                    <span className="text-xs font-bold text-green-800 hover:underline cursor-pointer">
+                      {formatCurrency(summaryApproved)}
+                    </span>
+                  </Link>
                 </div>
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-xs text-yellow-700 font-medium">Unapproved</span>
-                  <span className="text-xs font-bold text-yellow-800">
-                    {formatCurrency(summaryUnapproved)}
-                  </span>
+                  <Link href="/billing-workspace?status=unapproved" data-testid="drill-unapproved-summary">
+                    <span className="text-xs font-bold text-yellow-800 hover:underline cursor-pointer">
+                      {formatCurrency(summaryUnapproved)}
+                    </span>
+                  </Link>
                 </div>
                 <div className="flex justify-between items-center border-t border-orange-200 pt-1 mt-1">
                   <span className="text-xs text-orange-700 font-semibold">Total</span>
@@ -1771,11 +1783,15 @@ export default function CustomerBilling() {
                           <div className="space-y-0.5">
                             <div className="flex items-center justify-between">
                               <span className="text-xs text-green-700">Approved:</span>
-                              <span className="text-xs font-medium text-green-800">{formatCurrency(preview.approvedTotal || 0)}</span>
+                              <Link href={`/billing-workspace?status=approved&customer=${customer.id}`} data-testid={`drill-approved-card-${customer.id}`}>
+                                <span className="text-xs font-medium text-green-800 hover:underline cursor-pointer">{formatCurrency(preview.approvedTotal || 0)}</span>
+                              </Link>
                             </div>
                             <div className="flex items-center justify-between">
                               <span className="text-xs text-yellow-700">Unapproved:</span>
-                              <span className="text-xs font-medium text-yellow-800">{formatCurrency(preview.unapprovedTotal || 0)}</span>
+                              <Link href={`/billing-workspace?status=unapproved&customer=${customer.id}`} data-testid={`drill-unapproved-card-${customer.id}`}>
+                                <span className="text-xs font-medium text-yellow-800 hover:underline cursor-pointer">{formatCurrency(preview.unapprovedTotal || 0)}</span>
+                              </Link>
                             </div>
                             <div className="flex items-center justify-between border-t border-gray-100 pt-0.5">
                               <span className="text-xs text-orange-700 font-medium">Total:</span>

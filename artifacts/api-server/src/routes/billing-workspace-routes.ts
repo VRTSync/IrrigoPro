@@ -29,6 +29,7 @@ const BW_ROLES = new Set([
   "billing_manager",
   "company_admin",
   "super_admin",
+  "irrigation_manager",
 ]);
 
 function isAllowed(req: any): boolean {
@@ -36,16 +37,16 @@ function isAllowed(req: any): boolean {
 }
 
 // Statuses considered "active" / awaiting approval.
-const ACTIVE_BS = new Set([
+export const ACTIVE_BS = new Set([
   "pending_manager_review",
   "submitted",
   "completed",
 ]);
-const ACTIVE_WO = new Set([
+export const ACTIVE_WO = new Set([
   "pending_manager_review",
   "work_completed",
 ]);
-const ACTIVE_WCB = new Set([
+export const ACTIVE_WCB = new Set([
   "submitted",
   "pending_manager_review",
 ]);
@@ -501,7 +502,10 @@ export function registerBillingWorkspaceRoutes(
 
         if (wantBs) {
           for (const s of await scopedBillingSheets(req)) {
-            if (!ACTIVE_BS.has(s.status)) continue;
+            // When an explicit status filter is requested (e.g. drill-down to
+            // approved items from Customer Billing), include rows that match
+            // it even if they are outside the default ACTIVE set.
+            if (!ACTIVE_BS.has(s.status) && !(statusFilter && s.status === statusFilter)) continue;
             const photos = Array.isArray(s.photos) ? s.photos : [];
             const flags: string[] = [];
             if (photos.length === 0) flags.push("missing_photos");
@@ -530,7 +534,7 @@ export function registerBillingWorkspaceRoutes(
 
         if (wantWcb) {
           for (const w of await scopedWetCheckBillings(req)) {
-            if (!ACTIVE_WCB.has(w.status)) continue;
+            if (!ACTIVE_WCB.has(w.status) && !(statusFilter && w.status === statusFilter)) continue;
             const created = w.createdAt ? new Date(w.createdAt).toISOString() : null;
             const age = ageDays(created);
             const flags: string[] = [];
@@ -558,7 +562,7 @@ export function registerBillingWorkspaceRoutes(
 
         if (wantWo) {
           for (const w of await scopedWorkOrders(req)) {
-            if (!ACTIVE_WO.has(w.status)) continue;
+            if (!ACTIVE_WO.has(w.status) && !(statusFilter && w.status === statusFilter)) continue;
             const photos = Array.isArray(w.photos) ? w.photos : [];
             const flags: string[] = [];
             if (photos.length === 0) flags.push("missing_photos");

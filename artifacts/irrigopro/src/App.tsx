@@ -344,6 +344,10 @@ function Router() {
                   <Route path="/manager/wet-checks/:id" component={WetCheckReviewPage} />
                   <Route path="/wet-checks/admin" component={RedirectToWetChecks} />
                   <Route path="/financial-pulse" component={FinancialPulsePage} />
+                  <Route path="/billing-workspace" component={BillingWorkspace} />
+                  <Route path="/billing" component={RedirectToBillingWorkspace} />
+                  <Route path="/billing/dashboard" component={RedirectToBillingWorkspace} />
+                  <Route path="/billing-dashboard" component={RedirectToBillingWorkspace} />
                   <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                   <Route path="/wet-checks" component={WetChecksListPage} />
                   <Route path="/wet-checks/c/:customerId/new" component={NewWetCheckPage} />
