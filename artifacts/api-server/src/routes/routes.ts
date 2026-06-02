@@ -13496,14 +13496,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       .innerJoin(wetChecks, eq(wetChecks.id, wetCheckPhotos.wetCheckId))
       .where(and(
         eq(wetChecks.companyId, user.companyId),
-        sql`${wetCheckPhotos.url} = ANY(${candidates})`,
+        sql`${wetCheckPhotos.url} = ANY(${sql.param(candidates)}::text[])`,
       ))
       .limit(1);
     if (wcRows.length > 0) return true;
 
     // 2) text[] photo arrays on work_orders / billing_sheets / estimates
     //    scoped to this company.
-    const overlaps = (col: any) => sql`${col} && ${candidates}::text[]`;
+    const overlaps = (col: any) => sql`${col} && ${sql.param(candidates)}::text[]`;
     const woRows = await db.select({ id: workOrders.id }).from(workOrders)
       .innerJoin(customers, eq(customers.id, workOrders.customerId))
       .where(and(eq(customers.companyId, user.companyId), overlaps(workOrders.photos))).limit(1);
