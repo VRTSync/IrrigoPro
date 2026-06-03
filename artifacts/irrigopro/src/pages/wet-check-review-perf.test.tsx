@@ -144,13 +144,9 @@ describe("WetCheckWizard — performance assertions (Slice 6)", () => {
     expect(elapsed).toBeLessThan(BOUND_MS);
   });
 
-  it("optimistic approve flips QueryClient cache within 50ms of keypress", async () => {
-    // Measured against QueryClient.getQueryData() — not the DOM — to avoid
-    // act() overhead (act waits for React state flushes + async effects from
-    // the fetch mock, which adds ~200-700ms). onMutate awaits cancelQueries
-    // (no-op with no in-flight queries), then sets cache — effectively a
-    // single microtask hop. The 50ms bound is generous for jsdom.
-    const BOUND_MS = 50;
+  it("wizard-approve-convert button is present when all-green for manager roles", async () => {
+    // After the approve flow was removed (Task #1090), all-green should still
+    // show the Approve & Convert button (convert path), not an Approve button.
     const qc = primeCacheQc(makeAllGreenWc());
 
     render(
@@ -160,49 +156,13 @@ describe("WetCheckWizard — performance assertions (Slice 6)", () => {
     );
     await waitFor(() => expect(screen.getByTestId("wizard-header")).toBeTruthy());
 
-    // Fire the keydown — keyboard handler calls approveMut.mutate() synchronously
-    const t0 = performance.now();
-    fireEvent.keyDown(window, { key: "A" });
-
-    // Flush microtasks: onMutate is async but resolves in the first few ticks
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    const elapsed = performance.now() - t0;
-
-    // The optimistic cache update should have run by now
-    const cached = qc.getQueryData(["/api/wet-checks", 1]) as Record<string, unknown> | undefined;
-    expect(cached?.status).toBe("approved");
-    expect(elapsed).toBeLessThan(BOUND_MS);
-  });
-
-  it("keyboard-only approval completes in ≤ 3 keystrokes", async () => {
-    // When the wizard is already showing an all-green wet check:
-    //   Keystroke 1: "A" → triggers approve
-    // That's 1 keystroke — well within the ≤ 3 keystroke budget.
-    // (If a confirmation dialog were required, the budget allows up to 3.)
-    const qc = primeCacheQc(makeAllGreenWc());
-
-    render(
-      <QueryClientProvider client={qc}>
-        <WetCheckWizard id={1} />
-      </QueryClientProvider>,
-    );
-    await waitFor(() => expect(screen.getByTestId("wizard-header")).toBeTruthy());
-
-    let keystrokeCount = 0;
-    await act(async () => {
-      // Keystroke 1: approve
-      fireEvent.keyDown(window, { key: "A" });
-      keystrokeCount++;
-    });
-
-    const approveCallMade = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.some(
+    const convertBtn = screen.queryByTestId("wizard-approve-convert");
+    expect(convertBtn).toBeTruthy();
+    // The button must NOT call the removed approve endpoint
+    const allFetchCalls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
+    const approveCallMade = allFetchCalls.some(
       ([url]: any[]) => String(url).includes("/api/wet-checks/1/approve"),
     );
-
-    expect(approveCallMade).toBe(true);
-    expect(keystrokeCount).toBeLessThanOrEqual(3);
+    expect(approveCallMade).toBe(false);
   });
 });

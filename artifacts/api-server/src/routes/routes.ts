@@ -6121,7 +6121,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             (bs.status === 'approved_passed_to_billing') && !bs.invoiceId && bsInRange(bs)
           );
           const unbilledWetCheckBillings = wetCheckBillingsForCustomer.filter(wcb =>
-            wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId && wcbInRange(wcb)
+            wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId && wcb.wetCheckStatus === 'converted' && wcbInRange(wcb)
           );
 
           // Use stored totalAmount as the authoritative total (historical backfill guardrail)
@@ -6426,9 +6426,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const unbilledBillingSheets = billingSheets.filter(bs => 
         (bs.status === 'approved_passed_to_billing') && !bs.invoiceId
       );
-      // Unbilled wet check billings: approved_passed_to_billing with no invoiceId
+      // Unbilled wet check billings: approved_passed_to_billing, wet check converted, no invoiceId
       const unbilledWetCheckBillings = wetCheckBillings.filter(wcb =>
-        wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId
+        wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId && wcb.wetCheckStatus === 'converted'
       );
 
       // Calculate total unbilled amount (includes wet check billings)
@@ -6483,7 +6483,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Query eligible wet check billings for this customer (Slice 2+)
       const allWcbsForPreview = await storage.getWetCheckBillingsByCustomer(customerId);
       const eligibleWcbs = allWcbsForPreview.filter(wcb =>
-        wcb.status === 'approved_passed_to_billing' && wcb.invoiceId == null,
+        wcb.status === 'approved_passed_to_billing' && wcb.invoiceId == null && wcb.wetCheckStatus === 'converted',
       );
 
       // Filter to only include selected items
@@ -6773,7 +6773,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Query eligible wet check billings for this customer (Slice 2+)
       const allWcbsForMonthly = await storage.getWetCheckBillingsByCustomer(customerId);
       const eligibleWcbsMonthly = allWcbsForMonthly.filter(wcb =>
-        wcb.status === 'approved_passed_to_billing' && wcb.invoiceId == null,
+        wcb.status === 'approved_passed_to_billing' && wcb.invoiceId == null && wcb.wetCheckStatus === 'converted',
       );
 
       // Filter to only include selected items
@@ -16067,56 +16067,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // and wet-check-photo-attach-regression.test.ts.
   registerWetCheckPhotoAttachRoutes(app, { requireAuthentication, requireCompanyId, isFieldRole });
 
-  // ─── Manager review / routing / approve / convert ────────────────────────
-  app.post("/api/wet-checks/:id/approve", requireAuthentication, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isWetCheckManagerRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
-    const userId = req.authenticatedUserId;
-    if (!userId) { res.status(401).json({ message: "Authentication required" }); return; }
-    try {
-      const me = await storage.getUser(userId);
-      if (!me) { res.status(401).json({ message: "User not found" }); return; }
-      const wcId = parseInt(req.params.id);
-      const wcBefore = await storage.getWetCheck(wcId, cid).catch(() => null);
-      // Task #641 — co-transact the state mutation with the audit row.
-      // `approveWetCheck` writes via the global `db`, so we open the
-      // outer transaction here and only commit when the audit insert
-      // succeeds too. If the audit insert fails (e.g. constraint
-      // violation, transient DB error), `strict: true` propagates the
-      // error and Postgres rolls back the wet-check status flip — so
-      // we never end up with a transitioned row that has no audit
-      // trail.
-      let updated: Awaited<ReturnType<typeof storage.approveWetCheck>> | null = null;
-      await db.transaction(async (tx) => {
-        // Pass `tx` into the storage method so the UPDATE and the
-        // audit INSERT both run on the same SQL connection inside
-        // the same transaction. `strict: true` propagates any
-        // audit-write failure out of the tx, causing Postgres to
-        // roll back the wet-check status flip too — so we never
-        // end up with a transitioned row that has no audit trail.
-        updated = await storage.approveWetCheck(wcId, cid, { id: me.id, name: me.name }, tx);
-        if (!updated) return;
-        await recordLifecycleAudit(req, {
-          resource: "wet_check",
-          action: "wet_check.approved",
-          targetId: wcId,
-          companyId: cid,
-          before: { status: wcBefore?.status },
-          after: { status: updated.status },
-          summary: `Wet check ${wcId} approved by ${me.name}`,
-        }, { tx, strict: true });
-      });
-      if (!updated) { res.status(404).json({ message: "Not found" }); return; }
-      res.json(updated);
-    } catch (e: any) {
-      const { status, message } = classifyAndLog(req, e, {
-        op: "approveWetCheck",
-        ctx: { cid, wetCheckId: req.params.id },
-        fallbackStatus: 400,
-        fallbackMessage: "Couldn't approve wet check — please retry",
-      });
-      res.status(status).json({ message });
-    }
+  // ─── Manager review / routing / convert ──────────────────────────────────
+  // NOTE: /api/wet-checks/:id/approve was removed (Task #1090). The approve
+  // status is no longer reachable; wet checks move directly from
+  // submitted/partially_converted to converted via the convert route.
+  app.post("/api/wet-checks/:id/approve", (_req, res) => {
+    res.status(404).json({ message: "This endpoint has been removed. Wet checks are finalized via the convert route." });
   });
 
   const findingRouteBody = z.object({

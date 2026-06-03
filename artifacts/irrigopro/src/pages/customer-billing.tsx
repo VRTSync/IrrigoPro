@@ -3215,6 +3215,25 @@ export default function CustomerBilling() {
                 </div>
               )}
 
+              {/* "Review in progress" explainer for non-converted WCBs */}
+              {(() => {
+                const unbilledIds = new Set((customerBillingData.unbilledWetCheckBillings ?? []).map(w => w.id));
+                const pendingCount = (customerBillingData.wetCheckBillings ?? []).filter(wcb => {
+                  const status = String((wcb as any).status ?? "");
+                  const invoiceId = (wcb as any).invoiceId ?? null;
+                  return status === "approved_passed_to_billing" && invoiceId == null && !unbilledIds.has(wcb.id);
+                }).length;
+                if (pendingCount === 0) return null;
+                return (
+                  <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800 mb-2" data-testid="wcb-review-in-progress-explainer">
+                    <span className="mt-0.5">⚠</span>
+                    <span>
+                      {pendingCount} wet check billing{pendingCount === 1 ? "" : "s"} {pendingCount === 1 ? "is" : "are"} waiting on manager review and {pendingCount === 1 ? "isn't" : "aren't"} available to invoice yet.
+                    </span>
+                  </div>
+                );
+              })()}
+
               {/* Summary & Actions */}
               <div className="border-t pt-4">
                 <div className="flex items-center justify-between mb-4">

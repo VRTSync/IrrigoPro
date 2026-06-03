@@ -997,11 +997,6 @@ export interface IStorage {
   ): Promise<WetCheckFinding | undefined>;
   deleteWetCheckFinding(id: number, companyId: number): Promise<boolean>;
 
-  approveWetCheck(
-    id: number,
-    companyId: number,
-    manager: { id: number; name: string },
-  ): Promise<WetCheck | undefined>;
   routeWetCheckFinding(
     id: number,
     companyId: number,
@@ -1052,7 +1047,7 @@ export interface IStorage {
   getAllWetCheckBillings(): Promise<WetCheckBilling[]>;
   getAllWetCheckBillingsWithCounts(): Promise<WetCheckBillingListItem[]>;
   getWetCheckBillingById(id: number, companyId: number | null): Promise<WetCheckBilling | undefined>;
-  getWetCheckBillingsByCustomer(customerId: number): Promise<WetCheckBilling[]>;
+  getWetCheckBillingsByCustomer(customerId: number): Promise<WetCheckBillingListItem[]>;
   getWetCheckBillingsByTechnician(technicianId: number): Promise<WetCheckBilling[]>;
   getWetCheckBillingsByWetCheckId(wetCheckId: number): Promise<WetCheckBilling[]>;
   updateWetCheckBilling(id: number, data: Partial<InsertWetCheckBilling>): Promise<WetCheckBilling>;
@@ -3991,10 +3986,34 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async getWetCheckBillingsByCustomer(customerId: number): Promise<WetCheckBilling[]> {
-    return db.select().from(wetCheckBillings)
+  async getWetCheckBillingsByCustomer(customerId: number): Promise<WetCheckBillingListItem[]> {
+    const rows = await db
+      .select({
+        wcb: wetCheckBillings,
+        wetCheckStatus: wetChecks.status,
+        issuesCount: sql<number>`cast(count(${wetCheckFindings.id}) as int)`,
+        zonesCount: sql<number>`cast(count(distinct ${wetCheckFindings.zoneRecordId}) as int)`,
+        daysInQueue: sql<number>`cast(extract(epoch from (now() - ${wetCheckBillings.createdAt})) / 86400 as int)`,
+        findingsRepaired: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'repaired_in_field' then 1 end) as int)`,
+        findingsToEstimate: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'sent_to_estimate' then 1 end) as int)`,
+        findingsDeferred: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'deferred_to_work_order' then 1 end) as int)`,
+      })
+      .from(wetCheckBillings)
+      .leftJoin(wetCheckFindings, eq(wetCheckFindings.wetCheckBillingId, wetCheckBillings.id))
+      .leftJoin(wetChecks, eq(wetChecks.id, wetCheckBillings.wetCheckId))
       .where(eq(wetCheckBillings.customerId, customerId))
+      .groupBy(wetCheckBillings.id, wetChecks.status)
       .orderBy(desc(wetCheckBillings.createdAt));
+    return rows.map((r) => ({
+      ...r.wcb,
+      issuesCount: r.issuesCount ?? 0,
+      zonesCount: r.zonesCount ?? 0,
+      wetCheckStatus: r.wetCheckStatus ?? null,
+      daysInQueue: r.daysInQueue ?? 0,
+      findingsRepaired: r.findingsRepaired ?? 0,
+      findingsToEstimate: r.findingsToEstimate ?? 0,
+      findingsDeferred: r.findingsDeferred ?? 0,
+    }));
   }
 
   async getWetCheckBillingsByTechnician(technicianId: number): Promise<WetCheckBilling[]> {
@@ -7021,7 +7040,7 @@ export class DatabaseStorage implements IStorage {
     const autoBillEnabled = process.env.WET_CHECK_AUTO_BILL !== "false";
     const wcs = await db.select().from(wetChecks).where(and(
       eq(wetChecks.companyId, companyId),
-      inArray(wetChecks.status, ["submitted", "approved", "partially_converted"]),
+      inArray(wetChecks.status, ["submitted", "partially_converted"]),
     )).orderBy(desc(wetChecks.submittedAt)).limit(200);
     if (wcs.length === 0) return [];
     const ids = wcs.map(w => w.id);
@@ -8313,33 +8332,6 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async approveWetCheck(
-    id: number,
-    companyId: number,
-    manager: { id: number; name: string },
-    executor: DbExecutor = db,
-  ): Promise<WetCheck | undefined> {
-    const wc = await this.assertWetCheckBelongsToCompany(id, companyId);
-    if (
-      wc.status !== "submitted" &&
-      wc.status !== "partially_converted" &&
-      wc.status !== "approved"
-    ) {
-      throw new Error(`Cannot approve wet check in status ${wc.status}`);
-    }
-    const [updated] = await (executor as typeof db).update(wetChecks)
-      .set({
-        status: "approved",
-        approvedAt: wc.approvedAt ?? new Date(),
-        approvedBy: manager.id,
-        approvedByName: manager.name,
-        updatedAt: new Date(),
-      })
-      .where(eq(wetChecks.id, id))
-      .returning();
-    return updated;
-  }
-
   async routeWetCheckFinding(
     id: number,
     companyId: number,
@@ -8350,10 +8342,10 @@ export class DatabaseStorage implements IStorage {
     if (!f) return undefined;
     const wc = await this.assertWetCheckBelongsToCompany(f.wetCheckId, companyId);
     // Manager routing only makes sense once the field tech has handed off
-    // (submitted / approved / partially_converted). Block in_progress so a
-    // race during tech edit cannot flip routing, and block converted so a
-    // fully-routed wet check stays sealed.
-    if (wc.status !== "submitted" && wc.status !== "approved" && wc.status !== "partially_converted") {
+    // (submitted / partially_converted). Block in_progress so a race during
+    // tech edit cannot flip routing, and block converted so a fully-routed
+    // wet check stays sealed.
+    if (wc.status !== "submitted" && wc.status !== "partially_converted") {
       throw new Error(`Wet check ${f.wetCheckId} is ${wc.status}; routing is locked`);
     }
     // documented_only findings have convertedAt but no FK, so check both.
@@ -8389,7 +8381,7 @@ export class DatabaseStorage implements IStorage {
       const [wc] = await tx.select().from(wetChecks)
         .where(and(eq(wetChecks.id, id), eq(wetChecks.companyId, companyId)));
       if (!wc) throw new Error(`Wet check ${id} not found for company ${companyId}`);
-      if (wc.status !== "submitted" && wc.status !== "approved" && wc.status !== "partially_converted") {
+      if (wc.status !== "submitted" && wc.status !== "partially_converted") {
         throw new Error(`Cannot convert wet check in status ${wc.status}`);
       }
       const [cust] = await tx.select().from(customers).where(eq(customers.id, wc.customerId));
@@ -8732,9 +8724,6 @@ export class DatabaseStorage implements IStorage {
       const [updated] = await tx.update(wetChecks).set({
         status: newStatus,
         fullyConvertedAt: stillPending.length > 0 ? null : now,
-        approvedAt: wc.approvedAt ?? now,
-        approvedBy: wc.approvedBy ?? manager.id,
-        approvedByName: wc.approvedByName ?? manager.name,
         updatedAt: now,
       }).where(eq(wetChecks.id, id)).returning();
 

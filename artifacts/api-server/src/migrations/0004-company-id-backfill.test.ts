@@ -125,6 +125,11 @@ async function cleanUp() {
     )
   `);
   await db.execute(sql`DELETE FROM "work_orders"  WHERE id IN (${sql.raw(`${WO1},${WO2}`)}) OR customer_id IN (${sql.raw(`${CUST1},${CUST2}`)})`);
+  // wet_checks / wet_check_billings reference customers via FK — remove before customers.
+  await db.execute(sql`DELETE FROM "wet_check_findings" WHERE wet_check_id IN (SELECT id FROM "wet_checks" WHERE customer_id IN (${sql.raw(`${CUST1},${CUST2}`)}))`);
+  await db.execute(sql`DELETE FROM "wet_check_zone_records" WHERE wet_check_id IN (SELECT id FROM "wet_checks" WHERE customer_id IN (${sql.raw(`${CUST1},${CUST2}`)}))`);
+  await db.execute(sql`DELETE FROM "wet_checks"   WHERE customer_id IN (${sql.raw(`${CUST1},${CUST2}`)})`);
+  await db.execute(sql`DELETE FROM "wet_check_billings" WHERE customer_id IN (${sql.raw(`${CUST1},${CUST2}`)})`);
   await db.execute(sql`DELETE FROM "customers"    WHERE id IN (${sql.raw(`${CUST1},${CUST2}`)})`);
   await db.execute(sql`DELETE FROM "companies"    WHERE id IN (${sql.raw(`${C1},${C2}`)})`);
 }

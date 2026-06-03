@@ -241,6 +241,17 @@ function WcbRow({
             {item.invoiceId != null && <QbSyncIcon />}
           </div>
           {item.wetCheckStatus === "partially_converted" && <PartialBadge />}
+          {item.status === "approved_passed_to_billing" && item.wetCheckStatus !== "converted" && item.wetCheckStatus !== null && (
+            <Link
+              href={`/manager/wet-checks/${item.wetCheckId}`}
+              onClick={(e) => e.stopPropagation()}
+              data-testid={`wcb-review-in-progress-${item.id}`}
+            >
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 border border-gray-300 hover:bg-gray-200">
+                Review in progress
+              </span>
+            </Link>
+          )}
           <StaleBadge daysInQueue={item.daysInQueue} status={item.status} />
         </div>
       </td>

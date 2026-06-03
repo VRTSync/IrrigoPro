@@ -47,8 +47,6 @@ function StatusBadge({ status }: { status: string }) {
       return <Badge variant="info">Submitted</Badge>;
     case "partially_converted":
       return <Badge variant="warning">Partially Converted</Badge>;
-    case "approved":
-      return <Badge variant="success">Approved</Badge>;
     default:
       return (
         <Badge variant="secondary">

@@ -654,7 +654,11 @@ export default function BillingWorkspacePage() {
       if (active.type === "billing_sheet") path = `/api/billing-sheets/${active.refId}/approve`;
       else if (active.type === "work_order") path = `/api/work-orders/${active.refId}/approve`;
       else if (active.type === "wet_check_billing" && active.wetCheckId) {
-        path = `/api/wet-checks/${active.wetCheckId}/approve`;
+        // Wet check billings no longer have a standalone approve step (Task #1090).
+        // The manager must convert the wet check via the triage wizard before the
+        // WCB becomes eligible for invoicing.
+        window.location.href = `/manager/wet-checks/${active.wetCheckId}`;
+        return;
       } else {
         window.location.href = "/parts-pending-approval";
         return;

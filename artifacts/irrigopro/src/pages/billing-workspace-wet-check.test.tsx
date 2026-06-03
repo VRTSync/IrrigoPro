@@ -172,36 +172,4 @@ describe('Billing Workspace — WCB Slice 6', () => {
     }, { timeout: 2000 });
   });
 
-  it('Approve dispatches to /api/wet-checks/{wetCheckId}/approve for manager roles', async () => {
-    mockedGetCurrentUser.mockReturnValue({ id: 1, username: 'mgr', role: 'company_admin' });
-    mockedApiRequest.mockResolvedValueOnce({});
-
-    await renderPage(wcbQueueResponse, wcbQueueResponse);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('queue-row-wcb-1')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('queue-row-wcb-1'));
-    });
-
-    await waitFor(() => {
-      const buttons = screen.getAllByTestId('approve-button');
-      expect(buttons.length).toBeGreaterThan(0);
-    }, { timeout: 2000 });
-
-    // Click the first approve button (inline pane or drawer — same action)
-    await act(async () => {
-      fireEvent.click(screen.getAllByTestId('approve-button')[0]);
-    });
-
-    await waitFor(() => {
-      expect(mockedApiRequest).toHaveBeenCalledWith(
-        '/api/wet-checks/50/approve',
-        'POST',
-        {},
-      );
-    }, { timeout: 3000 });
-  });
 });

@@ -250,54 +250,6 @@ describe("WorkflowIndicator via WetCheckWizard", () => {
     expect(screen.queryByTestId("wizard-all-green-section")).toBeNull();
   });
 
-  it("A shortcut fires approve mutation when all-green", async () => {
-    vi.mocked(safeGet).mockReturnValue(JSON.stringify({ id: 1, role: "irrigation_manager" }));
-    const approveFetch = vi.fn(() =>
-      Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 1, status: "approved" }) }),
-    );
-    global.fetch = approveFetch as any;
-
-    const qc = makeQc(makeWcData());
-    render(
-      <QueryClientProvider client={qc}>
-        <WetCheckWizard id={1} />
-      </QueryClientProvider>,
-    );
-
-    await act(async () => {
-      fireEvent.keyDown(window, { key: "A" });
-    });
-
-    const approveCall = approveFetch.mock.calls.find(([url]: any[]) =>
-      String(url).includes("/api/wet-checks/1/approve"),
-    );
-    expect(approveCall).toBeTruthy();
-  });
-
-  it("billing_manager cannot trigger approve via A keyboard shortcut", async () => {
-    vi.mocked(safeGet).mockReturnValue(JSON.stringify({ id: 2, role: "billing_manager" }));
-    const fetchSpy = vi.fn(() =>
-      Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
-    );
-    global.fetch = fetchSpy as any;
-
-    const qc = makeQc(makeWcData());
-    render(
-      <QueryClientProvider client={qc}>
-        <WetCheckWizard id={1} />
-      </QueryClientProvider>,
-    );
-
-    await act(async () => {
-      fireEvent.keyDown(window, { key: "A" });
-    });
-
-    const approveCall = fetchSpy.mock.calls.find(([url]: any[]) =>
-      String(url).includes("/api/wet-checks/1/approve"),
-    );
-    expect(approveCall).toBeUndefined();
-  });
-
   it("billing_manager sees the read-only banner", () => {
     vi.mocked(safeGet).mockReturnValue(JSON.stringify({ id: 2, role: "billing_manager" }));
     const qc = makeQc(makeWcData());

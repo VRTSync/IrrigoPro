@@ -87,7 +87,6 @@ function lineTotal(f: WetCheckFinding, laborRate: number): number {
 const STATUS_LABELS: Record<string, string> = {
   in_progress: "In Progress",
   submitted: "Submitted",
-  approved: "Approved",
   partially_converted: "Partially Converted",
   converted: "Converted",
 };
@@ -95,7 +94,6 @@ const STATUS_LABELS: Record<string, string> = {
 const STATUS_BADGE: Record<string, string> = {
   in_progress: "bg-gray-100 text-gray-700 border border-gray-300",
   submitted: "bg-blue-100 text-blue-800 border border-blue-300",
-  approved: "bg-emerald-100 text-emerald-800 border border-emerald-300",
   partially_converted: "bg-amber-100 text-amber-800 border border-amber-300",
   converted: "bg-emerald-100 text-emerald-800 border border-emerald-300",
 };
@@ -614,23 +612,15 @@ function ManagerCTA({ wc }: { wc: WetCheckWithDetails }) {
     );
   }
 
-  if (wc.status === "approved" || wc.status === "converted") {
+  if (wc.status === "converted") {
     return (
       <div
         className="flex items-start gap-3 p-4 rounded-lg bg-emerald-50 border border-emerald-200"
-        data-testid="mgr-cta-approved"
+        data-testid="mgr-cta-converted"
       >
         <ClipboardCheck className="w-5 h-5 text-emerald-600 mt-0.5 flex-shrink-0" />
         <div>
-          <p className="text-sm font-medium text-emerald-800">
-            {wc.status === "converted" ? "Fully converted" : "Approved"}
-          </p>
-          {wc.approvedByName && (
-            <p className="text-xs text-emerald-700 mt-0.5">
-              Reviewed by {wc.approvedByName}
-              {wc.approvedAt ? ` on ${fmtDateShort(wc.approvedAt)}` : ""}
-            </p>
-          )}
+          <p className="text-sm font-medium text-emerald-800">Fully converted</p>
           <Link
             href={triageUrl}
             className="mt-2 inline-flex items-center gap-1 text-xs text-emerald-700 hover:underline font-medium"
@@ -725,7 +715,6 @@ function ManagerWetCheckDetailView({ id }: { id: number }) {
 
   const showOutcome =
     wc.status === "partially_converted" ||
-    wc.status === "approved" ||
     wc.status === "converted";
 
   return (

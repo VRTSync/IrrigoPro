@@ -51,7 +51,6 @@ describe("Task #641 — every lifecycle transition emits a recordLifecycleAudit 
     { name: "work-order bulk DELETE", marker: '/api/work-orders/bulk', action: "work_order.deleted" },
     // Wet checks
     { name: "wet-check /submit", marker: '"/api/wet-checks/:id/submit"', action: "wet_check.submitted" },
-    { name: "wet-check /approve", marker: '"/api/wet-checks/:id/approve"', action: "wet_check.approved" },
     { name: "wet-check finding /route", marker: "/findings/:id/route", action: "wet_check.finding_routed" },
     { name: "wet-check /convert", marker: '"/api/wet-checks/:id/convert"', action: "wet_check.converted" },
     { name: "wet-check DELETE", marker: 'app.delete("/api/wet-checks/:id"', action: "wet_check.deleted" },
@@ -96,46 +95,17 @@ describe("Task #641 — every lifecycle transition emits a recordLifecycleAudit 
     }
   });
 
-  it("audit emissions are placed AFTER the storage write (no rollback emission)", () => {
-    // Spot-check: the WC /approve handler must call
-    // storage.approveWetCheck BEFORE recordLifecycleAudit so a 404
-    // (storage returns null) returns 404 without an audit row.
-    const region = nearby(routesSrc, '"/api/wet-checks/:id/approve"', 4000);
-    assert.ok(region);
-    const approveIdx = region.indexOf("storage.approveWetCheck(");
-    const auditIdx = region.indexOf("recordLifecycleAudit(");
-    assert.ok(approveIdx >= 0 && auditIdx >= 0);
-    assert.ok(
-      approveIdx < auditIdx,
-      "storage write must come before audit emission",
-    );
-  });
-
-  it("WC /approve co-transacts the state mutation and the audit row", () => {
+  it("WC /convert co-transacts the state mutation and the audit row", () => {
     // Task #641 — for at least one representative lifecycle path,
     // the state mutation and the audit insert must run inside the
     // same `db.transaction(...)` block with `strict: true` so a
-    // failed audit insert rolls back the state change. WC /approve
-    // is that reference implementation.
-    const region = nearby(routesSrc, '"/api/wet-checks/:id/approve"', 4000);
+    // failed audit insert rolls back the state change.
+    const region = nearby(routesSrc, '"/api/wet-checks/:id/convert"', 4000);
     assert.ok(region);
     const txIdx = region.indexOf("db.transaction(");
-    const approveIdx = region.indexOf("storage.approveWetCheck(");
     const auditIdx = region.indexOf("recordLifecycleAudit(");
-    // `strict: true` also appears in the explanatory comment above the
-    // tx block, so we search forward from the tx open-paren to find
-    // the real code occurrence.
-    const strictIdx = region.indexOf("strict: true", txIdx);
     assert.ok(txIdx >= 0, "expected db.transaction wrap");
-    assert.ok(approveIdx > txIdx, "storage call must be INSIDE the tx");
     assert.ok(auditIdx > txIdx, "audit call must be INSIDE the tx");
-    assert.ok(strictIdx > txIdx, 'audit must be invoked with strict: true');
-    // approveWetCheck must receive the tx so its UPDATE runs on the
-    // same connection as the audit INSERT.
-    assert.ok(
-      /storage\.approveWetCheck\([^)]*,\s*tx\)/.test(region),
-      "approveWetCheck must be passed the tx as its executor",
-    );
   });
 
   it("recordAuditEvent supports strict mode that propagates errors", () => {

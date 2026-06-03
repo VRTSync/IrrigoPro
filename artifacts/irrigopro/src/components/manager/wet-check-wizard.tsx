@@ -478,39 +478,9 @@ export function WetCheckWizard({ id }: { id: number }) {
   // ── "Show help" tick counter forces DismissibleHelp remount ──────────
   const [tick, setTick] = useState(0);
   const handleShowHelp = useCallback(() => {
-    resetHelpDismissal("wc-review-ready-to-approve");
     resetHelpDismissal("wc-review-keyboard-shortcuts");
     setTick(t => t + 1);
   }, []);
-
-  // ── Optimistic approve mutation ────────────────────────────────────────
-  const approveMut = useMutation({
-    mutationFn: () => apiRequest(`/api/wet-checks/${id}/approve`, "POST"),
-    onMutate: async () => {
-      await queryClient.cancelQueries({ queryKey: ["/api/wet-checks", id] });
-      const prev = queryClient.getQueryData(["/api/wet-checks", id]);
-      queryClient.setQueryData(["/api/wet-checks", id], (old: WetCheckWithDetails | undefined) => {
-        if (!old) return old;
-        return { ...old, status: "approved", approvedAt: new Date().toISOString() };
-      });
-      return { prev };
-    },
-    onError: (err: any, _vars, ctx: { prev: unknown } | undefined) => {
-      if (ctx?.prev !== undefined) {
-        queryClient.setQueryData(["/api/wet-checks", id], ctx.prev);
-      }
-      toast({ title: "Approve failed", description: err?.message, variant: "destructive" });
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", id] });
-      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks/pending-review"] });
-    },
-  });
-
-  const handleApprove = useCallback(() => {
-    if (!allGreen || isBillingManager || approveMut.isPending) return;
-    approveMut.mutate();
-  }, [allGreen, isBillingManager, approveMut]);
 
   const editMut = useMutation({
     mutationFn: (vars: { fid: number; patch: FindingEdits }) =>
@@ -637,13 +607,6 @@ export function WetCheckWizard({ id }: { id: number }) {
           e.preventDefault();
           handleDecision("repaired_in_field");
           break;
-        case "a":
-        case "A":
-          if (isBillingManager) return;
-          if (!allGreen) return;
-          e.preventDefault();
-          handleApprove();
-          break;
         case "j":
         case "J":
           if (editMode || !active) return;
@@ -682,7 +645,7 @@ export function WetCheckWizard({ id }: { id: number }) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [active, advancing, editMode, isActiveFindingAutoBilled, handleDecision, handleSkip, handlePrev, navigate, id, allGreen, isBillingManager, handleApprove]);
+  }, [active, advancing, editMode, isActiveFindingAutoBilled, handleDecision, handleSkip, handlePrev, navigate, id, allGreen, isBillingManager]);
 
   // ── Tutorial tip ──────────────────────────────────────────────────────
   const [showTutorial, setShowTutorial] = useState(false);
@@ -1125,12 +1088,11 @@ export function WetCheckWizard({ id }: { id: number }) {
         <div className="px-4 pt-3" data-testid="wizard-all-green-section">
           <DismissibleHelp
             key={tick}
-            guideId="wc-review-ready-to-approve"
+            guideId="wc-review-ready-to-convert"
             variant="info"
           >
-            All zones reviewed and all findings resolved — this wet check is ready to approve.
-            Press <kbd className="px-1 border border-emerald-300 rounded text-xs">A</kbd> to approve instantly, or click{" "}
-            <strong>Approve &amp; Convert</strong> below. The billing row will be created as{" "}
+            All zones reviewed and all findings resolved — click{" "}
+            <strong>Approve &amp; Convert</strong> below to finalize this wet check and create the billing row{" "}
             <span className="font-mono text-xs">WC-{new Date().getFullYear()}-{String(id).padStart(4, "0")}</span>.
           </DismissibleHelp>
         </div>
@@ -1147,26 +1109,14 @@ export function WetCheckWizard({ id }: { id: number }) {
               ? `${pendingFindings.length} finding${pendingFindings.length === 1 ? "" : "s"} remaining`
               : "All findings resolved"}
           </div>
-          {allGreen && !isBillingManager ? (
-            <Button
-              onClick={handleApprove}
-              disabled={approveMut.isPending}
-              data-testid="wizard-approve-convert"
-              className="min-h-[44px] bg-emerald-600 hover:bg-emerald-700"
-            >
-              {approveMut.isPending && <Loader2 className="w-4 h-4 mr-1 animate-spin" aria-hidden="true" />}
-              Approve <kbd className="ml-1 opacity-70 text-xs border border-emerald-300 rounded px-1">A</kbd>
-            </Button>
-          ) : (
-            <Button
-              onClick={handleConvert}
-              disabled={!allResolved || isBillingManager}
-              data-testid="wizard-approve-convert"
-              className="min-h-[44px]"
-            >
-              Approve &amp; Convert
-            </Button>
-          )}
+          <Button
+            onClick={handleConvert}
+            disabled={!allResolved || isBillingManager}
+            data-testid="wizard-approve-convert"
+            className={`min-h-[44px] ${allGreen && !isBillingManager ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}
+          >
+            Approve &amp; Convert
+          </Button>
         </div>
       )}
 
