@@ -1,0 +1,386 @@
+# Command Center Inline Edit — Slice 1: Inline Edit, Emergency Rate Toggle, Wet Checks Tab
+
+**Source:** product feedback (Randy, 2026-06-03) — "edit flow for billing sheets and work orders needs to be much simpler than going through the wizard again. Optimizing for speed and accuracy in editing."  
+**Severity:** P1 (workflow blocker — managers currently re-enter the wizard for every correction)  
+**Prerequisite slices:** none (independent of any in-flight WC Manager Experience slice)
+
+This is a single self-contained slice. Do not deviate from the scope below. If a question arises mid-implementation that is not answered here, stop and flag it rather than guessing.
+
+---
+
+## Design Context (locked decisions)
+
+1. **"Command Center" = `/billing/command-center` = `billing-workspace.tsx`.** The page name in code (`BillingWorkspacePage`) is legacy; the UI label and the user's mental model are "Command Center." Do not rename the route or the file.
+2. **Inline edit replaces the wizard hop for the 95% case.** Today the detail drawer (`DetailPane` inside `billing-workspace.tsx`) only exposes a "note" textarea and an "Open" link that boots the full wizard. The wizard is heavyweight and contains controls (technician, work date, customer pin, AI description, photo capture) that managers do not need when correcting an already-submitted ticket. The wizard remains available via "Open" — it is not removed — but inline edit becomes the default path.
+3. **Editable in place (this slice):**
+   - Line items: labor hours per line (when `laborMode === 'per_part'`), parts qty, parts unit price.
+   - Add/remove line item rows.
+   - Per-ticket labor rate **mode** (normal ↔ emergency), which swaps the rate value used for the whole ticket.
+   - `totalHours` (the flat-mode authoritative hours field) when `laborMode === 'flat'`.
+4. **Out of scope (this slice):**
+   - Header field edits (work date, technician, customer, work description). Those still require the wizard. Document this in the UI with a "Edit header (wizard)" link for now.
+   - Photos/attachments add/remove.
+   - Multi-ticket bulk edit.
+   - Per-line emergency-rate overrides. The toggle is per-ticket only; do not introduce a per-line override.
+5. **Emergency rate source is the customer record.** `customers.emergencyLaborRate` already exists (default `125.00`, see `lib/db/src/schema/schema.ts:85`). `customers.laborRate` (line 84, default `45.00`) is the normal rate. The toggle does not let the user type a new emergency value at the ticket — if a customer's emergency rate is wrong, fix it in the customer record (existing `/api/customers/:id/labor-rates` endpoint).
+6. **Rate mode persistence.** A new column, `rateMode text not null default 'normal'`, is added to `billing_sheets`, `work_orders`, and `wet_check_billings`. Values: `'normal' | 'emergency'`. The toggle flips this column and triggers a server-side total recompute that pulls the corresponding rate from the customer record. We do NOT add a separate `emergency_labor_rate` snapshot — the rate snapshot already lives in `laborRate` / `appliedLaborRate`. After a toggle the snapshot is overwritten with the customer's current emergency (or normal) value.
+7. **Lock semantics are unchanged.** Inline edit, line-item edit, and the rate-mode toggle are all blocked when `status === 'billed'` or `invoiceId != null`. After `approved_passed_to_billing`, only `billing_manager`, `company_admin`, and `super_admin` can edit (mirrors the existing PATCH guard at `routes.ts:10778` for billing sheets and `routes.ts:11966` for work orders). Field techs never see inline edit affordances; they continue to use their normal completion flow.
+8. **Wet Checks tab in Command Center** is the same list/detail pattern as the existing `WetCheckBillings` page (`artifacts/irrigopro/src/pages/wet-check-billings.tsx`) but lives as an additional tab inside the Command Center. The existing standalone `/wet-check-billings` route stays, unchanged. The new tab simply mounts a slim variant of the same list + the modal in place.
+9. **Audit trail.** Every inline-edit save and every rate-mode flip writes an entry to the existing billing-sheet / work-order activity log (`/api/billing-sheets/:id/activity`, `/api/work-orders/:id/activity`). Use the same `recordActivity` helper that the PATCH endpoints already use. For wet-check billings, no activity endpoint exists today — record nothing for now (note this as a follow-up).
+
+---
+
+## Slice 1.1 — Schema: `rate_mode` column
+
+### Scope
+Add `rate_mode` to three tables. Backfill all existing rows to `'normal'`.
+
+### Files added
+- `lib/db/migrations/0006_add_rate_mode.sql` (latest existing is `0005_wcb_approval_snapshots.sql`).
+
+### Files modified
+- `lib/db/src/schema/schema.ts` — add `rateMode` column to `billingSheets`, `workOrders`, `wetCheckBillings`.
+
+### Concrete changes
+
+In `schema.ts`, inside `billingSheets` (around line 260, next to `appliedLaborRate`):
+
+```ts
+// 'normal' | 'emergency' — which customer-level rate this ticket bills at.
+// Toggled from Command Center. Locked once the ticket is billed/invoiced.
+rateMode: text("rate_mode").notNull().default("normal"),
+```
+
+Same column on `workOrders` (around line 694) and `wetCheckBillings` (around line 1410).
+
+Migration SQL:
+
+```sql
+ALTER TABLE billing_sheets
+  ADD COLUMN IF NOT EXISTS rate_mode text NOT NULL DEFAULT 'normal';
+ALTER TABLE billing_sheets
+  ADD CONSTRAINT billing_sheets_rate_mode_chk CHECK (rate_mode IN ('normal','emergency'));
+
+ALTER TABLE work_orders
+  ADD COLUMN IF NOT EXISTS rate_mode text NOT NULL DEFAULT 'normal';
+ALTER TABLE work_orders
+  ADD CONSTRAINT work_orders_rate_mode_chk CHECK (rate_mode IN ('normal','emergency'));
+
+ALTER TABLE wet_check_billings
+  ADD COLUMN IF NOT EXISTS rate_mode text NOT NULL DEFAULT 'normal';
+ALTER TABLE wet_check_billings
+  ADD CONSTRAINT wet_check_billings_rate_mode_chk CHECK (rate_mode IN ('normal','emergency'));
+```
+
+### Acceptance
+- All three tables have a `rate_mode` column, `NOT NULL`, default `'normal'`, with a CHECK constraint limiting values.
+- Existing rows are `'normal'` after backfill.
+- Drizzle types include `rateMode: 'normal' | 'emergency'` (or `string` if Drizzle doesn't narrow it — the API layer will narrow).
+
+---
+
+## Slice 1.2 — Server: rate-mode toggle + line-item PATCH endpoints
+
+### Scope
+Three new endpoints, each mirroring the slim, totals-recomputing pattern of `PATCH /api/wet-check-billings/:id/labor-rate` (`routes.ts:9773` → `storage.recomputeWcbTotalsForLaborRate` at `storage.ts:4044`).
+
+### Files modified
+- `artifacts/api-server/src/routes/routes.ts` — three new routes.
+- `artifacts/api-server/src/storage.ts` — three new storage methods.
+
+### New endpoints
+
+```
+PATCH /api/billing-sheets/:id/rate-mode      { mode: 'normal' | 'emergency' }
+PATCH /api/work-orders/:id/rate-mode         { mode: 'normal' | 'emergency' }
+PATCH /api/wet-check-billings/:id/rate-mode  { mode: 'normal' | 'emergency' }
+```
+
+Each:
+1. Auth: role must be `billing_manager`, `company_admin`, or `super_admin`. Otherwise 403.
+2. Tenant guard: same pattern as the existing labor-rate route (super_admin bypass, others scoped to `authenticatedUserCompanyId`).
+3. Lock guard: 409 if `status === 'billed'` or `invoiceId != null`.
+4. Lookup the customer for this ticket; read `customers.laborRate` and `customers.emergencyLaborRate`. If the customer record is missing (legacy data with `customerId = null` on `wet_check_billings`), 422 with `"Customer record required to switch rate mode"`.
+5. Choose the new rate: `mode === 'emergency' ? emergencyLaborRate : laborRate`.
+6. In one transaction: update the ticket's `rateMode`, `laborRate`, and `appliedLaborRate` to the new rate; recompute `laborSubtotal` and `totalAmount` from the existing `totalHours` (or, for per-part mode, `Σ items.laborHours`); write activity log for billing-sheet / work-order paths.
+7. Return the updated record.
+
+### New endpoints — line-item edit (drawer-driven)
+
+These are NOT separate granular routes. The existing `PATCH /api/billing-sheets/:id` and `PATCH /api/work-orders/:id` both accept `items` in the body and replace-all on update (see `routes.ts:10784` and `routes.ts:11972`). Inline edit reuses these by sending only the touched fields plus the full items array; no new endpoint is needed.
+
+**However,** for the drawer UX to feel inline (no full-record validation failures when the user changes one cell), add one helper:
+
+```
+PATCH /api/billing-sheets/:id/items   { items: [{ id?, partId?, partName, quantity, unitPrice, laborHours, notes }] }
+PATCH /api/work-orders/:id/items      { items: [{ id?, partId?, partName, partPrice, quantity, laborHours, notes }] }
+```
+
+Each:
+1. Same auth + lock guards as PATCH `/api/billing-sheets/:id`.
+2. Replace-all the items rows in a transaction (same as the existing line-item replace logic at `storage.ts:3818`).
+3. Recompute `partsSubtotal`, `laborSubtotal`, `totalAmount` from the new items + the ticket's current `laborRate` and `laborMode`.
+4. Return the updated ticket-with-items shape.
+
+### Storage methods to add (signatures)
+
+```ts
+recomputeBillingSheetTotalsForRateMode(
+  id: number,
+  mode: 'normal' | 'emergency',
+  companyId: number | null,
+): Promise<BillingSheetWithItems>;
+
+recomputeWorkOrderTotalsForRateMode(
+  id: number,
+  mode: 'normal' | 'emergency',
+  companyId: number | null,
+): Promise<WorkOrder>;
+
+recomputeWcbTotalsForRateMode(
+  id: number,
+  mode: 'normal' | 'emergency',
+  companyId: number | null,
+): Promise<WetCheckBilling>;
+
+replaceBillingSheetItems(
+  id: number,
+  items: Array<{ id?: number; partId?: number | null; partName: string; quantity: number; unitPrice: number; laborHours: number; notes?: string | null }>,
+  companyId: number | null,
+): Promise<BillingSheetWithItems>;
+
+replaceWorkOrderItems(
+  id: number,
+  items: Array<{ id?: number; partId?: number | null; partName: string; partPrice: number; quantity: number; laborHours: number; notes?: string | null }>,
+  companyId: number | null,
+): Promise<WorkOrderWithItems>;
+```
+
+Throw the same coded errors used elsewhere: `WCB_LOCKED`, `WCB_NOT_FOUND`, `WCB_CROSS_COMPANY` for WCB; analogous `BS_LOCKED` / `WO_LOCKED` / etc. for billing sheets / work orders.
+
+### Tests
+
+- `artifacts/api-server/src/routes/rate-mode-routes.test.ts` (new):
+  - Role gate: `field_tech` PATCH → 403; `billing_manager` → 200.
+  - Lock gate: ticket with `status='billed'` → 409.
+  - Tenant gate: cross-company ticket → 403.
+  - Toggle to `emergency` flips `rateMode`, `laborRate`, `appliedLaborRate` to `customer.emergencyLaborRate`, and `totalAmount` recomputes.
+  - Toggle back to `normal` restores `customer.laborRate`.
+  - Missing customer → 422.
+- `artifacts/api-server/src/routes/line-items-patch.test.ts` (new):
+  - Replacing items recomputes `partsSubtotal` and `totalAmount`.
+  - Items request on billed ticket → 409.
+
+### Acceptance
+- All six endpoints exist, are guarded, and behave as above.
+- Existing `PATCH /api/billing-sheets/:id` and `PATCH /api/work-orders/:id` are unchanged — inline edit code never sends a full-record PATCH; it only uses the new slim endpoints.
+
+---
+
+## Slice 1.3 — Frontend: inline edit in the Command Center detail drawer
+
+### Scope
+Rebuild `DetailPane` inside `billing-workspace.tsx` so it shows an editable line-item table and a rate-mode toggle when the role + lock state allow it. Drawer width grows to accommodate.
+
+### Files modified
+- `artifacts/irrigopro/src/pages/billing-workspace.tsx` — `DetailPane` is replaced with `DetailPaneInline`.
+- `artifacts/irrigopro/src/components/billing-workspace/` (new folder for sub-components).
+
+### Files added
+- `artifacts/irrigopro/src/components/billing-workspace/detail-pane-inline.tsx`
+- `artifacts/irrigopro/src/components/billing-workspace/rate-mode-toggle.tsx`
+- `artifacts/irrigopro/src/components/billing-workspace/line-items-editor.tsx`
+- `artifacts/irrigopro/src/components/billing-workspace/detail-pane-inline.test.tsx`
+- `artifacts/irrigopro/src/components/billing-workspace/rate-mode-toggle.test.tsx`
+- `artifacts/irrigopro/src/components/billing-workspace/line-items-editor.test.tsx`
+
+### Concrete changes
+
+**`detail-pane-inline.tsx`** — exports `DetailPaneInline`. Same props shape as the current `DetailPane`, plus loads the full ticket-with-items via:
+
+```ts
+const detailUrl =
+  item.type === 'billing_sheet' ? `/api/billing-sheets/${item.refId}` :
+  item.type === 'work_order'    ? `/api/work-orders/${item.refId}` :
+  item.type === 'wet_check_billing' ? `/api/wet-check-billings/${item.refId}` :
+  null;
+```
+
+Renders, top to bottom:
+
+1. The existing header `<dl>` (number / customer / tech / total / age) — unchanged.
+2. Flag badges — unchanged.
+3. **`RateModeToggle`** (new). Shown for `billing_sheet`, `work_order`, and `wet_check_billing` items when `canEdit`. Hidden for `part` and `manual_review`. Two-segment switch labeled `Normal $X/hr` / `Emergency $Y/hr` where the dollar values come from `customers.laborRate` and `customers.emergencyLaborRate` on the ticket's customer. Read these via the existing `GET /api/customers/:id` endpoint (the PATCH `/api/customers/:id/labor-rates` endpoint at `customer-routes.ts:112` is write-only and company-admin gated — do NOT call it for reads).
+4. **`LineItemsEditor`** (new). Table with columns: Part name, Qty, Unit price, Labor hrs (only in `per_part` mode), Total, ✕. A "+ Add line" button at the bottom. Click any cell → it becomes editable. Blur or Enter commits to local state; the **Save line items** button at the bottom dispatches `PATCH /api/billing-sheets/:id/items` (or `/work-orders/:id/items`). Wet-check billings: line items are not editable from this drawer in this slice — only the rate-mode toggle. Show a small `"Edit zone labor in the WCB modal"` link that opens the existing modal.
+5. The existing inline-note Textarea — unchanged.
+6. The existing Kickback Textarea — unchanged.
+7. The action row (Approve / Kickback / Save / Flag / Open) — `Save` now saves the note + line items in one click if both are dirty; `Open` still goes to the wizard.
+8. The activity log — unchanged.
+
+**`rate-mode-toggle.tsx`** — exports `RateModeToggle`:
+
+```tsx
+interface Props {
+  itemType: 'billing_sheet' | 'work_order' | 'wet_check_billing';
+  itemId: number;
+  currentMode: 'normal' | 'emergency';
+  normalRate: string;       // e.g. "45.00"
+  emergencyRate: string;    // e.g. "125.00"
+  disabled?: boolean;       // true when locked
+  onSaved?: () => void;     // parent should refetch + invalidate queries
+}
+```
+
+Renders a two-segment toggle. Use the existing `@/components/ui/toggle-group` component (confirmed present at `artifacts/irrigopro/src/components/ui/toggle-group.tsx`). On click, fires `PATCH /api/{path}/:id/rate-mode` with `{ mode }`. Optimistic UI: flip the visual state immediately, revert on error. `data-testid="rate-mode-toggle-{itemType}-{itemId}"`, with segment ids `data-testid="rate-mode-segment-normal"` and `data-testid="rate-mode-segment-emergency"`.
+
+**`line-items-editor.tsx`** — exports `LineItemsEditor`. Local state holds a working copy of `items`. Each row's cell is a controlled `<input>` styled as a borderless cell (visible border on focus only). Add row appends `{ partName: '', quantity: 1, unitPrice: 0, laborHours: 0 }`. Remove uses a small `<X>` button. `Save` button is disabled while not dirty; on save dispatches the items PATCH. After success, parent invalidates `[detailUrl]` and the queue query.
+
+Reuse the existing `Input` component (`@/components/ui/input`) for the cells. Money columns use `inputMode="decimal"` and validate on save (decimal with up to 2 places). Currency display in the read-only row uses the existing `fmt` helper at the top of `billing-workspace.tsx`.
+
+**`billing-workspace.tsx`** — swap both renders of `DetailPane` (the inline preview pane at the `lg:col-span-2` slot ~line 1325 and the Sheet drawer at ~line 1369) for `<DetailPaneInline />`. Pass the same props. Drop `editedNote` / `isDirty` / `onSave` plumbing only if `DetailPaneInline` takes them over internally; otherwise leave intact.
+
+### Drawer width
+
+The current Sheet width is `sm:max-w-[40%] sm:min-w-[420px]`. Bump to `sm:max-w-[55%] sm:min-w-[560px]` so the line-item table doesn't horizontal-scroll on a 1440 viewport. The inline preview pane (`lg:col-span-2`) stays at its current proportion.
+
+### Tests
+
+- `detail-pane-inline.test.tsx`:
+  - Renders line items table for a billing sheet with 3 items.
+  - Editing a `quantity` cell + clicking Save fires a PATCH to `/api/billing-sheets/:id/items`.
+  - Field tech role → no rate toggle, no line-items editor, the read-only `dl` plus "Open" link only.
+  - Billed ticket → editor disabled (cells become read-only spans).
+- `rate-mode-toggle.test.tsx`:
+  - Clicking Emergency segment fires PATCH with `{ mode: 'emergency' }`.
+  - Server error → toggle reverts and toast shows.
+- `line-items-editor.test.tsx`:
+  - Add row → row count increments; Save sends the new row.
+  - Remove row → row drops; Save sends array minus that row.
+  - Save disabled while not dirty.
+
+### Acceptance
+- A billing manager opens any billing sheet, work order, or wet check billing row in the Command Center, lands in the drawer, edits a labor hour or part qty in place, clicks **Save line items**, sees the row total + ticket total update without any wizard navigation.
+- The rate-mode toggle flips to Emergency, the total updates within 500 ms, and the toggle's segment reflects the new state on refetch.
+- Field techs see no editor — only the existing read-only `dl` and the "Open" link.
+- Billed and invoiced tickets show the editor in read-only mode with a small lock badge.
+
+---
+
+## Slice 1.4 — Command Center: "Wet Checks" tab
+
+### Scope
+Add a tab strip above the queue that lets the user switch the Command Center between two views:
+
+- **Approval Queue** (default — the existing Zone B/C list + drawer, unchanged).
+- **Wet Checks** — a list of wet-check billings using the same row + modal pattern as `wet-check-billings.tsx`, with the new inline-edit affordances from Slice 1.3 applied to the modal.
+
+The standalone `/wet-check-billings` route stays — the new tab is a convenience surface inside Command Center for managers who live in this page.
+
+### Files modified
+- `artifacts/irrigopro/src/pages/billing-workspace.tsx` — add tab strip + conditional render.
+
+### Files added
+- `artifacts/irrigopro/src/components/billing-workspace/wet-checks-tab.tsx` (new — a slim component that renders the same list table from `wet-check-billings.tsx`).
+- `artifacts/irrigopro/src/components/billing-workspace/wet-checks-tab.test.tsx`.
+
+### Concrete changes
+
+In `billing-workspace.tsx`, immediately below the header gradient (after the `Command Center` button row at ~line 953, before the Zone 0 financial pulse widget at line 959), add:
+
+```tsx
+const [activeTab, setActiveTab] = useState<'queue' | 'wet_checks'>(
+  (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('tab')) === 'wet_checks'
+    ? 'wet_checks' : 'queue'
+);
+```
+
+Render a tab strip using the existing `@/components/ui/tabs` component (confirmed present at `artifacts/irrigopro/src/components/ui/tabs.tsx`). When `activeTab === 'wet_checks'`, replace Zone A + Zone B + Zone C with `<WetChecksTab />`. Zone 0 (financial pulse), the header, and the QuickBooks drawer stay rendered in both tabs. Sync `?tab=wet_checks` to the URL so links remain bookmarkable (same pattern as the existing statusFilter sync at ~line 512).
+
+**`wet-checks-tab.tsx`** — extract the table + filter chips + sort logic from `wet-check-billings.tsx` (lines 316–469) into a reusable component:
+
+```tsx
+export function WetChecksTab() {
+  // Same useArrayQuery, same FilterChip/SortTh, same WcbRow.
+  // Same WetCheckBillingViewModal on row click.
+  // The modal already supports inline labor-rate edit (Task #977) and
+  // inline zone labor edit (Task #1027); Slice 1.3 adds the rate-mode toggle
+  // to the modal as well — see "Modal additions" below.
+  ...
+}
+```
+
+Refactor — do not copy-paste. Move the inner JSX from `wet-check-billings.tsx`'s default export into `WetChecksTab`. The existing `WetCheckBillings` page becomes a thin wrapper:
+
+```tsx
+export default function WetCheckBillings() {
+  return (
+    <PageContainer>
+      <PageHeader title="Wet Check Billings" subtitle="Auto-generated from wet check submissions" />
+      <PageContent className="space-y-4">
+        <WetChecksTab />
+      </PageContent>
+    </PageContainer>
+  );
+}
+```
+
+This keeps the standalone route functional and means any future change to the table lives in one place.
+
+### Modal additions (Slice 1.3 carries over)
+
+In `WetCheckBillingViewModal` (`artifacts/irrigopro/src/components/wet-check-billings/wet-check-billing-view-modal.tsx`), in `EditAffordancesPanel`, add a second row below the existing Labor Rate row:
+
+```
+| Rate Mode | [Normal $45.00/hr] [Emergency $125.00/hr]  |
+```
+
+Wire to `<RateModeToggle itemType="wet_check_billing" itemId={wcb.id} ... />` from Slice 1.3. The existing "override rate" pencil row stays; the toggle is additive and writes to `/api/wet-check-billings/:id/rate-mode`.
+
+### Tests
+- `wet-checks-tab.test.tsx`:
+  - Renders the same filter chips and table that `wet-check-billings.tsx` does.
+  - Clicking a row opens the WCB modal.
+- `billing-workspace.tsx` (existing test file):
+  - Switching tabs updates the URL to `?tab=wet_checks` and back.
+  - Default load with no `?tab` param renders the Approval Queue.
+
+### Acceptance
+- The Command Center has a two-tab strip; switching to **Wet Checks** shows the WCB list inside the same page shell.
+- Clicking a WCB row opens the existing modal, now with the rate-mode toggle visible in the edit-affordances panel.
+- The standalone `/wet-check-billings` page still works and now imports `WetChecksTab` instead of duplicating the table.
+
+---
+
+## Cross-cutting acceptance checklist
+
+- [ ] `rate_mode` column added to three tables; defaults to `'normal'`; CHECK constraint in place.
+- [ ] Six new endpoints exist (three rate-mode, two items, plus optional wet-check items handler if added).
+- [ ] All endpoints reject field-tech, cross-company, billed/invoiced.
+- [ ] Command Center drawer renders an editable line-item table for billing sheets and work orders.
+- [ ] Rate-mode toggle visible and functional for billing sheets, work orders, and wet check billings.
+- [ ] Command Center has a Wet Checks tab; URL syncs `?tab=`.
+- [ ] `WetCheckBillings` page now wraps `WetChecksTab` (no duplicated table).
+- [ ] Existing PATCH `/api/billing-sheets/:id` and PATCH `/api/work-orders/:id` are untouched.
+- [ ] The wizard "Open" path still works for everything the inline editor doesn't cover (header fields, photos, AI description).
+- [ ] Activity log entries appear on the billing-sheet and work-order detail pages after a rate-mode flip or items save.
+
+---
+
+## Out of scope (do NOT do in this slice)
+
+- Editing header fields (work date, technician, customer, work description) inline.
+- Editing or adding photos from the drawer.
+- Per-line emergency rate override.
+- A bulk rate-mode toggle across multiple selected tickets.
+- Activity-log writes for wet-check billings (no endpoint exists — note as follow-up).
+- Touching the legacy `/billing-dashboard` page (already replaced by Command Center).
+- Any change to the wet-check wizard or wet-check zone-record editor.
+
+---
+
+## Follow-ups to file as separate slices
+
+1. **Wet Check Billing activity log.** Add `/api/wet-check-billings/:id/activity` and a `recordActivity` call inside the new `rate-mode` and labor-rate routes.
+2. **Header inline edit.** Work date, customer pin, controller/zone, technician reassignment moved out of the wizard and into the drawer.
+3. **Photos in the drawer.** Add-photos affordance inline so the missing-photos report can be cleared without wizard hops.
+4. **Per-tech default rate mode.** Some shops want every after-hours ticket on emergency by default; consider a tech-level or time-of-day rule.
