@@ -39,6 +39,8 @@ import {
   X,
 } from "lucide-react";
 import { BulkApproveBar } from "@/components/billing-workspace/bulk-approve-bar";
+import { DetailPaneInline } from "@/components/billing-workspace/detail-pane-inline";
+import { WetChecksTab } from "@/components/billing-workspace/wet-checks-tab";
 import {
   Sheet,
   SheetContent,
@@ -457,6 +459,8 @@ export default function BillingWorkspacePage() {
   const [minTotal, setMinTotal] = useState<number>(0);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const _initTab = _initParams.get("tab") === "wet_checks" ? "wet_checks" : "queue";
+  const [workspaceTab, setWorkspaceTab] = useState<"queue" | "wet_checks">(_initTab);
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
   const [qbDrawerOpen, setQbDrawerOpen] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -507,8 +511,8 @@ export default function BillingWorkspacePage() {
     setPage(1);
   }, [type, customer, tech, age, statusFilter, sort]);
 
-  // Sync statusFilter + customer back to the URL so drill-down links remain
-  // bookmarkable after the user changes filters (canonical round-trip).
+  // Sync statusFilter + customer + workspaceTab back to the URL so drill-down
+  // links remain bookmarkable after the user changes filters (canonical round-trip).
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -526,12 +530,17 @@ export default function BillingWorkspacePage() {
     } else {
       params.delete("customer");
     }
+    if (workspaceTab === "wet_checks") {
+      params.set("tab", "wet_checks");
+    } else {
+      params.delete("tab");
+    }
     const search = params.toString();
     const newUrl = search
       ? `${window.location.pathname}?${search}`
       : window.location.pathname;
     window.history.replaceState(null, "", newUrl);
-  }, [statusFilter, customer]);
+  }, [statusFilter, customer, workspaceTab]);
 
   const queueUrl = useMemo(() => {
     const params = new URLSearchParams();
@@ -1053,8 +1062,42 @@ export default function BillingWorkspacePage() {
         />
       </div>
 
+      {/* Zone B tab strip (Task #1093) */}
+      <div className="flex items-center gap-1 border-b border-gray-200">
+        <button
+          type="button"
+          onClick={() => setWorkspaceTab("queue")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            workspaceTab === "queue"
+              ? "border-blue-600 text-blue-700"
+              : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+          }`}
+          data-testid="tab-queue"
+        >
+          Approval Queue
+        </button>
+        <button
+          type="button"
+          onClick={() => setWorkspaceTab("wet_checks")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5 ${
+            workspaceTab === "wet_checks"
+              ? "border-blue-600 text-blue-700"
+              : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+          }`}
+          data-testid="tab-wet-checks"
+        >
+          <Droplets className="w-3.5 h-3.5" />
+          Wet Checks
+        </button>
+      </div>
+
+      {/* Zone B — Wet Checks tab */}
+      {workspaceTab === "wet_checks" && (
+        <WetChecksTab />
+      )}
+
       {/* Zone B — unified queue + Zone C drawer */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+      <div className={`grid grid-cols-1 lg:grid-cols-5 gap-4 ${workspaceTab !== "queue" ? "hidden" : ""}`}>
         <div className="lg:col-span-3">
           <Card>
             {/* Sticky filter / sort bar */}
@@ -1326,6 +1369,51 @@ export default function BillingWorkspacePage() {
           <Card className="sticky top-4">
             <CardContent className="pt-4">
               {active ? (
+                <DetailPaneInline item={active} userRole={userRole}>
+                  <DetailPane
+                    item={active}
+                    userRole={userRole}
+                    approving={approving}
+                    kickingBack={kickingBack}
+                    saving={saving}
+                    kickbackReason={kickbackReason}
+                    editedNote={editedNote}
+                    isDirty={isDirty}
+                    onApprove={approveActive}
+                    onKickback={kickbackActive}
+                    onSave={saveActiveEdits}
+                    onFlag={flagActive}
+                    onChangeKickbackReason={setKickbackReason}
+                    onChangeNote={(v) => { setEditedNote(v); setIsDirty(true); }}
+                  />
+                </DetailPaneInline>
+              ) : (
+                <div className="text-sm text-gray-500 text-center py-10">
+                  Select a row to preview details.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Zone C — drawer for narrow viewports */}
+      <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-[55%] sm:min-w-[560px] overflow-y-auto"
+          data-testid="detail-drawer"
+        >
+          <SheetHeader>
+            <SheetTitle>{active?.number ?? `Item ${active?.refId ?? ""}`}</SheetTitle>
+            <SheetDescription>
+              {active?.customerName ?? "—"}
+              {active?.technicianName ? ` · ${active.technicianName}` : ""}
+            </SheetDescription>
+          </SheetHeader>
+          {active ? (
+            <div className="mt-4">
+              <DetailPaneInline item={active} userRole={userRole}>
                 <DetailPane
                   item={active}
                   userRole={userRole}
@@ -1342,48 +1430,7 @@ export default function BillingWorkspacePage() {
                   onChangeKickbackReason={setKickbackReason}
                   onChangeNote={(v) => { setEditedNote(v); setIsDirty(true); }}
                 />
-              ) : (
-                <div className="text-sm text-gray-500 text-center py-10">
-                  Select a row to preview details.
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      {/* Zone C — drawer for narrow viewports */}
-      <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-        <SheetContent
-          side="right"
-          className="w-full sm:max-w-[40%] sm:min-w-[420px] overflow-y-auto"
-          data-testid="detail-drawer"
-        >
-          <SheetHeader>
-            <SheetTitle>{active?.number ?? `Item ${active?.refId ?? ""}`}</SheetTitle>
-            <SheetDescription>
-              {active?.customerName ?? "—"}
-              {active?.technicianName ? ` · ${active.technicianName}` : ""}
-            </SheetDescription>
-          </SheetHeader>
-          {active ? (
-            <div className="mt-4">
-              <DetailPane
-                item={active}
-                userRole={userRole}
-                approving={approving}
-                kickingBack={kickingBack}
-                saving={saving}
-                kickbackReason={kickbackReason}
-                editedNote={editedNote}
-                isDirty={isDirty}
-                onApprove={approveActive}
-                onKickback={kickbackActive}
-                onSave={saveActiveEdits}
-                onFlag={flagActive}
-                onChangeKickbackReason={setKickbackReason}
-                onChangeNote={(v) => { setEditedNote(v); setIsDirty(true); }}
-              />
+              </DetailPaneInline>
             </div>
           ) : null}
           <SheetFooter className="mt-6">

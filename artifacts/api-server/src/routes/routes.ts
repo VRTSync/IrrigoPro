@@ -9686,7 +9686,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       const companyId: number | null = req.authenticatedUserCompanyId ?? null;
       const view = await storage.getWetCheckBillingViewById(id, companyId);
-      res.json(applyPricingVisibility(req, { wetCheckBilling, view }));
+      // Task #1093 — embed customer rates for inline edit.
+      let customerRatesWcb: { laborRate: string | null; emergencyLaborRate: string | null } | null = null;
+      if (wetCheckBilling.customerId) {
+        const cust = await storage.getCustomer(wetCheckBilling.customerId);
+        if (cust) customerRatesWcb = { laborRate: cust.laborRate, emergencyLaborRate: cust.emergencyLaborRate };
+      }
+      res.json(applyPricingVisibility(req, { wetCheckBilling, customer: customerRatesWcb, view }));
     } catch (error) {
       logger.error({ err: error }, "GET /api/wet-check-billings/:id failed");
       res.status(500).json({ message: "Failed to fetch wet check billing" });
@@ -9793,6 +9799,44 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         ctx: { wcbId, newRate: parsed.data.newRate },
         fallbackStatus: 500,
         fallbackMessage: "Couldn't update labor rate",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Task #1093 — rate-mode toggle for WCBs.
+  // Body: { mode: "normal" | "emergency" }
+  const rateModeBody = z.object({
+    mode: z.enum(["normal", "emergency"]),
+  });
+  app.patch("/api/wet-check-billings/:id/rate-mode", requireAuthentication, async (req, res) => {
+    const role = req.authenticatedUserRole;
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin") {
+      res.status(403).json({ message: "Forbidden" }); return;
+    }
+    const parsed = rateModeBody.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
+    const wcbId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(wcbId)) { res.status(400).json({ message: "Invalid id" }); return; }
+    const companyId: number | null = role === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
+    try {
+      const result = await storage.recomputeWcbTotalsForRateMode(wcbId, parsed.data.mode, companyId);
+      void recordAuditEvent(req, {
+        actionType: "data", action: "wet_check_billing.rate_mode_changed",
+        targetType: "wet_check_billing", targetId: String(wcbId),
+        summary: `Rate mode set to ${parsed.data.mode}`,
+      });
+      res.json(result);
+    } catch (e: any) {
+      if (e?.code === "WCB_LOCKED") { res.status(409).json({ message: e.message }); return; }
+      if (e?.code === "WCB_CROSS_COMPANY") { res.status(403).json({ message: "Access denied" }); return; }
+      if (e?.code === "WCB_NOT_FOUND") { res.status(404).json({ message: e.message }); return; }
+      if (e?.code === "NO_CUSTOMER") { res.status(422).json({ message: e.message }); return; }
+      const { status, message } = classifyAndLog(req, e, {
+        op: "recomputeWcbTotalsForRateMode",
+        ctx: { wcbId, mode: parsed.data.mode },
+        fallbackStatus: 500,
+        fallbackMessage: "Couldn't update rate mode",
       });
       res.status(status).json({ message });
     }
@@ -10434,11 +10478,126 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(404).json({ message: "Billing sheet not found" });
         return;
       }
+      // Embed customer rates for inline edit (Task #1093).
+      let customerRates: { laborRate: string | null; emergencyLaborRate: string | null } | null = null;
+      if (billingSheet.customerId) {
+        const cust = await storage.getCustomer(billingSheet.customerId);
+        if (cust) customerRates = { laborRate: cust.laborRate, emergencyLaborRate: cust.emergencyLaborRate };
+      }
       // Strip pricing fields for field technicians
-      res.json(applyPricingVisibility(req, billingSheet));
+      res.json(applyPricingVisibility(req, { ...billingSheet, customer: customerRates }));
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to fetch billing sheet" });
+    }
+  });
+
+  // Task #1093 — rate-mode toggle for billing sheets.
+  app.patch("/api/billing-sheets/:id/rate-mode", requireAuthentication, requireSameCompanyAsBillingSheet, async (req: any, res) => {
+    const role = req.authenticatedUserRole;
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin") {
+      res.status(403).json({ message: "Forbidden" }); return;
+    }
+    const parsed = rateModeBody.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid id" }); return; }
+    const companyId: number | null = role === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
+    try {
+      const result = await storage.recomputeBillingSheetTotalsForRateMode(id, parsed.data.mode, companyId);
+      void recordAuditEvent(req, {
+        actionType: "data", action: "billing_sheet.rate_mode_changed",
+        targetType: "billing_sheet", targetId: String(id),
+        summary: `Rate mode set to ${parsed.data.mode}`,
+      });
+      res.json(result);
+    } catch (e: any) {
+      if (e?.code === "BS_LOCKED") { res.status(409).json({ message: e.message }); return; }
+      if (e?.code === "BS_NOT_FOUND") { res.status(404).json({ message: e.message }); return; }
+      if (e?.code === "NO_CUSTOMER") { res.status(422).json({ message: e.message }); return; }
+      const { status, message } = classifyAndLog(req, e, {
+        op: "recomputeBillingSheetTotalsForRateMode",
+        ctx: { id, mode: parsed.data.mode },
+        fallbackStatus: 500, fallbackMessage: "Couldn't update rate mode",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Task #1093 — item replacement for billing sheets.
+  const itemsBody = z.object({
+    items: z.array(z.object({
+      partId: z.number().int().positive().optional().nullable(),
+      partName: z.string().min(1),
+      quantity: z.number().min(0),
+      unitPrice: z.coerce.number().min(0),
+      laborHours: z.coerce.number().min(0).optional().default(0),
+      notes: z.string().optional().nullable(),
+    })),
+  });
+  app.patch("/api/billing-sheets/:id/items", requireAuthentication, requireSameCompanyAsBillingSheet, async (req: any, res) => {
+    const role = req.authenticatedUserRole;
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin") {
+      res.status(403).json({ message: "Forbidden" }); return;
+    }
+    const parsed = itemsBody.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid id" }); return; }
+    const companyId: number | null = role === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
+    try {
+      const insertItems = parsed.data.items.map((i) => ({
+        billingSheetId: id,
+        partId: i.partId ?? null,
+        partName: i.partName,
+        quantity: String(i.quantity),
+        unitPrice: String(i.unitPrice),
+        laborHours: String(i.laborHours ?? 0),
+        notes: i.notes ?? null,
+        totalPrice: (i.quantity * i.unitPrice).toFixed(2),
+      }));
+      const result = await storage.replaceBillingSheetItemsWithResync(id, insertItems, companyId);
+      void recordAuditEvent(req, {
+        actionType: "data", action: "billing_sheet.items_replaced",
+        targetType: "billing_sheet", targetId: String(id),
+        summary: `Inline item edit: ${insertItems.length} item(s)`,
+      });
+      res.json(result);
+    } catch (e: any) {
+      if (e?.code === "BS_LOCKED") { res.status(409).json({ message: e.message }); return; }
+      if (e?.code === "BS_NOT_FOUND") { res.status(404).json({ message: e.message }); return; }
+      const { status, message } = classifyAndLog(req, e, {
+        op: "replaceBillingSheetItemsWithResync",
+        ctx: { id }, fallbackStatus: 500, fallbackMessage: "Couldn't save items",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Task #1093 — billing sheet activity log (mirrors work-orders/:id/activity).
+  app.get("/api/billing-sheets/:id/activity", requireAuthentication, requireSameCompanyAsBillingSheet, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid id" }); return; }
+      const isSuper = req.authenticatedUserRole === "super_admin";
+      const callerCid: number | null = isSuper ? null : (req.authenticatedUserCompanyId ?? null);
+      const bs = await storage.getBillingSheetById(id, callerCid);
+      if (!bs) { res.status(404).json({ message: "Billing sheet not found" }); return; }
+      const rows = await db.execute<{
+        id: number; occurredAt: string; actorUserId: number | null; actorLabel: string | null;
+        actorRole: string | null; action: string; summary: string | null; details: unknown;
+      }>(sql`
+        SELECT id, occurred_at AS "occurredAt", actor_user_id AS "actorUserId",
+               actor_label AS "actorLabel", actor_role AS "actorRole",
+               action, summary, details
+        FROM audit_log
+        WHERE target_type = 'billing_sheet' AND target_id = ${String(id)}
+        ORDER BY occurred_at DESC LIMIT 200
+      `);
+      res.json({ events: rows.rows ?? [] });
+    } catch (error) {
+      console.error("[activity] billing_sheet", error);
+      res.status(500).json({ message: "Failed to load activity" });
     }
   });
 
@@ -11775,11 +11934,87 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(404).json({ message: "Work order not found" });
         return;
       }
+      // Task #1093 — embed customer rates for inline edit.
+      let customerRatesWo: { laborRate: string | null; emergencyLaborRate: string | null } | null = null;
+      const cust = workOrder.customerId != null ? await storage.getCustomer(workOrder.customerId as number) : null;
+      if (cust) customerRatesWo = { laborRate: cust.laborRate, emergencyLaborRate: cust.emergencyLaborRate };
       // Strip pricing fields for field technicians
-      res.json(applyPricingVisibility(req, workOrder));
+      res.json(applyPricingVisibility(req, { ...workOrder, customer: customerRatesWo }));
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to fetch work order" });
+    }
+  });
+
+  // Task #1093 — rate-mode toggle for work orders.
+  app.patch("/api/work-orders/:id/rate-mode", requireAuthentication, requireSameCompanyAsWorkOrder, async (req: any, res) => {
+    const role = req.authenticatedUserRole;
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin") {
+      res.status(403).json({ message: "Forbidden" }); return;
+    }
+    const parsed = rateModeBody.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid id" }); return; }
+    const companyId: number | null = role === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
+    try {
+      const result = await storage.recomputeWorkOrderTotalsForRateMode(id, parsed.data.mode, companyId);
+      void recordAuditEvent(req, {
+        actionType: "data", action: "work_order.rate_mode_changed",
+        targetType: "work_order", targetId: String(id),
+        summary: `Rate mode set to ${parsed.data.mode}`,
+      });
+      res.json(result);
+    } catch (e: any) {
+      if (e?.code === "WO_LOCKED") { res.status(409).json({ message: e.message }); return; }
+      if (e?.code === "WO_NOT_FOUND") { res.status(404).json({ message: e.message }); return; }
+      if (e?.code === "NO_CUSTOMER") { res.status(422).json({ message: e.message }); return; }
+      const { status, message } = classifyAndLog(req, e, {
+        op: "recomputeWorkOrderTotalsForRateMode",
+        ctx: { id, mode: parsed.data.mode },
+        fallbackStatus: 500, fallbackMessage: "Couldn't update rate mode",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Task #1093 — item replacement for work orders.
+  app.patch("/api/work-orders/:id/items", requireAuthentication, requireSameCompanyAsWorkOrder, async (req: any, res) => {
+    const role = req.authenticatedUserRole;
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin") {
+      res.status(403).json({ message: "Forbidden" }); return;
+    }
+    const parsed = itemsBody.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid id" }); return; }
+    const companyId: number | null = role === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
+    try {
+      const insertItems = parsed.data.items.map((i) => ({
+        workOrderId: id,
+        partId: i.partId ?? null,
+        partName: i.partName,
+        partPrice: String(i.unitPrice),
+        quantity: i.quantity,
+        laborHours: String(i.laborHours ?? 0),
+        totalPrice: (i.quantity * i.unitPrice).toFixed(2),
+        notes: i.notes ?? null,
+      }));
+      const result = await storage.replaceWorkOrderItemsWithResync(id, insertItems, companyId);
+      void recordAuditEvent(req, {
+        actionType: "data", action: "work_order.items_replaced",
+        targetType: "work_order", targetId: String(id),
+        summary: `Inline item edit: ${insertItems.length} item(s)`,
+      });
+      res.json(result);
+    } catch (e: any) {
+      if (e?.code === "WO_LOCKED") { res.status(409).json({ message: e.message }); return; }
+      if (e?.code === "WO_NOT_FOUND") { res.status(404).json({ message: e.message }); return; }
+      const { status, message } = classifyAndLog(req, e, {
+        op: "replaceWorkOrderItemsWithResync",
+        ctx: { id }, fallbackStatus: 500, fallbackMessage: "Couldn't save items",
+      });
+      res.status(status).json({ message });
     }
   });
 

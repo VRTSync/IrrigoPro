@@ -258,6 +258,9 @@ export const billingSheets = pgTable("billing_sheets", {
   laborMode: text("labor_mode").notNull().default("flat"),
   // Snapshot of customer.laborRate at creation (mirrors work_orders).
   appliedLaborRate: decimal("applied_labor_rate", { precision: 10, scale: 2 }),
+  // Task #1093 — Normal / Emergency rate toggle. 'normal' uses customer.laborRate,
+  // 'emergency' uses customer.emergencyLaborRate. Toggling one recomputes labor totals.
+  rateMode: text("rate_mode").notNull().default("normal"),
   // Invoice linkage - prevents double billing
   invoiceId: integer("invoice_id").references(() => invoices.id),
   billedAt: timestamp("billed_at"),
@@ -692,6 +695,8 @@ export const workOrders = pgTable("work_orders", {
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).default("0.00"),
   // Applied rate snapshot — locked at the time financial total is first calculated
   appliedLaborRate: decimal("applied_labor_rate", { precision: 10, scale: 2 }), // customer.laborRate at completion time
+  // Task #1093 — Normal / Emergency rate toggle.
+  rateMode: text("rate_mode").notNull().default("normal"),
   totalItems: integer("total_items").default(0),
   // Invoice linkage - prevents double billing
   invoiceId: integer("invoice_id").references(() => invoices.id),
@@ -1408,6 +1413,8 @@ export const wetCheckBillings = pgTable("wet_check_billings", {
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
   // Snapshot of customer.laborRate at creation time.
   appliedLaborRate: decimal("applied_labor_rate", { precision: 10, scale: 2 }),
+  // Task #1093 — Normal / Emergency rate toggle.
+  rateMode: text("rate_mode").notNull().default("normal"),
   // Invoice linkage — prevents double billing.
   invoiceId: integer("invoice_id").references(() => invoices.id),
   billedAt: timestamp("billed_at"),

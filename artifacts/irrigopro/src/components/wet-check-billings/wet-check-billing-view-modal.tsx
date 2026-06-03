@@ -18,6 +18,7 @@ import type { WetCheckBillingView } from "@/components/billing/wet-check-billing
 import type { WetCheckBilling } from "@workspace/db/schema";
 import { safeGet } from "@/utils/safeStorage";
 import { WcbLaborRateEdit } from "./wcb-labor-rate-edit";
+import { RateModeToggle } from "@/components/billing-workspace/rate-mode-toggle";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -53,25 +54,41 @@ function canEditLaborFields(wcb: WetCheckBilling): boolean {
   return true;
 }
 
-// ── Edit affordances panel (Task #977 / #1027) ────────────────────────────────
+// ── Edit affordances panel (Task #977 / #1027 / #1093) ──────────────────────
 // Shown only for billing_manager+ on unlocked (not billed / invoiced) WCBs.
-// Contains only the labor rate editor — zone labor is now inline per-zone.
+// Contains labor rate editor and rate-mode toggle.
 
 function EditAffordancesPanel({
   wcb,
   onLabourSaved,
   initialAction,
 }: {
-  wcb: WetCheckBilling;
+  wcb: WetCheckBilling & { customer?: { laborRate?: string | null; emergencyLaborRate?: string | null } | null };
   onLabourSaved: () => void;
   initialAction?: "labor-rate" | "zone-labor";
 }) {
   const [editingLaborRate, setEditingLaborRate] = useState(initialAction === "labor-rate");
 
   const currentRate = String(wcb.laborRate ?? "0");
+  const rateMode = (wcb as any).rateMode ?? "normal";
+  const customerRates = wcb.customer;
 
   return (
     <div className="space-y-3" data-testid="wcb-edit-affordances">
+      {/* Task #1093 — Rate mode toggle */}
+      {customerRates && (
+        <div className="rounded-lg border border-gray-200 bg-white p-3">
+          <RateModeToggle
+            entityPath="wet-check-billings"
+            entityId={wcb.id}
+            currentMode={rateMode as "normal" | "emergency"}
+            normalRate={customerRates.laborRate ?? null}
+            emergencyRate={customerRates.emergencyLaborRate ?? null}
+            detailQueryKey={["/api/wet-check-billings", wcb.id]}
+            disabled={false}
+          />
+        </div>
+      )}
       {/* Labor rate row */}
       <div className="rounded-lg border border-gray-200 bg-white p-3">
         <div className="flex items-center justify-between">
@@ -132,6 +149,7 @@ export function WetCheckBillingViewModal({
 
   const { data, isLoading, isError } = useQuery<{
     wetCheckBilling: WetCheckBilling;
+    customer: { laborRate: string | null; emergencyLaborRate: string | null } | null;
     view: WetCheckBillingView | null;
   }>({
     queryKey: ["/api/wet-check-billings", wetCheckBillingId],
@@ -139,7 +157,11 @@ export function WetCheckBillingViewModal({
     enabled: open,
   });
 
-  const wcb = data?.wetCheckBilling;
+  // customer rates live at top level of the envelope (moved from wcb.customer
+  // to avoid coupling the WetCheckBilling DB type to UI-only rate fields).
+  const wcb = data?.wetCheckBilling
+    ? { ...data.wetCheckBilling, customer: data.customer ?? undefined }
+    : undefined;
   const view = data?.view ?? null;
   const showEditAffordances = !!wcb && !!view && canEditLaborFields(wcb);
 

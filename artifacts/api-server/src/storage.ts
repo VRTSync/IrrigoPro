@@ -1061,6 +1061,16 @@ export interface IStorage {
    * Passes companyId=null to bypass tenant-scope (super_admin).
    */
   recomputeWcbTotalsForLaborRate(id: number, newRate: number, companyId: number | null): Promise<WetCheckBilling>;
+  /** Task #1093 — flip rateMode on a billing sheet and recompute labor totals. */
+  recomputeBillingSheetTotalsForRateMode(id: number, mode: string, companyId: number | null): Promise<BillingSheetWithItems>;
+  /** Task #1093 — flip rateMode on a work order and recompute labor totals. */
+  recomputeWorkOrderTotalsForRateMode(id: number, mode: string, companyId: number | null): Promise<WorkOrder>;
+  /** Task #1093 — flip rateMode on a WCB and recompute labor totals. */
+  recomputeWcbTotalsForRateMode(id: number, mode: string, companyId: number | null): Promise<WetCheckBilling>;
+  /** Task #1093 — inline item replace for billing sheets (atomic with total resync). */
+  replaceBillingSheetItemsWithResync(id: number, items: InsertBillingSheetItem[], companyId: number | null): Promise<BillingSheetWithItems>;
+  /** Task #1093 — inline item replace for work orders (atomic with total resync). */
+  replaceWorkOrderItemsWithResync(id: number, items: InsertWorkOrderItem[], companyId: number | null): Promise<WorkOrder & { items: WorkOrderItem[] }>;
   deleteWetCheckBilling(id: number): Promise<void>;
   /** Returns the URL strings of all photos attached to a wet check (both zone-level and finding-level). */
   getWetCheckPhotoUrls(wetCheckId: number): Promise<string[]>;
@@ -4074,6 +4084,237 @@ export class DatabaseStorage implements IStorage {
       }).where(eq(wetCheckBillings.id, id)).returning();
       if (!updated) throw new Error(`WetCheckBilling id=${id} update failed`);
       return updated;
+    });
+  }
+
+  // ── Task #1093 — rate-mode recompute methods ────────────────────────────────
+
+  async recomputeBillingSheetTotalsForRateMode(
+    id: number,
+    mode: string,
+    companyId: number | null,
+  ): Promise<BillingSheetWithItems> {
+    return db.transaction(async (tx) => {
+      const scope = this._companyScopeForBS(companyId);
+      const cond = scope ? and(eq(billingSheets.id, id), scope) : eq(billingSheets.id, id);
+      const [bs] = await tx.select().from(billingSheets).where(cond);
+      if (!bs) throw Object.assign(new Error(`Billing sheet ${id} not found`), { code: "BS_NOT_FOUND" });
+      if (bs.status === "billed" || bs.invoiceId != null) {
+        throw Object.assign(new Error(`Billing sheet ${id} is locked`), { code: "BS_LOCKED" });
+      }
+      if (!bs.customerId) {
+        throw Object.assign(new Error("Billing sheet has no customer — cannot derive rate"), { code: "NO_CUSTOMER" });
+      }
+      const [customer] = await tx.select({
+        laborRate: customers.laborRate,
+        emergencyLaborRate: customers.emergencyLaborRate,
+      }).from(customers).where(eq(customers.id, bs.customerId));
+      if (!customer) throw Object.assign(new Error("Customer not found"), { code: "NO_CUSTOMER" });
+      const newRate = mode === "emergency"
+        ? parseFloat(String(customer.emergencyLaborRate ?? "0")) || 0
+        : parseFloat(String(customer.laborRate ?? "0")) || 0;
+      const totalHours = parseFloat(String(bs.totalHours ?? "0")) || 0;
+      const laborSubtotal = totalHours * newRate;
+      const partsSubtotal = parseFloat(String(bs.partsSubtotal ?? "0")) || 0;
+      const totalAmount = laborSubtotal + partsSubtotal;
+      const [updated] = await tx.update(billingSheets).set({
+        rateMode: mode,
+        laborRate: newRate.toFixed(2),
+        appliedLaborRate: newRate.toFixed(2),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
+        updatedAt: new Date(),
+      }).where(eq(billingSheets.id, id)).returning();
+      if (!updated) throw new Error(`Billing sheet ${id} update failed`);
+      const items = await tx.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, id));
+      return { ...updated, items };
+    });
+  }
+
+  async recomputeWorkOrderTotalsForRateMode(
+    id: number,
+    mode: string,
+    companyId: number | null,
+  ): Promise<WorkOrder> {
+    return db.transaction(async (tx) => {
+      const scope = this._companyScope(companyId);
+      const cond = scope ? and(eq(workOrders.id, id), scope) : eq(workOrders.id, id);
+      const [wo] = await tx.select().from(workOrders).where(cond);
+      if (!wo) throw Object.assign(new Error(`Work order ${id} not found`), { code: "WO_NOT_FOUND" });
+      if (wo.status === "billed" || wo.invoiceId != null) {
+        throw Object.assign(new Error(`Work order ${id} is locked`), { code: "WO_LOCKED" });
+      }
+      const [customer] = await tx.select({
+        laborRate: customers.laborRate,
+        emergencyLaborRate: customers.emergencyLaborRate,
+      }).from(customers).where(eq(customers.id, wo.customerId));
+      if (!customer) throw Object.assign(new Error("Customer not found"), { code: "NO_CUSTOMER" });
+      const newRate = mode === "emergency"
+        ? parseFloat(String(customer.emergencyLaborRate ?? "0")) || 0
+        : parseFloat(String(customer.laborRate ?? "0")) || 0;
+      const totalHours = parseFloat(String(wo.totalHours ?? "0")) || 0;
+      const laborSubtotal = totalHours * newRate;
+      const partsSubtotal = parseFloat(String(wo.partsSubtotal ?? "0")) || 0;
+      const totalAmount = laborSubtotal + partsSubtotal;
+      const [updated] = await tx.update(workOrders).set({
+        rateMode: mode,
+        laborRate: newRate.toFixed(2),
+        appliedLaborRate: newRate.toFixed(2),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
+        updatedAt: new Date(),
+      }).where(eq(workOrders.id, id)).returning();
+      if (!updated) throw new Error(`Work order ${id} update failed`);
+      return updated;
+    });
+  }
+
+  async recomputeWcbTotalsForRateMode(
+    id: number,
+    mode: string,
+    companyId: number | null,
+  ): Promise<WetCheckBilling> {
+    return db.transaction(async (tx) => {
+      const [wcb] = await tx.select().from(wetCheckBillings).where(eq(wetCheckBillings.id, id));
+      if (!wcb) throw Object.assign(new Error(`Wet check billing ${id} not found`), { code: "WCB_NOT_FOUND" });
+      if (companyId != null) {
+        const [wc] = await tx.select({ companyId: wetChecks.companyId }).from(wetChecks).where(eq(wetChecks.id, wcb.wetCheckId));
+        if (!wc || wc.companyId !== companyId) throw Object.assign(new Error("Access denied"), { code: "WCB_CROSS_COMPANY" });
+      }
+      if (wcb.status === "billed" || wcb.invoiceId != null) {
+        throw Object.assign(new Error(`Wet check billing ${id} is locked`), { code: "WCB_LOCKED" });
+      }
+      if (!wcb.customerId) {
+        throw Object.assign(new Error("WCB has no customer — cannot derive rate"), { code: "NO_CUSTOMER" });
+      }
+      const [customer] = await tx.select({
+        laborRate: customers.laborRate,
+        emergencyLaborRate: customers.emergencyLaborRate,
+      }).from(customers).where(eq(customers.id, wcb.customerId));
+      if (!customer) throw Object.assign(new Error("Customer not found"), { code: "NO_CUSTOMER" });
+      const newRate = mode === "emergency"
+        ? parseFloat(String(customer.emergencyLaborRate ?? "0")) || 0
+        : parseFloat(String(customer.laborRate ?? "0")) || 0;
+      const totalHours = parseFloat(String(wcb.totalHours ?? "0")) || 0;
+      const laborSubtotal = totalHours * newRate;
+      const partsSubtotal = parseFloat(String(wcb.partsSubtotal ?? "0")) || 0;
+      const totalAmount = laborSubtotal + partsSubtotal;
+      const [updated] = await tx.update(wetCheckBillings).set({
+        rateMode: mode,
+        laborRate: newRate.toFixed(2),
+        appliedLaborRate: newRate.toFixed(2),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
+        updatedAt: new Date(),
+      }).where(eq(wetCheckBillings.id, id)).returning();
+      if (!updated) throw new Error(`WetCheckBilling ${id} update failed`);
+      return updated;
+    });
+  }
+
+  async replaceBillingSheetItemsWithResync(
+    id: number,
+    items: InsertBillingSheetItem[],
+    companyId: number | null,
+  ): Promise<BillingSheetWithItems> {
+    return db.transaction(async (tx) => {
+      const scope = this._companyScopeForBS(companyId);
+      const cond = scope ? and(eq(billingSheets.id, id), scope) : eq(billingSheets.id, id);
+      const [bs] = await tx.select().from(billingSheets).where(cond);
+      if (!bs) throw Object.assign(new Error(`Billing sheet ${id} not found`), { code: "BS_NOT_FOUND" });
+      if (bs.status === "billed" || bs.invoiceId != null) {
+        throw Object.assign(new Error(`Billing sheet ${id} is locked`), { code: "BS_LOCKED" });
+      }
+
+      // Atomically delete and re-insert items
+      await tx.delete(billingSheetItems).where(eq(billingSheetItems.billingSheetId, id));
+      let inserted: typeof billingSheetItems.$inferSelect[] = [];
+      if (items.length > 0) {
+        const values = items.map((item) => ({
+          ...item,
+          billingSheetId: id,
+          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
+        }));
+        inserted = await tx.insert(billingSheetItems).values(values).returning();
+      }
+
+      // Recompute partsSubtotal from new items
+      const truePartsSubtotal = inserted.reduce(
+        (sum, row) => sum + parseFloat(String(row.totalPrice || 0)), 0
+      );
+
+      // Recompute laborSubtotal from labor config + new items
+      const laborRate = parseFloat(String(bs.laborRate ?? bs.appliedLaborRate ?? "0")) || 0;
+      let laborSubtotal: number;
+      let newTotalHours: number | undefined;
+      if (bs.laborMode === "per_part") {
+        newTotalHours = inserted.reduce((s, r) => s + parseFloat(String(r.laborHours || 0)), 0);
+        laborSubtotal = newTotalHours * laborRate;
+      } else {
+        // flat mode: totalHours × laborRate
+        const totalHours = parseFloat(String(bs.totalHours ?? "0")) || 0;
+        laborSubtotal = totalHours * laborRate;
+      }
+      const totalAmount = laborSubtotal + truePartsSubtotal;
+
+      const [updated] = await tx.update(billingSheets).set({
+        partsSubtotal: truePartsSubtotal.toFixed(2),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
+        ...(newTotalHours !== undefined ? { totalHours: newTotalHours.toFixed(2) } : {}),
+        updatedAt: new Date(),
+      }).where(eq(billingSheets.id, id)).returning();
+
+      if (!updated) throw new Error(`Billing sheet ${id} update failed`);
+      return { ...updated, items: inserted };
+    });
+  }
+
+  async replaceWorkOrderItemsWithResync(
+    id: number,
+    items: InsertWorkOrderItem[],
+    companyId: number | null,
+  ): Promise<WorkOrder & { items: WorkOrderItem[] }> {
+    return db.transaction(async (tx) => {
+      const scope = this._companyScope(companyId);
+      const cond = scope ? and(eq(workOrders.id, id), scope) : eq(workOrders.id, id);
+      const [wo] = await tx.select().from(workOrders).where(cond);
+      if (!wo) throw Object.assign(new Error(`Work order ${id} not found`), { code: "WO_NOT_FOUND" });
+      if (wo.status === "billed" || wo.invoiceId != null) {
+        throw Object.assign(new Error(`Work order ${id} is locked`), { code: "WO_LOCKED" });
+      }
+      await tx.delete(workOrderItems).where(eq(workOrderItems.workOrderId, id));
+      let inserted: WorkOrderItem[] = [];
+      if (items.length > 0) {
+        const values = items.map((item) => ({
+          ...item,
+          workOrderId: id,
+          totalPrice: (Number(item.quantity) * Number(item.partPrice)).toString(),
+        }));
+        inserted = await tx.insert(workOrderItems).values(values).returning();
+      }
+      const truePartsSubtotal = inserted.reduce((s, r) => s + parseFloat(String(r.totalPrice || 0)), 0);
+      const laborRate = parseFloat(String(wo.laborRate ?? wo.appliedLaborRate ?? "0")) || 0;
+      let laborSubtotal: number;
+      let newTotalHours: number | undefined;
+      if (wo.laborMode === "per_part") {
+        newTotalHours = inserted.reduce((s, r) => s + parseFloat(String(r.laborHours || 0)), 0);
+        laborSubtotal = newTotalHours * laborRate;
+      } else {
+        const totalHours = parseFloat(String(wo.totalHours ?? "0")) || 0;
+        laborSubtotal = totalHours * laborRate;
+      }
+      const totalAmount = laborSubtotal + truePartsSubtotal;
+      const [updated] = await tx.update(workOrders).set({
+        partsSubtotal: truePartsSubtotal.toFixed(2),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
+        totalItems: inserted.length,
+        ...(newTotalHours !== undefined ? { totalHours: newTotalHours.toFixed(2) } : {}),
+        updatedAt: new Date(),
+      }).where(eq(workOrders.id, id)).returning();
+      if (!updated) throw new Error(`Work order ${id} update failed`);
+      return { ...updated, items: inserted };
     });
   }
 
