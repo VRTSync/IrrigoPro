@@ -62,6 +62,11 @@ export function ZoneLaborEditInline({
     queryClient.invalidateQueries({ queryKey: ["/api/wet-check-billings", wcbId] });
     queryClient.invalidateQueries({ queryKey: ["/api/wet-check-billings"] });
     queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
+    // Task #1097 — refresh the activity feed so the zone_labor_edited row
+    // appears immediately without reopening the modal or drawer.
+    queryClient.invalidateQueries({
+      queryKey: [`/api/wet-check-billings/${wcbId}/activity`],
+    });
   }
 
   const saveMut = useMutation({

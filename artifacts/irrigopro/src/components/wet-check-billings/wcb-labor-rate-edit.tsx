@@ -14,7 +14,7 @@
  */
 
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 
@@ -34,11 +34,17 @@ export function WcbLaborRateEdit({
   const initValue = parseFloat(currentRate) || 0;
   const [rate, setRate] = useState<string>(initValue.toFixed(2));
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const mutation = useMutation({
     mutationFn: (newRate: number) =>
       apiRequest(`/api/wet-check-billings/${wcbId}/labor-rate`, "PATCH", { newRate }),
     onSuccess: (data) => {
+      // Task #1097 — refresh the activity feed so the labor_rate_overridden
+      // row appears immediately without reopening the modal or drawer.
+      queryClient.invalidateQueries({
+        queryKey: [`/api/wet-check-billings/${wcbId}/activity`],
+      });
       onSuccess?.(data);
       onClose();
     },

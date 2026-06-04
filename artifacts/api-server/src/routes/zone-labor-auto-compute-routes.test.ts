@@ -154,7 +154,7 @@ function buildApp(opts: ServerOpts): Express {
         cid,
       );
       if (!result) { res.status(404).json({ message: "Not found" }); return; }
-      res.json(result);
+      res.json(result.updated);
     } catch (e: any) {
       res.status(400).json({ message: (e as Error).message || "Couldn't save zone labor" });
     }

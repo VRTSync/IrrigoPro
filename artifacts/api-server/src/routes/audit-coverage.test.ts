@@ -126,6 +126,53 @@ describe("Task #641 — every lifecycle transition emits a recordLifecycleAudit 
     );
   });
 
+  // ── Task #1097 — WCB mutation audit coverage ───────────────────────────────
+  it("PATCH wet-check-billings/:id/labor-rate emits wet_check_billing.labor_rate_overridden", () => {
+    const region = nearby(routesSrc, 'app.patch("/api/wet-check-billings/:id/labor-rate"');
+    assert.ok(region, "PATCH /api/wet-check-billings/:id/labor-rate not found");
+    assert.ok(
+      region.includes("recordLifecycleAudit("),
+      "expected recordLifecycleAudit() in labor-rate PATCH handler",
+    );
+    assert.ok(
+      region.includes("wet_check_billing.labor_rate_overridden"),
+      'expected action "wet_check_billing.labor_rate_overridden"',
+    );
+  });
+
+  it("PATCH wet-check-billings/:id/rate-mode emits wet_check_billing.rate_mode_changed", () => {
+    const region = nearby(routesSrc, 'app.patch("/api/wet-check-billings/:id/rate-mode"');
+    assert.ok(region, "PATCH /api/wet-check-billings/:id/rate-mode not found");
+    assert.ok(
+      region.includes("recordLifecycleAudit("),
+      "expected recordLifecycleAudit() in rate-mode PATCH handler",
+    );
+    assert.ok(
+      region.includes("wet_check_billing.rate_mode_changed"),
+      'expected action "wet_check_billing.rate_mode_changed"',
+    );
+  });
+
+  it("PATCH wet-check-billings/:id/zone-labor emits wet_check_billing.zone_labor_edited", () => {
+    const region = nearby(routesSrc, 'app.patch("/api/wet-check-billings/:id/zone-labor"');
+    assert.ok(region, "PATCH /api/wet-check-billings/:id/zone-labor not found");
+    assert.ok(
+      region.includes("recordLifecycleAudit("),
+      "expected recordLifecycleAudit() in zone-labor PATCH handler",
+    );
+    assert.ok(
+      region.includes("wet_check_billing.zone_labor_edited"),
+      'expected action "wet_check_billing.zone_labor_edited"',
+    );
+  });
+
+  it("GET wet-check-billings/:id/activity is registered", () => {
+    assert.ok(
+      routesSrc.includes('app.get("/api/wet-check-billings/:id/activity"'),
+      "GET /api/wet-check-billings/:id/activity not found in routes.ts",
+    );
+  });
+
   it("recordLifecycleAudit helper resolves an actor name from the user record", () => {
     // Activity tab must show "Jane Smith" not "User #42". The
     // helper looks up storage.getUser(actorUserId) and falls back

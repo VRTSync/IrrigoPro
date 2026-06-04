@@ -976,7 +976,7 @@ export interface IStorage {
     zoneRecordId: number,
     repairLaborHours: string,
     companyId: number,
-  ): Promise<{ zoneRecord: WetCheckZoneRecord; wcb: WetCheckBilling } | undefined>;
+  ): Promise<{ before: { zoneRecord: WetCheckZoneRecord; wcb: WetCheckBilling }; updated: { zoneRecord: WetCheckZoneRecord; wcb: WetCheckBilling } } | undefined>;
 
   /** Task #1027 — billing-manager-tier reset of zone repair labor on a finalised WCB. */
   resetWcbZoneRepairLabor(
@@ -1060,13 +1060,13 @@ export interface IStorage {
    * Throws with code "WCB_NOT_FOUND" when the row is missing.
    * Passes companyId=null to bypass tenant-scope (super_admin).
    */
-  recomputeWcbTotalsForLaborRate(id: number, newRate: number, companyId: number | null): Promise<WetCheckBilling>;
+  recomputeWcbTotalsForLaborRate(id: number, newRate: number, companyId: number | null): Promise<{ before: WetCheckBilling; updated: WetCheckBilling }>;
   /** Task #1093 — flip rateMode on a billing sheet and recompute labor totals. */
   recomputeBillingSheetTotalsForRateMode(id: number, mode: string, companyId: number | null): Promise<BillingSheetWithItems>;
   /** Task #1093 — flip rateMode on a work order and recompute labor totals. */
   recomputeWorkOrderTotalsForRateMode(id: number, mode: string, companyId: number | null): Promise<WorkOrder>;
   /** Task #1093 — flip rateMode on a WCB and recompute labor totals. */
-  recomputeWcbTotalsForRateMode(id: number, mode: string, companyId: number | null): Promise<WetCheckBilling>;
+  recomputeWcbTotalsForRateMode(id: number, mode: string, companyId: number | null): Promise<{ before: WetCheckBilling; updated: WetCheckBilling }>;
   /** Task #1093 — inline item replace for billing sheets (atomic with total resync). */
   replaceBillingSheetItemsWithResync(id: number, items: InsertBillingSheetItem[], companyId: number | null): Promise<BillingSheetWithItems>;
   /** Task #1093 — inline item replace for work orders (atomic with total resync). */
@@ -4051,7 +4051,7 @@ export class DatabaseStorage implements IStorage {
   // Reads the existing WCB, enforces lock/tenant guards, then recomputes
   // laborSubtotal (= totalHours × newRate) and totalAmount (= laborSubtotal +
   // partsSubtotal) in one atomic UPDATE … RETURNING call.
-  async recomputeWcbTotalsForLaborRate(id: number, newRate: number, companyId: number | null): Promise<WetCheckBilling> {
+  async recomputeWcbTotalsForLaborRate(id: number, newRate: number, companyId: number | null): Promise<{ before: WetCheckBilling; updated: WetCheckBilling }> {
     return db.transaction(async (tx) => {
       const [wcb] = await tx.select().from(wetCheckBillings).where(eq(wetCheckBillings.id, id));
       if (!wcb) {
@@ -4083,7 +4083,7 @@ export class DatabaseStorage implements IStorage {
         updatedAt: new Date(),
       }).where(eq(wetCheckBillings.id, id)).returning();
       if (!updated) throw new Error(`WetCheckBilling id=${id} update failed`);
-      return updated;
+      return { before: wcb, updated };
     });
   }
 
@@ -4173,7 +4173,7 @@ export class DatabaseStorage implements IStorage {
     id: number,
     mode: string,
     companyId: number | null,
-  ): Promise<WetCheckBilling> {
+  ): Promise<{ before: WetCheckBilling; updated: WetCheckBilling }> {
     return db.transaction(async (tx) => {
       const [wcb] = await tx.select().from(wetCheckBillings).where(eq(wetCheckBillings.id, id));
       if (!wcb) throw Object.assign(new Error(`Wet check billing ${id} not found`), { code: "WCB_NOT_FOUND" });
@@ -4208,7 +4208,7 @@ export class DatabaseStorage implements IStorage {
         updatedAt: new Date(),
       }).where(eq(wetCheckBillings.id, id)).returning();
       if (!updated) throw new Error(`WetCheckBilling ${id} update failed`);
-      return updated;
+      return { before: wcb, updated };
     });
   }
 
@@ -8123,7 +8123,7 @@ export class DatabaseStorage implements IStorage {
     zoneRecordId: number,
     repairLaborHours: string,
     companyId: number,
-  ): Promise<{ zoneRecord: WetCheckZoneRecord; wcb: WetCheckBilling } | undefined> {
+  ): Promise<{ before: { zoneRecord: WetCheckZoneRecord; wcb: WetCheckBilling }; updated: { zoneRecord: WetCheckZoneRecord; wcb: WetCheckBilling } } | undefined> {
     return db.transaction(async (tx) => {
       const [wcb] = await tx.select().from(wetCheckBillings).where(eq(wetCheckBillings.id, wcbId));
       if (!wcb) return undefined;
@@ -8157,6 +8157,12 @@ export class DatabaseStorage implements IStorage {
         // Zone is not part of this WCB's billed findings.
         return undefined;
       }
+      // Capture the zone record before the update for audit before/after.
+      const [beforeZoneRow] = await tx
+        .select()
+        .from(wetCheckZoneRecords)
+        .where(eq(wetCheckZoneRecords.id, zoneRecordId));
+      if (!beforeZoneRow) return undefined;
       // Update the zone record's repair labor and stamp as manually set.
       const [zoneRow] = await tx
         .update(wetCheckZoneRecords)
@@ -8189,7 +8195,10 @@ export class DatabaseStorage implements IStorage {
         laborSubtotal: laborSubtotal.toFixed(2),
         totalAmount: total.toFixed(2),
       }).where(eq(wetCheckBillings.id, wcbId)).returning();
-      return { zoneRecord: zoneRow, wcb: updatedWcb };
+      return {
+        before: { zoneRecord: beforeZoneRow, wcb },
+        updated: { zoneRecord: zoneRow, wcb: updatedWcb },
+      };
     });
   }
 

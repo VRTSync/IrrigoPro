@@ -1,5 +1,5 @@
 /**
- * wcb-labor-rate-route.test.ts (Task #977)
+ * wcb-labor-rate-route.test.ts (Task #977 / Task #1097)
  *
  * Integration-level tests for PATCH /api/wet-check-billings/:id/labor-rate.
  *
@@ -20,6 +20,7 @@ import { z } from "zod/v4";
 
 // ── Stub storage ───────────────────────────────────────────────────────────────
 
+// Storage now returns { before, updated } so route can emit before/after audit.
 const recomputeStub = mock.fn<(id: number, newRate: number, companyId: number | null) => Promise<unknown>>();
 
 function buildApp(role: string, companyId: number | null = 1) {
@@ -51,8 +52,8 @@ function buildApp(role: string, companyId: number | null = 1) {
     if (!Number.isFinite(wcbId)) { res.status(400).json({ message: "Invalid id" }); return; }
     const cid: number | null = roleParsed === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
     try {
-      const result = await recomputeStub(wcbId, parsed.data.newRate, cid);
-      res.json(result);
+      const result = await recomputeStub(wcbId, parsed.data.newRate, cid) as { before: unknown; updated: unknown };
+      res.json(result.updated);
     } catch (e: any) {
       if (e?.code === "WCB_LOCKED") { res.status(409).json({ message: e.message }); return; }
       if (e?.code === "WCB_CROSS_COMPANY") { res.status(403).json({ message: "Access denied" }); return; }
@@ -64,6 +65,18 @@ function buildApp(role: string, companyId: number | null = 1) {
 
   return app;
 }
+
+const BEFORE_WCB = {
+  id: 5,
+  billingNumber: "WC-2026-0005",
+  laborRate: "65.00",
+  laborSubtotal: "195.00",
+  partsSubtotal: "80.00",
+  totalAmount: "275.00",
+  totalHours: "3.00",
+  status: "approved_passed_to_billing",
+  invoiceId: null,
+};
 
 const UPDATED_WCB = {
   id: 5,
@@ -77,13 +90,13 @@ const UPDATED_WCB = {
   invoiceId: null,
 };
 
-describe("PATCH /api/wet-check-billings/:id/labor-rate (Task #977)", () => {
+describe("PATCH /api/wet-check-billings/:id/labor-rate (Task #977 / Task #1097)", () => {
   beforeEach(() => {
     recomputeStub.mock.resetCalls();
   });
 
-  it("returns 200 and updated WCB for billing_manager", async () => {
-    recomputeStub.mock.mockImplementationOnce(async () => UPDATED_WCB);
+  it("returns 200 and updated WCB (from result.updated) for billing_manager", async () => {
+    recomputeStub.mock.mockImplementationOnce(async () => ({ before: BEFORE_WCB, updated: UPDATED_WCB }));
     const res = await request(buildApp("billing_manager", 1))
       .patch("/api/wet-check-billings/5/labor-rate")
       .send({ newRate: 80 });
@@ -145,7 +158,7 @@ describe("PATCH /api/wet-check-billings/:id/labor-rate (Task #977)", () => {
   });
 
   it("passes null companyId for super_admin", async () => {
-    recomputeStub.mock.mockImplementationOnce(async () => UPDATED_WCB);
+    recomputeStub.mock.mockImplementationOnce(async () => ({ before: BEFORE_WCB, updated: UPDATED_WCB }));
     await request(buildApp("super_admin", null))
       .patch("/api/wet-check-billings/5/labor-rate")
       .send({ newRate: 80 });

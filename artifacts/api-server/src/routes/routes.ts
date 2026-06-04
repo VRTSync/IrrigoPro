@@ -1048,7 +1048,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // "customer" actor used for customer-token transitions on estimates.
   // Best-effort: never throws and never fails the originating request.
   type LifecycleAuditOpts = {
-    resource: "estimate" | "wet_check" | "work_order";
+    resource: "estimate" | "wet_check" | "work_order" | "wet_check_billing";
     action: string;
     targetId: number | string;
     before?: unknown;
@@ -1129,7 +1129,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // rows with a null actor_company_id, which is how customer-token
   // transitions are attributed). super_admin sees everything.
   async function fetchActivityForTarget(
-    targetType: "estimate" | "wet_check" | "work_order",
+    targetType: "estimate" | "wet_check" | "work_order" | "wet_check_billing",
     targetId: number,
     companyId: number | null,
     isSuperAdmin: boolean,
@@ -1238,6 +1238,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ events: rows });
     } catch (error) {
       console.error("[activity] work_order", error);
+      res.status(500).json({ message: "Failed to load activity" });
+    }
+  });
+
+  // Task #1097 — WCB activity feed. Returns audit_log rows for a single
+  // WCB so the Command Center drawer and WCB view modal can display a
+  // who/when/before/after history.
+  // Tenant-guard: WCB is loaded with the same companyId isolation as the
+  // other activity endpoints; super_admin sees all (callerCid = null).
+  app.get("/api/wet-check-billings/:id/activity", requireAuthentication, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        res.status(400).json({ message: "Invalid WCB ID" });
+        return;
+      }
+      const isSuper = req.authenticatedUserRole === "super_admin";
+      const callerCid: number | null = isSuper ? null : (req.authenticatedUserCompanyId ?? null);
+      // Non-super users must have a company context — reject otherwise so we
+      // never accidentally serve cross-company data to an unscoped caller.
+      if (!isSuper && callerCid == null) {
+        res.status(403).json({ message: "Company context required" });
+        return;
+      }
+      const wcb = await storage.getWetCheckBillingById(id, callerCid);
+      if (!wcb) { res.status(404).json({ message: "Not found" }); return; }
+      // Resolve the WCB's tenant company via its wet check for the
+      // activity filter (actor_company_id = wc.companyId).
+      const wcResult = await db.execute<{ companyId: number | null }>(
+        sql`SELECT company_id AS "companyId" FROM wet_checks WHERE id = ${wcb.wetCheckId} LIMIT 1`,
+      );
+      const wcCompanyId: number | null = wcResult.rows[0]?.companyId ?? null;
+      if (!isSuper && wcCompanyId !== callerCid) {
+        res.status(404).json({ message: "Not found" });
+        return;
+      }
+      const rows = await fetchActivityForTarget("wet_check_billing", id, wcCompanyId, isSuper);
+      res.json({ events: rows });
+    } catch (error) {
+      console.error("[activity] wet_check_billing", error);
       res.status(500).json({ message: "Failed to load activity" });
     }
   });
@@ -9727,7 +9767,34 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         cid,
       );
       if (!result) { res.status(404).json({ message: "Not found" }); return; }
-      res.json(result);
+      // Audit write — non-fatal; a write failure must not fail the PATCH.
+      try {
+        const wcAuditResult = await db.execute<{ companyId: number | null }>(
+          sql`SELECT company_id AS "companyId" FROM wet_checks WHERE id = ${result.updated.wcb.wetCheckId} LIMIT 1`,
+        );
+        const wcCompanyIdForAudit: number | null = wcAuditResult.rows[0]?.companyId ?? null;
+        await recordLifecycleAudit(req, {
+          resource: "wet_check_billing",
+          action: "wet_check_billing.zone_labor_edited",
+          targetId: wcbId,
+          before: {
+            controllerLetter: result.before.zoneRecord.controllerLetter,
+            zoneNumber: result.before.zoneRecord.zoneNumber,
+            repairLaborHours: result.before.zoneRecord.repairLaborHours,
+          },
+          after: {
+            controllerLetter: result.updated.zoneRecord.controllerLetter,
+            zoneNumber: result.updated.zoneRecord.zoneNumber,
+            repairLaborHours: result.updated.zoneRecord.repairLaborHours,
+          },
+          summary: `Zone ${result.updated.zoneRecord.controllerLetter}${result.updated.zoneRecord.zoneNumber} labor → ${parsed.data.repairLaborHours}h`,
+          companyId: wcCompanyIdForAudit,
+          extra: { wetCheckId: result.updated.wcb.wetCheckId, zoneRecordId: parsed.data.zoneRecordId },
+        });
+      } catch (auditErr) {
+        console.error("[audit] wet_check_billing.zone_labor_edited", auditErr);
+      }
+      res.json(result.updated);
     } catch (e: any) {
       const { status, message } = classifyAndLog(req, e, {
         op: "setWcbZoneRepairLabor",
@@ -9789,7 +9856,25 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const companyId: number | null = role === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
     try {
       const result = await storage.recomputeWcbTotalsForLaborRate(wcbId, parsed.data.newRate, companyId);
-      res.json(result);
+      // Audit write — non-fatal; a write failure must not fail the PATCH.
+      try {
+        const wcAuditResult = await db.execute<{ companyId: number | null }>(
+          sql`SELECT company_id AS "companyId" FROM wet_checks WHERE id = ${result.updated.wetCheckId} LIMIT 1`,
+        );
+        const wcCompanyIdForAudit: number | null = wcAuditResult.rows[0]?.companyId ?? null;
+        await recordLifecycleAudit(req, {
+          resource: "wet_check_billing",
+          action: "wet_check_billing.labor_rate_overridden",
+          targetId: wcbId,
+          before: { laborRate: result.before.laborRate, totalAmount: result.before.totalAmount },
+          after: { laborRate: result.updated.laborRate, totalAmount: result.updated.totalAmount },
+          summary: `WCB ${result.updated.billingNumber} labor rate → $${parsed.data.newRate}/hr`,
+          companyId: wcCompanyIdForAudit,
+        });
+      } catch (auditErr) {
+        console.error("[audit] wet_check_billing.labor_rate_overridden", auditErr);
+      }
+      res.json(result.updated);
     } catch (e: any) {
       if (e?.code === "WCB_LOCKED") { res.status(409).json({ message: e.message }); return; }
       if (e?.code === "WCB_CROSS_COMPANY") { res.status(403).json({ message: "Access denied" }); return; }
@@ -9821,12 +9906,25 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const companyId: number | null = role === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
     try {
       const result = await storage.recomputeWcbTotalsForRateMode(wcbId, parsed.data.mode, companyId);
-      void recordAuditEvent(req, {
-        actionType: "data", action: "wet_check_billing.rate_mode_changed",
-        targetType: "wet_check_billing", targetId: String(wcbId),
-        summary: `Rate mode set to ${parsed.data.mode}`,
-      });
-      res.json(result);
+      // Audit write — non-fatal; a write failure must not fail the PATCH.
+      try {
+        const wcAuditResult = await db.execute<{ companyId: number | null }>(
+          sql`SELECT company_id AS "companyId" FROM wet_checks WHERE id = ${result.updated.wetCheckId} LIMIT 1`,
+        );
+        const wcCompanyIdForAudit: number | null = wcAuditResult.rows[0]?.companyId ?? null;
+        await recordLifecycleAudit(req, {
+          resource: "wet_check_billing",
+          action: "wet_check_billing.rate_mode_changed",
+          targetId: wcbId,
+          before: { rateMode: result.before.rateMode, laborRate: result.before.laborRate, totalAmount: result.before.totalAmount },
+          after: { rateMode: result.updated.rateMode, laborRate: result.updated.laborRate, totalAmount: result.updated.totalAmount },
+          summary: `WCB ${result.updated.billingNumber} rate mode → ${parsed.data.mode}`,
+          companyId: wcCompanyIdForAudit,
+        });
+      } catch (auditErr) {
+        console.error("[audit] wet_check_billing.rate_mode_changed", auditErr);
+      }
+      res.json(result.updated);
     } catch (e: any) {
       if (e?.code === "WCB_LOCKED") { res.status(409).json({ message: e.message }); return; }
       if (e?.code === "WCB_CROSS_COMPANY") { res.status(403).json({ message: "Access denied" }); return; }

@@ -18,6 +18,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RateModeToggle } from "./rate-mode-toggle";
 import { LineItemsEditor, type InlineItem } from "./line-items-editor";
+import { ActivityFeed } from "./activity-feed";
 import { Lock } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -171,6 +172,19 @@ export function DetailPaneInline({ item, userRole, children }: DetailPaneInlineP
           )}
         </div>
       ) : null}
+
+      {/* Task #1097 — Activity feed for auditable entity types */}
+      <ActivityFeed
+        url={
+          item.type === "billing_sheet"
+            ? `/api/billing-sheets/${item.refId}/activity`
+            : item.type === "work_order"
+              ? `/api/work-orders/${item.refId}/activity`
+              : item.type === "wet_check_billing"
+                ? `/api/wet-check-billings/${item.refId}/activity`
+                : null
+        }
+      />
     </div>
   );
 }

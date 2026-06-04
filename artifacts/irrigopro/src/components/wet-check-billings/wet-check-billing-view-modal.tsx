@@ -18,6 +18,7 @@ import type { WetCheckBillingView } from "@/components/billing/wet-check-billing
 import type { WetCheckBilling } from "@workspace/db/schema";
 import { safeGet } from "@/utils/safeStorage";
 import { WcbLaborRateEdit } from "./wcb-labor-rate-edit";
+import { ActivityFeed } from "@/components/billing-workspace/activity-feed";
 import { RateModeToggle } from "@/components/billing-workspace/rate-mode-toggle";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -176,6 +177,10 @@ export function WetCheckBillingViewModal({
     queryClient.invalidateQueries({ queryKey: ["/api/wet-check-billings", wetCheckBillingId] });
     queryClient.invalidateQueries({ queryKey: ["/api/wet-check-billings"] });
     queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
+    // Task #1097 — refresh the activity feed after a labor-rate save.
+    queryClient.invalidateQueries({
+      queryKey: [`/api/wet-check-billings/${wetCheckBillingId}/activity`],
+    });
   }
 
   const appliedRate = String(wcb?.appliedLaborRate ?? wcb?.laborRate ?? "0");
@@ -248,6 +253,8 @@ export function WetCheckBillingViewModal({
                 canEditLabor={canEditLaborFields(wcb)}
                 laborRate={appliedRate}
               />
+              {/* Task #1097 — activity log for this WCB */}
+              <ActivityFeed url={`/api/wet-check-billings/${wcb.id}/activity`} />
             </>
           )}
 

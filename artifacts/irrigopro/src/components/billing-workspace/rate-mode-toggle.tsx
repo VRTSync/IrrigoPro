@@ -58,6 +58,13 @@ export function RateModeToggle({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: detailQueryKey });
+      // Task #1097 — refresh the activity feed for WCBs so the new
+      // rate_mode_changed row appears immediately without reopening.
+      if (entityPath === "wet-check-billings") {
+        queryClient.invalidateQueries({
+          queryKey: [`/api/wet-check-billings/${entityId}/activity`],
+        });
+      }
     },
     onError: (e: any) => {
       // Revert the optimistic flip
