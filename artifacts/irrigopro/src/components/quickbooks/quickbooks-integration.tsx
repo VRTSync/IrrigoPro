@@ -651,13 +651,11 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                 </h3>
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-3">
                   <p className="text-xs text-amber-900 font-medium">
-                    Your QuickBooks connection is linked to the wrong account ID.
+                    Your QuickBooks connection needs to be completed.
                   </p>
                   <p className="text-xs text-amber-700">
-                    This usually happens after a server restart during the QuickBooks
-                    authorization flow. Invoices and customer syncs will fail until
-                    the connection is re-established. Re-authorizing clears the issue
-                    automatically.
+                    Click Connect to QuickBooks above to finish setup. Once authorized,
+                    invoices and customer syncs will resume automatically.
                   </p>
                   <button
                     onClick={handleQuickBooksConnect}

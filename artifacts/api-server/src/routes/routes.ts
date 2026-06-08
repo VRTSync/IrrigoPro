@@ -8992,8 +8992,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Scoped roles: stale only when (a) this company has no properly-linked row AND
       // (b) there is exactly ONE stale row globally. Multiple stale rows cannot be safely
       // attributed to one company without super_admin oversight — return stale: false so
-      // the repair card stays hidden. No row identifiers are exposed to the client; the
-      // repair endpoint re-derives the target server-side.
+      // the repair card stays hidden.
       const sessionCompanyId = String(req.authenticatedUserCompanyId ?? "");
       if (!sessionCompanyId) {
         res.json({ stale: false, count: 0 });
@@ -9012,7 +9011,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         sql`SELECT COUNT(*)::text AS count FROM quickbooks_integration WHERE company_id = realm_id`
       );
       const staleCount = parseInt(staleRowResult.rows[0]?.count ?? "0", 10);
-      res.json({ stale: staleCount === 1, count: staleCount });
+      res.json({ stale: staleCount === 1, count: 0 });
     } catch (err) {
       logger.error({ err }, "GET /api/quickbooks/connection/stale failed");
       res.status(500).json({ message: "Detection failed", error: String(err) });
