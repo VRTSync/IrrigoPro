@@ -2753,21 +2753,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // up via `loadPagingConfig()` on every transition; there's no
   // process restart required.
 
-  app.get("/api/admin/app-health/integrations", requireAuthentication, async (req, res) => {
-    if (!requireSuperAdminGuard(req, res)) return;
-    try {
-      const cfg = await loadPagingConfig();
-      res.json({ config: toPublicConfig(cfg) });
-    } catch (e) {
-      const { status, message } = classifyAndLog(req, e, {
-        op: "appHealthIntegrationsGet",
-        ctx: {},
-        fallbackMessage: "Couldn't load integrations — please retry",
-      });
-      res.status(status).json({ message });
-    }
-  });
-
   app.post("/api/admin/app-health/integrations", requireAuthentication, async (req, res) => {
     if (!requireSuperAdminGuard(req, res)) return;
     try {
@@ -5038,28 +5023,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/users/:id", requireAuthentication, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const userData = insertUserSchema.partial().parse(req.body);
-      const user = await storage.updateUser(id, userData);
-      if (!user) {
-        res.status(404).json({ message: "User not found" });
-        return;
-      }
-      // Remove password from response
-      const { password: _, ...userWithoutPassword } = user;
-      res.json(userWithoutPassword);
-    } catch (error) {
-      console.error(error);
-      if (error instanceof z.ZodError) {
-        res.status(400).json({ message: "Invalid user data", errors: error.issues });
-        return;
-      }
-      res.status(500).json({ message: "Failed to update user" });
-    }
-  });
-
   app.patch("/api/users/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -5082,20 +5045,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/users/:id", requireAuthentication, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const success = await storage.deleteUser(id);
-      if (!success) {
-        res.status(404).json({ message: "User not found" });
-        return;
-      }
-      res.json({ message: "User deleted successfully" });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to delete user" });
-    }
-  });
 
   // Dashboard statistics endpoint
   app.get("/api/dashboard/stats", requireAuthentication, async (req, res) => {
