@@ -1,0 +1,294 @@
+I need you to perform a full-system audit of the Irrigo Pro application.
+
+The main concern is that the app may have serious system bloat, duplicate pages, duplicate components, outdated routes, old screen versions still being loaded, unused files, layered workarounds, and disconnected pieces of functionality that are making the system harder to scale and maintain.
+
+This audit should be comprehensive. Do not skip any part of the system.
+
+The goal is to identify anything that prevents Irrigo Pro from being a clean, unified, scalable application.
+
+Please review the entire codebase, including:
+
+* All routes
+* All screens
+* All pages
+* All components
+* All layouts
+* All navigation files
+* All API routes
+* All backend services
+* All database schema files
+* All shared utilities
+* All hooks
+* All context providers
+* All state management logic
+* All styling systems
+* All legacy or unused files
+* All duplicate versions of the same feature
+* All mobile-specific and web-specific implementations
+* All admin-facing, manager-facing, crew-facing, and customer/property-facing views
+* Any hidden, orphaned, test, deprecated, or partially built sections
+
+I want you to determine whether the system has one clear version of each feature, screen, and workflow, or whether old versions are still present and potentially being used.
+
+Important areas to inspect closely:
+
+1. Routing & Navigation
+
+Review the entire routing structure and identify:
+
+* Every active route
+* Every unused route
+* Every duplicate route
+* Every route pointing to an outdated screen
+* Any hidden route still accessible
+* Any screen that exists but is not connected to navigation
+* Any route that appears to be a legacy version of another route
+* Any route naming inconsistencies
+* Any navigation structure that should be simplified
+
+Please provide a complete list of all routes and what screen/page/component each one loads.
+
+2. Screens & Pages
+
+Review every screen and page in the app.
+
+For each one, identify:
+
+* What the screen does
+* Whether it is active or unused
+* Whether it is the current intended version
+* Whether there are older duplicate versions elsewhere
+* Whether the screen shares logic properly or has copied/pasted logic
+* Whether the screen has unnecessary complexity
+* Whether it should be merged, removed, rewritten, or preserved
+
+I do not want any screen skipped.
+
+3. Duplicate Functionality
+
+Identify any features that appear to exist in more than one place.
+
+This includes duplicate or competing versions of:
+
+* Customer pages
+* Property pages
+* Contract pages
+* Service pages
+* Ticket pages
+* Proposal pages
+* Billing pages
+* Schedule pages
+* Employee pages
+* Equipment pages
+* Visual scope tools
+* Admin dashboards
+* Manager dashboards
+* Crew dashboards
+* Field entry forms
+* Approval workflows
+* Reporting screens
+* PDF generation logic
+* Map-related tools
+* Irrigation-specific tools
+* Snow-specific tools
+* Maintenance-specific tools
+
+For each duplicate, explain which version appears to be current, which version appears outdated, and what should happen with the outdated one.
+
+4. Component Bloat
+
+Review all components and identify:
+
+* Components that are unused
+* Components that are duplicates
+* Components that should be consolidated
+* Components that are overly specific and should be made reusable
+* Components that are doing too much
+* Components that mix business logic with display logic
+* Components that should be moved into a shared component structure
+* Components that appear to belong to an old design or workflow
+
+Please recommend a cleaner component structure.
+
+5. Backend / API Bloat
+
+Review all backend routes, server functions, API calls, and service files.
+
+Identify:
+
+* Duplicate API endpoints
+* API endpoints that are no longer used
+* API endpoints pointing to old data structures
+* Backend logic duplicated across routes
+* Services that should be consolidated
+* Inconsistent naming between frontend and backend
+* Inconsistent response formats
+* Any API route that may be supporting an old version of the app
+* Any missing separation between business logic and route handlers
+
+Please map which frontend screens rely on which backend endpoints when possible.
+
+6. Database / Schema Review
+
+Review the database schema and related query logic.
+
+Identify:
+
+* Tables that appear unused
+* Fields that appear unused
+* Duplicate tables or overlapping models
+* Tables that seem tied to old app versions
+* Inconsistent naming
+* Relationships that are unclear or poorly structured
+* Schema areas that may not scale well
+* Data models that should be consolidated
+* Any fields that are being stored in multiple places unnecessarily
+
+Please do not delete anything. Just report what appears to be unused, duplicated, or questionable.
+
+7. State Management & Data Flow
+
+Review how data moves through the application.
+
+Identify:
+
+* Duplicate state handling
+* Overuse of local state where shared state would be better
+* Overuse of global state where local state would be better
+* Multiple competing sources of truth
+* Screens that load the same data differently
+* Components that refetch unnecessarily
+* Data that is transformed repeatedly in different places
+* Logic that should be centralized
+
+The goal is to make the application feel like one unified system with one clear source of truth.
+
+8. Styling / Design System Review
+
+Review the styling approach.
+
+Identify:
+
+* Duplicate style patterns
+* Old design systems still present
+* Inconsistent layouts
+* Inconsistent buttons, forms, tables, cards, modals, and dashboards
+* Screens that appear visually outdated compared to others
+* Components that should use shared styling
+* Unnecessary one-off styling
+
+Recommend a scalable design system structure for Irrigo Pro.
+
+9. File Structure Audit
+
+Review the overall file and folder structure.
+
+Identify:
+
+* Messy or unclear folders
+* Files in the wrong location
+* Legacy files
+* Test files that should not be part of production
+* Dead files
+* Duplicate file names
+* Similar files with unclear purpose
+* Old backups or alternate versions
+* Areas where structure should be simplified
+
+Please recommend a cleaner file structure.
+
+10. Feature-by-Feature System Map
+
+Create a feature map of the entire app.
+
+For each major feature, list:
+
+* Current active screens
+* Current active components
+* Current active API routes
+* Current active database tables
+* Any duplicate or old versions found
+* Any recommended cleanup
+
+Major features to include:
+
+* Dashboard
+* Customers / Properties
+* Contracts
+* Services
+* Tickets / Work Orders
+* Scheduling
+* Field Crew View
+* Manager Approval
+* Billing Approval
+* Proposals
+* Visual Scope Tool
+* PDF / Report Generation
+* Irrigation
+* Maintenance
+* Snow
+* Employees
+* Equipment
+* Admin Settings
+* User Roles / Permissions
+* Authentication
+* Any other feature discovered in the codebase
+
+11. Risk Assessment
+
+Please identify:
+
+* Areas where old code may still be loading
+* Areas where deleting something could break the app
+* Areas where there are multiple versions and it is unclear which is live
+* Areas that need manual confirmation before cleanup
+* Areas that appear safe to remove after verification
+* Areas that need refactoring before the app can scale
+
+12. Final Deliverables
+
+At the end of the audit, provide the following:
+
+A. Full Route Inventory
+A complete list of every route and what it loads.
+
+B. Full Screen Inventory
+A complete list of every screen/page and whether it is active, duplicate, legacy, unused, or unclear.
+
+C. Duplicate / Legacy Code Report
+A list of duplicated, outdated, orphaned, or conflicting files.
+
+D. Cleanup Priority List
+Rank cleanup items by priority:
+
+* Critical
+* High
+* Medium
+* Low
+
+E. Recommended Unified Architecture
+Explain how the app should be organized going forward.
+
+F. Safe Cleanup Plan
+Give me a step-by-step plan for removing bloat safely without breaking the system.
+
+G. Refactor Roadmap
+Give me a phased roadmap for turning Irrigo Pro into a unified, scalable app.
+
+Important Instructions:
+
+* Do not make destructive changes during the audit unless specifically asked.
+* Do not delete files yet.
+* Do not rewrite major sections yet.
+* First, inspect and report.
+* Be extremely thorough.
+* Assume old versions may still be connected somewhere.
+* Verify usage before labeling something unused.
+* Trace imports, routes, navigation, API usage, and data flow before making conclusions.
+* Do not skip any folder or section of the app.
+* If something is unclear, mark it as unclear and explain what needs to be verified.
+* The final result should help me understand exactly where the system is bloated, where duplicate versions exist, and what needs to happen to make Irrigo Pro clean, scalable, and unified.
+
+The end goal is simple:
+
+I want Irrigo Pro to have one clean version of every feature, one clear source of truth for data, one scalable file structure, one consistent design system, and no hidden mess of outdated routes, unused pages, or duplicate workflows.

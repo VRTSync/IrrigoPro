@@ -1,0 +1,120 @@
+# QB Identity Fix — Slice 1: Production Company Scoping (the actual root cause)
+
+**Source:** Conversation 2026-06-08 — production shows QuickBooks "green/connected" but operations return 400, and the new Re-authorize button fails with a QuickBooks error every time. Replit's prior attempt (durable Postgres OAuth state, `USE_DB_OAUTH_STATE=1`) was a correct but unrelated fix — it did not address this.
+**Severity:** P0. QuickBooks connect/reauthorize is **impossible** in production, the status display is **falsely green**, and the status endpoint **leaks another company's connection cross-tenant**.
+**Prerequisite slices:** None. This is foundational — Slice 1116 (stale detection) and the QB OAuth state work are layered on top of the defect described here and cannot function correctly until it is fixed.
+
+---
+
+## Root cause (one sentence)
+
+Every legacy QuickBooks route resolves the caller's company from the **dev-only `x-user-company-id` header** via `headerUserCompanyId(req)`, which **returns `undefined` in production** — so in production these endpoints run with `companyId = null`.
+
+### Why
+
+`isHeaderAuthAllowed()` (routes.ts:72) is hard-wired to `process.env.NODE_ENV !== 'production'`. In production it returns `false`, so `headerUserCompanyId(req)` (routes.ts:85) returns `undefined`. The real production identity is set by the global auth middleware on `req.authenticatedUserCompanyId` (routes.ts:857, populated from the bearer token / session and used 93× elsewhere) — but the QuickBooks routes ignore it and read the header instead. This code predates the move to token auth and was never migrated.
+
+This single defect produces all three reported symptoms:
+
+**1. Re-authorize fails every time (the 400).**
+`GET /api/quickbooks/auth` (routes.ts:8589) captures the company as:
+```ts
+const authCompanyId = (headerUserCompanyId(req) as string) || null;   // = null in prod
+```
+The OAuth state is stored with `companyId: null`. On return, `GET /api/quickbooks/callback` reads that null back and hits the guard at routes.ts:8688:
+```ts
+if (!oauthCompanyId) { /* abort: "Unable to identify the IrrigoPro company" → 400 */ }
+```
+So the round-trip aborts on **our** side, regardless of `USE_DB_OAUTH_STATE`. Durable state never mattered here — the company was null before the redirect even happened.
+
+**2. Status is falsely "green" (and leaks cross-tenant).**
+`GET /api/quickbooks/connection` (routes.ts:8951) calls `storage.getQuickBooksCustomerStatus(null)`. In `getQuickBooksCustomerStatus` (storage.ts:3156), a null/absent `companyId` takes this branch:
+```ts
+integration = await db.select().from(quickbooksIntegration).limit(1);   // ANY company's row
+```
+It returns the **first integration row in the entire table**, for any tenant, and reports it `isConnected` if that arbitrary row's token is valid. So the page shows green using **some other company's** connection — a cross-tenant data exposure and the source of the phantom green.
+
+**3. Sync/customer operations 400.**
+The real Intuit API calls need *this* company's realm + token. This company has none (or a stale row), so the actual operations fail — while the status endpoint, reading an arbitrary row, still says green. That is the "green but 400" contradiction.
+
+This is the "layering on a broken foundation" you sensed: Slice 1116's detection endpoint (routes.ts:8977) is the *one* QB route that correctly uses `req.authenticatedUserCompanyId`. It sits on top of ~8 sibling routes that still use the dead header.
+
+---
+
+## Fix
+
+Two changes. The first restores function; the second closes the cross-tenant leak and the phantom green. Both are small.
+
+### Change A — Resolve company from the authenticated identity in every QB route
+
+Define one helper next to `headerUserCompanyId` (routes.ts ~85) and use it everywhere a QB route currently reads the header:
+
+```ts
+// Production-safe company resolution: prefer the authenticated identity set by
+// the global auth middleware; fall back to the dev-only header only in non-prod.
+function resolveCompanyId(req: Request): string | null {
+  const authed = (req as any).authenticatedUserCompanyId;
+  if (authed != null) return String(authed);
+  const hdr = headerUserCompanyId(req); // undefined in production by design
+  return hdr ? String(hdr) : null;
+}
+```
+
+Replace the company resolution at each of these QB route sites (all currently `const ... = (headerUserCompanyId(req) as string) || null;`):
+
+- `8589` — `/api/quickbooks/auth` (initiate) → `const authCompanyId = resolveCompanyId(req);`
+- `8829` — `/api/quickbooks/disconnect`
+- `8855` — `/api/quickbooks/status`
+- `8877` — `/api/quickbooks/customers`
+- `8951` — `/api/quickbooks/connection`
+- `9061` — `/api/quickbooks/sync-customers`
+- `9203` — `/api/quickbooks/sync-parts`
+- `9323` — `/api/quickbooks/sync-estimate/:id`
+
+Note the column type: `quickbooks_integration.company_id` is **text**, and `req.authenticatedUserCompanyId` is a number, so the `String(...)` conversion in `resolveCompanyId` is required for the `eq(quickbooksIntegration.companyId, companyId)` comparisons to match. (Slice 1116 already does `String(req.authenticatedUserCompanyId ?? "")` for the same reason.)
+
+Do **not** touch the non-QB `headerUserCompanyId` sites (4713, 7584, 11069, 11508, 12446, 12745, 12961, 13192, 13705) in this slice — several already use the `authenticatedUserCompanyId ?? header` pattern. This slice is scoped to QuickBooks only.
+
+### Change B — Never return an unscoped integration row
+
+In `getQuickBooksCustomerStatus` (storage.ts:3156), the null-company branch is a cross-tenant bug. Remove the unscoped fallback so an absent company resolves to **disconnected**, never an arbitrary row:
+
+```ts
+let integration: (typeof quickbooksIntegration.$inferSelect)[];
+if (companyId) {
+  integration = await db
+    .select().from(quickbooksIntegration)
+    .where(eq(quickbooksIntegration.companyId, companyId))
+    .limit(1);
+} else {
+  integration = []; // no company → not connected. NEVER select an arbitrary tenant's row.
+}
+```
+
+The `else` branch must never run in production once Change A lands (company will always resolve), but this hardens the storage layer so a missing scope can never again leak or fake a connection. Also review `syncQuickBooksCustomers()` (storage.ts, just below — it calls `getQuickBooksCustomerStatus()` with **no argument**); pass the real company through, or it will now correctly report not-connected instead of grabbing a random row.
+
+---
+
+## What NOT to change
+
+- Keep `USE_DB_OAUTH_STATE=1` and the durable Postgres state store — that work is correct and prevents a *different* failure (restart wiping in-memory state mid-flow). It is not the bug here; leave it on.
+- Keep `isHeaderAuthAllowed()` production-off. The header path is correctly disabled for security; the fix is to read the authenticated identity, not to re-enable headers.
+- Don't add another diagnostic/repair layer. This replaces the need for one.
+
+---
+
+## Verification (must pass before calling it fixed)
+
+1. **Reauthorize completes.** In production, as a `company_admin`, click Re-authorize → QuickBooks consent → land back on Settings with the connection showing the **correct** company and a fresh `realm_id`. No "Unable to identify the IrrigoPro company" 400.
+2. **Status reflects the caller's own row.** `GET /api/quickbooks/connection` for a company with **no** integration returns `isConnected: false` (not green). Confirm by querying as a company that has never connected — it must not show another company's connection.
+3. **Cross-tenant isolation.** With Company A connected and Company B not, Company B's `/api/quickbooks/connection` returns disconnected; Company A's returns A's realm. Neither ever returns the other's row.
+4. **Sync works end-to-end.** After a successful reauthorize, `POST /api/quickbooks/sync-customers` (and a single estimate sync) succeeds — no 400.
+5. **Server-side log check.** On reauthorize, the callback log line `Saving QuickBooks integration with realmId: <realm> companyId: <numeric company id>` shows a real numeric company id, not null/empty.
+6. **Regression:** super_admin QB views and the Slice 1116 stale card still behave; the stale fingerprint (`company_id = realm_id`) is unaffected.
+
+---
+
+## Relevant files
+
+- `artifacts/api-server/src/routes/routes.ts` — add `resolveCompanyId`; swap the 8 QB route company-resolution sites listed above; the callback guard at 8688 then receives a real company.
+- `artifacts/api-server/src/storage.ts` — `getQuickBooksCustomerStatus` (3156) null-branch; `syncQuickBooksCustomers` argument.
