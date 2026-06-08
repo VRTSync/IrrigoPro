@@ -8982,37 +8982,42 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
     try {
       if (role === "super_admin") {
-        const rows = await db.execute<{ count: string }>(
-          sql`SELECT COUNT(*)::text AS count FROM quickbooks_integration WHERE company_id = realm_id`
+        const rows = await db.execute<{ realm_id: string }>(
+          sql`SELECT realm_id FROM quickbooks_integration WHERE company_id = realm_id`
         );
-        const count = parseInt(rows.rows[0]?.count ?? "0", 10);
-        res.json({ stale: count > 0, count });
+        const count = rows.rows.length;
+        // Return realmId when there is exactly one stale row so the UI can target it directly.
+        const realmId = count === 1 ? rows.rows[0].realm_id : undefined;
+        res.json({ stale: count > 0, count, ...(realmId !== undefined ? { realmId } : {}) });
         return;
       }
-      // Scoped roles: stale when this company has no properly-linked row AND
-      // there is exactly ONE stale row globally (company_id = realm_id).
-      // We require exactly one stale row so the attribution is unambiguous —
-      // multiple stale rows could belong to different companies and must be
-      // handled by super_admin. If staleCount > 1 we return stale: false so
-      // the repair card stays hidden for scoped users.
+      // Scoped roles: stale only when (a) this company has no properly-linked row AND
+      // (b) there is exactly ONE stale row globally. Multiple stale rows cannot be safely
+      // attributed to a single company without super_admin oversight — return stale: false
+      // in that case so the repair card stays hidden. The realmId of the lone stale row is
+      // returned so the frontend can pass it back as a precise targeted row selector.
       const sessionCompanyId = String(req.authenticatedUserCompanyId ?? "");
       if (!sessionCompanyId) {
         res.json({ stale: false, count: 0 });
         return;
       }
-      const [properRows, staleRows] = await Promise.all([
-        db.execute<{ count: string }>(
-          sql`SELECT COUNT(*)::text AS count FROM quickbooks_integration WHERE company_id = ${sessionCompanyId}`
-        ),
-        db.execute<{ count: string }>(
-          sql`SELECT COUNT(*)::text AS count FROM quickbooks_integration WHERE company_id = realm_id`
-        ),
-      ]);
+      const properRows = await db.execute<{ count: string }>(
+        sql`SELECT COUNT(*)::text AS count FROM quickbooks_integration WHERE company_id = ${sessionCompanyId}`
+      );
       const properCount = parseInt(properRows.rows[0]?.count ?? "0", 10);
-      const staleCount = parseInt(staleRows.rows[0]?.count ?? "0", 10);
-      // Only show repair card when: no proper connection AND exactly one stale row.
-      const stale = properCount === 0 && staleCount === 1;
-      res.json({ stale, count: stale ? staleCount : 0 });
+      if (properCount > 0) {
+        res.json({ stale: false, count: 0 });
+        return;
+      }
+      // Fetch at most 2 stale rows — if exactly 1 exists the attribution is unambiguous.
+      const staleRowResult = await db.execute<{ realm_id: string }>(
+        sql`SELECT realm_id FROM quickbooks_integration WHERE company_id = realm_id LIMIT 2`
+      );
+      if (staleRowResult.rows.length !== 1) {
+        res.json({ stale: false, count: staleRowResult.rows.length });
+        return;
+      }
+      res.json({ stale: true, count: 1, realmId: staleRowResult.rows[0].realm_id });
     } catch (err) {
       logger.error({ err }, "GET /api/quickbooks/connection/stale failed");
       res.status(500).json({ message: "Detection failed", error: String(err) });
@@ -9020,10 +9025,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // POST /api/quickbooks/connection/repair
-  // Self-service: patches the caller's own company's QB integration row when
-  // company_id = realm_id. Derives targetCompanyId from the session for scoped
-  // roles — they cannot repair a different company's row even if they pass a
-  // body. super_admin may pass targetCompanyId in the body to repair any company.
+  // Self-service repair for a stale QB row (company_id = realm_id).
+  //
+  // Scoped roles (company_admin, billing_manager):
+  //   - targetCompanyId is ALWAYS the session company; body value is ignored.
+  //   - Must supply body.realmId (returned by the detection endpoint) as a precise
+  //     row selector. UPDATE targets WHERE realm_id = ? AND company_id = realm_id
+  //     so only that exact stale row is touched — no global sweep.
+  //
+  // super_admin:
+  //   - body.targetCompanyId overrides session company (required when super_admin
+  //     has no session-company context).
+  //   - body.realmId → targeted single-row repair (preferred).
+  //   - body.realmIdOverrides → multi-row repair mapping { realmId: companyId }.
+  //   - No body keys → scan all stale rows, 409 if more than one without overrides.
   app.post("/api/quickbooks/connection/repair", requireAuthentication, async (req: any, res: Response) => {
     const role = req.authenticatedUserRole;
     if (!["super_admin", "company_admin", "billing_manager"].includes(role)) {
@@ -9031,9 +9046,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       return;
     }
     try {
+      // Resolve targetCompanyId from session or body.
       let targetCompanyId: string;
-      if (role === "super_admin" && req.body?.targetCompanyId) {
-        targetCompanyId = String(req.body.targetCompanyId);
+      if (role === "super_admin") {
+        const raw = req.body?.targetCompanyId ?? req.authenticatedUserCompanyId;
+        if (!raw) {
+          res.status(400).json({ message: "targetCompanyId is required (pass it in the request body or sign in with a company context)." });
+          return;
+        }
+        targetCompanyId = String(raw);
       } else {
         const sessionCompanyId = req.authenticatedUserCompanyId;
         if (!sessionCompanyId) {
@@ -9051,53 +9072,64 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
+      // Scoped roles: require realmId and use it as a targeted row selector.
+      // Never do a global sweep for scoped callers.
+      if (role !== "super_admin") {
+        const realmId = req.body?.realmId ? String(req.body.realmId) : null;
+        if (!realmId) {
+          res.status(400).json({ message: "realmId is required. Call the stale-detection endpoint first to obtain it." });
+          return;
+        }
+        const result = await db.execute(
+          sql`UPDATE quickbooks_integration SET company_id = ${targetCompanyId}, updated_at = NOW() WHERE realm_id = ${realmId} AND company_id = realm_id`
+        );
+        const rowsPatched = result.rowCount ?? 0;
+        logger.info({ rowsPatched, targetCompanyId, realmId }, "POST /api/quickbooks/connection/repair complete");
+        res.json({ ok: true, rowsPatched, details: rowsPatched > 0 ? [{ realmId, newCompanyId: targetCompanyId }] : [] });
+        return;
+      }
+
+      // super_admin: targeted repair when realmId supplied.
+      const realmId = req.body?.realmId ? String(req.body.realmId) : null;
+      if (realmId) {
+        const result = await db.execute(
+          sql`UPDATE quickbooks_integration SET company_id = ${targetCompanyId}, updated_at = NOW() WHERE realm_id = ${realmId} AND company_id = realm_id`
+        );
+        const rowsPatched = result.rowCount ?? 0;
+        logger.info({ rowsPatched, targetCompanyId, realmId }, "POST /api/quickbooks/connection/repair complete (super_admin targeted)");
+        res.json({ ok: true, rowsPatched, details: rowsPatched > 0 ? [{ realmId, newCompanyId: targetCompanyId }] : [] });
+        return;
+      }
+
+      // super_admin multi-row fallback: scan all stale rows, require realmIdOverrides
+      // when more than one exists (matches existing admin endpoint behavior).
+      const realmIdOverrides: Record<string, string> = req.body?.realmIdOverrides ?? {};
       const staleRows = await db.execute<{ id: number; realm_id: string; company_id: string }>(
         sql`SELECT id, realm_id, company_id FROM quickbooks_integration WHERE company_id = realm_id`
       );
-
       if (staleRows.rows.length === 0) {
         res.json({ ok: true, rowsPatched: 0, details: [] });
         return;
       }
-
-      // Scoped roles (company_admin, billing_manager): only allow repair when
-      // there is exactly ONE stale row — multiple stale rows can't be attributed
-      // to a single company without super_admin oversight.
-      if (role !== "super_admin" && staleRows.rows.length > 1) {
-        res.status(409).json({
-          message:
-            "Multiple stale QuickBooks rows detected. Contact your administrator to resolve this.",
-          staleCount: staleRows.rows.length,
-        });
-        return;
-      }
-
-      // super_admin multi-row guard (matching existing admin endpoint behavior):
-      // require explicit realmIdOverrides when multiple stale rows exist.
-      const realmIdOverrides: Record<string, string> = req.body?.realmIdOverrides ?? {};
-      if (role === "super_admin" && staleRows.rows.length > 1) {
+      if (staleRows.rows.length > 1) {
         const needOverrides = staleRows.rows.filter(r => !realmIdOverrides[r.realm_id]);
         if (needOverrides.length > 1) {
           res.status(409).json({
-            message: "Multiple stale rows found. Supply realmIdOverrides to assign each realm to its correct company.",
+            message: "Multiple stale rows found. Supply realmId for a targeted repair, or realmIdOverrides to assign each realm to its correct company.",
             staleRows: staleRows.rows.map(r => ({ id: r.id, realmId: r.realm_id, currentCompanyId: r.company_id })),
           });
           return;
         }
       }
-
       const details: Array<{ id: number; realmId: string; oldCompanyId: string; newCompanyId: string }> = [];
       for (const row of staleRows.rows) {
-        // super_admin may use per-row overrides; scoped roles always use their session company.
-        const assignedCompanyId =
-          role === "super_admin" ? (realmIdOverrides[row.realm_id] ?? targetCompanyId) : targetCompanyId;
+        const assignedCompanyId = realmIdOverrides[row.realm_id] ?? targetCompanyId;
         await db.execute(
           sql`UPDATE quickbooks_integration SET company_id = ${assignedCompanyId}, updated_at = NOW() WHERE id = ${row.id}`
         );
         details.push({ id: row.id, realmId: row.realm_id, oldCompanyId: row.company_id, newCompanyId: assignedCompanyId });
       }
-
-      logger.info({ rowsPatched: details.length, targetCompanyId, details }, "POST /api/quickbooks/connection/repair complete");
+      logger.info({ rowsPatched: details.length, targetCompanyId, details }, "POST /api/quickbooks/connection/repair complete (super_admin multi-row)");
       res.json({ ok: true, rowsPatched: details.length, details });
     } catch (err) {
       logger.error({ err }, "POST /api/quickbooks/connection/repair failed");

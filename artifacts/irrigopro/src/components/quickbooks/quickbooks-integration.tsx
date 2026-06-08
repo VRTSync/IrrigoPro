@@ -273,7 +273,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
 
   const repairAllowedRoles = ["super_admin", "company_admin", "billing_manager"];
 
-  const { data: staleStatus } = useQuery<{ stale: boolean; count: number }>({
+  const { data: staleStatus } = useQuery<{ stale: boolean; count: number; realmId?: string }>({
     queryKey: ["/api/quickbooks/connection/stale"],
     enabled: repairAllowedRoles.includes(userRole ?? ""),
     staleTime: 30_000,
@@ -282,8 +282,8 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   });
 
   const repairMutation = useMutation({
-    mutationFn: async () =>
-      await apiRequest("/api/quickbooks/connection/repair", "POST", {}),
+    mutationFn: async ({ realmId, targetCompanyId }: { realmId?: string; targetCompanyId?: string }) =>
+      await apiRequest("/api/quickbooks/connection/repair", "POST", { realmId, targetCompanyId }),
     onSuccess: (data: any) => {
       if (data.rowsPatched > 0) {
         toast({
@@ -693,7 +693,10 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                     variant="outline"
                     className="border-amber-400 text-amber-900 hover:bg-amber-100"
                     disabled={repairMutation.isPending}
-                    onClick={() => repairMutation.mutate()}
+                    onClick={() => repairMutation.mutate({
+                      realmId: staleStatus?.realmId,
+                      targetCompanyId: userRole === "super_admin" ? userCompanyId || undefined : undefined,
+                    })}
                   >
                     {repairMutation.isPending ? (
                       <><RefreshCw className="w-3 h-3 mr-1 animate-spin" />Repairing…</>
