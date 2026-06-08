@@ -8416,7 +8416,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   // QuickBooks integration routes
-  app.get("/api/quickbooks/auth", requireQuickBooksAccess, async (req, res) => {
+  app.get("/api/quickbooks/auth", requireAuthentication, requireQuickBooksAccess, async (req, res) => {
     try {
       // Check if QuickBooks credentials are available
       if (!process.env.QUICKBOOKS_CLIENT_ID || !process.env.QUICKBOOKS_CLIENT_SECRET) {
@@ -8440,6 +8440,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // USE_DB_OAUTH_STATE=1 → durable Postgres store (survives server restarts);
       // unset (default) → existing in-memory Map.
       const authCompanyId = resolveCompanyId(req);
+      if (!authCompanyId) {
+        res.status(400).json({ message: "Company context is required to initiate QuickBooks connection" });
+        return;
+      }
       if (process.env.USE_DB_OAUTH_STATE) {
         await storage.saveOauthState(state, 'quickbooks', authCompanyId, new Date(Date.now() + 10 * 60 * 1000));
       } else {
@@ -8677,7 +8681,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Clear QuickBooks connection (for reconnecting)
-  app.post("/api/quickbooks/disconnect", requireQuickBooksAccess, async (req, res) => {
+  app.post("/api/quickbooks/disconnect", requireAuthentication, requireQuickBooksAccess, async (req, res) => {
     try {
       const userCompanyId = resolveCompanyId(req);
       if (!userCompanyId) {
@@ -8701,7 +8705,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/quickbooks/connection", requireQuickBooksAccess, async (req, res) => {
+  app.get("/api/quickbooks/connection", requireAuthentication, requireQuickBooksAccess, async (req, res) => {
     try {
       // In a real implementation, you would check stored tokens and validate them
       // For now, check if we have the required environment variables
@@ -8812,7 +8816,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/quickbooks/sync-customers", requireQuickBooksAccess, async (req, res) => {
+  app.post("/api/quickbooks/sync-customers", requireAuthentication, requireQuickBooksAccess, async (req, res) => {
     try {
       
       const userCompanyId = resolveCompanyId(req);
@@ -8958,7 +8962,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/quickbooks/sync-estimate/:id", requireQuickBooksAccess, async (req, res) => {
+  app.post("/api/quickbooks/sync-estimate/:id", requireAuthentication, requireQuickBooksAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
