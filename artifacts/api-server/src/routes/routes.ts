@@ -87,6 +87,12 @@ function headerUserCompanyId(req: Request): string | undefined {
   const v = req.headers['x-user-company-id'];
   return typeof v === 'string' ? v : Array.isArray(v) ? v[0] : undefined;
 }
+function resolveCompanyId(req: Request): string | null {
+  const authed = (req as any).authenticatedUserCompanyId;
+  if (authed != null) return String(authed);
+  const hdr = headerUserCompanyId(req);
+  return hdr ? String(hdr) : null;
+}
 
 // ============================================================================
 // FIELD TECH PRICING VISIBILITY - Critical Security Feature
@@ -8586,7 +8592,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Store state + company ID for CSRF verification in the callback (10 min TTL).
       // USE_DB_OAUTH_STATE=1 → durable Postgres store (survives server restarts);
       // unset (default) → existing in-memory Map.
-      const authCompanyId = (headerUserCompanyId(req) as string) || null;
+      const authCompanyId = resolveCompanyId(req);
       if (process.env.USE_DB_OAUTH_STATE) {
         await storage.saveOauthState(state, 'quickbooks', authCompanyId, new Date(Date.now() + 10 * 60 * 1000));
       } else {
@@ -8826,7 +8832,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // Clear QuickBooks connection (for reconnecting)
   app.post("/api/quickbooks/disconnect", requireQuickBooksAccess, async (req, res) => {
     try {
-      const userCompanyId = (headerUserCompanyId(req) as string) || null;
+      const userCompanyId = resolveCompanyId(req);
       if (!userCompanyId) {
         res.status(400).json({ success: false, message: "Company context is required to disconnect QuickBooks." });
         return;
@@ -8947,12 +8953,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
       
-      // Get user's company ID from header (app uses localStorage/header auth, not server sessions)
-      const userCompanyId = (headerUserCompanyId(req) as string) || null;
+      const userCompanyId = resolveCompanyId(req);
       
       // Get from database for this user's company
       const qbStatus = await storage.getQuickBooksCustomerStatus(userCompanyId);
-      console.log("QuickBooks status for company", userCompanyId, ":", qbStatus);
       
       res.json(qbStatus);
     } catch (error) {
@@ -9021,16 +9025,23 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.get("/api/quickbooks/health", requireAuthentication, async (req, res) => {
     try {
-      const integrations = await storage.getQuickBooksAllIntegrations();
+      const companyId = resolveCompanyId(req);
+      if (!companyId) {
+        res.json({ connection: null });
+        return;
+      }
+      const integ = await storage.getQuickBooksIntegrationByCompanyId(companyId);
+      if (!integ) {
+        res.json({ connection: null });
+        return;
+      }
       const now = new Date();
-
-      const health = integrations.map((integ) => {
-        const isTokenValid = integ.expiresAt ? new Date(integ.expiresAt) > now : false;
-        const tokenAgeMs = integ.expiresAt
-          ? new Date(integ.expiresAt).getTime() - now.getTime()
-          : null;
-
-        return {
+      const isTokenValid = integ.expiresAt ? new Date(integ.expiresAt) > now : false;
+      const tokenAgeMs = integ.expiresAt
+        ? new Date(integ.expiresAt).getTime() - now.getTime()
+        : null;
+      res.json({
+        connection: {
           realmId: integ.realmId,
           companyId: integ.companyId,
           connectionStatus: integ.connectionStatus,
@@ -9044,10 +9055,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           reconnectRequired: integ.connectionStatus === 'reconnect_required',
           tokenEnvironment: integ.tokenEnvironment,
           updatedAt: integ.updatedAt,
-        };
+        },
+        checkedAt: now,
       });
-
-      res.json({ connections: health, count: health.length, checkedAt: now });
     } catch (error) {
       console.error("[QB health] Error fetching health data:", error);
       res.status(500).json({ message: "Failed to fetch QuickBooks connection health" });
@@ -9057,11 +9067,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/quickbooks/sync-customers", requireQuickBooksAccess, async (req, res) => {
     try {
       
-      // Get user's company ID from header (app uses localStorage/header auth, not server sessions)
-      const userCompanyId = (headerUserCompanyId(req) as string) || null;
+      const userCompanyId = resolveCompanyId(req);
+      if (!userCompanyId) {
+        res.status(400).json({ success: false, message: "Company context is required." });
+        return;
+      }
       
       // Get actual QuickBooks integration data - resolve realmId from companyId then fetch canonically
-      const qbLookup = userCompanyId ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyId) : null;
+      const qbLookup = await storage.getQuickBooksIntegrationByCompanyId(userCompanyId);
       const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
       console.log("QuickBooks integration data available:", !!integration);
       
@@ -9320,8 +9333,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       
       // Get QuickBooks integration data - resolve realmId from companyId then fetch canonically
-      const userCompanyId = (headerUserCompanyId(req) as string) || null;
-      const qbLookup = userCompanyId ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyId) : null;
+      const userCompanyId = resolveCompanyId(req);
+      if (!userCompanyId) {
+        res.status(400).json({ success: false, message: "Company context is required." });
+        return;
+      }
+      const qbLookup = await storage.getQuickBooksIntegrationByCompanyId(userCompanyId);
       const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
       if (!integration || !integration.accessToken) {
         res.status(400).json({ 

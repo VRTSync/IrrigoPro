@@ -3159,7 +3159,7 @@ export class DatabaseStorage implements IStorage {
     if (companyId) {
       integration = await db.select().from(quickbooksIntegration).where(eq(quickbooksIntegration.companyId, companyId)).limit(1);
     } else {
-      integration = await db.select().from(quickbooksIntegration).limit(1);
+      integration = [];
     }
     
     const allCustomers = await db.select().from(customers);
@@ -3193,9 +3193,9 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async syncQuickBooksCustomers(): Promise<{ customersAdded: number; customersUpdated: number }> {
+  async syncQuickBooksCustomers(companyId?: string | null): Promise<{ customersAdded: number; customersUpdated: number }> {
     // Check if connected to QuickBooks
-    const status = await this.getQuickBooksCustomerStatus();
+    const status = await this.getQuickBooksCustomerStatus(companyId);
     if (!status.isConnected) {
       throw new Error("Not connected to QuickBooks. Please connect first.");
     }
