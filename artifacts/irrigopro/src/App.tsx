@@ -1,8 +1,8 @@
 import { Switch, Route, useLocation, Router as WouterRouter } from "wouter";
-import { useState, useEffect, lazy, Suspense, type ComponentType } from "react";
+import { useEffect, lazy, Suspense, type ComponentType } from "react";
 import { queryClient } from "./lib/queryClient";
-import { safeGet, safeRemove } from "@/utils/safeStorage";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { useAuth } from "@/lib/auth-context";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Navigation from "@/components/layout/navigation";
@@ -132,94 +132,20 @@ function RouteSuspenseFallback() {
   );
 }
 
-interface User {
-  id: number;
-  username: string;
-  name: string;
-  email: string;
-  role: "super_admin" | "company_admin" | "irrigation_manager" | "field_tech" | "billing_manager";
-  companyId?: number | null;
-  isActive: boolean;
-}
-
-
-
-// Read and parse the saved user from localStorage synchronously.
-// Returns null on any failure (missing key, bad JSON, storage error).
-function readUserFromStorage(): User | null {
-  try {
-    const saved = safeGet("user");
-    if (saved) return JSON.parse(saved) as User;
-  } catch (e) {
-    console.error("[boot] error parsing saved user:", e);
-    try { safeRemove("user"); } catch { /* ignore */ }
-  }
-  return null;
-}
-
 function Router() {
-  // Lazy initialiser: reads localStorage synchronously so the very first
-  // render already knows the correct role. Eliminates the stale-null window
-  // that caused super_admin to land on AdminDashboard when the page was
-  // restored from BFCache.
-  const [user, setUser] = useState<User | null>(readUserFromStorage);
-
-  // isLoading is true only when no saved user was found (fresh first visit /
-  // after logout). When a user IS found synchronously we already know what
-  // to render, so we skip the spinner entirely.
-  const [isLoading, setIsLoading] = useState<boolean>(() => readUserFromStorage() === null);
+  // User state comes from the AuthProvider (wraps the app in main.tsx).
+  // The provider reads localStorage synchronously so the very first render
+  // already knows the correct role — no stale-null window.
+  const { user, isLoading } = useAuth();
   const [currentPath] = useLocation();
 
   useEffect(() => {
-    let cancelled = false;
-
     // Run cache cleanup on mount.
     try {
       clearStaleCache();
     } catch (cacheErr) {
       console.warn("[boot] clearStaleCache failed:", cacheErr);
     }
-
-    // Boot timeout: only relevant on first visit (no saved user).
-    // Prevents a permanent spinner if something unexpectedly hangs.
-    let timeoutId: number | undefined;
-    if (isLoading) {
-      timeoutId = window.setTimeout(() => {
-        if (cancelled) return;
-        console.warn("[boot] session refresh timed out — falling through to login");
-        setIsLoading(false);
-      }, 4000);
-
-      // No async work needed — resolve immediately so the login page
-      // appears without waiting for the full 4 s safety window.
-      if (!cancelled) {
-        window.clearTimeout(timeoutId);
-        timeoutId = undefined;
-        setIsLoading(false);
-      }
-    }
-
-    // BFCache guard: when the browser restores this page from the
-    // Back-Forward Cache (event.persisted === true), re-read localStorage
-    // and update state so any post-login user change is reflected without
-    // requiring a hard refresh.
-    const handlePageShow = (event: PageTransitionEvent) => {
-      if (!event.persisted) return;
-      try {
-        const fresh = readUserFromStorage();
-        setUser(fresh);
-      } catch (e) {
-        console.error("[boot] BFCache re-read failed:", e);
-      }
-    };
-
-    window.addEventListener("pageshow", handlePageShow);
-
-    return () => {
-      cancelled = true;
-      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
-      window.removeEventListener("pageshow", handlePageShow);
-    };
   }, []);
 
   if (isLoading) {

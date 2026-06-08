@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useArrayQuery } from "@/lib/queryClient";
-import { safeGet } from "@/utils/safeStorage";
+import { useAuth } from "@/lib/auth-context";
 import { isOpen, lifecycleOf } from "@workspace/shared";
 
 import { HeaderStrip, type Health } from "@/components/admin-dashboard/header-strip";
@@ -16,7 +16,6 @@ import {
   Users, UserCheck, Wrench, FileText, Receipt, DollarSign,
 } from "lucide-react";
 
-interface User { id: number; companyId?: number; name: string; role: string; }
 interface DashboardStats { activeUsers: number; openWorkOrders: number; activeCustomers: number; }
 
 interface BillingPreviewRow {
@@ -92,13 +91,7 @@ function toNumber(x: unknown): number {
 }
 
 export default function AdminDashboard() {
-  const [user, setUser] = useState<User | null>(null);
-  useEffect(() => {
-    const saved = safeGet("user");
-    if (saved) {
-      try { setUser(JSON.parse(saved)); } catch { /* ignore */ }
-    }
-  }, []);
+  const { user } = useAuth();
 
   // Each card has its own query so a single failure does not block the rest.
   const statsQ = useQuery<DashboardStats>({

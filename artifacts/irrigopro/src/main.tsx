@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import { AppErrorBoundary } from "./components/error-boundary";
+import { AuthProvider } from "./lib/auth-context";
 
 // Render React first. Anything that touches IndexedDB, the service worker,
 // notifications, or the network must NOT run at module scope — a thrown
@@ -15,7 +16,9 @@ function mount() {
   try {
     createRoot(root).render(
       <AppErrorBoundary>
-        <App />
+        <AuthProvider>
+          <App />
+        </AuthProvider>
       </AppErrorBoundary>,
     );
   } catch (err) {

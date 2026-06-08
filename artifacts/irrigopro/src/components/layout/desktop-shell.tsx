@@ -54,6 +54,7 @@ import Navigation from "@/components/layout/navigation";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 import { safeGet, safeSet } from "@/utils/safeStorage";
+import { useAuth } from "@/lib/auth-context";
 import irrigoProLogo from "@assets/IrrigoPro_2026-03_1778193170303.png";
 import irrigoProMark from "@assets/IrrigoPro_2026-05_1778193170303.png";
 import { resolveRouteMeta } from "./route-meta";
@@ -193,14 +194,17 @@ export function DesktopShell({ navConfig, children }: DesktopShellProps) {
     safeSet(SIDEBAR_STORAGE_KEY, next ? "true" : "false");
   };
 
-  const user: SessionUser = useMemo(() => {
-    try {
-      return JSON.parse(safeGet("user") || "{}");
-    } catch {
-      return {};
-    }
-  }, []);
-  const userRole = user.role;
+  const { user: authUser } = useAuth();
+  const user: SessionUser = useMemo<SessionUser>(
+    () => ({
+      id: authUser?.id,
+      name: authUser?.name,
+      email: authUser?.email,
+      role: authUser?.role,
+    }),
+    [authUser],
+  );
+  const userRole = authUser?.role;
   const enableBadges =
     userRole === "company_admin" ||
     userRole === "billing_manager" ||

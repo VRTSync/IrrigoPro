@@ -66,7 +66,7 @@ import {
 } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { FinancialPulseWidget } from "@/components/financial-pulse/financial-pulse-widget";
-import { getCurrentUser } from "@/lib/impersonation";
+import { useAuth } from "@/lib/auth-context";
 
 type QueueType =
   | "all"
@@ -428,7 +428,8 @@ function ShortcutsCheatSheet({ open, onClose }: { open: boolean; onClose: () => 
 export default function BillingWorkspacePage() {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const userRole = getCurrentUser()?.role ?? "";
+  const { user } = useAuth();
+  const userRole = user?.role ?? "";
 
   // Seed initial filter state from URL search params so that drill-down
   // links from Command Center / Customer Billing land with the correct

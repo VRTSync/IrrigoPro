@@ -1,5 +1,5 @@
-import { safeGet } from "@/utils/safeStorage";
 import { useState } from "react";
+import { useAuth } from "@/lib/auth-context";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,19 +14,7 @@ import { BillingSheetWizard } from "@/components/billing/billing-sheet-wizard";
 
 export default function FieldTechDashboard() {
   const [showBillingModal, setShowBillingModal] = useState(false);
-  
-  // Get current user from localStorage
-  const getCurrentUser = () => {
-    const savedUser = safeGet("user");
-    if (!savedUser) return null;
-    try {
-      return JSON.parse(savedUser);
-    } catch {
-      return null;
-    }
-  };
-
-  const currentUser = getCurrentUser();
+  const { user: currentUser } = useAuth();
 
   // Get assigned work orders for this technician
   const { data: workOrders = [] } = useArrayQuery<WorkOrder>({
