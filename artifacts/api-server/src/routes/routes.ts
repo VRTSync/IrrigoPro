@@ -8895,23 +8895,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`Found ${qbCustomers.length} active customers in QuickBooks`);
       
-      const quickBooksCustomers = (qbCustomers as Record<string, unknown>[]).map((customer: Record<string, unknown>) => ({
-        qb_id: customer.Id as string,
-        name: (String(customer.DisplayName || '').trim() || String(customer.CompanyName || '').trim() || String(customer.Name || '').trim()),
-        email: ((customer.PrimaryEmailAddr as Record<string, string> | undefined)?.Address || ''),
-        phone: ((customer.PrimaryPhone as Record<string, string> | undefined)?.FreeFormNumber || ''),
-        address: customer.BillAddr ? 
-          `${(customer.BillAddr as Record<string, string>).Line1 || ''} ${(customer.BillAddr as Record<string, string>).City || ''} ${(customer.BillAddr as Record<string, string>).CountrySubDivisionCode || ''} ${(customer.BillAddr as Record<string, string>).PostalCode || ''}`.trim() 
-          : ''
-      }));
+      const quickBooksCustomers = (qbCustomers as Record<string, unknown>[]).map((customer: Record<string, unknown>) => {
+        const billAddr = customer.BillAddr as Record<string, string> | undefined;
+        const line1 = billAddr?.Line1 || '';
+        const line2 = billAddr?.Line2 || '';
+        const line3 = billAddr?.Line3 || '';
+        const streetParts = [line1, line2, line3].filter(Boolean);
+        const street = streetParts.join(', ');
+        const city = billAddr?.City || '';
+        const state = billAddr?.CountrySubDivisionCode || '';
+        const zip = billAddr?.PostalCode || '';
+        const country = billAddr?.Country || '';
+        const addressParts = [street, city, state, zip].filter(Boolean);
+        return {
+          qb_id: customer.Id as string,
+          name: (String(customer.DisplayName || '').trim() || String(customer.CompanyName || '').trim() || String(customer.Name || '').trim()),
+          email: ((customer.PrimaryEmailAddr as Record<string, string> | undefined)?.Address || ''),
+          phone: ((customer.PrimaryPhone as Record<string, string> | undefined)?.FreeFormNumber || ''),
+          address: addressParts.join(' ').trim(),
+          street,
+          city,
+          state,
+          zip,
+          country,
+        };
+      });
+
+      // Returns only the subset of fields that QB actually has a non-empty value for.
+      // email is NOT NULL in the schema so it is only included when non-empty.
+      function qbFields(qb: typeof quickBooksCustomers[number]): Record<string, string> {
+        const patch: Record<string, string> = {};
+        if (qb.name) patch.name = qb.name;
+        if (qb.email) patch.email = qb.email;
+        if (qb.phone) patch.phone = qb.phone;
+        if (qb.address) patch.address = qb.address;
+        if (qb.street) patch.street = qb.street;
+        if (qb.city) patch.city = qb.city;
+        if (qb.state) patch.state = qb.state;
+        if (qb.zip) patch.zip = qb.zip;
+        if (qb.country) patch.country = qb.country;
+        return patch;
+      }
       
       console.log(`After mapping: ${quickBooksCustomers.length} customers to process`);
-      console.log('Sample customer data:', quickBooksCustomers[0]);
       
       const validCustomers = quickBooksCustomers.filter(customer => customer.name && customer.name.trim() !== '');
 
       let customersAdded = 0;
-      let customersAlreadySynced = 0;
+      let customersUpdated = 0;
+      let customersUnchanged = 0;
       const results = [];
 
       console.log(`Processing ${validCustomers.length} valid customers`);
@@ -8931,6 +8963,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
               email: qbCustomer.email,
               phone: qbCustomer.phone || '',
               address: qbCustomer.address || '',
+              street: qbCustomer.street || null,
+              city: qbCustomer.city || null,
+              state: qbCustomer.state || null,
+              zip: qbCustomer.zip || null,
+              country: qbCustomer.country || null,
               quickbooksId: qbCustomer.qb_id,
               companyId: companyId
             });
@@ -8938,8 +8975,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
             customersAdded++;
             results.push({ action: 'created', customer: newCustomer });
           } else {
-            customersAlreadySynced++;
-            results.push({ action: 'exists', customer: existingCustomer });
+            // Cross-company safety: skip if the matched QB ID belongs to a different company
+            if (String(existingCustomer.companyId) !== String(userCompanyId)) {
+              results.push({ action: 'skipped_other_company', customer: { qb_id: qbCustomer.qb_id, name: qbCustomer.name } });
+              continue;
+            }
+
+            // Non-destructive update: only write fields QB actually provides
+            const patch = qbFields(qbCustomer);
+
+            // Change detection: skip the DB write if nothing actually changed
+            const existingAny = existingCustomer as Record<string, unknown>;
+            const changed = Object.keys(patch).some(
+              k => patch[k] !== (existingAny[k] ?? '')
+            );
+
+            if (!changed) {
+              customersUnchanged++;
+              results.push({ action: 'unchanged', customer: existingCustomer });
+            } else {
+              const updatedCustomer = await storage.updateCustomer(existingCustomer.id, patch);
+              customersUpdated++;
+              results.push({ action: 'updated', customer: updatedCustomer ?? existingCustomer });
+            }
           }
         } catch (error) {
           console.error(`Error syncing customer ${qbCustomer.name}:`, error);
@@ -8950,10 +9008,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         success: true,
         customersAdded,
-        customersAlreadySynced,
+        customersUpdated,
+        customersUnchanged,
         totalCustomers: quickBooksCustomers.length,
         results,
-        message: `${customersAdded} added, ${customersAlreadySynced} already synced`
+        message: `${customersAdded} added, ${customersUpdated} updated, ${customersUnchanged} unchanged`
       });
 
     } catch (error) {
