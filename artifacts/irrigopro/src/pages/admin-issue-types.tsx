@@ -18,7 +18,7 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { Loader2, Plus, ArrowUp, ArrowDown, Save, RotateCcw, Wrench } from "lucide-react";
+import { Loader2, Plus, ArrowUp, ArrowDown, Save, RotateCcw, Wrench, RefreshCw } from "lucide-react";
 import type { IssueTypeConfig } from "@workspace/db/schema";
 
 type GroupValue = "quick_fix" | "advanced" | "zone_issue";
@@ -140,6 +140,28 @@ export default function AdminIssueTypesPage() {
     },
   });
 
+  const recalcMut = useMutation({
+    mutationFn: async () => {
+      await apiRequest("/api/admin/seed-issue-type-configs", "POST");
+      return apiRequest("/api/admin/backfill/wcb-zone-labor", "POST") as Promise<{ ok: boolean; zonesUpdated: number; wcbsUpdated: number }>;
+    },
+    onSuccess: (result) => {
+      const r = result as { ok: boolean; zonesUpdated: number; wcbsUpdated: number };
+      toast({
+        title: "Recalculation complete",
+        description: `${r.zonesUpdated} zone${r.zonesUpdated !== 1 ? "s" : ""} updated, ${r.wcbsUpdated} uninvoiced WCB${r.wcbsUpdated !== 1 ? "s" : ""} repriced.`,
+      });
+      queryClient.invalidateQueries({ queryKey });
+    },
+    onError: (err) => {
+      toast({
+        title: "Recalculation failed",
+        description: parseApiError(err, "Could not recalculate WCB zone labor."),
+        variant: "destructive",
+      });
+    },
+  });
+
   const moveRow = (idx: number, dir: -1 | 1) => {
     if (!orderedIds) return;
     const target = idx + dir;
@@ -213,6 +235,22 @@ export default function AdminIssueTypesPage() {
                 ) : (<><Save className="h-3 w-3 mr-1" /> Save order</>)}
               </Button>
             </>
+          )}
+          {userRole === "super_admin" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => recalcMut.mutate()}
+              disabled={recalcMut.isPending}
+              title="Seed default configs (if missing) then recompute zone repair labor and reprice all uninvoiced WCBs"
+              data-testid="button-recalc-wcb-labor"
+            >
+              {recalcMut.isPending ? (
+                <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Recalculating…</>
+              ) : (
+                <><RefreshCw className="h-3 w-3 mr-1" /> Recalculate existing WCBs</>
+              )}
+            </Button>
           )}
           <Button size="sm" onClick={() => setShowAdd(true)} data-testid="button-add-issue-type">
             <Plus className="h-3 w-3 mr-1" /> Add issue type

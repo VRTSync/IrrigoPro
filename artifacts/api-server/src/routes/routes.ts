@@ -7297,6 +7297,137 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Seed failed", error: String(err) });
     }
   });
+  // WC Labor — one-shot backfill: re-compute repairLaborHours for every
+  // non-manually-set zone then re-derive totals on uninvoiced WCBs.
+  // Safe to re-run (idempotent). Only touches rows where
+  //   repair_labor_manually_set = false  AND  invoice_id IS NULL on the WCB.
+  app.post("/api/admin/backfill/wcb-zone-labor", requireAuthentication, async (req: any, res: Response) => {
+    if (req.authenticatedUserRole !== "super_admin") {
+      res.status(403).json({ message: "Super admin access required" });
+      return;
+    }
+    try {
+      function resolveKey(raw: string): string {
+        return raw.trim().toLowerCase().replace(/[\s-]+/g, "_");
+      }
+
+      // ── Step 1: recompute zone repair labor ─────────────────────────────
+      const configRows = await db.execute<{ company_id: number; issue_type: string; default_labor_hours: string }>(
+        sql`SELECT company_id, issue_type, default_labor_hours FROM issue_type_configs`
+      );
+      const catalog = new Map<number, Map<string, number>>();
+      for (const row of configRows.rows) {
+        if (!catalog.has(row.company_id)) catalog.set(row.company_id, new Map());
+        catalog.get(row.company_id)!.set(resolveKey(row.issue_type), parseFloat(String(row.default_labor_hours)) || 0);
+      }
+
+      const zoneRows = await db.execute<{ id: number; wet_check_id: number; repair_labor_hours: string }>(
+        sql`SELECT id, wet_check_id, repair_labor_hours FROM wet_check_zone_records WHERE repair_labor_manually_set = false`
+      );
+
+      const wcIds = [...new Set(zoneRows.rows.map((z) => z.wet_check_id))];
+      const wcRows = wcIds.length > 0
+        ? await db.execute<{ id: number; company_id: number; total_labor_hours: string }>(
+            sql`SELECT id, company_id, total_labor_hours FROM wet_checks WHERE id = ANY(${sql.param(wcIds)}::int[])`
+          )
+        : { rows: [] };
+      const wcMap = new Map<number, { companyId: number; baseLaborHours: number }>();
+      for (const w of wcRows.rows) {
+        wcMap.set(w.id, { companyId: w.company_id, baseLaborHours: parseFloat(String(w.total_labor_hours ?? "0")) || 0 });
+      }
+
+      const findingRows = await db.execute<{ zone_record_id: number; issue_type: string; quantity: number }>(
+        sql`SELECT zone_record_id, issue_type, quantity FROM wet_check_findings`
+      );
+      const findingsByZone = new Map<number, Array<{ issueType: string; quantity: number }>>();
+      for (const f of findingRows.rows) {
+        if (!findingsByZone.has(f.zone_record_id)) findingsByZone.set(f.zone_record_id, []);
+        findingsByZone.get(f.zone_record_id)!.push({ issueType: f.issue_type, quantity: f.quantity });
+      }
+
+      let zonesUpdated = 0;
+      const changedZoneIds = new Set<number>();
+
+      for (const zone of zoneRows.rows) {
+        const wc = wcMap.get(zone.wet_check_id);
+        if (!wc) continue;
+        const companyCatalog = catalog.get(wc.companyId) ?? new Map();
+        const findings = findingsByZone.get(zone.id) ?? [];
+        let totalHours = 0;
+        for (const f of findings) {
+          const perUnit = companyCatalog.get(resolveKey(f.issueType)) ?? 0;
+          const qty = isNaN(f.quantity) || f.quantity < 1 ? 1 : f.quantity;
+          totalHours += perUnit * qty;
+        }
+        const newVal = totalHours.toFixed(2);
+        const oldVal = parseFloat(String(zone.repair_labor_hours)).toFixed(2);
+        if (newVal === oldVal) continue;
+        await db.execute(
+          sql`UPDATE wet_check_zone_records SET repair_labor_hours = ${newVal} WHERE id = ${zone.id}`
+        );
+        zonesUpdated++;
+        changedZoneIds.add(zone.id);
+      }
+
+      // ── Step 2: recompute WCB totals for uninvoiced WCBs ────────────────
+      let wcbsUpdated = 0;
+      if (changedZoneIds.size > 0) {
+        const affectedWcbs = await db.execute<{
+          wcb_id: number; wet_check_id: number; parts_subtotal: string;
+          labor_rate: string; applied_labor_rate: string | null;
+        }>(
+          sql`
+            SELECT DISTINCT wcb.id AS wcb_id, wcb.wet_check_id, wcb.parts_subtotal,
+                            wcb.labor_rate, wcb.applied_labor_rate
+            FROM wet_check_billings wcb
+            JOIN wet_check_findings wf ON wf.wet_check_billing_id = wcb.id
+            WHERE wcb.invoice_id IS NULL
+              AND wf.zone_record_id = ANY(${sql.param([...changedZoneIds])}::int[])
+          `
+        );
+
+        const wcIds2 = [...new Set(affectedWcbs.rows.map((r) => r.wet_check_id))];
+        const wcRows2 = wcIds2.length > 0
+          ? await db.execute<{ id: number; total_labor_hours: string }>(
+              sql`SELECT id, total_labor_hours FROM wet_checks WHERE id = ANY(${sql.param(wcIds2)}::int[])`
+            )
+          : { rows: [] };
+        const wcBaseLaborMap = new Map<number, number>();
+        for (const w of wcRows2.rows) wcBaseLaborMap.set(w.id, parseFloat(String(w.total_labor_hours ?? "0")) || 0);
+
+        for (const wcb of affectedWcbs.rows) {
+          const zoneResult = await db.execute<{ zone_record_id: number }>(
+            sql`SELECT DISTINCT zone_record_id FROM wet_check_findings WHERE wet_check_billing_id = ${wcb.wcb_id} AND zone_record_id IS NOT NULL`
+          );
+          const zoneIds = zoneResult.rows.map((r) => r.zone_record_id);
+          let zoneRepairHours = 0;
+          if (zoneIds.length > 0) {
+            const zoneHrsResult = await db.execute<{ repair_labor_hours: string }>(
+              sql`SELECT repair_labor_hours FROM wet_check_zone_records WHERE id = ANY(${sql.param(zoneIds)}::int[])`
+            );
+            for (const z of zoneHrsResult.rows) zoneRepairHours += parseFloat(String(z.repair_labor_hours ?? "0")) || 0;
+          }
+          const baseLaborHours = wcBaseLaborMap.get(wcb.wet_check_id) ?? 0;
+          const totalHours = baseLaborHours + zoneRepairHours;
+          const rate = parseFloat(String(wcb.applied_labor_rate ?? wcb.labor_rate)) || 0;
+          const partsSubtotal = parseFloat(String(wcb.parts_subtotal ?? "0")) || 0;
+          const laborSubtotal = totalHours * rate;
+          const totalAmount = partsSubtotal + laborSubtotal;
+          await db.execute(
+            sql`UPDATE wet_check_billings SET total_hours = ${totalHours.toFixed(2)}, labor_subtotal = ${laborSubtotal.toFixed(2)}, total_amount = ${totalAmount.toFixed(2)}, updated_at = NOW() WHERE id = ${wcb.wcb_id}`
+          );
+          wcbsUpdated++;
+        }
+      }
+
+      logger.info({ zonesUpdated, wcbsUpdated }, "POST /api/admin/backfill/wcb-zone-labor complete");
+      res.json({ ok: true, zonesUpdated, wcbsUpdated });
+    } catch (err) {
+      logger.error({ err }, "POST /api/admin/backfill/wcb-zone-labor failed");
+      res.status(500).json({ message: "Backfill failed", error: String(err) });
+    }
+  });
+
   // WC Labor Slice 3 — WC labor backfill (start / status / cancel / reset).
   registerWcLaborBackfillRoutes(app, requireAuthentication);
   // Task #760 — Temporary one-time cleanup: delete test invoice #71256.
