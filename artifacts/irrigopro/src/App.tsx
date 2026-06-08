@@ -12,7 +12,6 @@ import { clearStaleCache } from "@/utils/clearStaleCache";
 import Login from "@/pages/login";
 import NotFound from "@/pages/not-found";
 import FieldTechDashboard from "@/pages/field-tech-dashboard";
-import ManagerDashboard from "@/pages/manager-dashboard";
 import AdminDashboard from "@/pages/admin-dashboard";
 import BillingWorkspace from "@/pages/billing-workspace";
 
@@ -26,7 +25,6 @@ const Dashboard = lazyPage(() => import("@/pages/dashboard"));
 const ManagerWorkspace = lazyPage(() => import("@/pages/manager-workspace"));
 const Estimates = lazyPage(() => import("@/pages/estimates"));
 const PartsCatalog = lazyPage(() => import("@/pages/parts-catalog"));
-const PartsList = lazyPage(() => import("@/pages/parts-list"));
 const Customers = lazyPage(() => import("@/pages/customers"));
 const FieldTech = lazyPage(() => import("@/pages/field-tech"));
 const WorkOrders = lazyPage(() => import("@/pages/work-orders"));
@@ -50,7 +48,6 @@ const SystemUserManagement = lazyPage(() => import("@/pages/system-user-manageme
 const CompanyUserManagement = lazyPage(() => import("@/pages/company-user-management"));
 const CompanyProfile = lazyPage(() => import("@/pages/company-profile"));
 const UserProfile = lazyPage(() => import("@/pages/user-profile"));
-const UserManager = lazyPage(() => import("@/pages/UserManager"));
 const LicenseAgreement = lazyPage(() => import("@/pages/license-agreement"));
 const PrivacyPolicy = lazyPage(() => import("@/pages/privacy-policy"));
 const SwitchUser = lazyPage(() => import("@/pages/switch-user"));
@@ -112,6 +109,12 @@ function RedirectToWetChecks() {
 function RedirectToAppHealth() {
   const [, navigate] = useLocation();
   useEffect(() => { navigate("/super-admin/app-health", { replace: true }); }, [navigate]);
+  return null;
+}
+
+function RedirectToManagerWorkspace() {
+  const [, navigate] = useLocation();
+  useEffect(() => { navigate("/manager-workspace", { replace: true }); }, [navigate]);
   return null;
 }
 
@@ -298,6 +301,7 @@ function Router() {
                   <Route path="/wet-checks" component={WetCustomerPickerPage} />
                   <Route path="/wet-checks/c/:customerId/new" component={NewWetCheckPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksRoutingPage} />
+                  {/* Both /review and /summary intentionally load the same component for field techs — diverges from manager blocks where /review uses ManagerWetCheckDetailPage */}
                   <Route path="/wet-checks/:id/review" component={WetCheckInspectionSummaryPage} />
                   <Route path="/wet-checks/:id/summary" component={WetCheckInspectionSummaryPage} />
                   <Route path="/wet-checks/:id" component={WetChecksRoutingPage} />
@@ -335,11 +339,10 @@ function Router() {
                 <Switch>
                   <Route path="/" component={ManagerWorkspace} />
                   <Route path="/manager-workspace" component={ManagerWorkspace} />
-                  <Route path="/manager-dashboard" component={ManagerDashboard} />
-                  <Route path="/manager" component={ManagerDashboard} />
+                  <Route path="/manager-dashboard" component={RedirectToManagerWorkspace} />
+                  <Route path="/manager" component={RedirectToManagerWorkspace} />
                   <Route path="/estimates" component={Estimates} />
                   <Route path="/parts" component={PartsCatalog} />
-                  <Route path="/parts-list" component={PartsList} />
                   <Route path="/parts-settings" component={PartsSettings} />
                   <Route path="/work-orders" component={WorkOrders} />
                   <Route path="/customers" component={Customers} />
@@ -485,7 +488,7 @@ function Router() {
                   <Route path="/quickbooks" component={QuickBooksPage} />
                   <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
                   <Route path="/financial-pulse" component={FinancialPulsePage} />
-                  <Route path="/user-manager" component={UserManager} />
+                  <Route path="/user-manager" component={SystemUserManagement} />
                   <Route path="/switch-user" component={SwitchUser} />
                   <Route path="/user-profile" component={UserProfile} />
                   <Route path="/license-agreement" component={LicenseAgreement} />
@@ -541,7 +544,7 @@ function Router() {
                 <Route path="/wet-checks/c/:clientId" component={WetChecksRoutingPage} />
                 <Route path="/wet-checks/:id/summary" component={WetCheckInspectionSummaryPage} />
                 <Route path="/wet-checks/:id" component={WetChecksRoutingPage} />
-                <Route path="/user-manager" component={UserManager} />
+                <Route path="/user-manager" component={SystemUserManagement} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/privacy-policy" component={PrivacyPolicy} />

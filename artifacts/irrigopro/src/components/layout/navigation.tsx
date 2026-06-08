@@ -208,7 +208,6 @@ export default function Navigation() {
             isDropdown: true,
             dropdownItems: [
               { path: "/parts", label: "Parts Catalog", icon: Package },
-              { path: "/parts-list", label: "Parts List", icon: Package },
               { path: "/parts-settings", label: "Parts Settings", icon: Settings },
             ]
           },
