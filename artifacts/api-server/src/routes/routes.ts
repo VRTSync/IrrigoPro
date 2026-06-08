@@ -8989,9 +8989,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.json({ stale: count > 0, count });
         return;
       }
-      // Scoped roles: stale when their company has no properly-linked row AND
-      // there is at least one stale row (company_id = realm_id). This means the
-      // orphan stale row is most likely theirs.
+      // Scoped roles: stale when this company has no properly-linked row AND
+      // there is exactly ONE stale row globally (company_id = realm_id).
+      // We require exactly one stale row so the attribution is unambiguous —
+      // multiple stale rows could belong to different companies and must be
+      // handled by super_admin. If staleCount > 1 we return stale: false so
+      // the repair card stays hidden for scoped users.
       const sessionCompanyId = String(req.authenticatedUserCompanyId ?? "");
       if (!sessionCompanyId) {
         res.json({ stale: false, count: 0 });
@@ -9007,7 +9010,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       ]);
       const properCount = parseInt(properRows.rows[0]?.count ?? "0", 10);
       const staleCount = parseInt(staleRows.rows[0]?.count ?? "0", 10);
-      const stale = properCount === 0 && staleCount > 0;
+      // Only show repair card when: no proper connection AND exactly one stale row.
+      const stale = properCount === 0 && staleCount === 1;
       res.json({ stale, count: stale ? staleCount : 0 });
     } catch (err) {
       logger.error({ err }, "GET /api/quickbooks/connection/stale failed");
@@ -9056,12 +9060,41 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
+      // Scoped roles (company_admin, billing_manager): only allow repair when
+      // there is exactly ONE stale row — multiple stale rows can't be attributed
+      // to a single company without super_admin oversight.
+      if (role !== "super_admin" && staleRows.rows.length > 1) {
+        res.status(409).json({
+          message:
+            "Multiple stale QuickBooks rows detected. Contact your administrator to resolve this.",
+          staleCount: staleRows.rows.length,
+        });
+        return;
+      }
+
+      // super_admin multi-row guard (matching existing admin endpoint behavior):
+      // require explicit realmIdOverrides when multiple stale rows exist.
+      const realmIdOverrides: Record<string, string> = req.body?.realmIdOverrides ?? {};
+      if (role === "super_admin" && staleRows.rows.length > 1) {
+        const needOverrides = staleRows.rows.filter(r => !realmIdOverrides[r.realm_id]);
+        if (needOverrides.length > 1) {
+          res.status(409).json({
+            message: "Multiple stale rows found. Supply realmIdOverrides to assign each realm to its correct company.",
+            staleRows: staleRows.rows.map(r => ({ id: r.id, realmId: r.realm_id, currentCompanyId: r.company_id })),
+          });
+          return;
+        }
+      }
+
       const details: Array<{ id: number; realmId: string; oldCompanyId: string; newCompanyId: string }> = [];
       for (const row of staleRows.rows) {
+        // super_admin may use per-row overrides; scoped roles always use their session company.
+        const assignedCompanyId =
+          role === "super_admin" ? (realmIdOverrides[row.realm_id] ?? targetCompanyId) : targetCompanyId;
         await db.execute(
-          sql`UPDATE quickbooks_integration SET company_id = ${targetCompanyId}, updated_at = NOW() WHERE id = ${row.id}`
+          sql`UPDATE quickbooks_integration SET company_id = ${assignedCompanyId}, updated_at = NOW() WHERE id = ${row.id}`
         );
-        details.push({ id: row.id, realmId: row.realm_id, oldCompanyId: row.company_id, newCompanyId: targetCompanyId });
+        details.push({ id: row.id, realmId: row.realm_id, oldCompanyId: row.company_id, newCompanyId: assignedCompanyId });
       }
 
       logger.info({ rowsPatched: details.length, targetCompanyId, details }, "POST /api/quickbooks/connection/repair complete");
