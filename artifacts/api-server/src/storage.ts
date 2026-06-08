@@ -3158,10 +3158,6 @@ export class DatabaseStorage implements IStorage {
     let integration: (typeof quickbooksIntegration.$inferSelect)[];
     if (companyId) {
       integration = await db.select().from(quickbooksIntegration).where(eq(quickbooksIntegration.companyId, companyId)).limit(1);
-      // Fall back to first integration (handles legacy data where companyId was stored as QB realm ID)
-      if (integration.length === 0) {
-        integration = await db.select().from(quickbooksIntegration).limit(1);
-      }
     } else {
       integration = await db.select().from(quickbooksIntegration).limit(1);
     }
