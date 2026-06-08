@@ -30,6 +30,10 @@ import {
   type WizardLineItem,
 } from "./wizard/estimate-wizard-line-items-step";
 import { EstimateWizardReviewStep } from "./wizard/estimate-wizard-review-step";
+import {
+  CustomerLocationStep,
+  type CustomerLocationValue,
+} from "@/components/location/customer-location-step";
 import { submitEstimate, type SubmitMode } from "./estimate-wizard-submit";
 import { isDraft, estimateSubmitStatusFields } from "@/lib/lifecycle";
 import { getCurrentUser } from "@/lib/impersonation";
@@ -91,12 +95,13 @@ interface EstimateWizardProps {
   estimateId?: number | null;
 }
 
-type Step = 1 | 2 | 3;
+type Step = 1 | 2 | 3 | 4;
 
 const STEP_TITLES: Record<Step, string> = {
-  1: "Customer & Project",
-  2: "Line Items",
-  3: "Review & Send",
+  1: "Customer & Scope",
+  2: "Location",
+  3: "Line Items",
+  4: "Review & Send",
 };
 
 function makeRowId() {
@@ -745,7 +750,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     }
     if (items.length === 0) {
       toast({ title: "Add at least one line item", variant: "destructive" });
-      setStep(2);
+      setStep(3);
       return;
     }
     const totals = computeTotals(items, laborRate, flatTotalHours);
@@ -828,7 +833,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (target?.isContentEditable) return;
       if (tag === "BUTTON" || tag === "A") return;
-      if (step === 3 && !saveMutation.isPending) {
+      if (step === 4 && !saveMutation.isPending) {
         e.preventDefault();
         handleSubmit("submit");
       }
@@ -839,7 +844,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     const parts: string[] = [];
     if (customerStep.customer?.name) parts.push(customerStep.customer.name);
     if (customerStep.projectName.trim()) parts.push(customerStep.projectName.trim());
-    if (step >= 2 && items.length > 0) {
+    if (step >= 3 && items.length > 0) {
       const totals = computeTotals(items, laborRate, flatTotalHours);
       parts.push(
         new Intl.NumberFormat("en-US", {
@@ -854,7 +859,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
 
   const stickyMobileFooter = (
     <div className="sm:hidden sticky bottom-0 -mx-4 px-4 py-2 bg-white border-t z-10 flex flex-col gap-1.5">
-      {step === 2 && items.length === 0 && (
+      {step === 3 && items.length === 0 && (
         <p
           className="text-xs text-gray-500 text-center"
           data-testid="wizard-continue-2-helper-mobile"
@@ -886,7 +891,6 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
           <Button
             type="button"
             onClick={() => setStep(3)}
-            disabled={items.length === 0}
             className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
           >
             Continue
@@ -896,6 +900,21 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       {step === 3 && (
         <>
           <Button type="button" variant="outline" onClick={() => setStep(2)} className="flex-1">
+            ← Back
+          </Button>
+          <Button
+            type="button"
+            onClick={() => setStep(4)}
+            disabled={items.length === 0}
+            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            Continue
+          </Button>
+        </>
+      )}
+      {step === 4 && (
+        <>
+          <Button type="button" variant="outline" onClick={() => setStep(3)} className="flex-1">
             ← Back
           </Button>
           {(!isEdit || isDraftEdit) && (
@@ -960,8 +979,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
             mode={isEdit ? "edit" : "new"}
             recordIdentifier={isEdit && estimateId ? `#${estimateId}` : null}
             currentStep={step}
-            totalSteps={3}
-            stepTitles={[STEP_TITLES[1], STEP_TITLES[2], STEP_TITLES[3]]}
+            totalSteps={4}
+            stepTitles={[STEP_TITLES[1], STEP_TITLES[2], STEP_TITLES[3], STEP_TITLES[4]]}
             contextLine={headerContextLine}
             loading={hydrating}
             loadingLabel="Loading estimate…"
@@ -973,7 +992,11 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                   variant="ghost"
                   size="sm"
                   className="h-8 w-8 p-0 sm:hidden -ml-1"
-                  onClick={() => setStep((s) => (s === 3 ? 2 : 1))}
+                  onClick={() =>
+                    setStep((s) =>
+                      s === 4 ? 3 : s === 3 ? 2 : 1,
+                    )
+                  }
                   aria-label="Back"
                 >
                   <ChevronLeft className="w-4 h-4" />
@@ -996,6 +1019,36 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                 onCancel={requestClose}
               />
             ) : step === 2 ? (
+              <CustomerLocationStep
+                customer={customerStep.customer}
+                value={{
+                  projectName: customerStep.projectName,
+                  projectAddress: customerStep.projectAddress,
+                  useDifferentAddress: customerStep.useDifferentAddress,
+                  locationNotes: customerStep.locationNotes,
+                  accessInstructions: customerStep.accessInstructions,
+                  workLocation: customerStep.workLocation,
+                  controllerLetter: customerStep.controllerLetter,
+                  zoneNumber: customerStep.zoneNumber,
+                }}
+                onChange={(next: CustomerLocationValue) =>
+                  setCustomerStep((prev) => ({
+                    ...prev,
+                    projectName: next.projectName,
+                    projectAddress: next.projectAddress,
+                    useDifferentAddress: next.useDifferentAddress,
+                    locationNotes: next.locationNotes,
+                    accessInstructions: next.accessInstructions,
+                    workLocation: next.workLocation,
+                    controllerLetter: next.controllerLetter,
+                    zoneNumber: next.zoneNumber,
+                  }))
+                }
+                onBack={() => setStep(1)}
+                onContinue={() => setStep(3)}
+                hideProjectName
+              />
+            ) : step === 3 ? (
               <EstimateWizardLineItemsStep
                 customerName={customerStep.customer?.name ?? ""}
                 projectName={customerStep.projectName}
@@ -1004,8 +1057,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                 customerMasterRate={customerMasterRateForUi}
                 items={items}
                 onItemsChange={setItems}
-                onBack={() => setStep(1)}
-                onContinue={() => setStep(3)}
+                onBack={() => setStep(2)}
+                onContinue={() => setStep(4)}
                 onChangeCustomer={() => setStep(1)}
                 flatTotalHours={flatTotalHours}
                 onFlatTotalHoursChange={setFlatTotalHours}
@@ -1032,7 +1085,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                 attachments={attachments}
                 onPhotosChange={setPhotos}
                 onAttachmentsChange={setAttachments}
-                onBack={() => setStep(2)}
+                onBack={() => setStep(3)}
                 onSubmit={(mode) => handleSubmit(mode ?? "submit")}
                 submitting={saveMutation.isPending}
                 isEdit={isEdit}

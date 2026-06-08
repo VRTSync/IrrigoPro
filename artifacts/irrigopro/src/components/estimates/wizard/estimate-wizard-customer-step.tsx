@@ -1,26 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { useForm } from "react-hook-form";
-import { useQuery } from "@tanstack/react-query";
-import { useArrayQuery } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
-import { Form } from "@/components/ui/form";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { CustomerSelector } from "@/components/ui/customer-selector";
-import { LocationFields } from "@/components/location/location-fields";
-import { LocationPicker } from "@/components/ui/location-picker";
 import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
-import { composeCustomerAddress } from "@/lib/customer-address";
-import { customerToBoundary } from "@/hooks/use-customer-boundary";
 import {
   User,
   Mail,
@@ -28,11 +13,9 @@ import {
   MapPin,
   Pencil,
   Briefcase,
-  Cpu,
-  Droplets,
   ClipboardList,
 } from "lucide-react";
-import type { Customer, PropertyController } from "@workspace/db/schema";
+import type { Customer } from "@workspace/db/schema";
 
 export interface WorkLocation {
   lat: number;
@@ -63,12 +46,6 @@ interface EstimateWizardCustomerStepProps {
   customerLocked?: boolean;
 }
 
-interface LocationFormValues {
-  projectAddress: string;
-  locationNotes: string;
-  accessInstructions: string;
-}
-
 export function EstimateWizardCustomerStep({
   value,
   onChange,
@@ -77,18 +54,9 @@ export function EstimateWizardCustomerStep({
   customerLocked,
 }: EstimateWizardCustomerStepProps) {
   const projectNameRef = useRef<HTMLInputElement | null>(null);
-  // Initialize to false so edit-mode (where the parent's hydration effect
-  // populates `value.customer` *after* this step first mounts) lands on the
-  // read-only customer card instead of being stuck showing the picker.
-  // When there's genuinely no customer, the render condition below
-  // (`!value.customer || showCustomerPicker`) still shows the picker.
-  // "Change customer" flips this to true to re-open the picker explicitly.
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
-  const [showLocationPicker, setShowLocationPicker] = useState(!!value.workLocation);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
-  // Clear any pending AI suggestion when the wizard switches to a
-  // different customer — prevents a suggestion generated for one
-  // estimate from showing up on the next.
+
   const lastCustomerIdRef = useRef<number | null>(value.customer?.id ?? null);
   useEffect(() => {
     const currentId = value.customer?.id ?? null;
@@ -97,52 +65,6 @@ export function EstimateWizardCustomerStep({
       setAiSuggestion(null);
     }
   }, [value.customer?.id]);
-  // valueRef avoids stale closures inside the form `watch` subscription.
-  const valueRef = useRef(value);
-  valueRef.current = value;
-
-  const form = useForm<LocationFormValues>({
-    defaultValues: {
-      projectAddress: value.projectAddress,
-      locationNotes: value.locationNotes,
-      accessInstructions: value.accessInstructions,
-    },
-  });
-
-  // Mirror form changes back up to the wizard's controlled state.
-  useEffect(() => {
-    const sub = form.watch((v) => {
-      const current = valueRef.current;
-      const projectAddress = v.projectAddress ?? "";
-      const locationNotes = v.locationNotes ?? "";
-      const accessInstructions = v.accessInstructions ?? "";
-      if (
-        projectAddress === current.projectAddress &&
-        locationNotes === current.locationNotes &&
-        accessInstructions === current.accessInstructions
-      ) {
-        return;
-      }
-      onChange({
-        ...current,
-        projectAddress,
-        locationNotes,
-        accessInstructions,
-      });
-    });
-    return () => sub.unsubscribe();
-  }, [form, onChange]);
-
-  // Keep the form's projectAddress field in sync whenever the controlled
-  // value changes (e.g. on customer selection or "use different address"
-  // toggle). `handleSelectCustomer` and `handleToggleAddress` are the only
-  // places that compute a new address, so this just mirrors that into the
-  // form.
-  useEffect(() => {
-    if (form.getValues("projectAddress") !== value.projectAddress) {
-      form.setValue("projectAddress", value.projectAddress, { shouldDirty: false });
-    }
-  }, [value.projectAddress, form]);
 
   useEffect(() => {
     if (value.customer) {
@@ -150,58 +72,7 @@ export function EstimateWizardCustomerStep({
     }
   }, [value.customer?.id]);
 
-  // Load the customer's controllers (A, B, ...) once a customer is picked.
-  const { data: controllers = [], isLoading: controllersLoading } = useArrayQuery<PropertyController>({
-    queryKey: ["/api/properties", value.customer?.id, "controllers"],
-    enabled: !!value.customer,
-  });
-
-  const selectedController = controllers.find(
-    (c) => c.controllerLetter === value.controllerLetter,
-  );
-  const zoneCount = selectedController?.zoneCount ?? 0;
-
-  // If the chosen controller no longer exists in the customer's list (e.g.
-  // customer changed), clear the controller/zone state.
-  useEffect(() => {
-    if (!value.controllerLetter) return;
-    if (controllersLoading) return; // wait until the query resolves
-    if (controllers.length === 0) return;
-    const stillThere = controllers.some(
-      (c) => c.controllerLetter === value.controllerLetter,
-    );
-    if (!stillThere) {
-      onChange({ ...valueRef.current, controllerLetter: null, zoneNumber: null });
-    }
-  }, [controllers, controllersLoading, value.controllerLetter, onChange]);
-
-  // If the chosen zone is now out of range for the (possibly changed)
-  // controller, clear it.
-  useEffect(() => {
-    if (value.zoneNumber == null) return;
-    if (!selectedController) return;
-    if (value.zoneNumber > zoneCount) {
-      onChange({ ...valueRef.current, zoneNumber: null });
-    }
-  }, [selectedController, zoneCount, value.zoneNumber, onChange]);
-
   const handleSelectCustomer = (c: Customer) => {
-    // A single customer pick fans out to every customer-derived default:
-    // contact info, project address (snap back to the customer's address
-    // even if a previous selection had toggled "use different address"),
-    // map pin, and controller/zone. The user never has to re-select.
-    //
-    // Important: don't call form.setValue("projectAddress", ...) here. Doing
-    // so would synchronously fire the form.watch subscription below, which
-    // calls onChange({ ...valueRef.current, projectAddress, ... }). At this
-    // point valueRef.current is still the *previous* render's value (the
-    // ref is only refreshed on the next render), so its customer is null
-    // and that stale onChange queues *after* our customer-setting onChange,
-    // clobbering it. The result was a dropped first click that required a
-    // second tap to actually select the customer. The useEffect on
-    // `value.projectAddress` mirrors the new address into the form on the
-    // next render, after valueRef has been refreshed, so the watch is a
-    // no-op.
     const nextAddress = c.address || "";
     onChange({
       ...value,
@@ -215,43 +86,9 @@ export function EstimateWizardCustomerStep({
       zoneNumber: null,
     });
     setShowCustomerPicker(false);
-    setShowLocationPicker(false);
-  };
-
-  const handleToggleAddress = () => {
-    // Same reasoning as handleSelectCustomer: rely on the value.projectAddress
-    // useEffect to push the new address into the form on the next render,
-    // instead of calling form.setValue inline and racing the watch callback.
-    const newUseDifferent = !value.useDifferentAddress;
-    const nextAddress = newUseDifferent ? value.projectAddress : (value.customer?.address || "");
-    onChange({ ...value, useDifferentAddress: newUseDifferent, projectAddress: nextAddress });
-  };
-
-  const handleLocationSelect = (loc: WorkLocation) => {
-    onChange({ ...valueRef.current, workLocation: loc });
-  };
-
-  const handleClearLocation = () => {
-    onChange({ ...valueRef.current, workLocation: null });
-  };
-
-  const handleControllerChange = (letter: string) => {
-    const next = letter === "__none__" ? null : letter;
-    onChange({ ...valueRef.current, controllerLetter: next, zoneNumber: null });
-  };
-
-  const handleZoneChange = (zone: string) => {
-    const next = zone === "__none__" ? null : Number(zone);
-    onChange({ ...valueRef.current, zoneNumber: next });
   };
 
   const canContinue = !!value.customer && value.projectName.trim().length > 0;
-  const addressReadOnly = !!value.customer && !value.useDifferentAddress;
-
-  const mapDefaultAddress =
-    value.workLocation?.address ||
-    value.projectAddress ||
-    composeCustomerAddress(value.customer);
 
   return (
     <div className="space-y-4">
@@ -339,10 +176,7 @@ export function EstimateWizardCustomerStep({
         </CardContent>
       </Card>
 
-      {/* Scope of Work — rendered directly under Customer so it's the
-          first thing a manager fills in on Step 1. Previously this card
-          sat below Project Details, which made managers think there was
-          no place to enter the scope of work. */}
+      {/* Scope of Work */}
       {value.customer && (
         <Card>
           <CardContent className="p-4 sm:p-5 space-y-3">
@@ -387,192 +221,29 @@ export function EstimateWizardCustomerStep({
         </Card>
       )}
 
-      {/* Project Details card — gated until a customer is chosen so it's
-          obvious that customer selection is the first step. */}
-      {value.customer && (
-      <Card>
-        <CardContent className="p-4 sm:p-5 space-y-4">
-          <div className="flex items-center gap-2">
-            <div className="bg-blue-50 p-2 rounded-md">
-              <Briefcase className="w-4 h-4 text-blue-600" />
-            </div>
-            <h2 className="text-base font-semibold text-gray-900">Project Details</h2>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="wizard-project-name" className="text-sm">
-              Project Name <span className="text-red-500">*</span>
-            </Label>
-            <Input
-              id="wizard-project-name"
-              ref={projectNameRef}
-              value={value.projectName}
-              onChange={(e) => onChange({ ...value, projectName: e.target.value })}
-              placeholder="e.g., Backyard Irrigation System"
-              className="focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-              data-testid="wizard-project-name"
-            />
-          </div>
-
-          <div className="flex justify-end -mb-2">
-            <button
-              type="button"
-              onClick={handleToggleAddress}
-              className="text-xs text-blue-600 hover:text-blue-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded"
-              data-testid="wizard-toggle-address"
-            >
-              {value.useDifferentAddress ? "Use customer address" : "Use a different address"}
-            </button>
-          </div>
-
-          <Form {...form}>
-            <LocationFields
-              control={form.control}
-              readOnlyAddress={addressReadOnly}
-              propertyAcres={customerToBoundary(value.customer)?.areaAcres ?? null}
-            />
-          </Form>
-        </CardContent>
-      </Card>
-      )}
-
-      {/* Work Location (map) card */}
+      {/* Project Details — project name only; address/map/controller move to Location step */}
       {value.customer && (
         <Card>
-          <CardContent className="p-4 sm:p-5 space-y-3">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-2">
-                <div className="bg-blue-50 p-2 rounded-md">
-                  <MapPin className="w-4 h-4 text-blue-600" />
-                </div>
-                <h2 className="text-base font-semibold text-gray-900">
-                  Work Location <span className="text-xs text-gray-500 font-normal">(optional)</span>
-                </h2>
-              </div>
-              <Button
-                type="button"
-                variant={showLocationPicker ? "default" : "outline"}
-                size="sm"
-                onClick={() => setShowLocationPicker((s) => !s)}
-                data-testid="wizard-toggle-map"
-                className="inline-flex items-center gap-1.5"
-              >
-                <MapPin className="w-3.5 h-3.5" />
-                {showLocationPicker ? "Close map" : "Open map"}
-              </Button>
-            </div>
-
-            {!showLocationPicker && !value.workLocation && (
-              <p className="text-xs text-gray-500">
-                Pick a precise spot on the map so the field tech can navigate straight to the
-                work area.
-              </p>
-            )}
-
-            {showLocationPicker && (
-              <LocationPicker
-                key={value.customer.id}
-                defaultAddress={mapDefaultAddress}
-                onLocationSelect={handleLocationSelect}
-                selectedLocation={value.workLocation}
-                customerBoundary={customerToBoundary(value.customer)}
-              />
-            )}
-
-            {value.workLocation && (
-              <div
-                className="border-l-4 border-l-blue-500 bg-blue-50/50 border border-blue-200 rounded-lg p-3"
-                data-testid="wizard-location-confirmation"
-              >
-                <p className="text-sm font-medium text-blue-900">Pinned Location:</p>
-                <p className="text-sm text-blue-800 mt-1">
-                  {value.workLocation.address ||
-                    `${value.workLocation.lat.toFixed(6)}, ${value.workLocation.lng.toFixed(6)}`}
-                </p>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleClearLocation}
-                  className="mt-2 text-blue-700 hover:text-blue-900"
-                  data-testid="wizard-clear-location"
-                >
-                  Clear
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Controller & Zone card */}
-      {value.customer && (
-        <Card>
-          <CardContent className="p-4 sm:p-5 space-y-3">
+          <CardContent className="p-4 sm:p-5 space-y-4">
             <div className="flex items-center gap-2">
               <div className="bg-blue-50 p-2 rounded-md">
-                <Cpu className="w-4 h-4 text-blue-600" />
+                <Briefcase className="w-4 h-4 text-blue-600" />
               </div>
-              <h2 className="text-base font-semibold text-gray-900">
-                Controller &amp; Zone <span className="text-xs text-gray-500 font-normal">(optional)</span>
-              </h2>
+              <h2 className="text-base font-semibold text-gray-900">Project Details</h2>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs text-gray-600">Controller</Label>
-                <Select
-                  value={value.controllerLetter ?? "__none__"}
-                  onValueChange={handleControllerChange}
-                  disabled={controllersLoading || controllers.length === 0}
-                >
-                  <SelectTrigger data-testid="wizard-controller-select">
-                    <SelectValue
-                      placeholder={
-                        controllersLoading
-                          ? "Loading controllers…"
-                          : controllers.length === 0
-                          ? "No controllers on file"
-                          : "Select controller"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">— None —</SelectItem>
-                    {controllers.map((c) => (
-                      <SelectItem key={c.controllerLetter} value={c.controllerLetter}>
-                        Controller {c.controllerLetter}{" "}
-                        <span className="text-gray-500">({c.zoneCount} zones)</span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs text-gray-600 flex items-center gap-1">
-                  <Droplets className="w-3 h-3" /> Zone
-                </Label>
-                <Select
-                  value={value.zoneNumber == null ? "__none__" : String(value.zoneNumber)}
-                  onValueChange={handleZoneChange}
-                  disabled={!selectedController || zoneCount === 0}
-                >
-                  <SelectTrigger data-testid="wizard-zone-select">
-                    <SelectValue
-                      placeholder={
-                        !selectedController ? "Pick a controller first" : "Select zone"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">— None —</SelectItem>
-                    {Array.from({ length: zoneCount }, (_, i) => i + 1).map((z) => (
-                      <SelectItem key={z} value={String(z)}>
-                        Zone {z}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="wizard-project-name" className="text-sm">
+                Project Name <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="wizard-project-name"
+                ref={projectNameRef}
+                value={value.projectName}
+                onChange={(e) => onChange({ ...value, projectName: e.target.value })}
+                placeholder="e.g., Backyard Irrigation System"
+                className="focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                data-testid="wizard-project-name"
+              />
             </div>
           </CardContent>
         </Card>

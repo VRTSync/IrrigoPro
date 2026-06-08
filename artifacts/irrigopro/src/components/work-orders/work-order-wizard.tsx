@@ -20,10 +20,13 @@ import type { Customer, WorkOrder } from "@workspace/db/schema";
 import type { UploadedFile } from "@/components/ui/file-upload";
 import { WoCustomerStep, type CustomerStepValue } from "./wizard/wo-customer-step";
 import {
-  WoLocationStep,
-  type LocationStepValue,
+  CustomerLocationStep,
+  type CustomerLocationValue,
   type WorkLocation,
-} from "./wizard/wo-location-step";
+} from "@/components/location/customer-location-step";
+
+type LocationStepValue = CustomerLocationValue;
+
 import { WoDescriptionStep, type DescriptionStepValue } from "./wizard/wo-description-step";
 import { WoScheduleStep, type ScheduleStepValue } from "./wizard/wo-schedule-step";
 import { WoReviewStep } from "./wizard/wo-review-step";
@@ -562,7 +565,7 @@ export function WorkOrderWizard({ open, onClose, onCreated, workOrderId }: WorkO
                 onCancel={requestClose}
               />
             ) : step === 2 ? (
-              <WoLocationStep
+              <CustomerLocationStep
                 customer={customerStep.customer}
                 value={locationStep}
                 onChange={setLocationStep}

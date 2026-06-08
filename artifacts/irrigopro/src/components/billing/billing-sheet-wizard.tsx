@@ -48,16 +48,19 @@ import { PhotoImage } from "@/components/ui/photo-image";
 import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
 import { PartPicker } from "@/components/parts/part-picker";
 import {
-  WizardLocationStep,
-  type WizardLocationValue,
+  CustomerLocationStep,
+  type CustomerLocationValue,
   type WorkLocation,
-} from "@/components/wizard-shared/wizard-location-step";
+} from "@/components/location/customer-location-step";
+
 import { WizardSummaryStrip } from "@/components/work-orders/wizard/wo-summary-strip";
 import { WizardHeader } from "@/components/wizard-shared/wizard-header";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { safeGet } from "@/utils/safeStorage";
 import type { Customer, Part, BillingSheet, BillingSheetItem } from "@workspace/db/schema";
+
+type WizardLocationValue = CustomerLocationValue;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -1671,7 +1674,7 @@ export function BillingSheetWizard({
                 }
               />
             ) : step === 2 ? (
-              <WizardLocationStep
+              <CustomerLocationStep
                 customer={customerStep.customer}
                 value={locationStep}
                 onChange={setLocationStep}

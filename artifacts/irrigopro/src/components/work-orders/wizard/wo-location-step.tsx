@@ -1,15 +1,7 @@
-// Work Order Wizard location step is now powered by the shared wizard
-// location step under client/src/components/wizard-shared/, so the Work
-// Order Wizard and the Billing Sheet Wizard cannot drift on map pin /
-// controller logic. This file re-exports the shared component under the
-// previous names so existing imports keep working.
-
-import {
-  WizardLocationStep,
-  type WizardLocationValue,
+// Thin re-export for any remaining imports. New code should import
+// CustomerLocationStep from @/components/location/customer-location-step directly.
+export {
+  CustomerLocationStep as WoLocationStep,
+  type CustomerLocationValue as LocationStepValue,
   type WorkLocation,
-} from "@/components/wizard-shared/wizard-location-step";
-
-export type LocationStepValue = WizardLocationValue;
-export type { WorkLocation };
-export const WoLocationStep = WizardLocationStep;
+} from "@/components/location/customer-location-step";

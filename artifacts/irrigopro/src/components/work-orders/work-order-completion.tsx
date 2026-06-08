@@ -51,8 +51,7 @@ import {
 } from "lucide-react";
 import { PartPicker } from "@/components/parts/part-picker";
 import { ToastAction } from "@/components/ui/toast";
-import { LocationPicker } from "@/components/ui/location-picker";
-import { useCustomerBoundary } from "@/hooks/use-customer-boundary";
+import { CustomerLocationPicker } from "@/components/location/customer-location-picker";
 import type { WorkOrder, Part, Customer } from "@workspace/db/schema";
 
 const workOrderCompletionSchema = z.object({
@@ -232,8 +231,6 @@ export function WorkOrderCompletion({
     queryKey: ["/api/customers", workOrder.customerId],
     enabled: !!workOrder.customerId,
   });
-
-  const { data: customerBoundary } = useCustomerBoundary(workOrder.customerId);
 
   const handleLocationSelect = (location: { lat: number; lng: number; address?: string }) => {
     const previous: PinFields = livePin;
@@ -701,7 +698,8 @@ export function WorkOrderCompletion({
 
             {/* Interactive map + location controls */}
             <div className="space-y-2">
-              <LocationPicker
+              <CustomerLocationPicker
+                customerId={workOrder.customerId}
                 selectedLocation={
                   livePin.workLocationLat != null && livePin.workLocationLng != null
                     ? {
@@ -711,8 +709,6 @@ export function WorkOrderCompletion({
                       }
                     : null
                 }
-                defaultAddress={workOrder.projectAddress || customer?.address || undefined}
-                customerBoundary={customerBoundary}
                 onLocationSelect={handleLocationSelect}
               />
               {/* Get directions + I'm here — kept alongside the map */}
