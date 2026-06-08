@@ -103,28 +103,28 @@ describe("computeLifecycleStatus", () => {
 });
 
 describe("lifecycleOf", () => {
-  it("prefers the server-stamped lifecycleStatus when valid", () => {
+  it("prefers the canonical lifecycle column over (status, internalStatus)", () => {
     expect(
       lifecycleOf(
         {
           status: "pending",
           internalStatus: "draft",
           estimateDate: FRESH,
-          lifecycleStatus: "sent",
+          lifecycle: "sent",
         },
         NOW,
       ),
     ).toBe("sent");
   });
 
-  it("ignores an invalid stamped lifecycleStatus and falls back to compute", () => {
+  it("ignores an invalid lifecycle column value and falls back to compute", () => {
     expect(
       lifecycleOf(
         {
           status: "pending",
           internalStatus: "draft",
           estimateDate: FRESH,
-          lifecycleStatus: "garbage",
+          lifecycle: "garbage",
         },
         NOW,
       ),

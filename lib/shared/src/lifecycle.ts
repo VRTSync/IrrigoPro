@@ -103,14 +103,13 @@ export function computeLifecycleStatus(
   return base;
 }
 
-// Canonical entry point for the UI. Prefers the server-stamped
-// `lifecycleStatus` when present, otherwise computes from
+// Canonical entry point for the UI. Prefers the stored `lifecycle`
+// column when present, otherwise computes from
 // (status, internalStatus, estimateDate). Every component that needs
 // to reason about an estimate's state should go through this helper
 // (or one of the predicates below) — never read `estimate.status` or
 // `estimate.internalStatus` directly.
 type EstimateLike = EstimateLifecycleInput & {
-  lifecycleStatus?: string | null;
   workOrderId?: number | null;
 };
 
@@ -119,9 +118,10 @@ export function lifecycleOf(
   now?: Date,
 ): LifecycleStatus {
   if (!estimate) return "pending_review";
-  // Prefer the canonical server-stamped lifecycle column over the
-  // legacy computed `lifecycleStatus` so all surfaces read the same
-  // source of truth.
+  // Prefer the canonical stored lifecycle column. Legacy
+  // (status, internalStatus) is consulted only when the column is
+  // missing/invalid (e.g. backfill not yet run, or an in-memory
+  // fixture in a test).
   const stored = estimate.lifecycle;
   if (
     typeof stored === "string" &&
@@ -140,13 +140,6 @@ export function lifecycleOf(
       );
     }
     return stored as LifecycleStatus;
-  }
-  const stamped = estimate.lifecycleStatus;
-  if (
-    typeof stamped === "string" &&
-    (LIFECYCLE_STATUSES as readonly string[]).includes(stamped)
-  ) {
-    return stamped as LifecycleStatus;
   }
   return computeLifecycleStatus(
     {
