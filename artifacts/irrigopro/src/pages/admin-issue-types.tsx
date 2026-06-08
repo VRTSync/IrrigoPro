@@ -18,8 +18,10 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { Loader2, Plus, ArrowUp, ArrowDown, Save, RotateCcw, Wrench, RefreshCw } from "lucide-react";
+import { Loader2, Plus, ArrowUp, ArrowDown, Save, RotateCcw, Wrench, RefreshCw, Building2 } from "lucide-react";
 import type { IssueTypeConfig } from "@workspace/db/schema";
+
+type Company = { id: number; name: string };
 
 type GroupValue = "quick_fix" | "advanced" | "zone_issue";
 const GROUP_OPTIONS: ReadonlyArray<{ value: GroupValue; label: string }> = [
@@ -54,18 +56,38 @@ export default function AdminIssueTypesPage() {
     try { return JSON.parse(safeGet("user") || "{}").role as string | undefined; }
     catch { return undefined; }
   })();
+  const isSuperAdmin = userRole === "super_admin";
   const allowed =
     userRole === "company_admin" ||
     userRole === "irrigation_manager" ||
     userRole === "billing_manager" ||
-    userRole === "super_admin";
+    isSuperAdmin;
 
-  const queryKey = ["/api/admin/issue-types"] as const;
+  // For super_admin: pick which company's issue types to manage.
+  const [scopedCompanyId, setScopedCompanyId] = useState<number | null>(null);
+
+  const { data: companies = [] } = useArrayQuery<Company>({
+    queryKey: ["/api/companies"],
+    enabled: isSuperAdmin,
+  });
+
+  // When super_admin selects a company, the query key embeds the companyId
+  // so the API receives ?companyId=N and scopes correctly.
+  const issueTypesUrl = isSuperAdmin
+    ? scopedCompanyId ? `/api/admin/issue-types?companyId=${scopedCompanyId}` : null
+    : "/api/admin/issue-types";
+
+  const queryKey = [issueTypesUrl ?? "/api/admin/issue-types"] as const;
 
   const { data, isLoading, isError, error } = useArrayQuery<IssueTypeConfig>({
     queryKey,
-    enabled: allowed,
+    enabled: allowed && issueTypesUrl !== null,
   });
+
+  // For mutations, super_admin must pass companyId in body so the server
+  // can scope the write (resolveIssueTypeCompanyId checks req.body.companyId).
+  const superAdminBody = (extra: Record<string, unknown> = {}) =>
+    isSuperAdmin && scopedCompanyId ? { ...extra, companyId: scopedCompanyId } : extra;
 
   // Local copy so reordering can be optimistic.
   const [orderedIds, setOrderedIds] = useState<number[] | null>(null);
@@ -97,7 +119,7 @@ export default function AdminIssueTypesPage() {
 
   const updateMut = useMutation({
     mutationFn: ({ id, patch }: { id: number; patch: Partial<EditState> & { isActive?: boolean } }) => {
-      const body: Record<string, unknown> = { ...patch };
+      const body: Record<string, unknown> = superAdminBody({ ...patch });
       if ("partCategoryFilter" in body) {
         const v = String(body.partCategoryFilter ?? "").trim();
         body.partCategoryFilter = v === "" ? null : v;
@@ -125,7 +147,7 @@ export default function AdminIssueTypesPage() {
 
   const reorderMut = useMutation({
     mutationFn: (ids: number[]) =>
-      apiRequest("/api/admin/issue-types/reorder", "POST", { orderedIds: ids }),
+      apiRequest("/api/admin/issue-types/reorder", "POST", superAdminBody({ orderedIds: ids })),
     onSuccess: () => {
       toast({ title: "Order saved" });
       queryClient.invalidateQueries({ queryKey });
@@ -236,7 +258,7 @@ export default function AdminIssueTypesPage() {
               </Button>
             </>
           )}
-          {userRole === "super_admin" && (
+          {isSuperAdmin && (
             <Button
               size="sm"
               variant="outline"
@@ -258,10 +280,39 @@ export default function AdminIssueTypesPage() {
         </div>
       </div>
 
+      {isSuperAdmin && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Building2 className="h-4 w-4 text-blue-600" />
+              Select company to manage issue types
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Select
+              value={scopedCompanyId ? String(scopedCompanyId) : ""}
+              onValueChange={(v) => { setScopedCompanyId(Number(v)); setEditing({}); setOrderedIds(null); }}
+            >
+              <SelectTrigger className="w-72" data-testid="select-company-scope">
+                <SelectValue placeholder="Choose a company…" />
+              </SelectTrigger>
+              <SelectContent>
+                {companies.map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </CardContent>
+        </Card>
+      )}
+
+      {(!isSuperAdmin || scopedCompanyId) && (
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
-            Defaults applied to new wet-check findings for your company.
+            {isSuperAdmin
+              ? `Issue types for ${companies.find(c => c.id === scopedCompanyId)?.name ?? "selected company"}`
+              : "Defaults applied to new wet-check findings for your company."}
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -435,24 +486,27 @@ export default function AdminIssueTypesPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       <AddIssueTypeDialog
         open={showAdd}
         onOpenChange={setShowAdd}
         existingKeys={new Set((data ?? []).map(r => r.issueType))}
         nextSortOrder={((data ?? []).reduce((m, r) => Math.max(m, r.sortOrder), 0) + 10) || 10}
+        scopedCompanyId={scopedCompanyId}
       />
     </div>
   );
 }
 
 function AddIssueTypeDialog({
-  open, onOpenChange, existingKeys, nextSortOrder,
+  open, onOpenChange, existingKeys, nextSortOrder, scopedCompanyId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   existingKeys: Set<string>;
   nextSortOrder: number;
+  scopedCompanyId: number | null;
 }) {
   const { toast } = useToast();
   const [issueType, setIssueType] = useState("");
@@ -473,7 +527,7 @@ function AddIssueTypeDialog({
 
   const createMut = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
-      apiRequest("/api/admin/issue-types", "POST", body),
+      apiRequest("/api/admin/issue-types", "POST", scopedCompanyId ? { ...body, companyId: scopedCompanyId } : body),
     onSuccess: () => {
       toast({ title: "Issue type added" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/issue-types"] });

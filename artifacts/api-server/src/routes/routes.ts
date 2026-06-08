@@ -15461,8 +15461,23 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       isActive: z.boolean().optional(),
     });
 
+  // Super-admin may pass ?companyId=N (or body.companyId) to scope to a
+  // specific company; all other roles use their session company scope.
+  const resolveIssueTypeCompanyId = (req: any, res: any): number | null => {
+    if (req.authenticatedUserRole === "super_admin") {
+      const raw = req.query?.companyId ?? req.body?.companyId;
+      const n = raw !== undefined ? Number(raw) : NaN;
+      if (!Number.isInteger(n) || n <= 0) {
+        res.status(400).json({ message: "companyId query param required for super_admin" });
+        return null;
+      }
+      return n;
+    }
+    return requireCompanyId(req, res);
+  };
+
   app.get("/api/admin/issue-types", requireAuthentication, requireIssueTypeAdminAccess, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
+    const cid = resolveIssueTypeCompanyId(req, res); if (!cid) return;
     try {
       const rows = await storage.listAllIssueTypeConfigs(cid);
       res.json(rows);
@@ -15477,7 +15492,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   app.post("/api/admin/issue-types", requireAuthentication, requireIssueTypeAdminAccess, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
+    const cid = resolveIssueTypeCompanyId(req, res); if (!cid) return;
     const parsed = issueTypeAdminBodySchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       res.status(400).json({ message: "Invalid input", issues: parsed.error.issues });
@@ -15505,7 +15520,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   const issueTypePatchSchema = issueTypeAdminBodySchema.partial();
   app.patch("/api/admin/issue-types/:id", requireAuthentication, requireIssueTypeAdminAccess, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
+    const cid = resolveIssueTypeCompanyId(req, res); if (!cid) return;
     const id = parseInt(req.params.id);
     if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ message: "Invalid id" }); return; }
     const parsed = issueTypePatchSchema.safeParse(req.body ?? {});
@@ -15536,7 +15551,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   // Soft-delete via deactivation — preserves historical references.
   app.delete("/api/admin/issue-types/:id", requireAuthentication, requireIssueTypeAdminAccess, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
+    const cid = resolveIssueTypeCompanyId(req, res); if (!cid) return;
     const id = parseInt(req.params.id);
     if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ message: "Invalid id" }); return; }
     try {
@@ -15557,7 +15572,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     orderedIds: z.array(z.coerce.number().int().positive()).min(1),
   });
   app.post("/api/admin/issue-types/reorder", requireAuthentication, requireIssueTypeAdminAccess, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
+    const cid = resolveIssueTypeCompanyId(req, res); if (!cid) return;
     const parsed = issueTypeReorderSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       res.status(400).json({ message: "Invalid input", issues: parsed.error.issues });
