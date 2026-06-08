@@ -8773,12 +8773,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const companyId = resolveCompanyId(req);
       if (!companyId) {
-        res.json({ connection: null });
+        res.json({ connections: [], count: 0, checkedAt: new Date().toISOString() });
         return;
       }
       const integ = await storage.getQuickBooksIntegrationByCompanyId(companyId);
       if (!integ) {
-        res.json({ connection: null });
+        res.json({ connections: [], count: 0, checkedAt: new Date().toISOString() });
         return;
       }
       const now = new Date();
@@ -8786,23 +8786,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tokenAgeMs = integ.expiresAt
         ? new Date(integ.expiresAt).getTime() - now.getTime()
         : null;
+      const connectionEntry = {
+        realmId: integ.realmId,
+        companyId: integ.companyId,
+        connectionStatus: integ.connectionStatus,
+        isTokenValid,
+        tokenExpiresAt: integ.expiresAt,
+        tokenExpiresInMs: tokenAgeMs,
+        lastRefreshAttempt: integ.lastRefreshAttempt,
+        lastRefreshSuccess: integ.lastRefreshSuccess,
+        lastRefreshFailure: integ.lastRefreshFailure,
+        lastFailureReason: integ.reconnectRequiredReason ?? null,
+        reconnectRequired: integ.connectionStatus === 'reconnect_required',
+        tokenEnvironment: integ.tokenEnvironment,
+        updatedAt: integ.updatedAt,
+      };
       res.json({
-        connection: {
-          realmId: integ.realmId,
-          companyId: integ.companyId,
-          connectionStatus: integ.connectionStatus,
-          isTokenValid,
-          tokenExpiresAt: integ.expiresAt,
-          tokenExpiresInMs: tokenAgeMs,
-          lastRefreshAttempt: integ.lastRefreshAttempt,
-          lastRefreshSuccess: integ.lastRefreshSuccess,
-          lastRefreshFailure: integ.lastRefreshFailure,
-          lastFailureReason: integ.reconnectRequiredReason ?? null,
-          reconnectRequired: integ.connectionStatus === 'reconnect_required',
-          tokenEnvironment: integ.tokenEnvironment,
-          updatedAt: integ.updatedAt,
-        },
-        checkedAt: now,
+        connections: [connectionEntry],
+        count: 1,
+        checkedAt: now.toISOString(),
       });
     } catch (error) {
       console.error("[QB health] Error fetching health data:", error);

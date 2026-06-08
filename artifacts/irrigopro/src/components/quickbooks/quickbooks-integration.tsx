@@ -81,7 +81,7 @@ function ConnectionHealthPanel() {
     );
   }
 
-  if (!health || health.count === 0) {
+  if (!health || !health.connections?.length) {
     return (
       <Alert>
         <Activity className="h-4 w-4" />
