@@ -7431,45 +7431,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // QB company_id repair — patches quickbooks_integration rows where company_id
   // was incorrectly stored as the QB realm ID (OAuth state lost on server
   // restart → fallback logic fired). Idempotent; only touches rows where
-  // company_id = realm_id. Accepts optional { targetCompanyId } body; if
-  // omitted, auto-resolves to the first active non-demo IrrigoPro company.
+  // company_id = realm_id.
+  //
+  // Body: { targetCompanyId: string } — required. Must be a valid IrrigoPro
+  // company ID. If multiple stale rows exist the endpoint fails with 409 and
+  // lists them so the caller can decide on a per-row basis (use the optional
+  // { realmIdOverrides: { [realmId]: targetCompanyId } } map for that case).
   app.post("/api/admin/repair/qb-company-id", requireAuthentication, async (req: any, res: Response) => {
     if (req.authenticatedUserRole !== "super_admin") {
       res.status(403).json({ message: "Super admin access required" });
       return;
     }
     try {
-      // Resolve the target IrrigoPro company ID.
-      let targetCompanyId: string | null = req.body?.targetCompanyId
-        ? String(req.body.targetCompanyId)
-        : null;
+      const rawTargetId = req.body?.targetCompanyId;
+      const realmIdOverrides: Record<string, string> = req.body?.realmIdOverrides ?? {};
 
-      if (!targetCompanyId) {
-        // Auto-resolve: first active company whose integer ID is < 90
-        // (avoids the demo company at id=99 and any future test companies).
-        const activeCompanies = await db.execute<{ id: number }>(
-          sql`SELECT id FROM companies WHERE is_active = TRUE AND id < 90 ORDER BY id LIMIT 1`
-        );
-        if (activeCompanies.rows.length === 0) {
-          res.status(422).json({ message: "No eligible active company found. Pass targetCompanyId explicitly." });
-          return;
-        }
-        targetCompanyId = String(activeCompanies.rows[0].id);
+      if (!rawTargetId) {
+        res.status(400).json({
+          message: "targetCompanyId is required. Pass the IrrigoPro company ID that should own this QuickBooks integration (e.g. '1').",
+        });
+        return;
+      }
+      const targetCompanyId = String(rawTargetId);
+
+      // Validate the target company exists.
+      const companyCheck = await db.execute<{ id: number }>(
+        sql`SELECT id FROM companies WHERE id = ${targetCompanyId} LIMIT 1`
+      );
+      if (companyCheck.rows.length === 0) {
+        res.status(422).json({ message: `Company '${targetCompanyId}' not found. Verify the IrrigoPro company ID.` });
+        return;
       }
 
       // Find all QB integration rows where company_id = realm_id
-      // (the fingerprint of the fallback that mis-stored the realm ID).
+      // (unique fingerprint of the fallback mis-store).
       const staleRows = await db.execute<{ id: number; realm_id: string; company_id: string }>(
         sql`SELECT id, realm_id, company_id FROM quickbooks_integration WHERE company_id = realm_id`
       );
 
+      // Guard: if multiple stale rows exist and the caller hasn't supplied
+      // per-row overrides, refuse to make a potentially wrong bulk assignment.
+      if (staleRows.rows.length > 1) {
+        const needOverrides = staleRows.rows.filter(r => !realmIdOverrides[r.realm_id]);
+        if (needOverrides.length > 1) {
+          res.status(409).json({
+            message: "Multiple stale rows found. Supply realmIdOverrides to assign each realm to its correct company.",
+            staleRows: staleRows.rows.map(r => ({ id: r.id, realmId: r.realm_id, currentCompanyId: r.company_id })),
+          });
+          return;
+        }
+      }
+
       const details: Array<{ id: number; realmId: string; oldCompanyId: string; newCompanyId: string }> = [];
 
       for (const row of staleRows.rows) {
+        const assignedCompanyId = realmIdOverrides[row.realm_id] ?? targetCompanyId;
         await db.execute(
-          sql`UPDATE quickbooks_integration SET company_id = ${targetCompanyId}, updated_at = NOW() WHERE id = ${row.id}`
+          sql`UPDATE quickbooks_integration SET company_id = ${assignedCompanyId}, updated_at = NOW() WHERE id = ${row.id}`
         );
-        details.push({ id: row.id, realmId: row.realm_id, oldCompanyId: row.company_id, newCompanyId: targetCompanyId });
+        details.push({ id: row.id, realmId: row.realm_id, oldCompanyId: row.company_id, newCompanyId: assignedCompanyId });
       }
 
       logger.info({ rowsPatched: details.length, targetCompanyId, details }, "POST /api/admin/repair/qb-company-id complete");
