@@ -270,7 +270,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     }
   })();
 
-  const repairAllowedRoles = ["super_admin", "company_admin", "billing_manager"];
+  const repairAllowedRoles = ["company_admin", "billing_manager"];
 
   const { data: staleStatus } = useQuery<{ stale: boolean; count: number }>({
     queryKey: ["/api/quickbooks/connection/stale"],

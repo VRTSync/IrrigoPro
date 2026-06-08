@@ -237,8 +237,8 @@ interface PulseSummaryResponse {
   asOf: string;
 }
 
-// QuickBooks connection-status payload shape. Matches the existing
-// `/api/quickbooks/connection-status` contract used by
+// QuickBooks connection-status payload shape. Matches the
+// `/api/quickbooks/connection` contract used by
 // `components/quickbooks/quickbooks-integration.tsx` — see
 // `QbConnectionStatus` there. We treat the response as a partial
 // payload because the endpoint can return `{}` on transient failures

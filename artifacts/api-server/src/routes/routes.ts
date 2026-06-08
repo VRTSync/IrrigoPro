@@ -7383,78 +7383,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // QB company_id repair — patches quickbooks_integration rows where company_id
-  // was incorrectly stored as the QB realm ID (OAuth state lost on server
-  // restart → fallback logic fired). Idempotent; only touches rows where
-  // company_id = realm_id.
-  //
-  // Body: { targetCompanyId: string } — required. Must be a valid IrrigoPro
-  // company ID. If multiple stale rows exist the endpoint fails with 409 and
-  // lists them so the caller can decide on a per-row basis (use the optional
-  // { realmIdOverrides: { [realmId]: targetCompanyId } } map for that case).
-  app.post("/api/admin/repair/qb-company-id", requireAuthentication, async (req: any, res: Response) => {
-    if (req.authenticatedUserRole !== "super_admin") {
-      res.status(403).json({ message: "Super admin access required" });
-      return;
-    }
-    try {
-      const rawTargetId = req.body?.targetCompanyId;
-      const realmIdOverrides: Record<string, string> = req.body?.realmIdOverrides ?? {};
-
-      if (!rawTargetId) {
-        res.status(400).json({
-          message: "targetCompanyId is required. Pass the IrrigoPro company ID that should own this QuickBooks integration (e.g. '1').",
-        });
-        return;
-      }
-      const targetCompanyId = String(rawTargetId);
-
-      // Validate the target company exists.
-      const companyCheck = await db.execute<{ id: number }>(
-        sql`SELECT id FROM companies WHERE id = ${targetCompanyId} LIMIT 1`
-      );
-      if (companyCheck.rows.length === 0) {
-        res.status(422).json({ message: `Company '${targetCompanyId}' not found. Verify the IrrigoPro company ID.` });
-        return;
-      }
-
-      // Find all QB integration rows where company_id = realm_id
-      // (unique fingerprint of the fallback mis-store).
-      const staleRows = await db.execute<{ id: number; realm_id: string; company_id: string }>(
-        sql`SELECT id, realm_id, company_id FROM quickbooks_integration WHERE company_id = realm_id`
-      );
-
-      // Guard: if multiple stale rows exist and the caller hasn't supplied
-      // per-row overrides, refuse to make a potentially wrong bulk assignment.
-      if (staleRows.rows.length > 1) {
-        const needOverrides = staleRows.rows.filter(r => !realmIdOverrides[r.realm_id]);
-        if (needOverrides.length > 1) {
-          res.status(409).json({
-            message: "Multiple stale rows found. Supply realmIdOverrides to assign each realm to its correct company.",
-            staleRows: staleRows.rows.map(r => ({ id: r.id, realmId: r.realm_id, currentCompanyId: r.company_id })),
-          });
-          return;
-        }
-      }
-
-      const details: Array<{ id: number; realmId: string; oldCompanyId: string; newCompanyId: string }> = [];
-
-      for (const row of staleRows.rows) {
-        const assignedCompanyId = realmIdOverrides[row.realm_id] ?? targetCompanyId;
-        await db.execute(
-          sql`UPDATE quickbooks_integration SET company_id = ${assignedCompanyId}, updated_at = NOW() WHERE id = ${row.id}`
-        );
-        details.push({ id: row.id, realmId: row.realm_id, oldCompanyId: row.company_id, newCompanyId: assignedCompanyId });
-      }
-
-      logger.info({ rowsPatched: details.length, targetCompanyId, details }, "POST /api/admin/repair/qb-company-id complete");
-      res.json({ ok: true, rowsPatched: details.length, targetCompanyId, details });
-    } catch (err) {
-      logger.error({ err }, "POST /api/admin/repair/qb-company-id failed");
-      res.status(500).json({ message: "Repair failed", error: String(err) });
-    }
-  });
-
   // WC Labor Slice 3 — WC labor backfill (start / status / cancel / reset).
   registerWcLaborBackfillRoutes(app, requireAuthentication);
   // Task #760 — Temporary one-time cleanup: delete test invoice #71256.
@@ -8096,36 +8024,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Serve the QuickBooks debug script
-  app.get("/quickbooks-temp-fix.js", (req, res) => {
-    res.type('application/javascript');
-    res.send(`
-// QuickBooks Debug Script
-console.log("QuickBooks debug script loaded successfully");
-console.log("Current domain:", window.location.host);
-console.log("Required redirect URI:", window.location.protocol + "//" + window.location.host + "/api/quickbooks/callback");
-    `);
-  });
-
-  // Serve QuickBooks debug page
-  app.get("/quickbooks-debug", (req, res) => {
-    res.sendFile('quickbooks-debug.html', { root: '.' });
-  });
-
-  // Serve simple QuickBooks test page
-  app.get("/quickbooks-test", (req, res) => {
-    res.sendFile('simple-quickbooks-test.html', { root: '.' });
-  });
-
-  // Serve QuickBooks debug test page
-  app.get("/quickbooks-debug-test", (req, res) => {
-    res.sendFile('quickbooks-debug-test.html', { root: '.' });
-  });
-
-  // Serve domain check page
-  app.get("/check-domain", (req, res) => {
-    res.sendFile('check-domain.html', { root: '.' });
-  });
-
   // Function to refresh QuickBooks token
   async function refreshQuickBooksToken(refreshToken: string, signal?: AbortSignal, context?: { realmId?: string; calledFrom?: string }): Promise<{ access_token: string; refresh_token: string; expires_in?: number; [key: string]: unknown }> {
     const tokenEndpoint = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
@@ -8803,86 +8701,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  // Add alias for status endpoint
-  app.get("/api/quickbooks/status", requireQuickBooksAccess, async (req, res) => {
-    try {
-      // Get user's company ID from header (app uses localStorage/header auth, not server sessions)
-      const userCompanyId = (headerUserCompanyId(req) as string) || null;
-      
-      // Get from database for this user's company
-      const qbStatus = await storage.getQuickBooksCustomerStatus(userCompanyId);
-      console.log("QuickBooks status for company", userCompanyId, ":", qbStatus);
-      
-      res.json(qbStatus);
-    } catch (error) {
-      console.error("Error getting QuickBooks status:", error);
-      res.status(500).json({ 
-        companyId: null,
-        companyName: null,
-        isConnected: false,
-        lastSync: null,
-        error: "Failed to check QuickBooks status"
-      });
-    }
-  });
-
-  app.get("/api/quickbooks/customers", requireQuickBooksAccess, async (req, res) => {
-    try {
-      // Get user's company ID from header (app uses localStorage/header auth, not server sessions)
-      const userCompanyId = (headerUserCompanyId(req) as string) || null;
-      
-      const qbStatus = await storage.getQuickBooksCustomerStatus(userCompanyId);
-      
-      if (!qbStatus.isConnected) {
-        res.json([]);
-        return;
-      }
-
-      // Get actual QuickBooks integration data - resolve realmId from companyId then fetch canonically
-      const qbLookup = userCompanyId ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyId) : null;
-      const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
-      
-      if (!integration || !integration.accessToken) {
-        res.json([]);
-        return;
-      }
-
-      // Use production QuickBooks API for deployment, sandbox for development
-      const apiBase = process.env.NODE_ENV === 'production' 
-        ? 'https://quickbooks.api.intuit.com' 
-        : 'https://sandbox-quickbooks.api.intuit.com';
-      
-      const customersResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/query?query=SELECT * FROM Customer WHERE Active = true`, {
-        headers: {
-          'Authorization': `Bearer ${integration.accessToken}`,
-          'Accept': 'application/json'
-        }
-      }, 'Customers Query', integration.realmId);
-
-      if (!customersResponse.ok) {
-        const errorText = await customersResponse.text();
-        const customersTid = customersResponse.headers.get('intuit_tid');
-        console.error('Failed to fetch customers from QuickBooks:', customersResponse.status, errorText);
-        
-        // Handle 403 authorization errors
-        if (customersResponse.status === 403) {
-          console.error('QuickBooks authorization failed - connection needs to be re-established');
-        }
-        
-        res.json([]);
-        return;
-      }
-
-      const qbData = (await customersResponse.json()) as QbCustomerQueryResponse;
-      const qbCustomers = qbData?.QueryResponse?.Customer || [];
-      
-      res.json(qbCustomers);
-    } catch (error) {
-      console.error("Error fetching QuickBooks customers:", error);
-      res.json([]);
-    }
-  });
-
   app.get("/api/quickbooks/connection", requireQuickBooksAccess, async (req, res) => {
     try {
       // In a real implementation, you would check stored tokens and validate them
@@ -8923,48 +8741,27 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // GET /api/quickbooks/connection/stale
-  // Returns { stale: boolean, count: number } — true when a QB integration row
-  // with company_id = realm_id (fingerprint of the OAuth-state-lost mis-store)
-  // exists and this company has no properly-linked row. Read-only; safe to call
-  // on every page mount. Allowed: super_admin, company_admin, billing_manager.
+  // Returns { stale: boolean, count: number } — true when this company has a QB
+  // integration row where company_id = realm_id (fingerprint of the
+  // OAuth-state-lost mis-store). Read-only; safe to call on every page mount.
+  // Allowed: company_admin, billing_manager.
   app.get("/api/quickbooks/connection/stale", requireAuthentication, async (req: any, res: Response) => {
     const role = req.authenticatedUserRole;
-    if (!["super_admin", "company_admin", "billing_manager"].includes(role)) {
+    if (!["company_admin", "billing_manager"].includes(role)) {
       res.status(403).json({ message: "Not authorized" });
       return;
     }
     try {
-      if (role === "super_admin") {
-        const rows = await db.execute<{ count: string }>(
-          sql`SELECT COUNT(*)::text AS count FROM quickbooks_integration WHERE company_id = realm_id`
-        );
-        const count = parseInt(rows.rows[0]?.count ?? "0", 10);
-        res.json({ stale: count > 0, count });
-        return;
-      }
-      // Scoped roles: stale only when (a) this company has no properly-linked row AND
-      // (b) there is exactly ONE stale row globally. Multiple stale rows cannot be safely
-      // attributed to one company without super_admin oversight — return stale: false so
-      // the repair card stays hidden.
       const sessionCompanyId = String(req.authenticatedUserCompanyId ?? "");
       if (!sessionCompanyId) {
         res.json({ stale: false, count: 0 });
         return;
       }
-      const properRows = await db.execute<{ count: string }>(
-        sql`SELECT COUNT(*)::text AS count FROM quickbooks_integration WHERE company_id = ${sessionCompanyId}`
+      const staleRows = await db.execute<{ count: string }>(
+        sql`SELECT COUNT(*)::text AS count FROM quickbooks_integration WHERE company_id = realm_id AND company_id = ${sessionCompanyId}`
       );
-      const properCount = parseInt(properRows.rows[0]?.count ?? "0", 10);
-      if (properCount > 0) {
-        res.json({ stale: false, count: 0 });
-        return;
-      }
-      // Fetch at most 2 stale rows — if exactly 1 exists the attribution is unambiguous.
-      const staleRowResult = await db.execute<{ count: string }>(
-        sql`SELECT COUNT(*)::text AS count FROM quickbooks_integration WHERE company_id = realm_id`
-      );
-      const staleCount = parseInt(staleRowResult.rows[0]?.count ?? "0", 10);
-      res.json({ stale: staleCount === 1, count: 0 });
+      const count = parseInt(staleRows.rows[0]?.count ?? "0", 10);
+      res.json({ stale: count > 0, count });
     } catch (err) {
       logger.error({ err }, "GET /api/quickbooks/connection/stale failed");
       res.status(500).json({ message: "Detection failed", error: String(err) });
@@ -9159,113 +8956,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  // QuickBooks Parts Sync - Only irrigation-related items
-  app.post('/api/quickbooks/sync-parts', requireAuthentication, async (req, res) => {
-    try {
-      const userCompanyId = (headerUserCompanyId(req) as string) || null;
-      const qbLookup = userCompanyId ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyId) : null;
-      const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
-      if (!integration || !integration.accessToken) {
-        res.status(400).json({ 
-          success: false, 
-          message: "QuickBooks not connected. Please connect QuickBooks first." 
-        });
-        return;
-      }
-
-      // Use production QuickBooks API for deployment, sandbox for development
-      const apiBase = process.env.NODE_ENV === 'production' 
-        ? 'https://quickbooks.api.intuit.com' 
-        : 'https://sandbox-quickbooks.api.intuit.com';
-      
-      const itemsResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/query?query=SELECT * FROM Item WHERE Type = 'Inventory' AND Active = true`, {
-        headers: {
-          'Authorization': `Bearer ${integration.accessToken}`,
-          'Accept': 'application/json'
-        }
-      }, 'Items Query', integration.realmId);
-
-      if (!itemsResponse.ok) {
-        const errorText = await itemsResponse.text();
-        const itemsTid = itemsResponse.headers.get('intuit_tid');
-        console.error('Failed to fetch items from QuickBooks:', itemsResponse.status, errorText);
-        res.status(500).json({ 
-          success: false, 
-          message: `Failed to fetch items from QuickBooks: ${itemsResponse.status}${itemsTid ? ` [TID: ${itemsTid}]` : ''}` 
-        });
-        return;
-      }
-
-      const qbData = (await itemsResponse.json()) as QbItemQueryResponse;
-      const qbItems = qbData?.QueryResponse?.Item || [];
-      
-      console.log(`Found ${qbItems.length} inventory items in QuickBooks`);
-      
-      // Filter for irrigation-related parts only
-      const irrigationKeywords = ['sprinkler', 'irrigation', 'valve', 'controller', 'nozzle', 'pipe', 'fitting', 'timer', 'drip', 'emitter', 'backflow', 'decoder', 'filter', 'bushing'];
-      
-      const irrigationParts = qbItems.filter((item: any) => {
-        const name = (item.Name || '').toLowerCase();
-        const description = (item.Description || '').toLowerCase();
-        return irrigationKeywords.some(keyword => 
-          name.includes(keyword) || description.includes(keyword)
-        );
-      });
-
-      console.log(`Found ${irrigationParts.length} irrigation-related parts`);
-
-      let syncedCount = 0;
-      const results = [];
-
-      for (const item of irrigationParts as Array<Record<string, unknown>>) {
-        try {
-          const itemId = String(item.Id ?? '');
-          const itemName = String(item.Name ?? `Item ${itemId}`);
-          const partData = {
-            name: itemName,
-            sku: String(item.Sku ?? item.Name ?? `QB-${itemId}`),
-            description: String(item.Description ?? ''),
-            price: Number(item.UnitPrice ?? 0),
-            companyId: req.authenticatedUserCompanyId || 1,
-            quickbooksId: itemId,
-            category: 'General'
-          };
-
-          // Check if part already exists by QuickBooks ID
-          const existingPart = await storage.getPartByQuickBooksId(itemId);
-          
-          if (!existingPart) {
-            // Actually create the part in the database
-            const newPart = await storage.createPart(partData);
-            syncedCount++;
-            results.push({ action: 'created', part: newPart });
-          } else {
-            results.push({ action: 'exists', part: existingPart });
-          }
-        } catch (error: any) {
-          console.error(`Error processing part ${item.Id}:`, error);
-          results.push({ 
-            action: 'error', 
-            part: { qb_id: item.Id, name: item.Name }, 
-            error: error.message 
-          });
-        }
-      }
-
-      res.json({ 
-        success: true, 
-        syncedCount, 
-        totalParts: irrigationParts.length, 
-        filteredFrom: qbItems.length,
-        results,
-        message: `Found ${irrigationParts.length} irrigation parts out of ${qbItems.length} total inventory items`
-      });
-    } catch (error) {
-      console.error('Error syncing parts from QuickBooks:', error);
-      res.status(500).json({ success: false, message: "Failed to sync parts from QuickBooks" });
-    }
-  });
-
   app.post("/api/quickbooks/sync-estimate/:id", requireQuickBooksAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -9451,65 +9141,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to disconnect from Google Sheets" });
-    }
-  });
-
-  // QuickBooks Customer Integration
-  app.get("/api/integrations/quickbooks/customers/status", async (req, res) => {
-    try {
-      const status = await storage.getQuickBooksCustomerStatus();
-      res.json(status);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to get QuickBooks status" });
-    }
-  });
-
-  app.get("/api/integrations/quickbooks/customers/auth-url", async (req, res) => {
-    try {
-      const authData = await storage.getQuickBooksAuthUrl();
-      res.json(authData);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to get QuickBooks auth URL" });
-    }
-  });
-
-  app.post("/api/integrations/quickbooks/customers/connect", async (req, res) => {
-    try {
-      // In a real implementation, this would handle OAuth callback
-      // For demo purposes, we'll simulate a successful connection
-      await storage.connectQuickBooks("demo_access_token", "demo_refresh_token", "demo_realm_id", "Demo Company");
-      res.json({ message: "Connected to QuickBooks successfully" });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to connect to QuickBooks" });
-    }
-  });
-
-  app.post("/api/integrations/quickbooks/customers/sync", async (req, res) => {
-    try {
-      const result = await storage.syncQuickBooksCustomers();
-      res.json(result);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: error instanceof Error ? error.message : "Failed to sync customers from QuickBooks" });
-    }
-  });
-
-  app.post("/api/integrations/quickbooks/customers/disconnect", requireAuthentication, async (req, res) => {
-    try {
-      // req.authenticatedUserCompanyId is set by requireAuthentication from x-user-company-id header
-      const userCompanyId = req.authenticatedUserCompanyId ? req.authenticatedUserCompanyId.toString() : null;
-      if (!userCompanyId) {
-        res.status(400).json({ message: "Company context is required to disconnect QuickBooks." });
-        return;
-      }
-      await storage.disconnectQuickBooks(userCompanyId);
-      res.json({ message: "Disconnected from QuickBooks successfully" });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to disconnect from QuickBooks" });
     }
   });
 
@@ -14625,25 +14256,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       res.status(500).json({ message: "Failed to get log summary" });
     }
   });
-
-  // Launch URL - Called when user clicks "Launch" button in QuickBooks App Menu
-  app.get("/api/quickbooks/launch", requireQuickBooksAccess, async (req, res) => {
-    try {
-      // Log the launch request with enhanced logging
-      console.log('QuickBooks Launch URL accessed:', req.query);
-      
-      // Redirect to the main application with QuickBooks context
-      // The realmId (company ID) will be provided by QuickBooks
-      const realmId = req.query.realmId;
-      
-      // Redirect to customer billing page where QuickBooks integration is located
-      res.redirect('/customer-billing?source=quickbooks_launch');
-    } catch (error) {
-      console.error('QuickBooks Launch URL error:', error);
-      res.status(500).json({ message: "QuickBooks launch failed" });
-    }
-  });
-  
 
   // ============================================
   // External API Key Management Routes

@@ -409,7 +409,6 @@ export interface IStorage {
 
   // Customer Integrations
   syncCustomersFromGoogleSheets(sheetsUrl: string): Promise<{ customersAdded: number }>;
-  syncCustomersFromQuickBooks(): Promise<{ customersAdded: number }>;
   getGoogleSheetsCustomerStatus(): Promise<{ isConnected: boolean; lastSync?: string; sheetUrl?: string; customerCount?: number }>;
 
   // Parts Assemblies
@@ -423,8 +422,6 @@ export interface IStorage {
   getQuickBooksAllIntegrations(): Promise<(typeof quickbooksIntegration.$inferSelect)[]>;
   connectGoogleSheetsCustomers(sheetUrl: string): Promise<void>;
   disconnectGoogleSheetsCustomers(): Promise<void>;
-  getQuickBooksAuthUrl(): Promise<{ authUrl: string; state: string }>;
-  disconnectQuickBooksCustomers(): Promise<void>;
   markQuickBooksReconnectRequired(realmId: string, reason: string): Promise<void>;
   getAllActiveQuickBooksIntegrations(): Promise<(typeof quickbooksIntegration.$inferSelect)[]>;
 
@@ -2907,32 +2904,6 @@ export class DatabaseStorage implements IStorage {
     return { customersAdded };
   }
 
-  async syncCustomersFromQuickBooks(): Promise<{ customersAdded: number }> {
-    // Mock implementation - in real app, would use QuickBooks API
-    console.log("Syncing customers from QuickBooks");
-    
-    // Simulate adding customers from QuickBooks
-    const mockCustomers = [
-      { name: "ABC Corp", email: "contact@abccorp.com", phone: "555-0201", address: "789 Business Blvd, Corporate City, USA" },
-      { name: "XYZ Services", email: "info@xyzservices.com", phone: "555-0202", address: "321 Service Way, Professional Town, USA" }
-    ];
-
-    let customersAdded = 0;
-    for (const customerData of mockCustomers) {
-      try {
-        const existing = await db.select().from(customers).where(eq(customers.email, customerData.email));
-        if (existing.length === 0) {
-          await db.insert(customers).values({ ...customerData, companyId: 1 });
-          customersAdded++;
-        }
-      } catch (error) {
-        console.error(`Failed to add customer ${customerData.name}:`, error);
-      }
-    }
-
-    return { customersAdded };
-  }
-
   async getGoogleSheetsCustomerStatus(): Promise<{ isConnected: boolean; lastSync?: string; sheetUrl?: string; customerCount?: number }> {
     // Mock implementation - in real app, would store connection status in database
     const allCustomers = await db.select().from(customers);
@@ -3193,123 +3164,6 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async syncQuickBooksCustomers(companyId?: string | null): Promise<{ customersAdded: number; customersUpdated: number }> {
-    // Check if connected to QuickBooks
-    const status = await this.getQuickBooksCustomerStatus(companyId);
-    if (!status.isConnected) {
-      throw new Error("Not connected to QuickBooks. Please connect first.");
-    }
-
-    // In a real implementation, this would call QuickBooks API
-    // For now, we'll simulate the process with mock data
-    const mockQBCustomers = [
-      {
-        id: "QB001",
-        name: "QuickBooks Customer 1",
-        email: "customer1@quickbooks.com",
-        phone: "555-0001",
-        address: "123 QB Street, Denver, CO 80202",
-        isActive: true
-      },
-      {
-        id: "QB002", 
-        name: "QuickBooks Customer 2",
-        email: "customer2@quickbooks.com",
-        phone: "555-0002",
-        address: "456 QB Avenue, Boulder, CO 80301",
-        isActive: true
-      },
-      {
-        id: "QB003",
-        name: "Inactive Customer",
-        email: "inactive@quickbooks.com", 
-        phone: "555-0003",
-        address: "789 QB Road, Colorado Springs, CO 80904",
-        isActive: false
-      }
-    ];
-
-    let customersAdded = 0;
-    let customersUpdated = 0;
-
-    // Only sync active customers
-    for (const qbCustomer of mockQBCustomers.filter(c => c.isActive)) {
-      // Check if customer already exists (by name or email)
-      const existingCustomer = await db.select()
-        .from(customers)
-        .where(
-          or(
-            eq(customers.name, qbCustomer.name),
-            eq(customers.email, qbCustomer.email)
-          )
-        )
-        .limit(1);
-
-      if (existingCustomer.length === 0) {
-        // Add new customer
-        await db.insert(customers).values({
-          name: qbCustomer.name,
-          email: qbCustomer.email || '',
-          phone: qbCustomer.phone,
-          address: qbCustomer.address,
-          companyId: 1,
-          laborRate: "45.00",
-          paymentTerms: "net_30",
-          notes: `Synced from QuickBooks (ID: ${qbCustomer.id})`
-        } as InsertCustomer);
-        customersAdded++;
-      } else {
-        // Update existing customer with QuickBooks data
-        await db.update(customers)
-          .set({
-            phone: qbCustomer.phone,
-            address: qbCustomer.address,
-            notes: `Synced from QuickBooks (ID: ${qbCustomer.id})`
-          })
-          .where(eq(customers.id, existingCustomer[0].id));
-        customersUpdated++;
-      }
-    }
-
-    // Update sync timestamp
-    const integration = await db.select().from(quickbooksIntegration).limit(1);
-    if (integration.length > 0) {
-      await db.update(quickbooksIntegration)
-        .set({ updatedAt: new Date() })
-        .where(eq(quickbooksIntegration.id, integration[0].id));
-    }
-
-    return { customersAdded, customersUpdated };
-  }
-
-  async connectQuickBooks(accessToken: string, refreshToken: string, realmId: string, companyId: string): Promise<void> {
-    // Store QuickBooks connection
-    const expiresAt = new Date(Date.now() + 3600 * 1000); // 1 hour from now
-    
-    const existing = await db.select().from(quickbooksIntegration).limit(1);
-    
-    if (existing.length === 0) {
-      await db.insert(quickbooksIntegration).values({
-        companyId,
-        accessToken,
-        refreshToken,
-        realmId,
-        expiresAt
-      });
-    } else {
-      await db.update(quickbooksIntegration)
-        .set({
-          companyId,
-          accessToken,
-          refreshToken,
-          realmId,
-          expiresAt,
-          updatedAt: new Date()
-        })
-        .where(eq(quickbooksIntegration.id, existing[0].id));
-    }
-  }
-
   async disconnectQuickBooks(companyId: string): Promise<void> {
     await db.delete(quickbooksIntegration).where(eq(quickbooksIntegration.companyId, companyId));
   }
@@ -3323,20 +3177,6 @@ export class DatabaseStorage implements IStorage {
   async disconnectGoogleSheetsCustomers(): Promise<void> {
     // Mock implementation - in real app, would remove connection info
     console.log("Disconnecting Google Sheets");
-  }
-
-  async getQuickBooksAuthUrl(): Promise<{ authUrl: string; state: string }> {
-    // Mock implementation - in real app, would generate actual QuickBooks OAuth URL
-    const state = Math.random().toString(36).substring(2, 15);
-    return {
-      authUrl: `https://appcenter.intuit.com/connect/oauth2?client_id=YOUR_CLIENT_ID&scope=com.intuit.quickbooks.accounting&redirect_uri=YOUR_REDIRECT_URI&response_type=code&state=${state}`,
-      state
-    };
-  }
-
-  async disconnectQuickBooksCustomers(): Promise<void> {
-    // Mock implementation - in real app, would revoke QuickBooks tokens
-    console.log("Disconnecting QuickBooks");
   }
 
   // Work Orders - Enhanced

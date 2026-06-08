@@ -7,11 +7,10 @@ import { CustomerListSkeleton } from "@/components/ui/loading-skeleton";
 import { MetricTile, MetricGrid } from "@/components/ui/metric-tile";
 import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Users, Search, Trash2, Phone, Mail, Settings, Eye, MapPin, ChevronRight, ChevronDown, ChevronUp, Building2 } from "lucide-react";
+import { Plus, Users, Search, Trash2, Phone, Mail, Eye, MapPin, ChevronRight, ChevronDown, ChevronUp, Building2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import type { Customer } from "@workspace/db/schema";
-import { CustomerIntegration } from "@/components/integrations/customer-integration";
 import { CustomerForm } from "@/components/customer-form";
 import { CustomerProfile } from "@/components/customers/customer-profile";
 import { CustomerSiteMaps } from "@/components/customers/customer-site-maps";
@@ -207,15 +206,8 @@ export default function Customers() {
         </MetricGrid>
 
         <Tabs defaultValue="customers" className="w-full">
-          <TabsList className={(userRole === 'company_admin' || userRole === 'super_admin') ? "grid w-full grid-cols-2 rounded-xl h-12" : "grid w-full grid-cols-1 rounded-xl h-12"}>
+          <TabsList className="grid w-full grid-cols-1 rounded-xl h-12">
             <TabsTrigger value="customers" className="text-sm rounded-lg data-[state=active]:shadow-sm">Customer List</TabsTrigger>
-            {(userRole === 'company_admin' || userRole === 'super_admin') && (
-              <TabsTrigger value="integrations" className="text-sm rounded-lg data-[state=active]:shadow-sm">
-                <Settings className="w-4 h-4 mr-2" />
-                <span className="hidden sm:inline">Integrations</span>
-                <span className="sm:hidden">Setup</span>
-              </TabsTrigger>
-            )}
           </TabsList>
 
           <TabsContent value="customers" className="space-y-4 mt-4">
@@ -434,11 +426,6 @@ export default function Customers() {
             )}
           </TabsContent>
 
-          {(userRole === 'company_admin' || userRole === 'super_admin') && (
-            <TabsContent value="integrations">
-              <CustomerIntegration />
-            </TabsContent>
-          )}
         </Tabs>
       </PageContent>
 
