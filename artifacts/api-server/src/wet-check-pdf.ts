@@ -3,6 +3,7 @@ import type { Company } from '@workspace/db';
 import type { WetCheckWithDetails, WetCheckZoneRecord, WetCheckFinding } from '@workspace/db/schema';
 import { resolveChromiumExecutable } from './chromium-resolver';
 import { fetchLogoAsBase64 } from './pdf-generator';
+import { VRT_LOGO_DATA_URI } from './assets/vrt-logo.js';
 
 const DEFAULT_BRAND_COLOR = '#1E5A99';
 const DEFAULT_BRAND_DARK = '#143F6B';
@@ -342,10 +343,13 @@ export function buildWetCheckHtml(
 }
 
 function footerTemplate(companyName: string, wetCheckId: number | null | undefined): string {
+  const logoHtml = VRT_LOGO_DATA_URI
+    ? `<img src="${VRT_LOGO_DATA_URI}" style="height:11px;opacity:0.5;" alt="VRT Sync" />`
+    : `<span style="color:#6b7280;">VRT Sync</span>`;
   return `
-<div style="width:100%; font-size:8.5px; color:#6b7280; padding:0 0.5in; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; display:flex; justify-content:space-between;">
-  <span>${esc(companyName)}</span>
-  <span>Wet Check #${esc(wetCheckId ?? '')}</span>
+<div style="width:100%; font-size:8.5px; color:#6b7280; padding:0 0.5in; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; display:flex; justify-content:space-between; align-items:center; box-sizing:border-box;">
+  ${logoHtml}
+  <span>${esc(companyName)} &mdash; Wet Check #${esc(wetCheckId ?? '')}</span>
   <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
 </div>`;
 }

@@ -4,6 +4,7 @@ import { resolveChromiumExecutable } from './chromium-resolver';
 import { fetchLogoAsBase64, preloadPhotos } from './pdf-generator';
 import { FAILED_PHOTO_SENTINEL } from './pdf-helpers';
 import { formatEstimateNumber } from '@workspace/shared';
+import { VRT_LOGO_DATA_URI } from './assets/vrt-logo.js';
 
 const DEFAULT_BRAND_COLOR = '#1E5A99';
 const DEFAULT_BRAND_DARK = '#143F6B';
@@ -424,10 +425,13 @@ export function buildEstimateHtml(
 }
 
 function footerTemplate(companyName: string, estimateNumber: string): string {
+  const logoHtml = VRT_LOGO_DATA_URI
+    ? `<img src="${VRT_LOGO_DATA_URI}" style="height:11px;opacity:0.5;" alt="VRT Sync" />`
+    : `<span style="color:#6b7280;">VRT Sync</span>`;
   return `
-<div style="width:100%; font-size:8.5px; color:#6b7280; padding:0 0.5in; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; display:flex; justify-content:space-between;">
-  <span>${escapeHtml(companyName)}</span>
-  <span>Estimate ${escapeHtml(formatEstimateNumber(estimateNumber))}</span>
+<div style="width:100%; font-size:8.5px; color:#6b7280; padding:0 0.5in; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; display:flex; justify-content:space-between; align-items:center; box-sizing:border-box;">
+  ${logoHtml}
+  <span>${escapeHtml(companyName)} &mdash; Estimate ${escapeHtml(formatEstimateNumber(estimateNumber))}</span>
   <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
 </div>`;
 }
