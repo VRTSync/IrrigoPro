@@ -463,6 +463,8 @@ function Router() {
                   <Route path="/super-admin/app-health" component={SuperAdminAppHealthPage} />
                   <Route path="/admin/migrations" component={AdminMigrationsPage} />
                   <Route path="/admin/wc-labor-backfill" component={AdminWcLaborBackfillPage} />
+                  <Route path="/quickbooks" component={QuickBooksPage} />
+                  <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
                   <Route path="/financial-pulse" component={FinancialPulsePage} />
                   <Route path="/user-manager" component={UserManager} />
                   <Route path="/switch-user" component={SwitchUser} />
