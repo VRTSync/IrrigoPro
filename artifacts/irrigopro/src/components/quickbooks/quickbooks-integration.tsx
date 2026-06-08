@@ -273,7 +273,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
 
   const repairAllowedRoles = ["super_admin", "company_admin", "billing_manager"];
 
-  const { data: staleStatus } = useQuery<{ stale: boolean; count: number; realmId?: string }>({
+  const { data: staleStatus } = useQuery<{ stale: boolean; count: number }>({
     queryKey: ["/api/quickbooks/connection/stale"],
     enabled: repairAllowedRoles.includes(userRole ?? ""),
     staleTime: 30_000,
@@ -282,8 +282,14 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   });
 
   const repairMutation = useMutation({
-    mutationFn: async ({ realmId, targetCompanyId }: { realmId?: string; targetCompanyId?: string }) =>
-      await apiRequest("/api/quickbooks/connection/repair", "POST", { realmId, targetCompanyId }),
+    mutationFn: async () => {
+      // Scoped roles: server derives the repair target entirely from session — body ignored.
+      // super_admin: pass targetCompanyId so the server can resolve it when the
+      // super_admin session has no company context.
+      const body: Record<string, string | undefined> =
+        userRole === "super_admin" ? { targetCompanyId: userCompanyId || undefined } : {};
+      return await apiRequest("/api/quickbooks/connection/repair", "POST", body);
+    },
     onSuccess: (data: any) => {
       if (data.rowsPatched > 0) {
         toast({
@@ -693,10 +699,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                     variant="outline"
                     className="border-amber-400 text-amber-900 hover:bg-amber-100"
                     disabled={repairMutation.isPending}
-                    onClick={() => repairMutation.mutate({
-                      realmId: staleStatus?.realmId,
-                      targetCompanyId: userRole === "super_admin" ? userCompanyId || undefined : undefined,
-                    })}
+                    onClick={() => repairMutation.mutate()}
                   >
                     {repairMutation.isPending ? (
                       <><RefreshCw className="w-3 h-3 mr-1 animate-spin" />Repairing…</>
