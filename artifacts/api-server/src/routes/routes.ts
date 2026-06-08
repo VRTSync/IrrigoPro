@@ -7428,6 +7428,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // QB company_id repair — patches quickbooks_integration rows where company_id
+  // was incorrectly stored as the QB realm ID (OAuth state lost on server
+  // restart → fallback logic fired). Idempotent; only touches rows where
+  // company_id = realm_id. Accepts optional { targetCompanyId } body; if
+  // omitted, auto-resolves to the first active non-demo IrrigoPro company.
+  app.post("/api/admin/repair/qb-company-id", requireAuthentication, async (req: any, res: Response) => {
+    if (req.authenticatedUserRole !== "super_admin") {
+      res.status(403).json({ message: "Super admin access required" });
+      return;
+    }
+    try {
+      // Resolve the target IrrigoPro company ID.
+      let targetCompanyId: string | null = req.body?.targetCompanyId
+        ? String(req.body.targetCompanyId)
+        : null;
+
+      if (!targetCompanyId) {
+        // Auto-resolve: first active company whose integer ID is < 90
+        // (avoids the demo company at id=99 and any future test companies).
+        const activeCompanies = await db.execute<{ id: number }>(
+          sql`SELECT id FROM companies WHERE is_active = TRUE AND id < 90 ORDER BY id LIMIT 1`
+        );
+        if (activeCompanies.rows.length === 0) {
+          res.status(422).json({ message: "No eligible active company found. Pass targetCompanyId explicitly." });
+          return;
+        }
+        targetCompanyId = String(activeCompanies.rows[0].id);
+      }
+
+      // Find all QB integration rows where company_id = realm_id
+      // (the fingerprint of the fallback that mis-stored the realm ID).
+      const staleRows = await db.execute<{ id: number; realm_id: string; company_id: string }>(
+        sql`SELECT id, realm_id, company_id FROM quickbooks_integration WHERE company_id = realm_id`
+      );
+
+      const details: Array<{ id: number; realmId: string; oldCompanyId: string; newCompanyId: string }> = [];
+
+      for (const row of staleRows.rows) {
+        await db.execute(
+          sql`UPDATE quickbooks_integration SET company_id = ${targetCompanyId}, updated_at = NOW() WHERE id = ${row.id}`
+        );
+        details.push({ id: row.id, realmId: row.realm_id, oldCompanyId: row.company_id, newCompanyId: targetCompanyId });
+      }
+
+      logger.info({ rowsPatched: details.length, targetCompanyId, details }, "POST /api/admin/repair/qb-company-id complete");
+      res.json({ ok: true, rowsPatched: details.length, targetCompanyId, details });
+    } catch (err) {
+      logger.error({ err }, "POST /api/admin/repair/qb-company-id failed");
+      res.status(500).json({ message: "Repair failed", error: String(err) });
+    }
+  });
+
   // WC Labor Slice 3 — WC labor backfill (start / status / cancel / reset).
   registerWcLaborBackfillRoutes(app, requireAuthentication);
   // Task #760 — Temporary one-time cleanup: delete test invoice #71256.
