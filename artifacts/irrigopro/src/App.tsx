@@ -141,62 +141,81 @@ interface User {
 
 
 
+// Read and parse the saved user from localStorage synchronously.
+// Returns null on any failure (missing key, bad JSON, storage error).
+function readUserFromStorage(): User | null {
+  try {
+    const saved = safeGet("user");
+    if (saved) return JSON.parse(saved) as User;
+  } catch (e) {
+    console.error("[boot] error parsing saved user:", e);
+    try { safeRemove("user"); } catch { /* ignore */ }
+  }
+  return null;
+}
+
 function Router() {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // Lazy initialiser: reads localStorage synchronously so the very first
+  // render already knows the correct role. Eliminates the stale-null window
+  // that caused super_admin to land on AdminDashboard when the page was
+  // restored from BFCache.
+  const [user, setUser] = useState<User | null>(readUserFromStorage);
+
+  // isLoading is true only when no saved user was found (fresh first visit /
+  // after logout). When a user IS found synchronously we already know what
+  // to render, so we skip the spinner entirely.
+  const [isLoading, setIsLoading] = useState<boolean>(() => readUserFromStorage() === null);
   const [currentPath] = useLocation();
 
   useEffect(() => {
     let cancelled = false;
 
-    // Boot timeout: never strand on the spinner. If the session refresh
-    // hasn't resolved within ~4s, fall through to the unauthenticated
-    // routes (login screen) so field techs on slow connections see
-    // *something* rather than a permanent loading state.
-    const timeoutId = window.setTimeout(() => {
-      if (cancelled) return;
-      console.warn("[boot] session refresh timed out — falling through to login");
-      setIsLoading(false);
-    }, 4000);
+    // Run cache cleanup on mount.
+    try {
+      clearStaleCache();
+    } catch (cacheErr) {
+      console.warn("[boot] clearStaleCache failed:", cacheErr);
+    }
 
-    // Check for saved user in localStorage and validate session.
-    // Wrapped end-to-end in try/catch so a thrown safeGet/JSON.parse cannot
-    // strand the app on a blank screen.
-    const refreshUserSession = async () => {
+    // Boot timeout: only relevant on first visit (no saved user).
+    // Prevents a permanent spinner if something unexpectedly hangs.
+    let timeoutId: number | undefined;
+    if (isLoading) {
+      timeoutId = window.setTimeout(() => {
+        if (cancelled) return;
+        console.warn("[boot] session refresh timed out — falling through to login");
+        setIsLoading(false);
+      }, 4000);
+
+      // No async work needed — resolve immediately so the login page
+      // appears without waiting for the full 4 s safety window.
+      if (!cancelled) {
+        window.clearTimeout(timeoutId);
+        timeoutId = undefined;
+        setIsLoading(false);
+      }
+    }
+
+    // BFCache guard: when the browser restores this page from the
+    // Back-Forward Cache (event.persisted === true), re-read localStorage
+    // and update state so any post-login user change is reflected without
+    // requiring a hard refresh.
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
       try {
-        try {
-          clearStaleCache();
-        } catch (cacheErr) {
-          console.warn("[boot] clearStaleCache failed:", cacheErr);
-        }
-
-        const savedUser = safeGet("user");
-        if (savedUser) {
-          try {
-            const userData = JSON.parse(savedUser);
-            if (!cancelled) setUser(userData);
-          } catch (parseErr) {
-            console.error("[boot] error parsing saved user:", parseErr);
-            try { safeRemove("user"); } catch { /* ignore */ }
-          }
-        } else {
-          console.log("[boot] no saved user found");
-        }
-      } catch (err) {
-        console.error("[boot] session refresh failed:", err);
-      } finally {
-        if (!cancelled) {
-          window.clearTimeout(timeoutId);
-          setIsLoading(false);
-        }
+        const fresh = readUserFromStorage();
+        setUser(fresh);
+      } catch (e) {
+        console.error("[boot] BFCache re-read failed:", e);
       }
     };
 
-    void refreshUserSession();
+    window.addEventListener("pageshow", handlePageShow);
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timeoutId);
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+      window.removeEventListener("pageshow", handlePageShow);
     };
   }, []);
 
