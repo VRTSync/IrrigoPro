@@ -235,6 +235,7 @@ export const superAdminNav: NavConfig = {
       items: [
         { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
         { type: "leaf", label: "Client Errors", path: "/admin/client-errors", icon: AlertTriangle },
+        { type: "leaf", label: "QuickBooks", path: "/quickbooks", icon: Calculator },
       ],
     },
     {
@@ -244,6 +245,7 @@ export const superAdminNav: NavConfig = {
       items: [
         { type: "leaf", label: "DB Migrations", path: "/admin/migrations", icon: Database },
         { type: "leaf", label: "WC Labor Backfill", path: "/admin/wc-labor-backfill", icon: Droplets },
+        { type: "leaf", label: "Wet Check Issue Types", path: "/admin/issue-types", icon: Droplets },
       ],
     },
   ],
