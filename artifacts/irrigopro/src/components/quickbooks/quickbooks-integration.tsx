@@ -18,7 +18,6 @@ import {
   ShieldAlert,
   Activity,
   XCircle,
-  Wrench,
   AlertCircle
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -281,39 +280,6 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     throwOnError: false,
   });
 
-  const repairMutation = useMutation({
-    mutationFn: async () => {
-      // Scoped roles: server derives the repair target entirely from session — body ignored.
-      // super_admin: pass targetCompanyId so the server can resolve it when the
-      // super_admin session has no company context.
-      const body: Record<string, string | undefined> =
-        userRole === "super_admin" ? { targetCompanyId: userCompanyId || undefined } : {};
-      return await apiRequest("/api/quickbooks/connection/repair", "POST", body);
-    },
-    onSuccess: (data: any) => {
-      if (data.rowsPatched > 0) {
-        toast({
-          title: "Connection Repaired",
-          description: "QuickBooks connection is now linked to your company. Refreshing status…",
-        });
-      } else {
-        toast({
-          title: "Nothing to Repair",
-          description: "Your QuickBooks connection is already correctly configured.",
-        });
-      }
-      queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/connection/stale"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/connection"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/health"] });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Repair Failed",
-        description: error?.message || "Could not repair the connection. Contact support if this persists.",
-        variant: "destructive",
-      });
-    },
-  });
 
   // Phase 5b — QB Harden #5: surface credential/env mismatch errors that were
   // forwarded from the OAuth callback via ?qb_connect_error=<message>.
@@ -674,8 +640,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
           </div>
 
           {/* Connection issue detection — visible to company_admin, billing_manager, and
-              super_admin only when a stale QB row is detected for this company. Hidden
-              when the connection is healthy so there is no noise for normal users. */}
+              super_admin only when a stale QB row is detected. Hidden when healthy. */}
           {repairAllowedRoles.includes(userRole ?? "") && staleStatus?.stale && (
             <>
               <Separator />
@@ -691,22 +656,9 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                   <p className="text-xs text-amber-700">
                     This usually happens after a server restart during the QuickBooks
                     authorization flow. Invoices and customer syncs will fail until
-                    repaired. Click below to fix it — no re-authorization with
-                    QuickBooks is required.
+                    the connection is re-established. Use the <strong>Connect to QuickBooks</strong> button
+                    above to re-authorize — the issue clears automatically on reconnect.
                   </p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="border-amber-400 text-amber-900 hover:bg-amber-100"
-                    disabled={repairMutation.isPending}
-                    onClick={() => repairMutation.mutate()}
-                  >
-                    {repairMutation.isPending ? (
-                      <><RefreshCw className="w-3 h-3 mr-1 animate-spin" />Repairing…</>
-                    ) : (
-                      <><Wrench className="w-3 h-3 mr-1" />Repair Connection</>
-                    )}
-                  </Button>
                 </div>
               </div>
             </>
