@@ -8682,11 +8682,28 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           lastSync: new Date()
         };
 
-        // Save to database — use the company ID that was stored when OAuth flow began
+        // Save to database — use the company ID that was stored when OAuth flow began.
+        // If oauthCompanyId is null the state lookup succeeded but carried no company ID,
+        // which would silently bind this QB realm to the wrong tenant. Abort instead.
+        if (!oauthCompanyId) {
+          console.error('[QB] OAuth callback completed but oauthCompanyId is null — cannot determine which IrrigoPro company initiated this auth. Aborting to prevent bad data.', { realmId, state });
+          res.status(400).send(`
+            <html>
+              <head><title>Connection Failed</title></head>
+              <body>
+                <h2>QuickBooks Connection Failed</h2>
+                <p>Unable to identify the IrrigoPro company that started this connection. Please return to IrrigoPro and try connecting again.</p>
+                <button onclick="window.location.href='/billing'">Return to IrrigoPro</button>
+              </body>
+            </html>
+          `);
+          return;
+        }
+
         console.log("Saving QuickBooks integration with realmId:", realmId, "companyId:", oauthCompanyId);
         
         await storage.saveQuickBooksIntegration({
-          companyId: oauthCompanyId || realmId as string, // Prefer IrrigoPro company ID; fall back to QB realm ID
+          companyId: oauthCompanyId,
           accessToken: qbData.accessToken,
           refreshToken: qbData.refreshToken,
           realmId: realmId as string, // Keep QB realm ID for API calls
