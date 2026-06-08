@@ -17,7 +17,8 @@ import {
   DollarSign,
   ShieldAlert,
   Activity,
-  XCircle
+  XCircle,
+  Wrench
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, adaptiveRefetchInterval, useArrayQuery } from "@/lib/queryClient";
@@ -258,6 +259,44 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const search = useSearch();
+
+  // Read role + companyId from the session stored in localStorage.
+  const { userRole, userCompanyId } = (() => {
+    try {
+      const u = JSON.parse(localStorage.getItem("user") || "{}");
+      return { userRole: u.role as string | undefined, userCompanyId: String(u.companyId ?? "") };
+    } catch {
+      return { userRole: undefined, userCompanyId: "" };
+    }
+  })();
+
+  const repairCompanyIdMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest("/api/admin/repair/qb-company-id", "POST", { targetCompanyId: userCompanyId });
+    },
+    onSuccess: (data: any) => {
+      if (data.rowsPatched > 0) {
+        toast({
+          title: "QB Company ID Repaired",
+          description: `Patched ${data.rowsPatched} row(s) to company ${data.targetCompanyId}. Refreshing status…`,
+        });
+      } else {
+        toast({
+          title: "No Rows Needed Repair",
+          description: "All QuickBooks integration rows already have the correct company ID.",
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/connection"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/health"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Repair Failed",
+        description: error?.message || "Could not repair the QB company ID. Check the API logs.",
+        variant: "destructive",
+      });
+    },
+  });
 
   // Phase 5b — QB Harden #5: surface credential/env mismatch errors that were
   // forwarded from the OAuth callback via ?qb_connect_error=<message>.
@@ -616,6 +655,40 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
             </h3>
             <ConnectionHealthPanel />
           </div>
+
+          {/* Super-admin diagnostics: one-click company ID repair */}
+          {userRole === "super_admin" && (
+            <>
+              <Separator />
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                  <Wrench className="w-4 h-4" />
+                  Admin Diagnostics
+                </h3>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+                  <p className="text-xs text-amber-800 font-medium">Repair QB company ID mismatch</p>
+                  <p className="text-xs text-amber-700">
+                    If the connection shows "Connected" but syncs fail with "not connected", the
+                    integration row may be stored under the QB realm ID instead of your IrrigoPro
+                    company ID. Click Repair to fix it in one step.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-amber-400 text-amber-900 hover:bg-amber-100"
+                    disabled={!userCompanyId || repairCompanyIdMutation.isPending}
+                    onClick={() => repairCompanyIdMutation.mutate()}
+                  >
+                    {repairCompanyIdMutation.isPending ? (
+                      <><RefreshCw className="w-3 h-3 mr-1 animate-spin" />Repairing…</>
+                    ) : (
+                      <><Wrench className="w-3 h-3 mr-1" />Repair Company ID</>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
 
           <Separator />
 
