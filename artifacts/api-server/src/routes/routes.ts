@@ -8969,6 +8969,109 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // GET /api/quickbooks/connection/stale
+  // Returns { stale: boolean, count: number } — true when a QB integration row
+  // with company_id = realm_id (fingerprint of the OAuth-state-lost mis-store)
+  // exists and this company has no properly-linked row. Read-only; safe to call
+  // on every page mount. Allowed: super_admin, company_admin, billing_manager.
+  app.get("/api/quickbooks/connection/stale", requireAuthentication, async (req: any, res: Response) => {
+    const role = req.authenticatedUserRole;
+    if (!["super_admin", "company_admin", "billing_manager"].includes(role)) {
+      res.status(403).json({ message: "Not authorized" });
+      return;
+    }
+    try {
+      if (role === "super_admin") {
+        const rows = await db.execute<{ count: string }>(
+          sql`SELECT COUNT(*)::text AS count FROM quickbooks_integration WHERE company_id = realm_id`
+        );
+        const count = parseInt(rows.rows[0]?.count ?? "0", 10);
+        res.json({ stale: count > 0, count });
+        return;
+      }
+      // Scoped roles: stale when their company has no properly-linked row AND
+      // there is at least one stale row (company_id = realm_id). This means the
+      // orphan stale row is most likely theirs.
+      const sessionCompanyId = String(req.authenticatedUserCompanyId ?? "");
+      if (!sessionCompanyId) {
+        res.json({ stale: false, count: 0 });
+        return;
+      }
+      const [properRows, staleRows] = await Promise.all([
+        db.execute<{ count: string }>(
+          sql`SELECT COUNT(*)::text AS count FROM quickbooks_integration WHERE company_id = ${sessionCompanyId}`
+        ),
+        db.execute<{ count: string }>(
+          sql`SELECT COUNT(*)::text AS count FROM quickbooks_integration WHERE company_id = realm_id`
+        ),
+      ]);
+      const properCount = parseInt(properRows.rows[0]?.count ?? "0", 10);
+      const staleCount = parseInt(staleRows.rows[0]?.count ?? "0", 10);
+      const stale = properCount === 0 && staleCount > 0;
+      res.json({ stale, count: stale ? staleCount : 0 });
+    } catch (err) {
+      logger.error({ err }, "GET /api/quickbooks/connection/stale failed");
+      res.status(500).json({ message: "Detection failed", error: String(err) });
+    }
+  });
+
+  // POST /api/quickbooks/connection/repair
+  // Self-service: patches the caller's own company's QB integration row when
+  // company_id = realm_id. Derives targetCompanyId from the session for scoped
+  // roles — they cannot repair a different company's row even if they pass a
+  // body. super_admin may pass targetCompanyId in the body to repair any company.
+  app.post("/api/quickbooks/connection/repair", requireAuthentication, async (req: any, res: Response) => {
+    const role = req.authenticatedUserRole;
+    if (!["super_admin", "company_admin", "billing_manager"].includes(role)) {
+      res.status(403).json({ message: "Not authorized" });
+      return;
+    }
+    try {
+      let targetCompanyId: string;
+      if (role === "super_admin" && req.body?.targetCompanyId) {
+        targetCompanyId = String(req.body.targetCompanyId);
+      } else {
+        const sessionCompanyId = req.authenticatedUserCompanyId;
+        if (!sessionCompanyId) {
+          res.status(400).json({ message: "No company associated with this session." });
+          return;
+        }
+        targetCompanyId = String(sessionCompanyId);
+      }
+
+      const companyCheck = await db.execute<{ id: number }>(
+        sql`SELECT id FROM companies WHERE id = ${targetCompanyId} LIMIT 1`
+      );
+      if (companyCheck.rows.length === 0) {
+        res.status(422).json({ message: `Company '${targetCompanyId}' not found.` });
+        return;
+      }
+
+      const staleRows = await db.execute<{ id: number; realm_id: string; company_id: string }>(
+        sql`SELECT id, realm_id, company_id FROM quickbooks_integration WHERE company_id = realm_id`
+      );
+
+      if (staleRows.rows.length === 0) {
+        res.json({ ok: true, rowsPatched: 0, details: [] });
+        return;
+      }
+
+      const details: Array<{ id: number; realmId: string; oldCompanyId: string; newCompanyId: string }> = [];
+      for (const row of staleRows.rows) {
+        await db.execute(
+          sql`UPDATE quickbooks_integration SET company_id = ${targetCompanyId}, updated_at = NOW() WHERE id = ${row.id}`
+        );
+        details.push({ id: row.id, realmId: row.realm_id, oldCompanyId: row.company_id, newCompanyId: targetCompanyId });
+      }
+
+      logger.info({ rowsPatched: details.length, targetCompanyId, details }, "POST /api/quickbooks/connection/repair complete");
+      res.json({ ok: true, rowsPatched: details.length, details });
+    } catch (err) {
+      logger.error({ err }, "POST /api/quickbooks/connection/repair failed");
+      res.status(500).json({ message: "Repair failed", error: String(err) });
+    }
+  });
+
   app.get("/api/quickbooks/health", requireAuthentication, async (req, res) => {
     try {
       const integrations = await storage.getQuickBooksAllIntegrations();

@@ -18,7 +18,8 @@ import {
   ShieldAlert,
   Activity,
   XCircle,
-  Wrench
+  Wrench,
+  AlertCircle
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, adaptiveRefetchInterval, useArrayQuery } from "@/lib/queryClient";
@@ -270,29 +271,39 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     }
   })();
 
-  const repairCompanyIdMutation = useMutation({
-    mutationFn: async () => {
-      return await apiRequest("/api/admin/repair/qb-company-id", "POST", { targetCompanyId: userCompanyId });
-    },
+  const repairAllowedRoles = ["super_admin", "company_admin", "billing_manager"];
+
+  const { data: staleStatus } = useQuery<{ stale: boolean; count: number }>({
+    queryKey: ["/api/quickbooks/connection/stale"],
+    enabled: repairAllowedRoles.includes(userRole ?? ""),
+    staleTime: 30_000,
+    retry: false,
+    throwOnError: false,
+  });
+
+  const repairMutation = useMutation({
+    mutationFn: async () =>
+      await apiRequest("/api/quickbooks/connection/repair", "POST", {}),
     onSuccess: (data: any) => {
       if (data.rowsPatched > 0) {
         toast({
-          title: "QB Company ID Repaired",
-          description: `Patched ${data.rowsPatched} row(s) to company ${data.targetCompanyId}. Refreshing status…`,
+          title: "Connection Repaired",
+          description: "QuickBooks connection is now linked to your company. Refreshing status…",
         });
       } else {
         toast({
-          title: "No Rows Needed Repair",
-          description: "All QuickBooks integration rows already have the correct company ID.",
+          title: "Nothing to Repair",
+          description: "Your QuickBooks connection is already correctly configured.",
         });
       }
+      queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/connection/stale"] });
       queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/connection"] });
       queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/health"] });
     },
     onError: (error: any) => {
       toast({
         title: "Repair Failed",
-        description: error?.message || "Could not repair the QB company ID. Check the API logs.",
+        description: error?.message || "Could not repair the connection. Contact support if this persists.",
         variant: "destructive",
       });
     },
@@ -656,33 +667,38 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
             <ConnectionHealthPanel />
           </div>
 
-          {/* Super-admin diagnostics: one-click company ID repair */}
-          {userRole === "super_admin" && (
+          {/* Connection issue detection — visible to company_admin, billing_manager, and
+              super_admin only when a stale QB row is detected for this company. Hidden
+              when the connection is healthy so there is no noise for normal users. */}
+          {repairAllowedRoles.includes(userRole ?? "") && staleStatus?.stale && (
             <>
               <Separator />
               <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                  <Wrench className="w-4 h-4" />
-                  Admin Diagnostics
+                  <AlertCircle className="w-4 h-4 text-amber-500" />
+                  Connection Issue Detected
                 </h3>
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
-                  <p className="text-xs text-amber-800 font-medium">Repair QB company ID mismatch</p>
+                  <p className="text-xs text-amber-900 font-medium">
+                    Your QuickBooks connection is linked to the wrong account ID.
+                  </p>
                   <p className="text-xs text-amber-700">
-                    If the connection shows "Connected" but syncs fail with "not connected", the
-                    integration row may be stored under the QB realm ID instead of your IrrigoPro
-                    company ID. Click Repair to fix it in one step.
+                    This usually happens after a server restart during the QuickBooks
+                    authorization flow. Invoices and customer syncs will fail until
+                    repaired. Click below to fix it — no re-authorization with
+                    QuickBooks is required.
                   </p>
                   <Button
                     size="sm"
                     variant="outline"
                     className="border-amber-400 text-amber-900 hover:bg-amber-100"
-                    disabled={!userCompanyId || repairCompanyIdMutation.isPending}
-                    onClick={() => repairCompanyIdMutation.mutate()}
+                    disabled={repairMutation.isPending}
+                    onClick={() => repairMutation.mutate()}
                   >
-                    {repairCompanyIdMutation.isPending ? (
+                    {repairMutation.isPending ? (
                       <><RefreshCw className="w-3 h-3 mr-1 animate-spin" />Repairing…</>
                     ) : (
-                      <><Wrench className="w-3 h-3 mr-1" />Repair Company ID</>
+                      <><Wrench className="w-3 h-3 mr-1" />Repair Connection</>
                     )}
                   </Button>
                 </div>
