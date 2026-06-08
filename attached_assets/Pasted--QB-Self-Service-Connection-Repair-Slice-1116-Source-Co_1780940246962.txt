@@ -1,0 +1,250 @@
+# QB Self-Service Connection Repair — Slice 1116
+
+**Source:** Conversation 2026-06-08 — QB connection broken for High Plains; super_admin repair endpoint exists but the problem is per-company, so company_admin and billing_manager should be able to fix it themselves without involving super_admin.  
+**Severity:** P1 (QB push completely broken when the stale row exists; only super_admin can currently fix it).  
+**Prerequisite slices:** Slice 1108b (QB OAuth fix) should be deployed so `USE_DB_OAUTH_STATE=1` prevents new occurrences. This slice handles self-service recovery when the stale row already exists.
+
+---
+
+## Why
+
+The existing repair endpoint at `POST /api/admin/repair/qb-company-id` (routes.ts:7440) requires `super_admin`. But the problem it fixes — a QB integration row where `company_id = realm_id` — is entirely scoped to one company's own row. The company_admin or billing_manager can see their QB settings page; they should be able to run the repair themselves without escalating to super_admin.
+
+There is also no automatic detection. The admin diagnostics button in `quickbooks-integration.tsx` (line 660) is hidden behind `userRole === "super_admin"` and renders unconditionally when visible — it doesn't check whether a stale row actually exists first. A company_admin will never see it.
+
+This slice adds:
+1. A self-service repair endpoint scoped to the caller's own company.
+2. A stale-row detection endpoint so the UI only surfaces the repair card when there's actually something to fix.
+3. A repair card in the QB settings page visible to company_admin and billing_manager (and super_admin) that appears only when stale is detected.
+
+The existing `POST /api/admin/repair/qb-company-id` super_admin endpoint is kept unchanged — it operates across companies (useful for super_admin fixing any company's row without logging in as that company).
+
+---
+
+## Part 1 — Self-service repair endpoint (routes.ts)
+
+Add near the existing QB routes (around line 8865, with the other QB management endpoints — not in the admin block).
+
+```ts
+// GET /api/quickbooks/connection/stale
+// Returns { stale: boolean, count: number } — true when this company has a
+// QB integration row where company_id = realm_id (fingerprint of the
+// OAuth-state-lost mis-store). Read-only; safe to call on every page mount.
+app.get("/api/quickbooks/connection/stale", requireAuthentication, async (req: any, res: Response) => {
+  const role = req.authenticatedUserRole;
+  const allowedRoles = ["super_admin", "company_admin", "billing_manager"];
+  if (!allowedRoles.includes(role)) {
+    return res.status(403).json({ message: "Not authorized" });
+  }
+
+  // super_admin sees all companies; scoped roles see only their own.
+  const companyId: number | null =
+    role === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
+
+  try {
+    const rows = await db.execute<{ count: string }>(
+      companyId != null
+        ? sql`SELECT COUNT(*)::text AS count FROM quickbooks_integration
+              WHERE company_id = realm_id AND company_id IN (
+                SELECT id::text FROM companies WHERE id = ${companyId}
+              )`
+        : sql`SELECT COUNT(*)::text AS count FROM quickbooks_integration
+              WHERE company_id = realm_id`
+    );
+    const count = parseInt(rows.rows[0]?.count ?? "0", 10);
+    res.json({ stale: count > 0, count });
+  } catch (err) {
+    logger.error({ err }, "GET /api/quickbooks/connection/stale failed");
+    res.status(500).json({ message: "Detection failed", error: String(err) });
+  }
+});
+
+// POST /api/quickbooks/connection/repair
+// Self-service: patches the caller's own company's QB integration row when
+// company_id = realm_id. Derives targetCompanyId from the session —
+// the caller cannot repair a different company's row.
+// super_admin may pass targetCompanyId in the body to repair any company.
+app.post("/api/quickbooks/connection/repair", requireAuthentication, async (req: any, res: Response) => {
+  const role = req.authenticatedUserRole;
+  const allowedRoles = ["super_admin", "company_admin", "billing_manager"];
+  if (!allowedRoles.includes(role)) {
+    return res.status(403).json({ message: "Not authorized" });
+  }
+
+  try {
+    // Scoped roles use their own company ID from session — they cannot
+    // pass a different ID in the body. super_admin may pass one explicitly.
+    let targetCompanyId: string;
+    if (role === "super_admin" && req.body?.targetCompanyId) {
+      targetCompanyId = String(req.body.targetCompanyId);
+    } else {
+      const sessionCompanyId = req.authenticatedUserCompanyId;
+      if (!sessionCompanyId) {
+        return res.status(400).json({ message: "No company associated with this session." });
+      }
+      targetCompanyId = String(sessionCompanyId);
+    }
+
+    // Validate company exists.
+    const companyCheck = await db.execute<{ id: number }>(
+      sql`SELECT id FROM companies WHERE id = ${targetCompanyId} LIMIT 1`
+    );
+    if (companyCheck.rows.length === 0) {
+      return res.status(422).json({ message: `Company '${targetCompanyId}' not found.` });
+    }
+
+    // Find stale rows scoped to this company only.
+    const staleRows = await db.execute<{ id: number; realm_id: string; company_id: string }>(
+      sql`SELECT id, realm_id, company_id FROM quickbooks_integration
+          WHERE company_id = realm_id AND company_id IN (
+            SELECT id::text FROM companies WHERE id = ${targetCompanyId}
+          )`
+    );
+
+    if (staleRows.rows.length === 0) {
+      return res.json({ ok: true, rowsPatched: 0, details: [] });
+    }
+
+    const details: Array<{ id: number; realmId: string; oldCompanyId: string; newCompanyId: string }> = [];
+    for (const row of staleRows.rows) {
+      await db.execute(
+        sql`UPDATE quickbooks_integration SET company_id = ${targetCompanyId}, updated_at = NOW() WHERE id = ${row.id}`
+      );
+      details.push({ id: row.id, realmId: row.realm_id, oldCompanyId: row.company_id, newCompanyId: targetCompanyId });
+    }
+
+    logger.info({ rowsPatched: details.length, targetCompanyId, details }, "POST /api/quickbooks/connection/repair complete");
+    res.json({ ok: true, rowsPatched: details.length, details });
+  } catch (err) {
+    logger.error({ err }, "POST /api/quickbooks/connection/repair failed");
+    res.status(500).json({ message: "Repair failed", error: String(err) });
+  }
+});
+```
+
+**Security note:** scoped roles (`company_admin`, `billing_manager`) cannot supply `targetCompanyId` in the body — it is always derived from `req.authenticatedUserCompanyId`. The `WHERE company_id IN (SELECT id::text FROM companies WHERE id = ${targetCompanyId})` clause means the UPDATE only ever touches rows belonging to their own company. They cannot repair another company's row even if they guess the ID.
+
+---
+
+## Part 2 — Repair card in `quickbooks-integration.tsx`
+
+### Detection query
+
+At component mount, call `GET /api/quickbooks/connection/stale`. Use `useQuery` so it participates in the normal React Query cache and can be invalidated after repair.
+
+```tsx
+const { data: staleStatus } = useQuery({
+  queryKey: ["/api/quickbooks/connection/stale"],
+  // Only fetch for roles that can act on the result.
+  enabled: ["super_admin", "company_admin", "billing_manager"].includes(userRole ?? ""),
+  staleTime: 30_000, // re-check at most every 30s — this is a health check, not hot data
+});
+```
+
+### Repair mutation
+
+Replace the existing `repairCompanyIdMutation` (line 273) — which points to the old super_admin endpoint — with one that calls the new self-service endpoint. The old mutation can be removed entirely since the super_admin path is now covered by the same self-service endpoint (super_admin just gets the body option).
+
+```tsx
+const repairMutation = useMutation({
+  mutationFn: async () =>
+    await apiRequest("/api/quickbooks/connection/repair", "POST", {}),
+  onSuccess: (data: any) => {
+    if (data.rowsPatched > 0) {
+      toast({
+        title: "Connection Repaired",
+        description: `QuickBooks connection is now linked to your company. Refreshing status…`,
+      });
+    } else {
+      toast({
+        title: "Nothing to Repair",
+        description: "Your QuickBooks connection is already correctly configured.",
+      });
+    }
+    queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/connection/stale"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/connection"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/health"] });
+  },
+  onError: (error: any) => {
+    toast({
+      title: "Repair Failed",
+      description: error?.message || "Could not repair the connection. Contact support if this persists.",
+      variant: "destructive",
+    });
+  },
+});
+```
+
+### Repair card render
+
+Replace the existing super_admin-only diagnostics block (lines 659–691) with a role-aware card that only renders when a stale row is detected:
+
+```tsx
+{["super_admin", "company_admin", "billing_manager"].includes(userRole ?? "") &&
+  staleStatus?.stale && (
+    <>
+      <Separator />
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-amber-500" />
+          Connection Issue Detected
+        </h3>
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+          <p className="text-xs text-amber-900 font-medium">
+            Your QuickBooks connection is linked to the wrong account ID.
+          </p>
+          <p className="text-xs text-amber-700">
+            This usually happens after a server restart during the QuickBooks
+            authorization flow. Invoices and customer syncs will fail until
+            repaired. Click below to fix it — no re-authorization with
+            QuickBooks is required.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-amber-400 text-amber-900 hover:bg-amber-100"
+            disabled={repairMutation.isPending}
+            onClick={() => repairMutation.mutate()}
+          >
+            {repairMutation.isPending ? (
+              <><RefreshCw className="w-3 h-3 mr-1 animate-spin" />Repairing…</>
+            ) : (
+              <><Wrench className="w-3 h-3 mr-1" />Repair Connection</>
+            )}
+          </Button>
+        </div>
+      </div>
+    </>
+  )
+}
+```
+
+When `staleStatus?.stale` is false (healthy connection), the entire block is absent — no noise for companies that don't have the problem.
+
+---
+
+## Acceptance criteria
+
+- `company_admin` and `billing_manager` see the repair card on the QB page when their company has a stale row. They do not see it when the connection is healthy.
+- Clicking Repair calls `/api/quickbooks/connection/repair`, patches the row, and refreshes the connection status — no super_admin involvement required.
+- A `company_admin` cannot repair a different company's row by passing a foreign `targetCompanyId` in the request body — the server ignores the body param and uses the session company ID.
+- `super_admin` sees the repair card when any stale row exists and can repair it via the same self-service endpoint.
+- The existing `POST /api/admin/repair/qb-company-id` endpoint is unchanged and still works.
+- The repair card disappears after a successful repair (stale query is invalidated and re-fetches as `stale: false`).
+- `field_tech` and `irrigation_manager` receive 403 from both new endpoints and never see the repair card.
+
+---
+
+## Out of scope
+
+- Changing the OAuth flow to prevent the mis-store in the first place (that is `USE_DB_OAUTH_STATE=1` from Slice 1108).
+- Any change to the existing super_admin endpoint at `/api/admin/repair/qb-company-id`.
+- Repair UI on mobile.
+
+---
+
+## Relevant files
+
+- `artifacts/api-server/src/routes/routes.ts` — add two new QB routes near line 8865
+- `artifacts/irrigopro/src/components/quickbooks/quickbooks-integration.tsx` — replace super_admin-only block with role-aware stale-detection + repair card
+- `artifacts/irrigopro/src/pages/quickbooks.tsx` — no changes needed; repair card is inside `<QuickBooksIntegration />`
