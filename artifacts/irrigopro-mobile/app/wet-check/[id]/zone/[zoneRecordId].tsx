@@ -24,19 +24,7 @@ import { LoadingScreen } from "@/components/Loading";
 import { useColors } from "@/hooks/useColors";
 import { ApiError, apiRequest } from "@/lib/api";
 import { friendlyErrorMessage } from "@/lib/toast";
-import {
-  captureZonePhoto,
-  deleteLocalPhoto,
-  ensureCameraPermission,
-  type LocalPhoto,
-} from "@/lib/photo-upload";
-import { drainQueue } from "@/lib/sync/engine";
-import { isOfflineQueuedResult } from "@/lib/sync/errors";
-import { removeEntry, updateEntry } from "@/lib/sync/queue";
-import {
-  useScopeConflictTick,
-  useSyncStatus,
-} from "@/lib/sync/use-sync-status";
+import { useScopeConflictTick } from "@/lib/sync/use-sync-status";
 import {
   WetCheckConflictError,
   wetCheckDetailQueryKey,
@@ -189,17 +177,6 @@ export default function ZoneDetailScreen() {
   const [findingError, setFindingError] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
 
-  // Local-first photo state. Each pending entry is a captured-but-not-yet-
-  // uploaded photo we've already written into the docs directory; rendering
-  // merges these with the server's photo list so the user sees the new
-  // thumbnail instantly. On a successful upload we delete the local file
-  // and let the server query refetch.
-  type PendingPhoto = LocalPhoto & {
-    status: "uploading" | "queued" | "error";
-    error?: string;
-  };
-  const [pendingPhotos, setPendingPhotos] = useState<PendingPhoto[]>([]);
-
   // Surface 409s discovered by background queue drains in the same
   // conflict banner as inline-mutation conflicts.
   const conflictTick = useScopeConflictTick(
@@ -208,55 +185,6 @@ export default function ZoneDetailScreen() {
   useEffect(() => {
     if (conflictTick > 0) setConflict(true);
   }, [conflictTick]);
-
-  // Subscribe to the offline queue so we can:
-  //  (a) re-seed `queued` thumbnails for photos captured in a prior app
-  //      session (so a relaunch shows them until the engine drains
-  //      them), and
-  //  (b) drop `queued` rows once the engine has actually sent them. The
-  //      engine deletes the local file on success, so we remove our
-  //      row when no matching queue entry remains.
-  //
-  // We match queue entries to this screen via wetCheckId in the
-  // scopeKey + the photo's zoneRecordId. Use clientId (= queue entry
-  // id) as the stable PendingPhoto key so retry/cancel keep working
-  // identically for restored rows.
-  const { entries: queueEntries } = useSyncStatus();
-  useEffect(() => {
-    if (wetCheckId == null || zoneRecordId == null) return;
-    setPendingPhotos((prev) => {
-      const queuedPhotosForThisZone = queueEntries.filter(
-        (e) =>
-          e.kind === "wet-check-photo" &&
-          e.scopeKey === `wc:${wetCheckId}` &&
-          e.photo?.zoneRecordId === zoneRecordId,
-      );
-      const seen = new Set(prev.map((p) => p.clientId));
-      const additions: PendingPhoto[] = [];
-      for (const e of queuedPhotosForThisZone) {
-        if (!e.photo) continue;
-        if (seen.has(e.id)) continue;
-        additions.push({
-          clientId: e.id,
-          localUri: e.photo.localUri,
-          takenAt: e.photo.takenAt,
-          zoneRecordId: e.photo.zoneRecordId,
-          findingId: e.photo.findingId,
-          status: "queued",
-        });
-      }
-      const survivors = prev.filter((p) => {
-        if (p.status !== "queued") return true;
-        return queuedPhotosForThisZone.some(
-          (e) => e.photo?.localUri === p.localUri,
-        );
-      });
-      if (additions.length === 0 && survivors.length === prev.length) {
-        return prev;
-      }
-      return [...survivors, ...additions];
-    });
-  }, [queueEntries, wetCheckId, zoneRecordId]);
 
   const detailQuery = useQuery({
     queryKey:
@@ -410,19 +338,57 @@ export default function ZoneDetailScreen() {
         label: "Add finding",
       });
     },
+    onMutate: async (input) => {
+      if (wetCheckId == null || zoneRecordId == null) return { previous: undefined };
+      await queryClient.cancelQueries({ queryKey: wetCheckDetailQueryKey(wetCheckId) });
+      const previous = queryClient.getQueryData<WetCheckDetail>(
+        wetCheckDetailQueryKey(wetCheckId),
+      );
+      if (previous) {
+        const placeholder: WetCheckFinding = {
+          id: -1,
+          zoneRecordId: zoneRecordId,
+          issueType: input.issueType,
+          partId: input.partId,
+          partName: input.partName,
+          partPrice: input.partPrice,
+          quantity: input.quantity,
+          laborHours: input.laborHours,
+          notes: input.notes,
+          resolution: "needs_manager_review",
+        };
+        queryClient.setQueryData<WetCheckDetail>(
+          wetCheckDetailQueryKey(wetCheckId),
+          {
+            ...previous,
+            zoneRecords: previous.zoneRecords.map((z) =>
+              z.id === zoneRecordId
+                ? { ...z, findings: [...z.findings, placeholder] }
+                : z,
+            ),
+          },
+        );
+      }
+      return { previous };
+    },
     onSuccess: () => {
       setFindingError(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => undefined,
       );
       setEditorOpen(false);
+    },
+    onError: (err, _input, ctx) => {
+      if (wetCheckId != null && ctx?.previous) {
+        queryClient.setQueryData(wetCheckDetailQueryKey(wetCheckId), ctx.previous);
+      }
+      const m = errorMessage(err);
+      if (m != null) setFindingError(m);
+    },
+    onSettled: () => {
       if (wetCheckId != null) {
         queryClient.invalidateQueries({ queryKey: wetCheckDetailQueryKey(wetCheckId) });
       }
-    },
-    onError: (err) => {
-      const m = errorMessage(err);
-      if (m != null) setFindingError(m);
     },
   });
 
@@ -456,148 +422,6 @@ export default function ZoneDetailScreen() {
     },
   });
 
-  // ── Photo upload (POST sign → PUT → finalize → POST metadata) ──
-  const uploadPhotoMutation = useMutation({
-    mutationKey:
-      wetCheckId != null
-        ? wetCheckMutationKey(wetCheckId, "photo-add")
-        : ["wet-check", "mutation", -1, "photo-add"],
-    mutationFn: async (
-      pending: PendingPhoto,
-    ): Promise<WetCheckPhoto | { _offlineQueued: true }> => {
-      if (wetCheckId == null) throw new Error("Missing wet check id");
-      // Funnel the entire sign+PUT+POST sequence through the offline
-      // queue. When online the engine attempts immediately and the
-      // helper resolves with the real `WetCheckPhoto`; when offline (or
-      // the upload itself fails with a network error) the helper resolves
-      // with a synthetic `_offlineQueued` placeholder and the engine
-      // retries on the next drain.
-      return wetCheckMutate<WetCheckPhoto>({
-        // Reuse the captured photo's clientId as the queue entry id so
-        // pendingPhotos[].clientId === queue entry id. Retry/cancel UI
-        // can then address the exact queue row instead of enqueueing a
-        // duplicate POST on each retry (the server's per-(zone,clientId)
-        // unique index would dedupe regardless, but an extra row would
-        // still get stuck spinning forever).
-        id: pending.clientId,
-        path: `/api/wet-checks/${wetCheckId}/photos`,
-        method: "POST",
-        withClientId: false, // engine bakes its own clientId into the body
-        wetCheckId,
-        label: "Add photo",
-        isPhoto: true,
-        photo: {
-          localUri: pending.localUri,
-          takenAt: pending.takenAt,
-          zoneRecordId: pending.zoneRecordId,
-          findingId: pending.findingId,
-        },
-      });
-    },
-    onSuccess: (created, pending) => {
-      setPhotoError(null);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-        () => undefined,
-      );
-      if (isOfflineQueuedResult(created)) {
-        // Keep the local thumbnail visible while the queue waits to drain.
-        // The cleanup useEffect above removes the row once the queue
-        // entry is gone (sent or discarded).
-        setPendingPhotos((prev) =>
-          prev.map((p) =>
-            p.clientId === pending.clientId
-              ? { ...p, status: "queued", error: undefined }
-              : p,
-          ),
-        );
-        return;
-      }
-      // Online success: engine already deleted the local file.
-      setPendingPhotos((prev) =>
-        prev.filter((p) => p.clientId !== pending.clientId),
-      );
-      if (wetCheckId != null) {
-        queryClient.invalidateQueries({
-          queryKey: wetCheckDetailQueryKey(wetCheckId),
-        });
-      }
-    },
-    onError: (err, pending) => {
-      const m = errorMessage(err);
-      setPendingPhotos((prev) =>
-        prev.map((p) =>
-          p.clientId === pending.clientId
-            ? { ...p, status: "error", error: m ?? "Upload failed" }
-            : p,
-        ),
-      );
-      if (m != null) setPhotoError(m);
-    },
-  });
-
-  const onAddPhoto = useCallback(async () => {
-    if (wetCheckId == null || zoneRecordId == null) return;
-    if (isLocked) return;
-    setPhotoError(null);
-    const perm = await ensureCameraPermission();
-    if (perm !== "granted") {
-      setPhotoError(
-        perm === "blocked"
-          ? "Camera access is blocked. Enable it in Settings to add photos."
-          : "Camera permission is required to add photos.",
-      );
-      return;
-    }
-    let captured: LocalPhoto | null = null;
-    try {
-      captured = await captureZonePhoto({
-        wetCheckId,
-        zoneRecordId,
-        findingId: null,
-      });
-    } catch (err) {
-      const m = friendlyErrorMessage(err, "Couldn't open the camera");
-      setPhotoError(m);
-      return;
-    }
-    if (!captured) return; // user cancelled
-    const pending: PendingPhoto = { ...captured, status: "uploading" };
-    setPendingPhotos((prev) => [...prev, pending]);
-    uploadPhotoMutation.mutate(pending);
-  }, [wetCheckId, zoneRecordId, isLocked, uploadPhotoMutation]);
-
-  // Retry an entry that the engine marked failed. The queue is the
-  // source of truth — we re-mark the existing row pending and kick a
-  // drain instead of calling uploadPhotoMutation.mutate (which would
-  // enqueue a *new* row with a *new* clientId and risk duplicate POSTs
-  // on the server). If the row was discarded out from under us (e.g.
-  // by Force Resync's markAllPending or another tab), updateEntry is a
-  // no-op and the cleanup effect above will drop the stale thumbnail
-  // on the next queue tick.
-  const onRetryPendingPhoto = useCallback((clientId: string) => {
-    setPendingPhotos((prev) =>
-      prev.map((p) =>
-        p.clientId === clientId
-          ? { ...p, status: "queued", error: undefined }
-          : p,
-      ),
-    );
-    void updateEntry(clientId, {
-      status: "pending",
-      lastError: null,
-    }).then(() => drainQueue().catch(() => undefined));
-  }, []);
-
-  // Cancel = drop the local file AND remove the durable queue row, so
-  // we don't leave an orphan entry pointing at a deleted file that the
-  // engine will keep failing to upload.
-  const onCancelPendingPhoto = useCallback((pending: PendingPhoto) => {
-    deleteLocalPhoto(pending.localUri);
-    void removeEntry(pending.clientId);
-    setPendingPhotos((prev) =>
-      prev.filter((p) => p.clientId !== pending.clientId),
-    );
-  }, []);
 
   // ── Delete server photo (optimistic) ──
   const deletePhotoMutation = useMutation({
@@ -975,7 +799,7 @@ export default function ZoneDetailScreen() {
             </Section>
 
             <Section
-              title={`Photos (${zonePhotos.length + pendingPhotos.length})`}
+              title={`Photos (${zonePhotos.length})`}
               colors={colors}
             >
               {photoError ? (
@@ -985,7 +809,7 @@ export default function ZoneDetailScreen() {
                   onDismiss={() => setPhotoError(null)}
                 />
               ) : null}
-              {zonePhotos.length === 0 && pendingPhotos.length === 0 ? (
+              {zonePhotos.length === 0 ? (
                 <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
                   No photos for this zone.
                 </Text>
@@ -995,75 +819,6 @@ export default function ZoneDetailScreen() {
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.photoStrip}
                 >
-                  {pendingPhotos.map((p) => (
-                    <View
-                      key={`pending-${p.clientId}`}
-                      style={[
-                        styles.photoFrame,
-                        {
-                          borderColor:
-                            p.status === "error"
-                              ? colors.destructive
-                              : colors.border,
-                          borderRadius: colors.radius - 4,
-                          backgroundColor: colors.secondary,
-                        },
-                      ]}
-                    >
-                      <Image
-                        source={{ uri: p.localUri }}
-                        style={styles.photoImage}
-                        contentFit="cover"
-                        transition={120}
-                        cachePolicy="memory"
-                        accessibilityLabel="Pending wet check photo"
-                      />
-                      <View style={styles.photoOverlay} pointerEvents="box-none">
-                        {p.status === "uploading" ? (
-                          <View style={styles.photoOverlayCenter} pointerEvents="none">
-                            <ActivityIndicator color="#ffffff" />
-                            <Text style={styles.photoOverlayCaption}>Uploading…</Text>
-                          </View>
-                        ) : p.status === "queued" ? (
-                          <View
-                            style={styles.photoOverlayCenter}
-                            pointerEvents="none"
-                            accessibilityLabel="Queued — will upload when back online"
-                          >
-                            <Feather name="cloud-off" size={18} color="#ffffff" />
-                            <Text style={styles.photoOverlayCaption}>Queued</Text>
-                          </View>
-                        ) : (
-                          <View style={styles.photoErrorOverlay}>
-                            <Pressable
-                              onPress={() => onRetryPendingPhoto(p.clientId)}
-                              accessibilityRole="button"
-                              accessibilityLabel="Retry photo upload"
-                              style={({ pressed }) => [
-                                styles.photoOverlayButton,
-                                { opacity: pressed ? 0.85 : 1 },
-                              ]}
-                            >
-                              <Feather name="refresh-cw" size={14} color="#ffffff" />
-                              <Text style={styles.photoOverlayButtonText}>Retry</Text>
-                            </Pressable>
-                            <Pressable
-                              onPress={() => onCancelPendingPhoto(p)}
-                              accessibilityRole="button"
-                              accessibilityLabel="Discard photo"
-                              hitSlop={6}
-                              style={({ pressed }) => [
-                                styles.photoOverlayDismiss,
-                                { opacity: pressed ? 0.7 : 1 },
-                              ]}
-                            >
-                              <Feather name="x" size={14} color="#ffffff" />
-                            </Pressable>
-                          </View>
-                        )}
-                      </View>
-                    </View>
-                  ))}
                   {zonePhotos.map((p) => (
                     <View
                       key={p.id}
@@ -1111,26 +866,6 @@ export default function ZoneDetailScreen() {
                   ))}
                 </ScrollView>
               )}
-              {!isLocked ? (
-                <Pressable
-                  onPress={onAddPhoto}
-                  accessibilityRole="button"
-                  accessibilityLabel="Add photo"
-                  style={({ pressed }) => [
-                    styles.addPhotoButton,
-                    {
-                      backgroundColor: colors.primary,
-                      borderRadius: colors.radius,
-                      opacity: pressed ? 0.85 : 1,
-                    },
-                  ]}
-                >
-                  <Feather name="camera" size={20} color={colors.primaryForeground} />
-                  <Text style={[styles.addPhotoText, { color: colors.primaryForeground }]}>
-                    Add Photo
-                  </Text>
-                </Pressable>
-              ) : null}
             </Section>
 
             <View style={{ height: 24 }} />
