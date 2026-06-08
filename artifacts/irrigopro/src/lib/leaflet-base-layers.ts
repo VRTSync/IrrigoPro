@@ -2,8 +2,8 @@ import L from "leaflet";
 
 const ESRI_WORLD_IMAGERY =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
-const CARTO_VOYAGER_LABELS =
-  "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png";
+const ESRI_WORLD_REFERENCE_OVERLAY =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Reference_Overlay/MapServer/tile/{z}/{y}/{x}";
 
 export function createSatelliteLayer(maxZoom = 22): L.TileLayer {
   return L.tileLayer(ESRI_WORLD_IMAGERY, {
@@ -15,12 +15,12 @@ export function createSatelliteLayer(maxZoom = 22): L.TileLayer {
 }
 
 export function createReferenceLabelsLayer(maxZoom = 22): L.TileLayer {
-  return L.tileLayer(CARTO_VOYAGER_LABELS, {
-    attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a>',
-    maxNativeZoom: 22,
+  return L.tileLayer(ESRI_WORLD_REFERENCE_OVERLAY, {
+    attribution:
+      'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+    maxNativeZoom: 19,
     maxZoom,
-    opacity: 0.95,
-    subdomains: "abcd",
+    opacity: 1,
   });
 }
 

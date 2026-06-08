@@ -234,6 +234,7 @@ export function CustomerLocationStep({
               <CustomerLocationPicker
                 key={customer.id}
                 customerId={customer.id}
+                hasCustomerAddress={!!customer.address}
                 onLocationSelect={(loc) =>
                   onChange({ ...valueRef.current, workLocation: loc })
                 }

@@ -17,12 +17,39 @@ L.Icon.Default.mergeOptions({
 
 export interface LocationPickerProps {
   /** Kept for API compat — used only for reverse-geocode display after a pin
-   *  drop. Not used for map centering (centering uses pin → boundary → regional
-   *  fallback). */
+   *  drop. Not used for map centering (centering uses pin → boundary → company
+   *  fallback → regional fallback). */
   defaultAddress?: string;
   onLocationSelect: (location: { lat: number; lng: number; address?: string }) => void;
   selectedLocation?: { lat: number; lng: number; address?: string } | null;
   customerBoundary?: PropertyBoundary | null;
+  /**
+   * When the customer has no pin and no property boundary, the map falls back
+   * to centering on this address string (typically the company address).
+   * A soft yellow inline notice is shown when this fallback is used and no
+   * pin has been dropped yet.
+   *
+   * May arrive after the first render (e.g. on a React Query cache miss) — the
+   * component handles this with a reactive re-center effect so the map will
+   * pan to the company address as soon as the value resolves.
+   */
+  companyFallbackAddress?: string | null;
+  /**
+   * Signal from the caller that the boundary lookup has definitively settled
+   * (whether or not a boundary was found). Defaults to `true` — callers that
+   * don't use boundary lookup should leave this unset.
+   *
+   * When `false` (boundary query still in-flight), the reactive company-fallback
+   * re-center is suppressed so the company address is never applied in place of
+   * a boundary that hasn't arrived yet.
+   */
+  boundaryResolved?: boolean;
+  /**
+   * True when the customer record has a non-empty address string. When true,
+   * the company fallback centering is suppressed — company address is only used
+   * when the customer has NO address AND NO boundary. Defaults to `false`.
+   */
+  hasCustomerAddress?: boolean;
   className?: string;
 }
 
@@ -47,6 +74,10 @@ const PULSING_DOT_CSS = `
 const FALLBACK_CENTER: [number, number] = [39.8283, -98.5795];
 const FALLBACK_ZOOM = 12;
 
+// What was used to center the map on first mount. Used to gate the reactive
+// re-center effect that handles late-arriving companyFallbackAddress.
+type CenteredBy = "pin" | "boundary" | "company" | "regional";
+
 async function reverseGeocode(lat: number, lng: number): Promise<string> {
   try {
     const response = await fetch(
@@ -61,10 +92,28 @@ async function reverseGeocode(lat: number, lng: number): Promise<string> {
   return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 }
 
+async function forwardGeocode(address: string): Promise<[number, number] | null> {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`
+    );
+    const data = await response.json();
+    if (Array.isArray(data) && data.length > 0) {
+      const { lat, lon } = data[0];
+      return [parseFloat(lat), parseFloat(lon)];
+    }
+  } catch {
+  }
+  return null;
+}
+
 export function LocationPicker({
   onLocationSelect,
   selectedLocation,
   customerBoundary,
+  companyFallbackAddress,
+  boundaryResolved = true,
+  hasCustomerAddress = false,
   className = ""
 }: LocationPickerProps) {
   const mapRef = useRef<HTMLDivElement>(null);
@@ -75,9 +124,18 @@ export function LocationPicker({
   const watchIdRef = useRef<number | null>(null);
   const liveLocationRef = useRef<{ lat: number; lng: number } | null>(null);
 
+  // Tracks what was used for the initial map centering so the reactive
+  // company-fallback effect knows whether it should re-center.
+  const centeredByRef = useRef<CenteredBy | null>(null);
+
   const [isLoading, setIsLoading] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [usedCompanyFallback, setUsedCompanyFallback] = useState(false);
+  // Tracks whether a pin is currently placed — set immediately on click (before
+  // the async reverse-geocode resolves) so the yellow notice disappears the
+  // moment the tech drops a pin, not after parent state propagates.
+  const [hasPinDropped, setHasPinDropped] = useState(!!selectedLocation);
 
   const hasBoundary = !!customerBoundary;
 
@@ -104,8 +162,15 @@ export function LocationPicker({
   // Initialize the map once on mount. Centering priority:
   // 1. existing pin  → center + zoom 20
   // 2. customer boundary → fitBounds
-  // 3. regional fallback → FALLBACK_CENTER zoom 12
-  // The map ALWAYS mounts — no geocoding, no dead-end mapless state.
+  // 3. company address fallback (if available at mount time) → geocode + zoom 12
+  // 4. regional fallback → FALLBACK_CENTER zoom 12
+  //
+  // centeredByRef records which branch was taken. When companyFallbackAddress
+  // arrives AFTER the map has mounted (React Query cache miss), the reactive
+  // effect below handles re-centering — the init effect only handles the case
+  // where the prop was already available.
+  //
+  // The map ALWAYS mounts — no dead-end mapless state.
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
 
@@ -122,25 +187,36 @@ export function LocationPicker({
       let initialCenter: [number, number] = FALLBACK_CENTER;
       let initialZoom = FALLBACK_ZOOM;
       let fitToBoundary = false;
+      let centeredBy: CenteredBy = "regional";
 
       if (selectedLocation) {
         initialCenter = [selectedLocation.lat, selectedLocation.lng];
         initialZoom = 20;
+        centeredBy = "pin";
       } else if (customerBoundary) {
         initialCenter = [customerBoundary.centerLat, customerBoundary.centerLng];
         initialZoom = customerBoundary.zoom;
         fitToBoundary = true;
+        centeredBy = "boundary";
+      } else if (!hasCustomerAddress && companyFallbackAddress) {
+        // Only consult company address when the customer has NO address and NO boundary.
+        const coords = await forwardGeocode(companyFallbackAddress);
+        if (coords) {
+          initialCenter = coords;
+          initialZoom = 12;
+          centeredBy = "company";
+        }
+        // else: remain "regional" / FALLBACK_CENTER
       }
-      // else: fallback to FALLBACK_CENTER / FALLBACK_ZOOM
 
       const map = L.map(mapRef.current!, {
         center: initialCenter,
         zoom: initialZoom,
         zoomControl: true,
         maxZoom: 22,
-        minZoom: 3,
-        zoomSnap: 0.1,
-        wheelPxPerZoomLevel: 20,
+        minZoom: 2,
+        zoomSnap: 0.5,
+        wheelPxPerZoomLevel: 60,
       });
 
       addSatelliteHybrid(map, { withLabels: true, maxZoom: 22, withControl: true });
@@ -160,6 +236,9 @@ export function LocationPicker({
         }
         const marker = L.marker([lat, lng]).addTo(map);
         markerRef.current = marker;
+        // Dismiss the company-fallback notice immediately — before the async
+        // reverse-geocode and before the parent updates selectedLocation.
+        setHasPinDropped(true);
         const address = await reverseGeocode(lat, lng);
         onLocationSelect({ lat, lng, address });
       });
@@ -169,7 +248,9 @@ export function LocationPicker({
         markerRef.current = marker;
       }
 
+      centeredByRef.current = centeredBy;
       mapInstanceRef.current = map;
+      setUsedCompanyFallback(centeredBy === "company");
       setIsLoading(false);
 
       if ('geolocation' in navigator) {
@@ -204,7 +285,67 @@ export function LocationPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Reactive company-fallback re-center: fires when companyFallbackAddress or
+  // boundaryResolved changes after the map has already mounted.
+  //
+  // This handles the React Query cache-miss scenario where the company profile
+  // (and/or the boundary query) resolves after the map has already opened.
+  //
+  // All guards must pass before geocoding is attempted:
+  //   - Map is mounted
+  //   - Initial centering used the regional fallback (centeredByRef === 'regional')
+  //   - Boundary lookup has definitively settled (boundaryResolved === true)
+  //     → prevents applying company fallback while boundary is still in-flight
+  //   - No boundary was found (customerBoundary is falsy)
+  //   - No pin has been set (selectedLocation is falsy)
+  //   - companyFallbackAddress is a non-empty string
+  //
+  // After the async geocode, re-checks are performed to handle races
+  // (e.g. a boundary arriving while geocoding was in progress).
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (centeredByRef.current !== "regional") return;
+    if (!boundaryResolved) return;          // boundary query still in-flight
+    if (customerBoundary) return;           // boundary exists — never consult company
+    if (hasCustomerAddress) return;         // customer has an address — never consult company
+    if (!companyFallbackAddress) return;
+    if (selectedLocation) return;
+
+    let cancelled = false;
+    forwardGeocode(companyFallbackAddress).then((coords) => {
+      if (cancelled) return;
+      if (!coords) return;
+      const liveMap = mapInstanceRef.current;
+      if (!liveMap) return;
+      // Re-check guards after async gap in case boundary or pin arrived meanwhile
+      if (centeredByRef.current !== "regional") return;
+      if (markerRef.current) return;        // pin was dropped while geocoding
+      // customerBoundary captured via closure; check ref would be better but the
+      // boundary effect will fitBounds independently and clear usedCompanyFallback.
+      liveMap.setView(coords, 12, { animate: true });
+      centeredByRef.current = "company";
+      setUsedCompanyFallback(true);
+    });
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyFallbackAddress, boundaryResolved]);
+
+  // When a boundary arrives after the company fallback was already applied,
+  // suppress the yellow notice and update centeredByRef so the reactive effect
+  // above remains a no-op even if companyFallbackAddress changes later.
+  useEffect(() => {
+    if (customerBoundary && usedCompanyFallback) {
+      setUsedCompanyFallback(false);
+      centeredByRef.current = "boundary";
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!customerBoundary]);
+
   // Sync the pin marker whenever the parent changes `selectedLocation` externally.
+  // Also keeps hasPinDropped in sync so the yellow notice correctly re-appears
+  // when a pin is cleared from outside (e.g. a "Reset" action in the wizard).
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -216,11 +357,13 @@ export function LocationPicker({
         markerRef.current = L.marker([lat, lng]).addTo(map);
       }
       map.flyTo([lat, lng], Math.max(map.getZoom(), 18), { duration: 0.8 });
+      setHasPinDropped(true);
     } else {
       if (markerRef.current) {
         map.removeLayer(markerRef.current);
         markerRef.current = null;
       }
+      setHasPinDropped(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLocation?.lat, selectedLocation?.lng]);
@@ -308,6 +451,11 @@ export function LocationPicker({
     );
   };
 
+  // Notice is hidden immediately when the tech drops a pin (hasPinDropped)
+  // and also suppressed if a boundary exists (it may have arrived after the
+  // company fallback was applied and centeredByRef was reset).
+  const showCompanyFallbackNotice = usedCompanyFallback && !hasPinDropped && !customerBoundary;
+
   return (
     <Card className={className}>
       <CardHeader>
@@ -381,6 +529,16 @@ export function LocationPicker({
               </div>
             )}
           </div>
+
+          {showCompanyFallbackNotice && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+              <p className="text-sm text-yellow-800">
+                No address or property boundary on file for this customer — map is centered on your
+                company address. Add an address or boundary to the customer profile for accurate
+                centering.
+              </p>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
