@@ -3482,14 +3482,16 @@ export class DatabaseStorage implements IStorage {
       throw new Error(`Estimate ${estimateId} not found`);
     }
     
-    if (estimate.status !== 'approved') {
-      throw new Error(`Estimate ${estimateId} must be approved before creating work order`);
-    }
-
-    // Check if work order already exists for this estimate
+    // Check if work order already exists — idempotent: return the existing
+    // work order instead of throwing so double-clicks and the
+    // approve-via-token auto-convert path are both safe.
     const existingWorkOrders = await this.getWorkOrdersByEstimate(estimateId, null);
     if (existingWorkOrders.length > 0) {
-      throw new Error(`Work order already exists for estimate ${estimateId}`);
+      return existingWorkOrders[0];
+    }
+
+    if (estimate.status !== 'approved') {
+      throw new Error(`Estimate ${estimateId} must be approved before creating work order`);
     }
 
     // Generate work order number
@@ -3556,12 +3558,14 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
-    // Update estimate with work order reference and mark as converted
+    // Update estimate with work order reference and stamp the converted status
+    // so isConvertedToWorkOrder() returns true and the button hides.
     await db.update(estimates)
       .set({ 
-        status: 'approved', // Keep as approved, don't change status
+        status: 'converted_to_work_order',
         workOrderId: newWorkOrder.id,
         // Task #642 — dual-write the canonical lifecycle column.
+        // converted_to_work_order maps to the 'approved' bucket.
         lifecycle: 'approved',
       })
       .where(eq(estimates.id, estimateId));
@@ -3690,9 +3694,10 @@ export class DatabaseStorage implements IStorage {
         });
       }
 
-      // 4. Back-link the estimate to the work order.
+      // 4. Back-link the estimate to the work order and stamp the
+      // converted status so isConvertedToWorkOrder() returns true.
       const [linkedEstimate] = await tx.update(estimates)
-        .set({ workOrderId: newWorkOrder.id })
+        .set({ workOrderId: newWorkOrder.id, status: 'converted_to_work_order' })
         .where(eq(estimates.id, estimateId))
         .returning();
 

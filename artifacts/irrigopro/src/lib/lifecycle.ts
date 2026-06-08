@@ -67,6 +67,7 @@ export function computeLifecycleStatus(
 type EstimateLike = EstimateLifecycleInput & {
   lifecycleStatus?: string | null;
   lifecycle?: string | null;
+  workOrderId?: number | null;
 };
 
 export function lifecycleOf(
@@ -165,7 +166,7 @@ export const isAwaitingInternalReview = (
 // status enum.
 export const isConvertedToWorkOrder = (
   e: EstimateLike | null | undefined,
-): boolean => e?.status === "converted_to_work_order";
+): boolean => e?.status === "converted_to_work_order" || e?.workOrderId != null;
 
 // Customer hasn't responded yet — used to gate the customer-facing
 // Approve/Reject actions in the detail modal. Mirrors the server's

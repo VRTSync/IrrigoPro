@@ -58,7 +58,7 @@ export function deriveLifecycleForWrite(opts: {
   const status = opts.status ?? "";
   const internalStatus = opts.internalStatus ?? "";
 
-  if (status === "approved") return "approved";
+  if (status === "approved" || status === "converted_to_work_order") return "approved";
   if (status === "rejected") return "rejected";
   if (internalStatus === "draft") return "draft";
   if (internalStatus === "sent_to_customer" && status === "pending") return "sent";

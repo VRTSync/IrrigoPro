@@ -1873,8 +1873,11 @@ export function registerEstimateRoutes(
           });
         }
       } catch (workOrderError) {
-        console.error("Auto work order creation failed:", workOrderError);
-        // Continue even if work order creation fails - estimate is still approved
+        req.log.warn(
+          { err: workOrderError, estimateId: estimate.id },
+          "approve-via-token: auto work-order creation failed — estimate approval recorded, work order skipped",
+        );
+        // Continue — estimate approval must succeed even if work-order creation fails
       }
 
       // Notify company admins that the customer approved the estimate
@@ -2090,6 +2093,13 @@ export function registerEstimateRoutes(
         // Use the new storage function that handles all validation and conversion
         const workOrder = await storage.createWorkOrderFromEstimate!(id);
 
+        if (estBefore?.workOrderId != null) {
+          req.log.warn(
+            { estimateId: id, workOrderId: workOrder.id },
+            "convert-to-work-order: estimate already had a work order — returning existing (idempotent)",
+          );
+        }
+
         await recordLifecycleAudit(req, {
           resource: "estimate",
           action: "estimate.converted_to_work_order",
@@ -2137,16 +2147,13 @@ export function registerEstimateRoutes(
           estimateId: id,
         });
       } catch (error) {
-        console.error("Error converting estimate to work order:", error);
+        req.log.error({ err: error }, "Error converting estimate to work order");
         if (error instanceof Error) {
           if (error.message.includes("not found")) {
             res.status(404).json({ message: error.message });
             return;
           }
-          if (
-            error.message.includes("must be approved") ||
-            error.message.includes("already exists")
-          ) {
+          if (error.message.includes("must be approved")) {
             res.status(400).json({ message: error.message });
             return;
           }
