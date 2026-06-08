@@ -1,0 +1,57 @@
+name: RangeError
+message: Invalid time value
+url: https://irrigopro.com/quickbooks
+ua: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36
+time: 2026-06-08T20:28:30.367Z
+
+stack:
+RangeError: Invalid time value
+    at rje (https://irrigopro.com/assets/index-Ca-keJtJ.js:53:35992)
+    at up (https://irrigopro.com/assets/index-Ca-keJtJ.js:53:37225)
+    at d4e (https://irrigopro.com/assets/index-Ca-keJtJ.js:180:102151)
+    at DS (https://irrigopro.com/assets/index-Ca-keJtJ.js:8:34335)
+    at ek (https://irrigopro.com/assets/index-Ca-keJtJ.js:8:63197)
+    at kL (https://irrigopro.com/assets/index-Ca-keJtJ.js:8:73904)
+    at JL (https://irrigopro.com/assets/index-Ca-keJtJ.js:8:108242)
+    at cce (https://irrigopro.com/assets/index-Ca-keJtJ.js:8:107288)
+    at _k (https://irrigopro.com/assets/index-Ca-keJtJ.js:8:107114)
+    at ZL (https://irrigopro.com/assets/index-Ca-keJtJ.js:8:104173)
+
+componentStack:
+
+    at d4e (https://irrigopro.com/assets/index-Ca-keJtJ.js:180:100877)
+    at div (<anonymous>)
+    at div (<anonymous>)
+    at https://irrigopro.com/assets/index-Ca-keJtJ.js:49:24306
+    at div (<anonymous>)
+    at https://irrigopro.com/assets/index-Ca-keJtJ.js:49:23610
+    at div (<anonymous>)
+    at m4e (https://irrigopro.com/assets/index-Ca-keJtJ.js:180:105013)
+    at div (<anonymous>)
+    at https://irrigopro.com/assets/index-Ca-keJtJ.js:49:24306
+    at div (<anonymous>)
+    at https://irrigopro.com/assets/index-Ca-keJtJ.js:49:23610
+    at div (<anonymous>)
+    at div (<anonymous>)
+    at div (<anonymous>)
+    at jre (<anonymous>)
+    at _e (https://irrigopro.com/assets/index-Ca-keJtJ.js:9:39134)
+    at Zm (https://irrigopro.com/assets/index-Ca-keJtJ.js:9:39946)
+    at div (<anonymous>)
+    at div (<anonymous>)
+    at main (<anonymous>)
+    at https://irrigopro.com/assets/index-Ca-keJtJ.js:176:175150
+    at div (<anonymous>)
+    at u (https://irrigopro.com/assets/index-Ca-keJtJ.js:9:83213)
+    at KK (https://irrigopro.com/assets/index-Ca-keJtJ.js:9:193433)
+    at https://irrigopro.com/assets/index-Ca-keJtJ.js:176:170638
+    at div (<anonymous>)
+    at Kj (https://irrigopro.com/assets/index-Ca-keJtJ.js:176:194656)
+    at _Ze (https://irrigopro.com/assets/index-Ca-keJtJ.js:257:99823)
+    at Pu (https://irrigopro.com/assets/index-Ca-keJtJ.js:9:74216)
+    at u (https://irrigopro.com/assets/index-Ca-keJtJ.js:9:83213)
+    at KK (https://irrigopro.com/assets/index-Ca-keJtJ.js:9:193433)
+    at QZe (https://irrigopro.com/assets/index-Ca-keJtJ.js:257:112774)
+    at JV (https://irrigopro.com/assets/index-Ca-keJtJ.js:9:38440)
+    at YZe (<anonymous>)
+    at JZe (https://irrigopro.com/assets/index-Ca-keJtJ.js:257:125004)
