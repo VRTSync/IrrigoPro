@@ -10,6 +10,7 @@ import type {
 } from './pdf-view-model';
 import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
 import type { WetCheckBillingView, WcvZone } from './wet-check-billing-view';
+import { VRT_LOGO_DATA_URI } from './assets/vrt-logo';
 
 /**
  * Task #843 — Resolved (data-URI) version of PdfWcbZonePhotoGroup.
@@ -326,7 +327,7 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
     </div>
 
     ${bs.wetCheckView
-      ? partsBlockForWetCheckBS(bs.wetCheckView, brandColors)
+      ? partsBlockForWetCheckBS(bs.wetCheckView, brandColors, undefined, bs.laborRate)
       : partsTableFromBS(bs.items)}
 
     ${photoFailWarningBS}
@@ -388,8 +389,8 @@ export function ticketPageWCB(
   // otherwise fall back to the flat gallery at the bottom.
   const hasZonePhotos = Array.isArray(zonePhotoGroups) && zonePhotoGroups.length > 0;
   const partsBlock = hasZonePhotos
-    ? partsBlockForWetCheckBS(view, brandColors, zonePhotoGroups)
-    : partsBlockForWetCheckBS(view, brandColors);
+    ? partsBlockForWetCheckBS(view, brandColors, zonePhotoGroups, laborRate)
+    : partsBlockForWetCheckBS(view, brandColors, undefined, laborRate);
 
   const bottomPhotoSection = hasZonePhotos
     ? ''  // photos are already embedded per-zone
@@ -474,6 +475,7 @@ export function partsBlockForWetCheckBS(
   view: WetCheckBillingView,
   colors: PdfBrandColors = DEFAULT_BRAND_COLORS,
   zonePhotoGroups?: WcbZonePhotoGroupResolved[],
+  laborRate: number = 0,
 ): string {
   const { navy, green, gray, black, brown } = colors;
 
@@ -489,36 +491,74 @@ export function partsBlockForWetCheckBS(
     return formatCurrency(parseFloat(s) || 0);
   }
 
-  // ── Repairs Summary table ────────────────────────────────────────────────
-  const allLineItems = view.zones.flatMap(z => z.lineItems);
-  const summaryRows = allLineItems.map(li => {
-    const show = li.noPartNeeded || parseFloat(li.partsTotal) !== 0;
-    if (!show) return '';
-    return `
-      <tr>
-        <td>${li.issueDisplayLabel}${li.notes ? `<br><small class="item-note">${li.notes}</small>` : ''}</td>
-        <td class="text-right">${li.noPartNeeded ? '—' : li.partName ?? '—'}</td>
-        <td class="text-right">${li.noPartNeeded ? '—' : String(li.quantity)}</td>
-        <td class="text-right">${li.noPartNeeded ? '—' : money(li.unitPrice)}</td>
-        <td class="text-right">${li.noPartNeeded ? '—' : money(li.partsTotal)}</td>
-      </tr>`;
-  }).filter(Boolean).join('');
+  // ── Aggregated Repairs Summary rollup (Change 5a) ─────────────────────────
+  // Group by issueDisplayLabel + partName, summing Qty and Parts Total.
+  const rollupMap = new Map<string, {
+    issueDisplayLabel: string;
+    partName: string | null;
+    noPartNeeded: boolean;
+    qty: number;
+    partsTotal: number;
+  }>();
+  for (const z of view.zones) {
+    for (const li of z.lineItems) {
+      const show = li.noPartNeeded || parseFloat(li.partsTotal) !== 0;
+      if (!show) continue;
+      const key = `${li.issueDisplayLabel}||${li.partName ?? ''}||${String(li.noPartNeeded)}`;
+      const existing = rollupMap.get(key);
+      if (existing) {
+        existing.qty += li.quantity;
+        existing.partsTotal += parseFloat(li.partsTotal);
+      } else {
+        rollupMap.set(key, {
+          issueDisplayLabel: li.issueDisplayLabel,
+          partName: li.partName,
+          noPartNeeded: li.noPartNeeded,
+          qty: li.quantity,
+          partsTotal: parseFloat(li.partsTotal),
+        });
+      }
+    }
+  }
 
-  const repairsSummaryBlock = summaryRows
+  const rollupRows = Array.from(rollupMap.values()).map(r => `
+      <tr>
+        <td>${r.issueDisplayLabel}</td>
+        <td class="text-right">${r.noPartNeeded ? '—' : (r.partName ?? '—')}</td>
+        <td class="text-right">${r.noPartNeeded ? '—' : String(r.qty)}</td>
+        <td class="text-right">${r.noPartNeeded ? '—' : money(String(r.partsTotal))}</td>
+      </tr>`).join('');
+
+  const rollupRepairsTotal = Array.from(rollupMap.values()).reduce((s, r) => s + r.partsTotal, 0);
+  const rollupTotalRow = `
+      <tr class="zone-subtotal-row">
+        <td colspan="3" style="font-weight:700;">Repairs Total</td>
+        <td class="text-right" style="font-weight:700; color:${brown};">${money(String(rollupRepairsTotal))}</td>
+      </tr>`;
+
+  // Stale labor note shown under the header when zone repair_labor_hours are stale
+  const staleLaborNote = view.zonesHaveStaleLaborData
+    ? `<div class="zone-labor-note">&#9432; Zone labor data is pending a refresh &mdash; zone subtotals reflect parts only. Labor will appear once the wet check record is updated.</div>`
+    : '';
+
+  const repairsSummaryBlock = rollupRows
     ? `
   <div class="ticket-section ticket-parts-section">
-    <div class="ticket-section-label">Repairs Summary &mdash; ${view.repairsSummary}</div>
+    <div class="vrt-section-label">
+      ${VRT_LOGO_DATA_URI ? `<img src="${VRT_LOGO_DATA_URI}" class="vrt-section-logo" alt="VRT">` : ''}
+      <span>Repairs Summary &mdash; ${view.repairsSummary}</span>
+    </div>
+    ${staleLaborNote}
     <table class="items-table">
       <thead>
         <tr>
           <th>Repair Type</th>
           <th class="text-right">Part</th>
           <th class="text-right">Qty</th>
-          <th class="text-right">Unit Price</th>
           <th class="text-right">Parts Total</th>
         </tr>
       </thead>
-      <tbody>${summaryRows}</tbody>
+      <tbody>${rollupRows}${rollupTotalRow}</tbody>
     </table>
   </div>`
     : `<div class="ticket-section"><p class="no-items-msg">No repairs recorded for this wet check.</p></div>`;
@@ -538,20 +578,30 @@ export function partsBlockForWetCheckBS(
         <td class="text-right">${li.noPartNeeded ? '—' : money(li.partsTotal)}</td>
       </tr>`).join('');
 
+    // Per-zone labor row (Change 4) — shown only when zone labor data is fresh
+    const zoneLaborAmt = laborRate * parseFloat(zone.repairLaborHours);
+    const zoneSubtotalAmt = parseFloat(zone.zonePartsSubtotal) +
+      (!view.zonesHaveStaleLaborData ? zoneLaborAmt : 0);
+
+    const laborRow = !view.zonesHaveStaleLaborData
+      ? `
+      <tr class="zone-labor-row">
+        <td colspan="4">Labor (${zone.repairLaborHours} hrs &times; ${formatCurrency(laborRate)}/hr)</td>
+        <td class="text-right">${money(String(zoneLaborAmt))}</td>
+      </tr>`
+      : '';
+
     const subtotalRow = `
       <tr class="zone-subtotal-row">
         <td colspan="4" style="font-weight:700; color:${black};">Zone ${zone.zoneLabel} Subtotal</td>
-        <td class="text-right" style="font-weight:700; color:${brown};">${money(zone.zonePartsSubtotal)}</td>
+        <td class="text-right" style="font-weight:700; color:${brown};">${money(String(zoneSubtotalAmt))}</td>
       </tr>`;
 
     // Task #843 — per-zone photo section (zone-level + per-finding)
     const photoGroup = photoGroupByZone.get(zone.zoneLabel);
     let zonePhotoHtml = '';
     if (photoGroup) {
-      // Zone-level photos (no finding link)
       zonePhotoHtml += inlinePhotoGrid(photoGroup.zonePhotoDataUris);
-
-      // Per-finding photo groups
       for (const fg of photoGroup.findingGroups) {
         if (fg.photoDataUris.length > 0) {
           zonePhotoHtml += inlinePhotoGrid(fg.photoDataUris, fg.issueDisplayLabel);
@@ -575,6 +625,7 @@ export function partsBlockForWetCheckBS(
         </thead>
         <tbody>
           ${zoneRows || '<tr><td colspan="5" class="no-items-msg">No billable items</td></tr>'}
+          ${laborRow}
           ${subtotalRow}
         </tbody>
       </table>
@@ -597,7 +648,6 @@ export function partsTableFromWO(items: PdfWorkOrderRow['items']): string {
         <td>${item.partName}${subLines ? `<br>${subLines}` : ''}</td>
         <td class="text-right">${item.quantity}</td>
         <td class="text-right">${formatCurrency(item.unitPrice)}</td>
-        <td class="text-right">${item.laborHours}</td>
         <td class="text-right">${formatCurrency(item.rowTotal)}</td>
       </tr>`;
   }).join('');
@@ -610,7 +660,6 @@ export function partsTableFromWO(items: PdfWorkOrderRow['items']): string {
           <th>Part Description</th>
           <th class="text-right">Qty</th>
           <th class="text-right">Unit Price</th>
-          <th class="text-right">Labor Hrs</th>
           <th class="text-right">Total</th>
         </tr>
       </thead>
@@ -624,13 +673,16 @@ export function partsTableFromBS(items: PdfBillingSheetRow['items']): string {
     return `<div class="ticket-section"><p class="no-items-msg">No parts recorded for this billing sheet.</p></div>`;
   }
   const rows = items.map(item => {
-    const subLines = [item.partDescription, item.notes].filter(Boolean).map(s => `<small class="item-note">${s}</small>`).join('');
+    // Only emit partDescription / notes as sub-lines when they differ from partName
+    const extras = [
+      item.partDescription && item.partDescription !== item.partName ? item.partDescription : null,
+      item.notes ?? null,
+    ].filter(Boolean).map(s => `<small class="item-note">${s}</small>`).join('');
     return `
       <tr>
-        <td>${item.partName}${subLines ? `<br>${subLines}` : ''}</td>
+        <td>${item.partName}${extras ? `<br>${extras}` : ''}</td>
         <td class="text-right">${item.quantity}</td>
         <td class="text-right">${formatCurrency(item.unitPrice)}</td>
-        <td class="text-right">${item.laborHours}</td>
         <td class="text-right">${formatCurrency(item.rowTotal)}</td>
       </tr>`;
   }).join('');
@@ -643,7 +695,6 @@ export function partsTableFromBS(items: PdfBillingSheetRow['items']): string {
           <th>Part Description</th>
           <th class="text-right">Qty</th>
           <th class="text-right">Unit Price</th>
-          <th class="text-right">Labor Hrs</th>
           <th class="text-right">Total</th>
         </tr>
       </thead>
@@ -720,7 +771,7 @@ export function photoGridSectionWCB(dataUris: string[]): string {
 }
 
 export function reconciliationPage(vm: PdfViewModel): string {
-  const { workOrders, billingSheets, totals, validationWarning, customerHasBranches, branchSubtotals } = vm;
+  const { workOrders, billingSheets, wetCheckBillings, totals, validationWarning, customerHasBranches, branchSubtotals } = vm;
 
   const warningRow = validationWarning ? `
     <tr class="recon-warning">
@@ -728,6 +779,28 @@ export function reconciliationPage(vm: PdfViewModel): string {
         <span class="recon-warning-icon">&#9888;</span>
         ${validationWarning}
       </td>
+    </tr>` : '';
+
+  // ── WCB section (shared by both branch and flat paths) ────────────────────
+  const wcbList = wetCheckBillings ?? [];
+  const wcbGroupTotal = wcbList.reduce(
+    (s, r) => s + (parseFloat(String(r.wetCheckBilling.totalAmount || '0')) || 0),
+    0,
+  );
+  const wcbSectionHeader = wcbList.length > 0 ? `
+    <tr class="recon-group-header recon-group-wcb">
+      <td colspan="3">Wet Check Billings</td>
+    </tr>` : '';
+  const wcbRows = wcbList.map(r => `
+    <tr>
+      <td class="recon-ref recon-ref-wcb">${r.wetCheckBilling.billingNumber}</td>
+      <td class="recon-type recon-type-wcb">WC Billing</td>
+      <td class="recon-total">${formatCurrency(parseFloat(String(r.wetCheckBilling.totalAmount || '0')) || 0)}</td>
+    </tr>`).join('');
+  const wcbSubtotal = wcbList.length > 0 ? `
+    <tr class="recon-subtotal">
+      <td colspan="2" class="recon-subtotal-label">Wet Check Billings Subtotal</td>
+      <td class="recon-total">${formatCurrency(wcbGroupTotal)}</td>
     </tr>` : '';
 
   if (customerHasBranches && branchSubtotals.length > 0) {
@@ -771,6 +844,9 @@ export function reconciliationPage(vm: PdfViewModel): string {
         </thead>
         <tbody>
           ${branchBlocks}
+          ${wcbSectionHeader}
+          ${wcbRows}
+          ${wcbSubtotal}
           ${warningRow}
           <tr class="recon-grand-total">
             <td colspan="2" class="recon-grand-label">GRAND TOTAL</td>
@@ -855,6 +931,9 @@ export function reconciliationPage(vm: PdfViewModel): string {
         ${bsSectionHeader}
         ${bsRows}
         ${bsSubtotal}
+        ${wcbSectionHeader}
+        ${wcbRows}
+        ${wcbSubtotal}
         ${warningRow}
         <tr class="recon-grand-total">
           <td colspan="2" class="recon-grand-label">GRAND TOTAL</td>
@@ -880,13 +959,6 @@ export function reconciliationPage(vm: PdfViewModel): string {
   </div>`;
 }
 
-export function pageFooter(invoiceNumber: string): string {
-  return `
-  <div class="pdf-footer">
-    <span class="pdf-footer-invoice">Invoice #${invoiceNumber}</span>
-    <span class="pdf-footer-page">Page <span class="pdf-page-num"></span></span>
-  </div>`;
-}
 
 export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): string {
   const { navy, brown, green, black, gray } = colors;
@@ -904,7 +976,7 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
 
   .container {
     max-width: 100%;
-    padding: 0 20px 80px 20px;
+    padding: 0 20px 20px 20px;
   }
 
   /* ═══════════════════════════════════
@@ -1602,29 +1674,9 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
   }
 
   /* ═══════════════════════════════════
-     PAGE NUMBERING & FOOTER
+     PAGE NUMBERING
   ═══════════════════════════════════ */
-  .pdf-footer {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 40px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0 24px;
-    background: white;
-    border-top: 1px solid #e5e7eb;
-    font-size: 11px;
-    color: #9ca3af;
-    z-index: 1000;
-  }
-
-  .pdf-footer-invoice { font-weight: 600; color: #6b7280; }
-
-  @page { margin: 0.5in 0.5in 0.75in 0.5in; }
-  .pdf-page-num::before { content: counter(page); }
+  @page { margin: 0.5in 0.5in 0.5in 0.5in; }
 
   .text-right { text-align: right; }
 
@@ -1643,6 +1695,61 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     padding-top: 8px;
     padding-bottom: 8px;
   }
+
+  /* Per-zone labor line (Change 4) */
+  .zone-labor-row td {
+    font-style: italic;
+    color: #4b5563;
+    font-size: 11px;
+    background: ${gray};
+  }
+
+  /* Stale labor note under Repairs Summary header */
+  .zone-labor-note {
+    font-size: 11px;
+    font-style: italic;
+    color: #92400e;
+    background: #fef3c7;
+    border: 1px solid #fbbf24;
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin-bottom: 8px;
+  }
+
+  /* VRT logo header for Repairs Summary (Change 3) */
+  .vrt-section-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: ${navy};
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid ${green};
+  }
+
+  .vrt-section-logo {
+    max-width: 56px;
+    max-height: 14px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    display: inline-block;
+    vertical-align: middle;
+  }
+
+  /* Reconciliation — Wet Check Billing rows (Change 1) */
+  .recon-group-wcb td {
+    background: ${gray};
+    color: ${navy};
+    border-top: 1px solid ${green};
+  }
+
+  .recon-ref-wcb { color: ${navy}; }
+  .recon-type-wcb { color: ${navy}; font-style: italic; }
 
   /* Task #843 — inline per-zone photo grids */
   .zone-photo-section {

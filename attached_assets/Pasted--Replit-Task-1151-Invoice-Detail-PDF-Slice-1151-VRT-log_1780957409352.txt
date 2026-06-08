@@ -1,0 +1,103 @@
+# Replit Task #1151 — Invoice Detail PDF, Slice 1151 (VRT logo: swap placeholder for the real asset)
+
+Small follow-up to #1150. Slice #1150 shipped `VRT_LOGO_DATA_URI` as a
+placeholder wordmark in the Repairs Summary header. The real VRT logo
+already exists in the repo — swap it in. This is the *only* change; do
+not touch anything else from #1150.
+
+> **TL;DR.** Point `VRT_LOGO_DATA_URI` at the existing VRTSync brand
+> asset (`attached_assets/FINAL-02_1754876518960.png`) instead of the
+> placeholder. Everything else (the header markup, CSS, sizing) from
+> #1150 stays as-is.
+
+## Context
+
+The web app already renders this exact logo in its "Powered by" footer:
+
+- Component: `artifacts/irrigopro/src/components/layout/powered-by-footer.tsx:1`
+  → `import vrtSyncLogo from "@assets/FINAL-02_1754876518960.png"`.
+- `@assets` resolves to repo-root `attached_assets/`
+  (`artifacts/irrigopro/vite.config.ts:98`).
+- File: `attached_assets/FINAL-02_1754876518960.png` — PNG, 710×215,
+  RGBA, ~29 KB. It's the VRTSync icon + wordmark lockup.
+
+The PDF is generated server-side under `artifacts/api-server` via
+puppeteer, where the Vite `@assets` alias is not available — so the asset
+must be embedded as a base64 data-URI (consistent with how photos and the
+company logo are pre-embedded in the PDF).
+
+## The change
+
+Replace the placeholder body of
+`artifacts/api-server/src/assets/vrt-logo.ts` so `VRT_LOGO_DATA_URI`
+reads the real PNG at module load and base64-encodes it:
+
+```typescript
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+// Same asset the web app's powered-by footer uses
+// (@assets/FINAL-02_1754876518960.png → repo-root attached_assets/).
+// Resolve relative to the compiled api-server output; adjust the hop
+// count if the build layout differs. Surface which path you used.
+const VRT_LOGO_PATH = join(
+  import.meta.dirname, '..', '..', '..', '..',
+  'attached_assets', 'FINAL-02_1754876518960.png',
+);
+
+let dataUri = '';
+try {
+  const b64 = readFileSync(VRT_LOGO_PATH).toString('base64');
+  dataUri = `data:image/png;base64,${b64}`;
+} catch (err) {
+  console.warn('[PDF] VRT logo asset not found; header falls back to text-only label', err);
+  dataUri = '';
+}
+
+export const VRT_LOGO_DATA_URI = dataUri;
+```
+
+The `partsBlockForWetCheckBS` header from #1150 already renders the logo
+only when the data-URI is non-empty (it should — confirm the `<img>` is
+guarded by `VRT_LOGO_DATA_URI ?` and falls back to the text-only label
+when empty). If #1150 did not guard it, add the guard now so a missing
+asset degrades to the plain "Repairs Summary — …" label instead of a
+broken image.
+
+If resolving the repo-root path from the build output proves fragile,
+copy the PNG into `artifacts/api-server/src/assets/` as a build step and
+read it from there. Reuse the real file either way — do not regenerate
+or recreate the logo.
+
+## Done looks like
+
+- The Repairs Summary section header shows the real VRTSync logo
+  (matching the app's "Powered by" footer), not the placeholder wordmark.
+- The logo renders at the existing #1150 size (`.vrt-section-logo`,
+  height 16px) without distortion (710×215 aspect ratio preserved by
+  `width:auto`).
+- If the asset can't be read, the header degrades to the text-only label
+  with a logged warning — no broken-image icon in the PDF.
+- `pnpm typecheck` and `pnpm test` pass; #1150's tests still pass. The
+  Change 3 test from #1150 (`partsBlockForWetCheckBS` output contains
+  `vrt-section-logo`) continues to pass when the asset is present.
+
+## Out of scope
+
+- Any of #1150's other changes (reconciliation WCB section, footer
+  removal, per-zone labor, layout rollup) — already shipped/rolling.
+- Cropping the lockup to just the hex icon, or restyling the header —
+  if Randy later wants only the icon mark, that's a separate asset and a
+  separate slice.
+
+## Relevant files
+
+- `artifacts/api-server/src/assets/vrt-logo.ts` — the only file changed.
+- `attached_assets/FINAL-02_1754876518960.png` — source asset (reference).
+- `artifacts/api-server/src/pdf-helpers.ts` — `partsBlockForWetCheckBS`
+  header (reference; confirm the empty-data-URI guard only).
+
+## Dependencies
+
+- #1150 (Invoice Detail PDF Cleanup, Slice 1) — must land first; this
+  swaps the constant it introduced.

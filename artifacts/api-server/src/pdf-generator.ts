@@ -15,7 +15,6 @@ import {
   ticketPageBS,
   ticketPageWCB,
   reconciliationPage,
-  pageFooter,
   buildFullCSS,
 } from './pdf-helpers';
 import type { WcbZonePhotoGroupResolved } from './pdf-helpers';
@@ -324,7 +323,6 @@ export class PDFGenerator {
   <style>${buildFullCSS(brandColors)}</style>
 </head>
 <body>
-  ${pageFooter(invoice.invoiceNumber)}
   <div class="container">
     ${coverPage(vm)}
     ${reconciliationPage(vm)}
