@@ -40,9 +40,9 @@ import {
   lifecycleOf,
   reviewStageLabelOf,
   type LifecycleStatus,
-} from "@/lib/lifecycle";
+} from "@workspace/shared";
 import { EstimateListStatusBadge } from "@/components/estimates/list/estimate-list-status-badge";
-import { formatEstimateNumber, buildEstimatePdfFilename } from "@/lib/estimate-number";
+import { formatEstimateNumber, buildEstimatePdfFilename } from "@workspace/shared";
 
 interface EstimateDetailModalProps {
   open: boolean;

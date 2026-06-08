@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { tintForControllerLetter } from "@/lib/lifecycle";
+import { tintForControllerLetter } from "@workspace/shared";
 import { isOfflineQueueEnabled } from "@/lib/offline/engine";
 import {
   upsertZoneRecord as offlineUpsertZoneRecord,

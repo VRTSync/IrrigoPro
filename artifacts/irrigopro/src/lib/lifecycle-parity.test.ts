@@ -25,7 +25,7 @@
 // decision about both sides at once.
 
 import { describe, it, expect } from "vitest";
-import { computeLifecycleStatus } from "./lifecycle";
+import { computeLifecycleStatus } from "@workspace/shared";
 
 // Mirror of the SQL filter in storage.getEstimatesPendingApproval.
 // Keeping this list local to the test (rather than importing from the

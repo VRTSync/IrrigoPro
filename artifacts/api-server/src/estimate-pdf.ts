@@ -3,7 +3,7 @@ import type { EstimateWithItems, EstimateItem, Company } from '@workspace/db';
 import { resolveChromiumExecutable } from './chromium-resolver';
 import { fetchLogoAsBase64, preloadPhotos } from './pdf-generator';
 import { FAILED_PHOTO_SENTINEL } from './pdf-helpers';
-import { formatEstimateNumber } from './estimate-number';
+import { formatEstimateNumber } from '@workspace/shared';
 
 const DEFAULT_BRAND_COLOR = '#1E5A99';
 const DEFAULT_BRAND_DARK = '#143F6B';

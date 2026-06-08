@@ -16,8 +16,8 @@ import {
 } from "@/components/estimates/send-estimate-dialog";
 import { sendEstimateEmail } from "@/lib/email";
 import type { Estimate } from "@workspace/db/schema";
-import { isReadyToSend } from "@/lib/lifecycle";
-import { formatEstimateNumber } from "@/lib/estimate-number";
+import { isReadyToSend } from "@workspace/shared";
+import { formatEstimateNumber } from "@workspace/shared";
 
 function formatCurrency(amount: string | number) {
   const n = typeof amount === "string" ? parseFloat(amount) : amount;

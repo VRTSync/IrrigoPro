@@ -9,7 +9,7 @@ import {
   ImageOff,
   Loader2,
 } from "lucide-react";
-import { formatEstimateNumber } from "@/lib/estimate-number";
+import { formatEstimateNumber } from "@workspace/shared";
 
 // Task #666 — derive a human-readable filename from an attachment URL.
 // Used both to label list rows and to decide whether the URL is safe

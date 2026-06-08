@@ -42,7 +42,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
 import type { Customer, WorkOrder, BillingSheet, Estimate } from "@workspace/db/schema";
-import { LIFECYCLE_TINTS, lifecycleOf } from "@/lib/lifecycle";
+import { LIFECYCLE_TINTS, lifecycleOf } from "@workspace/shared";
 import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
 import { InvoiceList } from "@/components/billing/invoice-list";
 import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";

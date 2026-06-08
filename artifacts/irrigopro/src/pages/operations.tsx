@@ -13,7 +13,7 @@ import { EstimateWizard } from "@/components/estimates/estimate-wizard";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { WorkOrderWizard } from "@/components/work-orders/work-order-wizard";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
-import { formatEstimateNumber } from "@/lib/estimate-number";
+import { formatEstimateNumber } from "@workspace/shared";
 
 interface Estimate {
   id: number;

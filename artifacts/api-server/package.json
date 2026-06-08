@@ -31,7 +31,8 @@
     "puppeteer-core": "^24.43.0",
     "sharp": "^0.34.5",
     "twilio": "^6.0.1",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "@workspace/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",

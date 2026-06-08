@@ -22,12 +22,19 @@ const ROOT = join(__dirname, ".."); // artifacts/irrigopro/src
 // Files that are allowed to read the raw enum fields. Keep this
 // list short and justified — each entry weakens the guarantee.
 const ALLOWLIST = new Set<string>([
-  // The single owner of the lifecycle → enum mapping.
-  "lib/lifecycle.ts",
+  // The canonical lifecycle module now lives in @workspace/shared
+  // (lib/shared/src/lifecycle.ts), outside this src tree — the walker
+  // never visits it, so no entry is needed for it here.
+  //
   // Re-exports `lifecycleOf` from the canonical helper but still
   // takes an `Estimate` parameter shape (no raw reads of its own;
   // present here defensively in case future helpers do).
   "components/estimates/list/estimate-list.helpers.ts",
+  // Reads `.internalStatus` from an opaque audit-log `before`/`after`
+  // JSON delta payload (the activity history API), not from a live
+  // estimate object. The field is accessed on `Record<string, unknown>`
+  // for display in the audit trail — lifecycle helpers don't apply here.
+  "components/activity/ActivityTab.tsx",
 ]);
 
 // Matches `estimate.status`, `estimate.internalStatus`, `est.status`,
@@ -127,7 +134,7 @@ describe("estimate direct-read guard (Task #638)", () => {
         .join("\n");
       throw new Error(
         `Found direct reads of estimate.status / estimate.internalStatus outside the allowlist.\n` +
-          `Use lifecycleOf(estimate) or one of the predicates in @/lib/lifecycle instead.\n` +
+          `Use lifecycleOf(estimate) or one of the predicates in @workspace/shared instead.\n` +
           `If the read is genuinely necessary, add the file to ALLOWLIST in this test with a one-line justification.\n\n` +
           detail,
       );

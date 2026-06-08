@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { LIFECYCLE_TINTS, type LifecycleStatus } from "@/lib/lifecycle";
+import { LIFECYCLE_TINTS, type LifecycleStatus } from "@workspace/shared";
 
 interface Props {
   status: LifecycleStatus;

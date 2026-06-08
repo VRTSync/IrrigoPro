@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { BilledIndicator, BilledBadge } from "@/components/ui/billed-indicator";
 import type { Customer, Estimate, WorkOrder, BillingSheetWithItems } from "@workspace/db/schema";
-import { lifecycleOf } from "@/lib/lifecycle";
+import { lifecycleOf } from "@workspace/shared";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
 import { PropertyNotes } from "./property-notes";
@@ -33,7 +33,7 @@ import { PropertyBoundarySection } from "./property-boundary";
 import { BillingNotes } from "./billing-notes";
 import { CustomerSiteMaps } from "./customer-site-maps";
 import { displayCustomerAddress } from "@/lib/customer-address";
-import { formatEstimateNumber } from "@/lib/estimate-number";
+import { formatEstimateNumber } from "@workspace/shared";
 
 interface CustomerProfileProps {
   customer: Customer;

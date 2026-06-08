@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2, Camera } from "lucide-react";
 import { asArray } from "@/lib/queryClient";
-import { tintForControllerLetter } from "@/lib/lifecycle";
+import { tintForControllerLetter } from "@workspace/shared";
 import type { PropertyController, WetCheckZoneRecord, WetCheckFinding } from "@workspace/db/schema";
 
 export type ZoneRecordWithFindings = WetCheckZoneRecord & { findings: WetCheckFinding[] };

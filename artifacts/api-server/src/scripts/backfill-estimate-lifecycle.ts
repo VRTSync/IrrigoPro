@@ -25,7 +25,7 @@
 import { db } from "../db";
 import { estimates } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
-import { deriveLifecycleForWrite } from "../lifecycle";
+import { deriveLifecycleForWrite } from "@workspace/shared";
 
 function parseFlag(name: string): boolean {
   return process.argv.includes(`--${name}`);

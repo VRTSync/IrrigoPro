@@ -19,7 +19,7 @@ const { toastSpy } = vi.hoisted(() => ({ toastSpy: vi.fn() }));
 
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: toastSpy }) }));
 
-vi.mock("@/lib/lifecycle", () => ({
+vi.mock("@workspace/shared", () => ({
   tintForControllerLetter: () => "bg-gray-100 border-gray-300 text-gray-800",
   lifecycleStageMeta: () => ({ label: "Active", className: "bg-gray-100" }),
 }));

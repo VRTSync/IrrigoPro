@@ -13,7 +13,7 @@ import {
   computeLifecycleStatus,
   deriveLifecycleForWrite,
   ESTIMATE_EXPIRATION_DAYS,
-} from "./lifecycle";
+} from "@workspace/shared";
 
 describe("deriveLifecycleForWrite (Task #642)", () => {
   it("maps draft internalStatus to draft", () => {

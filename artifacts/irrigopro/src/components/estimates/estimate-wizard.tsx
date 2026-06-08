@@ -35,7 +35,7 @@ import {
   type CustomerLocationValue,
 } from "@/components/location/customer-location-step";
 import { submitEstimate, type SubmitMode } from "./estimate-wizard-submit";
-import { isDraft, estimateSubmitStatusFields } from "@/lib/lifecycle";
+import { isDraft, estimateSubmitStatusFields } from "@workspace/shared";
 import { getCurrentUser } from "@/lib/impersonation";
 
 interface EstimateApiPayloadEstimate {

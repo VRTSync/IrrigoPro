@@ -25,7 +25,7 @@
 
 import type { Express, Request, RequestHandler, Response } from "express";
 import { and, eq } from "drizzle-orm";
-import { formatEstimateNumber } from "../estimate-number";
+import { formatEstimateNumber } from "@workspace/shared";
 import { z } from "zod/v4";
 import {
   estimates,
@@ -57,7 +57,7 @@ import {
 } from "./audit-log";
 import { paginate } from "./pagination";
 import { ESTIMATE_PENDING_DELETE_ROLES } from "./estimate-role-guards";
-import { deriveLifecycleForWrite } from "../lifecycle";
+import { deriveLifecycleForWrite } from "@workspace/shared";
 
 // Storage surface used by every estimate route. Methods used only by
 // routes that aren't exercised in the existing test suite are marked

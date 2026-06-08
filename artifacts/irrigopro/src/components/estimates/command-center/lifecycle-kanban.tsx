@@ -8,7 +8,7 @@
 
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { LIFECYCLE_TINTS, lifecycleOf, type LifecycleStatus } from "@/lib/lifecycle";
+import { LIFECYCLE_TINTS, lifecycleOf, type LifecycleStatus } from "@workspace/shared";
 import { LifecycleCard } from "./lifecycle-card";
 import type { Estimate } from "@workspace/db/schema";
 import type { EstimateSummary } from "@workspace/db";

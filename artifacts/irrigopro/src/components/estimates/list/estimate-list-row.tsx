@@ -25,8 +25,8 @@ import {
   canDeleteEstimateAs,
   isPendingReview,
   type LifecycleStatus,
-} from "@/lib/lifecycle";
-import { formatEstimateNumber, buildEstimatePdfFilename } from "@/lib/estimate-number";
+} from "@workspace/shared";
+import { formatEstimateNumber, buildEstimatePdfFilename } from "@workspace/shared";
 import { EstimateListStatusBadge } from "./estimate-list-status-badge";
 import { useToast } from "@/hooks/use-toast";
 

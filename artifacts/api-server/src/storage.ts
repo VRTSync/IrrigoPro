@@ -150,7 +150,7 @@ import {
   deriveLifecycleForWrite,
   ESTIMATE_EXPIRATION_DAYS,
   type LifecycleStatus,
-} from "./lifecycle";
+} from "@workspace/shared";
 import { computeEstimateSummary } from "./estimate-summary";
 import type { EstimateSummary, WetCheckBillingListItem } from "@workspace/db";
 import { ObjectStorageService } from "./objectStorage";

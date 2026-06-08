@@ -12,7 +12,7 @@ import {
   ESTIMATE_EXPIRATION_DAYS,
   ESTIMATE_HIGH_VALUE_USD,
   ESTIMATE_STUCK_REVIEW_DAYS,
-} from "./lifecycle";
+} from "@workspace/shared";
 import type {
   EstimateAttentionReason,
   EstimateAttentionRow,

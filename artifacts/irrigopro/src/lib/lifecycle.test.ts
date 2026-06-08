@@ -33,7 +33,7 @@ import {
   reviewStageLabel,
   reviewStageLabelOf,
   type LifecycleStatus,
-} from "./lifecycle";
+} from "@workspace/shared";
 
 const NOW = new Date("2026-05-15T12:00:00Z");
 const FRESH = new Date(NOW.getTime() - 1 * 24 * 60 * 60 * 1000); // 1 day old

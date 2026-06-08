@@ -1,7 +1,7 @@
 import sgMail from '@sendgrid/mail';
 import { ObjectStorageService } from './objectStorage';
 import { storage } from './storage';
-import { formatEstimateNumber } from './estimate-number';
+import { formatEstimateNumber } from '@workspace/shared';
 
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const DEFAULT_FROM_EMAIL =

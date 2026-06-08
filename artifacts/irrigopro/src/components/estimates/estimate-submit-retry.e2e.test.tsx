@@ -47,7 +47,7 @@ import EstimatesPendingApproval from "@/pages/estimates-pending-approval";
 import { EstimateBoard } from "./board/estimate-board";
 import { getQueryFn } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
-import { computeLifecycleStatus } from "@/lib/lifecycle";
+import { computeLifecycleStatus } from "@workspace/shared";
 
 // ---------------------------------------------------------------
 // In-memory fake server

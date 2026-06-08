@@ -1,7 +1,11 @@
-// Task #678 — display-time "EST-" prefix.
+// Display-time "EST-" prefix.
 // The database stores only the raw digits in `estimates.estimateNumber`
 // (e.g. "50001"). This helper is the single source of truth for the
-// human-readable rendering of an estimate number across the frontend.
+// human-readable rendering of an estimate number across the frontend
+// and any server-rendered surface (PDF, email subject/body, audit
+// summaries). Validation, uniqueness, and the per-company sequence
+// allocator continue to operate on the raw digits — never call this
+// before a DB write.
 // It tolerates already-prefixed legacy values defensively by stripping
 // any leading "EST-" / "EST" / "#" before re-prepending the canonical
 // "EST-" prefix.
@@ -14,7 +18,7 @@ export function formatEstimateNumber(value: string | number | null | undefined):
   return `EST-${digits}`;
 }
 
-// Task #691 — Sanitize a customer name for use in a downloaded file name.
+// Sanitize a customer name for use in a downloaded file name.
 // Replaces filesystem-reserved characters on Windows/macOS (/ \ : * ? " < > |)
 // and ASCII control chars with a space, collapses whitespace runs, and trims.
 export function sanitizeFilenameSegment(value: string | null | undefined): string {
@@ -26,7 +30,7 @@ export function sanitizeFilenameSegment(value: string | null | undefined): strin
     .trim();
 }
 
-// Task #691 — Build the download filename for an estimate PDF.
+// Build the download filename for an estimate PDF.
 // Format: "{Customer Name} - EST-{Number}.pdf". Falls back to
 // "estimate-EST-{Number}.pdf" when the customer name is empty after
 // sanitization, and to "estimate.pdf" when the number is missing.

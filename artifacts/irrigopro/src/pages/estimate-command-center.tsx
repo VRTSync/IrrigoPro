@@ -35,7 +35,7 @@ import {
 } from "@/components/estimates/command-center/estimate-table";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
-import { LIFECYCLE_STATUSES, type LifecycleStatus } from "@/lib/lifecycle";
+import { LIFECYCLE_STATUSES, type LifecycleStatus } from "@workspace/shared";
 import type { Estimate } from "@workspace/db/schema";
 import type { EstimateSummary } from "@workspace/db";
 

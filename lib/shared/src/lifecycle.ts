@@ -22,27 +22,72 @@ export type LifecycleStatus = (typeof LIFECYCLE_STATUSES)[number];
 // the lower end: exactly 30 days old still counts as `sent`.
 export const ESTIMATE_EXPIRATION_DAYS = 30;
 
+// Estimate Command Center thresholds. A pending_review estimate older
+// than this many days is flagged as stuck. A `sent` estimate at or
+// above this $ amount and not responded to within a week is flagged as
+// high-value silent. Centralized here so the summary aggregator,
+// attention strip, and any future surface read from the same source.
+export const ESTIMATE_STUCK_REVIEW_DAYS = 3;
+export const ESTIMATE_HIGH_VALUE_USD = 5000;
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 type EstimateLifecycleInput = {
   status?: string | null;
   internalStatus?: string | null;
   estimateDate?: Date | string | null;
+  // Canonical lifecycle column. Preferred over (status, internalStatus)
+  // when set. `null`/missing means a pre-migration row.
+  lifecycle?: string | null;
 };
+
+// Write-time derivation of the lifecycle column from the two legacy
+// axes. Returns only the five *stored* lifecycle values; `expired` is
+// intentionally excluded because it's a read-time view over
+// (lifecycle='sent', estimateDate > 30 days). Every write path that
+// mutates `status` or `internalStatus` must also pass the result of
+// this helper through as `lifecycle` so the column stays in sync with
+// the legacy axes during the dual-write window.
+export type StoredLifecycleStatus = Exclude<LifecycleStatus, "expired">;
+
+export function deriveLifecycleForWrite(opts: {
+  status?: string | null;
+  internalStatus?: string | null;
+}): StoredLifecycleStatus {
+  const status = opts.status ?? "";
+  const internalStatus = opts.internalStatus ?? "";
+
+  if (status === "approved" || status === "converted_to_work_order") return "approved";
+  if (status === "rejected") return "rejected";
+  if (internalStatus === "draft") return "draft";
+  if (internalStatus === "sent_to_customer" && status === "pending") return "sent";
+  return "pending_review";
+}
+
+const STORED_LIFECYCLES = new Set<string>([
+  "draft",
+  "pending_review",
+  "sent",
+  "approved",
+  "rejected",
+]);
 
 export function computeLifecycleStatus(
   estimate: EstimateLifecycleInput,
   now: Date = new Date(),
 ): LifecycleStatus {
-  const status = estimate.status ?? "";
-  const internalStatus = estimate.internalStatus ?? "";
+  // Prefer the stored lifecycle column when present.
+  // Legacy (status, internalStatus) is consulted only when the column
+  // is missing/invalid (e.g. backfill not yet run, or an in-memory
+  // fixture in a test). `sent` always re-checks the expiry window so
+  // a row can flip into `expired` without a write.
+  const stored = (estimate.lifecycle ?? "") as string;
+  const useStored = STORED_LIFECYCLES.has(stored);
+  const base: StoredLifecycleStatus = useStored
+    ? (stored as StoredLifecycleStatus)
+    : deriveLifecycleForWrite(estimate);
 
-  if (status === "approved" || status === "converted_to_work_order") return "approved";
-  if (status === "rejected") return "rejected";
-
-  if (internalStatus === "draft") return "draft";
-
-  if (internalStatus === "sent_to_customer" && status === "pending") {
+  if (base === "sent") {
     const ed = estimate.estimateDate;
     if (ed) {
       const sent = ed instanceof Date ? ed : new Date(ed);
@@ -55,18 +100,17 @@ export function computeLifecycleStatus(
     return "sent";
   }
 
-  return "pending_review";
+  return base;
 }
 
-// Task #638 — canonical entry point for the UI. Prefers the
-// server-stamped `lifecycleStatus` when present, otherwise computes
-// from (status, internalStatus, estimateDate). Every component that
-// needs to reason about an estimate's state should go through this
-// helper (or one of the predicates below) — never read
-// `estimate.status` or `estimate.internalStatus` directly.
+// Canonical entry point for the UI. Prefers the server-stamped
+// `lifecycleStatus` when present, otherwise computes from
+// (status, internalStatus, estimateDate). Every component that needs
+// to reason about an estimate's state should go through this helper
+// (or one of the predicates below) — never read `estimate.status` or
+// `estimate.internalStatus` directly.
 type EstimateLike = EstimateLifecycleInput & {
   lifecycleStatus?: string | null;
-  lifecycle?: string | null;
   workOrderId?: number | null;
 };
 
@@ -75,9 +119,9 @@ export function lifecycleOf(
   now?: Date,
 ): LifecycleStatus {
   if (!estimate) return "pending_review";
-  // Task #683 / #642 — prefer the canonical server-stamped lifecycle
-  // column over the legacy computed `lifecycleStatus` so the kanban,
-  // table, and summary tiles all read the same source of truth.
+  // Prefer the canonical server-stamped lifecycle column over the
+  // legacy computed `lifecycleStatus` so all surfaces read the same
+  // source of truth.
   const stored = estimate.lifecycle;
   if (
     typeof stored === "string" &&
@@ -90,6 +134,7 @@ export function lifecycleOf(
           status: estimate.status,
           internalStatus: estimate.internalStatus,
           estimateDate: estimate.estimateDate,
+          lifecycle: estimate.lifecycle,
         },
         now,
       );
@@ -108,6 +153,7 @@ export function lifecycleOf(
       status: estimate.status,
       internalStatus: estimate.internalStatus,
       estimateDate: estimate.estimateDate,
+      lifecycle: estimate.lifecycle,
     },
     now,
   );
@@ -148,7 +194,7 @@ export const isOpen = (e: LifecycleArg, now?: Date) => !isClosed(e, now);
 // `pending_approval` (awaiting manager review) and `approved_internal`
 // (manager has internally approved; ready to send to customer).
 // The "ready to send" badge on /estimates/pending-approval needs to
-// distinguish them. Keep this read isolated to lifecycle.ts so the
+// distinguish them. Keep this read isolated to lifecycle so the
 // rest of the UI stays free of raw enum reads.
 export const isReadyToSend = (
   e: EstimateLike | null | undefined,
@@ -175,12 +221,12 @@ export const isAwaitingCustomerReply = (
   e: EstimateLike | null | undefined,
 ): boolean => e?.status === "pending";
 
-// Task #658 — role × lifecycle delete matrix. Must agree with the
-// server's `ESTIMATE_DELETE_ROLES` + `ESTIMATE_PENDING_DELETE_ROLES`
-// sets in `estimate-routes.ts` / `estimate-role-guards.ts`. The UI
-// hides the Delete control whenever this returns false so we never
-// surface an action that would 403 / 409 on click; the server
-// remains the authoritative gate.
+// Role × lifecycle delete matrix. Must agree with the server's
+// `ESTIMATE_DELETE_ROLES` + `ESTIMATE_PENDING_DELETE_ROLES` sets in
+// `estimate-routes.ts` / `estimate-role-guards.ts`. The UI hides the
+// Delete control whenever this returns false so we never surface an
+// action that would 403 / 409 on click; the server remains the
+// authoritative gate.
 //
 //   - draft           → any role that can create an estimate (incl.
 //                       field_tech for their own drafts) may delete.
@@ -224,12 +270,11 @@ export function canDeleteEstimateAs(
 // (internalStatus = "review stage", status = "customer response") into
 // a single lifecycle bucket — which is what every list / board / badge
 // surface should show. The estimate detail modal is the one
-// documented exception (see docs/estimate-system.md §1): it shows the
-// canonical lifecycle badge in the header *and* a secondary detail
-// row exposing the two axes. These two helpers are the only place
-// raw enum values turn into human-readable labels, so the modal
-// doesn't have to read `estimate.status` / `estimate.internalStatus`
-// directly.
+// documented exception: it shows the canonical lifecycle badge in the
+// header *and* a secondary detail row exposing the two axes. These two
+// helpers are the only place raw enum values turn into human-readable
+// labels, so the modal doesn't have to read `estimate.status` /
+// `estimate.internalStatus` directly.
 export function reviewStageLabel(
   internalStatus: string | null | undefined,
 ): string {
@@ -278,11 +323,11 @@ export function customerResponseLabelOf(
   return customerResponseLabel(e?.status);
 }
 
-// Task #638 — wizard payload round-trip helper. The estimate wizard
-// needs to forward the existing review track (and the customer's
-// previous response) verbatim when saving an edit, but it must not
-// read the raw enums itself. This helper is the one isolated point
-// where those reads are allowed.
+// Wizard payload round-trip helper. The estimate wizard needs to
+// forward the existing review track (and the customer's previous
+// response) verbatim when saving an edit, but it must not read the raw
+// enums itself. This helper is the one isolated point where those reads
+// are allowed.
 export function estimateSubmitStatusFields(
   e: EstimateLike | null | undefined,
 ): { nextStatus: string; nextInternalStatus: string | null } {
@@ -292,8 +337,8 @@ export function estimateSubmitStatusFields(
   };
 }
 
-// Slice 10c — shared tint + label map so the board column headers and the
-// list status badges stay visually in sync. Tailwind class strings only;
+// Shared tint + label map so the board column headers and the list
+// status badges stay visually in sync. Tailwind class strings only;
 // the consumers compose them as needed.
 export const LIFECYCLE_TINTS: Record<
   LifecycleStatus,

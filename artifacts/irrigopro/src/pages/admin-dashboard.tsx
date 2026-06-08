@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useArrayQuery } from "@/lib/queryClient";
 import { safeGet } from "@/utils/safeStorage";
-import { isOpen, lifecycleOf } from "@/lib/lifecycle";
+import { isOpen, lifecycleOf } from "@workspace/shared";
 
 import { HeaderStrip, type Health } from "@/components/admin-dashboard/header-strip";
 import { QuickActions } from "@/components/admin-dashboard/quick-actions";

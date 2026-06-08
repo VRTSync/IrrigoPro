@@ -11,7 +11,7 @@
 import { AlertTriangle, CheckCircle2, Clock, DollarSign, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { formatEstimateNumber } from "@/lib/estimate-number";
+import { formatEstimateNumber } from "@workspace/shared";
 import type { EstimateAttentionReason } from "@workspace/db";
 
 export type AttentionReason = EstimateAttentionReason;

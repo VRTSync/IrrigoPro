@@ -18,7 +18,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { EstimateListRow } from "./list/estimate-list-row";
 import { EstimateDetailModal } from "./estimate-detail-modal";
-import { computeLifecycleStatus, type LifecycleStatus } from "@/lib/lifecycle";
+import { computeLifecycleStatus, type LifecycleStatus } from "@workspace/shared";
 import type { Estimate } from "@workspace/db/schema";
 
 function setRole(role: string | null): void {

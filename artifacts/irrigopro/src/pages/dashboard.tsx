@@ -6,12 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
-import { lifecycleOf, LIFECYCLE_TINTS } from "@/lib/lifecycle";
+import { lifecycleOf, LIFECYCLE_TINTS } from "@workspace/shared";
 
 import { Plus, Settings, Clock, CheckCircle, DollarSign, Package, FileText, TrendingUp, Wrench, Users, UserCheck, FolderOpen } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Link } from "wouter";
-import { formatEstimateNumber } from "@/lib/estimate-number";
+import { formatEstimateNumber } from "@workspace/shared";
 
 interface DashboardStats {
   pendingEstimates: number;

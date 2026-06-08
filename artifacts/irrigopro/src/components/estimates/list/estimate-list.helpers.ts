@@ -1,4 +1,4 @@
-import { LIFECYCLE_ORDER, lifecycleOf as canonicalLifecycleOf, type LifecycleStatus } from "@/lib/lifecycle";
+import { LIFECYCLE_ORDER, lifecycleOf as canonicalLifecycleOf, type LifecycleStatus } from "@workspace/shared";
 import type { Estimate } from "@workspace/db/schema";
 
 export type SortField = "customer" | "amount" | "status" | "date";

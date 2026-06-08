@@ -96,6 +96,7 @@
     "workbox-precaching": "^7.4.1",
     "workbox-routing": "^7.4.1",
     "workbox-strategies": "^7.4.1",
-    "xml2js": "^0.6.2"
+    "xml2js": "^0.6.2",
+    "@workspace/shared": "workspace:*"
   }
 }

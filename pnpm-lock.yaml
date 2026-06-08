@@ -181,6 +181,9 @@ importers:
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
+      '@workspace/shared':
+        specifier: workspace:*
+        version: link:../../lib/shared
       bcrypt:
         specifier: ^6.0.0
         version: 6.0.0
@@ -287,6 +290,9 @@ importers:
 
   artifacts/irrigopro:
     dependencies:
+      '@workspace/shared':
+        specifier: workspace:*
+        version: link:../../lib/shared
       browser-image-compression:
         specifier: ^2.0.2
         version: 2.0.2
@@ -959,6 +965,8 @@ importers:
       drizzle-kit:
         specifier: ^0.31.9
         version: 0.31.9
+
+  lib/shared: {}
 
   scripts:
     devDependencies:

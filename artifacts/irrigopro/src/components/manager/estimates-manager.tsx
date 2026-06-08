@@ -14,7 +14,7 @@ import {
   isConvertedToWorkOrder,
   lifecycleOf,
   type LifecycleStatus,
-} from "@/lib/lifecycle";
+} from "@workspace/shared";
 
 interface EstimatesManagerProps {
   onBack: () => void;

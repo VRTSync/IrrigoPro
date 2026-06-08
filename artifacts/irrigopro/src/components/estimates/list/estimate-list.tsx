@@ -9,7 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { type LifecycleStatus } from "@/lib/lifecycle";
+import { type LifecycleStatus } from "@workspace/shared";
 import type { Estimate } from "@workspace/db/schema";
 import { EstimateListRow } from "./estimate-list-row";
 import { EstimateListStatusBadge } from "./estimate-list-status-badge";

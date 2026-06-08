@@ -23,7 +23,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, adaptiveRefetchInterval, useArrayQuery } from "@/lib/queryClient";
 import { format, formatDistanceToNow } from "date-fns";
-import { formatEstimateNumber } from "@/lib/estimate-number";
+import { formatEstimateNumber } from "@workspace/shared";
 
 interface QuickBooksConnectionProps {
   className?: string;

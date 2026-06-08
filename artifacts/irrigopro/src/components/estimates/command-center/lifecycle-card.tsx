@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
-import { LIFECYCLE_TINTS, lifecycleOf } from "@/lib/lifecycle";
-import { formatEstimateNumber } from "@/lib/estimate-number";
+import { LIFECYCLE_TINTS, lifecycleOf } from "@workspace/shared";
+import { formatEstimateNumber } from "@workspace/shared";
 import type { Estimate } from "@workspace/db/schema";
 
 function formatCurrency(amount: string | number) {
