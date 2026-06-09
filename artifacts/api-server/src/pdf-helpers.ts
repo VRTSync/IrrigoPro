@@ -228,7 +228,7 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
       : '';
 
   return `
-  <div class="ticket-page">
+  <div class="ticket-page ticket-type-wo">
     <div class="ticket-header ticket-header-wo">
       <div class="ticket-header-condensed">
         ${logoHtml}
@@ -305,7 +305,7 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
       : '';
 
   return `
-  <div class="ticket-page">
+  <div class="ticket-page ticket-type-bs">
     <div class="ticket-header ticket-header-bs">
       <div class="ticket-header-condensed">
         ${bsLogoHtml}
@@ -408,7 +408,7 @@ export function ticketPageWCB(
     : photoGridSection(photoDataUris);
 
   return `
-  <div class="ticket-page">
+  <div class="ticket-page ticket-type-wcb">
     <div class="ticket-header ticket-header-wcb">
       <div class="ticket-header-condensed">
         ${wcbLogoHtml}
@@ -1358,6 +1358,9 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     padding-bottom: 4px;
     border-bottom: 1px solid ${green};
   }
+  .ticket-type-wo .ticket-section-label { color: ${JOB_TYPE_COLORS.workOrder}; }
+  .ticket-type-bs .ticket-section-label { color: ${JOB_TYPE_COLORS.billingSheet}; }
+  .ticket-type-wcb .ticket-section-label { color: ${JOB_TYPE_COLORS.wetCheck}; }
 
   /* Work bullet list */
   .ticket-work-list {
@@ -1441,6 +1444,9 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
 
   .items-table { width: 100%; border-collapse: collapse; font-size: 11px; }
   .items-table thead { background: ${navy}; color: white; }
+  .ticket-type-wo .items-table thead { background: ${JOB_TYPE_COLORS.workOrder}; }
+  .ticket-type-bs .items-table thead { background: ${JOB_TYPE_COLORS.billingSheet}; }
+  .ticket-type-wcb .items-table thead { background: ${JOB_TYPE_COLORS.wetCheck}; }
   .items-table th { padding: 7px 10px; text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
   .items-table th.text-right { text-align: right; }
   .items-table tbody tr { border-bottom: 1px solid #e5e7eb; }

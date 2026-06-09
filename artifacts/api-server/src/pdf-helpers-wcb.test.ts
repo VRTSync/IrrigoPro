@@ -15,8 +15,9 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ticketPageWCB, partsBlockForWetCheckBS, FAILED_PHOTO_SENTINEL } from "./pdf-helpers";
+import { ticketPageWCB, ticketPageBS, ticketPageWO, partsBlockForWetCheckBS, FAILED_PHOTO_SENTINEL, buildFullCSS, JOB_TYPE_COLORS } from "./pdf-helpers";
 import type { WcbZonePhotoGroupResolved } from "./pdf-helpers";
+import { DEFAULT_BRAND_COLORS } from "./pdf-view-model";
 import type { PdfWetCheckBillingRow } from "./pdf-view-model";
 import type { WetCheckBillingView } from "./wet-check-billing-view";
 
@@ -403,5 +404,80 @@ describe("ticketPageWCB — zone photo grouping (Task #854)", () => {
     const html = ticketPageWCB(makeRowWithView(), "INV-99", []);
     assert.match(html, /ticket-photos-section/);
     assert.match(html, /No photos captured/);
+  });
+});
+
+// ── Task #1173: job-type modifier classes + scoped CSS ────────────────────────
+
+const minimalWO: PdfWorkOrderRow = {
+  workOrderNumber: "WO-001",
+  projectName: "Test Project",
+  projectAddress: "1 Main St",
+  branchName: null,
+  locationNotes: "",
+  technicianName: "Tech A",
+  completedAt: null,
+  totalHours: 1,
+  laborRate: 80,
+  workDescription: "",
+  workSummary: "",
+  aiDetailedDescription: "",
+  photos: [],
+  items: [],
+  partsSubtotal: 0,
+  laborSubtotal: 80,
+  rowTotal: 80,
+  approvedBy: null,
+  approvedAt: null,
+};
+
+const minimalBS: PdfBillingSheetRow = {
+  billingNumber: "BS-001",
+  workDescription: "",
+  propertyAddress: "1 Main St",
+  branchName: null,
+  technicianName: "Tech B",
+  workDate: new Date("2026-05-15"),
+  totalHours: 1,
+  laborRate: 80,
+  aiDetailedDescription: "",
+  notes: "",
+  photos: [],
+  items: [],
+  partsSubtotal: 0,
+  laborSubtotal: 80,
+  rowTotal: 80,
+  approvedBy: null,
+  approvedAt: null,
+};
+
+describe("job-type modifier classes (Task #1173)", () => {
+  it("tags each ticket page with its job-type modifier", () => {
+    const woHtml = ticketPageWO(minimalWO, "INV-1", []);
+    assert.match(woHtml, /class="[^"]*\bticket-type-wo\b/, "WO ticket page must carry ticket-type-wo class");
+
+    const bsHtml = ticketPageBS(minimalBS, "INV-2", []);
+    assert.match(bsHtml, /class="[^"]*\bticket-type-bs\b/, "BS ticket page must carry ticket-type-bs class");
+
+    const wcbHtml = ticketPageWCB(makeRow(), "INV-3", []);
+    assert.match(wcbHtml, /class="[^"]*\bticket-type-wcb\b/, "WCB ticket page must carry ticket-type-wcb class");
+  });
+
+  it("WCB header uses the wcb class, not bs", () => {
+    const html = ticketPageWCB(makeRow(), "INV-1", []);
+    assert.match(html, /class="[^"]*\bticket-header-wcb\b/, "WCB header must carry ticket-header-wcb class");
+    assert.doesNotMatch(html, /class="[^"]*\bticket-header-bs\b/, "WCB header must NOT carry ticket-header-bs class");
+  });
+
+  it("scopes section labels and table headers per type in CSS", () => {
+    const css = buildFullCSS(DEFAULT_BRAND_COLORS);
+    assert.ok(
+      css.includes(`.ticket-type-bs .items-table thead { background: ${JOB_TYPE_COLORS.billingSheet}`),
+      "CSS must scope BS table header background to billingSheet color",
+    );
+    assert.ok(
+      css.includes(`.ticket-type-wcb .ticket-section-label { color: ${JOB_TYPE_COLORS.wetCheck}`),
+      "CSS must scope WCB section label color to wetCheck color",
+    );
   });
 });
