@@ -1,6 +1,7 @@
 import puppeteer from 'puppeteer-core';
 import { resolveChromiumExecutable } from './chromium-resolver';
 import { VRT_LOGO_DATA_URI } from './assets/vrt-logo.js';
+import { IRRIGOPRO_LOGO_DATA_URI } from './assets/irrigopro-logo.js';
 import { readFileSync, existsSync } from 'fs';
 import { join, basename } from 'path';
 import type { PdfViewModel, PdfBrandColors } from './pdf-view-model';
@@ -284,6 +285,7 @@ export class PDFGenerator {
         footerTemplate: `
           <div style="width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;font-size:10px;color:#9ca3af;display:flex;justify-content:space-between;align-items:center;padding:0 0.5in;box-sizing:border-box;">
             <div style="display:flex;align-items:center;gap:6px;">
+              ${IRRIGOPRO_LOGO_DATA_URI ? `<img src="${IRRIGOPRO_LOGO_DATA_URI}" style="height:14px;" alt="IrrigoPro" />` : ''}
               <span style="color:#9ca3af;font-size:10px;">Powered by</span>
               ${VRT_LOGO_DATA_URI
                 ? `<img src="${VRT_LOGO_DATA_URI}" style="height:16px;" alt="VRT Sync" />`

@@ -16,7 +16,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 
-const ASSET_FILE = 'irrigopro - logo - BLUE - FINAL_1756061385150.png';
+const ASSET_FILE = 'IrrigoPro_2026-03_1780427958317.png';
 
 const _candidates: string[] = [
   // Primary: cwd = workspace root (pnpm dev / production start)
