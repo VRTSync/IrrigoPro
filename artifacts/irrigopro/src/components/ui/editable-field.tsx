@@ -76,14 +76,15 @@ export function EditableField({
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(null);
 
-  // Auto-cancel when another field becomes active on the same surface
+  // Auto-cancel when another field becomes active on the same surface.
+  // Blocked while a save is in-flight so the PATCH can land before the field closes.
   useEffect(() => {
-    if (fieldId && activeField !== null && activeField !== fieldId && isEditing) {
+    if (fieldId && activeField !== null && activeField !== fieldId && isEditing && !isSaving) {
       setIsEditing(false);
       setDraft(value);
       setError(null);
     }
-  }, [activeField, fieldId, isEditing, value]);
+  }, [activeField, fieldId, isEditing, isSaving, value]);
 
   // Sync draft when value changes while not editing
   useEffect(() => {
@@ -135,7 +136,14 @@ export function EditableField({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") { e.preventDefault(); handleCancel(); return; }
-    if (e.key === "Enter" && type !== "textarea") { e.preventDefault(); handleSave(); }
+    if (e.key === "Enter") {
+      if (type === "textarea") {
+        // Plain Enter inserts a newline; Cmd/Ctrl+Enter saves.
+        if (e.metaKey || e.ctrlKey) { e.preventDefault(); handleSave(); }
+      } else {
+        e.preventDefault(); handleSave();
+      }
+    }
   };
 
   // ─── Display mode ──────────────────────────────────────────────────────────
@@ -213,7 +221,7 @@ export function EditableField({
             onClick={handleSave}
             disabled={isSaving}
             className="p-1 rounded text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 transition-colors"
-            title="Save (Enter)"
+            title={type === "textarea" ? "Save (⌘Enter / Ctrl+Enter)" : "Save (Enter)"}
             data-testid="editable-field-save"
           >
             {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}

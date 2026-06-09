@@ -520,6 +520,10 @@ export function CompletedWorkDetailModal({
 
   const [fieldOverrides, setFieldOverrides] = useState<Record<string, string>>({});
   useEffect(() => { setFieldOverrides({}); }, [id, open]);
+  // After a successful save the server refetches and updatedAt changes.
+  // Clear all overrides at that point so server-normalized values show through.
+  const updatedAtStamp = (wo ?? bs)?.updatedAt as string | undefined;
+  useEffect(() => { setFieldOverrides({}); }, [updatedAtStamp]);
 
   const patchRecordMutation = useMutation({
     mutationFn: async (patch: Record<string, unknown>) => {
@@ -844,7 +848,15 @@ export function CompletedWorkDetailModal({
                       value={fv(
                         isWorkOrder ? "scheduledDate" : "workDate",
                         workDate
-                          ? (() => { try { return format(new Date(workDate as string | Date), "yyyy-MM-dd"); } catch { return ""; } })()
+                          ? (() => {
+                              try {
+                                // Use local date parts — not toISOString (UTC) — to avoid
+                                // off-by-one when the server stores UTC midnight timestamps.
+                                const d = new Date(workDate as string | Date);
+                                if (isNaN(d.getTime())) return "";
+                                return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                              } catch { return ""; }
+                            })()
                           : ""
                       )}
                       onSave={async (v) =>
@@ -915,7 +927,14 @@ export function CompletedWorkDetailModal({
                         canEdit={true}
                         type="number"
                         min={0}
+                        max={100}
                         step={0.25}
+                        validate={(v) => {
+                          const n = parseFloat(v);
+                          if (isNaN(n) || n < 0) return "Hours must be 0 or greater";
+                          if (n > 100) return "Hours seem unusually high (max 100)";
+                          return null;
+                        }}
                         className="justify-center"
                         inputClassName="text-center w-20"
                       >

@@ -597,8 +597,8 @@ const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) =>
   const userId = req.authenticatedUserId;
   const updateData = req.body;
 
-  // Managers have full access
-  if (userRole === 'company_admin' || userRole === 'billing_manager' || userRole === 'irrigation_manager') {
+  // Managers and super_admin have full access
+  if (userRole === 'company_admin' || userRole === 'super_admin' || userRole === 'billing_manager' || userRole === 'irrigation_manager') {
     return next();
   }
 
@@ -15774,7 +15774,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const parsed = wetCheckPatchBody.safeParse(req.body ?? {});
     if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     try {
-      const updated = await storage.updateWetCheck(parseInt(req.params.id), cid, parsed.data);
+      const wcId = parseInt(req.params.id);
+      // Billed lock: reject edits if any billing sheet derived from this wet check is billed/invoiced.
+      // Mirrors the lock on PATCH /api/work-orders/:id and /api/billing-sheets/:id.
+      const billedRows = await db.execute<{ id: number }>(sql`
+        SELECT bs.id FROM billing_sheets bs
+        JOIN wet_check_billings wcb ON wcb.billing_sheet_id = bs.id
+        WHERE wcb.wet_check_id = ${wcId}
+          AND (bs.status = 'billed' OR bs.invoice_id IS NOT NULL)
+        LIMIT 1
+      `);
+      if (billedRows.rows.length > 0) {
+        res.status(409).json({ message: "This record has been billed and cannot be edited." });
+        return;
+      }
+      const updated = await storage.updateWetCheck(wcId, cid, parsed.data);
       if (!updated) { res.status(404).json({ message: "Not found" }); return; }
       res.json(updated);
     } catch (e: any) {

@@ -126,6 +126,9 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
 
   const [fieldOverrides, setFieldOverrides] = useState<Record<string, string>>({});
   useEffect(() => { setFieldOverrides({}); }, [workOrder.id]);
+  // After a successful save the server refetches and workOrder.updatedAt changes.
+  // Clear all overrides at that point so any server-normalized values show through.
+  useEffect(() => { setFieldOverrides({}); }, [(workOrder as any).updatedAt]);
 
   const patchWOMutation = useMutation({
     mutationFn: async (patch: Record<string, unknown>) =>
@@ -359,7 +362,16 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
 
   const toDateInput = (d: string | Date | null | undefined): string => {
     if (!d) return "";
-    try { return new Date(d as string | Date).toISOString().slice(0, 10); } catch { return ""; }
+    try {
+      // Use local date parts (not toISOString which is UTC) so the value shown
+      // in the <input type="date"> matches the user's local calendar date.
+      const date = new Date(d as string | Date);
+      if (isNaN(date.getTime())) return "";
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    } catch { return ""; }
   };
 
   const formatDate = (date: string | Date | null) => {
