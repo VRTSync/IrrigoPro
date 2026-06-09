@@ -69,7 +69,6 @@ process.on("exit", () => {
 const SHARED_CLASSES: string[] = [
   "ticket-page",
   "ticket-header",
-  "ticket-header-bs",
   "ticket-header-condensed",
   "ticket-header-line1",
   "ticket-header-line2",
@@ -246,6 +245,13 @@ describe("ticketPageBS + ticketPageWCB — intentional differences (Slice 4)", (
   it("BS includes WORK PERFORMED section; WCB does not", () => {
     assert.match(bsHtml, /WORK PERFORMED/, "BS must include WORK PERFORMED section");
     assert.doesNotMatch(wcbHtml, /WORK PERFORMED/, "WCB must NOT include WORK PERFORMED section");
+  });
+
+  it("BS uses ticket-header-bs (amber); WCB uses ticket-header-wcb (green)", () => {
+    assert.match(bsHtml, /class="[^"]*\bticket-header-bs\b/, "BS must use ticket-header-bs class");
+    assert.doesNotMatch(bsHtml, /class="[^"]*\bticket-header-wcb\b/, "BS must NOT use ticket-header-wcb class");
+    assert.match(wcbHtml, /class="[^"]*\bticket-header-wcb\b/, "WCB must use ticket-header-wcb class");
+    assert.doesNotMatch(wcbHtml, /class="[^"]*\bticket-header-bs\b/, "WCB must NOT use ticket-header-bs class");
   });
 
   it("WCB parts block uses zone-block divs; BS (no wetCheckView) uses a flat table", () => {

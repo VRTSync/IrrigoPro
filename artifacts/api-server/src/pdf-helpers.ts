@@ -409,7 +409,7 @@ export function ticketPageWCB(
 
   return `
   <div class="ticket-page">
-    <div class="ticket-header ticket-header-bs">
+    <div class="ticket-header ticket-header-wcb">
       <div class="ticket-header-condensed">
         ${wcbLogoHtml}
         <div class="ticket-header-line1">WC Billing #${wcb.billingNumber} &nbsp;|&nbsp; Invoice #${invoiceNumber}</div>
@@ -1242,12 +1242,17 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
   }
 
   .ticket-header-wo {
-    background: ${navy};
+    background: ${JOB_TYPE_COLORS.workOrder};
     color: white;
   }
 
   .ticket-header-bs {
-    background: ${navy};
+    background: ${JOB_TYPE_COLORS.billingSheet};
+    color: white;
+  }
+
+  .ticket-header-wcb {
+    background: ${JOB_TYPE_COLORS.wetCheck};
     color: white;
   }
 

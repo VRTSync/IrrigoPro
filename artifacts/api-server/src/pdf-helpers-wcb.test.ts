@@ -72,6 +72,14 @@ function makeRow(overrides: Partial<PdfWetCheckBillingRow> = {}): PdfWetCheckBil
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
+describe("ticketPageWCB — header color class (Task #1164)", () => {
+  it("uses ticket-header-wcb (green) not ticket-header-bs (amber)", () => {
+    const html = ticketPageWCB(makeRow(), "INV-1", []);
+    assert.match(html, /class="[^"]*\bticket-header-wcb\b/, "WCB header must carry ticket-header-wcb class");
+    assert.doesNotMatch(html, /class="[^"]*\bticket-header-bs\b/, "WCB header must NOT carry ticket-header-bs class");
+  });
+});
+
 describe("ticketPageWCB — header fields (Task #787)", () => {
   it("includes billing number and invoice number in header", () => {
     const html = ticketPageWCB(makeRow(), "INV-0042", []);

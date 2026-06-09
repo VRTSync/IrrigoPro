@@ -153,3 +153,45 @@ describe('buildFullCSS — job-type colors in recon rules (Part B)', () => {
     );
   });
 });
+
+describe('buildFullCSS — ticket header color classes (Task #1164)', () => {
+  it('.ticket-header-wo uses JOB_TYPE_COLORS.workOrder (#1E5A99)', () => {
+    const css = buildFullCSS(DEFAULT_BRAND_COLORS);
+    const woRuleMatch = css.match(/\.ticket-header-wo\s*\{[^}]+\}/);
+    assert.ok(woRuleMatch, 'Expected .ticket-header-wo rule in CSS');
+    assert.ok(
+      woRuleMatch[0].includes('#1E5A99'),
+      'Expected .ticket-header-wo background to be #1E5A99',
+    );
+  });
+
+  it('.ticket-header-bs uses JOB_TYPE_COLORS.billingSheet (#B06820)', () => {
+    const css = buildFullCSS(DEFAULT_BRAND_COLORS);
+    const bsRuleMatch = css.match(/\.ticket-header-bs\s*\{[^}]+\}/);
+    assert.ok(bsRuleMatch, 'Expected .ticket-header-bs rule in CSS');
+    assert.ok(
+      bsRuleMatch[0].includes('#B06820'),
+      'Expected .ticket-header-bs background to be #B06820',
+    );
+  });
+
+  it('.ticket-header-wcb uses JOB_TYPE_COLORS.wetCheck (#5E8C2A)', () => {
+    const css = buildFullCSS(DEFAULT_BRAND_COLORS);
+    const wcbRuleMatch = css.match(/\.ticket-header-wcb\s*\{[^}]+\}/);
+    assert.ok(wcbRuleMatch, 'Expected .ticket-header-wcb rule in CSS');
+    assert.ok(
+      wcbRuleMatch[0].includes('#5E8C2A'),
+      'Expected .ticket-header-wcb background to be #5E8C2A',
+    );
+  });
+
+  it('ticket header colors are fixed regardless of brand navy/green overrides', () => {
+    const css = buildFullCSS({ ...DEFAULT_BRAND_COLORS, navy: '#000000', green: '#000000' });
+    const woMatch = css.match(/\.ticket-header-wo\s*\{[^}]+\}/);
+    const bsMatch = css.match(/\.ticket-header-bs\s*\{[^}]+\}/);
+    const wcbMatch = css.match(/\.ticket-header-wcb\s*\{[^}]+\}/);
+    assert.ok(woMatch?.[0].includes('#1E5A99'), '.ticket-header-wo must stay #1E5A99 when navy is overridden');
+    assert.ok(bsMatch?.[0].includes('#B06820'), '.ticket-header-bs must stay #B06820 when navy is overridden');
+    assert.ok(wcbMatch?.[0].includes('#5E8C2A'), '.ticket-header-wcb must stay #5E8C2A when green is overridden');
+  });
+});
