@@ -389,7 +389,7 @@ export default function Operations() {
                         }
                       }}
                     >
-                      View Details
+                      View / Edit
                     </Button>
                   </div>
                 </div>

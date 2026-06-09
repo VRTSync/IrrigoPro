@@ -637,10 +637,10 @@ export default function BillingSheets() {
                                 <Send className="w-3 h-3 mr-1" />Submit for Approval
                               </Button>
                             )}
-                            {/* View button for submitted/review sheets */}
+                            {/* View / Edit button for submitted/review sheets */}
                             {sheet.status !== 'draft' && (
                               <Button size="sm" variant="outline" onClick={() => setViewingSheet(sheet)} className="w-full sm:w-auto">
-                                <Eye className="w-3 h-3 mr-1" />View
+                                <Eye className="w-3 h-3 mr-1" />View / Edit
                               </Button>
                             )}
                             {/* Manager approval gate: Approve or Return for Correction */}
@@ -897,7 +897,7 @@ export default function BillingSheets() {
 
                           <div className="flex flex-col gap-2 flex-shrink-0 w-full sm:w-auto sm:items-end">
                             <Button size="sm" variant="outline" onClick={() => setViewingSheet(sheet)} className="w-full sm:w-auto">
-                              <Eye className="w-3 h-3 mr-1" />View
+                              <Eye className="w-3 h-3 mr-1" />View / Edit
                             </Button>
                             <div className="text-xs text-gray-500">
                               Created: {formatDate(sheet.createdAt)}
