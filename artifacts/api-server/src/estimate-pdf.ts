@@ -353,7 +353,7 @@ export function buildEstimateHtml(
 
   ${pinSection}
 
-  <section>
+  <section style="page-break-before: always;">
     <h2>Line Items</h2>
     <table>
       <thead>

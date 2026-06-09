@@ -328,7 +328,7 @@ export function buildWetCheckHtml(
   </div>` : ''}
 
   ${totalZones > 0 ? `
-  <h2>Zone &amp; Findings Detail</h2>
+  <h2 style="page-break-before: always;">Zone &amp; Findings Detail</h2>
   <table>
     <thead>
       <tr>
