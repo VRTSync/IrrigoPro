@@ -1,0 +1,397 @@
+# Replit Task #1163 — Invoice Detail PDF, Slice 1152 (colored cover header band + job-type colors)
+
+> Tracked as ticket **#1163**. Verified against the freshly-fetched tree
+> (#1150 + #1151 already landed; HEAD at Task #1161). Current anchors:
+> - Part A cover header: markup `class="cover-header"` at
+>   `pdf-helpers.ts:155`; CSS `.cover-header` `:998`,
+>   `.cover-company-block` `:1006`, `.cover-invoice-meta` `:1045`.
+> - Part B recon rules are in **two separate blocks** (not a branch-path
+>   duplicate): the `wo`/`bs` ref/type/group rules at `:1555–1587`, and
+>   the `wcb` variants #1150 appended further down at `:1746–1753` (under
+>   the comment "Reconciliation — Wet Check Billing rows"). Update
+>   **both** blocks. Grep the class names rather than trusting lines.
+> - `.recon-type-wcb` carries `font-style: italic` today — keep it; only
+>   change the color.
+
+Two presentational changes to the invoice PDF, both in `pdf-helpers.ts`:
+
+- **Part A — Colored cover header band.** Restyle the cover-page header
+  into a filled brand-color band with a white logo tile and white company
+  text, matching the approved mockup.
+- **Part B — Job-type colors.** Color-code the three job types in the
+  reconciliation summary to match the customer guide "Understanding Your
+  Invoice," section 02.
+
+**Scope: header band + job-type colors only.** Do NOT merge the
+reconciliation summary onto the cover, do NOT change the
+cover→reconciliation page structure, and make **no layout changes** for
+Part B (colors only). `coverPage()` + `buildFullCSS` edits only.
+
+> **TL;DR.** Replace the current green-underline `.cover-header`
+> (`pdf-helpers.ts:998`) with a navy band: a white rounded logo tile
+> on the left, company name + contact details in white beside it, and the
+> Invoice #/Billing Period moved just below the band as a brown accent
+> line. Band color = the navy already used elsewhere in the PDF
+> (`brandColors.navy`, default `#1E5A99` — the recon table header color).
+
+> **Already exists — do NOT build:**
+> - **Company logo upload.** Company admins already upload their logo at
+>   the Company Profile page (`artifacts/irrigopro/src/pages/company-profile.tsx:292–400`):
+>   current-logo preview, remove button, and an `ObjectUploader` wired to
+>   `POST /api/company/logo/upload` + `PUT /api/company/:companyId/logo`.
+>   No new upload surface is needed for this slice.
+> - **Logo → PDF pipeline.** `invoice-pdf-service.ts:368–395` already
+>   resolves `company.logo`, base64-embeds it via `fetchLogoAsBase64`
+>   into `logoDataUri`, and extracts `brandColors` from it. `coverPage()`
+>   already renders `company.logoDataUri`. The uploaded logo shows on the
+>   cover today — this slice only restyles its container.
+
+## Context (locked)
+
+- `coverPage(vm)` is `pdf-helpers.ts:114`. It already has
+  `company.logoDataUri`, `company.name/address/phone/email`,
+  `invoice.invoiceNumber`, and `invoice.periodStart/periodEnd`.
+- `vm.brandColors` is in scope on the view model
+  (`pdf-view-model.ts:174`, populated at `:444`). Read
+  `vm.brandColors.navy` for the band — no signature change needed.
+- The palette in `buildFullCSS` already destructures
+  `{ navy, brown, green, black, gray }` (`pdf-helpers.ts:892`). Use
+  `navy` for the band and `brown` for the invoice-number accent.
+
+## Part A — Cover header band
+
+### 1. `coverPage()` markup (`class="cover-header"` block, ~`pdf-helpers.ts:155–170`)
+
+Replace the `<div class="cover-header">…</div>` block (the company block
++ the right-aligned `cover-invoice-meta`) with a band + a below-band
+invoice line. Keep `cover-bill-to` and `branchSummaryHtml` exactly as
+they are.
+
+```typescript
+const navy = vm.brandColors.navy;
+
+const logoTile = company.logoDataUri
+  ? `<div class="cover-logo-tile"><img src="${company.logoDataUri}" class="cover-logo" alt="${company.name}"></div>`
+  : `<div class="cover-logo-tile cover-logo-tile-empty">${company.name?.charAt(0) ?? ''}</div>`;
+
+// …inside the returned template, replacing the old .cover-header:
+`
+<div class="cover-brand-band" style="background:${navy};">
+  ${logoTile}
+  <div class="cover-brand-company">
+    <div class="cover-brand-name">${company.name}</div>
+    ${company.address ? `<div class="cover-brand-line">${company.address}</div>` : ''}
+    ${company.phone ? `<div class="cover-brand-line">${company.phone}</div>` : ''}
+    ${company.email ? `<div class="cover-brand-line">${company.email}</div>` : ''}
+  </div>
+</div>
+
+<div class="cover-invoice-block">
+  <div class="cover-invoice-number">INVOICE #${invoice.invoiceNumber}</div>
+  <div class="cover-invoice-period">Billing Period: ${formatDate(invoice.periodStart)} – ${formatDate(invoice.periodEnd)}</div>
+</div>
+`
+```
+
+The inline `style="background:${navy}"` keeps the band color tied to the
+runtime brand color (CSS can't interpolate it because `buildFullCSS`
+runs once with the default palette). White text and the tile come from
+the CSS class.
+
+### 2. CSS (`buildFullCSS`, replace the `.cover-header` rule at `pdf-helpers.ts:998` and add the new classes)
+
+```css
+/* Colored brand band (Slice 1152) */
+.cover-brand-band {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 22px 26px;
+  border-radius: 10px;
+  /* background set inline from brandColors.navy */
+}
+
+.cover-logo-tile {
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 10px;
+  width: 96px;
+  height: 96px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cover-logo-tile-empty {
+  font-size: 40px;
+  font-weight: 800;
+  color: ${navy};
+}
+
+.cover-logo {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  display: block;
+}
+
+.cover-brand-company { display: flex; flex-direction: column; gap: 3px; }
+
+.cover-brand-name {
+  font-size: 22px;
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1.2;
+}
+
+.cover-brand-line {
+  font-size: 12px;
+  color: rgba(255,255,255,0.85);
+}
+
+.cover-invoice-block { margin-top: 22px; }
+
+.cover-invoice-number {
+  font-size: 20px;
+  font-weight: 800;
+  color: ${brown};
+  letter-spacing: 0.5px;
+}
+
+.cover-invoice-period {
+  font-size: 13px;
+  color: #6b7280;
+  margin-top: 4px;
+}
+```
+
+Remove the now-unused `.cover-header`, `.cover-company-block`,
+`.cover-company-name`, `.cover-company-details`, `.cover-company-line`,
+`.cover-invoice-meta`, `.cover-invoice-label`, `.cover-meta-item`,
+`.cover-meta-label`, and `.cover-meta-value` rules
+(`pdf-helpers.ts:~998–1055`) **only if** no other function references them
+— grep first; `.cover-company-name-fallback` and `.cover-invoice-number`
+are being repurposed, so keep/adjust rather than delete. Leave
+`.cover-bill-to` and below untouched.
+
+### Notes
+
+- Logo tile is a fixed 96×96 white square (mockup's "LOGO" box). The
+  logo is contained inside with padding so wide or tall logos both fit.
+- When no logo is uploaded, the tile shows the company's first initial in
+  navy on white — never a broken image.
+- Band color follows `brandColors.navy`, which is the same navy the recon
+  table header and cover accents already use, so the document stays
+  internally consistent. (Per Randy: reuse the existing PDF navy.)
+
+## Part B — Job-type colors (match the customer guide, section 02)
+
+The customer-facing explainer "Understanding Your Invoice," section 02
+"Understand the Job Types," teaches customers a fixed color language for
+the three job types. The invoice should use the same colors so the two
+documents reinforce each other. Today the reconciliation summary renders
+every type in the same navy on a gray bar — no per-type color.
+
+| Job type | Reference | Color | Hex |
+|---|---|---|---|
+| Work Order | WO-#### | Blue | `#1E5A99` (the PDF's existing navy) |
+| Billing Sheet | BS-#### | Amber/Orange | `#B06820` |
+| Wet Check Billing | WCB-#### | Green | `#5E8C2A` |
+
+Values sampled from the shipped guide's section-02 card title bars
+(Work Order `≈#185898` ≈ the PDF navy — reuse `#1E5A99`; Billing Sheet
+`≈#B06820`; Wet Check `≈#588828`, use `#5E8C2A` for contrast under white).
+
+**Locked: job-type colors are FIXED constants, not brand-derived.**
+`brandColors` varies per company (extracted from the uploaded logo). The
+customer guide is one fixed document, so these colors must be identical
+on every company's invoice or they won't match the guide. Do NOT wire
+them to `brandColors`.
+
+### 3. Add a fixed color map (top of `pdf-helpers.ts`, exported for tests)
+
+```typescript
+// Job-type semantic colors — must match the customer guide
+// "Understanding Your Invoice," section 02. Fixed across all companies;
+// intentionally NOT derived from brandColors.
+export const JOB_TYPE_COLORS = {
+  workOrder:    '#1E5A99', // blue  (WO-)
+  billingSheet: '#B06820', // amber (BS-)
+  wetCheck:     '#5E8C2A', // green (WCB-)
+} as const;
+```
+
+### 4. Recolor the recon rules in `buildFullCSS`
+
+The markup already emits the right classes (`recon-ref-wo/bs/wcb`,
+`recon-type-wo/bs/wcb`, `recon-group-wo/bs/wcb`) — the `*-wcb` variants
+come from #1150. Only the CSS color values change.
+
+**Important: these rules live in TWO separate blocks** in `buildFullCSS`
+(verified on the fresh tree). The `wo`/`bs` ref/type/group rules are
+together at `:1555–1587`; #1150 appended the `wcb` variants in a
+*separate* block at `:1746–1753`, under the comment "Reconciliation —
+Wet Check Billing rows." This is not a branch-path duplicate — it's just
+two locations. Update **both**. Grep each class name; treat line numbers
+as approximate. When recoloring `.recon-type-wcb`, **keep its existing
+`font-style: italic`** and change only the color. The CSS shown below is
+the target for each rule.
+
+Reference + type text colors (every `recon-ref-*` / `recon-type-*` rule):
+
+```css
+.recon-ref-wo  { color: ${JOB_TYPE_COLORS.workOrder}; }
+.recon-ref-bs  { color: ${JOB_TYPE_COLORS.billingSheet}; }
+.recon-ref-wcb { color: ${JOB_TYPE_COLORS.wetCheck}; }
+
+.recon-type-wo  { color: ${JOB_TYPE_COLORS.workOrder}; }
+.recon-type-bs  { color: ${JOB_TYPE_COLORS.billingSheet}; }
+.recon-type-wcb { color: ${JOB_TYPE_COLORS.wetCheck}; font-style: italic; } /* keep italic */
+```
+
+Section-header bars — match the guide's filled colored title bars (every
+`recon-group-*` rule, in both the non-branch and branch-grouped paths):
+
+```css
+.recon-group-wo td {
+  background: ${JOB_TYPE_COLORS.workOrder};
+  color: #ffffff;
+  border-left: 4px solid rgba(0,0,0,0.18);
+}
+.recon-group-bs td {
+  background: ${JOB_TYPE_COLORS.billingSheet};
+  color: #ffffff;
+  border-left: 4px solid rgba(0,0,0,0.18);
+}
+.recon-group-wcb td {
+  background: ${JOB_TYPE_COLORS.wetCheck};
+  color: #ffffff;
+  border-left: 4px solid rgba(0,0,0,0.18);
+}
+```
+
+(Removes the previous gray background and `border-top: 1px solid ${green}`
+on these three. Leave `.recon-group-branch`, `.recon-subtotal`,
+`.recon-grand-total`, and the table header untouched.) If Randy prefers a
+lighter touch over filled bars, the fallback is to keep the gray
+background, set the header **text** to the type color, and add the 4px
+colored left border — ship filled unless told otherwise, and note which
+you used.
+
+**Part B scope guard (per Randy):** colors only — no layout/structural
+changes. Don't restyle ticket pages, totals box, or footer. If you spot
+something drastic while in here, surface it and stop.
+
+## Done looks like
+
+**Part A:**
+- The cover page opens with a filled navy band: white logo tile on the
+  left, company name in white + address/phone/email in white beside it.
+- Directly below the band: "INVOICE #<number>" in brown, then "Billing
+  Period: <start> – <end>" in gray.
+- Bill-To block and any per-branch summary render below, unchanged.
+- The cover and reconciliation remain separate pages; footer/page numbers
+  unchanged.
+- A company with no uploaded logo shows the initial-in-tile fallback, not
+  a broken image.
+
+**Part B:**
+- In the reconciliation summary the Work Orders section reads blue, the
+  Billing Sheets section amber, and the Wet Check Billings section green —
+  matching the guide's section-02 cards. Reference numbers and Type text
+  use the same per-type colors.
+- Colors are identical regardless of the company's logo-derived brand
+  colors (job-type colors are fixed constants).
+- No rows, columns, totals, or page breaks change.
+
+- `pnpm typecheck` and `pnpm test` pass; existing cover/recon tests pass.
+
+## Tests
+
+Extend the cover-page render test (or add `pdf-cover-header.test.ts`):
+
+```typescript
+it("renders the colored brand band with the navy brand color", () => {
+  const html = coverPage(vmWith({ brandColors: { ...DEFAULT_BRAND_COLORS, navy: "#123456" } }));
+  expect(html).toContain("cover-brand-band");
+  expect(html).toContain("background:#123456");
+});
+
+it("shows the logo inside the tile when logoDataUri is present", () => {
+  const html = coverPage(vmWith({ company: { logoDataUri: "data:image/png;base64,AAA", name: "Acme" } }));
+  expect(html).toContain("cover-logo-tile");
+  expect(html).toContain('src="data:image/png;base64,AAA"');
+  expect(html).not.toContain("cover-logo-tile-empty");
+});
+
+it("falls back to the company initial when no logo", () => {
+  const html = coverPage(vmWith({ company: { logoDataUri: null, name: "Greenfield" } }));
+  expect(html).toContain("cover-logo-tile-empty");
+  expect(html).toContain(">G<");
+});
+
+it("renders the invoice number in the below-band block", () => {
+  const html = coverPage(vmWith({ invoice: { invoiceNumber: "INV-20418" } }));
+  expect(html).toContain("INVOICE #INV-20418");
+  expect(html).toContain("Billing Period:");
+});
+
+// Part B — job-type colors
+it("exposes fixed job-type colors matching the guide", () => {
+  expect(JOB_TYPE_COLORS.workOrder).toBe('#1E5A99');
+  expect(JOB_TYPE_COLORS.billingSheet).toBe('#B06820');
+  expect(JOB_TYPE_COLORS.wetCheck).toBe('#5E8C2A');
+});
+
+it("applies each job-type color to its recon section + labels", () => {
+  const css = buildFullCSS(DEFAULT_BRAND_COLORS);
+  expect(css).toContain('.recon-type-wcb { color: #5E8C2A; }');
+  expect(css).toContain('#B06820'); // BS amber section bar
+});
+
+it("job-type colors do NOT change with brandColors", () => {
+  const css = buildFullCSS({ ...DEFAULT_BRAND_COLORS, navy: '#000000', green: '#000000' });
+  expect(css).toContain('#B06820');
+  expect(css).toContain('#5E8C2A');
+});
+```
+
+## Out of scope
+
+- Building any logo-upload UI or endpoint — already exists at Company
+  Profile.
+- Merging the reconciliation summary onto the cover / full mockup
+  restructure — header band only this slice. (Can be a follow-up if
+  Randy wants the single-page-1 look.)
+- Changing logo storage, serving, or brand-color extraction.
+- Wiring job-type colors to `brandColors` — they are fixed constants by
+  design so every customer's invoice matches the one shared guide.
+- Coloring ticket-page headers (WO/BS/WCB detail pages) by type — not
+  requested; possible future slice if the color language should carry
+  onto the tickets.
+
+## Relevant files
+
+- `artifacts/api-server/src/pdf-helpers.ts` — `coverPage()` markup,
+  `JOB_TYPE_COLORS` constant, and `buildFullCSS` cover + recon CSS (only
+  file changed).
+- `artifacts/api-server/src/pdf-view-model.ts` — reference
+  (`brandColors`, `company` fields).
+- `artifacts/irrigopro/src/pages/company-profile.tsx` — reference; the
+  existing upload surface (no change).
+- Reference: customer guide "Understanding Your Invoice," section 02
+  (source of the Part B color values).
+- Tests: `artifacts/api-server/src/pdf-cover-header.test.ts` (new), plus
+  `pdf-helpers-wcb.test.ts` / `pdf-changes-1150.test.ts` (the #1150 recon
+  tests must still pass once the section bars are recolored).
+
+## Dependencies
+
+- **Part B depends on #1150** — it recolors the `recon-group-wcb`,
+  `recon-ref-wcb`, and `recon-type-wcb` classes that #1150 introduces, so
+  #1150 must land first. Part A is independent of #1150.
+- Independent of #1151. Edits the same `pdf-helpers.ts` as #1150/#1151;
+  if landing alongside them, expect a trivial merge in `buildFullCSS`.
