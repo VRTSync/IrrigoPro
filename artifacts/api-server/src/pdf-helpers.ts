@@ -12,6 +12,8 @@ import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
 import type { WetCheckBillingView, WcvZone } from './wet-check-billing-view';
 import { VRT_LOGO_DATA_URI } from './assets/vrt-logo';
 import { IRRIGOPRO_LOGO_DATA_URI } from './assets/irrigopro-logo';
+import { JOB_TYPE_COLORS, type JobTypeKey } from '@workspace/shared';
+export { JOB_TYPE_COLORS, type JobTypeKey };
 
 /**
  * Task #843 — Resolved (data-URI) version of PdfWcbZonePhotoGroup.
@@ -30,17 +32,6 @@ export interface WcbZonePhotoGroupResolved {
 }
 
 export const FAILED_PHOTO_SENTINEL = '__PHOTO_UNAVAILABLE__';
-
-/**
- * Fixed job-type colors for the reconciliation summary.
- * These are intentionally NOT derived from brandColors so every company's
- * invoice matches the shared customer guide "Understanding Your Invoice."
- */
-export const JOB_TYPE_COLORS = {
-  workOrder: '#1E5A99',
-  billingSheet: '#B06820',
-  wetCheck: '#5E8C2A',
-} as const;
 
 export function formatWorkSummaryAsBullets(text: string | null | undefined): string {
   if (!text || text.trim().length === 0) return '';

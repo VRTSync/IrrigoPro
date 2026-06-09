@@ -61,6 +61,18 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        // Job-type color palette — mirrors lib/shared/src/job-type-colors.ts
+        // (single source of truth). Keep these hex values in sync by hand;
+        // Tailwind config runs before the TS build so a direct import is not
+        // available at config-eval time.
+        // Utilities: bg-jobtype-wo, bg-jobtype-bs, bg-jobtype-wcb, bg-jobtype-est
+        // (and text-*, border-*, ring-*, etc.)
+        jobtype: {
+          wo:  "#1E5A99",
+          bs:  "#B06820",
+          wcb: "#5E8C2A",
+          est: "#6B46C1",
+        },
       },
       keyframes: {
         "accordion-down": {
