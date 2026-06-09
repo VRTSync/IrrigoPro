@@ -283,9 +283,12 @@ export class PDFGenerator {
         headerTemplate: '<span></span>',
         footerTemplate: `
           <div style="width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;font-size:10px;color:#9ca3af;display:flex;justify-content:space-between;align-items:center;padding:0 0.5in;box-sizing:border-box;">
-            ${VRT_LOGO_DATA_URI
-              ? `<img src="${VRT_LOGO_DATA_URI}" style="height:12px;opacity:0.5;" alt="VRT Sync" />`
-              : '<span style="color:#9ca3af;">VRT Sync</span>'}
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="color:#9ca3af;font-size:10px;">Powered by</span>
+              ${VRT_LOGO_DATA_URI
+                ? `<img src="${VRT_LOGO_DATA_URI}" style="height:16px;" alt="VRT Sync" />`
+                : '<span style="color:#9ca3af;">VRT Sync</span>'}
+            </div>
             <span style="color:#9ca3af;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
           </div>
         `,

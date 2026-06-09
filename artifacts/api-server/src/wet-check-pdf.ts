@@ -4,6 +4,7 @@ import type { WetCheckWithDetails, WetCheckZoneRecord, WetCheckFinding } from '@
 import { resolveChromiumExecutable } from './chromium-resolver';
 import { fetchLogoAsBase64 } from './pdf-generator';
 import { VRT_LOGO_DATA_URI } from './assets/vrt-logo.js';
+import { IRRIGOPRO_LOGO_DATA_URI } from './assets/irrigopro-logo.js';
 
 const DEFAULT_BRAND_COLOR = '#1E5A99';
 const DEFAULT_BRAND_DARK = '#143F6B';
@@ -338,17 +339,27 @@ export function buildWetCheckHtml(
       ${zoneRows || '<tr><td colspan="8" class="muted">No zones recorded</td></tr>'}
     </tbody>
   </table>` : '<div class="muted" style="margin-top:12px;">No zone data recorded for this wet check.</div>'}
+
+  ${(IRRIGOPRO_LOGO_DATA_URI || VRT_LOGO_DATA_URI) ? `
+  <div style="border-top:1px solid #e5e7eb; margin-top:32px; padding-top:14px; display:flex; align-items:center; justify-content:center; gap:12px;">
+    ${IRRIGOPRO_LOGO_DATA_URI ? `<img src="${IRRIGOPRO_LOGO_DATA_URI}" style="height:28px;" alt="IrrigoPro" />` : '<span style="font-size:11px;color:#374151;font-weight:600;">IrrigoPro</span>'}
+    <span style="font-size:10px; color:#9ca3af;">Powered by</span>
+    ${VRT_LOGO_DATA_URI ? `<img src="${VRT_LOGO_DATA_URI}" style="height:18px;" alt="VRT Sync" />` : '<span style="font-size:10px;color:#9ca3af;">VRT Sync</span>'}
+  </div>` : ''}
 </body>
 </html>`;
 }
 
 function footerTemplate(companyName: string, wetCheckId: number | null | undefined): string {
-  const logoHtml = VRT_LOGO_DATA_URI
-    ? `<img src="${VRT_LOGO_DATA_URI}" style="height:11px;opacity:0.5;" alt="VRT Sync" />`
-    : `<span style="color:#6b7280;">VRT Sync</span>`;
+  const vrtLogoHtml = VRT_LOGO_DATA_URI
+    ? `<img src="${VRT_LOGO_DATA_URI}" style="height:16px;" alt="VRT Sync" />`
+    : `<span style="color:#9ca3af;">VRT Sync</span>`;
   return `
-<div style="width:100%; font-size:8.5px; color:#6b7280; padding:0 0.5in; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; display:flex; justify-content:space-between; align-items:center; box-sizing:border-box;">
-  ${logoHtml}
+<div style="width:100%; font-size:8.5px; color:#9ca3af; padding:0 0.5in; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; display:flex; justify-content:space-between; align-items:center; box-sizing:border-box;">
+  <div style="display:flex;align-items:center;gap:6px;">
+    <span style="color:#9ca3af;font-size:8.5px;">Powered by</span>
+    ${vrtLogoHtml}
+  </div>
   <span>${esc(companyName)} &mdash; Wet Check #${esc(wetCheckId ?? '')}</span>
   <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
 </div>`;

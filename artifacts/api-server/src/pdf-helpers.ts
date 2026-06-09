@@ -11,6 +11,7 @@ import type {
 import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
 import type { WetCheckBillingView, WcvZone } from './wet-check-billing-view';
 import { VRT_LOGO_DATA_URI } from './assets/vrt-logo';
+import { IRRIGOPRO_LOGO_DATA_URI } from './assets/irrigopro-logo';
 
 /**
  * Task #843 — Resolved (data-URI) version of PdfWcbZonePhotoGroup.
@@ -176,6 +177,13 @@ export function coverPage(
     </div>
 
     ${branchSummaryHtml}
+
+    ${(IRRIGOPRO_LOGO_DATA_URI || VRT_LOGO_DATA_URI) ? `
+    <div style="border-top:1px solid #e5e7eb; margin-top:32px; padding-top:14px; display:flex; align-items:center; justify-content:center; gap:12px;">
+      ${IRRIGOPRO_LOGO_DATA_URI ? `<img src="${IRRIGOPRO_LOGO_DATA_URI}" style="height:28px;" alt="IrrigoPro" />` : '<span style="font-size:11px;color:#374151;font-weight:600;">IrrigoPro</span>'}
+      <span style="font-size:10px; color:#9ca3af;">Powered by</span>
+      ${VRT_LOGO_DATA_URI ? `<img src="${VRT_LOGO_DATA_URI}" style="height:18px;" alt="VRT Sync" />` : '<span style="font-size:10px;color:#9ca3af;">VRT Sync</span>'}
+    </div>` : ''}
   </div>`;
 }
 
