@@ -320,6 +320,13 @@ export function buildWetCheckHtml(
     <div class="summary-chip"><div class="num">${allFindings.length}</div><div class="lbl">Total Findings</div></div>
   </div>
 
+  ${(IRRIGOPRO_LOGO_DATA_URI || VRT_LOGO_DATA_URI) ? `
+  <div style="border-top:1px solid #e5e7eb; margin-top:24px; padding-top:14px; display:flex; align-items:center; justify-content:center; gap:12px;">
+    ${IRRIGOPRO_LOGO_DATA_URI ? `<img src="${IRRIGOPRO_LOGO_DATA_URI}" style="height:28px;" alt="IrrigoPro" />` : '<span style="font-size:11px;color:#374151;font-weight:600;">IrrigoPro</span>'}
+    <span style="font-size:10px; color:#9ca3af;">Powered by</span>
+    ${VRT_LOGO_DATA_URI ? `<img src="${VRT_LOGO_DATA_URI}" style="height:18px;" alt="VRT Sync" />` : '<span style="font-size:10px;color:#9ca3af;">VRT Sync</span>'}
+  </div>` : ''}
+
   ${totalZones > 0 ? `
   <h2>Zone &amp; Findings Detail</h2>
   <table>
@@ -340,12 +347,6 @@ export function buildWetCheckHtml(
     </tbody>
   </table>` : '<div class="muted" style="margin-top:12px;">No zone data recorded for this wet check.</div>'}
 
-  ${(IRRIGOPRO_LOGO_DATA_URI || VRT_LOGO_DATA_URI) ? `
-  <div style="border-top:1px solid #e5e7eb; margin-top:32px; padding-top:14px; display:flex; align-items:center; justify-content:center; gap:12px;">
-    ${IRRIGOPRO_LOGO_DATA_URI ? `<img src="${IRRIGOPRO_LOGO_DATA_URI}" style="height:28px;" alt="IrrigoPro" />` : '<span style="font-size:11px;color:#374151;font-weight:600;">IrrigoPro</span>'}
-    <span style="font-size:10px; color:#9ca3af;">Powered by</span>
-    ${VRT_LOGO_DATA_URI ? `<img src="${VRT_LOGO_DATA_URI}" style="height:18px;" alt="VRT Sync" />` : '<span style="font-size:10px;color:#9ca3af;">VRT Sync</span>'}
-  </div>` : ''}
 </body>
 </html>`;
 }
