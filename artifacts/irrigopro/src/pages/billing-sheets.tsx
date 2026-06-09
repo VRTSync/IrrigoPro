@@ -27,7 +27,6 @@ export default function BillingSheets() {
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [viewingSheet, setViewingSheet] = useState<BillingSheet | null>(null);
-  const [editingDraft, setEditingDraft] = useState<BillingSheet | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   // Single-delete confirm + the friendly server message when the sheet is
@@ -625,22 +624,14 @@ export default function BillingSheets() {
                           </div>
 
                           <div className="flex flex-col gap-2 flex-shrink-0 w-full sm:w-auto sm:items-end">
-                            {/* Continue Draft button for field techs and irrigation managers */}
-                            {(currentUser?.role === 'field_tech' || currentUser?.role === 'irrigation_manager') && sheet.status === 'draft' && sheet.technicianId === currentUser.id && (
-                              <Button size="sm" onClick={() => setEditingDraft(sheet)} className="bg-orange-600 hover:bg-orange-700 text-white w-full sm:w-auto">
-                                <FileText className="w-3 h-3 mr-1" />Continue Draft
-                              </Button>
-                            )}
+                            {/* View / Edit opens detail modal for all statuses */}
+                            <Button size="sm" variant="outline" onClick={() => setViewingSheet(sheet)} className="w-full sm:w-auto">
+                              <Eye className="w-3 h-3 mr-1" />View / Edit
+                            </Button>
                             {/* Submit for approval button for field techs and irrigation managers */}
                             {(currentUser?.role === 'field_tech' || currentUser?.role === 'irrigation_manager') && sheet.status === 'draft' && sheet.technicianId === currentUser.id && (
                               <Button size="sm" onClick={() => submitForApproval.mutate(sheet.id)} disabled={submitForApproval.isPending} className="bg-blue-600 hover:bg-blue-700 text-white w-full sm:w-auto">
                                 <Send className="w-3 h-3 mr-1" />Submit for Approval
-                              </Button>
-                            )}
-                            {/* View / Edit button for submitted/review sheets */}
-                            {sheet.status !== 'draft' && (
-                              <Button size="sm" variant="outline" onClick={() => setViewingSheet(sheet)} className="w-full sm:w-auto">
-                                <Eye className="w-3 h-3 mr-1" />View / Edit
                               </Button>
                             )}
                             {/* Manager approval gate: Approve or Return for Correction */}
@@ -997,15 +988,6 @@ export default function BillingSheets() {
         open={showBillingModal}
         onClose={() => setShowBillingModal(false)}
       />
-
-      {/* Edit Draft Wizard */}
-      {editingDraft && (
-        <BillingSheetWizard
-          open={!!editingDraft}
-          onClose={() => setEditingDraft(null)}
-          draftData={editingDraft}
-        />
-      )}
 
       {/* View / Edit Billing Sheet Modal */}
       {viewingSheet && (
