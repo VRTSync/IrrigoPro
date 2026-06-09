@@ -516,6 +516,7 @@ export function WetCheckBillingViewComponent({
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-0.5">Inspection Notes</p>
               {canEditInspectionNotes && onSaveInspectionNotes ? (
                 <EditableField
+                  fieldId="inspectionNotes"
                   value={view.inspection.notes ?? ""}
                   onSave={onSaveInspectionNotes}
                   canEdit={true}

@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem, Customer } from "@workspace/db/schema";
 import { WetCheckBillingViewComponent, type WetCheckBillingView } from "@/components/billing/wet-check-billing-view";
-import { EditableField } from "@/components/ui/editable-field";
+import { EditableField, InlineEditProvider } from "@/components/ui/editable-field";
 import { format } from "date-fns";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
@@ -623,6 +623,7 @@ export function CompletedWorkDetailModal({
           </DialogHeader>
 
           {/* Scrollable body */}
+          <InlineEditProvider>
           <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
 
             {/* Billed lock notice */}
@@ -812,6 +813,7 @@ export function CompletedWorkDetailModal({
                     <div>
                       <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-0.5">Location Notes</p>
                       <EditableField
+                        fieldId="locationNotes"
                         value={fv("locationNotes", isWorkOrder ? (wo?.locationNotes ?? "") : "")}
                         onSave={async (v) => patchField("locationNotes", v, { locationNotes: v })}
                         canEdit={canInlineEdit && isWorkOrder}
@@ -838,6 +840,7 @@ export function CompletedWorkDetailModal({
                       {isWorkOrder ? "Scheduled Date" : "Work Date"}
                     </p>
                     <EditableField
+                      fieldId={isWorkOrder ? "scheduledDate" : "workDate"}
                       value={fv(
                         isWorkOrder ? "scheduledDate" : "workDate",
                         workDate
@@ -906,6 +909,7 @@ export function CompletedWorkDetailModal({
                   <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
                     {canInlineEdit && !isWorkOrder ? (
                       <EditableField
+                        fieldId="totalHours"
                         value={fv("totalHours", String(bs?.totalHours ?? "0"))}
                         onSave={async (v) => patchField("totalHours", v, { totalHours: v })}
                         canEdit={true}
@@ -1143,6 +1147,7 @@ export function CompletedWorkDetailModal({
                     <div>
                       <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Work Description</p>
                       <EditableField
+                        fieldId={isWorkOrder ? "description" : "workDescription"}
                         value={fv(
                           isWorkOrder ? "description" : "workDescription",
                           isWorkOrder ? (wo?.description ?? "") : (bs?.workDescription ?? "")
@@ -1181,6 +1186,7 @@ export function CompletedWorkDetailModal({
                         {isWorkOrder ? "Additional Notes" : "Internal Notes"}
                       </p>
                       <EditableField
+                        fieldId="notes"
                         value={fv("notes", isWorkOrder ? (wo?.notes ?? "") : (bs?.notes ?? ""))}
                         onSave={async (v) => patchField("notes", v, { notes: v })}
                         canEdit={canInlineEdit}
@@ -1269,6 +1275,7 @@ export function CompletedWorkDetailModal({
               </div>
             </div>
           </div>
+          </InlineEditProvider>
         </DialogContent>
       </Dialog>
 

@@ -50,7 +50,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { PricingAuditHistory } from "@/components/billing/pricing-audit-history";
-import { EditableField } from "@/components/ui/editable-field";
+import { EditableField, InlineEditProvider } from "@/components/ui/editable-field";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
 import type { WorkOrder, User as UserType } from "@workspace/db/schema";
@@ -69,7 +69,6 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
   const [activeTab, setActiveTab] = useState("overview");
   const [showCompletionForm, setShowCompletionForm] = useState(false);
   const [selectedTechnicianId, setSelectedTechnicianId] = useState<string>("");
-  const [isEditingPriority, setIsEditingPriority] = useState(false);
   const [showAssignmentConfirmation, setShowAssignmentConfirmation] = useState(false);
   const [pendingTechnicianId, setPendingTechnicianId] = useState<string>("");
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -158,7 +157,6 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
         description: "Work order priority has been updated successfully",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
-      setIsEditingPriority(false);
       onUpdate();
     },
     onError: (error: any) => {
@@ -359,6 +357,11 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
 
 
 
+  const toDateInput = (d: string | Date | null | undefined): string => {
+    if (!d) return "";
+    try { return new Date(d as string | Date).toISOString().slice(0, 10); } catch { return ""; }
+  };
+
   const formatDate = (date: string | Date | null) => {
     if (!date) return "Not set";
     return new Date(date).toLocaleDateString('en-US', {
@@ -424,6 +427,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto overscroll-contain p-3 sm:p-6">
 
+        <InlineEditProvider>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -443,46 +447,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                   <Badge className="bg-purple-100 text-purple-800 border-purple-200">Billed</Badge>
                 )}
                 <div className="flex items-center gap-2">
-                  {!isEditingPriority ? (
-                    <>
-                      {getPriorityBadge(workOrder.priority, true)}
-                      {currentUser?.role !== 'field_tech' && !isBilledWorkOrder && (
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={() => setIsEditingPriority(true)}
-                          className="h-6 px-2 text-xs"
-                        >
-                          <Edit className="w-3 h-3" />
-                        </Button>
-                      )}
-                    </>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <Select 
-                        value={workOrder.priority} 
-                        onValueChange={(priority) => updatePriority.mutate(priority)}
-                      >
-                        <SelectTrigger className="h-6 w-32 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="low">Low Priority</SelectItem>
-                          <SelectItem value="medium">Standard</SelectItem>
-                          <SelectItem value="high">High Priority</SelectItem>
-                          <SelectItem value="urgent">Emergency</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        onClick={() => setIsEditingPriority(false)}
-                        className="h-6 px-2 text-xs"
-                      >
-                        ✕
-                      </Button>
-                    </div>
-                  )}
+                  {getPriorityBadge(fv("priority", workOrder.priority ?? ""), true)}
                 </div>
                 {workOrder.estimateId && (
                   <Badge className="bg-green-100 text-green-800 border-green-200">
@@ -570,12 +535,36 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                   <div>
                     <span className="font-medium text-gray-700">Priority:</span>
                     <div className="mt-1">
-                      {getPriorityBadge(workOrder.priority, true)}
+                      <EditableField
+                        fieldId="priority"
+                        value={fv("priority", workOrder.priority ?? "")}
+                        onSave={async (v) => patchWOField("priority", v, { priority: v })}
+                        canEdit={canInlineEditWO}
+                        type="select"
+                        options={[
+                          { value: "low", label: "Low Priority" },
+                          { value: "medium", label: "Standard" },
+                          { value: "high", label: "High Priority" },
+                          { value: "urgent", label: "Emergency" },
+                        ]}
+                      >
+                        {getPriorityBadge(fv("priority", workOrder.priority ?? ""), true)}
+                      </EditableField>
                     </div>
                   </div>
                   <div>
                     <span className="font-medium text-gray-700">Scheduled Date:</span>
-                    <p className="text-gray-900">{formatDate(workOrder.scheduledDate)}</p>
+                    <EditableField
+                      fieldId="scheduledDate"
+                      value={toDateInput(fv("scheduledDate", workOrder.scheduledDate as string | null))}
+                      onSave={async (v) => patchWOField("scheduledDate", v, { scheduledDate: v })}
+                      canEdit={canInlineEditWO}
+                      type="date"
+                    >
+                      <p className="text-gray-900">
+                        {formatDate(fv("scheduledDate", workOrder.scheduledDate as string | null) || workOrder.scheduledDate)}
+                      </p>
+                    </EditableField>
                   </div>
                 </CardContent>
               </Card>
@@ -1047,6 +1036,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                     <div>
                       <h4 className="font-medium text-gray-900 mb-2">Description</h4>
                       <EditableField
+                        fieldId="description"
                         value={fv("description", workOrder.description ?? "")}
                         onSave={async (v) => patchWOField("description", v, { description: v })}
                         canEdit={canInlineEditWO}
@@ -1062,10 +1052,23 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                     </div>
                   )}
 
-                  {workOrder.specialInstructions && (
+                  {(workOrder.specialInstructions || canInlineEditWO) && (
                     <div>
                       <h4 className="font-medium text-gray-900 mb-2">Special Instructions</h4>
-                      <p className="text-gray-700 bg-yellow-50 p-3 rounded-lg border border-yellow-200">{workOrder.specialInstructions}</p>
+                      <EditableField
+                        fieldId="specialInstructions"
+                        value={fv("specialInstructions", workOrder.specialInstructions ?? "")}
+                        onSave={async (v) => patchWOField("specialInstructions", v, { specialInstructions: v })}
+                        canEdit={canInlineEditWO}
+                        type="textarea"
+                        placeholder="Add special instructions…"
+                      >
+                        <p className="text-gray-700 bg-yellow-50 p-3 rounded-lg border border-yellow-200 min-h-[2.5rem] whitespace-pre-wrap">
+                          {fv("specialInstructions", workOrder.specialInstructions ?? "") || (
+                            <span className="text-gray-400 italic">No special instructions</span>
+                          )}
+                        </p>
+                      </EditableField>
                     </div>
                   )}
 
@@ -1073,6 +1076,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                     <div>
                       <h4 className="font-medium text-gray-900 mb-2">Notes</h4>
                       <EditableField
+                        fieldId="notes"
                         value={fv("notes", workOrder.notes ?? "")}
                         onSave={async (v) => patchWOField("notes", v, { notes: v })}
                         canEdit={canInlineEditWO}
@@ -1259,6 +1263,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
             )}
           </TabsContent>
         </Tabs>
+        </InlineEditProvider>
 
         {/* Action Buttons - Bottom Section */}
         {/* Start Work Order button - for pending/assigned work orders */}

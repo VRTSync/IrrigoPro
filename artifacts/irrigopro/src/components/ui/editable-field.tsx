@@ -1,16 +1,43 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, createContext, useContext } from "react";
 import { Pencil, Check, X, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
-type FieldType = "text" | "textarea" | "date" | "number";
+// ─── One-at-a-time coordinator ───────────────────────────────────────────────
+// Wrap any editable surface (modal, card, page) with <InlineEditProvider> so
+// opening one field auto-cancels any other open field on that surface.
+
+interface InlineEditCtx {
+  activeField: string | null;
+  setActiveField: (id: string | null) => void;
+}
+
+const InlineEditContext = createContext<InlineEditCtx>({
+  activeField: null,
+  setActiveField: () => {},
+});
+
+export function InlineEditProvider({ children }: { children: React.ReactNode }) {
+  const [activeField, setActiveField] = useState<string | null>(null);
+  return (
+    <InlineEditContext.Provider value={{ activeField, setActiveField }}>
+      {children}
+    </InlineEditContext.Provider>
+  );
+}
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+type FieldType = "text" | "textarea" | "date" | "number" | "select";
+
+export interface SelectOption { label: string; value: string; }
 
 interface EditableFieldProps {
   value: string;
   onSave: (newValue: string) => Promise<void>;
   canEdit: boolean;
   type?: FieldType;
+  options?: SelectOption[];
   placeholder?: string;
   className?: string;
   displayClassName?: string;
@@ -20,13 +47,17 @@ interface EditableFieldProps {
   max?: number;
   step?: number;
   inputClassName?: string;
+  /** Unique id within the nearest InlineEditProvider — ensures only one field is open at a time. */
+  fieldId?: string;
 }
 
+// ─── Component ───────────────────────────────────────────────────────────────
 export function EditableField({
   value,
   onSave,
   canEdit,
   type = "text",
+  options,
   placeholder,
   className,
   displayClassName,
@@ -36,13 +67,30 @@ export function EditableField({
   max,
   step,
   inputClassName,
+  fieldId,
 }: EditableFieldProps) {
+  const { activeField, setActiveField } = useContext(InlineEditContext);
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(null);
 
+  // Auto-cancel when another field becomes active on the same surface
+  useEffect(() => {
+    if (fieldId && activeField !== null && activeField !== fieldId && isEditing) {
+      setIsEditing(false);
+      setDraft(value);
+      setError(null);
+    }
+  }, [activeField, fieldId, isEditing, value]);
+
+  // Sync draft when value changes while not editing
+  useEffect(() => {
+    if (!isEditing) setDraft(value);
+  }, [value, isEditing]);
+
+  // Focus input when entering edit mode
   useEffect(() => {
     if (!isEditing) return;
     setDraft(value);
@@ -51,32 +99,38 @@ export function EditableField({
     return () => clearTimeout(t);
   }, [isEditing]);
 
-  useEffect(() => {
-    if (!isEditing) setDraft(value);
-  }, [value, isEditing]);
+  const startEditing = () => {
+    if (fieldId) setActiveField(fieldId);
+    setIsEditing(true);
+  };
+
+  const finishEditing = () => {
+    setIsEditing(false);
+    if (fieldId) setActiveField(null);
+  };
 
   const handleSave = async () => {
     if (validate) {
       const err = validate(draft);
       if (err) { setError(err); return; }
     }
-    if (draft === value) { setIsEditing(false); return; }
+    if (draft === value) { finishEditing(); return; }
     setIsSaving(true);
     try {
       await onSave(draft);
-      setIsEditing(false);
+      finishEditing();
       setError(null);
-    } catch (err: any) {
-      setError(err?.message || "Save failed");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleCancel = () => {
-    setIsEditing(false);
     setDraft(value);
     setError(null);
+    finishEditing();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -84,6 +138,7 @@ export function EditableField({
     if (e.key === "Enter" && type !== "textarea") { e.preventDefault(); handleSave(); }
   };
 
+  // ─── Display mode ──────────────────────────────────────────────────────────
   if (!isEditing) {
     return (
       <div className={cn("group flex items-start gap-1", className)}>
@@ -93,7 +148,7 @@ export function EditableField({
         {canEdit && (
           <button
             type="button"
-            onClick={() => setIsEditing(true)}
+            onClick={startEditing}
             className="flex-shrink-0 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity p-0.5 rounded text-gray-400 hover:text-blue-600 mt-0.5"
             title="Edit"
             data-testid="editable-field-pencil"
@@ -105,6 +160,7 @@ export function EditableField({
     );
   }
 
+  // ─── Edit mode ─────────────────────────────────────────────────────────────
   return (
     <div className={cn("flex flex-col gap-1", className)}>
       <div className="flex items-start gap-1">
@@ -119,6 +175,23 @@ export function EditableField({
             className={cn("flex-1 text-sm min-h-[72px]", inputClassName)}
             data-testid="editable-field-textarea"
           />
+        ) : type === "select" ? (
+          <select
+            ref={inputRef as React.RefObject<HTMLSelectElement>}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            className={cn(
+              "flex-1 h-8 text-sm rounded-md border border-input bg-background px-3 py-1",
+              "ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+              inputClassName,
+            )}
+            data-testid="editable-field-select"
+          >
+            {options?.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
         ) : (
           <Input
             ref={inputRef as React.RefObject<HTMLInputElement>}
