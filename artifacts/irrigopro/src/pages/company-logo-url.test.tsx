@@ -286,4 +286,113 @@ describe("CompanyLogoBanner — logoApiUrl routes through /api/company-logo/:id"
     // No logo img should be present.
     expect(screen.queryAllByRole("img")).toHaveLength(0);
   });
+
+  it("renders <img src=/api/company-logo/…> when logo is in legacy /api/company-logo/<id> format", async () => {
+    const COMPANY_ID = 9;
+    const LOGO_ID = "legacy-uuid-001";
+    const legacyLogo = `/api/company-logo/${LOGO_ID}`;
+
+    safeStorageState.user = JSON.stringify({
+      id: 12,
+      companyId: COMPANY_ID,
+      role: "company_admin",
+    });
+
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    qc.setQueryData([`/api/company/${COMPANY_ID}/profile`], {
+      id: COMPANY_ID,
+      name: "Legacy Logo Co",
+      logo: legacyLogo,
+    });
+
+    const { CompanyLogoBanner } = await import(
+      "@/components/ui/company-logo-banner"
+    );
+
+    render(
+      <QueryClientProvider client={qc}>
+        <CompanyLogoBanner />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(
+      () => {
+        const imgs = screen.queryAllByRole("img");
+        expect(imgs.length).toBeGreaterThan(0);
+      },
+      { timeout: 3000 },
+    );
+
+    const imgs = screen.getAllByRole("img");
+    const src = imgs[0].getAttribute("src");
+    expect(src).toBe(`/api/company-logo/${LOGO_ID}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Legacy format — Navigation
+// ---------------------------------------------------------------------------
+
+describe("Navigation — logoApiUrl handles legacy /api/company-logo/<id> format", () => {
+  beforeEach(() => {
+    mockApiRequest.mockReset();
+    mockApiRequest.mockResolvedValue({});
+  });
+
+  it("renders <img src=/api/company-logo/…> when logo is stored in legacy format", async () => {
+    const COMPANY_ID = 44;
+    const LOGO_ID = "legacy-nav-uuid-002";
+    const legacyLogo = `/api/company-logo/${LOGO_ID}`;
+
+    safeStorageState.user = JSON.stringify({
+      id: 3,
+      companyId: COMPANY_ID,
+      role: "company_admin",
+    });
+
+    mockApiRequest.mockImplementation(async (url: string) => {
+      if (url === `/api/company/${COMPANY_ID}/profile`) {
+        return { id: COMPANY_ID, name: "Legacy Nav Co", logo: legacyLogo };
+      }
+      return {};
+    });
+
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    qc.setQueryData(["/api/parts/pending-approval"], []);
+    qc.setQueryData(["/api/manual-part-reviews"], []);
+    qc.setQueryData(["/api/estimates/pending-approval"], []);
+
+    const { Router } = await import("wouter");
+    const { memoryLocation } = await import("wouter/memory-location");
+    const { hook } = memoryLocation({ path: "/" });
+    const Navigation = (await import("@/components/layout/navigation")).default;
+
+    render(
+      <QueryClientProvider client={qc}>
+        <Router hook={hook}>
+          <Navigation />
+        </Router>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      const imgs = screen
+        .getAllByRole("img")
+        .filter((el) => el.getAttribute("alt") === "Company Logo");
+      expect(imgs.length).toBeGreaterThan(0);
+    });
+
+    const logoImgs = screen
+      .getAllByRole("img")
+      .filter((el) => el.getAttribute("alt") === "Company Logo");
+
+    for (const img of logoImgs) {
+      const src = img.getAttribute("src");
+      expect(src).toBe(`/api/company-logo/${LOGO_ID}`);
+    }
+  });
 });

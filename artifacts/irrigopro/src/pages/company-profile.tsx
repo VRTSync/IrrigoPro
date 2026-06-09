@@ -1,5 +1,5 @@
 import { safeGet } from "@/utils/safeStorage";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@/lib/zod-resolver";
@@ -63,6 +63,20 @@ export default function CompanyProfile() {
 
   // Hooks must stay above the `if (requiresSetup)` early return below
   // (Rules of Hooks).
+
+  // Safe logo URL: routes through /api/company-logo/:id (public route, no auth
+  // headers needed for <img src>).  Handles both stored formats:
+  //   new:    company-logos/<uuid>     → /api/company-logo/<uuid>
+  //   legacy: /api/company-logo/<uuid> → pass through as-is
+  const logoApiUrl = useMemo(() => {
+    const logo = company?.logo;
+    if (!logo || logo.trim() === '' || logo === 'null') return null;
+    const m = logo.match(/company-logos\/([^?]+)/);
+    if (m) return `/api/company-logo/${m[1]}`;
+    const legacy = logo.match(/\/api\/company-logo\/([^?/]+)/);
+    if (legacy) return `/api/company-logo/${legacy[1]}`;
+    return null;
+  }, [company?.logo]);
 
   // Set up form with current company data
   const form = useForm<CompanyProfileFormData>({
@@ -297,18 +311,14 @@ export default function CompanyProfile() {
                   </Label>
                   
                   {/* Current logo display */}
-                  {company?.logo && company.logo.trim() !== '' && company.logo !== null && company.logo !== 'null' ? (
+                  {logoApiUrl ? (
                     <div className="flex items-center gap-4 p-4 border rounded-lg bg-muted/50">
                       <img
-                        src={`${company.logo}?v=${Date.now()}`}
+                        src={logoApiUrl}
                         alt="Company Logo"
                         className="h-16 w-16 object-contain rounded border"
                         onError={(e) => {
-                          // Hide broken logo images gracefully in production
                           e.currentTarget.style.display = 'none';
-                        }}
-                        onLoad={() => {
-                          // Logo loaded successfully
                         }}
                       />
                       <div className="flex-1">

@@ -527,6 +527,14 @@ export class ObjectStorageService {
   normalizeLogoPath(uploadUrl: string): string {
     if (!uploadUrl.startsWith("https://storage.googleapis.com/")) return uploadUrl;
     const url = new URL(uploadUrl);
+    // Preserve the company-logos/<uuid> segment so display components can
+    // extract it.  The pathname looks like /<bucket>/…/company-logos/<uuid>;
+    // slice from the company-logos/ part onward (strip any GCS query params,
+    // which are already absent from the pathname).
+    const idx = url.pathname.indexOf('company-logos/');
+    if (idx !== -1) return url.pathname.slice(idx);
+    // Fallback: return the last segment only (preserves old behavior for
+    // unexpected path shapes).
     const pathParts = url.pathname.split('/');
     return pathParts[pathParts.length - 1];
   }

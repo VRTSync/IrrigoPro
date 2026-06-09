@@ -96,11 +96,20 @@ export default function Navigation() {
   // custom headers. Routing through the API endpoint avoids exposing the raw
   // object-storage URL and keeps the fallback from ever pointing at a
   // potentially inaccessible direct storage path.
+  //
+  // Handles two stored formats:
+  //   new:    company-logos/<uuid>          → /api/company-logo/<uuid>
+  //   legacy: /api/company-logo/<uuid>      → pass through as-is
   const logoApiUrl = useMemo(() => {
     const logo = company?.logo;
     if (!logo || logo.trim() === '' || logo === 'null') return null;
+    // New format: company-logos/<id>
     const m = logo.match(/company-logos\/([^?]+)/);
-    return m ? `/api/company-logo/${m[1]}` : null;
+    if (m) return `/api/company-logo/${m[1]}`;
+    // Legacy format: /api/company-logo/<id> stored directly in DB
+    const legacy = logo.match(/\/api\/company-logo\/([^?/]+)/);
+    if (legacy) return `/api/company-logo/${legacy[1]}`;
+    return null;
   }, [company?.logo]);
 
   // Define navigation items based on user role

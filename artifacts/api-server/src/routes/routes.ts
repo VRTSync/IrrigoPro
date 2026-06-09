@@ -4665,16 +4665,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
-      // Normalize the logo path and get public URL
+      // Normalize the signed GCS URL to the stable company-logos/<uuid> path.
+      // Display components (CompanyLogoBanner, Navigation) build the public
+      // /api/company-logo/<id> URL at render time from this stored path, so we
+      // store the path — not the public URL — to keep the DB value stable.
       const objectStorageService = new ObjectStorageService();
       const logoPath = objectStorageService.normalizeLogoPath(logoUrl);
-      const publicUrl = objectStorageService.getCompanyLogoPublicURL(logoPath);
-      
-      // Normalize logo path and generate public URL
 
-      // Update company with logo URL
+      // Update company with the normalized path
       const updatedCompany = await storage.updateCompany(companyId, { 
-        logo: publicUrl 
+        logo: logoPath 
       });
 
       if (!updatedCompany) {
@@ -4682,7 +4682,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
-      // Logo successfully updated in database
+      // Build the public URL for the response so the client can display it
+      // immediately without an extra profile refetch.
+      const publicUrl = objectStorageService.getCompanyLogoPublicURL(logoPath);
 
       res.json({ 
         message: "Logo updated successfully", 
