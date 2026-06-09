@@ -1,0 +1,122 @@
+# Replit Task — Job-Type Colors, Slice A (shared source of truth)
+
+Create ONE definition of the job-type color language and have the billing
+PDF consume it, so "match the colors" is a single-file change forever.
+Foundational; do it right after #1163/#1164 land and before any UI
+recolor (Slice B).
+
+> **TL;DR.** Add `JOB_TYPE_COLORS` (+ Tailwind companions) to the
+> `@workspace/shared` package (`lib/shared`). Re-point `pdf-helpers.ts`
+> at it instead of its local copy. Four job types, four distinct colors:
+
+| Type | Hex | Tailwind name |
+|---|---|---|
+| Work Order | `#1E5A99` blue | `jobtype-wo` |
+| Billing Sheet | `#B06820` amber | `jobtype-bs` |
+| Wet Check Billing | `#5E8C2A` green | `jobtype-wcb` |
+| Estimate | `#475569` slate | `jobtype-est` |
+
+(Estimate = slate per Randy — it isn't on the invoice, but it must be
+distinct from Work-Order blue across the app.)
+
+## Context
+
+- `@workspace/shared` lives at `lib/shared`; its barrel is
+  `lib/shared/src/index.ts` (re-exports modules with `.js` specifiers).
+- Both the api-server (`pdf-helpers.ts` neighbors already import
+  `@workspace/shared`) and the web app (`customer-profile.tsx` already
+  imports `@workspace/shared`) can consume it. Mobile is a separate
+  package and is not wired here.
+- #1163/#1164 introduced `JOB_TYPE_COLORS` **locally** inside
+  `pdf-helpers.ts`. This slice promotes it; do not leave two copies.
+
+## Steps
+
+1. **Add `lib/shared/src/job-type-colors.ts`:**
+
+```typescript
+// Canonical job-type color language. Matches the customer guide
+// "Understanding Your Invoice," section 02. Fixed constants — never
+// derived from company brand colors. Single source of truth for the
+// billing PDF, the web app, and (later) mobile.
+export const JOB_TYPE_COLORS = {
+  workOrder:    '#1E5A99', // blue
+  billingSheet: '#B06820', // amber
+  wetCheck:     '#5E8C2A', // green
+  estimate:     '#475569', // slate (not on the invoice; must stay distinct)
+} as const;
+
+export type JobTypeKey = keyof typeof JOB_TYPE_COLORS;
+```
+
+2. **Export it from the barrel** — add to `lib/shared/src/index.ts`:
+
+```typescript
+export * from "./job-type-colors.js";
+```
+
+3. **Re-point the PDF** (`artifacts/api-server/src/pdf-helpers.ts`):
+   remove the local `JOB_TYPE_COLORS` definition that #1163/#1164 added
+   and import the shared one:
+
+```typescript
+import { JOB_TYPE_COLORS } from '@workspace/shared';
+```
+
+   All existing `JOB_TYPE_COLORS.workOrder/billingSheet/wetCheck`
+   references in `buildFullCSS` (recon rules) and the ticket-header rules
+   (#1164) keep working unchanged — same shape, same hexes.
+
+4. **Add Tailwind theme tokens for the web** (so the UI in Slice B uses
+   real classes, not purgeable arbitrary values). In the web app's
+   Tailwind config (`artifacts/irrigopro/tailwind.config.*`), extend
+   colors so `*-jobtype-wo|bs|wcb|est` classes exist:
+
+```js
+// tailwind.config — theme.extend.colors
+colors: {
+  jobtype: {
+    wo:  '#1E5A99',
+    bs:  '#B06820',
+    wcb: '#5E8C2A',
+    est: '#475569',
+  },
+},
+```
+
+   Keeping the hexes in sync with `JOB_TYPE_COLORS` by hand is acceptable
+   (Tailwind config can't easily import a TS const at build time); add a
+   comment in both files pointing at each other. If the build already
+   imports JS into the Tailwind config, prefer importing the shared
+   constant directly.
+
+## Done looks like
+
+- `@workspace/shared` exports `JOB_TYPE_COLORS` with all four keys.
+- `pdf-helpers.ts` imports it; no local copy remains (grep confirms a
+  single definition repo-wide).
+- The billing PDF renders identically to post-#1163/#1164 (same hexes) —
+  this is a refactor, not a visual change for the PDF.
+- Web Tailwind config exposes `jobtype-wo/bs/wcb/est` color tokens, ready
+  for Slice B.
+- `pnpm typecheck` and `pnpm test` pass across api-server, web, and the
+  shared package.
+
+## Tests
+
+- Shared: `lib/shared/src/job-type-colors.test.ts` — asserts the four
+  exact hexes and that all four are distinct.
+- PDF: existing #1163/#1164 recon/ticket-header tests still pass
+  unchanged (they assert the same hex literals, now sourced from shared).
+
+## Out of scope
+
+- Any UI recolor — that's Slice B.
+- Mobile package wiring — separate, lower priority.
+- Status colors.
+
+## Dependencies
+
+- #1163 and #1164 must land first (they introduce the local
+  `JOB_TYPE_COLORS` this slice promotes). After this lands, Slice B
+  imports the tokens.
