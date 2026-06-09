@@ -50,8 +50,9 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { PricingAuditHistory } from "@/components/billing/pricing-audit-history";
+import { EditableField } from "@/components/ui/editable-field";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, useArrayQuery } from "@/lib/queryClient";
+import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
 import type { WorkOrder, User as UserType } from "@workspace/db/schema";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { buildMapsUrl } from "@/lib/maps-url";
@@ -119,6 +120,33 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
   const { data: workOrderItems } = useQuery({
     queryKey: ["/api/work-orders", workOrder.id, "items"],
   });
+
+  const canInlineEditWO =
+    ["billing_manager", "company_admin", "super_admin"].includes(currentUser?.role ?? "") &&
+    !(workOrder.status === 'billed' || workOrder.invoiceId != null);
+
+  const [fieldOverrides, setFieldOverrides] = useState<Record<string, string>>({});
+  useEffect(() => { setFieldOverrides({}); }, [workOrder.id]);
+
+  const patchWOMutation = useMutation({
+    mutationFn: async (patch: Record<string, unknown>) =>
+      apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", patch),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+      onUpdate();
+    },
+    onError: (err: Error) => {
+      toast({ title: "Could not save", description: parseApiError(err, err.message), variant: "destructive" });
+    },
+  });
+
+  const patchWOField = async (key: string, value: string, patch: Record<string, unknown>) => {
+    await patchWOMutation.mutateAsync(patch);
+    setFieldOverrides((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const fv = (key: string, raw: string | null | undefined) =>
+    key in fieldOverrides ? fieldOverrides[key] : (raw ?? "");
 
   const updatePriority = useMutation({
     mutationFn: async (priority: string) => {
@@ -1006,7 +1034,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
             )}
 
             {/* Notes and Instructions */}
-            {(workOrder.description || workOrder.specialInstructions || workOrder.notes) && (
+            {(workOrder.description || workOrder.specialInstructions || workOrder.notes || canInlineEditWO) && (
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg flex items-center gap-2">
@@ -1015,24 +1043,48 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {workOrder.description && (
+                  {(workOrder.description || canInlineEditWO) && (
                     <div>
                       <h4 className="font-medium text-gray-900 mb-2">Description</h4>
-                      <p className="text-gray-700 bg-gray-50 p-3 rounded-lg">{workOrder.description}</p>
+                      <EditableField
+                        value={fv("description", workOrder.description ?? "")}
+                        onSave={async (v) => patchWOField("description", v, { description: v })}
+                        canEdit={canInlineEditWO}
+                        type="textarea"
+                        placeholder="Add a work description…"
+                      >
+                        <p className="text-gray-700 bg-gray-50 p-3 rounded-lg min-h-[2.5rem] whitespace-pre-wrap">
+                          {fv("description", workOrder.description ?? "") || (
+                            <span className="text-gray-400 italic">No description</span>
+                          )}
+                        </p>
+                      </EditableField>
                     </div>
                   )}
-                  
+
                   {workOrder.specialInstructions && (
                     <div>
                       <h4 className="font-medium text-gray-900 mb-2">Special Instructions</h4>
                       <p className="text-gray-700 bg-yellow-50 p-3 rounded-lg border border-yellow-200">{workOrder.specialInstructions}</p>
                     </div>
                   )}
-                  
-                  {workOrder.notes && (
+
+                  {(workOrder.notes || canInlineEditWO) && (
                     <div>
                       <h4 className="font-medium text-gray-900 mb-2">Notes</h4>
-                      <p className="text-gray-700 bg-blue-50 p-3 rounded-lg border border-blue-200">{workOrder.notes}</p>
+                      <EditableField
+                        value={fv("notes", workOrder.notes ?? "")}
+                        onSave={async (v) => patchWOField("notes", v, { notes: v })}
+                        canEdit={canInlineEditWO}
+                        type="textarea"
+                        placeholder="Add internal notes…"
+                      >
+                        <p className="text-gray-700 bg-blue-50 p-3 rounded-lg border border-blue-200 min-h-[2.5rem] whitespace-pre-wrap">
+                          {fv("notes", workOrder.notes ?? "") || (
+                            <span className="text-gray-400 italic">No notes</span>
+                          )}
+                        </p>
+                      </EditableField>
                     </div>
                   )}
                 </CardContent>

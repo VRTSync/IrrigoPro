@@ -14,6 +14,7 @@ import { format } from "date-fns";
 import { Wrench, MapPin, ClipboardList, DollarSign, CloudSun, Camera, Info } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { ZoneLaborEditInline } from "@/components/wet-check-billings/zone-labor-edit-inline";
+import { EditableField } from "@/components/ui/editable-field";
 import { authedPhotoSrc } from "@/lib/queryClient";
 
 // ─── Mirrored types (match artifacts/api-server/src/wet-check-billing-view.ts) ─
@@ -334,6 +335,10 @@ interface WetCheckBillingViewProps {
   canEditLabor?: boolean;
   /** Applied labor rate for the inline dollar-value calculation, e.g. "80.00". */
   laborRate?: string;
+  /** True when the current user can edit inspection notes. */
+  canEditInspectionNotes?: boolean;
+  /** Callback to persist updated inspection notes. */
+  onSaveInspectionNotes?: (notes: string) => Promise<void>;
 }
 
 export function WetCheckBillingViewComponent({
@@ -342,6 +347,8 @@ export function WetCheckBillingViewComponent({
   wcbId,
   canEditLabor,
   laborRate,
+  canEditInspectionNotes,
+  onSaveInspectionNotes,
 }: WetCheckBillingViewProps) {
   const totalFindings = view.zones.reduce((s, z) => s + z.lineItems.length, 0);
 
@@ -504,12 +511,26 @@ export function WetCheckBillingViewComponent({
               <p className="text-gray-900">{view.inspection.weather}</p>
             </div>
           )}
-          {view.inspection.notes && (
+          {(view.inspection.notes || canEditInspectionNotes) && (
             <div className="sm:col-span-2">
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-0.5">Inspection Notes</p>
-              <p className="text-gray-800 bg-gray-50 rounded-lg p-3 leading-relaxed whitespace-pre-wrap text-sm">
-                {view.inspection.notes}
-              </p>
+              {canEditInspectionNotes && onSaveInspectionNotes ? (
+                <EditableField
+                  value={view.inspection.notes ?? ""}
+                  onSave={onSaveInspectionNotes}
+                  canEdit={true}
+                  type="textarea"
+                  placeholder="Add technician inspection notes…"
+                >
+                  <p className="text-gray-800 bg-gray-50 rounded-lg p-3 leading-relaxed whitespace-pre-wrap text-sm min-h-[2.5rem]">
+                    {view.inspection.notes || <span className="text-gray-400 italic">No inspection notes</span>}
+                  </p>
+                </EditableField>
+              ) : (
+                <p className="text-gray-800 bg-gray-50 rounded-lg p-3 leading-relaxed whitespace-pre-wrap text-sm">
+                  {view.inspection.notes}
+                </p>
+              )}
             </div>
           )}
         </div>

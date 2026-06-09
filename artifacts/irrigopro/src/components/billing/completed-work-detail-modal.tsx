@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem, Customer } from "@workspace/db/schema";
 import { WetCheckBillingViewComponent, type WetCheckBillingView } from "@/components/billing/wet-check-billing-view";
+import { EditableField } from "@/components/ui/editable-field";
 import { format } from "date-fns";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
@@ -511,6 +512,37 @@ export function CompletedWorkDetailModal({
   const workSummary = isWorkOrder ? wo?.workSummary : null;
   const customerNotes = isWorkOrder ? wo?.customerNotes : null;
   const locationNotes = isWorkOrder ? wo?.locationNotes : null;
+
+  // ── Inline editing (billing_manager / admin, unlocked records only) ──────
+  const canInlineEdit =
+    ["billing_manager", "company_admin", "super_admin"].includes(userRole) &&
+    !isBilledOrInvoiced;
+
+  const [fieldOverrides, setFieldOverrides] = useState<Record<string, string>>({});
+  useEffect(() => { setFieldOverrides({}); }, [id, open]);
+
+  const patchRecordMutation = useMutation({
+    mutationFn: async (patch: Record<string, unknown>) => {
+      const endpoint = isWorkOrder ? `/api/work-orders/${id}` : `/api/billing-sheets/${id}`;
+      return apiRequest(endpoint, "PATCH", patch);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: isWorkOrder ? ["/api/work-orders"] : ["/api/billing-sheets"],
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Could not save", description: parseApiError(err, err.message), variant: "destructive" });
+    },
+  });
+
+  const patchField = async (key: string, value: string, patch: Record<string, unknown>) => {
+    await patchRecordMutation.mutateAsync(patch);
+    setFieldOverrides((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const fv = (key: string, raw: string | null | undefined) =>
+    key in fieldOverrides ? fieldOverrides[key] : (raw ?? "");
   const branchName = isWorkOrder ? (wo as any)?.branchName : (bs as any)?.branchName;
 
   // Approval stamp fields
@@ -776,7 +808,24 @@ export function CompletedWorkDetailModal({
                       </div>
                     );
                   })()}
-                  {locationNotes && <InfoRow label="Location Notes" value={locationNotes} />}
+                  {(locationNotes || (isWorkOrder && canInlineEdit)) && (
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-0.5">Location Notes</p>
+                      <EditableField
+                        value={fv("locationNotes", isWorkOrder ? (wo?.locationNotes ?? "") : "")}
+                        onSave={async (v) => patchField("locationNotes", v, { locationNotes: v })}
+                        canEdit={canInlineEdit && isWorkOrder}
+                        type="textarea"
+                        placeholder="Add location notes…"
+                      >
+                        <span className="text-sm text-gray-900 leading-snug whitespace-pre-wrap">
+                          {fv("locationNotes", isWorkOrder ? (wo?.locationNotes ?? "") : "") || (
+                            <span className="text-gray-400 italic">No location notes</span>
+                          )}
+                        </span>
+                      </EditableField>
+                    </div>
+                  )}
                 </div>
               </SectionCard>
 
@@ -784,10 +833,35 @@ export function CompletedWorkDetailModal({
                 <div className="space-y-3">
                   <InfoRow label="Technician" value={techName ?? "—"} />
                   {branchName && <InfoRow label="Branch" value={branchName} />}
-                  <InfoRow
-                    label={isWorkOrder ? "Scheduled Date" : "Work Date"}
-                    value={fmt(workDate)}
-                  />
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-0.5">
+                      {isWorkOrder ? "Scheduled Date" : "Work Date"}
+                    </p>
+                    <EditableField
+                      value={fv(
+                        isWorkOrder ? "scheduledDate" : "workDate",
+                        workDate
+                          ? (() => { try { return format(new Date(workDate as string | Date), "yyyy-MM-dd"); } catch { return ""; } })()
+                          : ""
+                      )}
+                      onSave={async (v) =>
+                        patchField(
+                          isWorkOrder ? "scheduledDate" : "workDate",
+                          v,
+                          isWorkOrder ? { scheduledDate: v } : { workDate: v }
+                        )
+                      }
+                      canEdit={canInlineEdit}
+                      type="date"
+                    >
+                      <span className="text-sm text-gray-900 leading-snug">
+                        {(() => {
+                          const override = fieldOverrides[isWorkOrder ? "scheduledDate" : "workDate"];
+                          return override ? fmt(override) : fmt(workDate);
+                        })()}
+                      </span>
+                    </EditableField>
+                  </div>
                   {completedDate && (
                     <InfoRow
                       label="Completed"
@@ -808,7 +882,7 @@ export function CompletedWorkDetailModal({
                   <div className="flex items-center flex-wrap gap-3">
                     <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
                       <p className="text-2xl font-bold text-gray-900">{totalHours ?? "0"}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">Hours</p>
+                      <p className="text-xs text-gray-500 mt-0.5">Hours (WC)</p>
                     </div>
                     <span className="text-xl font-semibold text-gray-400">×</span>
                     <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
@@ -830,7 +904,24 @@ export function CompletedWorkDetailModal({
               ) : canSeePricing ? (
                 <div className="flex items-center flex-wrap gap-3">
                   <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
-                    <p className="text-2xl font-bold text-gray-900">{totalHours ?? "0"}</p>
+                    {canInlineEdit && !isWorkOrder ? (
+                      <EditableField
+                        value={fv("totalHours", String(bs?.totalHours ?? "0"))}
+                        onSave={async (v) => patchField("totalHours", v, { totalHours: v })}
+                        canEdit={true}
+                        type="number"
+                        min={0}
+                        step={0.25}
+                        className="justify-center"
+                        inputClassName="text-center w-20"
+                      >
+                        <p className="text-2xl font-bold text-gray-900">
+                          {fv("totalHours", String(bs?.totalHours ?? "0"))}
+                        </p>
+                      </EditableField>
+                    ) : (
+                      <p className="text-2xl font-bold text-gray-900">{totalHours ?? "0"}</p>
+                    )}
                     <p className="text-xs text-gray-500 mt-0.5">Hours</p>
                   </div>
                   <span className="text-xl font-semibold text-gray-400">×</span>
@@ -854,7 +945,24 @@ export function CompletedWorkDetailModal({
 
             {/* Parts & Materials — replaced by zone-grouped view for WC billing sheets */}
             {wetCheckView && type === "billing_sheet" ? (
-              <WetCheckBillingViewComponent view={wetCheckView} canSeePricing={canSeePricing} />
+              <WetCheckBillingViewComponent
+                view={wetCheckView}
+                canSeePricing={canSeePricing}
+                wcbId={id}
+                canEditLabor={canInlineEdit}
+                laborRate={bs?.laborRate ?? undefined}
+                canEditInspectionNotes={canInlineEdit}
+                onSaveInspectionNotes={async (notes) => {
+                  await apiRequest(
+                    `/api/wet-checks/${wetCheckView.inspection.wetCheckId}`,
+                    "PATCH",
+                    { notes }
+                  );
+                  queryClient.invalidateQueries({
+                    queryKey: ["/api/billing-sheets", id, "wet-check-view"],
+                  });
+                }}
+              />
             ) : items.length > 0 && (
               <SectionCard
                 title={`Parts & Materials (${items.length} item${items.length !== 1 ? "s" : ""})`}
@@ -1028,15 +1136,35 @@ export function CompletedWorkDetailModal({
             )}
 
             {/* Notes */}
-            {(workDescription || workSummary || notes || customerNotes) && (
+            {(workDescription || workSummary || notes || customerNotes || canInlineEdit) && (
               <SectionCard title="Notes & Description" icon={<FileText className="w-4 h-4" />}>
                 <div className="space-y-3">
-                  {workDescription && (
+                  {(workDescription || canInlineEdit) && (
                     <div>
                       <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Work Description</p>
-                      <p className="text-sm text-gray-800 bg-gray-50 rounded-lg p-3 leading-relaxed whitespace-pre-wrap">
-                        {workDescription}
-                      </p>
+                      <EditableField
+                        value={fv(
+                          isWorkOrder ? "description" : "workDescription",
+                          isWorkOrder ? (wo?.description ?? "") : (bs?.workDescription ?? "")
+                        )}
+                        onSave={async (v) =>
+                          patchField(
+                            isWorkOrder ? "description" : "workDescription",
+                            v,
+                            isWorkOrder ? { description: v } : { workDescription: v }
+                          )
+                        }
+                        canEdit={canInlineEdit}
+                        type="textarea"
+                        placeholder="Add a work description…"
+                      >
+                        <p className="text-sm text-gray-800 bg-gray-50 rounded-lg p-3 leading-relaxed whitespace-pre-wrap min-h-[2.5rem]">
+                          {fv(
+                            isWorkOrder ? "description" : "workDescription",
+                            isWorkOrder ? (wo?.description ?? "") : (bs?.workDescription ?? "")
+                          ) || <span className="text-gray-400 italic">No description</span>}
+                        </p>
+                      </EditableField>
                     </div>
                   )}
                   {workSummary && (
@@ -1047,12 +1175,24 @@ export function CompletedWorkDetailModal({
                       </p>
                     </div>
                   )}
-                  {notes && (
+                  {(notes || canInlineEdit) && (
                     <div>
-                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Additional Notes</p>
-                      <p className="text-sm text-gray-800 bg-gray-50 rounded-lg p-3 leading-relaxed whitespace-pre-wrap">
-                        {notes}
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+                        {isWorkOrder ? "Additional Notes" : "Internal Notes"}
                       </p>
+                      <EditableField
+                        value={fv("notes", isWorkOrder ? (wo?.notes ?? "") : (bs?.notes ?? ""))}
+                        onSave={async (v) => patchField("notes", v, { notes: v })}
+                        canEdit={canInlineEdit}
+                        type="textarea"
+                        placeholder="Add internal notes…"
+                      >
+                        <p className="text-sm text-gray-800 bg-gray-50 rounded-lg p-3 leading-relaxed whitespace-pre-wrap min-h-[2.5rem]">
+                          {fv("notes", isWorkOrder ? (wo?.notes ?? "") : (bs?.notes ?? "")) || (
+                            <span className="text-gray-400 italic">No notes</span>
+                          )}
+                        </p>
+                      </EditableField>
                     </div>
                   )}
                   {customerNotes && (
