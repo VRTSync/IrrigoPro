@@ -18,7 +18,7 @@ export const JOB_TYPE_COLORS = {
   workOrder:    '#1E5A99',
   billingSheet: '#B06820',
   wetCheck:     '#5E8C2A',
-  estimate:     '#6B46C1',
+  estimate:     '#475569',
 } as const;
 
 export type JobTypeKey = keyof typeof JOB_TYPE_COLORS;

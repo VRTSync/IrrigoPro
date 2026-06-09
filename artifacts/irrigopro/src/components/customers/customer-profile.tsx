@@ -206,29 +206,29 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
               
               {/* Enhanced Summary Stats - Mobile Responsive */}
               <div className="grid grid-cols-3 gap-2 sm:gap-4 lg:gap-6 w-full lg:w-auto">
-                <div className="bg-white rounded-lg lg:rounded-xl p-2 sm:p-3 lg:p-4 shadow-sm border border-blue-100 hover:shadow-md transition-shadow">
+                <div className="bg-white rounded-lg lg:rounded-xl p-2 sm:p-3 lg:p-4 shadow-sm border border-jobtype-est/20 hover:shadow-md transition-shadow">
                   <div className="flex flex-col items-center lg:flex-row lg:items-center lg:justify-between mb-1 lg:mb-2">
-                    <FileText className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6 text-blue-600 mb-1 lg:mb-0" />
-                    <div className="text-lg sm:text-xl lg:text-2xl font-bold text-blue-700">{estimates.length}</div>
+                    <FileText className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6 text-jobtype-est mb-1 lg:mb-0" />
+                    <div className="text-lg sm:text-xl lg:text-2xl font-bold text-jobtype-est">{estimates.length}</div>
                   </div>
                   <div className="text-xs sm:text-sm font-medium text-gray-700 text-center lg:text-left">Estimates</div>
-                  <div className="text-xs text-blue-600 font-medium mt-1 text-center lg:text-left">{formatCurrency(totalEstimateValue)}</div>
+                  <div className="text-xs text-jobtype-est font-medium mt-1 text-center lg:text-left">{formatCurrency(totalEstimateValue)}</div>
                 </div>
-                <div className="bg-white rounded-lg lg:rounded-xl p-2 sm:p-3 lg:p-4 shadow-sm border border-green-100 hover:shadow-md transition-shadow">
+                <div className="bg-white rounded-lg lg:rounded-xl p-2 sm:p-3 lg:p-4 shadow-sm border border-jobtype-wo/20 hover:shadow-md transition-shadow">
                   <div className="flex flex-col items-center lg:flex-row lg:items-center lg:justify-between mb-1 lg:mb-2">
-                    <Wrench className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6 text-green-600 mb-1 lg:mb-0" />
-                    <div className="text-lg sm:text-xl lg:text-2xl font-bold text-green-700">{workOrders.length}</div>
+                    <Wrench className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6 text-jobtype-wo mb-1 lg:mb-0" />
+                    <div className="text-lg sm:text-xl lg:text-2xl font-bold text-jobtype-wo">{workOrders.length}</div>
                   </div>
                   <div className="text-xs sm:text-sm font-medium text-gray-700 text-center lg:text-left">Work Orders</div>
-                  <div className="text-xs text-green-600 font-medium mt-1 text-center lg:text-left">Active Projects</div>
+                  <div className="text-xs text-jobtype-wo font-medium mt-1 text-center lg:text-left">Active Projects</div>
                 </div>
-                <div className="bg-white rounded-lg lg:rounded-xl p-2 sm:p-3 lg:p-4 shadow-sm border border-orange-100 hover:shadow-md transition-shadow">
+                <div className="bg-white rounded-lg lg:rounded-xl p-2 sm:p-3 lg:p-4 shadow-sm border border-jobtype-bs/20 hover:shadow-md transition-shadow">
                   <div className="flex flex-col items-center lg:flex-row lg:items-center lg:justify-between mb-1 lg:mb-2">
-                    <Receipt className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6 text-orange-600 mb-1 lg:mb-0" />
-                    <div className="text-lg sm:text-xl lg:text-2xl font-bold text-orange-700">{billingSheets.length}</div>
+                    <Receipt className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6 text-jobtype-bs mb-1 lg:mb-0" />
+                    <div className="text-lg sm:text-xl lg:text-2xl font-bold text-jobtype-bs">{billingSheets.length}</div>
                   </div>
                   <div className="text-xs sm:text-sm font-medium text-gray-700 text-center lg:text-left">Billing Sheets</div>
-                  <div className="text-xs text-orange-600 font-medium mt-1 text-center lg:text-left">{formatCurrency(totalBillingValue)}</div>
+                  <div className="text-xs text-jobtype-bs font-medium mt-1 text-center lg:text-left">{formatCurrency(totalBillingValue)}</div>
                 </div>
               </div>
             </div>
@@ -292,7 +292,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                 onClick={() => setActiveView('estimates')}
                 className={`flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all duration-200 text-sm ${
                   activeView === 'estimates'
-                    ? 'bg-blue-500 text-white shadow-md'
+                    ? 'bg-jobtype-est text-white shadow-md'
                     : 'text-gray-600 hover:bg-white hover:shadow-sm'
                 }`}
               >
@@ -300,8 +300,8 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                 <span>Estimates</span>
                 <div className={`px-2 py-0.5 rounded-full text-xs font-bold ${
                   activeView === 'estimates'
-                    ? 'bg-blue-400 text-white'
-                    : 'bg-blue-100 text-blue-800'
+                    ? 'bg-jobtype-est/80 text-white'
+                    : 'bg-jobtype-est/15 text-jobtype-est'
                 }`}>
                   {estimates.length}
                 </div>
@@ -310,7 +310,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                 onClick={() => setActiveView('work-orders')}
                 className={`flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all duration-200 text-sm ${
                   activeView === 'work-orders'
-                    ? 'bg-green-500 text-white shadow-md'
+                    ? 'bg-jobtype-wo text-white shadow-md'
                     : 'text-gray-600 hover:bg-white hover:shadow-sm'
                 }`}
               >
@@ -318,8 +318,8 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                 <span>Work Orders</span>
                 <div className={`px-2 py-0.5 rounded-full text-xs font-bold ${
                   activeView === 'work-orders'
-                    ? 'bg-green-400 text-white'
-                    : 'bg-green-100 text-green-800'
+                    ? 'bg-jobtype-wo/80 text-white'
+                    : 'bg-jobtype-wo/15 text-jobtype-wo'
                 }`}>
                   {workOrders.length}
                 </div>
@@ -328,7 +328,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                 onClick={() => setActiveView('billing-sheets')}
                 className={`flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all duration-200 text-sm ${
                   activeView === 'billing-sheets'
-                    ? 'bg-orange-500 text-white shadow-md'
+                    ? 'bg-jobtype-bs text-white shadow-md'
                     : 'text-gray-600 hover:bg-white hover:shadow-sm'
                 }`}
               >
@@ -336,8 +336,8 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                 <span>Billing Sheets</span>
                 <div className={`px-2 py-0.5 rounded-full text-xs font-bold ${
                   activeView === 'billing-sheets'
-                    ? 'bg-orange-400 text-white'
-                    : 'bg-orange-100 text-orange-800'
+                    ? 'bg-jobtype-bs/80 text-white'
+                    : 'bg-jobtype-bs/15 text-jobtype-bs'
                 }`}>
                   {billingSheets.length}
                 </div>
@@ -361,8 +361,8 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                   <Card className="border-2 border-dashed border-gray-200">
                     <CardContent className="flex items-center justify-center py-16">
                       <div className="text-center">
-                        <div className="bg-blue-100 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
-                          <FileText className="w-10 h-10 text-blue-500" />
+                        <div className="bg-jobtype-est/15 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
+                          <FileText className="w-10 h-10 text-jobtype-est" />
                         </div>
                         <h3 className="text-lg font-semibold text-gray-900 mb-2">No Estimates Yet</h3>
                         <p className="text-gray-600">This customer doesn't have any estimates created</p>
@@ -372,7 +372,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                 ) : (
                   <div className="grid gap-4">
                     {estimates.map((estimate) => (
-                      <Card key={estimate.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-blue-500 hover:border-l-blue-600 bg-gradient-to-r from-blue-50/30 to-transparent" 
+                      <Card key={estimate.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-jobtype-est hover:border-l-jobtype-est/80 bg-gradient-to-r from-jobtype-est/5 to-transparent" 
                             onClick={() => {
                               setSelectedEstimateId(estimate.id);
                               setEstimateWizardOpen(true);
@@ -381,11 +381,11 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                           <div className="space-y-4">
                             {/* Header */}
                             <div className="flex items-center gap-3">
-                              <div className="bg-blue-500 p-2.5 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
+                              <div className="bg-jobtype-est p-2.5 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
                                 <FileText className="w-5 h-5 text-white" />
                               </div>
                               <div className="flex-1 min-w-0">
-                                <h3 className="font-bold text-gray-900 text-lg group-hover:text-blue-700 transition-colors">{formatEstimateNumber(estimate.estimateNumber)}</h3>
+                                <h3 className="font-bold text-gray-900 text-lg group-hover:text-jobtype-est transition-colors">{formatEstimateNumber(estimate.estimateNumber)}</h3>
                                 <p className="text-gray-600 font-medium text-sm">{estimate.projectName}</p>
                               </div>
                               <div className="flex-shrink-0">
@@ -401,7 +401,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                               </div>
                               <div className="flex items-center gap-2 text-gray-500 text-sm">
                                 <DollarSign className="w-4 h-4 flex-shrink-0" />
-                                <span className="font-semibold text-blue-600">{formatCurrency(Number(estimate.totalAmount || 0))}</span>
+                                <span className="font-semibold text-jobtype-est">{formatCurrency(Number(estimate.totalAmount || 0))}</span>
                               </div>
                             </div>
                           </div>
@@ -424,8 +424,8 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                   <Card className="border-2 border-dashed border-gray-200">
                     <CardContent className="flex items-center justify-center py-16">
                       <div className="text-center">
-                        <div className="bg-green-100 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
-                          <Wrench className="w-10 h-10 text-green-500" />
+                        <div className="bg-jobtype-wo/15 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
+                          <Wrench className="w-10 h-10 text-jobtype-wo" />
                         </div>
                         <h3 className="text-lg font-semibold text-gray-900 mb-2">No Work Orders</h3>
                         <p className="text-gray-600">This customer doesn't have any work orders yet</p>
@@ -437,7 +437,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                     {/* Active (non-billed) work orders */}
                     <div className="grid gap-4">
                       {workOrders.filter(wo => !isWOBilled(wo)).map((workOrder) => (
-                        <Card key={workOrder.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-green-500 hover:border-l-green-600 bg-gradient-to-r from-green-50/30 to-transparent"
+                        <Card key={workOrder.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-jobtype-wo hover:border-l-jobtype-wo/80 bg-gradient-to-r from-jobtype-wo/5 to-transparent"
                               onClick={() => {
                                 setSelectedWorkOrder(workOrder);
                                 setWorkOrderModalOpen(true);
@@ -445,11 +445,11 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                           <CardContent className="p-4 sm:p-6">
                             <div className="space-y-4">
                               <div className="flex items-center gap-3">
-                                <div className="bg-green-500 p-2.5 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
+                                <div className="bg-jobtype-wo p-2.5 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
                                   <Wrench className="w-5 h-5 text-white" />
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                  <h3 className="font-bold text-gray-900 text-lg group-hover:text-green-700 transition-colors">{workOrder.workOrderNumber}</h3>
+                                  <h3 className="font-bold text-gray-900 text-lg group-hover:text-jobtype-wo transition-colors">{workOrder.workOrderNumber}</h3>
                                   <p className="text-gray-600 font-medium text-sm">{workOrder.projectName}</p>
                                 </div>
                                 <div className="flex-shrink-0">
@@ -538,8 +538,8 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                   <Card className="border-2 border-dashed border-gray-200">
                     <CardContent className="flex items-center justify-center py-16">
                       <div className="text-center">
-                        <div className="bg-orange-100 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
-                          <Receipt className="w-10 h-10 text-orange-500" />
+                        <div className="bg-jobtype-bs/15 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
+                          <Receipt className="w-10 h-10 text-jobtype-bs" />
                         </div>
                         <h3 className="text-lg font-semibold text-gray-900 mb-2">No Billing Sheets</h3>
                         <p className="text-gray-600">This customer doesn't have any billing sheets created</p>
@@ -551,21 +551,21 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                     {/* Active (non-billed) billing sheets */}
                     <div className="grid gap-4">
                       {billingSheets.filter(bs => !isBSBilled(bs)).map((billingSheet) => (
-                        <Card key={billingSheet.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-orange-500 hover:border-l-orange-600 bg-gradient-to-r from-orange-50/30 to-transparent"
+                        <Card key={billingSheet.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-jobtype-bs hover:border-l-jobtype-bs/80 bg-gradient-to-r from-jobtype-bs/5 to-transparent"
                               onClick={() => setSelectedBillingSheet(billingSheet)}>
                           <CardContent className="p-4 sm:p-6">
                             <div className="space-y-4">
                               <div className="flex items-center gap-3">
-                                <div className="bg-orange-500 p-2.5 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
+                                <div className="bg-jobtype-bs p-2.5 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
                                   <Receipt className="w-5 h-5 text-white" />
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                  <h3 className="font-bold text-gray-900 text-lg group-hover:text-orange-700 transition-colors">{billingSheet.billingNumber}</h3>
+                                  <h3 className="font-bold text-gray-900 text-lg group-hover:text-jobtype-bs transition-colors">{billingSheet.billingNumber}</h3>
                                   <p className="text-gray-600 font-medium text-sm">{billingSheet.notes || 'Billing sheet'}</p>
                                 </div>
                                 <div className="flex-shrink-0 text-right">
                                   <div className="mb-1">{getStatusBadge(billingSheet.status, 'billing')}</div>
-                                  <div className="text-lg font-bold text-orange-600">{formatCurrency(Number(billingSheet.totalAmount || 0))}</div>
+                                  <div className="text-lg font-bold text-jobtype-bs">{formatCurrency(Number(billingSheet.totalAmount || 0))}</div>
                                 </div>
                               </div>
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-gray-100">

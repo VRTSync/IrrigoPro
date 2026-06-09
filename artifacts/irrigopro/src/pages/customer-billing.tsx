@@ -175,7 +175,7 @@ function WetCheckBillingRow({
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-1">
-              <Droplets className="w-4 h-4 text-teal-400" />
+              <Droplets className="w-4 h-4 text-jobtype-wcb" />
               <span className="font-medium text-sm">{wcb.billingNumber}</span>
               {status && <WetCheckBillingStatusBadge status={status} />}
               {billed && <BilledBadge />}
@@ -191,7 +191,7 @@ function WetCheckBillingRow({
             )}
           </div>
           <div className="flex items-center gap-2">
-            <div className="text-sm font-medium text-teal-700 whitespace-nowrap">
+            <div className="text-sm font-medium text-jobtype-wcb whitespace-nowrap">
               {new Intl.NumberFormat("en-US", {
                 style: "currency",
                 currency: "USD",
@@ -1325,7 +1325,7 @@ export default function CustomerBilling() {
                                   <div className="flex items-center justify-between mb-2">
                                     <div className="flex items-center gap-2">
                                       <div className="text-sm font-medium">{wcb.billingNumber}</div>
-                                      <Badge className="bg-teal-100 text-teal-800 text-xs">[WC]</Badge>
+                                      <Badge className="bg-jobtype-wcb/15 text-jobtype-wcb text-xs">[WC]</Badge>
                                     </div>
                                   </div>
                                   <div className="text-xs text-gray-600 mb-2">{wcb.description || 'Wet Check Billing'}</div>
@@ -1487,7 +1487,7 @@ export default function CustomerBilling() {
                         {(customerBillingData.wetCheckBillings ?? []).length === 0 ? (
                           <Card>
                             <CardContent className="p-6 text-center text-gray-500">
-                              <Droplets className="w-8 h-8 mx-auto mb-2 text-teal-300" />
+                              <Droplets className="w-8 h-8 mx-auto mb-2 text-jobtype-wcb/40" />
                               <div className="font-medium mb-1">No wet check billings</div>
                               <div className="text-sm">No wet check billings found for this customer.</div>
                             </CardContent>
@@ -2150,14 +2150,14 @@ export default function CustomerBilling() {
 
                         {/* Unbilled Wet Check Billings (desktop) */}
                         {(customerBillingData.unbilledWetCheckBillings ?? []).map((wcb) => (
-                          <Card key={`wcb-${wcb.id}`} className="border-teal-200">
+                          <Card key={`wcb-${wcb.id}`} className="border-jobtype-wcb/30">
                             <CardContent className="p-3">
                               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                                 <div className="flex-1">
                                   <div className="flex items-center gap-2 mb-1">
-                                    <Receipt className="w-4 h-4 text-teal-400" />
+                                    <Receipt className="w-4 h-4 text-jobtype-wcb" />
                                     <span className="font-medium text-sm">{wcb.billingNumber}</span>
-                                    <Badge className="bg-teal-100 text-teal-800 text-xs">[WC]</Badge>
+                                    <Badge className="bg-jobtype-wcb/15 text-jobtype-wcb text-xs">[WC]</Badge>
                                   </div>
                                   <div className="text-xs text-gray-600 mb-2">
                                     {wcb.description || 'Wet Check Billing'}
@@ -2172,7 +2172,7 @@ export default function CustomerBilling() {
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <div className="text-sm font-medium text-teal-700">
+                                  <div className="text-sm font-medium text-jobtype-wcb">
                                     {formatCurrency(wcb.laborCost + wcb.partsCost)}
                                   </div>
                                 </div>
@@ -2482,7 +2482,7 @@ export default function CustomerBilling() {
                     {(customerBillingData.wetCheckBillings ?? []).length === 0 ? (
                       <Card>
                         <CardContent className="p-6 text-center text-gray-500">
-                          <Droplets className="w-8 h-8 mx-auto mb-2 text-teal-300" />
+                          <Droplets className="w-8 h-8 mx-auto mb-2 text-jobtype-wcb/40" />
                           <div className="font-medium mb-1">No wet check billings</div>
                           <div className="text-sm">No wet check billings found for this customer.</div>
                         </CardContent>
@@ -3085,7 +3085,7 @@ export default function CustomerBilling() {
               {(customerBillingData.unbilledWetCheckBillings ?? []).length > 0 && (
                 <div>
                   <h3 className="font-medium text-lg mb-3 flex items-center gap-2">
-                    <Receipt className="w-5 h-5 text-teal-600" />
+                    <Receipt className="w-5 h-5 text-jobtype-wcb" />
                     Unbilled Wet Check Billings ({(customerBillingData.unbilledWetCheckBillings ?? []).length})
                   </h3>
                   <div className="space-y-2">
@@ -3103,7 +3103,7 @@ export default function CustomerBilling() {
                               <div className="flex-1">
                                 <div className="flex items-center gap-2 mb-1">
                                   <span className="font-medium">{wcb.billingNumber}</span>
-                                  <Badge className="bg-teal-100 text-teal-800 text-xs">[WC]</Badge>
+                                  <Badge className="bg-jobtype-wcb/15 text-jobtype-wcb text-xs">[WC]</Badge>
                                 </div>
                                 <div className="text-sm text-gray-600 mb-2">
                                   {wcb.description || 'Wet Check Billing'}

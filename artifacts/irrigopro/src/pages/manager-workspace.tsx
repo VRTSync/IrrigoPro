@@ -143,9 +143,9 @@ function StatusTile({
 }) {
   const border =
     intent === "ok"
-      ? "border-l-green-500"
+      ? "border-l-jobtype-wo"
       : intent === "warn"
-        ? "border-l-amber-500"
+        ? "border-l-jobtype-bs"
         : intent === "bad"
           ? "border-l-red-500"
           : "border-l-gray-300";

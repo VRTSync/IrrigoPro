@@ -71,7 +71,7 @@ export default {
           wo:  "#1E5A99",
           bs:  "#B06820",
           wcb: "#5E8C2A",
-          est: "#6B46C1",
+          est: "#475569",
         },
       },
       keyframes: {
