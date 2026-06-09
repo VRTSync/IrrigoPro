@@ -1,0 +1,148 @@
+# Replit Task — Job-Type Colors, Slice C (billing PDF ticket pages theme by type)
+
+The reconciliation page now color-codes job types (amber Billing Sheets,
+green Wet Check Billings, blue Work Orders). But when the reader flips to
+an **individual ticket page**, every accent is still navy regardless of
+type — the header bar, the section labels ("FINANCIAL BREAKDOWN", "ZONE
+A-2", "REPAIRS SUMMARY"), and the parts/zone **table header fills**. This
+slice extends the type color through the whole ticket section so a Billing
+Sheet ticket reads amber end-to-end, a WCB ticket green, and a Work Order
+ticket blue — matching the recon row the reader came from.
+
+> Verified on the current export (Invoice #94354): the BS ticket header,
+> its "PARTS & LABOR DETAILS" table header, and section labels are navy;
+> the WCB ticket header, "REPAIRS SUMMARY"/"ZONE" labels, and every zone
+> table header are navy. Only the recon page is type-colored today.
+
+| Type | Accent color | (Slice A token) |
+|---|---|---|
+| Work Order | blue `#1E5A99` | `JOB_TYPE_COLORS.workOrder` |
+| Billing Sheet | amber `#B06820` | `JOB_TYPE_COLORS.billingSheet` |
+| Wet Check Billing | green `#5E8C2A` | `JOB_TYPE_COLORS.wetCheck` |
+
+## Relationship to #1164
+
+#1164 recolors only the ticket **header bar**. This slice covers the
+**whole ticket page** via a single wrapper modifier, which subsumes the
+header. If #1164 has already landed, keep its `.ticket-header-*` color
+rules (they become a subset of the per-type theming here) and add the
+section-level scoping below — don't duplicate. If #1164 has NOT landed,
+this slice does both. Either way, the end state is one coherent per-type
+theme driven off the wrapper class.
+
+## The mechanism: one type-modifier class on the ticket wrapper
+
+The accent classes (`.ticket-section-label`, `.items-table thead`) are
+shared by all ticket types, so they can't be recolored directly. Add a
+type modifier to the `.ticket-page` wrapper and scope the accents under
+it.
+
+### 1. Markup — tag each ticket wrapper (`pdf-helpers.ts`)
+
+- `ticketPageWO` (`:221`): `<div class="ticket-page ticket-type-wo">`
+- `ticketPageBS` (`:298`): `<div class="ticket-page ticket-type-bs">`
+- `ticketPageWCB` (`:401`): `<div class="ticket-page ticket-type-wcb">`
+
+Also fix the **WCB header class gap**: `ticketPageWCB`'s header is
+currently `ticket-header ticket-header-bs` (`:402`) — change it to
+`ticket-header ticket-header-wcb`.
+
+### 2. CSS — header bars per type (`buildFullCSS`, `~:1255–1263`)
+
+```css
+.ticket-header-wo  { background: ${JOB_TYPE_COLORS.workOrder};    color: #fff; }
+.ticket-header-bs  { background: ${JOB_TYPE_COLORS.billingSheet}; color: #fff; }
+.ticket-header-wcb { background: ${JOB_TYPE_COLORS.wetCheck};     color: #fff; }
+```
+
+(Add the `-wcb` rule; it doesn't exist yet.)
+
+### 3. CSS — section labels per type (scope `.ticket-section-label`, `~:1357`)
+
+Keep the base rule (navy) as the default, then add type overrides:
+
+```css
+.ticket-type-wo  .ticket-section-label { color: ${JOB_TYPE_COLORS.workOrder}; }
+.ticket-type-bs  .ticket-section-label { color: ${JOB_TYPE_COLORS.billingSheet}; }
+.ticket-type-wcb .ticket-section-label { color: ${JOB_TYPE_COLORS.wetCheck}; }
+```
+
+This covers "FINANCIAL BREAKDOWN", "WORK PERFORMED", "PARTS & LABOR
+DETAILS", "REPAIRS SUMMARY", "ZONE …", and the VRT repairs-summary label
+(it's a `.ticket-section-label`). The VRT logo sits beside it and is
+unaffected.
+
+### 4. CSS — table header fills per type (scope `.items-table thead`, `~:1449`)
+
+```css
+.ticket-type-wo  .items-table thead { background: ${JOB_TYPE_COLORS.workOrder}; }
+.ticket-type-bs  .items-table thead { background: ${JOB_TYPE_COLORS.billingSheet}; }
+.ticket-type-wcb .items-table thead { background: ${JOB_TYPE_COLORS.wetCheck}; }
+```
+
+Leave the base `.items-table thead { background: ${navy}; color: white; }`
+as the fallback (and keep `color: white` — only the background changes per
+type). `.recon-table` is a different class, so the reconciliation page is
+untouched.
+
+## Deliberate non-changes (confirm, don't "fix")
+
+- **Money totals stay amber.** `.ticket-fin-total` TOTAL, zone subtotals,
+  and the "Repairs Total" use the brown/amber money accent today and
+  should keep it on every ticket type — amber reads as "dollar total"
+  consistently. Do NOT recolor these to the type color. (If Randy later
+  wants totals to follow the type color too, that's a one-line follow-up;
+  flag it, don't do it here.)
+- **Approval check / body text** — unchanged.
+- **Reconciliation page** — already correct (#1163); not touched.
+
+## Done looks like
+
+- A Billing Sheet ticket: amber header bar, amber section labels, amber
+  table header fills. A WCB ticket: green throughout (header, REPAIRS
+  SUMMARY, ZONE labels, every zone table header). A Work Order ticket:
+  blue throughout.
+- Each ticket's accents match the color of its row/section on the
+  reconciliation page — the reader can flip recon → ticket and the color
+  carries.
+- WCB tickets no longer borrow the Billing-Sheet header class.
+- Money totals remain amber on all types; recon page unchanged.
+- All colors come from `JOB_TYPE_COLORS` (single source of truth — no new
+  literals).
+- `pnpm typecheck` and `pnpm test` pass; #1163/#1164 recon + header tests
+  still pass.
+
+## Tests (extend `pdf-helpers-wcb.test.ts` / ticket tests)
+
+```typescript
+it("tags each ticket page with its job-type modifier", () => {
+  expect(ticketPageWO(wo, '94354', [], null, 'Co')).toContain('ticket-type-wo');
+  expect(ticketPageBS(bs, '94354', [], null, 'Co')).toContain('ticket-type-bs');
+  expect(ticketPageWCB(wcb, '94354', [], null, 'Co')).toContain('ticket-type-wcb');
+});
+
+it("WCB header uses the wcb class, not bs", () => {
+  const html = ticketPageWCB(wcb, '94354', [], null, 'Co');
+  expect(html).toContain('ticket-header-wcb');
+  expect(html).not.toContain('ticket-header-bs');
+});
+
+it("scopes section labels and table headers per type in CSS", () => {
+  const css = buildFullCSS(DEFAULT_BRAND_COLORS);
+  expect(css).toContain(`.ticket-type-bs  .items-table thead { background: ${JOB_TYPE_COLORS.billingSheet}`);
+  expect(css).toContain(`.ticket-type-wcb .ticket-section-label { color: ${JOB_TYPE_COLORS.wetCheck}`);
+});
+```
+
+## Out of scope
+
+- Money-total / subtotal recolor (deliberately amber).
+- The reconciliation page (already done).
+- Web/mobile UI (Slice B).
+
+## Dependencies
+
+- `JOB_TYPE_COLORS` must exist — provided by #1163/#1164 (local) or
+  Slice A (shared). If Slice A has landed, import from `@workspace/shared`;
+  otherwise use the existing local constant. Coordinate with #1164 on the
+  `.ticket-header-*` rules per the "Relationship to #1164" note.
