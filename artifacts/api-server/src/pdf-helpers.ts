@@ -31,6 +31,17 @@ export interface WcbZonePhotoGroupResolved {
 
 export const FAILED_PHOTO_SENTINEL = '__PHOTO_UNAVAILABLE__';
 
+/**
+ * Fixed job-type colors for the reconciliation summary.
+ * These are intentionally NOT derived from brandColors so every company's
+ * invoice matches the shared customer guide "Understanding Your Invoice."
+ */
+export const JOB_TYPE_COLORS = {
+  workOrder: '#1E5A99',
+  billingSheet: '#B06820',
+  wetCheck: '#5E8C2A',
+} as const;
+
 export function formatWorkSummaryAsBullets(text: string | null | undefined): string {
   if (!text || text.trim().length === 0) return '';
   const trimmed = text.trim();
@@ -117,10 +128,11 @@ export function coverPage(
   vm: PdfViewModel
 ): string {
   const { company, invoice, customerHasBranches, branchSubtotals } = vm;
+  const navy = vm.brandColors.navy;
 
-  const logoHtml = company.logoDataUri
-    ? `<img src="${company.logoDataUri}" class="cover-logo" alt="${company.name}">`
-    : `<div class="cover-company-name-fallback">${company.name}</div>`;
+  const logoTile = company.logoDataUri
+    ? `<div class="cover-logo-tile"><img src="${company.logoDataUri}" class="cover-logo" alt="${company.name}"></div>`
+    : `<div class="cover-logo-tile cover-logo-tile-empty">${company.name?.charAt(0) ?? ''}</div>`;
 
   const branchSummaryHtml = (customerHasBranches && branchSubtotals.length > 0)
     ? (() => {
@@ -152,21 +164,19 @@ export function coverPage(
 
   return `
   <div class="cover-page">
-    <div class="cover-header">
-      <div class="cover-company-block">
-        ${logoHtml}
-        <div class="cover-company-details">
-          <div class="cover-company-name">${company.name}</div>
-          ${company.address ? `<div class="cover-company-line">${company.address}</div>` : ''}
-          ${company.phone ? `<div class="cover-company-line">${company.phone}</div>` : ''}
-          ${company.email ? `<div class="cover-company-line">${company.email}</div>` : ''}
-        </div>
+    <div class="cover-brand-band" style="background:${navy};">
+      ${logoTile}
+      <div class="cover-brand-company">
+        <div class="cover-brand-name">${company.name}</div>
+        ${company.address ? `<div class="cover-brand-line">${company.address}</div>` : ''}
+        ${company.phone ? `<div class="cover-brand-line">${company.phone}</div>` : ''}
+        ${company.email ? `<div class="cover-brand-line">${company.email}</div>` : ''}
       </div>
-      <div class="cover-invoice-meta">
-        <div class="cover-invoice-label">INVOICE</div>
-        <div class="cover-invoice-number">#${invoice.invoiceNumber}</div>
-        <div class="cover-meta-item"><span class="cover-meta-label">Billing Period</span><span class="cover-meta-value">${formatDate(invoice.periodStart)} – ${formatDate(invoice.periodEnd)}</span></div>
-      </div>
+    </div>
+
+    <div class="cover-invoice-block">
+      <div class="cover-invoice-number">INVOICE #${invoice.invoiceNumber}</div>
+      <div class="cover-invoice-period">Billing Period: ${formatDate(invoice.periodStart)} – ${formatDate(invoice.periodEnd)}</div>
     </div>
 
     <div class="cover-bill-to">
@@ -995,92 +1005,71 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     break-inside: avoid;
   }
 
-  .cover-header {
+  .cover-brand-band {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    border-bottom: 3px solid ${green};
-    padding-bottom: 24px;
+    align-items: center;
+    gap: 20px;
+    padding: 20px 28px;
+    border-radius: 8px;
   }
 
-  .cover-company-block {
+  .cover-logo-tile {
+    width: 96px;
+    height: 96px;
+    background: white;
+    border-radius: 8px;
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  .cover-logo-tile-empty {
+    font-size: 42px;
+    font-weight: 800;
+    color: ${navy};
   }
 
   .cover-logo {
-    max-width: 200px;
-    max-height: 70px;
-    width: auto;
-    height: auto;
+    max-width: 100%;
+    max-height: 100%;
     object-fit: contain;
     display: block;
   }
 
-  .cover-company-name-fallback {
-    font-size: 24px;
-    font-weight: 800;
-    color: ${navy};
-  }
-
-  .cover-company-name {
-    font-size: 18px;
-    font-weight: 700;
-    color: ${black};
-  }
-
-  .cover-company-details {
+  .cover-brand-company {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    margin-top: 4px;
+    gap: 4px;
   }
 
-  .cover-company-line {
-    font-size: 12px;
-    color: #6b7280;
-  }
-
-  .cover-invoice-meta {
-    text-align: right;
-  }
-
-  .cover-invoice-label {
-    font-size: 11px;
+  .cover-brand-name {
+    font-size: 22px;
     font-weight: 700;
-    color: ${navy};
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    margin-bottom: 4px;
+    color: white;
+  }
+
+  .cover-brand-line {
+    font-size: 12px;
+    color: rgba(255,255,255,0.85);
+  }
+
+  .cover-invoice-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .cover-invoice-number {
-    font-size: 30px;
-    font-weight: 800;
-    color: ${black};
-    margin-bottom: 12px;
+    font-size: 20px;
+    font-weight: 700;
+    color: ${brown};
   }
 
-  .cover-meta-item {
-    display: flex;
-    justify-content: flex-end;
-    align-items: baseline;
-    gap: 8px;
-    font-size: 12px;
-    margin-bottom: 4px;
-  }
-
-  .cover-meta-label {
-    color: ${navy};
-    font-weight: 600;
-    font-size: 11px;
-    text-transform: uppercase;
-  }
-
-  .cover-meta-value {
-    color: ${black};
-    font-weight: 500;
+  .cover-invoice-period {
+    font-size: 13px;
+    color: #6b7280;
   }
 
   .cover-bill-to {
@@ -1552,12 +1541,12 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
   }
 
   .recon-ref { font-weight: 600; }
-  .recon-ref-wo { color: ${navy}; }
-  .recon-ref-bs { color: ${navy}; }
+  .recon-ref-wo { color: #1E5A99; }
+  .recon-ref-bs { color: #B06820; }
 
   .recon-type { font-weight: 500; font-size: 12px; }
-  .recon-type-wo { color: ${navy}; }
-  .recon-type-bs { color: ${navy}; }
+  .recon-type-wo { color: #1E5A99; }
+  .recon-type-bs { color: #B06820; }
 
   .recon-total {
     text-align: right;
@@ -1573,15 +1562,15 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
   }
 
   .recon-group-wo td {
-    background: ${gray};
-    color: ${navy};
-    border-top: 1px solid ${green};
+    background: #1E5A99;
+    color: #ffffff;
+    border-left: 4px solid rgba(0,0,0,0.18);
   }
 
   .recon-group-bs td {
-    background: ${gray};
-    color: ${navy};
-    border-top: 1px solid ${green};
+    background: #B06820;
+    color: #ffffff;
+    border-left: 4px solid rgba(0,0,0,0.18);
   }
 
   .recon-group-branch td {
@@ -1744,13 +1733,13 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
 
   /* Reconciliation — Wet Check Billing rows (Change 1) */
   .recon-group-wcb td {
-    background: ${gray};
-    color: ${navy};
-    border-top: 1px solid ${green};
+    background: #5E8C2A;
+    color: #ffffff;
+    border-left: 4px solid rgba(0,0,0,0.18);
   }
 
-  .recon-ref-wcb { color: ${navy}; }
-  .recon-type-wcb { color: ${navy}; font-style: italic; }
+  .recon-ref-wcb { color: #5E8C2A; }
+  .recon-type-wcb { color: #5E8C2A; font-style: italic; }
 
   /* Task #843 — inline per-zone photo grids */
   .zone-photo-section {
