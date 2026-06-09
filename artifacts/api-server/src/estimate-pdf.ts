@@ -344,16 +344,9 @@ export function buildEstimateHtml(
     <div class="scope">${escapeHtml(estimate.workDescription)}</div>
   </section>` : ''}
 
-  ${(IRRIGOPRO_LOGO_DATA_URI || VRT_LOGO_DATA_URI) ? `
-  <div style="border-top:1px solid #e5e7eb; margin-top:20px; margin-bottom:20px; padding-top:14px; display:flex; align-items:center; justify-content:center; gap:12px;">
-    ${IRRIGOPRO_LOGO_DATA_URI ? `<img src="${IRRIGOPRO_LOGO_DATA_URI}" style="height:28px;" alt="IrrigoPro" />` : '<span style="font-size:11px;color:#374151;font-weight:600;">IrrigoPro</span>'}
-    <span style="font-size:10px; color:#9ca3af;">Powered by</span>
-    ${VRT_LOGO_DATA_URI ? `<img src="${VRT_LOGO_DATA_URI}" style="height:18px;" alt="VRT Sync" />` : '<span style="font-size:10px;color:#9ca3af;">VRT Sync</span>'}
-  </div>` : ''}
-
   ${pinSection}
 
-  <section style="page-break-before: always;">
+  <section>
     <h2>Line Items</h2>
     <table>
       <thead>
@@ -429,6 +422,12 @@ export function buildEstimateHtml(
     </div>
   </div>
 
+  ${(IRRIGOPRO_LOGO_DATA_URI || VRT_LOGO_DATA_URI) ? `
+  <div style="border-top:1px solid #e5e7eb; margin-top:32px; padding-top:14px; display:flex; align-items:center; justify-content:center; gap:12px;">
+    ${IRRIGOPRO_LOGO_DATA_URI ? `<img src="${IRRIGOPRO_LOGO_DATA_URI}" style="height:28px;" alt="IrrigoPro" />` : '<span style="font-size:11px;color:#374151;font-weight:600;">IrrigoPro</span>'}
+    <span style="font-size:10px; color:#9ca3af;">Powered by</span>
+    ${VRT_LOGO_DATA_URI ? `<img src="${VRT_LOGO_DATA_URI}" style="height:18px;" alt="VRT Sync" />` : '<span style="font-size:10px;color:#9ca3af;">VRT Sync</span>'}
+  </div>` : ''}
 </body>
 </html>`;
 }
