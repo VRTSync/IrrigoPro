@@ -132,7 +132,7 @@ export function coverPage(
 
   const logoTile = company.logoDataUri
     ? `<div class="cover-logo-tile"><img src="${company.logoDataUri}" class="cover-logo" alt="${company.name}"></div>`
-    : `<div class="cover-logo-tile cover-logo-tile-empty">${company.name?.charAt(0) ?? ''}</div>`;
+    : `<div class="cover-logo-tile cover-logo-tile-empty">${company.name?.charAt(0) || '?'}</div>`;
 
   const branchSummaryHtml = (customerHasBranches && branchSubtotals.length > 0)
     ? (() => {
