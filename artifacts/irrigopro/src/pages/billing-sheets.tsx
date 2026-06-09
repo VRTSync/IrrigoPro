@@ -12,7 +12,7 @@ import { MetricTile, MetricGrid } from "@/components/ui/metric-tile";
 import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
 import { FAB } from "@/components/ui/fab";
 import { BillingSheetWizard } from "@/components/billing/billing-sheet-wizard";
-import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
+import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
 import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2, ChevronRight, ChevronDown, MapPin, Camera, AlertTriangle, ClipboardList } from "lucide-react";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
@@ -1007,12 +1007,15 @@ export default function BillingSheets() {
         />
       )}
 
-      {/* View Billing Sheet Modal */}
+      {/* View / Edit Billing Sheet Modal */}
       {viewingSheet && (
-        <BillingSheetViewModal
-          sheet={viewingSheet}
+        <CompletedWorkDetailModal
+          type="billing_sheet"
+          id={viewingSheet.id}
+          data={viewingSheet}
           open={!!viewingSheet}
-          onOpenChange={() => setViewingSheet(null)}
+          onOpenChange={(open) => { if (!open) setViewingSheet(null); }}
+          showPricing={true}
         />
       )}
       </PageContent>

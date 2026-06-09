@@ -602,7 +602,8 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                         {billedBSExpanded && (
                           <div className="grid gap-3 p-3 bg-purple-50/30">
                             {billingSheets.filter(bs => isBSBilled(bs)).map((billingSheet) => (
-                              <Card key={billingSheet.id} className="border-l-4 border-l-purple-400 bg-purple-50/60 border border-purple-200">
+                              <Card key={billingSheet.id} className="border-l-4 border-l-purple-400 bg-purple-50/60 border border-purple-200 cursor-pointer hover:shadow-md transition-shadow"
+                                    onClick={() => setSelectedBillingSheet(billingSheet)}>
                                 <CardContent className="p-4 sm:p-6">
                                   <div className="space-y-4">
                                     <div className="flex items-center gap-3">

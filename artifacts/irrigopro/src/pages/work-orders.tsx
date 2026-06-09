@@ -801,7 +801,7 @@ export default function WorkOrders() {
                                     className="text-xs px-3 py-1.5 bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
                                   >
                                     <Eye className="w-3 h-3 mr-1" />
-                                    View
+                                    View / Edit
                                   </Button>
                                   
                                   {/* Assignment dropdown for irrigation managers — hidden for billed */}

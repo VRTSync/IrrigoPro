@@ -8,8 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
-import { WorkOrderWizard } from "@/components/work-orders/work-order-wizard";
-import { BillingSheetWizard } from "@/components/billing/billing-sheet-wizard";
 import { BilledBadge, BilledIndicator } from "@/components/ui/billed-indicator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -231,8 +229,6 @@ export default function CustomerBilling() {
   const [openWcbId, setOpenWcbId] = useState<number | null>(null);
   const [showWorkOrderDetail, setShowWorkOrderDetail] = useState(false);
   const [showBillingSheetDetail, setShowBillingSheetDetail] = useState(false);
-  const [showEditWorkOrder, setShowEditWorkOrder] = useState(false);
-  const [showEditBillingSheet, setShowEditBillingSheet] = useState(false);
   const [showInvoicePreview, setShowInvoicePreview] = useState(false);
   const [previewInvoiceData, setPreviewInvoiceData] = useState<any>(null);
   
@@ -2078,15 +2074,6 @@ export default function CustomerBilling() {
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => { setSelectedWorkOrder(wo); setShowEditWorkOrder(true); }}
-                                    className="h-6 px-2 text-xs hover:bg-blue-50 text-blue-600"
-                                  >
-                                    <Edit className="w-3 h-3 mr-1" />
-                                    Edit
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
                                     onClick={() => setItemToDelete({ type: "work_order", id: wo.id, label: `Work Order #${wo.id}` })}
                                     className="h-6 px-2 text-xs hover:bg-red-50 text-red-600"
                                   >
@@ -2138,15 +2125,6 @@ export default function CustomerBilling() {
                                   <div className="text-sm font-medium text-orange-700">
                                     {formatCurrency(bs.laborCost + bs.partsCost)}
                                   </div>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => { setSelectedBillingSheet(bs); setShowEditBillingSheet(true); }}
-                                    className="h-6 px-2 text-xs hover:bg-blue-50 text-blue-600"
-                                  >
-                                    <Edit className="w-3 h-3 mr-1" />
-                                    Edit
-                                  </Button>
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -2264,20 +2242,8 @@ export default function CustomerBilling() {
                                       <div className="text-xs text-gray-400 italic">Breakdown unavailable</div>
                                     )}
                                   </div>
-                                  {wo.status === 'billed' || wo.invoiceId ? (
-                                    <span className="h-6 px-2 text-xs text-purple-700 font-medium flex items-center">Billed — cannot be edited</span>
-                                  ) : wo.status === 'pending_manager_review' ? (
-                                    <span className="h-6 px-2 text-xs text-yellow-700 font-medium flex items-center">Pending approval — view only</span>
-                                  ) : (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => { setSelectedWorkOrder(wo); setShowEditWorkOrder(true); }}
-                                    className="h-6 px-2 text-xs hover:bg-blue-50 text-blue-600"
-                                  >
-                                    <Edit className="w-3 h-3 mr-1" />
-                                    Edit
-                                  </Button>
+                                  {(wo.status === 'billed' || wo.invoiceId) && (
+                                    <span className="h-6 px-2 text-xs text-purple-700 font-medium flex items-center">Billed</span>
                                   )}
                                   {!(wo.status === 'billed' || wo.invoiceId || wo.status === 'pending_manager_review') && (
                                     <>
@@ -2413,20 +2379,8 @@ export default function CustomerBilling() {
                                   <div className="text-sm font-medium">
                                     {formatCurrency(bs.laborCost + bs.partsCost)}
                                   </div>
-                                  {bs.status === 'billed' || bs.invoiceId ? (
-                                    <span className="h-6 px-2 text-xs text-purple-700 font-medium flex items-center">Billed — cannot be edited</span>
-                                  ) : bs.status === 'pending_manager_review' ? (
-                                    <span className="h-6 px-2 text-xs text-yellow-700 font-medium flex items-center">Pending approval — view only</span>
-                                  ) : (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => { setSelectedBillingSheet(bs); setShowEditBillingSheet(true); }}
-                                    className="h-6 px-2 text-xs hover:bg-blue-50 text-blue-600"
-                                  >
-                                    <Edit className="w-3 h-3 mr-1" />
-                                    Edit
-                                  </Button>
+                                  {(bs.status === 'billed' || bs.invoiceId) && (
+                                    <span className="h-6 px-2 text-xs text-purple-700 font-medium flex items-center">Billed</span>
                                   )}
                                   {!(bs.status === 'billed' || bs.invoiceId || bs.status === 'pending_manager_review') && (
                                     <>
@@ -2818,31 +2772,6 @@ export default function CustomerBilling() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Work Order Wizard */}
-      {selectedWorkOrder && showEditWorkOrder && (
-        <WorkOrderWizard
-          open={showEditWorkOrder}
-          workOrderId={selectedWorkOrder.id}
-          onClose={() => { setShowEditWorkOrder(false); setSelectedWorkOrder(null); }}
-          onCreated={() => {
-            queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
-            queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing"] });
-          }}
-        />
-      )}
-
-      {/* Edit Billing Sheet Wizard */}
-      {selectedBillingSheet && showEditBillingSheet && (
-        <BillingSheetWizard
-          open={showEditBillingSheet}
-          billingSheetId={selectedBillingSheet.id}
-          onClose={() => { setShowEditBillingSheet(false); setSelectedBillingSheet(null); }}
-          onCreated={() => {
-            queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
-            queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing"] });
-          }}
-        />
-      )}
 
       {/* Invoice Preview Dialog */}
       <Dialog open={showInvoicePreview} onOpenChange={setShowInvoicePreview}>
