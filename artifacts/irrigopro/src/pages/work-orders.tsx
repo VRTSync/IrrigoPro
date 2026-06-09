@@ -19,6 +19,7 @@ import { FAB } from "@/components/ui/fab";
 import { WorkOrderWizard } from "@/components/work-orders/work-order-wizard";
 import { buildMapsUrl } from "@/lib/maps-url";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
+import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
 import { WorkOrderCompletion } from "@/components/work-orders/work-order-completion";
 import { 
   Plus, 
@@ -54,7 +55,6 @@ export default function WorkOrders() {
   const [selectedWorkOrderForStart, setSelectedWorkOrderForStart] = useState<WorkOrder | null>(null);
   const [selectedWorkOrderForCompletion, setSelectedWorkOrderForCompletion] = useState<WorkOrder | null>(null);
   const [showWorkOrderForm, setShowWorkOrderForm] = useState(false);
-  const [editingWorkOrder, setEditingWorkOrder] = useState<WorkOrder | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [groupByCustomer, setGroupByCustomer] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<any>(() => {
@@ -840,19 +840,6 @@ export default function WorkOrders() {
                                     </Select>
                                   )}
                                   
-                                  {/* Edit button for company admin, billing manager, and irrigation manager — hidden for billed */}
-                                  {canEditDelete && !isBilled(workOrder) && (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => setEditingWorkOrder(workOrder)}
-                                      className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
-                                    >
-                                      <Edit className="w-3 h-3 mr-1" />
-                                      Edit
-                                    </Button>
-                                  )}
-                                  
                                   {/* Delete button for company admin and billing manager — hidden for billed */}
                                   {canEditDelete && !isBilled(workOrder) && (
                                     <Button
@@ -1153,7 +1140,7 @@ export default function WorkOrders() {
                             className="bg-green-600 hover:bg-green-700 text-white flex-1 sm:flex-none"
                           >
                             <Eye className="w-4 h-4 mr-1" />
-                            View
+                            View / Edit
                           </Button>
                           
                           {/* Assignment dropdown for irrigation managers */}
@@ -1192,21 +1179,6 @@ export default function WorkOrders() {
                                 )) : []}
                               </SelectContent>
                             </Select>
-                          )}
-                          
-                          {/* Edit button for company admin, billing manager, and irrigation manager — hidden for billed */}
-                          {canEditDelete && !isBilled(workOrder) && (
-                            <Button
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingWorkOrder(workOrder);
-                              }}
-                              className="bg-blue-600 hover:bg-blue-700 text-white flex-1 sm:flex-none"
-                            >
-                              <Edit className="w-4 h-4 mr-1" />
-                              Edit
-                            </Button>
                           )}
                           
                           {/* Delete button for company admin and billing manager — hidden for billed */}
@@ -1377,36 +1349,15 @@ export default function WorkOrders() {
           />
         )}
 
-        {/* Work Order Wizard — edit existing work order (opens on Step 2) */}
-        {editingWorkOrder && (
-          <WorkOrderWizard
-            open={!!editingWorkOrder}
-            workOrderId={editingWorkOrder.id}
-            onClose={() => setEditingWorkOrder(null)}
-            onCreated={() => {
-              queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
-            }}
-          />
-        )}
-
-        {/* Work Order Details Dialog - View Only */}
+        {/* Work Order Detail Modal — view and inline-edit */}
         {selectedWorkOrder && (
-          <WorkOrderDetails 
-            workOrder={selectedWorkOrder}
-            onClose={() => {
-              console.log('Closing work order details');
-              setSelectedWorkOrder(null);
-            }}
-            onUpdate={() => {
-              console.log('Updating work orders');
-              queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
-            }}
-            showAddDetailsButton={false}
-            onStartWork={(workOrder) => {
-              console.log('Starting work order from details modal');
-              setSelectedWorkOrder(null);
-              setSelectedWorkOrderForCompletion(workOrder);
-            }}
+          <CompletedWorkDetailModal
+            type="work_order"
+            id={selectedWorkOrder.id}
+            data={selectedWorkOrder}
+            open={!!selectedWorkOrder}
+            onOpenChange={(open) => { if (!open) setSelectedWorkOrder(null); }}
+            showPricing={true}
           />
         )}
 

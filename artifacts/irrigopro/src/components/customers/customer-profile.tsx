@@ -27,7 +27,7 @@ import { BilledIndicator, BilledBadge } from "@/components/ui/billed-indicator";
 import type { Customer, Estimate, WorkOrder, BillingSheetWithItems } from "@workspace/db/schema";
 import { lifecycleOf } from "@workspace/shared";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
-import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
+import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
 import { PropertyNotes } from "./property-notes";
 import { PropertyBoundarySection } from "./property-boundary";
 import { BillingNotes } from "./billing-notes";
@@ -44,6 +44,7 @@ interface CustomerProfileProps {
 export function CustomerProfile({ customer, onBack, userRole = "company_admin" }: CustomerProfileProps) {
   const [selectedEstimateId, setSelectedEstimateId] = useState<number | null>(null);
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
+  const [selectedBillingSheet, setSelectedBillingSheet] = useState<BillingSheetWithItems | null>(null);
   const [estimateWizardOpen, setEstimateWizardOpen] = useState(false);
   const [workOrderModalOpen, setWorkOrderModalOpen] = useState(false);
   const [showSiteMaps, setShowSiteMaps] = useState(false);
@@ -550,7 +551,8 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                     {/* Active (non-billed) billing sheets */}
                     <div className="grid gap-4">
                       {billingSheets.filter(bs => !isBSBilled(bs)).map((billingSheet) => (
-                        <Card key={billingSheet.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-orange-500 hover:border-l-orange-600 bg-gradient-to-r from-orange-50/30 to-transparent">
+                        <Card key={billingSheet.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-orange-500 hover:border-l-orange-600 bg-gradient-to-r from-orange-50/30 to-transparent"
+                              onClick={() => setSelectedBillingSheet(billingSheet)}>
                           <CardContent className="p-4 sm:p-6">
                             <div className="space-y-4">
                               <div className="flex items-center gap-3">
@@ -648,17 +650,27 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
       )}
 
       {workOrderModalOpen && selectedWorkOrder && (
-        <WorkOrderDetails
-          workOrder={selectedWorkOrder}
-          onClose={() => {
-            setWorkOrderModalOpen(false);
-            setSelectedWorkOrder(null);
+        <CompletedWorkDetailModal
+          type="work_order"
+          id={selectedWorkOrder.id}
+          data={selectedWorkOrder}
+          open={workOrderModalOpen}
+          onOpenChange={(open) => {
+            setWorkOrderModalOpen(open);
+            if (!open) setSelectedWorkOrder(null);
           }}
-          onUpdate={() => {
-            // Refresh work orders when updated
-            setWorkOrderModalOpen(false);
-            setSelectedWorkOrder(null);
-          }}
+          showPricing={true}
+        />
+      )}
+
+      {selectedBillingSheet && (
+        <CompletedWorkDetailModal
+          type="billing_sheet"
+          id={selectedBillingSheet.id}
+          data={selectedBillingSheet}
+          open={!!selectedBillingSheet}
+          onOpenChange={(open) => { if (!open) setSelectedBillingSheet(null); }}
+          showPricing={true}
         />
       )}
     </>

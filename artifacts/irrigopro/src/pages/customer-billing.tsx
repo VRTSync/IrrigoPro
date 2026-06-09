@@ -2781,11 +2781,6 @@ export default function CustomerBilling() {
           open={showWorkOrderDetail}
           onOpenChange={(open) => { setShowWorkOrderDetail(open); if (!open) setSelectedWorkOrder(null); }}
           showPricing={true}
-          onEdit={
-            !(selectedWorkOrder.status === 'billed' || selectedWorkOrder.invoiceId || selectedWorkOrder.status === 'pending_manager_review')
-              ? () => { setShowWorkOrderDetail(false); setShowEditWorkOrder(true); }
-              : undefined
-          }
         />
       )}
 
@@ -2798,11 +2793,6 @@ export default function CustomerBilling() {
           open={showBillingSheetDetail}
           onOpenChange={(open) => { setShowBillingSheetDetail(open); if (!open) setSelectedBillingSheet(null); }}
           showPricing={true}
-          onEdit={
-            !(selectedBillingSheet.status === 'billed' || selectedBillingSheet.invoiceId || selectedBillingSheet.status === 'pending_manager_review')
-              ? () => { setShowBillingSheetDetail(false); setShowEditBillingSheet(true); }
-              : undefined
-          }
         />
       )}
 

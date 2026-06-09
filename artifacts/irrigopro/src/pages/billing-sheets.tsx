@@ -665,13 +665,12 @@ export default function BillingSheets() {
                                 </Button>
                               </div>
                             )}
-                            {/* Edit / Delete via overflow menu for admins */}
+                            {/* Delete via overflow menu for admins */}
                             {canEditDelete && (
                               <ListRowOverflowMenu
                                 triggerTestId={`bs-overflow-menu-active-${sheet.id}`}
                                 actions={[
-                                  { label: "Edit", icon: <Edit className="w-3.5 h-3.5" />, onClick: () => setEditingDraft(sheet) },
-                                  { label: "Delete", icon: <Trash2 className="w-3.5 h-3.5" />, onClick: () => { setDeleteBlockedMessage(null); setPendingDeleteSheet(sheet); }, destructive: true, separator: true },
+                                  { label: "Delete", icon: <Trash2 className="w-3.5 h-3.5" />, onClick: () => { setDeleteBlockedMessage(null); setPendingDeleteSheet(sheet); }, destructive: true },
                                 ]}
                               />
                             )}
@@ -790,14 +789,13 @@ export default function BillingSheets() {
 
                           <div className="flex flex-col gap-2 flex-shrink-0 w-full sm:w-auto sm:items-end">
                             <Button size="sm" variant="outline" onClick={() => setViewingSheet(sheet)} className="w-full sm:w-auto">
-                              <Eye className="w-3 h-3 mr-1" />View
+                              <Eye className="w-3 h-3 mr-1" />View / Edit
                             </Button>
                             {canEditDelete && (
                               <ListRowOverflowMenu
                                 triggerTestId={`bs-overflow-menu-completed-${sheet.id}`}
                                 actions={[
-                                  { label: "Edit", icon: <Edit className="w-3.5 h-3.5" />, onClick: () => setEditingDraft(sheet) },
-                                  { label: "Delete", icon: <Trash2 className="w-3.5 h-3.5" />, onClick: () => { setDeleteBlockedMessage(null); setPendingDeleteSheet(sheet); }, destructive: true, separator: true },
+                                  { label: "Delete", icon: <Trash2 className="w-3.5 h-3.5" />, onClick: () => { setDeleteBlockedMessage(null); setPendingDeleteSheet(sheet); }, destructive: true },
                                 ]}
                               />
                             )}

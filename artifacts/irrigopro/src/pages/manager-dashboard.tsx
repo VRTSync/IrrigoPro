@@ -14,7 +14,6 @@ import { EstimateWizard } from "@/components/estimates/estimate-wizard";
 import { WorkOrderWizard } from "@/components/work-orders/work-order-wizard";
 import { BillingSheetWizard } from "@/components/billing/billing-sheet-wizard";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
-import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
 import type { WorkOrder, BillingSheet } from "@workspace/db/schema";
 import { format } from "date-fns";
 
@@ -551,8 +550,10 @@ export default function ManagerDashboard() {
 
       {/* Billing Sheet Review Modal */}
       {reviewBillingSheet && (
-        <BillingSheetViewModal
-          sheet={reviewBillingSheet}
+        <CompletedWorkDetailModal
+          type="billing_sheet"
+          id={reviewBillingSheet.id}
+          data={reviewBillingSheet}
           open={!!reviewBillingSheet}
           onOpenChange={(open) => {
             if (!open) {
@@ -560,6 +561,7 @@ export default function ManagerDashboard() {
               invalidateAll();
             }
           }}
+          showPricing
         />
       )}
     </PageContainer>
