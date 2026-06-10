@@ -139,18 +139,19 @@ describe("ticketPageWCB — branch header (Task #787)", () => {
   });
 });
 
-describe("ticketPageWCB — approval block (Task #787)", () => {
-  it("renders approval block when approvedBy is set", () => {
+describe("ticketPageWCB — approval block absent from PDF (Task #1193)", () => {
+  it("does not render approval block even when approvedBy is set", () => {
     const row = makeRow();
     (row.wetCheckBilling as any).approvedBy = "Manager Bob";
     const html = ticketPageWCB(row, "INV-1", []);
-    assert.match(html, /ticket-approval/);
-    assert.match(html, /Manager Bob/);
+    assert.doesNotMatch(html, /ticket-approval/, "approval block must be absent from PDF");
+    assert.doesNotMatch(html, /Approved By:/, "Approved By text must not appear in PDF");
   });
 
-  it("omits approval block when approvedBy is null and approvedAt is null", () => {
+  it("does not render approval block when approvedBy is null and approvedAt is null", () => {
     const html = ticketPageWCB(makeRow(), "INV-1", []);
     assert.doesNotMatch(html, /ticket-approval/);
+    assert.doesNotMatch(html, /Approved By:/);
   });
 });
 
@@ -450,6 +451,22 @@ const minimalBS: PdfBillingSheetRow = {
   approvedBy: null,
   approvedAt: null,
 };
+
+describe("ticketPageWO — approval text absent from PDF (Task #1193)", () => {
+  it("does not render approval block even when approvedBy is set", () => {
+    const woWithApproval = { ...minimalWO, approvedBy: "Manager Alice", approvedAt: new Date("2026-05-20") };
+    const html = ticketPageWO(woWithApproval, "INV-1", []);
+    assert.doesNotMatch(html, /ticket-approval/, "approval block must be absent from WO PDF");
+    assert.doesNotMatch(html, /Approved By:/, "Approved By text must not appear in WO PDF");
+    assert.doesNotMatch(html, /Approved At:/, "Approved At text must not appear in WO PDF");
+  });
+
+  it("does not render approval block when approvedBy is null", () => {
+    const html = ticketPageWO(minimalWO, "INV-1", []);
+    assert.doesNotMatch(html, /ticket-approval/);
+    assert.doesNotMatch(html, /Approved By:/);
+  });
+});
 
 describe("job-type modifier classes (Task #1173)", () => {
   it("tags each ticket page with its job-type modifier", () => {

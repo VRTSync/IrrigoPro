@@ -202,16 +202,6 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
     ? `<div class="ticket-header-branch">&#127970; Branch: ${wo.branchName}</div>`
     : '';
 
-  const approvalHtml = (wo.approvedBy || wo.approvedAt)
-    ? `<div class="ticket-approval">
-         <span class="ticket-approval-icon">&#10003;</span>
-         <div class="ticket-approval-details">
-           ${wo.approvedBy ? `<span class="ticket-approval-by">Approved By: <strong>${wo.approvedBy}</strong></span>` : ''}
-           ${wo.approvedAt ? `<span class="ticket-approval-at">Approved At: ${formatDate(wo.approvedAt)}</span>` : ''}
-         </div>
-       </div>`
-    : '';
-
   const logoHtml = logoDataUri
     ? `<img src="${logoDataUri}" class="ticket-header-logo" alt="Company logo">`
     : companyName
@@ -227,7 +217,6 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
         <div class="ticket-header-line2">Date: ${wo.completedAt ? formatDate(wo.completedAt) : 'N/A'} &nbsp;|&nbsp; Technician: ${wo.technicianName} &nbsp;|&nbsp; Hours: ${wo.totalHours} hrs</div>
         ${locationLine ? `<div class="ticket-header-line3">&#128205; ${locationLine}</div>` : ''}
         ${branchLine}
-        ${approvalHtml}
       </div>
     </div>
 
@@ -279,16 +268,6 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
        </div>`
     : '';
 
-  const approvalHtml = (bs.approvedBy || bs.approvedAt)
-    ? `<div class="ticket-approval">
-         <span class="ticket-approval-icon">&#10003;</span>
-         <div class="ticket-approval-details">
-           ${bs.approvedBy ? `<span class="ticket-approval-by">Approved By: <strong>${bs.approvedBy}</strong></span>` : ''}
-           ${bs.approvedAt ? `<span class="ticket-approval-at">Approved At: ${formatDate(bs.approvedAt)}</span>` : ''}
-         </div>
-       </div>`
-    : '';
-
   const bsLogoHtml = logoDataUri
     ? `<img src="${logoDataUri}" class="ticket-header-logo" alt="Company logo">`
     : companyName
@@ -304,7 +283,6 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
         <div class="ticket-header-line2">Date: ${formatDate(bs.workDate)} &nbsp;|&nbsp; Technician: ${bs.technicianName} &nbsp;|&nbsp; Hours: ${bs.totalHours} hrs</div>
         ${bs.propertyAddress ? `<div class="ticket-header-line3">&#128205; ${bs.propertyAddress}</div>` : ''}
         ${bs.branchName ? `<div class="ticket-header-branch">&#127970; Branch: ${bs.branchName}</div>` : ''}
-        ${approvalHtml}
       </div>
     </div>
 
@@ -371,16 +349,6 @@ export function ticketPageWCB(
        </div>`
     : '';
 
-  const approvalHtml = (wcb.approvedBy || wcb.approvedAt)
-    ? `<div class="ticket-approval">
-         <span class="ticket-approval-icon">&#10003;</span>
-         <div class="ticket-approval-details">
-           ${wcb.approvedBy ? `<span class="ticket-approval-by">Approved By: <strong>${wcb.approvedBy}</strong></span>` : ''}
-           ${wcb.approvedAt ? `<span class="ticket-approval-at">Approved At: ${formatDate(new Date(wcb.approvedAt))}</span>` : ''}
-         </div>
-       </div>`
-    : '';
-
   const wcbLogoHtml = logoDataUri
     ? `<img src="${logoDataUri}" class="ticket-header-logo" alt="Company logo">`
     : companyName
@@ -407,7 +375,6 @@ export function ticketPageWCB(
         <div class="ticket-header-line2">Date: ${formatDate(new Date(wcb.workDate))} &nbsp;|&nbsp; Technician: ${wcb.technicianName} &nbsp;|&nbsp; Hours: ${totalHours} hrs</div>
         ${wcb.propertyAddress ? `<div class="ticket-header-line3">&#128205; ${wcb.propertyAddress}</div>` : ''}
         ${wcb.branchName ? `<div class="ticket-header-branch">&#127970; Branch: ${wcb.branchName}</div>` : ''}
-        ${approvalHtml}
       </div>
     </div>
 
@@ -1297,35 +1264,6 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     color: rgba(255,255,255,0.95);
     line-height: 1.3;
     margin-top: 2px;
-  }
-
-  .ticket-approval {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    margin-top: 4px;
-    background: rgba(255,255,255,0.15);
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-size: 10px;
-    width: fit-content;
-  }
-
-  .ticket-approval-icon {
-    font-size: 12px;
-    font-weight: 700;
-  }
-
-  .ticket-approval-details {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-  }
-
-  .ticket-approval-by,
-  .ticket-approval-at {
-    display: block;
-    font-size: 10px;
   }
 
   /* ── Ticket Sections ── */

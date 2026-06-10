@@ -2,8 +2,8 @@
  * pdf-ticket-parity.test.ts  (Slice 4)
  *
  * Pins the shared structural contract between ticketPageBS and ticketPageWCB.
- * Both renderers share the same outer chrome, financial layout, approval block,
- * and photo gallery pattern. This file asserts 15 shared CSS classes, 6 shared
+ * Both renderers share the same outer chrome, financial layout,
+ * and photo gallery pattern. This file asserts 15 shared CSS classes, 4 shared
  * labels, the three intentional differences, and a TOTAL value sanity check, then
  * snapshots both renderers so any future drift is caught in CI.
  *
@@ -88,8 +88,6 @@ const SHARED_LABELS: string[] = [
   "Irrigation Labor",
   "Parts Subtotal",
   "TOTAL",
-  "Approved By:",
-  "Approved At:",
 ];
 
 // ── fixtures ──────────────────────────────────────────────────────────────────
@@ -258,6 +256,22 @@ describe("ticketPageBS + ticketPageWCB — intentional differences (Slice 4)", (
     assert.match(wcbHtml, /class="[^"]*\bzone-block\b/, "WCB must render zone-block div for parts");
     assert.doesNotMatch(bsHtml, /class="[^"]*\bzone-block\b/, "BS without wetCheckView must NOT render zone-block");
     assert.match(bsHtml, /<table/, "BS without wetCheckView must render a flat <table> for parts");
+  });
+});
+
+// ── approval text absent from PDF (Task #1193) ────────────────────────────────
+
+describe("ticketPageBS + ticketPageWCB — approval text absent from PDF (Task #1193)", () => {
+  it("BS does not contain 'Approved By:' or 'Approved At:'", () => {
+    assert.doesNotMatch(bsHtml, /Approved By:/, "BS must not render Approved By in PDF");
+    assert.doesNotMatch(bsHtml, /Approved At:/, "BS must not render Approved At in PDF");
+    assert.doesNotMatch(bsHtml, /ticket-approval/, "BS must not render ticket-approval block in PDF");
+  });
+
+  it("WCB does not contain 'Approved By:' or 'Approved At:'", () => {
+    assert.doesNotMatch(wcbHtml, /Approved By:/, "WCB must not render Approved By in PDF");
+    assert.doesNotMatch(wcbHtml, /Approved At:/, "WCB must not render Approved At in PDF");
+    assert.doesNotMatch(wcbHtml, /ticket-approval/, "WCB must not render ticket-approval block in PDF");
   });
 });
 
