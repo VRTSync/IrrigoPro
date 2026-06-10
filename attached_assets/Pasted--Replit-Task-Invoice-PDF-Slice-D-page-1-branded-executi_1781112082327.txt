@@ -1,0 +1,241 @@
+# Replit Task — Invoice PDF, Slice D (page 1 = branded executive-summary cover)
+
+Redesign page 1 of the invoice packet from a sparse header (brand band +
+invoice # + Bill-To, then ⅔ empty page) into a real cover sheet that
+answers, at a glance: *what is this, who is it for, how much, and what's
+inside?* Confined to `coverPage()` + `buildFullCSS` in
+`artifacts/api-server/src/pdf-helpers.ts`, plus a watermark asset and a
+verified logo binding.
+
+> **Heads-up on line numbers.** The deployed PDF already has the #1163
+> cover brand band (verified in the Woodglenn export), but the iCloud
+> checkout is a few commits behind and still shows the pre-#1163
+> `coverPage()`. **Work against the deployed structure and grep by class
+> name; do not trust absolute line numbers in this doc.**
+
+---
+
+## Scope decisions — what's IN, and what I pushed back on
+
+The original direction bundled several things that don't belong in a
+page-1 redesign. Keeping this slice focused:
+
+**IN (this slice):**
+- Branded cover layout: document title, prepared-for, invoice total card,
+  snapshot stats, "What's included," "How to review," watermark accent.
+- All cover content **derived from `vm`** (no hardcoded numbers).
+- Verify the cover logo uses the company-profile-uploaded logo.
+
+**PUSHED BACK / separate work (do NOT do here):**
+1. **Reference-to-page numbers on the recon table ("BS-2026-0167 →
+   Page 3").** This is genuinely hard: page numbers are assigned by
+   puppeteer at print time, and ticket pages are variable-length (photos,
+   work-text, zone counts), so the HTML has no idea which physical page a
+   ticket lands on. Doing it right needs a measured two-pass render or a
+   JS pagination pass — a real project of its own. **Defer to its own
+   slice.** Don't fake it.
+2. **Rewriting "AI-sounding" work descriptions** ("expertly repaired,"
+   "optimal functionality"). That text is stored data
+   (`wo.aiDetailedDescription || wo.workSummary || wo.workDescription`,
+   rendered as-is). Rewriting it in the PDF layer would misstate the
+   billing record and is the wrong place. **Fix at the source** — the
+   capture flow / the AI-description prompt / tech-entry guidance — as a
+   separate, non-PDF change. Out of scope here.
+3. **Photo-page headers / captions / photo counts** (e.g. "Work Photos —
+   BS-2026-0167 · 4 photos"). Reasonable, but it's ticket-page work, not
+   the cover. **Separate small slice.**
+4. **Page-2 reconciliation subtitle.** Trivial and nice, but it's a
+   different page. Listed as a recommended follow-up below, not done here.
+
+**Design push-back (apply in this slice):** the droplet is *IrrigoPro/
+VRTSync* product branding, but this is *High Plains'* invoice to *their*
+customer. The dominant brand on the cover must stay the service company.
+Use the droplet as a **subtle large background accent (low opacity,
+cropped in a corner)** — not a dominant centered graphic — and keep
+"Powered by IrrigoPro + VRTSync" in the footer where it already lives.
+
+---
+
+## Logo binding — use the company-profile upload (the "H" fallback issue)
+
+The Woodglenn cover shows an "H" initial tile, i.e. no logo resolved. The
+pipeline *should* already bind the company-profile-uploaded logo:
+`company-profile.tsx` saves to `company.logo` → `invoice-pdf-service.ts`
+(`resolveLogoToFetchableUrl` + `fetchLogoAsBase64`) → `logoDataUri` →
+`coverPage` renders it in the logo tile.
+
+**Verify and fix if broken:**
+- Confirm the format the profile **saves** (`PUT /api/company/:companyId/logo`,
+  via `normalizeLogoPath`) matches a pattern `resolveLogoToFetchableUrl`
+  (`invoice-pdf-service.ts:~75–110`) actually resolves. A mismatch here
+  silently yields the initial fallback.
+- Acceptance: with a logo uploaded on the Company Profile page, the cover
+  logo tile renders that image (not the initial). With no logo, the
+  initial fallback is expected — that's correct, not a bug.
+- The "H" on Woodglenn most likely means High Plains simply hasn't
+  uploaded a logo yet; confirm by uploading one and re-exporting. Only
+  treat it as a bug if a saved logo still doesn't appear.
+
+---
+
+## Cover content — all derived from `vm`
+
+`vm` already carries everything; compute, don't hardcode:
+
+```typescript
+const woCount  = vm.workOrders.length;
+const bsCount  = vm.billingSheets.length;
+const wcbCount = vm.wetCheckBillings.length;
+const jobCount = woCount + bsCount + wcbCount;
+
+const woTotal  = vm.workOrders.reduce((s, r) => s + r.rowTotal, 0);
+const bsTotal  = vm.billingSheets.reduce((s, r) => s + r.rowTotal, 0);
+const wcbTotal = vm.wetCheckBillings.reduce(
+  (s, r) => s + parseFloat(String(r.wetCheckBilling.totalAmount || '0')), 0);
+
+const grand = vm.totals.grandTotal;       // invoice total
+const labor = vm.totals.laborSubtotal;    // total labor
+const parts = vm.totals.partsSubtotal;    // total parts
+```
+
+**Dynamic content rules (don't promise what isn't there):**
+- Title subtitle uses `vm.invoice.customerName`.
+- The snapshot lists only the job types with `count > 0`, but may show all
+  three rows with `0` for transparency (the user likes the "0 Work Orders"
+  transparency — show all three rows).
+- "What's included" lists **Work Photos** only if any ticket actually has
+  photos; otherwise omit that item.
+- "Jobs Included: N <type>" pluralizes and names the dominant type(s).
+
+---
+
+## Layout (split cover)
+
+Keep the #1163 brand band at top as the **company** identity. Below it,
+build the executive summary:
+
+```
+┌───────────────────────────────────────────────────────┐
+│  [brand band: company logo tile + name + contact]      │  ← keep #1163
+└───────────────────────────────────────────────────────┘
+
+IRRIGATION BILLING DETAIL                      Invoice #82883
+Monthly service documentation for Woodglenn Squares HOA
+Billing Period: May 1, 2026 – May 31, 2026
+Prepared For: Woodglenn Squares HOA · matt.trebon@advancehoa.com
+
+┌── Invoice Total ───────────────┐   ┌ 7 ┐ ┌ $1,997.50 ┐ ┌ $867.41 ┐
+│   $2,864.91                    │   │BS │ │  Labor    │ │  Parts  │
+│   Labor $1,997.50              │   └───┘ └───────────┘ └─────────┘
+│   Parts $867.41 · 7 Billing Sh.│
+└────────────────────────────────┘
+
+WHAT'S INCLUDED
+ 01  Reconciliation Summary — line-by-line summary of all billed work.
+ 02  Billing Sheet Detail — labor, parts, approvals, work performed.
+ 03  Work Photos — photo documentation attached when available.   (if photos)
+
+HOW TO REVIEW
+ Start with the reconciliation summary on page 2. Each line has a
+ reference number that matches a detailed billing sheet later in the
+ packet — use it to review work, labor, parts, approvals, and photos.
+
+            [ droplet watermark, large/low-opacity, lower-right ]
+```
+
+### Title block
+Replace the plain `INVOICE #<n>` line with a large blue document title
+(`cover-doc-title`) "Irrigation Billing Detail", a gray subtitle
+("Monthly service documentation for {customerName}"), then billing
+period, "Prepared For," and Bill-To contact. Move the invoice number to a
+small right-aligned chip (`cover-invoice-chip`) so the title leads.
+
+### Invoice total card
+A bordered card (`cover-total-card`, blue border like the existing totals
+box on page 2): big `Invoice Total` + `formatCurrency(grand)`, with
+`Labor`, `Parts`, and `Jobs Included: N <type(s)>` beneath. This is the
+single biggest win — page 1 must show the total.
+
+### Snapshot stat tiles
+Three-or-four small tiles (`cover-stat`) using the **job-type colors**
+where they denote a type (Billing Sheets amber, Work Orders blue, Wet
+Check green — reuse `JOB_TYPE_COLORS` from #1163/Slice A): count + label,
+plus Labor / Parts / Total tiles. Show all three job-type rows even at 0.
+
+### What's included / How to review
+Two light boxes (`cover-included`, `cover-howto`) with the copy above.
+"Work Photos" item conditional on photos existing.
+
+### Watermark
+Embed `IRRIGO LOGOS/Watermark - IrrigoPro_2026-05.png` (or an
+`attached_assets/IrrigoPro_*.png`) as a base64 data-URI in a new
+`assets/` module (same pattern as the VRT logo). Render it absolutely
+positioned, large, **cropped** lower-right, `opacity: 0.06–0.10`, behind
+the content (`z-index:0`, content above). Guard: never let it reduce text
+legibility; if the asset can't load, render nothing.
+
+---
+
+## Done looks like
+
+- Page 1 leads with "Irrigation Billing Detail" + "Monthly service
+  documentation for {customer}", shows the invoice **total** prominently,
+  a snapshot of counts/labor/parts, a "What's included" guide, and a
+  "How to review" note — no large empty whitespace.
+- Every figure is derived from `vm` and matches page 2 (grand total, labor,
+  parts, per-type counts/totals reconcile exactly).
+- The cover logo tile renders the company-profile-uploaded logo when one
+  exists; initial fallback only when none is set.
+- The droplet watermark is a subtle background accent, not dominant; the
+  service company remains the lead brand; "Powered by" stays in the footer.
+- Cover and reconciliation remain separate pages; page 2+ unchanged.
+- `pnpm typecheck` and `pnpm test` pass.
+
+## Tests (extend a cover test)
+
+```typescript
+it("shows the invoice total and derived stats on the cover", () => {
+  const html = coverPage(vmWith({
+    totals: { grandTotal: 2864.91, laborSubtotal: 1997.50, partsSubtotal: 867.41 },
+    billingSheets: makeRows(7), workOrders: [], wetCheckBillings: [],
+  }));
+  expect(html).toContain('Irrigation Billing Detail');
+  expect(html).toContain('$2,864.91');
+  expect(html).toContain('$1,997.50');
+  expect(html).toContain('$867.41');
+  expect(html).toMatch(/7\s*Billing Sheets/);
+});
+
+it("omits the Work Photos line when no ticket has photos", () => {
+  const html = coverPage(vmWith({ /* no photos */ }));
+  expect(html).not.toContain('Work Photos');
+});
+
+it("renders the uploaded company logo in the tile when present", () => {
+  const html = coverPage(vmWith({ company: { logoDataUri: 'data:image/png;base64,AAA', name: 'High Plains' } }));
+  expect(html).toContain('data:image/png;base64,AAA');
+  expect(html).not.toContain('cover-logo-tile-empty');
+});
+```
+
+## Out of scope (see push-backs)
+
+- Recon reference-to-page numbers (separate, hard).
+- Rewriting stored work descriptions (data-layer, not PDF).
+- Photo-page headers/captions (separate ticket-page slice).
+- Page-2 subtitle (recommended follow-up).
+- Status colors; brand-color extraction.
+
+## Recommended follow-up slices (not here)
+
+1. Page-2 recon subtitle ("A summary of all approved billing items in this
+   invoice.") — trivial.
+2. Photo-section headers + counts tied to their billing sheet.
+3. Reference → page-number column on the recon table (needs measured
+   render; scope carefully).
+
+## Dependencies
+
+- #1163 (cover band + `JOB_TYPE_COLORS`) is deployed; reuse its band and
+  colors. If Slice A landed, import colors from `@workspace/shared`.
+- Independent of Slice C, though both touch `pdf-helpers.ts`.
