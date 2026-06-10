@@ -4592,8 +4592,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userRole = req.authenticatedUserRole;
       
-      // Only company admins can upload logos
-      if (userRole !== 'company_admin') {
+      // Only company admins and super admins can upload logos
+      if (userRole !== 'company_admin' && userRole !== 'super_admin') {
         res.status(403).json({ message: "Access denied. Only company admins can upload logos." });
         return;
       }
@@ -4618,7 +4618,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userRole = req.authenticatedUserRole;
       const companyId = parseInt(req.params.companyId);
       
-      if (userRole !== 'company_admin') {
+      if (userRole !== 'company_admin' && userRole !== 'super_admin') {
         res.status(403).json({ message: "Access denied. Only company admins can reset logos." });
         return;
       }
@@ -4654,8 +4654,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Production-ready logo update processing
       
-      // Only company admins can update logos
-      if (userRole !== 'company_admin') {
+      // Only company admins and super admins can update logos
+      if (userRole !== 'company_admin' && userRole !== 'super_admin') {
         res.status(403).json({ message: "Access denied. Only company admins can update logos." });
         return;
       }

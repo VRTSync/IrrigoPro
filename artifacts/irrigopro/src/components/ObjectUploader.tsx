@@ -242,6 +242,7 @@ export function ObjectUploader({
           )}
 
           <Button
+            type="button"
             onClick={handleUpload}
             disabled={isUploading}
             className={buttonClassName}
