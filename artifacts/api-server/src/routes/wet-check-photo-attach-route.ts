@@ -113,7 +113,7 @@ export function registerWetCheckPhotoAttachRoutes(
     const parsed = photoLinkBody.safeParse(req.body ?? {});
     if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     const photoId = parseInt(req.params.id);
-    if (!Number.isFinite(photoId)) {
+    if (!Number.isFinite(photoId) || photoId <= 0) {
       res.status(400).json({ message: "Invalid photo id" });
       return;
     }

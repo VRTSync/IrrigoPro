@@ -473,6 +473,21 @@ export class SyncEngine {
       return;
     }
 
+    // Belt-and-suspenders: cancel any photo.link mutation whose URL still
+    // has a baked-in negative photo ID (pre-Task-#510 legacy shape). These
+    // are created by old browser-cached code and will always fail with
+    // PostgreSQL error 22003. Deleting here is a silent cleanup so the tech
+    // never sees a spurious "sync failed" toast. Fix #1 above (running
+    // cleanupLegacyPhotoLinks after every upload) is the primary defence;
+    // this guard fires only if a legacy link somehow escapes that pass.
+    if (m.kind === "photo.link" && /\/api\/wet-checks\/photos\/-\d+/.test(url)) {
+      await deleteMutation(db, m.id);
+      this.inFlight.delete(m.id);
+      // Note: AbortController (ac) has not been created yet at this point,
+      // so there is nothing in this.aborts to clean up.
+      return;
+    }
+
     const ac = typeof AbortController !== "undefined" ? new AbortController() : null;
     if (ac) this.aborts.set(m.id, ac);
     try {
@@ -524,6 +539,13 @@ export class SyncEngine {
         // 4C — only NOW is the captured Blob safe to drop from IDB.
         if (m.kind === "photo.upload") {
           try { await deletePhotoBlob(db, m.clientId); } catch {}
+          // Old browser-cached code (pre-Task-#510) creates photo.link
+          // mutations with baked-in negative photo IDs AFTER engine
+          // startup, so they escape the startup-only cleanup. Re-running
+          // cleanupLegacyPhotoLinks here catches any such link that was
+          // just unblocked by this upload completing and rewrites/cancels
+          // it before the next tick can dispatch it.
+          void this.cleanupLegacyPhotoLinks().catch(() => {});
         }
         // Task #552 — telemetry: photo upload + wet check sync success.
         if (m.kind === "photo.upload") {
