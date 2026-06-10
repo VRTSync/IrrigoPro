@@ -1303,9 +1303,9 @@ export function CompletedWorkDetailModal({
                   });
                 }}
               />
-            ) : items.length > 0 && (
+            ) : (items.length > 0 || canInlineEdit) && (
               <SectionCard
-                title={`Parts & Materials (${items.length} item${items.length !== 1 ? "s" : ""})`}
+                title={`Parts & Materials${items.length > 0 ? ` (${items.length} item${items.length !== 1 ? "s" : ""})` : ""}`}
                 icon={<Package className="w-4 h-4" />}
                 action={canInlineEdit ? (
                   <button
@@ -1318,6 +1318,11 @@ export function CompletedWorkDetailModal({
                   </button>
                 ) : undefined}
               >
+                {items.length === 0 ? (
+                  <p className="text-sm text-gray-400 italic">
+                    No parts on this record.{canInlineEdit && ' Click \u201cEdit Parts List\u201d above to add some.'}
+                  </p>
+                ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -1380,6 +1385,7 @@ export function CompletedWorkDetailModal({
                     )}
                   </table>
                 </div>
+                )}
               </SectionCard>
             )}
 
