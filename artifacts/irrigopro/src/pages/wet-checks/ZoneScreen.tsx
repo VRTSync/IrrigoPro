@@ -1066,15 +1066,6 @@ export function ZoneScreen({
                   {mergedPhotos.length}
                 </span>
               )}
-              {!readOnly && zoneRecord && (
-                <PhotoCaptureButton
-                  wetCheckId={wetCheckId}
-                  wetCheckClientId={wetCheckClientId}
-                  zoneRecordId={zoneRecord.id}
-                  zoneRecordClientId={zoneRecord.clientId ?? null}
-                  onUploaded={onOptimisticPhoto}
-                />
-              )}
             </div>
           </div>
         </div>
