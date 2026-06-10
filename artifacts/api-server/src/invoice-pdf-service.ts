@@ -76,7 +76,17 @@ const LOGO_PATH_PATTERNS = [
   /\/api\/company-logo\/(.+)/,
 ];
 
-function resolveLogoToFetchableUrl(storedLogo: string): string {
+/**
+ * Exported for unit-test verification of the logo path → URL binding.
+ *
+ * Logo path binding verified (Task #1192):
+ *   normalizeLogoPath() on a GCS upload URL saves "company-logos/<uuid>" to the DB.
+ *   resolveLogoToFetchableUrl("company-logos/<uuid>") hits the
+ *   `startsWith('company-logos/')` branch and produces
+ *   `http://localhost:<port>/api/company-logo/<uuid>`, which is the correct
+ *   internal endpoint served by GET /api/company-logo/:id. No mismatch found.
+ */
+export function resolveLogoToFetchableUrl(storedLogo: string): string {
   const port = process.env.PORT || 5000;
   const localBase = `http://localhost:${port}`;
 

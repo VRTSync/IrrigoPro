@@ -4,6 +4,9 @@
  * Tests for Invoice PDF Slice 1152:
  *   Part A — colored cover brand band + below-band invoice block
  *   Part B — fixed job-type colors on reconciliation summary
+ *
+ * Task #1192 — Slice D (executive summary cover page):
+ *   Part C — total card / stat counts, conditional photos line, logo binding
  */
 
 import { describe, it } from 'node:test';
@@ -11,6 +14,7 @@ import assert from 'node:assert/strict';
 import { coverPage, buildFullCSS, JOB_TYPE_COLORS } from './pdf-helpers';
 import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
 import type { PdfViewModel } from './pdf-view-model';
+import { resolveLogoToFetchableUrl } from './invoice-pdf-service';
 
 // ── Minimal PdfViewModel fixture ──────────────────────────────────────────────
 
@@ -19,6 +23,10 @@ function makeVm(overrides: {
   companyName?: string;
   navy?: string;
   invoiceNumber?: string;
+  totals?: Partial<PdfViewModel['totals']>;
+  workOrders?: PdfViewModel['workOrders'];
+  billingSheets?: PdfViewModel['billingSheets'];
+  wetCheckBillings?: PdfViewModel['wetCheckBillings'];
 } = {}): PdfViewModel {
   const navy = overrides.navy ?? '#1E5A99';
   return {
@@ -39,10 +47,16 @@ function makeVm(overrides: {
       customerEmail: 'acme@example.com',
       customerPhone: '555-9999',
     },
-    workOrders: [],
-    billingSheets: [],
-    wetCheckBillings: [],
-    totals: { grandTotal: 0, laborSubtotal: 0, partsSubtotal: 0, storedTotalAmount: 0 },
+    workOrders: overrides.workOrders ?? [],
+    billingSheets: overrides.billingSheets ?? [],
+    wetCheckBillings: overrides.wetCheckBillings ?? [],
+    totals: {
+      grandTotal: 0,
+      laborSubtotal: 0,
+      partsSubtotal: 0,
+      storedTotalAmount: 0,
+      ...(overrides.totals ?? {}),
+    },
     totalJobs: 0,
     validationWarning: null,
     brandColors: {
@@ -193,5 +207,121 @@ describe('buildFullCSS — ticket header color classes (Task #1164)', () => {
     assert.ok(woMatch?.[0].includes('#1E5A99'), '.ticket-header-wo must stay #1E5A99 when navy is overridden');
     assert.ok(bsMatch?.[0].includes('#B06820'), '.ticket-header-bs must stay #B06820 when navy is overridden');
     assert.ok(wcbMatch?.[0].includes('#5E8C2A'), '.ticket-header-wcb must stay #5E8C2A when green is overridden');
+  });
+});
+
+// ── Part C: Executive summary cover page (Task #1192, Slice D) ───────────────
+
+describe('coverPage — total card and stat counts (Part C)', () => {
+  it('renders grand total, labor subtotal, and parts subtotal from vm.totals', () => {
+    const vm = makeVm({
+      totals: { grandTotal: 4875.50, laborSubtotal: 1200.00, partsSubtotal: 3675.50 },
+    });
+    const html = coverPage(vm);
+    assert.ok(html.includes('cover-total-card'), 'Expected cover-total-card element');
+    assert.ok(html.includes('$4,875.50'), 'Expected grand total $4,875.50');
+    assert.ok(html.includes('$1,200.00'), 'Expected labor subtotal $1,200.00');
+    assert.ok(html.includes('$3,675.50'), 'Expected parts subtotal $3,675.50');
+  });
+
+  it('renders all three stat tiles even when counts are 0', () => {
+    const vm = makeVm();
+    const html = coverPage(vm);
+    const statMatches = html.match(/class="cover-stat"/g);
+    assert.ok(statMatches !== null && statMatches.length >= 3, 'Expected at least 3 cover-stat tiles');
+    assert.ok(html.includes('Billing Sheets'), 'Expected Billing Sheets tile label');
+    assert.ok(html.includes('Work Orders'), 'Expected Work Orders tile label');
+    assert.ok(html.includes('Wet Check Billings'), 'Expected Wet Check Billings tile label');
+  });
+
+  it('stat tile counts match the workOrders, billingSheets, and wetCheckBillings arrays', () => {
+    const vm = makeVm({
+      workOrders: [
+        { photos: [] } as unknown as PdfViewModel['workOrders'][0],
+        { photos: [] } as unknown as PdfViewModel['workOrders'][0],
+      ],
+      billingSheets: [
+        { photos: [] } as unknown as PdfViewModel['billingSheets'][0],
+      ],
+      wetCheckBillings: [
+        { mergedPhotoUrls: [] } as unknown as PdfViewModel['wetCheckBillings'][0],
+        { mergedPhotoUrls: [] } as unknown as PdfViewModel['wetCheckBillings'][0],
+        { mergedPhotoUrls: [] } as unknown as PdfViewModel['wetCheckBillings'][0],
+      ],
+    });
+    const html = coverPage(vm);
+    const stat2 = html.match(/cover-stat-count[^>]*>2</g);
+    const stat1 = html.match(/cover-stat-count[^>]*>1</g);
+    const stat3 = html.match(/cover-stat-count[^>]*>3</g);
+    assert.ok(stat2 !== null, 'Expected a stat tile with count 2 (work orders)');
+    assert.ok(stat1 !== null, 'Expected a stat tile with count 1 (billing sheets)');
+    assert.ok(stat3 !== null, 'Expected a stat tile with count 3 (wet check billings)');
+  });
+});
+
+describe('coverPage — conditional Work Photos item (Part C)', () => {
+  it('omits Work Photos item when no job has photos', () => {
+    const vm = makeVm({
+      workOrders: [{ photos: [] } as unknown as PdfViewModel['workOrders'][0]],
+      billingSheets: [{ photos: [] } as unknown as PdfViewModel['billingSheets'][0]],
+      wetCheckBillings: [{ mergedPhotoUrls: [] } as unknown as PdfViewModel['wetCheckBillings'][0]],
+    });
+    const html = coverPage(vm);
+    assert.ok(!html.includes('Work Photos'), 'Expected Work Photos item to be absent when no photos');
+  });
+
+  it('includes Work Photos item when a work order has photos', () => {
+    const vm = makeVm({
+      workOrders: [{ photos: ['http://example.com/photo.jpg'] } as unknown as PdfViewModel['workOrders'][0]],
+    });
+    const html = coverPage(vm);
+    assert.ok(html.includes('Work Photos'), 'Expected Work Photos item when a work order has photos');
+  });
+
+  it('includes Work Photos item when a billing sheet has photos', () => {
+    const vm = makeVm({
+      billingSheets: [{ photos: ['http://example.com/photo.jpg'] } as unknown as PdfViewModel['billingSheets'][0]],
+    });
+    const html = coverPage(vm);
+    assert.ok(html.includes('Work Photos'), 'Expected Work Photos item when a billing sheet has photos');
+  });
+
+  it('includes Work Photos item when a WCB has mergedPhotoUrls', () => {
+    const vm = makeVm({
+      wetCheckBillings: [{
+        mergedPhotoUrls: ['http://example.com/photo.jpg'],
+      } as unknown as PdfViewModel['wetCheckBillings'][0]],
+    });
+    const html = coverPage(vm);
+    assert.ok(html.includes('Work Photos'), 'Expected Work Photos item when a WCB has mergedPhotoUrls');
+  });
+});
+
+describe('coverPage — logo binding (Part C)', () => {
+  it('resolveLogoToFetchableUrl maps company-logos/<uuid> to /api/company-logo/<uuid>', () => {
+    const uuid = 'abc123-def456';
+    const storedPath = `company-logos/${uuid}`;
+    const resolved = resolveLogoToFetchableUrl(storedPath);
+    assert.ok(
+      resolved.includes(`/api/company-logo/${uuid}`),
+      `Expected resolved URL to contain /api/company-logo/${uuid}, got: ${resolved}`,
+    );
+  });
+
+  it('resolveLogoToFetchableUrl handles /api/company-logo/<uuid> path stored by older clients', () => {
+    // Some paths may be stored in the DB as /api/company-logo/<uuid> (API-relative)
+    const uuid = 'xyz789';
+    const storedPath = `/api/company-logo/${uuid}`;
+    const resolved = resolveLogoToFetchableUrl(storedPath);
+    assert.ok(
+      resolved.includes(`/api/company-logo/${uuid}`),
+      `Expected /api/company-logo/${uuid} to resolve correctly, got: ${resolved}`,
+    );
+  });
+
+  it('renders img src when logoDataUri is provided (cover logo tile)', () => {
+    const html = coverPage(makeVm({ logoDataUri: 'data:image/png;base64,XYZ' }));
+    assert.ok(html.includes('src="data:image/png;base64,XYZ"'), 'Expected logo img src in cover page output');
+    assert.ok(!html.includes('cover-logo-tile-empty'), 'Expected no empty fallback tile when logoDataUri is set');
   });
 });

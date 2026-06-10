@@ -12,6 +12,7 @@ import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
 import type { WetCheckBillingView, WcvZone } from './wet-check-billing-view';
 import { VRT_LOGO_DATA_URI } from './assets/vrt-logo';
 import { IRRIGOPRO_LOGO_DATA_URI } from './assets/irrigopro-logo';
+import { WATERMARK_DATA_URI } from './assets/watermark';
 import { JOB_TYPE_COLORS, type JobTypeKey } from '@workspace/shared';
 export { JOB_TYPE_COLORS, type JobTypeKey };
 
@@ -118,13 +119,15 @@ export function formatCurrency(amount: number): string {
 export function coverPage(
   vm: PdfViewModel
 ): string {
-  const { company, invoice, customerHasBranches, branchSubtotals } = vm;
+  const { company, invoice, customerHasBranches, branchSubtotals, totals, workOrders, billingSheets, wetCheckBillings } = vm;
   const navy = vm.brandColors.navy;
 
+  // ── Brand band (Task #1163 — unchanged) ─────────────────────────────────
   const logoTile = company.logoDataUri
     ? `<div class="cover-logo-tile"><img src="${company.logoDataUri}" class="cover-logo" alt="${company.name}"></div>`
     : `<div class="cover-logo-tile cover-logo-tile-empty">${company.name?.charAt(0) || '?'}</div>`;
 
+  // ── Branch summary block (unchanged) ────────────────────────────────────
   const branchSummaryHtml = (customerHasBranches && branchSubtotals.length > 0)
     ? (() => {
         const rows = branchSubtotals.map(group => {
@@ -153,8 +156,48 @@ export function coverPage(
       })()
     : '';
 
+  // ── Executive summary content ────────────────────────────────────────────
+
+  // Computed figures (all from vm — nothing hardcoded)
+  const woCount = workOrders.length;
+  const bsCount = billingSheets.length;
+  const wcbCount = wetCheckBillings.length;
+  const totalJobs = woCount + bsCount + wcbCount;
+
+  // Detect any attached photos for the conditional "Work Photos" included item
+  const hasPhotos =
+    workOrders.some(wo => wo.photos && wo.photos.length > 0) ||
+    billingSheets.some(bs => bs.photos && bs.photos.length > 0) ||
+    wetCheckBillings.some(wcb => {
+      const urls = wcb.mergedPhotoUrls ?? wcb.photoUrls ?? [];
+      return urls.length > 0;
+    });
+
+  // Watermark: large droplet logo at low opacity, lower-right, behind content
+  const watermarkHtml = WATERMARK_DATA_URI
+    ? `<img src="${WATERMARK_DATA_URI}" class="cover-watermark" alt="">`
+    : '';
+
+  // Stat tiles using JOB_TYPE_COLORS
+  const statTiles = [
+    { label: 'Billing Sheets',      count: bsCount,  color: JOB_TYPE_COLORS.billingSheet },
+    { label: 'Work Orders',         count: woCount,  color: JOB_TYPE_COLORS.workOrder },
+    { label: 'Wet Check Billings',  count: wcbCount, color: JOB_TYPE_COLORS.wetCheck },
+  ].map(({ label, count, color }) => `
+    <div class="cover-stat">
+      <div class="cover-stat-count" style="color:${color};">${count}</div>
+      <div class="cover-stat-label">${label}</div>
+    </div>`).join('');
+
+  // What's Included list (photos item conditional)
+  const photosItem = hasPhotos
+    ? `<li><strong>Work Photos</strong> — site and field photos attached to completed tickets</li>`
+    : '';
+
   return `
   <div class="cover-page">
+    ${watermarkHtml}
+
     <div class="cover-brand-band" style="background:${navy};">
       ${logoTile}
       <div class="cover-brand-company">
@@ -165,16 +208,53 @@ export function coverPage(
       </div>
     </div>
 
-    <div class="cover-invoice-block">
-      <div class="cover-invoice-number">INVOICE #${invoice.invoiceNumber}</div>
-      <div class="cover-invoice-period">Billing Period: ${formatDate(invoice.periodStart)} – ${formatDate(invoice.periodEnd)}</div>
+    <div class="cover-title-block">
+      <div class="cover-doc-title">Irrigation Billing Detail</div>
+      <div class="cover-subtitle">Monthly service documentation for ${invoice.customerName}</div>
+      <div class="cover-meta-row">
+        <span class="cover-billing-period">Billing Period: ${formatDate(invoice.periodStart)} \u2013 ${formatDate(invoice.periodEnd)}</span>
+        <span class="cover-invoice-chip">INVOICE #${invoice.invoiceNumber}</span>
+      </div>
+      <div class="cover-prepared-for">Prepared for: <strong>${invoice.customerName}</strong></div>
     </div>
 
-    <div class="cover-bill-to">
-      <div class="cover-bill-to-label">BILL TO</div>
-      <div class="cover-bill-to-name">${invoice.customerName}</div>
-      ${invoice.customerEmail ? `<div class="cover-bill-to-detail">${invoice.customerEmail}</div>` : ''}
-      ${invoice.customerPhone ? `<div class="cover-bill-to-detail">${invoice.customerPhone}</div>` : ''}
+    <div class="cover-total-card">
+      <div class="cover-total-card-header">Invoice Total</div>
+      <div class="cover-total-card-amount">${formatCurrency(totals.grandTotal)}</div>
+      <div class="cover-total-card-breakdown">
+        <div class="cover-total-card-sub">
+          <span class="cover-total-card-sub-label">Labor</span>
+          <span class="cover-total-card-sub-value">${formatCurrency(totals.laborSubtotal)}</span>
+        </div>
+        <div class="cover-total-card-sep"></div>
+        <div class="cover-total-card-sub">
+          <span class="cover-total-card-sub-label">Parts</span>
+          <span class="cover-total-card-sub-value">${formatCurrency(totals.partsSubtotal)}</span>
+        </div>
+        <div class="cover-total-card-sep"></div>
+        <div class="cover-total-card-sub">
+          <span class="cover-total-card-sub-label">Jobs</span>
+          <span class="cover-total-card-sub-value">${totalJobs}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="cover-stat-grid">
+      ${statTiles}
+    </div>
+
+    <div class="cover-included">
+      <div class="cover-included-heading">What\u2019s Included</div>
+      <ol class="cover-included-list">
+        <li><strong>Reconciliation Summary</strong> — line-item breakdown of all charges for this billing period</li>
+        <li><strong>Billing Sheet Detail</strong> — technician notes, parts, and labor for each service ticket</li>
+        ${photosItem}
+      </ol>
+    </div>
+
+    <div class="cover-howto">
+      <div class="cover-howto-heading">How to Review</div>
+      <p class="cover-howto-body">Start with the <strong>Reconciliation Summary</strong> on the next page for a quick overview of all charges. Then turn to the <strong>Billing Sheet Detail</strong> pages for full technician notes and parts used on each visit.${hasPhotos ? ' Site photos follow each ticket where available.' : ''} Contact us with any questions before your payment due date.</p>
     </div>
 
     ${branchSummaryHtml}
@@ -953,6 +1033,7 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
   ═══════════════════════════════════ */
   .cover-page {
     min-height: 95vh;
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 28px;
@@ -961,6 +1042,7 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     break-after: page;
     page-break-inside: avoid;
     break-inside: avoid;
+    overflow: hidden;
   }
 
   .cover-brand-band {
@@ -1178,6 +1260,226 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
   .cover-breakdown-table tfoot td.cover-breakdown-type,
   .cover-breakdown-table tfoot td.cover-breakdown-count {
     text-align: left;
+  }
+
+  /* ── Executive summary cover additions (Task #1192) ── */
+
+  .cover-watermark {
+    position: absolute;
+    bottom: -20px;
+    right: -20px;
+    width: 320px;
+    height: auto;
+    opacity: 0.07;
+    z-index: 0;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .cover-title-block {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .cover-doc-title {
+    font-size: 30px;
+    font-weight: 900;
+    color: ${navy};
+    letter-spacing: -0.5px;
+    line-height: 1.1;
+  }
+
+  .cover-subtitle {
+    font-size: 14px;
+    color: #6b7280;
+    font-weight: 400;
+  }
+
+  .cover-meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 4px;
+  }
+
+  .cover-billing-period {
+    font-size: 13px;
+    color: #374151;
+    font-weight: 500;
+  }
+
+  .cover-invoice-chip {
+    font-size: 11px;
+    font-weight: 700;
+    color: white;
+    background: ${brown};
+    border-radius: 20px;
+    padding: 4px 12px;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+
+  .cover-prepared-for {
+    font-size: 13px;
+    color: #4b5563;
+    margin-top: 2px;
+  }
+
+  .cover-total-card {
+    position: relative;
+    z-index: 1;
+    background: ${navy};
+    border-radius: 12px;
+    padding: 28px 32px;
+    color: white;
+    border: 2px solid ${green};
+  }
+
+  .cover-total-card-header {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    opacity: 0.8;
+    margin-bottom: 8px;
+  }
+
+  .cover-total-card-amount {
+    font-size: 48px;
+    font-weight: 900;
+    letter-spacing: -1px;
+    line-height: 1;
+    color: ${brown};
+    margin-bottom: 16px;
+  }
+
+  .cover-total-card-breakdown {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    border-top: 1px solid rgba(255,255,255,0.2);
+    padding-top: 14px;
+    flex-wrap: wrap;
+  }
+
+  .cover-total-card-sub {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 80px;
+  }
+
+  .cover-total-card-sub-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.7;
+  }
+
+  .cover-total-card-sub-value {
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .cover-total-card-sep {
+    width: 1px;
+    height: 36px;
+    background: rgba(255,255,255,0.2);
+    margin: 0 20px;
+  }
+
+  .cover-stat-grid {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    gap: 16px;
+  }
+
+  .cover-stat {
+    flex: 1;
+    background: ${gray};
+    border-radius: 8px;
+    padding: 18px 16px;
+    text-align: center;
+    border-top: 3px solid transparent;
+  }
+
+  .cover-stat-count {
+    font-size: 36px;
+    font-weight: 900;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+
+  .cover-stat-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .cover-included {
+    position: relative;
+    z-index: 1;
+    border: 1.5px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 18px 22px;
+    background: white;
+  }
+
+  .cover-included-heading {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: ${navy};
+    margin-bottom: 10px;
+  }
+
+  .cover-included-list {
+    margin: 0;
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+    color: #374151;
+  }
+
+  .cover-included-list li {
+    line-height: 1.4;
+  }
+
+  .cover-howto {
+    position: relative;
+    z-index: 1;
+    background: ${gray};
+    border-radius: 8px;
+    padding: 18px 22px;
+    border-left: 4px solid ${green};
+  }
+
+  .cover-howto-heading {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: ${navy};
+    margin-bottom: 8px;
+  }
+
+  .cover-howto-body {
+    font-size: 13px;
+    color: #374151;
+    line-height: 1.6;
+    margin: 0;
   }
 
   /* ═══════════════════════════════════
