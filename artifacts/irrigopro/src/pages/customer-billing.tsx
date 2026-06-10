@@ -2086,7 +2086,7 @@ export default function CustomerBilling() {
                                     onClick={() => { setSelectedWorkOrder(wo); setShowWorkOrderDetail(true); }}
                                     className="h-6 px-2 text-xs hover:bg-orange-50"
                                   >
-                                    View
+                                    View / Edit
                                   </Button>
                                 </div>
                               </div>
@@ -2140,7 +2140,7 @@ export default function CustomerBilling() {
                                     onClick={() => { setSelectedBillingSheet(bs); setShowBillingSheetDetail(true); }}
                                     className="h-6 px-2 text-xs hover:bg-orange-50"
                                   >
-                                    View
+                                    View / Edit
                                   </Button>
                                 </div>
                               </div>
@@ -2262,7 +2262,7 @@ export default function CustomerBilling() {
                                         onClick={() => { setSelectedWorkOrder(wo); setShowWorkOrderDetail(true); }}
                                         className="h-6 px-2 text-xs"
                                       >
-                                        View
+                                        View / Edit
                                       </Button>
                                     </>
                                   )}
@@ -2324,7 +2324,7 @@ export default function CustomerBilling() {
                                               onClick={() => { setSelectedWorkOrder(wo); setShowWorkOrderDetail(true); }}
                                               className="h-6 px-2 text-xs"
                                             >
-                                              View
+                                              View / Edit
                                             </Button>
                                           </div>
                                         </div>
@@ -2399,7 +2399,7 @@ export default function CustomerBilling() {
                                         onClick={() => { setSelectedBillingSheet(bs); setShowBillingSheetDetail(true); }}
                                         className="h-6 px-2 text-xs"
                                       >
-                                        View
+                                        View / Edit
                                       </Button>
                                     </>
                                   )}
@@ -2459,7 +2459,7 @@ export default function CustomerBilling() {
                                               onClick={() => { setSelectedBillingSheet(bs); setShowBillingSheetDetail(true); }}
                                               className="h-6 px-2 text-xs"
                                             >
-                                              View
+                                              View / Edit
                                             </Button>
                                           </div>
                                         </div>
@@ -2545,7 +2545,7 @@ export default function CustomerBilling() {
                                       onClick={() => setSelectedEstimate(estimate)}
                                       className="h-6 px-2 text-xs"
                                     >
-                                      View
+                                      View / Edit
                                     </Button>
                                   </DialogTrigger>
                                   <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
