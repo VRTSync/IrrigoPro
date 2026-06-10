@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2, Upload } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Select,
@@ -76,6 +76,7 @@ export function LoosePhotosSection({
       </div>
       <div className="space-y-2">
         {photos.map((p) => {
+          const isOptimistic = p.id <= 0;
           const busy = busyPhotoId === p.id && attachMut.isPending;
           return (
             <div
@@ -83,43 +84,52 @@ export function LoosePhotosSection({
               className="flex items-center gap-3 bg-white rounded border border-amber-200 p-2"
               data-testid={`loose-photo-${p.id}`}
             >
-              <PhotoThumb photo={p} canDelete={!readOnly} />
-              {!readOnly && findingOptions.length > 0 && (
-                <div className="flex-1 min-w-0 flex items-center gap-2">
-                  <Select
-                    disabled={busy}
-                    onValueChange={(value) => {
-                      const findingId = parseInt(value, 10);
-                      if (!Number.isFinite(findingId)) return;
-                      setBusyPhotoId(p.id);
-                      attachMut.mutate({ photoId: p.id, findingId });
-                    }}
-                  >
-                    <SelectTrigger
-                      className="h-9 text-xs"
-                      data-testid={`loose-photo-${p.id}-attach-trigger`}
-                    >
-                      <SelectValue placeholder="Attach to finding…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {findingOptions.map((opt) => (
-                        <SelectItem
-                          key={opt.id}
-                          value={String(opt.id)}
-                          data-testid={`loose-photo-${p.id}-attach-option-${opt.id}`}
+              <PhotoThumb photo={p} canDelete={!readOnly && !isOptimistic} />
+              {isOptimistic ? (
+                <div className="flex-1 flex items-center gap-1.5 text-xs text-amber-700" data-testid={`loose-photo-${p.id}-uploading`}>
+                  <Upload className="w-3.5 h-3.5 animate-pulse shrink-0" />
+                  Uploading…
+                </div>
+              ) : (
+                <>
+                  {!readOnly && findingOptions.length > 0 && (
+                    <div className="flex-1 min-w-0 flex items-center gap-2">
+                      <Select
+                        disabled={busy}
+                        onValueChange={(value) => {
+                          const findingId = parseInt(value, 10);
+                          if (!Number.isFinite(findingId)) return;
+                          setBusyPhotoId(p.id);
+                          attachMut.mutate({ photoId: p.id, findingId });
+                        }}
+                      >
+                        <SelectTrigger
+                          className="h-9 text-xs"
+                          data-testid={`loose-photo-${p.id}-attach-trigger`}
                         >
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {busy && <Loader2 className="w-4 h-4 animate-spin text-amber-700" />}
-                </div>
-              )}
-              {!readOnly && findingOptions.length === 0 && (
-                <div className="flex-1 text-xs text-amber-800">
-                  Add a work item first, then re-open this section to attach the photo.
-                </div>
+                          <SelectValue placeholder="Attach to finding…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {findingOptions.map((opt) => (
+                            <SelectItem
+                              key={opt.id}
+                              value={String(opt.id)}
+                              data-testid={`loose-photo-${p.id}-attach-option-${opt.id}`}
+                            >
+                              {opt.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {busy && <Loader2 className="w-4 h-4 animate-spin text-amber-700" />}
+                    </div>
+                  )}
+                  {!readOnly && findingOptions.length === 0 && (
+                    <div className="flex-1 text-xs text-amber-800">
+                      Add a work item first, then re-open this section to attach the photo.
+                    </div>
+                  )}
+                </>
               )}
             </div>
           );

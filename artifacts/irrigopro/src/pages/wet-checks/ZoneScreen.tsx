@@ -1512,7 +1512,9 @@ export function ZoneScreen({
             const zoneOnlyPhotos = mergedPhotos.filter((p) => p.findingId == null);
             if (zoneOnlyPhotos.length === 0) return null;
             if (findings.length > 0) {
-              const options = findings.map((f) => ({
+              const options = findings
+              .filter((f) => f.id > 0)
+              .map((f) => ({
                 id: f.id,
                 label: [f.issueType.replace(/_/g, " "), f.partName ?? "no part"].join(" · "),
               }));
