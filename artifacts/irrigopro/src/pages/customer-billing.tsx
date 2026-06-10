@@ -1333,6 +1333,16 @@ export default function CustomerBilling() {
                                     <span>Total:</span>
                                     <span className="font-medium">{formatCurrency(wcb.laborCost + wcb.partsCost)}</span>
                                   </div>
+                                  <div className="mt-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setOpenWcbId(wcb.id)}
+                                      className="h-6 px-2 text-xs hover:bg-orange-50"
+                                    >
+                                      View / Edit
+                                    </Button>
+                                  </div>
                                 </CardContent>
                               </Card>
                             ))}
@@ -2175,6 +2185,14 @@ export default function CustomerBilling() {
                                   <div className="text-sm font-medium text-jobtype-wcb">
                                     {formatCurrency(wcb.laborCost + wcb.partsCost)}
                                   </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setOpenWcbId(wcb.id)}
+                                    className="h-6 px-2 text-xs hover:bg-orange-50"
+                                  >
+                                    View / Edit
+                                  </Button>
                                 </div>
                               </div>
                             </CardContent>
