@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, createContext, useContext } from "react";
+import { useState, useRef, useEffect, createContext, useContext, useCallback } from "react";
 import { Pencil, Check, X, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,17 +11,42 @@ import { cn } from "@/lib/utils";
 interface InlineEditCtx {
   activeField: string | null;
   setActiveField: (id: string | null) => void;
+  registerSave: (fieldId: string, fn: () => Promise<void>) => void;
+  unregisterSave: (fieldId: string) => void;
+  /** Saves the currently active field. No-op if no field is open. */
+  triggerSave: () => Promise<void>;
 }
 
 const InlineEditContext = createContext<InlineEditCtx>({
   activeField: null,
   setActiveField: () => {},
+  registerSave: () => {},
+  unregisterSave: () => {},
+  triggerSave: async () => {},
 });
+
+export { InlineEditContext };
 
 export function InlineEditProvider({ children }: { children: React.ReactNode }) {
   const [activeField, setActiveField] = useState<string | null>(null);
+  const saveFnsRef = useRef(new Map<string, () => Promise<void>>());
+
+  const registerSave = useCallback((fieldId: string, fn: () => Promise<void>) => {
+    saveFnsRef.current.set(fieldId, fn);
+  }, []);
+
+  const unregisterSave = useCallback((fieldId: string) => {
+    saveFnsRef.current.delete(fieldId);
+  }, []);
+
+  const triggerSave = useCallback(async () => {
+    if (!activeField) return;
+    const fn = saveFnsRef.current.get(activeField);
+    if (fn) await fn();
+  }, [activeField]);
+
   return (
-    <InlineEditContext.Provider value={{ activeField, setActiveField }}>
+    <InlineEditContext.Provider value={{ activeField, setActiveField, registerSave, unregisterSave, triggerSave }}>
       {children}
     </InlineEditContext.Provider>
   );
@@ -69,12 +94,15 @@ export function EditableField({
   inputClassName,
   fieldId,
 }: EditableFieldProps) {
-  const { activeField, setActiveField } = useContext(InlineEditContext);
+  const { activeField, setActiveField, registerSave, unregisterSave } = useContext(InlineEditContext);
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(null);
+
+  // Always-current reference to handleSave for triggerSave delegation.
+  const handleSaveRef = useRef<() => Promise<void>>(async () => {});
 
   // Auto-cancel when another field becomes active on the same surface.
   // Blocked while a save is in-flight so the PATCH can land before the field closes.
@@ -100,16 +128,6 @@ export function EditableField({
     return () => clearTimeout(t);
   }, [isEditing]);
 
-  const startEditing = () => {
-    if (fieldId) setActiveField(fieldId);
-    setIsEditing(true);
-  };
-
-  const finishEditing = () => {
-    setIsEditing(false);
-    if (fieldId) setActiveField(null);
-  };
-
   const handleSave = async () => {
     if (validate) {
       const err = validate(draft);
@@ -126,6 +144,26 @@ export function EditableField({
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // Keep the ref current on every render so triggerSave always calls the latest version.
+  handleSaveRef.current = handleSave;
+
+  const finishEditing = () => {
+    setIsEditing(false);
+    if (fieldId) {
+      setActiveField(null);
+      unregisterSave(fieldId);
+    }
+  };
+
+  const startEditing = () => {
+    if (fieldId) {
+      setActiveField(fieldId);
+      // Register a stable wrapper that delegates to the always-current ref.
+      registerSave(fieldId, async () => { await handleSaveRef.current(); });
+    }
+    setIsEditing(true);
   };
 
   const handleCancel = () => {
@@ -157,7 +195,7 @@ export function EditableField({
           <button
             type="button"
             onClick={startEditing}
-            className="flex-shrink-0 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity p-0.5 rounded text-gray-400 hover:text-blue-600 mt-0.5"
+            className="flex-shrink-0 opacity-30 group-hover:opacity-80 hover:!opacity-100 transition-opacity p-0.5 rounded text-gray-400 hover:text-blue-600 mt-0.5"
             title="Edit"
             data-testid="editable-field-pencil"
           >

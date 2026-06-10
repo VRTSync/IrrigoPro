@@ -1,5 +1,5 @@
 import { safeGet } from "@/utils/safeStorage";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useContext } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +23,10 @@ import {
   Edit,
   Plus,
   Upload,
+  Trash2,
+  Info,
+  Save,
+  Loader2,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -36,7 +40,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem, Customer } from "@workspace/db/schema";
 import { WetCheckBillingViewComponent, type WetCheckBillingView } from "@/components/billing/wet-check-billing-view";
-import { EditableField, InlineEditProvider } from "@/components/ui/editable-field";
+import { EditableField, InlineEditProvider, InlineEditContext } from "@/components/ui/editable-field";
 import { format } from "date-fns";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
@@ -131,14 +135,301 @@ function InfoRow({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
-function SectionCard({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+function SectionCard({
+  title,
+  icon,
+  children,
+  action,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  action?: React.ReactNode;
+}) {
   return (
     <div className="border border-gray-100 rounded-xl overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-3 bg-gray-50 border-b border-gray-100">
         <span className="text-gray-500">{icon}</span>
         <h3 className="text-sm font-semibold text-gray-800">{title}</h3>
+        {action && <div className="ml-auto">{action}</div>}
       </div>
       <div className="p-4">{children}</div>
+    </div>
+  );
+}
+
+// ─── Parts List Editor ────────────────────────────────────────────────────────
+interface PartsEditorRow {
+  partId: number | null;
+  partName: string;
+  quantity: string;
+  unitPrice: string;
+  laborHours: string;
+  notes: string;
+}
+
+function PartsListEditorDialog({
+  open,
+  onOpenChange,
+  type,
+  id,
+  initialItems,
+  canSeePricing,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  type: "work_order" | "billing_sheet";
+  id: number;
+  initialItems: (WorkOrderItem | BillingSheetItem)[];
+  canSeePricing: boolean;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const toEditorRows = (items: (WorkOrderItem | BillingSheetItem)[]): PartsEditorRow[] =>
+    items.map((item) => ({
+      partId: (item as any).partId ?? null,
+      partName: item.partName ?? "",
+      quantity: String((item as BillingSheetItem).quantity ?? (item as WorkOrderItem).quantity ?? "1"),
+      unitPrice: String(
+        (item as BillingSheetItem).unitPrice ?? (item as WorkOrderItem).partPrice ?? "0"
+      ),
+      laborHours: String((item as any).laborHours ?? "0"),
+      notes: String((item as any).notes ?? ""),
+    }));
+
+  const [rows, setRows] = useState<PartsEditorRow[]>([]);
+  const [catalog, setCatalog] = useState<{ id: number; name: string; unitPrice?: string }[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    setRows(toEditorRows(initialItems));
+    fetch("/api/parts", { headers: getAuthHeaders(), credentials: "include" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: unknown) => setCatalog(Array.isArray(data) ? data : []))
+      .catch(() => setCatalog([]));
+  }, [open]);
+
+  const updateRow = (idx: number, updates: Partial<PartsEditorRow>) => {
+    setRows((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...updates };
+      return next;
+    });
+  };
+
+  const handlePartNameChange = (idx: number, val: string) => {
+    const match = catalog.find((c) => c.name.toLowerCase() === val.toLowerCase());
+    updateRow(idx, {
+      partName: val,
+      ...(match && rows[idx]?.unitPrice === "0"
+        ? { partId: match.id, unitPrice: match.unitPrice ?? "0" }
+        : {}),
+    });
+  };
+
+  const addRow = () =>
+    setRows((prev) => [
+      ...prev,
+      { partId: null, partName: "", quantity: "1", unitPrice: "0", laborHours: "0", notes: "" },
+    ]);
+
+  const removeRow = (idx: number) =>
+    setRows((prev) => prev.filter((_, i) => i !== idx));
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const validRows = rows.filter((r) => r.partName.trim());
+      const items = validRows.map((r) => ({
+        ...(r.partId != null ? { partId: r.partId } : {}),
+        partName: r.partName.trim(),
+        quantity: Math.max(0, parseFloat(r.quantity) || 0),
+        unitPrice: Math.max(0, parseFloat(r.unitPrice) || 0),
+        laborHours: Math.max(0, parseFloat(r.laborHours) || 0),
+        ...(r.notes.trim() ? { notes: r.notes.trim() } : {}),
+      }));
+      const endpoint =
+        type === "work_order"
+          ? `/api/work-orders/${id}/items`
+          : `/api/billing-sheets/${id}/items`;
+      return apiRequest(endpoint, "PATCH", { items });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: [type === "work_order" ? "/api/work-orders" : "/api/billing-sheets", id, "items"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: [type === "work_order" ? "/api/work-orders" : "/api/billing-sheets"],
+      });
+      toast({ title: "Parts saved", description: "Parts list updated successfully." });
+      onOpenChange(false);
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "Could not save parts",
+        description: parseApiError(err, err.message),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const inputCls =
+    "flex h-8 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Package className="w-5 h-5 text-gray-500" />
+            Edit Parts List
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-2 max-h-[50vh] overflow-y-auto py-1 pr-0.5">
+          {rows.length === 0 && (
+            <p className="text-sm text-gray-500 text-center py-6">
+              No parts yet. Click <strong>Add Part</strong> below.
+            </p>
+          )}
+
+          {/* Header row */}
+          {rows.length > 0 && (
+            <div className={`grid gap-2 text-xs font-medium text-gray-500 px-1 pb-1 ${canSeePricing ? "grid-cols-[1fr_60px_80px_32px]" : "grid-cols-[1fr_60px_32px]"}`}>
+              <span>Part Name</span>
+              <span className="text-center">Qty</span>
+              {canSeePricing && <span className="text-right">Unit $</span>}
+              <span />
+            </div>
+          )}
+
+          {rows.map((row, idx) => (
+            <div
+              key={idx}
+              className={`grid gap-2 items-center px-1 ${canSeePricing ? "grid-cols-[1fr_60px_80px_32px]" : "grid-cols-[1fr_60px_32px]"}`}
+            >
+              <div className="relative">
+                <input
+                  type="text"
+                  list="parts-catalog-datalist"
+                  value={row.partName}
+                  onChange={(e) => handlePartNameChange(idx, e.target.value)}
+                  placeholder="Part name"
+                  className={`${inputCls} w-full`}
+                />
+              </div>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={row.quantity}
+                onChange={(e) => updateRow(idx, { quantity: e.target.value })}
+                className={`${inputCls} text-center`}
+              />
+              {canSeePricing && (
+                <input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={row.unitPrice}
+                  onChange={(e) => updateRow(idx, { unitPrice: e.target.value })}
+                  className={`${inputCls} text-right`}
+                />
+              )}
+              <button
+                type="button"
+                onClick={() => removeRow(idx)}
+                className="flex items-center justify-center w-8 h-8 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                title="Remove row"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {/* Datalist for autocomplete */}
+        {catalog.length > 0 && (
+          <datalist id="parts-catalog-datalist">
+            {catalog.map((c) => (
+              <option key={c.id} value={c.name} />
+            ))}
+          </datalist>
+        )}
+
+        <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+          <Button type="button" variant="outline" size="sm" onClick={addRow}>
+            <Plus className="w-4 h-4 mr-1.5" />
+            Add Part
+          </Button>
+          <div className="flex-1" />
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending || rows.every((r) => !r.partName.trim())}
+            className="bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            {saveMutation.isPending ? (
+              <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4 mr-1.5" />
+            )}
+            Save Changes
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Modal Footer (reads InlineEditContext for Save & Close) ──────────────────
+function ModalFooter({ title, onClose }: { title: string; onClose: () => void }) {
+  const { activeField, triggerSave } = useContext(InlineEditContext);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSaveAndClose = async () => {
+    setIsSaving(true);
+    try {
+      await triggerSave();
+    } finally {
+      setIsSaving(false);
+    }
+    onClose();
+  };
+
+  return (
+    <div className="flex-shrink-0 border-t border-gray-100 px-5 py-3 bg-gray-50">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-xs text-gray-500">
+          <Hash className="w-3.5 h-3.5" />
+          <span>{title}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {activeField !== null && (
+            <Button
+              variant="default"
+              size="sm"
+              disabled={isSaving}
+              onClick={handleSaveAndClose}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {isSaving ? (
+                <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4 mr-1.5" />
+              )}
+              Save & Close
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={onClose}>
+            <X className="w-4 h-4 mr-1.5" />
+            Close
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -157,6 +448,10 @@ export function CompletedWorkDetailModal({
   const [photoToRemove, setPhotoToRemove] = useState<number | null>(null);
   const [confirmNoPhotosNeeded, setConfirmNoPhotosNeeded] = useState(false);
   const [showReassignDialog, setShowReassignDialog] = useState(false);
+  const [showPartsEditor, setShowPartsEditor] = useState(false);
+  const [hintDismissed, setHintDismissed] = useState(() => {
+    try { return !!localStorage.getItem("irrigopro:inlineEditHintDismissed"); } catch { return false; }
+  });
   const [reassignTechId, setReassignTechId] = useState<string>("");
   const [localTechName, setLocalTechName] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -744,6 +1039,27 @@ export function CompletedWorkDetailModal({
               </div>
             )}
 
+            {/* Inline-edit hint — shown once to eligible users, dismissed to localStorage */}
+            {canInlineEdit && !hintDismissed && (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-800">
+                <div className="flex items-center gap-2">
+                  <Info className="w-4 h-4 flex-shrink-0 text-blue-500" />
+                  <span>Click any <strong>✏</strong> pencil icon to edit a field. Changes save automatically.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHintDismissed(true);
+                    try { localStorage.setItem("irrigopro:inlineEditHintDismissed", "1"); } catch {}
+                  }}
+                  className="flex-shrink-0 p-0.5 text-blue-400 hover:text-blue-700 transition-colors"
+                  aria-label="Dismiss"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
             {/* Location & Job Info */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <SectionCard title="Location" icon={<MapPin className="w-4 h-4" />}>
@@ -988,6 +1304,16 @@ export function CompletedWorkDetailModal({
               <SectionCard
                 title={`Parts & Materials (${items.length} item${items.length !== 1 ? "s" : ""})`}
                 icon={<Package className="w-4 h-4" />}
+                action={canInlineEdit ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowPartsEditor(true)}
+                    className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
+                  >
+                    <Edit className="w-3 h-3" />
+                    Edit Parts List
+                  </button>
+                ) : undefined}
               >
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -1272,23 +1598,20 @@ export function CompletedWorkDetailModal({
           </div>
 
           {/* Footer */}
-          <div className="flex-shrink-0 border-t border-gray-100 px-5 py-3 bg-gray-50">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Hash className="w-3.5 h-3.5" />
-                <span>{title}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-                  <X className="w-4 h-4 mr-1.5" />
-                  Close
-                </Button>
-              </div>
-            </div>
-          </div>
+          <ModalFooter title={title} onClose={() => onOpenChange(false)} />
           </InlineEditProvider>
         </DialogContent>
       </Dialog>
+
+      {/* Parts List Editor */}
+      <PartsListEditorDialog
+        open={showPartsEditor}
+        onOpenChange={setShowPartsEditor}
+        type={type}
+        id={id}
+        initialItems={items}
+        canSeePricing={canSeePricing}
+      />
 
       {/* Lightbox */}
       {lightboxPhoto && (
