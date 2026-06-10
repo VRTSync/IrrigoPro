@@ -197,10 +197,90 @@ function InlineFindingEditor({
       }
       return { id: createdId ?? 0, clientId: findingClientId };
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // Immediate cache write so the finding appears without waiting for the
+      // background refetch (same pattern as deleteFindingMut.onMutate).
+      const payload = buildFindingSavePayload({
+        selectedPart,
+        partFromEdit,
+        quantity,
+        laborHours,
+        notes,
+        repairedInField,
+        noPartNeeded,
+      });
+      // When the offline queue queues the write without a server round-trip,
+      // the mutationFn returns id=0 (no confirmed id yet). Use a stable
+      // negative integer derived from the clientId UUID so multiple queued
+      // findings never share the same id in the cache. Real server ids are
+      // always positive, so negatives will never collide.
+      const stableId =
+        data.id > 0
+          ? data.id
+          : -parseInt(data.clientId.replace(/-/g, "").slice(0, 8), 16);
+      const optimisticFinding: WetCheckFinding = {
+        id: stableId,
+        clientId: data.clientId,
+        zoneRecordId: zoneRecordId ?? 0,
+        wetCheckId,
+        issueType,
+        issueGroup: cfg?.issueGroup ?? "",
+        severity: null,
+        partId: payload.partId,
+        partName: payload.partName,
+        partPrice: payload.partPrice,
+        quantity: payload.quantity,
+        laborHours: payload.laborHours,
+        notes: payload.notes,
+        resolution: repairedInField ? "repaired_in_field" : "pending",
+        noPartNeeded: payload.noPartNeeded,
+        techDisposition: payload.techDisposition,
+        resolutionDecidedAt: null,
+        resolutionDecidedBy: null,
+        billingSheetId: null,
+        estimateId: null,
+        workOrderId: null,
+        convertedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const cacheKeys: readonly unknown[][] = [
+        ["/api/wet-checks", wetCheckId],
+        ...(wetCheckClientId ? [["/api/wet-checks", "c", wetCheckClientId]] : []),
+      ];
+      for (const key of cacheKeys) {
+        const current = queryClient.getQueryData<WetCheckWithDetails>(key);
+        if (!current) continue;
+        queryClient.setQueryData<WetCheckWithDetails>(key, {
+          ...current,
+          zoneRecords: asArray(current.zoneRecords).map((zr) => {
+            const isTarget =
+              zoneRecordId != null ? zr.id === zoneRecordId : zoneRecordClientId != null && zr.clientId === zoneRecordClientId;
+            if (!isTarget) return zr;
+            const prevFindings = asArray(zr.findings);
+            return {
+              ...zr,
+              findings:
+                mode === "edit" && editing
+                  ? prevFindings.map((f) =>
+                      (editing.clientId && f.clientId
+                        ? f.clientId === editing.clientId
+                        : f.id === editing.id)
+                        ? { ...f, ...optimisticFinding }
+                        : f,
+                    )
+                  : [...prevFindings, optimisticFinding],
+            };
+          }),
+        });
+      }
+
       toast({ title: mode === "edit" ? "Finding updated" : "Finding added" });
-      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
       onSaved();
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
     },
     onError: (e: any) =>
       toast({ title: "Failed", description: e?.message, variant: "destructive" }),
@@ -1208,12 +1288,20 @@ export function ZoneScreen({
                         Work added — {findings.length} item{findings.length !== 1 ? "s" : ""}
                       </div>
                       {findings.map((f) => {
-                        const isBeingEdited = inlineEditing?.id === f.id;
+                        // Prefer clientId for both key and edit-state matching so
+                        // optimistic offline entries (which may have a temp negative id)
+                        // are identified stably before the server confirms the real id.
+                        const stableKey = f.clientId ?? String(f.id);
+                        const isBeingEdited = inlineEditing
+                          ? inlineEditing.clientId && f.clientId
+                            ? inlineEditing.clientId === f.clientId
+                            : inlineEditing.id === f.id
+                          : false;
                         if (isBeingEdited) return null;
                         const fc = countFindingPhotos({ photos: mergedPhotos }, f);
                         return (
                           <div
-                            key={f.id}
+                            key={stableKey}
                             className="border rounded-lg p-3 bg-white"
                             data-testid={`finding-${f.id}`}
                           >
