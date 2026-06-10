@@ -392,12 +392,15 @@ function ModalFooter({ title, onClose }: { title: string; onClose: () => void })
 
   const handleSaveAndClose = async () => {
     setIsSaving(true);
+    let ok = false;
     try {
-      await triggerSave();
+      ok = await triggerSave();
     } finally {
       setIsSaving(false);
     }
-    onClose();
+    // Only close when the save succeeded. If it failed (validation error or API
+    // error), keep the modal open so the inline field error remains visible.
+    if (ok) onClose();
   };
 
   return (

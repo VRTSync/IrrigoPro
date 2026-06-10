@@ -11,10 +11,15 @@ import { cn } from "@/lib/utils";
 interface InlineEditCtx {
   activeField: string | null;
   setActiveField: (id: string | null) => void;
-  registerSave: (fieldId: string, fn: () => Promise<void>) => void;
+  registerSave: (fieldId: string, fn: () => Promise<boolean>) => void;
   unregisterSave: (fieldId: string) => void;
-  /** Saves the currently active field. No-op if no field is open. */
-  triggerSave: () => Promise<void>;
+  /**
+   * Saves the currently active field.
+   * Returns `true` if the save succeeded (or no field was open).
+   * Returns `false` if the field has a validation error or the API call failed —
+   * callers must NOT close the modal in that case so the inline error stays visible.
+   */
+  triggerSave: () => Promise<boolean>;
 }
 
 const InlineEditContext = createContext<InlineEditCtx>({
@@ -22,16 +27,16 @@ const InlineEditContext = createContext<InlineEditCtx>({
   setActiveField: () => {},
   registerSave: () => {},
   unregisterSave: () => {},
-  triggerSave: async () => {},
+  triggerSave: async () => true,
 });
 
 export { InlineEditContext };
 
 export function InlineEditProvider({ children }: { children: React.ReactNode }) {
   const [activeField, setActiveField] = useState<string | null>(null);
-  const saveFnsRef = useRef(new Map<string, () => Promise<void>>());
+  const saveFnsRef = useRef(new Map<string, () => Promise<boolean>>());
 
-  const registerSave = useCallback((fieldId: string, fn: () => Promise<void>) => {
+  const registerSave = useCallback((fieldId: string, fn: () => Promise<boolean>) => {
     saveFnsRef.current.set(fieldId, fn);
   }, []);
 
@@ -39,10 +44,11 @@ export function InlineEditProvider({ children }: { children: React.ReactNode }) 
     saveFnsRef.current.delete(fieldId);
   }, []);
 
-  const triggerSave = useCallback(async () => {
-    if (!activeField) return;
+  const triggerSave = useCallback(async (): Promise<boolean> => {
+    if (!activeField) return true; // nothing open — treat as success
     const fn = saveFnsRef.current.get(activeField);
-    if (fn) await fn();
+    if (fn) return await fn();
+    return true;
   }, [activeField]);
 
   return (
@@ -102,7 +108,7 @@ export function EditableField({
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(null);
 
   // Always-current reference to handleSave for triggerSave delegation.
-  const handleSaveRef = useRef<() => Promise<void>>(async () => {});
+  const handleSaveRef = useRef<() => Promise<boolean>>(async () => true);
 
   // Auto-cancel when another field becomes active on the same surface.
   // Blocked while a save is in-flight so the PATCH can land before the field closes.
@@ -128,19 +134,21 @@ export function EditableField({
     return () => clearTimeout(t);
   }, [isEditing]);
 
-  const handleSave = async () => {
+  const handleSave = async (): Promise<boolean> => {
     if (validate) {
       const err = validate(draft);
-      if (err) { setError(err); return; }
+      if (err) { setError(err); return false; }
     }
-    if (draft === value) { finishEditing(); return; }
+    if (draft === value) { finishEditing(); return true; }
     setIsSaving(true);
     try {
       await onSave(draft);
       finishEditing();
       setError(null);
+      return true;
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Save failed");
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -161,7 +169,8 @@ export function EditableField({
     if (fieldId) {
       setActiveField(fieldId);
       // Register a stable wrapper that delegates to the always-current ref.
-      registerSave(fieldId, async () => { await handleSaveRef.current(); });
+      // Returns the boolean result so triggerSave can gate modal-close on success.
+      registerSave(fieldId, async () => handleSaveRef.current());
     }
     setIsEditing(true);
   };
