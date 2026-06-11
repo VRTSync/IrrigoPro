@@ -1,0 +1,307 @@
+# Replit Task — Command Center Unbilled Reconciliation (Single Source, No Date Window)
+
+This is a single self-contained task. Do not deviate from the file paths, endpoint
+paths, or status sets specified. If you believe a deviation is necessary, surface
+it and stop.
+
+> **TL;DR.** On the Command Center (`pages/customer-billing.tsx`), the per-customer
+> **"Total"** in the left list and the **"Unbilled Work"** badge on the right
+> detail panel are computed by two different endpoints using two different
+> inclusion rules, so they disagree. A real customer (Village of Five Parks
+> Heritage) shows **Total $1,131.09** on the left but **$1,211.09** on the right —
+> an **$80.00** gap. Root cause is two independent divergences: (1) the left
+> "Total" is **date-windowed** (default last 30 days) while the right is all-time,
+> and (2) the right "Unbilled Work" badge is **approved-only** while the left
+> "Total" is **approved + unapproved**. This page is meant to be an **all current
+> unbilled work** view — never date-constrained — with both headline numbers
+> derived from **one** array of all current unbilled tickets, separated by approval
+> status and by ticket type. This slice makes both endpoints compute that single
+> definition and makes the two headline numbers equal by construction.
+
+---
+
+## What & Why
+
+The Command Center is an "all current unbilled work" surface. A user must be able
+to trust that:
+
+- the **left list "Total"** for a customer, and
+- the **right "Unbilled Work" badge** for that same customer
+
+are the **same number**, because they describe the same thing: everything not yet
+invoiced for that customer. Today they don't, and the page is silently hiding
+aging approved work behind a 30-day window.
+
+**Decision locked for this slice (user-confirmed):** both headline numbers show
+**all current unbilled = approved + unapproved**. Approved vs unapproved is a
+*breakdown within* that total, and ticket type (WO / BS / WCB) is a further
+breakdown. The total is never reduced by a date filter. Invoicing still acts only
+on the **approved** subset (see "Invoicing stays approved-only" below).
+
+---
+
+## Root causes — confirmed in code
+
+### Cause 1 — The left "Total" is date-windowed; the right badge is not
+
+Left list "Total" is rendered from the per-customer preview
+(`GET /api/customers/billing-preview`, `routes.ts:6017`). The displayed Total is
+`approvedTotal + unapprovedTotal` (`customer-billing.tsx:1036-1038`,
+`:814-816`, sort at `:725-726`). But `approvedTotal` (= `unbilledAmount`,
+`routes.ts:6129-6135`) is built from sets filtered through `woInRange` /
+`bsInRange` / `wcbInRange` (`routes.ts:6114-6126`), default **`last_30_days`**
+(`routes.ts:6043-6044`). Any approved, un-invoiced billable whose work/created
+date is older than the window **drops out** of `approvedTotal`.
+
+Right "Unbilled Work" badge is rendered from the single-customer detail
+(`GET /api/customers/:id/billing`, `routes.ts:6322`). Its
+`totalUnbilledAmount` (`routes.ts:6441-6444`) has **no date filter**.
+
+So an approved billing sheet dated > 30 days ago is counted on the right, dropped
+on the left. **That is the $80.00.**
+
+### Cause 2 — The right badge is approved-only; the left "Total" includes unapproved
+
+- Right `totalUnbilledAmount` (`routes.ts:6441-6444`) sums only
+  `unbilledWorkOrders` / `unbilledBillingSheets` / `unbilledWetCheckBillings`,
+  each filtered to `status === 'approved_passed_to_billing' && !invoiceId`
+  (`routes.ts:6424-6438`). **Approved only.**
+- Left "Total" = `approvedTotal + unapprovedTotal`, where `unapprovedTotal`
+  (`routes.ts:6138-6150`) sums the pending statuses
+  (WO: `pending_manager_review`, `work_completed`; BS: `pending_manager_review`,
+  `completed`, `submitted`; WCB: `submitted`, `pending_manager_review`).
+  **Approved + unapproved.**
+
+In the reported screenshot Unapproved is $0.00, so Cause 2 is dormant and only the
+$80 from Cause 1 shows. The moment a customer has pending work, the two numbers
+diverge for this second, independent reason. Fixing only the date window would
+leave this latent.
+
+### Cause 3 — The preview already half-migrated; the display didn't follow
+
+The preview payload **already** computes a date-window-free, all-time figure:
+`totalUnbilled = allTimeApprovedTotal + unapprovedTotal` (`routes.ts:6182-6198`),
+and the **list filter** already gates customer visibility on it
+(`customer-billing.tsx:715`, `:595-598`). But the **displayed "Total," the sort,
+and the header summary still use the date-windowed `approvedTotal`**
+(`customer-billing.tsx:1036-1038`, `:725-726`, `:814-816`). This is a
+half-finished migration: filtering moved to the all-time field; display did not.
+
+### Existing drift guard does not catch this
+
+`routes.ts:6229-6243` asserts `combinedTotal === approvedTotal + unapprovedTotal`
+**within the preview payload only**. It never compares the preview against the
+detail endpoint, so the preview-vs-detail divergence is invisible to it.
+
+### Overlap with the in-flight WCB visibility slice
+
+`Billing Visibility Audit - Revision Slice - WCB and Command Center
+Invisibility.md` (Cause 5 + Step 2) already flags the date-window aging trap and
+recommends dropping `*InRange` from the `unbilled*` filters. **This slice subsumes
+that recommendation for the Command Center totals.** If both land, remove the date
+window **once** and keep the canonical selector below as the single definition. Do
+not implement the date-window removal twice.
+
+---
+
+## Done looks like
+
+- For every customer, the left list **"Total"** equals the right **"Unbilled
+  Work"** badge **exactly**, because both are the sum of the *same* canonical
+  "current unbilled" set.
+- That total = **all current unbilled = approved + unapproved**, with no date
+  filter shrinking it. The Village of Five Parks Heritage example reads **$1,211.09
+  on both sides**.
+- The date filter, if retained at all on this page, shapes only an optional
+  *displayed breakdown* — it can never change a customer's headline Total or hide a
+  customer that has unbilled work.
+- Approved vs unapproved remains visible as a breakdown; ticket-type tabs (WO / BS
+  / WCB) still split the list.
+- **Invoicing is unchanged**: "Select Items to Invoice" and the invoice
+  preview/construction paths still operate only on `approved_passed_to_billing`,
+  un-invoiced items. The headline total may exceed the invoice-able amount; the
+  card states how much is "ready to bill" vs "pending approval."
+- A new invariant test asserts preview-Total === detail-Total for a customer with a
+  mix of approved, unapproved, and aging (>30-day) billables.
+
+---
+
+## Steps
+
+### 1. Define one canonical "current unbilled" selector (shared, no date window)
+
+Create a single shared helper (suggested:
+`artifacts/api-server/src/billing-unbilled-selectors.ts`) that both endpoints
+import. Given a customer's WO / BS / WCB records, it returns the partition with
+**no date filtering**:
+
+- `approved`  = records with `status === 'approved_passed_to_billing' && !invoiceId`
+- `unapproved` = records with `!invoiceId` and status in the pending sets:
+  - WO: `pending_manager_review`, `work_completed`
+  - BS: `pending_manager_review`, `completed`, `submitted`
+  - WCB: `submitted`, `pending_manager_review`
+- For each bucket, expose per-type arrays and per-type dollar subtotals, plus
+  `approvedTotal`, `unapprovedTotal`, and `total = approvedTotal + unapprovedTotal`.
+
+Use the existing `safeAmount` coercion semantics (`routes.ts:6103-6111`) so a
+non-finite `totalAmount` is coerced to 0 identically in both endpoints. The status
+sets above are the **single source of truth** — do not redefine them inline in
+either route.
+
+Do **not** apply the `wetCheckStatus === 'converted'` gate in this selector; it is
+a visibility path. (The invoice-construction `converted` gate at `routes.ts:6496`
+and `:6790` stays — see Step 5.)
+
+### 2. Make the preview list display the all-time Total
+
+In `customer-billing.tsx`:
+- Per-customer card "Total": replace `approvedTotal + unapprovedTotal`
+  (`:1036-1038`) with the canonical date-window-free total (`totalUnbilled`,
+  already on the payload, or the selector's `total`).
+- Header summary (`:814-816`): base "Approved" / "Unapproved" / "Total" on the
+  all-time fields (`allTimeApprovedTotal`, `unapprovedTotal`, `totalUnbilled`), not
+  the date-windowed `approvedTotal`.
+- Sort (`:725-726`): sort by the same all-time total so list order matches the
+  displayed number.
+- Keep showing the Approved / Unapproved split beneath the Total (it's the
+  breakdown the user wants).
+
+Server side, `routes.ts` `/api/customers/billing-preview` should source
+`approvedTotal`, `unapprovedTotal`, and `totalUnbilled` from the Step-1 selector so
+`approvedTotal` is **no longer date-windowed**. Remove the `*InRange` gating from
+the `unbilled*` filters (`routes.ts:6114-6126`). The date filter may remain as an
+optional *breakdown-only* output (e.g. `currentMonthUnbilled`) but must not feed
+list inclusion or the headline Total.
+
+### 3. Make the detail "Unbilled Work" badge the full unbilled total
+
+In `routes.ts` `/api/customers/:id/billing` (`:6322`):
+- Source the unbilled partition from the Step-1 selector.
+- Change `totalUnbilledAmount` (`:6441-6444`) to
+  `approvedTotal + unapprovedTotal` (the selector's `total`) so the right badge
+  (`customer-billing.tsx:1199`) equals the left list Total.
+- Return both buckets so the UI can show the breakdown and the "ready vs pending"
+  subtext: keep `unbilledWorkOrders` / `unbilledBillingSheets` /
+  `unbilledWetCheckBillings` as the **approved** (invoice-able) arrays, and add
+  parallel `pendingApprovalWorkOrders` / `pendingApprovalBillingSheets` /
+  `pendingApprovalWetCheckBillings` arrays for the unapproved bucket.
+
+### 4. Update the detail-panel UI for the new shape
+
+In `customer-billing.tsx`:
+- The "Unbilled Work" badge already reads `totalUnbilledAmount` (`:1199`) — now the
+  full total. No change needed beyond Step 3.
+- The subtext (`:1206`) currently says "N Work Orders, M Billing Sheets ready".
+  Keep "ready" pointing at the **approved** counts, and add a second line for the
+  pending counts (e.g. "P items pending approval — not yet billable").
+- "Select Items to Invoice": `selectAllUnbilledItems` (`customer-billing.tsx:395`)
+  and the disabled gate (`:1214`) must continue selecting/enabling on the
+  **approved** arrays only. The button must **not** become enabled purely because
+  the unapproved bucket is nonzero. If the only unbilled work is unapproved, the
+  total is nonzero but the invoice button stays disabled.
+
+### 4a. The lists must show every item behind the total, tagged
+
+This is the core requirement: **a number on this page is never larger than the
+rows you can see under it.** If a dollar is in the headline, its source ticket must
+be visible in the list below, carrying a visible **Approved** / **Unapproved**
+status tag. No silent contributors.
+
+- **Unbilled tab** (`:1255-1256` count; the `TabsContent value="unbilled"` body):
+  render **both** buckets returned by Step 3 — the approved (invoice-able) arrays
+  **and** the new `pendingApproval*` arrays — as one combined list. Each row shows a
+  status badge (reuse the existing approval badge tokens; "Approved / Ready to Bill"
+  vs "Unapproved / Pending"). The tab count becomes the **total** (approved +
+  pending) so it matches the headline.
+- **Selection affordance:** only **approved** rows get an enabled checkbox / are
+  picked up by `selectAllUnbilledItems`. Unapproved rows render in the same list but
+  with the checkbox disabled and a short "pending approval" hint, so the user sees
+  the money and understands why it isn't yet invoice-able.
+- **Other tabs (Work Orders, Billing Sheets, WC Billings, Estimates):** apply the
+  same principle — each per-type tab lists all unbilled records of that type with
+  the Approved/Unapproved tag, so the per-type rows sum to the per-type subtotal and
+  the per-type subtotals sum to the headline. Verify no tab silently filters out a
+  status that contributes to a total it sits beneath.
+- **Reconciliation rule to encode:** for each tab, `sum(visible row amounts) ===
+  the subtotal shown for that tab`, and `sum(tab subtotals) === headline total`.
+  Build the row lists and the totals from the **same** Step-1 partition so they
+  cannot drift.
+
+### 5. Leave invoice construction alone
+
+Do **not** modify the invoice preview/construction filters at `routes.ts:6469`
+(`/api/invoices/preview`, anchors `:6504-6536`, `converted` gate `:6496`) or the
+monthly path (`:6647`, `converted` gate `:6790`). Those legitimately restrict to
+`approved_passed_to_billing` (and keep the `converted` gate). Including unapproved
+work in the *headline* must not leak into *what gets invoiced*.
+
+### 6. Add the preview-vs-detail invariant test
+
+Add a test asserting that for a synthesized customer with (a) an approved BS dated
+> 30 days ago, (b) an approved WO dated today, and (c) an unapproved BS, the
+`total` from `/api/customers/billing-preview` for that customer **equals**
+`totalUnbilledAmount` from `/api/customers/:id/billing`, and that both equal
+`approvedTotal + unapprovedTotal`. Include the aging item specifically to lock the
+"no date window" guarantee against regression.
+
+### 7. Reconcile Financial Pulse (verify, do not redesign)
+
+`routes/financial-pulse.ts` `computeUnbilledExposure` (`:357`, uninvoiced =
+`invoiceId IS NULL`) is the dashboard exposure KPI. After Steps 1-3, confirm the
+Command Center per-customer totals and the FP exposure agree on which customers
+carry unbilled dollars and how much. If FP's definition differs (e.g. it counts
+states the canonical selector excludes), note the discrepancy in the PR — do not
+silently change FP in this slice.
+
+---
+
+## Out of scope
+
+- Changing WCB **creation** status (`storage.ts:7710`) or adding a separate WCB
+  approval step.
+- Removing the `converted` gate from invoice-construction paths (`routes.ts:6483`,
+  `:6773`).
+- Any QuickBooks sync behavior.
+- Redesigning Financial Pulse math (Step 7 is verification only).
+- The WCB queue/tile double-count work already specified in
+  *Billing Visibility Audit - Revision Slice - WCB and Command Center
+  Invisibility.md* (coordinate the shared date-window removal; don't duplicate it).
+
+---
+
+## Relevant files
+
+- `artifacts/api-server/src/routes/routes.ts`
+  - `/api/customers/billing-preview` — `:6017-6286` (left list source)
+  - `/api/customers/:id/billing` — `:6322-6463` (right detail source)
+  - `totalUnbilledAmount` — `:6441-6444`
+  - `*InRange` date filters — `:6079-6096`, `:6114-6126`
+  - `safeAmount` — `:6103-6111`
+  - existing intra-payload drift guard — `:6229-6243`
+- `artifacts/irrigopro/src/pages/customer-billing.tsx`
+  - per-customer card Total — `:1036-1038`
+  - header summary — `:814-816`
+  - sort — `:725-726`; list-inclusion filter — `:715`, `:595-598`
+  - right "Unbilled Work" badge — `:1190-1218`
+  - "Unbilled (N)" tab — `:1255-1256`
+  - `selectAllUnbilledItems` — `:395-401`
+- `artifacts/api-server/src/routes/financial-pulse.ts` — `computeUnbilledExposure` `:357`
+- New: `artifacts/api-server/src/billing-unbilled-selectors.ts` (Step 1)
+
+---
+
+## Acceptance checklist
+
+- [ ] Left list "Total" === right "Unbilled Work" badge for every customer.
+- [ ] Both = approved + unapproved, all-time, no date-window reduction.
+- [ ] Village of Five Parks Heritage reads **$1,211.09** on both sides.
+- [ ] Approved/unapproved breakdown and WO/BS/WCB tabs still render.
+- [ ] "Select Items to Invoice" enables/selects on approved items only; stays
+      disabled when only unapproved work exists.
+- [ ] Status sets defined once (canonical selector); no inline redefinition.
+- [ ] Every item behind a total is visible in the list below it, tagged
+      Approved / Unapproved — no silent contributors.
+- [ ] Per tab: sum(visible rows) === tab subtotal; sum(tab subtotals) === headline.
+- [ ] Unapproved rows are visible but their invoice checkbox is disabled.
+- [ ] Preview-vs-detail invariant test passes, including a >30-day aging item.
+- [ ] No existing visible billable becomes newly hidden.
