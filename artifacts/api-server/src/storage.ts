@@ -4369,7 +4369,7 @@ export class DatabaseStorage implements IStorage {
 
     // Slice 4c — legacy BS-WC path has no WCB row; pass wcb: undefined so
     // buildWetCheckBillingView falls back to the live-derive totals path.
-    return buildWetCheckBillingView({
+    const view = buildWetCheckBillingView({
       billingSheet: bs,
       customer,
       findings,
@@ -4379,6 +4379,16 @@ export class DatabaseStorage implements IStorage {
       issueTypeConfigs: configs,
       wcb: undefined,
     });
+
+    // If the findings carry a wetCheckBillingId (findings routed through the
+    // WCB flow), surface it so the frontend can target the correct rate-mode
+    // endpoint (`/api/wet-check-billings/:id/rate-mode`) rather than the
+    // billing-sheet one.
+    const wcbIdFromFindings = findings[0]?.wetCheckBillingId ?? null;
+    if (wcbIdFromFindings != null) {
+      return { ...view, wetCheckBillingId: wcbIdFromFindings };
+    }
+    return view;
   }
 
   // Task #787 (WC Separate System Slice 2) — zone-grouped view assembler for

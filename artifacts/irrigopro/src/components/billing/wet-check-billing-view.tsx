@@ -68,6 +68,13 @@ export interface WcvInspection {
 
 export interface WetCheckBillingView {
   billingSheetId: number;
+  /**
+   * Set when the findings for this billing sheet originate from a
+   * wet_check_billings row (WCB flow). When present, rate-mode mutations
+   * should target `/api/wet-check-billings/:wetCheckBillingId/rate-mode`
+   * rather than the billing-sheet endpoint.
+   */
+  wetCheckBillingId?: number;
   billingNumber: string;
   customerId: number;
   customerName: string;

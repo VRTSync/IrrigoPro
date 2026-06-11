@@ -51,6 +51,7 @@ import { History, Cpu, Droplets, Navigation } from "lucide-react";
 import { buildMapsUrl } from "@/lib/maps-url";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { RateModeToggle } from "@/components/billing-workspace/rate-mode-toggle";
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -569,9 +570,12 @@ export function CompletedWorkDetailModal({
 
   // Fetch the customer to compare their current labor rate vs stored rate on billing sheet.
   // Also needed to scope the technician list to the right company in the reassign dialog.
+  // Also used to supply Normal/Emergency rates to the RateModeToggle for work orders.
+  const entityCustomerId = type === "work_order" ? (data as WorkOrder)?.customerId : bs?.customerId;
+  const canInlineEditRole = ["billing_manager", "company_admin", "super_admin"].includes(userRole);
   const { data: customerForRateCheck } = useQuery<Customer>({
-    queryKey: ["/api/customers", bs?.customerId],
-    enabled: open && type === "billing_sheet" && !!bs?.customerId && (canSeePricing || canReassignTechnician),
+    queryKey: ["/api/customers", entityCustomerId],
+    enabled: open && !!entityCustomerId && (canSeePricing || canReassignTechnician || canInlineEditRole),
   });
 
   // Detect rate mismatch for billing sheets
@@ -1211,21 +1215,38 @@ export function CompletedWorkDetailModal({
             <SectionCard title="Time & Labor" icon={<Clock className="w-4 h-4" />}>
               {wetCheckView && type === "billing_sheet" ? (
                 canSeePricing ? (
-                  <div className="flex items-center flex-wrap gap-3">
-                    <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
-                      <p className="text-2xl font-bold text-gray-900">{totalHours ?? "0"}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">Hours (WC)</p>
+                  <div className="space-y-3">
+                    <div className="flex items-center flex-wrap gap-3">
+                      <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
+                        <p className="text-2xl font-bold text-gray-900">{totalHours ?? "0"}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">Hours (WC)</p>
+                      </div>
+                      <span className="text-xl font-semibold text-gray-400">×</span>
+                      <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
+                        <p className="text-2xl font-bold text-gray-900">{currency(wetCheckView.laborRate)}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">Rate / hr</p>
+                      </div>
+                      <span className="text-xl font-semibold text-gray-400">=</span>
+                      <div className="bg-blue-50 rounded-lg px-4 py-3 text-center min-w-[80px] border border-blue-100">
+                        <p className="text-2xl font-bold text-blue-700">{currency(laborSubtotal)}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">Irrigation Labor</p>
+                      </div>
                     </div>
-                    <span className="text-xl font-semibold text-gray-400">×</span>
-                    <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
-                      <p className="text-2xl font-bold text-gray-900">{currency(wetCheckView.laborRate)}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">Rate / hr</p>
-                    </div>
-                    <span className="text-xl font-semibold text-gray-400">=</span>
-                    <div className="bg-blue-50 rounded-lg px-4 py-3 text-center min-w-[80px] border border-blue-100">
-                      <p className="text-2xl font-bold text-blue-700">{currency(laborSubtotal)}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">Irrigation Labor</p>
-                    </div>
+                    {canInlineEditRole && customerForRateCheck && (
+                      <RateModeToggle
+                        entityPath={wetCheckView.wetCheckBillingId ? "wet-check-billings" : "billing-sheets"}
+                        entityId={wetCheckView.wetCheckBillingId ?? id}
+                        currentMode={(bs?.rateMode ?? "normal") as "normal" | "emergency"}
+                        normalRate={customerForRateCheck.laborRate ?? null}
+                        emergencyRate={customerForRateCheck.emergencyLaborRate ?? null}
+                        detailQueryKey={
+                          wetCheckView.wetCheckBillingId
+                            ? ["/api/billing-sheets", id, "wet-check-view"]
+                            : ["/api/billing-sheets"]
+                        }
+                        disabled={isBilledOrInvoiced}
+                      />
+                    )}
                   </div>
                 ) : (
                   <div className="text-center">
@@ -1234,46 +1255,59 @@ export function CompletedWorkDetailModal({
                   </div>
                 )
               ) : canSeePricing ? (
-                <div className="flex items-center flex-wrap gap-3">
-                  <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
-                    {canInlineEdit && !isWorkOrder ? (
-                      <EditableField
-                        fieldId="totalHours"
-                        value={fv("totalHours", String(bs?.totalHours ?? "0"))}
-                        onSave={async (v) => patchField("totalHours", v, { totalHours: v })}
-                        canEdit={true}
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={0.25}
-                        validate={(v) => {
-                          const n = parseFloat(v);
-                          if (isNaN(n) || n < 0) return "Hours must be 0 or greater";
-                          if (n > 100) return "Hours seem unusually high (max 100)";
-                          return null;
-                        }}
-                        className="justify-center"
-                        inputClassName="text-center w-20"
-                      >
-                        <p className="text-2xl font-bold text-gray-900">
-                          {fv("totalHours", String(bs?.totalHours ?? "0"))}
-                        </p>
-                      </EditableField>
-                    ) : (
-                      <p className="text-2xl font-bold text-gray-900">{totalHours ?? "0"}</p>
-                    )}
-                    <p className="text-xs text-gray-500 mt-0.5">Hours</p>
+                <div className="space-y-3">
+                  <div className="flex items-center flex-wrap gap-3">
+                    <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
+                      {canInlineEdit && !isWorkOrder ? (
+                        <EditableField
+                          fieldId="totalHours"
+                          value={fv("totalHours", String(bs?.totalHours ?? "0"))}
+                          onSave={async (v) => patchField("totalHours", v, { totalHours: v })}
+                          canEdit={true}
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={0.25}
+                          validate={(v) => {
+                            const n = parseFloat(v);
+                            if (isNaN(n) || n < 0) return "Hours must be 0 or greater";
+                            if (n > 100) return "Hours seem unusually high (max 100)";
+                            return null;
+                          }}
+                          className="justify-center"
+                          inputClassName="text-center w-20"
+                        >
+                          <p className="text-2xl font-bold text-gray-900">
+                            {fv("totalHours", String(bs?.totalHours ?? "0"))}
+                          </p>
+                        </EditableField>
+                      ) : (
+                        <p className="text-2xl font-bold text-gray-900">{totalHours ?? "0"}</p>
+                      )}
+                      <p className="text-xs text-gray-500 mt-0.5">Hours</p>
+                    </div>
+                    <span className="text-xl font-semibold text-gray-400">×</span>
+                    <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
+                      <p className="text-2xl font-bold text-gray-900">{currency(laborRate ?? 0)}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">Rate / hr</p>
+                    </div>
+                    <span className="text-xl font-semibold text-gray-400">=</span>
+                    <div className="bg-blue-50 rounded-lg px-4 py-3 text-center min-w-[80px] border border-blue-100">
+                      <p className="text-2xl font-bold text-blue-700">{currency(laborSubtotal)}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">Labor Total</p>
+                    </div>
                   </div>
-                  <span className="text-xl font-semibold text-gray-400">×</span>
-                  <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
-                    <p className="text-2xl font-bold text-gray-900">{currency(laborRate ?? 0)}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">Rate / hr</p>
-                  </div>
-                  <span className="text-xl font-semibold text-gray-400">=</span>
-                  <div className="bg-blue-50 rounded-lg px-4 py-3 text-center min-w-[80px] border border-blue-100">
-                    <p className="text-2xl font-bold text-blue-700">{currency(laborSubtotal)}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">Labor Total</p>
-                  </div>
+                  {canInlineEditRole && customerForRateCheck && (
+                    <RateModeToggle
+                      entityPath={isWorkOrder ? "work-orders" : "billing-sheets"}
+                      entityId={id}
+                      currentMode={((isWorkOrder ? (wo as any)?.rateMode : bs?.rateMode) ?? "normal") as "normal" | "emergency"}
+                      normalRate={customerForRateCheck.laborRate ?? null}
+                      emergencyRate={customerForRateCheck.emergencyLaborRate ?? null}
+                      detailQueryKey={[isWorkOrder ? "/api/work-orders" : "/api/billing-sheets"]}
+                      disabled={isBilledOrInvoiced}
+                    />
+                  )}
                 </div>
               ) : (
                 <div className="text-center">
