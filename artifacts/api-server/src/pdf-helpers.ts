@@ -1353,7 +1353,7 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     font-weight: 900;
     letter-spacing: -1px;
     line-height: 1;
-    color: ${brown};
+    color: white;
     margin-bottom: 16px;
   }
 
