@@ -249,6 +249,63 @@ describe("App.tsx — irrigation_manager billing redirect routes", () => {
   });
 });
 
+// ── (j) customer-billing.tsx — billing month URL round-trip ──────────────────
+
+function deriveBillingMonth(search: string, defaultMonth: string): string {
+  const raw = new URLSearchParams(search).get("month") ?? "";
+  if (raw === "all" || /^\d{4}-\d{2}$/.test(raw)) return raw;
+  return defaultMonth;
+}
+
+describe("customer-billing.tsx — billing month URL state derivation", () => {
+  const DEFAULT = "2026-05";
+
+  it("?month=2026-04 → billingMonth='2026-04'", () => {
+    assert.equal(deriveBillingMonth("?month=2026-04", DEFAULT), "2026-04");
+  });
+
+  it("?month=all → billingMonth='all'", () => {
+    assert.equal(deriveBillingMonth("?month=all", DEFAULT), "all");
+  });
+
+  it("no month param → falls back to defaultBillingMonth", () => {
+    assert.equal(deriveBillingMonth("", DEFAULT), DEFAULT);
+  });
+
+  it("?month=bad-value → falls back to defaultBillingMonth", () => {
+    assert.equal(deriveBillingMonth("?month=bad-value", DEFAULT), DEFAULT);
+  });
+
+  it("?month=2026-4 (single-digit month) → falls back (must be zero-padded)", () => {
+    assert.equal(deriveBillingMonth("?month=2026-4", DEFAULT), DEFAULT);
+  });
+});
+
+describe("customer-billing.tsx — billing month URL source guards", () => {
+  const src = readSrc("artifacts/irrigopro/src/pages/customer-billing.tsx");
+
+  it("seeds billingMonth from URLSearchParams on init", () => {
+    assert.ok(
+      src.includes('new URLSearchParams(window.location.search).get("month")'),
+      "billingMonth useState initializer must read ?month= from URL",
+    );
+  });
+
+  it("syncs billingMonth back to URL via replaceState", () => {
+    assert.ok(
+      src.includes("window.history.replaceState"),
+      "useEffect must call replaceState to persist billingMonth in URL",
+    );
+  });
+
+  it('replaceState sets the "month" param', () => {
+    assert.ok(
+      src.includes('params.set("month", billingMonth)'),
+      'replaceState effect must call params.set("month", billingMonth)',
+    );
+  });
+});
+
 // ── (i) Static source — desktop-shell badge probe includes irrigation_manager ─
 
 describe("desktop-shell.tsx — irrigation_manager badge enablement", () => {

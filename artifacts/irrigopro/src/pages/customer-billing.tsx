@@ -253,6 +253,7 @@ export default function CustomerBilling() {
   
   // Billing month picker — drives both preview and detail queries.
   // Default to the previous calendar month (YYYY-MM). "all" = no cutoff.
+  // Seeded from the URL ?month= param so the selection survives refreshes.
   const defaultBillingMonth = (() => {
     const now = new Date();
     const y = now.getFullYear();
@@ -261,7 +262,12 @@ export default function CustomerBilling() {
     const prevM = m === 0 ? 12 : m;
     return `${prevY}-${String(prevM).padStart(2, '0')}`;
   })();
-  const [billingMonth, setBillingMonth] = useState<string>(defaultBillingMonth);
+  const [billingMonth, setBillingMonth] = useState<string>(() => {
+    if (typeof window === "undefined") return defaultBillingMonth;
+    const raw = new URLSearchParams(window.location.search).get("month") ?? "";
+    if (raw === "all" || /^\d{4}-\d{2}$/.test(raw)) return raw;
+    return defaultBillingMonth;
+  });
   const [amountFilter, setAmountFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
@@ -327,6 +333,14 @@ export default function CustomerBilling() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Persist the billing month selection in the URL so it survives page refreshes.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("month", billingMonth);
+    const qs = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}?${qs}`);
+  }, [billingMonth]);
 
   // Get billing-visible customers only
   const { data: customers = [], isLoading: loadingCustomers } = useArrayQuery<Customer>({
