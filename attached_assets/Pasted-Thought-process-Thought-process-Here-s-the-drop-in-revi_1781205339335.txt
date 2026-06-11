@@ -1,0 +1,24 @@
+Thought process
+Thought process
+Here's the drop-in revision. It replaces the Step 2 bullets for lines 854/1615 and adds the supporting payload/interface changes.
+
+Step 2 — Command Center list rollup (revised counter handling)
+
+Switch list inclusion and the headline figure to the date-independent totalUnbilled, but gate the "need billing" counter on a new date-independent approved-ready field, so each metric still matches its label:
+
+Line 597 — has_unbilled status filter gate: approvedTotal + unapprovedTotal > 0 → (Number(preview.totalUnbilled) || 0) > 0
+Line 714 — openBillingCustomers list filter: same change
+Line 1804 — per-card Total headline figure: approvedTotal + unapprovedTotal → totalUnbilled
+Line 854 — mobile "N customers need billing" counter: filter(p => approvedTotal > 0) → filter(p => (Number(p.allTimeApprovedTotal) || 0) > 0)
+Line 1615 — desktop "N customers need billing" counter: same change
+Rationale: inclusion and the headline answer "does this customer have any unbilled exposure?" — that is totalUnbilled and must never be date-windowed (the whole point of this fix). The "need billing" counter is an action metric meaning "approved and ready to invoice now"; work still in unapprovedTotal (pending review) needs approval, not billing, so it must be excluded. The counter today is approvedTotal > 0, which already means "approved-ready" — it is only broken because approvedTotal is date-windowed. Gating on allTimeApprovedTotal restores the original meaning while removing the date trap. A customer may therefore appear in the list (has exposure) without being in the counter (work not yet approved); that is correct.
+
+Expose allTimeApprovedTotal in the billing-preview payload. It is already computed at routes.ts:6188 but not returned. Add it to both return paths of /api/customers/billing-preview:
+
+Success return (routes.ts:~6241-6259): add allTimeApprovedTotal,
+Catch/fallback return (routes.ts:~6262-6279): add allTimeApprovedTotal: 0,
+Add the field to the frontend type. In customer-billing.tsx (CustomerPreview interface, ~line 102-118), add:
+
+ts
+allTimeApprovedTotal?: number;
+Do not change how allTimeApprovedTotal is computed — it is already date-independent and ungated. This step only surfaces the existing value and points the two counters at it.

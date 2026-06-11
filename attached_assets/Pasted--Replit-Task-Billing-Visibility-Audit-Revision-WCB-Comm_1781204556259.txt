@@ -1,0 +1,413 @@
+# Replit Task — Billing Visibility Audit & Revision (WCB + Command Center Invisibility)
+
+This is a single self-contained task. It supersedes draft plan **#1209 — Fix WCB
+Invisibility in Billing Workspace & Command Center**. Do not deviate from the file
+paths, endpoint paths, or status sets specified. If you believe a deviation is
+necessary, surface it and stop.
+
+> **TL;DR.** A wet-check billing (WC-2026-1024, First Bank of Colorado) is
+> invisible everywhere a billing manager would look: the Billing Workspace queue,
+> the "Awaiting Approval" tile, and — the symptom the user actually reported —
+> **under any customer in the Command Center list.** Draft #1209 correctly
+> diagnosed the queue/tile cause and one of the gates, but it **misses the gate
+> that actually causes the Command Center customer to disappear**, double-counts a
+> KPI, and would break an existing test. This revision audits the full billable
+> surfacing path for all three billable types (work orders, billing sheets,
+> wet-check billings) and specifies the complete, correct fix. The guiding
+> requirement from the user: **no billable should be able to float invisibly in
+> the system.**
+
+---
+
+## What & Why
+
+A "billable" is one of three record types — work orders (WO), billing sheets (BS),
+and wet-check billings (WCB). Each must be reachable by a billing manager through
+two independent surfaces:
+
+1. **Billing Workspace queue** (`GET /api/billing-workspace/queue`) and its
+   **status-strip** tiles (`GET /api/billing-workspace/status-strip`).
+2. **Command Center customer list** (`GET /api/customers/billing-preview`,
+   rendered by `pages/customer-billing.tsx`).
+
+These two surfaces use **different inclusion logic**, and the divergence is where
+billables go invisible. The WCB lifecycle exposes the divergence because WCBs are
+**born already approved** — they enter the world at `approved_passed_to_billing`
+(`storage.ts:7710`, inside `_writeRepairedInFieldBilling`), skipping `submitted`
+and `pending_manager_review` entirely. The manager's "Convert" action on the wet
+check **is** the approval step. Every set and filter that assumes "approved =
+later state" therefore mishandles WCBs.
+
+---
+
+## Root causes — confirmed in code
+
+### Cause 1 — Queue & "Awaiting Approval" tile never include WCBs
+
+`ACTIVE_WCB` in `billing-workspace-routes.ts:49-52` is:
+
+```ts
+export const ACTIVE_WCB = new Set([
+  "submitted",
+  "pending_manager_review",
+]);
+```
+
+WCBs are never in either status, so:
+
+- the queue loop (`billing-workspace-routes.ts:537`) skips every WCB unless an
+  explicit `?status=` drill-down is passed;
+- the `awaitingApproval` tile (`billing-workspace-routes.ts:736`) counts 0 WCBs.
+
+This matches draft #1209's diagnosis. **It is correct.**
+
+### Cause 2 — KPI double-count (gap in draft #1209)
+
+`APPROVED_WCB` (`billing-workspace-routes.ts:56`) **already** contains
+`approved_passed_to_billing` and feeds the **`approvedThisWeek`** tile
+(`billing-workspace-routes.ts:746`). If we simply add `approved_passed_to_billing`
+to `ACTIVE_WCB` (draft #1209, Step 1), the **same WCB is counted in two tiles at
+once** — `awaitingApproval` and `approvedThisWeek`.
+
+This breaks an invariant the other two types hold: `ACTIVE_BS`/`APPROVED_BS` and
+`ACTIVE_WO`/`APPROVED_WO` are **disjoint** (active = pre-approval, approved =
+post-approval). WCB is the odd type because its "needs billing" state **is** its
+approved state. Draft #1209 Step 3 treats this as a labeling question; it is a
+counting question.
+
+### Cause 3 — Command Center list drops the customer (THE reported symptom; missed by draft #1209)
+
+This is the cause of *"not showing up under any customers in the Command Center."*
+
+The Command Center customer list comes from `GET /api/customers/billing-preview`
+(`routes.ts:6017`). For each customer it computes:
+
+- `approvedTotal` (= `unbilledAmount`, `routes.ts:6131`), built from
+  `unbilledWetCheckBillings` at **`routes.ts:6120-6122`**:
+
+  ```ts
+  const unbilledWetCheckBillings = wetCheckBillingsForCustomer.filter(wcb =>
+    wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId
+    && wcb.wetCheckStatus === 'converted'      // <-- gate A
+    && wcbInRange(wcb)                          // <-- gate B (date window)
+  );
+  ```
+
+- `unapprovedTotal` (`routes.ts:6140-6142`), which for WCBs counts only
+  `submitted` / `pending_manager_review` — **never** `approved_passed_to_billing`.
+
+The frontend then **includes a customer in the list only if**
+`approvedTotal + unapprovedTotal > 0` (`customer-billing.tsx:597` and `:714`).
+
+So a customer whose **only** pending billing is a WCB at
+`approved_passed_to_billing` contributes:
+
+- `$0` to `unapprovedTotal` (wrong status bucket), **and**
+- `$0` to `approvedTotal` **if** the parent wet check is `partially_converted`
+  (fails gate A) **or** the WCB's `workDate` is outside the default 30-day window
+  (fails gate B — frontend defaults `dateFilter = "last_30_days"`,
+  `customer-billing.tsx:242`).
+
+`$0 + $0 = 0` → the customer is filtered out of the list entirely → **invisible.**
+
+**Draft #1209 only removes gate A at `routes.ts:6428`** (the *single-customer*
+billing page, `GET /api/customers/:id/billing`). It never touches `routes.ts:6121`
+— the *list* rollup that actually decides whether the customer appears in the
+Command Center. As written, #1209 would not fix the user's reported symptom for a
+`partially_converted` WCB.
+
+### Cause 4 — The billing-preview endpoint disagrees with itself
+
+Inside the *same* endpoint, `allTimeApprovedWCBs` (`routes.ts:6185-6187`) has
+**neither** the `converted` gate nor the date window:
+
+```ts
+const allTimeApprovedWCBs = wetCheckBillingsForCustomer.filter(wcb =>
+  wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId
+);
+```
+
+It feeds `totalUnbilled` (`routes.ts:6194`), which the header summary sums
+(`customer-billing.tsx:814`, `:1575`). Result: **the money appears in the
+aggregate "Total Unbilled" header, but the customer is absent from the list.**
+That is the precise definition of "floating invisible" — the dollars are
+acknowledged; the record is unreachable. The same WCB is also counted by
+`financial-pulse.ts` `computeUnbilledExposure` (uninvoiced = `invoiceId IS NULL`,
+no status/converted gate, `financial-pulse.ts:386-389`), so the dashboard exposure
+KPI includes it too while the Command Center hides it.
+
+### Cause 5 — Systemic date-window aging trap (all three billable types)
+
+`approvedTotal`/`unbilledAmount` filters **WO, BS, and WCB** through `*InRange`
+(`routes.ts:6114-6122`), default 30 days. **Any** approved-but-unbilled billable
+older than the selected window drops out of `approvedTotal`; if it is the
+customer's only pending item, the customer disappears from the default list until
+the user manually switches the date filter to "All". This is not WCB-specific —
+it is a general way for aging, never-invoiced work to go quiet. Flagged here
+because the user's requirement is "nothing invisible," and this is the most likely
+*future* recurrence for WO/BS.
+
+### Not a bug — invoice-construction gate (do NOT blanket-remove)
+
+The same `converted` gate also appears at `routes.ts:6483` and `routes.ts:6773`.
+These are **invoice-construction** paths ("Filter to only include selected items"
+— building/previewing an actual invoice), not visibility paths. There the gate
+plausibly protects billing correctness (don't invoice a WCB whose parent wet check
+is still partially converted and whose amount could still move). **Leave these two
+as-is in this slice.** Changing them is a billing-correctness decision, not a
+visibility fix, and belongs in its own task.
+
+### Test coupling
+
+`artifacts/api-server/src/routes/wcb-invoice-gate.test.ts` asserts the
+`wetCheckStatus === 'converted'` gate exists near multiple anchors. Removing it
+from the **visibility** filters (6121, 6428) will fail this test. The test must be
+updated to assert the gate only on the invoice-construction anchors (6483, 6773),
+not the visibility anchors.
+
+---
+
+## Done looks like
+
+- A WCB at `approved_passed_to_billing` with `invoiceId IS NULL` appears in the
+  Billing Workspace queue alongside BS and WO awaiting action, regardless of
+  whether its parent wet check is `converted` or `partially_converted`.
+- That WCB is counted in exactly **one** status-strip tile (no double-count
+  between "Awaiting Approval / Needs Billing" and "Approved this week").
+- A customer whose only pending billing is such a WCB **appears in the Command
+  Center list** in the default date view, and the header "Total Unbilled" figure
+  reconciles with the per-customer rows (no money acknowledged in the aggregate
+  but missing from the list).
+- The single-customer billing page "Unbilled" tab shows the WCB on the same
+  condition.
+- `field_tech` access is unchanged; no existing visible billable becomes newly
+  hidden (every change is additive to visibility).
+
+---
+
+## Steps
+
+### 1. Make WCBs surface in the queue without double-counting the tile
+In `billing-workspace-routes.ts`:
+- Add `"approved_passed_to_billing"` to `ACTIVE_WCB` (lines 49-52).
+- **Remove** `"approved_passed_to_billing"` from `APPROVED_WCB` (line 56) so a WCB
+  is counted in the `awaitingApproval` tile **or** `approvedThisWeek`, never both.
+  (`APPROVED_WCB` becomes `new Set(["billed"])`.)
+- Confirm the tile label at the frontend status strip reads as an action state
+  (e.g. "Needs Billing" / "Awaiting Action"). WCBs are already approved but still
+  need invoicing; "Awaiting Approval" is misleading for them.
+
+### 2. Fix the Command Center list rollup (the reported symptom)
+In `routes.ts`, in the `/api/customers/billing-preview` handler:
+- **`routes.ts:6120-6122`** — remove the `wcb.wetCheckStatus === 'converted'`
+  condition from `unbilledWetCheckBillings`. (Keep `status === 'approved_passed_to_billing'`
+  and `!wcb.invoiceId`.) This is the change that makes a `partially_converted`
+  customer reappear in the list.
+- Decide the date-window behavior for **approved-but-unbilled** billables
+  (Cause 5). Recommended: make the customer-list **inclusion** test independent of
+  the date filter by gating frontend visibility on `totalUnbilled > 0` (date-
+  independent, already computed at `routes.ts:6194`) rather than on
+  `approvedTotal + unapprovedTotal > 0`. The date filter should shape the
+  *displayed* breakdown, not silently *hide the customer*. If you prefer to keep
+  the existing gating field, instead drop `*InRange` from the three `unbilled*`
+  filters at `routes.ts:6114-6122` so approved-unbilled work is never date-hidden.
+  Pick one; do not leave list-inclusion dependent on a 30-day window.
+
+### 3. Fix the single-customer billing page
+In `routes.ts:6427-6429` (`GET /api/customers/:id/billing`), remove the
+`wcb.wetCheckStatus === 'converted'` condition from `unbilledWetCheckBillings`
+(same rationale as Step 2). `wetCheckStatus` remains in the returned shape
+(`storage.getWetCheckBillingsByCustomer` join) for display of a "partial" badge —
+it just stops being a visibility gate.
+
+### 4. Reconcile the endpoint with itself
+After Steps 2-3, `unbilledWetCheckBillings` (6120) and `allTimeApprovedWCBs`
+(6185) use the same status/invoice predicate (differing only by date window, which
+Step 2 resolves). Confirm `approvedTotal`, `totalUnbilled`, and the
+`combinedTotal` drift guard (`routes.ts:6225-6239`) still reconcile, and that
+`financial-pulse.ts` `computeUnbilledExposure` and the Command Center now agree on
+which customers carry unbilled WCB dollars.
+
+### 5. Update the gate test
+In `wcb-invoice-gate.test.ts`, change the assertions so the `converted` gate is
+required **only** at the invoice-construction anchors (`routes.ts:6483`, `:6773`)
+and **explicitly not** at the visibility anchors (`routes.ts:6121`, `:6428`). Add
+a regression test that a `partially_converted` WCB at `approved_passed_to_billing`
+with `invoiceId IS NULL` is (a) returned by `/api/customers/billing-preview` as a
+nonzero `approvedTotal` contribution, and (b) present in the
+`/api/billing-workspace/queue` response.
+
+### 6. Leave invoice construction alone
+Do **not** modify `routes.ts:6483` or `routes.ts:6773` in this slice. Note in the
+PR description that the `converted` gate on invoice construction is intentional and
+tracked separately.
+
+---
+
+## Out of scope
+
+- Adding an explicit manager review/approval step to the WCB pipeline (creating
+  WCBs in `submitted` and requiring a separate approval click). Workflow change,
+  separate decision.
+- Changing the WCB **creation** status (`storage.ts:7710`).
+- Removing the `converted` gate from the **invoice-construction** paths
+  (`routes.ts:6483`, `:6773`) — separate billing-correctness task.
+- Any QuickBooks sync behavior for WCBs.
+- The Billing Workspace role-gating / drill-down / bulk-approve work already
+  specified in *Billing Approval Visibility - Slice 1*.
+
+---
+
+## Relevant files
+
+- `artifacts/api-server/src/routes/billing-workspace-routes.ts:44-60` (ACTIVE_WCB / APPROVED_WCB sets)
+- `artifacts/api-server/src/routes/billing-workspace-routes.ts:535-561` (queue WCB loop)
+- `artifacts/api-server/src/routes/billing-workspace-routes.ts:733-747` (awaitingApproval / approvedThisWeek tiles)
+- `artifacts/api-server/src/routes/routes.ts:6114-6122` (billing-preview unbilled filters — Command Center list)
+- `artifacts/api-server/src/routes/routes.ts:6131,6185-6194` (approvedTotal vs allTimeApproved / totalUnbilled — self-inconsistency)
+- `artifacts/api-server/src/routes/routes.ts:6427-6429` (single-customer billing page gate)
+- `artifacts/api-server/src/routes/routes.ts:6483,6773` (invoice-construction gate — do NOT change)
+- `artifacts/api-server/src/routes/financial-pulse.ts:357-389` (computeUnbilledExposure parity)
+- `artifacts/api-server/src/storage.ts:7700-7715` (WCB born at approved_passed_to_billing)
+- `artifacts/api-server/src/routes/wcb-invoice-gate.test.ts` (gate assertions — must update)
+- `artifacts/irrigopro/src/pages/customer-billing.tsx:242,560-597,712-730,814` (date default + customer-list inclusion test)
+
+---
+
+## Audit verdict on draft #1209
+
+| #1209 claim | Verdict |
+|-------------|---------|
+| `ACTIVE_WCB = {submitted, pending_manager_review}` | **Accurate** (lines 49-52) |
+| WCBs born at `approved_passed_to_billing` (storage.ts:7710) | **Accurate** |
+| Queue & awaiting-approval tile exclude WCBs | **Accurate** |
+| Single-customer page gated by `converted` (routes.ts:6428) | **Accurate** |
+| "Affects every WCB, not customer-specific" | **Accurate** — pure status/set logic |
+| Fix is additive (nothing newly hidden) | **Accurate** for the visibility direction |
+| Adding to `ACTIVE_WCB` is "the only change for the tile" | **Incomplete** — causes a double-count vs `APPROVED_WCB` (Cause 2) |
+| Command Center customer list fix | **Missing** — #1209 never touches the list rollup at routes.ts:6121 (Cause 3), so the reported symptom is not fully fixed |
+| Endpoint self-consistency / date window | **Not considered** (Causes 4-5) |
+| Test impact | **Not considered** — `wcb-invoice-gate.test.ts` will fail |
+
+---
+
+## Completeness audit — can we guarantee the Command Center shows ALL pending billables?
+
+The user's requirement: *no billable should float invisibly.* This section answers
+whether the fix above is sufficient for that guarantee, and adds the structural
+changes that make it true rather than incidentally-true.
+
+### Status-enum coverage (verified against `lib/db/src/schema/schema.ts`)
+
+The schema enums are the ground truth. Cross-checking every status value against
+the "pending billable" sets:
+
+**Work Orders** — `workOrderStatusValues` (schema.ts:969):
+`pending`, `assigned`, `in_progress`, `work_completed`, `pending_manager_review`,
+`approved_passed_to_billing`, `cancelled`, `billed`
+
+| Status | Billable yet? | Surfaced? |
+|--------|---------------|-----------|
+| `pending`, `assigned`, `in_progress` | No — work not done | Correctly excluded |
+| `work_completed` | Yes | ✅ unapproved set |
+| `pending_manager_review` | Yes | ✅ unapproved set |
+| `approved_passed_to_billing` (no invoiceId) | Yes | ✅ approved set |
+| `cancelled` | No | Correctly excluded |
+| `billed` / invoiceId set | Already billed | Correctly excluded |
+
+**Billing Sheets** — `billingSheetStatusValues` (schema.ts:975):
+`draft`, `submitted`, `completed`, `pending_manager_review`,
+`approved_passed_to_billing`, `billed`
+
+| Status | Billable yet? | Surfaced? |
+|--------|---------------|-----------|
+| `draft` | No | Correctly excluded |
+| `submitted`, `completed`, `pending_manager_review` | Yes | ✅ unapproved set |
+| `approved_passed_to_billing` (no invoiceId) | Yes | ✅ approved set |
+| `billed` / invoiceId set | Already billed | Correctly excluded |
+
+**Wet-Check Billings** — status enum (schema.ts:1408):
+`submitted`, `pending_manager_review`, `approved_passed_to_billing`, `billed`
+
+| Status | Billable yet? | Surfaced? |
+|--------|---------------|-----------|
+| `submitted`, `pending_manager_review` | Yes | ✅ unapproved set |
+| `approved_passed_to_billing` (no invoiceId) | Yes | ✅ approved set **after Steps 1-3** |
+| `billed` / invoiceId set | Already billed | Correctly excluded |
+
+**Result: there is no fall-through status.** Every "work done, money owed, not yet
+invoiced" state is enumerated. So after Steps 1-3, the *status* dimension is
+complete. (Storage helpers `getWetCheckBillingsByCustomer` / `getBillingSheetsByCustomer`
+/ `getWorkOrdersByCustomer` apply no hidden status filter of their own — verified
+`storage.ts:3840-3865` — so nothing is dropped at the query layer.)
+
+### What can STILL hide a pending billable after Steps 1-3
+
+The status dimension is closed, but three non-status holes remain. **Without the
+guarantees below, the answer to "can we guarantee completeness" is no.**
+
+1. **Dollar-amount gating.** The Command Center includes a customer only if
+   `approvedTotal + unapprovedTotal > 0` (`customer-billing.tsx:597`, `:714`), and
+   `safeAmount` coerces null/non-finite `totalAmount` to `0` (`routes.ts:6103`).
+   A pending billable with a `$0` or malformed total contributes nothing → if it's
+   the customer's only pending item, the customer is hidden **even though a pending
+   record exists.** Visibility must be decided by **existence of a pending record**,
+   not by sum > 0.
+
+2. **Future enum drift.** The pending sets are hand-maintained string sets in two
+   files. The day someone adds a new status (e.g. a `kickback` / `rework` state) to
+   `workOrderStatusValues`, the sets won't know about it and that status goes
+   invisible silently. Nothing forces a classification decision.
+
+3. **`hiddenFromBilling`.** Excluded by design (`routes.ts:6021`,
+   `financial-pulse.ts:362`). Legitimate, but it is a blanket per-customer hide —
+   worth a visible indicator so it can't silently swallow real billables.
+
+### Step 7 — Structural guarantees (add to this slice)
+
+These convert "complete today" into "provably complete and self-policing."
+
+**7a. Single canonical classifier, derived from the schema enums.** Add one module
+(e.g. `lib/db/src/billable-status.ts`) exporting, per type, three exhaustive
+buckets — `NOT_BILLABLE`, `PENDING_BILLABLE`, `BILLED` — built with a TypeScript
+`satisfies Record<WorkOrderStatus, Bucket>` (and the BS/WCB equivalents) so the
+compiler **fails the build if a new enum value is added without classifying it.**
+Replace the inline sets in `billing-workspace-routes.ts` (`ACTIVE_*`/`APPROVED_*`)
+and the inline filters in `routes.ts` (`unbilled*`/`unapproved*`/`allTimeApproved*`)
+with this single source. This closes hole #2 permanently.
+
+**7b. Inclusion by existence, not by amount.** Change the Command Center
+list-inclusion test (and the `/api/customers/billing-preview` payload) to carry a
+`pendingBillableCount` per customer (count of records where
+`PENDING_BILLABLE.has(status) && invoiceId == null`, date-independent). The
+frontend filters on `pendingBillableCount > 0`, not on dollar totals. Dollar
+totals remain for display only. This closes hole #1.
+
+**7c. Cross-surface parity test.** A test that seeds a tenant with at least one
+billable in **every** `PENDING_BILLABLE` status across all three types and asserts
+the set of `(type, id)` returned by `/api/billing-workspace/queue?type=all`
+equals the set surfaced by `/api/customers/billing-preview` (and that both equal a
+direct DB query for `PENDING_BILLABLE && invoiceId IS NULL`). This is the
+regression guard that the two surfaces can never silently diverge again.
+
+**7d. Orphan / invariant sweep.** A single query — *"every WO/BS/WCB with
+`invoiceId IS NULL` in a `PENDING_BILLABLE` status whose customer is not
+`hiddenFromBilling`, that does NOT appear in the billing-preview output"* — wired
+as (i) a test that must return empty against the seed fixture, and optionally
+(ii) a lightweight admin/health endpoint so production can be swept on demand. If
+anything ever floats invisible again, this returns it by name.
+
+### Honest verdict
+
+- **After Steps 1-3 only:** the reported symptom is fixed and there is no
+  status-level fall-through today — but completeness is *incidental*, still
+  defeatable by a `$0`/malformed amount, and unprotected against future enum
+  additions. **Not a guarantee.**
+- **After Steps 1-3 + Step 7 (7a-7d):** completeness is **structurally
+  guaranteed** — inclusion is existence-based, the classifier is exhaustive at
+  compile time, parity is test-enforced across both surfaces, and an orphan sweep
+  catches any regression. The only remaining invisibility is the deliberate
+  `hiddenFromBilling` flag, which is intentional and auditable.
+
+**Recommendation:** ship Steps 1-6 to fix the live symptom now, and treat Step 7 as
+required (not optional) to satisfy the "nothing floats invisibly" requirement.
