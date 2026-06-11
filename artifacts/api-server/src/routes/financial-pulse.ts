@@ -346,8 +346,25 @@ async function loadTechs(companyId: number | null): Promise<UserWithName[]> {
   }));
 }
 
-// Unbilled exposure — mirrors the billing-preview rollup
-// (`/api/customers/billing-preview` in routes.ts, lines ~6014-6128):
+// Unbilled exposure — intentionally broader than the Command Center rollup.
+//
+// The Command Center ("Customer Billing" page, billing-preview endpoint +
+// per-customer /billing endpoint) applies an *as-of billing-month cutoff*:
+// it only counts work whose work date (scheduledDate / serviceDate) falls
+// ON OR BEFORE the last day of the selected billing month.  Undated work
+// is always included; work dated after the cutoff is deferred to a future
+// month.  This makes the left-list "Total" card and the right-panel
+// "Unbilled Work" badge agree on the same scoped number.
+//
+// This Financial-Pulse function is a KPI metric (total uninvoiced exposure)
+// and deliberately uses NO date cutoff — it counts every non-invoiced,
+// non-cancelled record across all time to answer "how much is owed to us
+// right now?".  The two numbers SHOULD differ when there is future-dated
+// work on the books.  Do NOT change this function to match the cutoff
+// logic — keep them independent.
+//
+// Mirrors the billing-preview rollup
+// (`/api/customers/billing-preview` in routes.ts):
 // `approvedTotal` (status=`approved_passed_to_billing`, no invoiceId)
 // plus `unapprovedTotal` (work orders pending review / completed and
 // billing sheets pending review / completed / submitted, no invoiceId).

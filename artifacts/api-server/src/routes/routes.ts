@@ -26,6 +26,11 @@ import { InvoicePdfService } from "../invoice-pdf-service";
 import { buildWorkDescriptionPrompt, buildExpandDescriptionPrompt, TEMPLATE_VERSION, CRITICAL_FIELDS, type WorkDescriptionInputs } from "../ai-prompt-templates";
 import { makeRequireSameCompanyAsWorkOrder } from "./work-order-tenant-guard";
 import { makeRequireSameCompanyAsBillingSheet } from "./billing-sheet-tenant-guard";
+import {
+  computeUnbilledPartition,
+  resolveAsOfCutoff,
+  previousCalendarMonth,
+} from "../billing-unbilled-selectors";
 /**
  * Phase 5b — QB Harden #5: thrown when the detected credential environment
  * does not match the server environment and STRICT_QB_ENV_CHECK is set.
@@ -6083,52 +6088,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const customers = allCustomers.filter(c => !c.hiddenFromBilling);
       console.log(`Found ${customers.length} customers (${allCustomers.length - customers.length} hidden from billing)`);
       
-      // Get filter parameters from query
-      const dateFilter = req.query.dateFilter as string || "last_30_days";
-      const selectedMonth = req.query.selectedMonth as string;
-      
-      const currentDate = new Date();
-      const currentMonth = currentDate.getMonth();
-      const currentYear = currentDate.getFullYear();
-      
-      // Calculate date range based on filter
-      let startDate: Date;
-      let endDate: Date = currentDate;
-      
-      switch (dateFilter) {
-        case "all":
-          startDate = new Date(2020, 0, 1); // Far past date
-          break;
-        case "current_month":
-          startDate = new Date(currentYear, currentMonth, 1);
-          break;
-        case "last_30_days":
-          startDate = new Date(currentDate.getTime() - (30 * 24 * 60 * 60 * 1000));
-          break;
-        case "last_90_days":
-          startDate = new Date(currentDate.getTime() - (90 * 24 * 60 * 60 * 1000));
-          break;
-        case "custom_month":
-          if (selectedMonth) {
-            const [year, month] = selectedMonth.split('-').map(Number);
-            startDate = new Date(year, month - 1, 1);
-            endDate = new Date(year, month, 0); // Last day of the month
-          } else {
-            startDate = new Date(currentDate.getTime() - (30 * 24 * 60 * 60 * 1000));
-          }
-          break;
-        default:
-          startDate = new Date(currentDate.getTime() - (30 * 24 * 60 * 60 * 1000));
-      }
-      
-      console.log(`Filtering data from ${startDate.toISOString()} to ${endDate.toISOString()}`);
-      const currentMonthStart = new Date(currentYear, currentMonth, 1);
+      // Resolve billing month — default to the previous calendar month when
+      // the client omits selectedMonth (or sends an empty string).
+      // "all" → no date cutoff (all-open view); YYYY-MM → cutoff at
+      // 23:59:59.999 on the last day of that month in server-local time.
+      const rawSelectedMonth = req.query.selectedMonth as string | undefined;
+      const selectedMonth = rawSelectedMonth && rawSelectedMonth.trim() !== ''
+        ? rawSelectedMonth.trim()
+        : previousCalendarMonth();
+      const asOfCutoff = resolveAsOfCutoff(selectedMonth);
       
       // Get billing previews for all customers including work orders, estimates, and billing sheets
       const customerPreviews = await Promise.all(customers.map(async (customer) => {
         try {
-          console.log(`Processing customer: ${customer.name} (ID: ${customer.id})`);
-          
           // Get all four data sources for this customer
           const callerCompanyId6058 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
           const workOrders = await storage.getWorkOrdersByCustomer(customer.id, callerCompanyId6058);
@@ -6138,171 +6110,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           const approvedEstimates = estimates.filter(est => est.status === 'approved');
 
-          // Helper: check if a work order falls within the selected date range
-          const woInRange = (wo: typeof workOrders[0]) => {
-            const d = wo.completedAt ? new Date(wo.completedAt) : (wo.createdAt ? new Date(wo.createdAt) : null);
-            if (!d) return true; // no date → always include
-            return d >= startDate && d <= endDate;
-          };
-          // Helper: check if a billing sheet falls within the selected date range
-          const bsInRange = (bs: typeof billingSheets[0]) => {
-            const d = bs.workDate ? new Date(bs.workDate) : (bs.createdAt ? new Date(bs.createdAt) : null);
-            if (!d) return true;
-            return d >= startDate && d <= endDate;
-          };
-          // Helper: check if a wet check billing falls within the selected date range
-          const wcbInRange = (wcb: typeof wetCheckBillingsForCustomer[0]) => {
-            const d = wcb.workDate ? new Date(wcb.workDate) : (wcb.createdAt ? new Date(wcb.createdAt) : null);
-            if (!d) return true;
-            return d >= startDate && d <= endDate;
-          };
-
-          // Coerce stored decimal/text totalAmount to a finite number; track
-          // every non-finite raw value so we can warn per customer afterwards.
-          // Dedupe by source so a single bad row doesn't multiply across the
-          // approved / unapproved / independent-combined / current-month passes.
-          const coercions = new Map<string, unknown>();
-          const safeAmount = (raw: unknown, source: string): number => {
-            if (raw === null || raw === undefined) return 0;
-            const n = typeof raw === 'number' ? raw : parseFloat(String(raw));
-            if (!Number.isFinite(n)) {
-              if (!coercions.has(source)) coercions.set(source, raw);
-              return 0;
-            }
-            return n;
-          };
-
-          // Calculate unbilled amounts for this customer (only approved/passed-to-billing tickets)
-          const unbilledWorkOrders = workOrders.filter(wo =>
-            (wo.status === 'approved_passed_to_billing') && !wo.invoiceId && woInRange(wo)
+          // Partition via canonical selector — single source of truth for both
+          // billing-preview and /api/customers/:id/billing. The cutoff is the
+          // last instant of the selected billing month (upper bound only, open
+          // start). null = all-open view. Null work-date records are always
+          // included and flagged undated:true.
+          const partition = computeUnbilledPartition(
+            workOrders,
+            billingSheets,
+            wetCheckBillingsForCustomer,
+            asOfCutoff,
           );
-          const unbilledBillingSheets = billingSheets.filter(bs =>
-            (bs.status === 'approved_passed_to_billing') && !bs.invoiceId && bsInRange(bs)
-          );
-          // Visibility filter: wetCheckStatus === 'converted' is intentionally absent here.
-          // Partially-converted-parent WCBs must still be visible so billing managers
-          // can act on them. The 'converted' gate is only appropriate on invoice-construction
-          // paths (see eligibleWcbs / eligibleWcbsMonthly below) — not on visibility paths.
-          const unbilledWetCheckBillings = wetCheckBillingsForCustomer.filter(wcb =>
-            wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId && wcbInRange(wcb)
-          );
-
-          // Use stored totalAmount as the authoritative total (historical backfill guardrail)
-          const unbilledAmount =
-            unbilledWorkOrders.reduce((sum, wo) => sum + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
-            unbilledBillingSheets.reduce((sum, bs) => sum + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0) +
-            unbilledWetCheckBillings.reduce((sum, wcb) => sum + safeAmount(wcb.totalAmount, `wcb:${wcb.id}`), 0);
-
-          // Approved total: approved_passed_to_billing with no invoiceId (same as unbilledAmount)
-          const approvedTotal = unbilledAmount;
-
-          // Unapproved total: work_completed OR pending_manager_review with no invoiceId (no date filter — these are current unbilled work)
-          const unapprovedWorkOrders = workOrders.filter(wo =>
-            (wo.status === 'pending_manager_review' || wo.status === 'work_completed') && !wo.invoiceId
-          );
-          const unapprovedBillingSheets = billingSheets.filter(bs =>
-            (bs.status === 'pending_manager_review' || bs.status === 'completed' || bs.status === 'submitted') && !bs.invoiceId
-          );
-          const unapprovedWetCheckBillings = wetCheckBillingsForCustomer.filter(wcb =>
-            (wcb.status === 'submitted' || wcb.status === 'pending_manager_review') && !wcb.invoiceId
-          );
-          const unapprovedTotal =
-            unapprovedWorkOrders.reduce((sum, wo) => sum + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
-            unapprovedBillingSheets.reduce((sum, bs) => sum + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0) +
-            unapprovedWetCheckBillings.reduce((sum, wcb) => sum + safeAmount(wcb.totalAmount, `wcb:${wcb.id}`), 0);
-
-          // Independent accumulation of combinedTotal — single pass over all
-          // source arrays rather than reusing the approvedTotal /
-          // unapprovedTotal locals. This is what makes the drift guard below
-          // a real invariant check: if any future refactor changes how one
-          // of the subtotals is computed (e.g. adds tax, swaps the
-          // amount field, applies a discount), this independent sum diverges
-          // and the warn fires.
-          let combinedTotal = 0;
-          for (const wo of unbilledWorkOrders) combinedTotal += safeAmount(wo.totalAmount, `wo:${wo.id}`);
-          for (const bs of unbilledBillingSheets) combinedTotal += safeAmount(bs.totalAmount, `bs:${bs.id}`);
-          for (const wcb of unbilledWetCheckBillings) combinedTotal += safeAmount(wcb.totalAmount, `wcb:${wcb.id}`);
-          for (const wo of unapprovedWorkOrders) combinedTotal += safeAmount(wo.totalAmount, `wo:${wo.id}`);
-          for (const bs of unapprovedBillingSheets) combinedTotal += safeAmount(bs.totalAmount, `bs:${bs.id}`);
-          for (const wcb of unapprovedWetCheckBillings) combinedTotal += safeAmount(wcb.totalAmount, `wcb:${wcb.id}`);
-
-          // Two extra rollups (date-filter independent) exposed alongside the
-          // date-filtered totals: totalUnbilled = all approved+unapproved
-          // regardless of date; currentMonthUnbilled = same scope, current
-          // calendar month only.
-          const woAnyDate = (wo: typeof workOrders[0]) =>
-            wo.completedAt ? new Date(wo.completedAt) : (wo.createdAt ? new Date(wo.createdAt) : null);
-          const bsAnyDate = (bs: typeof billingSheets[0]) =>
-            bs.workDate ? new Date(bs.workDate) : (bs.createdAt ? new Date(bs.createdAt) : null);
-          const wcbAnyDate = (wcb: typeof wetCheckBillingsForCustomer[0]) =>
-            wcb.workDate ? new Date(wcb.workDate) : (wcb.createdAt ? new Date(wcb.createdAt) : null);
-          const inCurrentMonth = (d: Date | null) => {
-            if (!d) return false;
-            return d >= currentMonthStart && d <= currentDate;
-          };
-
-          // All-time approved (deliberately ignore the user's date filter)
-          const allTimeApprovedWOs = workOrders.filter(wo =>
-            (wo.status === 'approved_passed_to_billing') && !wo.invoiceId
-          );
-          const allTimeApprovedBSs = billingSheets.filter(bs =>
-            (bs.status === 'approved_passed_to_billing') && !bs.invoiceId
-          );
-          const allTimeApprovedWCBs = wetCheckBillingsForCustomer.filter(wcb =>
-            wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId
-          );
-          const allTimeApprovedTotal =
-            allTimeApprovedWOs.reduce((s, wo) => s + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
-            allTimeApprovedBSs.reduce((s, bs) => s + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0) +
-            allTimeApprovedWCBs.reduce((s, wcb) => s + safeAmount(wcb.totalAmount, `wcb:${wcb.id}`), 0);
-
-          // unapprovedTotal is already unfiltered, so total unbilled is just the sum
-          const totalUnbilled = allTimeApprovedTotal + unapprovedTotal;
-
-          // Current-month slice across all buckets
-          const currentMonthApprovedTotal =
-            allTimeApprovedWOs.filter(wo => inCurrentMonth(woAnyDate(wo)))
-              .reduce((s, wo) => s + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
-            allTimeApprovedBSs.filter(bs => inCurrentMonth(bsAnyDate(bs)))
-              .reduce((s, bs) => s + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0) +
-            allTimeApprovedWCBs.filter(wcb => inCurrentMonth(wcbAnyDate(wcb)))
-              .reduce((s, wcb) => s + safeAmount(wcb.totalAmount, `wcb:${wcb.id}`), 0);
-          const currentMonthUnapprovedTotal =
-            unapprovedWorkOrders.filter(wo => inCurrentMonth(woAnyDate(wo)))
-              .reduce((s, wo) => s + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
-            unapprovedBillingSheets.filter(bs => inCurrentMonth(bsAnyDate(bs)))
-              .reduce((s, bs) => s + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0) +
-            unapprovedWetCheckBillings.filter(wcb => inCurrentMonth(wcbAnyDate(wcb)))
-              .reduce((s, wcb) => s + safeAmount(wcb.totalAmount, `wcb:${wcb.id}`), 0);
-          const currentMonthUnbilled = currentMonthApprovedTotal + currentMonthUnapprovedTotal;
-
-          // Guard 1: warn when any raw totalAmount was non-finite and coerced to 0.
-          if (coercions.size > 0) {
-            const entries = Array.from(coercions.entries());
-            const sample = entries.slice(0, 3).map(([src, raw]) =>
-              `${src}=${typeof raw === 'string' ? JSON.stringify(raw) : String(raw)}`
-            );
-            console.warn(
-              `[billing-preview] customer ${customer.id}: coerced non-finite totalAmount ` +
-              `to 0 on ${coercions.size} distinct source record(s). ` +
-              `Sample: ${sample.join(', ')}${entries.length > 3 ? ', …' : ''}`
-            );
-          }
-          // Guard 2: combinedTotal (independent pass) must equal approvedTotal + unapprovedTotal.
-          // The independent pass exists only as a drift sentinel — log if it diverges,
-          // then normalize the API payload to the subtotal sum so any future surface
-          // that reads combinedTotal directly cannot disagree with Approved + Unapproved.
-          const expectedCombined = approvedTotal + unapprovedTotal;
-          if (Math.abs(combinedTotal - expectedCombined) > 0.005) {
-            console.warn(
-              `[billing-preview] customer ${customer.id}: combined-vs-sum drift — ` +
-              `independent combinedTotal=${combinedTotal.toFixed(2)} ` +
-              `expected=${expectedCombined.toFixed(2)} ` +
-              `(approvedTotal=${approvedTotal.toFixed(2)}, unapprovedTotal=${unapprovedTotal.toFixed(2)}) ` +
-              `— payload normalized to expected.`
-            );
-          }
-          const combinedTotalForPayload = expectedCombined;
+          const { approvedTotal, unapprovedTotal } = partition;
+          // combinedTotalForPayload = cutoff-scoped approved + unapproved
+          const combinedTotalForPayload = partition.total;
+          // unbilledAmount kept for backward-compat (same as approvedTotal)
+          const unbilledAmount = approvedTotal;
+          // allOpenTotal: no-cutoff total (for Financial Pulse cross-check +
+          // "All open" view). Also exposed as allTimeApprovedTotal for
+          // backward-compat with frontend code that reads that field.
+          const allTimeApprovedTotal = partition.allOpenTotal;
+          const totalUnbilled = partition.allOpenTotal;
+          // currentMonthUnbilled removed — billing-month picker supersedes it.
+          const currentMonthUnbilled = 0;
 
           return {
             id: customer.id,
@@ -6313,6 +6143,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             approvedTotal,
             unapprovedTotal,
             combinedTotal: combinedTotalForPayload,
+            total: combinedTotalForPayload,  // cutoff-scoped; use this for list card "Total"
+            allOpenTotal: partition.allOpenTotal,  // no-cutoff; use this for "All open" view
             totalUnbilled,
             allTimeApprovedTotal,
             currentMonthUnbilled,
@@ -6335,6 +6167,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             approvedTotal: 0,
             unapprovedTotal: 0,
             combinedTotal: 0,
+            total: 0,
+            allOpenTotal: 0,
             totalUnbilled: 0,
             allTimeApprovedTotal: 0,
             currentMonthUnbilled: 0,
@@ -6390,6 +6224,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(400).json({ message: "Invalid customer ID" });
         return;
       }
+
+      // Resolve billing month — same logic as billing-preview so the two
+      // headline numbers agree for the same selectedMonth.
+      const rawSelectedMonthDetail = req.query.selectedMonth as string | undefined;
+      const selectedMonthDetail = rawSelectedMonthDetail && rawSelectedMonthDetail.trim() !== ''
+        ? rawSelectedMonthDetail.trim()
+        : previousCalendarMonth();
+      const asOfCutoffDetail = resolveAsOfCutoff(selectedMonthDetail);
       
       // Get customer details
       const customer = await storage.getCustomerById(customerId);
@@ -6482,28 +6324,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
       });
 
-      // Filter unbilled work: only approved_passed_to_billing tickets surface to billing intake
-      const unbilledWorkOrders = workOrders.filter(wo => 
-        (wo.status === 'approved_passed_to_billing') && !wo.invoiceId
-      );
-      // A non-null invoiceId is the authoritative signal that a billing sheet has
-      // been billed — exclude it from unbilled regardless of status value.
-      const unbilledBillingSheets = billingSheets.filter(bs => 
-        (bs.status === 'approved_passed_to_billing') && !bs.invoiceId
-      );
-      // Unbilled wet check billings: approved_passed_to_billing, wet check converted, no invoiceId
-      // Visibility filter: wetCheckStatus === 'converted' is intentionally absent here.
-      // Partially-converted-parent WCBs must still be visible on the single-customer
-      // billing page. The 'converted' gate belongs only on invoice-construction paths.
-      const unbilledWetCheckBillings = wetCheckBillings.filter(wcb =>
-        wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId
+      // Partition unbilled work via canonical selector — same logic as
+      // billing-preview so the two headline numbers agree for the same
+      // selectedMonth. Cutoff is upper-bound only (open start). Null
+      // work-date records are always included and flagged undated:true.
+      // 'converted' visibility note: wetCheckStatus === 'converted' is NOT
+      // gated here; that gate belongs only on invoice-construction paths.
+      const detailPartition = computeUnbilledPartition(
+        workOrders,
+        billingSheets,
+        wetCheckBillings,
+        asOfCutoffDetail,
       );
 
-      // Calculate total unbilled amount (includes wet check billings)
-      const totalUnbilledAmount = 
-        unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
-        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0) +
-        unbilledWetCheckBillings.reduce((sum, wcb) => sum + parseFloat(wcb.totalAmount || '0'), 0);
+      // approvedWorkOrders / approvedBillingSheets / approvedWetCheckBillings
+      // are the items the billing manager can include in an invoice (they
+      // map 1:1 to the old unbilledWorkOrders / unbilledBillingSheets /
+      // unbilledWetCheckBillings field names preserved for backward compat).
+      const unbilledWorkOrders = detailPartition.approvedWorkOrders;
+      const unbilledBillingSheets = detailPartition.approvedBillingSheets;
+      const unbilledWetCheckBillings = detailPartition.approvedWetCheckBillings;
+
+      // totalUnbilledAmount = cutoff-scoped approved + pending total so
+      // it agrees with the left-list "Total" card for the same billing month.
+      const totalUnbilledAmount = detailPartition.total;
 
       const billingData = {
         customer: applyBillingNotesVisibility(req, customer),
@@ -6514,7 +6358,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         unbilledBillingSheets,
         totalUnbilledAmount,
         wetCheckBillings,
-        unbilledWetCheckBillings
+        unbilledWetCheckBillings,
+        pendingApprovalWorkOrders: detailPartition.pendingWorkOrders,
+        pendingApprovalBillingSheets: detailPartition.pendingBillingSheets,
+        pendingApprovalWetCheckBillings: detailPartition.pendingWetCheckBillings,
+        approvedTotal: detailPartition.approvedTotal,
+        unapprovedTotal: detailPartition.unapprovedTotal,
+        allOpenTotal: detailPartition.allOpenTotal,
+        selectedMonth: selectedMonthDetail,
       };
 
       res.json(billingData);

@@ -57,6 +57,7 @@ interface BillingWorkOrder extends WorkOrder {
   billedDate: Date | null;
   completedDate: Date | null;
   hasFinancialBreakdown: boolean;
+  undated?: boolean;
 }
 
 interface BillingBillingSheet extends BillingSheet {
@@ -65,6 +66,7 @@ interface BillingBillingSheet extends BillingSheet {
   description: string;
   billedDate: Date | null;
   completedDate: Date | null;
+  undated?: boolean;
 }
 
 interface BillingEstimate extends Estimate {
@@ -84,6 +86,7 @@ interface BillingWetCheckBilling {
   description: string;
   billedDate: Date | null;
   completedDate: Date | null;
+  undated?: boolean;
   [key: string]: unknown;
 }
 
@@ -96,7 +99,14 @@ interface CustomerBillingData {
   unbilledWorkOrders: BillingWorkOrder[];
   unbilledBillingSheets: BillingBillingSheet[];
   unbilledWetCheckBillings: BillingWetCheckBilling[];
+  pendingApprovalWorkOrders?: BillingWorkOrder[];
+  pendingApprovalBillingSheets?: BillingBillingSheet[];
+  pendingApprovalWetCheckBillings?: BillingWetCheckBilling[];
   totalUnbilledAmount: number;
+  approvedTotal?: number;
+  unapprovedTotal?: number;
+  allOpenTotal?: number;
+  selectedMonth?: string;
 }
 
 interface CustomerPreview {
@@ -108,7 +118,9 @@ interface CustomerPreview {
   approvedTotal: number;
   unapprovedTotal: number;
   combinedTotal: number;
-  totalUnbilled?: number;
+  total?: number;          // cutoff-scoped (approvedTotal + unapprovedTotal for the selected billing month)
+  allOpenTotal?: number;   // no-cutoff all-time unbilled exposure
+  totalUnbilled?: number;  // backward-compat alias for allOpenTotal
   allTimeApprovedTotal?: number;
   currentMonthUnbilled?: number;
   lastInvoiceDate?: string;
@@ -239,9 +251,17 @@ export default function CustomerBilling() {
   const [selectedBillingSheetIds, setSelectedBillingSheetIds] = useState<Set<number>>(new Set());
   const [selectedWetCheckBillingIds, setSelectedWetCheckBillingIds] = useState<Set<number>>(new Set());
   
-  // Filter states
-  const [dateFilter, setDateFilter] = useState<string>("last_30_days"); // Default to last 30 days
-  const [selectedMonth, setSelectedMonth] = useState<string>("");
+  // Billing month picker — drives both preview and detail queries.
+  // Default to the previous calendar month (YYYY-MM). "all" = no cutoff.
+  const defaultBillingMonth = (() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth(); // 0-based
+    const prevY = m === 0 ? y - 1 : y;
+    const prevM = m === 0 ? 12 : m;
+    return `${prevY}-${String(prevM).padStart(2, '0')}`;
+  })();
+  const [billingMonth, setBillingMonth] = useState<string>(defaultBillingMonth);
   const [amountFilter, setAmountFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
@@ -314,15 +334,14 @@ export default function CustomerBilling() {
     queryFn: () => apiRequest("/api/customers?billingVisible=true"),
   });
 
-  // Get comprehensive customer billing data including work orders, estimates, and billing sheets
+  // Get comprehensive customer billing data including work orders, estimates, and billing sheets.
+  // selectedMonth drives both the preview list and the per-customer detail query so
+  // the left-list "Total" card and right-panel "Unbilled Work" badge always agree.
   const { data: customerPreviews = [], isLoading: loadingPreviews } = useArrayQuery<any>({
-    queryKey: ["/api/customers/billing-preview", dateFilter, selectedMonth],
+    queryKey: ["/api/customers/billing-preview", billingMonth],
     queryFn: async () => {
       const params = new URLSearchParams();
-      params.append('dateFilter', dateFilter);
-      if (selectedMonth) {
-        params.append('selectedMonth', selectedMonth);
-      }
+      params.set('selectedMonth', billingMonth);
       try {
         const response = await fetch(`/api/customers/billing-preview?${params.toString()}`);
         if (!response.ok) {
@@ -414,7 +433,7 @@ export default function CustomerBilling() {
     mutationFn: (id: number) => apiRequest(`/api/work-orders/${id}`, "DELETE"),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing", billingMonth] });
       queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
       setItemToDelete(null);
       toast({ title: "Work order deleted", description: "The work order has been removed." });
@@ -429,7 +448,7 @@ export default function CustomerBilling() {
     mutationFn: (id: number) => apiRequest(`/api/billing-sheets/${id}`, "DELETE"),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing", billingMonth] });
       queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
       setItemToDelete(null);
       toast({ title: "Billing sheet deleted", description: "The billing sheet has been removed." });
@@ -524,7 +543,7 @@ export default function CustomerBilling() {
       });
       queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "billing"] });
       queryClient.invalidateQueries({ queryKey: ['/api/billing-sheets'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/customers/billing-preview'] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
       queryClient.invalidateQueries({ queryKey: ['/api/invoices'] });
     },
     onError: (error: any) => {
@@ -593,9 +612,11 @@ export default function CustomerBilling() {
       if (statusFilter !== "all") {
         switch (statusFilter) {
           case "has_unbilled":
-            // Use totalUnbilled (date-window-free) so WCBs older than 30 days
-            // still surface — billing managers must be able to find all unbilled exposure.
-            if ((Number(preview.totalUnbilled) || 0) <= 0) return false;
+            // Use allOpenTotal (no-cutoff) so aging WCBs don't silently
+            // drop when the user has a billing month selected. This lets
+            // billing managers see all customers with any open exposure
+            // regardless of the cutoff.
+            if ((Number(preview.allOpenTotal ?? preview.totalUnbilled) || 0) <= 0) return false;
             break;
           case "no_activity":
             if (preview.totalWorkOrders > 0) return false;
@@ -610,21 +631,31 @@ export default function CustomerBilling() {
 
   // Reset all filters
   const resetFilters = () => {
-    setDateFilter("last_30_days");
-    setSelectedMonth("");
+    setBillingMonth(defaultBillingMonth);
     setAmountFilter("all");
     setStatusFilter("all");
     setSearchTerm("");
   };
 
-  // Count active filters
+  // Count active filters (billing month change counts as one)
   const activeFilterCount = [
-    dateFilter !== "last_30_days" ? 1 : 0,
-    selectedMonth ? 1 : 0,
+    billingMonth !== defaultBillingMonth ? 1 : 0,
     amountFilter !== "all" ? 1 : 0,
     statusFilter !== "all" ? 1 : 0,
     searchTerm ? 1 : 0
   ].reduce((sum, count) => sum + count, 0);
+
+  // Human-readable label for the selected billing month
+  const billingMonthLabel = (() => {
+    if (billingMonth === 'all') return 'All open unbilled';
+    const parts = billingMonth.split('-');
+    if (parts.length < 2) return billingMonth;
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    if (!year || !month) return billingMonth;
+    const d = new Date(year, month - 1, 1);
+    return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  })();
 
   // Handle opening PDF modal
   const handleOpenPdf = (invoiceId: number, invoiceNumber: string, customerEmail: string) => {
@@ -632,10 +663,22 @@ export default function CustomerBilling() {
     setShowPdfModal(true);
   };
 
-  // Get detailed billing data for selected customer
+  // Get detailed billing data for selected customer.
+  // billingMonth is included in the queryKey so changing the picker
+  // triggers a fresh fetch with the new selectedMonth param.
   const { data: customerBillingData, isLoading: loadingCustomerData } = useQuery<CustomerBillingData>({
-    queryKey: ["/api/customers", selectedCustomerId, "billing"],
+    queryKey: ["/api/customers", selectedCustomerId, "billing", billingMonth],
     enabled: !!selectedCustomerId,
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      params.set('selectedMonth', billingMonth);
+      const res = await fetch(`/api/customers/${selectedCustomerId}/billing?${params.toString()}`);
+      if (!res.ok) {
+        if (res.status === 401) return null as unknown as CustomerBillingData;
+        throw new Error(await res.text());
+      }
+      return res.json();
+    },
   });
 
   // Fetch recent invoices for the dashboard panel.
@@ -696,7 +739,7 @@ export default function CustomerBilling() {
         title: "Monthly Invoice Created",
         description: `Invoice ${data.invoiceNumber} created successfully for ${data.totalAmount}`,
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing", billingMonth] });
     },
     onError: (error: any) => {
       toast({
@@ -712,18 +755,26 @@ export default function CustomerBilling() {
   const openBillingCustomers = filteredCustomers
     .filter(c => {
       const preview = getCustomerPreview(c);
-      // Use totalUnbilled (date-window-free) so aging WCBs don't silently
-      // drop the customer from the list when the default 30-day window passes.
-      return (Number(preview.totalUnbilled) || 0) > 0;
+      // For "All open" view: use allOpenTotal (no-cutoff exposure) so every
+      // customer with any unbilled work shows up.
+      // For a specific billing month: use the cutoff-scoped `total` so the
+      // list only surfaces customers with work in that window.
+      if (billingMonth === 'all') {
+        return (Number(preview.allOpenTotal ?? preview.totalUnbilled) || 0) > 0;
+      }
+      return (Number(preview.total ?? preview.combinedTotal) || 0) > 0;
     })
     .sort((a, b) => {
-      // Sort by displayed Total (approved + unapproved) so list order tracks
-      // the same number shown to the user, not the separately-computed
-      // combinedTotal field.
+      // Sort by the same total shown in the card so list order tracks
+      // the displayed number.
       const pa = getCustomerPreview(a);
       const pb = getCustomerPreview(b);
-      const ta = (Number(pa.approvedTotal) || 0) + (Number(pa.unapprovedTotal) || 0);
-      const tb = (Number(pb.approvedTotal) || 0) + (Number(pb.unapprovedTotal) || 0);
+      const ta = billingMonth === 'all'
+        ? (Number(pa.allOpenTotal ?? pa.totalUnbilled) || 0)
+        : (Number(pa.total ?? pa.combinedTotal) || 0);
+      const tb = billingMonth === 'all'
+        ? (Number(pb.allOpenTotal ?? pb.totalUnbilled) || 0)
+        : (Number(pb.total ?? pb.combinedTotal) || 0);
       return tb - ta;
     });
 
@@ -807,15 +858,33 @@ export default function CustomerBilling() {
           <div className="flex flex-col h-full">
             {/* Header */}
             <div className="p-4 border-b border-gray-200 bg-white">
-              <h1 className="text-xl font-bold text-gray-900 mb-4">Customer Billing</h1>
+              <h1 className="text-xl font-bold text-gray-900 mb-2">Customer Billing</h1>
+
+              {/* Billing Month Picker — drives both list and detail queries */}
+              <div className="mb-3">
+                <label className="text-xs text-gray-600 mb-1 block font-medium">
+                  Billing for: <span className="text-orange-700 font-semibold">{billingMonthLabel}</span>
+                </label>
+                <Select value={billingMonth} onValueChange={setBillingMonth}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All open (no cutoff)</SelectItem>
+                    {generateMonthOptions().map(m => (
+                      <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               
               {/* Summary Stats */}
               {!loadingCustomers && !loadingPreviews && customers.length > 0 && (() => {
                 const summaryApproved = customerPreviews.reduce((sum, p) => sum + (Number(p.approvedTotal) || 0), 0);
                 const summaryUnapproved = customerPreviews.reduce((sum, p) => sum + (Number(p.unapprovedTotal) || 0), 0);
                 const summaryTotal = summaryApproved + summaryUnapproved;
-                const summaryTotalUnbilled = customerPreviews.reduce((sum, p) => sum + (Number(p.totalUnbilled) || 0), 0);
-                const summaryThisMonth = customerPreviews.reduce((sum, p) => sum + (Number(p.currentMonthUnbilled) || 0), 0);
+                const summaryTotalUnbilled = customerPreviews.reduce((sum, p) => sum + (Number(p.allOpenTotal ?? p.totalUnbilled) || 0), 0);
+                const summaryThisMonth = 0; // removed — use billing-month picker
                 return (
                 <div className="mb-4">
                   <div className="bg-orange-50 p-3 rounded-lg">
@@ -910,41 +979,7 @@ export default function CustomerBilling() {
                 {/* Collapsible Filter Content */}
                 {isFiltersExpanded && (
                   <div className="space-y-3 animate-in slide-in-from-top-2 duration-200">
-                    {/* Date Range Filter */}
-                    <div>
-                      <label className="text-xs text-gray-600 mb-1 block">Date Range</label>
-                      <Select value={dateFilter} onValueChange={setDateFilter}>
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Time</SelectItem>
-                          <SelectItem value="last_30_days">Last 30 Days</SelectItem>
-                          <SelectItem value="current_month">Current Month</SelectItem>
-                          <SelectItem value="last_90_days">Last 90 Days</SelectItem>
-                          <SelectItem value="custom_month">Specific Month</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* Month Selector */}
-                    {dateFilter === "custom_month" && (
-                      <div>
-                        <label className="text-xs text-gray-600 mb-1 block">Select Month</label>
-                        <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                          <SelectTrigger className="h-8 text-xs">
-                            <SelectValue placeholder="Choose month..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {generateMonthOptions().map(month => (
-                              <SelectItem key={month.value} value={month.value}>
-                                {month.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
+    
 
                     {/* Amount Filter */}
                     <div>
@@ -1199,11 +1234,17 @@ export default function CustomerBilling() {
                             {formatCurrency(customerBillingData.totalUnbilledAmount)}
                           </Badge>
                         </div>
+                        <p className="text-xs text-orange-600 mt-1">{billingMonthLabel}</p>
                       </CardHeader>
                       <CardContent className="pt-0 px-3 pb-3">
                         <div className="space-y-2">
                           <div className="text-sm text-orange-700">
                             {customerBillingData.unbilledWorkOrders.length} Work Orders, {customerBillingData.unbilledBillingSheets.length} Billing Sheets ready
+                            {((customerBillingData.pendingApprovalWorkOrders?.length ?? 0) + (customerBillingData.pendingApprovalBillingSheets?.length ?? 0) + (customerBillingData.pendingApprovalWetCheckBillings?.length ?? 0)) > 0 && (
+                              <span className="text-yellow-700 ml-1">
+                                (+{(customerBillingData.pendingApprovalWorkOrders?.length ?? 0) + (customerBillingData.pendingApprovalBillingSheets?.length ?? 0) + (customerBillingData.pendingApprovalWetCheckBillings?.length ?? 0)} pending approval)
+                              </span>
+                            )}
                           </div>
                           <Button
                             onClick={() => {
@@ -1211,7 +1252,7 @@ export default function CustomerBilling() {
                               selectAllUnbilledItems();
                               setShowItemSelection(true);
                             }}
-                            disabled={customerBillingData.totalUnbilledAmount === 0}
+                            disabled={customerBillingData.unbilledWorkOrders.length === 0 && customerBillingData.unbilledBillingSheets.length === 0 && (customerBillingData.unbilledWetCheckBillings ?? []).length === 0}
                             className="bg-orange-600 hover:bg-orange-700 text-white w-full h-10 text-sm"
                           >
                             <Receipt className="w-4 h-4 mr-2" />
@@ -1253,7 +1294,7 @@ export default function CustomerBilling() {
                   <Tabs defaultValue="unbilled" className="w-full">
                     <TabsList className="grid w-full grid-cols-6 text-xs h-10">
                       <TabsTrigger value="unbilled" className="text-xs">
-                        Unbilled ({customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length + (customerBillingData.unbilledWetCheckBillings ?? []).length})
+                        Unbilled ({customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length + (customerBillingData.unbilledWetCheckBillings ?? []).length + (customerBillingData.pendingApprovalWorkOrders?.length ?? 0) + (customerBillingData.pendingApprovalBillingSheets?.length ?? 0) + (customerBillingData.pendingApprovalWetCheckBillings?.length ?? 0)})
                       </TabsTrigger>
                       <TabsTrigger value="workorders" className="text-xs">
                         Work Orders ({customerBillingData.workOrders.length})
@@ -1274,16 +1315,19 @@ export default function CustomerBilling() {
 
                     <TabsContent value="unbilled" className="mt-3">
                       <div className="space-y-2">
-                        {/* Unbilled Work Orders (mobile) */}
+                        {/* Approved Work Orders (mobile) */}
                         {customerBillingData.unbilledWorkOrders.length > 0 && (
                           <div>
-                            <h4 className="font-medium text-sm text-gray-900 mb-2">Unbilled Work Orders</h4>
+                            <h4 className="font-medium text-sm text-gray-900 mb-2">Work Orders</h4>
                             {customerBillingData.unbilledWorkOrders.map((workOrder) => (
                               <Card key={workOrder.id} className="mb-2">
                                 <CardContent className="p-3">
-                                  <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center justify-between mb-1">
                                     <div className="text-sm font-medium">#{workOrder.id}</div>
-                                    <Badge>{getStatusBadge(workOrder.status)}</Badge>
+                                    <div className="flex items-center gap-1">
+                                      {workOrder.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                      <Badge className="bg-green-100 text-green-800 text-xs">Approved</Badge>
+                                    </div>
                                   </div>
                                   <div className="text-xs text-gray-600 mb-2">{workOrder.description}</div>
                                   <div className="flex justify-between text-sm">
@@ -1293,25 +1337,68 @@ export default function CustomerBilling() {
                                 </CardContent>
                               </Card>
                             ))}
+                            {/* Pending approval WOs */}
+                            {(customerBillingData.pendingApprovalWorkOrders ?? []).map((workOrder) => (
+                              <Card key={`pending-wo-${workOrder.id}`} className="mb-2 opacity-70 border-yellow-300">
+                                <CardContent className="p-3">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <div className="text-sm font-medium">#{workOrder.id}</div>
+                                    <div className="flex items-center gap-1">
+                                      {workOrder.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                      <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
+                                    </div>
+                                  </div>
+                                  <div className="text-xs text-gray-600 mb-2">{workOrder.description}</div>
+                                  <div className="flex justify-between text-sm">
+                                    <span>Total:</span>
+                                    <span className="font-medium">{formatCurrency(workOrder.laborCost + workOrder.partsCost)}</span>
+                                  </div>
+                                  <div className="text-xs text-yellow-700 mt-1">Not yet billable — pending manager review</div>
+                                </CardContent>
+                              </Card>
+                            ))}
                           </div>
                         )}
 
-                        {/* Unbilled Billing Sheets */}
+                        {/* Approved Billing Sheets */}
                         {customerBillingData.unbilledBillingSheets.length > 0 && (
                           <div>
-                            <h4 className="font-medium text-sm text-gray-900 mb-2">Unbilled Billing Sheets</h4>
+                            <h4 className="font-medium text-sm text-gray-900 mb-2">Billing Sheets</h4>
                             {customerBillingData.unbilledBillingSheets.map((billingSheet) => (
                               <Card key={billingSheet.id} className="mb-2">
                                 <CardContent className="p-3">
-                                  <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center justify-between mb-1">
                                     <div className="text-sm font-medium">#{billingSheet.id}</div>
-                                    <Badge>{getStatusBadge(billingSheet.status)}</Badge>
+                                    <div className="flex items-center gap-1">
+                                      {billingSheet.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                      <Badge className="bg-green-100 text-green-800 text-xs">Approved</Badge>
+                                    </div>
                                   </div>
                                   <div className="text-xs text-gray-600 mb-2">{billingSheet.description}</div>
                                   <div className="flex justify-between text-sm">
                                     <span>Total:</span>
                                     <span className="font-medium">{formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}</span>
                                   </div>
+                                </CardContent>
+                              </Card>
+                            ))}
+                            {/* Pending approval BSs */}
+                            {(customerBillingData.pendingApprovalBillingSheets ?? []).map((billingSheet) => (
+                              <Card key={`pending-bs-${billingSheet.id}`} className="mb-2 opacity-70 border-yellow-300">
+                                <CardContent className="p-3">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <div className="text-sm font-medium">#{billingSheet.id}</div>
+                                    <div className="flex items-center gap-1">
+                                      {billingSheet.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                      <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
+                                    </div>
+                                  </div>
+                                  <div className="text-xs text-gray-600 mb-2">{billingSheet.description}</div>
+                                  <div className="flex justify-between text-sm">
+                                    <span>Total:</span>
+                                    <span className="font-medium">{formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}</span>
+                                  </div>
+                                  <div className="text-xs text-yellow-700 mt-1">Not yet billable — pending manager review</div>
                                 </CardContent>
                               </Card>
                             ))}
@@ -1352,9 +1439,10 @@ export default function CustomerBilling() {
                           </div>
                         )}
 
-                        {customerBillingData.unbilledWorkOrders.length === 0 && customerBillingData.unbilledBillingSheets.length === 0 && (customerBillingData.unbilledWetCheckBillings ?? []).length === 0 && (
+                        {customerBillingData.unbilledWorkOrders.length === 0 && customerBillingData.unbilledBillingSheets.length === 0 && (customerBillingData.unbilledWetCheckBillings ?? []).length === 0 &&
+                         (customerBillingData.pendingApprovalWorkOrders ?? []).length === 0 && (customerBillingData.pendingApprovalBillingSheets ?? []).length === 0 && (customerBillingData.pendingApprovalWetCheckBillings ?? []).length === 0 && (
                           <div className="text-center py-6 text-gray-500 text-sm">
-                            No unbilled work found
+                            No unbilled work found for {billingMonthLabel}
                           </div>
                         )}
                       </div>
@@ -1362,29 +1450,78 @@ export default function CustomerBilling() {
 
                     <TabsContent value="workorders" className="mt-3">
                       <div className="space-y-2">
-                        {customerBillingData.workOrders.filter(wo => !(wo.status === 'billed' || wo.invoiceId)).length > 0 ? (
-                          customerBillingData.workOrders.filter(wo => !(wo.status === 'billed' || wo.invoiceId)).map((workOrder) => (
-                            <Card key={workOrder.id}>
-                              <CardContent className="p-3">
-                                <div className="flex items-center justify-between mb-2">
-                                  <div className="text-sm font-medium">#{workOrder.id}</div>
-                                  <div className="flex items-center gap-1">
-                                    {getStatusBadge(workOrder.status)}
-                                  </div>
+                        {/* Approved (billing month) */}
+                        {customerBillingData.unbilledWorkOrders.map((workOrder) => (
+                          <Card key={workOrder.id}>
+                            <CardContent className="p-3">
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="text-sm font-medium">#{workOrder.id}</div>
+                                <div className="flex items-center gap-1">
+                                  {workOrder.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                  <Badge className="bg-green-100 text-green-800 text-xs">Approved</Badge>
                                 </div>
-                                <div className="text-xs text-gray-600 mb-2">{workOrder.description}</div>
-                                <div className="text-xs text-gray-500 mb-2">Assigned to: {workOrder.assignedTo}</div>
-                                <div className="flex justify-between text-sm">
-                                  <span>Total:</span>
-                                  <span className="font-medium">{formatCurrency(workOrder.laborCost + workOrder.partsCost)}</span>
+                              </div>
+                              <div className="text-xs text-gray-600 mb-2">{workOrder.description}</div>
+                              <div className="flex justify-between text-sm">
+                                <span>Total:</span>
+                                <span className="font-medium">{formatCurrency(workOrder.laborCost + workOrder.partsCost)}</span>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                        {/* Pending approval (billing month) */}
+                        {(customerBillingData.pendingApprovalWorkOrders ?? []).map((workOrder) => (
+                          <Card key={`pwo-${workOrder.id}`} className="border-yellow-300 bg-yellow-50/40">
+                            <CardContent className="p-3">
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="text-sm font-medium">#{workOrder.id}</div>
+                                <div className="flex items-center gap-1">
+                                  {workOrder.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                  <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
                                 </div>
-                              </CardContent>
-                            </Card>
-                          ))
-                        ) : (
-                          customerBillingData.workOrders.filter(wo => wo.status === 'billed' || wo.invoiceId).length === 0 && (
-                            <div className="text-center py-6 text-gray-500 text-sm">No work orders found</div>
-                          )
+                              </div>
+                              <div className="text-xs text-gray-600 mb-2">{workOrder.description}</div>
+                              <div className="flex justify-between text-sm">
+                                <span>Total:</span>
+                                <span className="font-medium">{formatCurrency(workOrder.laborCost + workOrder.partsCost)}</span>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                        {/* Other active (early-stage / prior period — not in billing partition) */}
+                        {(() => {
+                          const pid = new Set([
+                            ...customerBillingData.unbilledWorkOrders.map(w => w.id),
+                            ...(customerBillingData.pendingApprovalWorkOrders ?? []).map(w => w.id),
+                          ]);
+                          const others = customerBillingData.workOrders.filter(wo => !(wo.status === 'billed' || wo.invoiceId) && !pid.has(wo.id));
+                          if (others.length === 0) return null;
+                          return (
+                            <div className="border border-gray-200 rounded-lg p-2 bg-gray-50/60">
+                              <div className="text-xs font-medium text-gray-500 mb-2 px-1">In progress / prior period</div>
+                              {others.map((workOrder) => (
+                                <Card key={workOrder.id} className="mb-1">
+                                  <CardContent className="p-3">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <div className="text-sm font-medium">#{workOrder.id}</div>
+                                      {getStatusBadge(workOrder.status)}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mb-1">{workOrder.description}</div>
+                                    <div className="flex justify-between text-sm">
+                                      <span>Total:</span>
+                                      <span className="font-medium">{formatCurrency(workOrder.laborCost + workOrder.partsCost)}</span>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                        {/* Empty state */}
+                        {customerBillingData.unbilledWorkOrders.length === 0 &&
+                         (customerBillingData.pendingApprovalWorkOrders ?? []).length === 0 &&
+                         customerBillingData.workOrders.filter(wo => !(wo.status === 'billed' || wo.invoiceId)).length === 0 && (
+                          <div className="text-center py-6 text-gray-500 text-sm">No work orders found</div>
                         )}
                         {/* Billed work orders collapsible */}
                         {customerBillingData.workOrders.filter(wo => wo.status === 'billed' || wo.invoiceId).length > 0 && (
@@ -1430,28 +1567,78 @@ export default function CustomerBilling() {
 
                     <TabsContent value="billing" className="mt-3">
                       <div className="space-y-2">
-                        {customerBillingData.billingSheets.filter(bs => !(bs.status === 'billed' || bs.invoiceId)).length > 0 ? (
-                          customerBillingData.billingSheets.filter(bs => !(bs.status === 'billed' || bs.invoiceId)).map((billingSheet) => (
-                            <Card key={billingSheet.id}>
-                              <CardContent className="p-3">
-                                <div className="flex items-center justify-between mb-2">
-                                  <div className="text-sm font-medium">#{billingSheet.id}</div>
-                                  <div className="flex items-center gap-1">
-                                    {getStatusBadge(billingSheet.status)}
-                                  </div>
+                        {/* Approved (billing month) */}
+                        {customerBillingData.unbilledBillingSheets.map((billingSheet) => (
+                          <Card key={billingSheet.id}>
+                            <CardContent className="p-3">
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="text-sm font-medium">#{billingSheet.id}</div>
+                                <div className="flex items-center gap-1">
+                                  {billingSheet.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                  <Badge className="bg-green-100 text-green-800 text-xs">Approved</Badge>
                                 </div>
-                                <div className="text-xs text-gray-600 mb-2">{billingSheet.description}</div>
-                                <div className="flex justify-between text-sm">
-                                  <span>Total:</span>
-                                  <span className="font-medium">{formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}</span>
+                              </div>
+                              <div className="text-xs text-gray-600 mb-2">{billingSheet.description}</div>
+                              <div className="flex justify-between text-sm">
+                                <span>Total:</span>
+                                <span className="font-medium">{formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}</span>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                        {/* Pending approval (billing month) */}
+                        {(customerBillingData.pendingApprovalBillingSheets ?? []).map((billingSheet) => (
+                          <Card key={`pbs-${billingSheet.id}`} className="border-yellow-300 bg-yellow-50/40">
+                            <CardContent className="p-3">
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="text-sm font-medium">#{billingSheet.id}</div>
+                                <div className="flex items-center gap-1">
+                                  {billingSheet.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                  <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
                                 </div>
-                              </CardContent>
-                            </Card>
-                          ))
-                        ) : (
-                          customerBillingData.billingSheets.filter(bs => bs.status === 'billed' || bs.invoiceId).length === 0 && (
-                            <div className="text-center py-6 text-gray-500 text-sm">No billing sheets found</div>
-                          )
+                              </div>
+                              <div className="text-xs text-gray-600 mb-2">{billingSheet.description}</div>
+                              <div className="flex justify-between text-sm">
+                                <span>Total:</span>
+                                <span className="font-medium">{formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}</span>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                        {/* Other active (early-stage / prior period) */}
+                        {(() => {
+                          const pid = new Set([
+                            ...customerBillingData.unbilledBillingSheets.map(b => b.id),
+                            ...(customerBillingData.pendingApprovalBillingSheets ?? []).map(b => b.id),
+                          ]);
+                          const others = customerBillingData.billingSheets.filter(bs => !(bs.status === 'billed' || bs.invoiceId) && !pid.has(bs.id));
+                          if (others.length === 0) return null;
+                          return (
+                            <div className="border border-gray-200 rounded-lg p-2 bg-gray-50/60">
+                              <div className="text-xs font-medium text-gray-500 mb-2 px-1">In progress / prior period</div>
+                              {others.map((billingSheet) => (
+                                <Card key={billingSheet.id} className="mb-1">
+                                  <CardContent className="p-3">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <div className="text-sm font-medium">#{billingSheet.id}</div>
+                                      {getStatusBadge(billingSheet.status)}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mb-1">{billingSheet.description}</div>
+                                    <div className="flex justify-between text-sm">
+                                      <span>Total:</span>
+                                      <span className="font-medium">{formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}</span>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                        {/* Empty state */}
+                        {customerBillingData.unbilledBillingSheets.length === 0 &&
+                         (customerBillingData.pendingApprovalBillingSheets ?? []).length === 0 &&
+                         customerBillingData.billingSheets.filter(bs => !(bs.status === 'billed' || bs.invoiceId)).length === 0 && (
+                          <div className="text-center py-6 text-gray-500 text-sm">No billing sheets found</div>
                         )}
                         {/* Billed billing sheets collapsible */}
                         {customerBillingData.billingSheets.filter(bs => bs.status === 'billed' || bs.invoiceId).length > 0 && (
@@ -1497,7 +1684,69 @@ export default function CustomerBilling() {
 
                     <TabsContent value="wet-check-billings" className="mt-3">
                       <div className="space-y-2">
-                        {(customerBillingData.wetCheckBillings ?? []).length === 0 ? (
+                        {/* Approved (billing month) */}
+                        {(customerBillingData.unbilledWetCheckBillings ?? []).map((wcb) => (
+                          <Card key={wcb.id}>
+                            <CardContent className="p-3">
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="text-sm font-medium">{wcb.billingNumber}</div>
+                                <div className="flex items-center gap-1">
+                                  {wcb.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                  <Badge className="bg-green-100 text-green-800 text-xs">Approved</Badge>
+                                </div>
+                              </div>
+                              <div className="text-xs text-gray-600 mb-2">{wcb.description || 'Wet Check Billing'}</div>
+                              <div className="flex justify-between text-sm">
+                                <span>Total:</span>
+                                <span className="font-medium">{formatCurrency(wcb.laborCost + wcb.partsCost)}</span>
+                              </div>
+                              <Button variant="ghost" size="sm" onClick={() => setOpenWcbId(wcb.id)} className="h-6 px-2 text-xs mt-1">View</Button>
+                            </CardContent>
+                          </Card>
+                        ))}
+                        {/* Pending approval (billing month) */}
+                        {(customerBillingData.pendingApprovalWetCheckBillings ?? []).map((wcb) => (
+                          <Card key={`pwcb-${wcb.id}`} className="border-yellow-300 bg-yellow-50/40">
+                            <CardContent className="p-3">
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="text-sm font-medium">{wcb.billingNumber}</div>
+                                <div className="flex items-center gap-1">
+                                  {wcb.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                  <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
+                                </div>
+                              </div>
+                              <div className="text-xs text-gray-600 mb-2">{wcb.description || 'Wet Check Billing'}</div>
+                              <div className="flex justify-between text-sm">
+                                <span>Total:</span>
+                                <span className="font-medium">{formatCurrency(wcb.laborCost + wcb.partsCost)}</span>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                        {/* Other (billed or not in partition) */}
+                        {(() => {
+                          const pid = new Set([
+                            ...(customerBillingData.unbilledWetCheckBillings ?? []).map(w => w.id),
+                            ...(customerBillingData.pendingApprovalWetCheckBillings ?? []).map(w => w.id),
+                          ]);
+                          const others = (customerBillingData.wetCheckBillings ?? []).filter(wcb => !pid.has(wcb.id));
+                          if (others.length === 0) return null;
+                          return (
+                            <div className="border border-gray-200 rounded-lg p-2 bg-gray-50/60">
+                              <div className="text-xs font-medium text-gray-500 mb-2 px-1">Other / prior period / billed</div>
+                              {others.map((wcb) => (
+                                <WetCheckBillingRow
+                                  key={wcb.id}
+                                  wcb={wcb}
+                                  onClick={() => setOpenWcbId(wcb.id)}
+                                  userRole={userRole}
+                                  customerId={selectedCustomerId}
+                                />
+                              ))}
+                            </div>
+                          );
+                        })()}
+                        {(customerBillingData.wetCheckBillings ?? []).length === 0 && (
                           <Card>
                             <CardContent className="p-6 text-center text-gray-500">
                               <Droplets className="w-8 h-8 mx-auto mb-2 text-jobtype-wcb/40" />
@@ -1505,16 +1754,6 @@ export default function CustomerBilling() {
                               <div className="text-sm">No wet check billings found for this customer.</div>
                             </CardContent>
                           </Card>
-                        ) : (
-                          (customerBillingData.wetCheckBillings ?? []).map((wcb) => (
-                            <WetCheckBillingRow
-                              key={wcb.id}
-                              wcb={wcb}
-                              onClick={() => setOpenWcbId(wcb.id)}
-                              userRole={userRole}
-                              customerId={selectedCustomerId}
-                            />
-                          ))
                         )}
                       </div>
                     </TabsContent>
@@ -1566,17 +1805,33 @@ export default function CustomerBilling() {
       {/* Desktop: Left Sidebar - Customer List */}
       <div className="hidden lg:flex lg:w-1/3 bg-white border-r border-gray-200 flex-col">
         <div className="p-4 border-b border-gray-200">
-          <h1 className="text-xl font-bold text-gray-900 mb-4">Customer Billing</h1>
-          
+          <h1 className="text-xl font-bold text-gray-900 mb-2">Customer Billing</h1>
 
+          {/* Billing Month Picker — drives both list and detail queries */}
+          <div className="mb-3">
+            <label className="text-xs text-gray-600 mb-1 block font-medium">
+              Billing for: <span className="text-orange-700 font-semibold">{billingMonthLabel}</span>
+            </label>
+            <Select value={billingMonth} onValueChange={setBillingMonth}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All open (no cutoff)</SelectItem>
+                {generateMonthOptions().map(m => (
+                  <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           
           {/* Summary Stats */}
           {!loadingCustomers && !loadingPreviews && customers.length > 0 && (() => {
             const summaryApproved = customerPreviews.reduce((sum, p) => sum + (Number(p.approvedTotal) || 0), 0);
             const summaryUnapproved = customerPreviews.reduce((sum, p) => sum + (Number(p.unapprovedTotal) || 0), 0);
             const summaryTotal = summaryApproved + summaryUnapproved;
-            const summaryTotalUnbilled = customerPreviews.reduce((sum, p) => sum + (Number(p.totalUnbilled) || 0), 0);
-            const summaryThisMonth = customerPreviews.reduce((sum, p) => sum + (Number(p.currentMonthUnbilled) || 0), 0);
+            const summaryTotalUnbilled = customerPreviews.reduce((sum, p) => sum + (Number(p.allOpenTotal ?? p.totalUnbilled) || 0), 0);
+            const summaryThisMonth = 0; // removed — use billing-month picker
             return (
             <div className="mb-4">
               <div className="bg-orange-50 p-3 rounded-lg">
@@ -1671,42 +1926,6 @@ export default function CustomerBilling() {
             {/* Collapsible Filter Content */}
             {isFiltersExpanded && (
               <div className="space-y-3 animate-in slide-in-from-top-2 duration-200">
-                {/* Date Range Filter */}
-                <div>
-                  <label className="text-xs text-gray-600 mb-1 block">Date Range</label>
-                  <Select value={dateFilter} onValueChange={setDateFilter}>
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Time</SelectItem>
-                      <SelectItem value="last_30_days">Last 30 Days</SelectItem>
-                      <SelectItem value="current_month">Current Month</SelectItem>
-                      <SelectItem value="last_90_days">Last 90 Days</SelectItem>
-                      <SelectItem value="custom_month">Specific Month</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Month Selector (shown when custom_month is selected) */}
-                {dateFilter === "custom_month" && (
-                  <div>
-                    <label className="text-xs text-gray-600 mb-1 block">Select Month</label>
-                    <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue placeholder="Choose month..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {generateMonthOptions().map(month => (
-                          <SelectItem key={month.value} value={month.value}>
-                            {month.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
                 {/* Amount Filter */}
                 <div>
                   <label className="text-xs text-gray-600 mb-1 block">Billing Amount</label>
@@ -1804,7 +2023,7 @@ export default function CustomerBilling() {
                             </div>
                             <div className="flex items-center justify-between border-t border-gray-100 pt-0.5">
                               <span className="text-xs text-orange-700 font-medium">Total:</span>
-                              <span className="text-xs font-semibold text-orange-800">{formatCurrency(Number(preview.totalUnbilled) || 0)}</span>
+                              <span className="text-xs font-semibold text-orange-800">{formatCurrency(billingMonth === 'all' ? (Number(preview.allOpenTotal ?? preview.totalUnbilled) || 0) : (Number(preview.total ?? preview.combinedTotal) || 0))}</span>
                             </div>
                             {preview.lastInvoiceDate && (
                               <div className="flex items-center justify-between">
@@ -1953,11 +2172,17 @@ export default function CustomerBilling() {
                         {formatCurrency(customerBillingData.totalUnbilledAmount)}
                       </Badge>
                     </div>
+                    <p className="text-xs text-orange-600 mt-1">{billingMonthLabel}</p>
                   </CardHeader>
                   <CardContent className="pt-0 px-3 pb-3">
                     <div className="space-y-2">
                       <div className="text-xs text-orange-700">
                         {customerBillingData.unbilledWorkOrders.length} WO, {customerBillingData.unbilledBillingSheets.length} BS, {(customerBillingData.unbilledWetCheckBillings ?? []).length} WC ready
+                        {((customerBillingData.pendingApprovalWorkOrders?.length ?? 0) + (customerBillingData.pendingApprovalBillingSheets?.length ?? 0) + (customerBillingData.pendingApprovalWetCheckBillings?.length ?? 0)) > 0 && (
+                          <span className="text-yellow-700 ml-1">
+                            (+{(customerBillingData.pendingApprovalWorkOrders?.length ?? 0) + (customerBillingData.pendingApprovalBillingSheets?.length ?? 0) + (customerBillingData.pendingApprovalWetCheckBillings?.length ?? 0)} pending)
+                          </span>
+                        )}
                       </div>
                       <Button
                         onClick={() => {
@@ -1965,7 +2190,7 @@ export default function CustomerBilling() {
                           selectAllUnbilledItems();
                           setShowItemSelection(true);
                         }}
-                        disabled={customerBillingData.totalUnbilledAmount === 0}
+                        disabled={customerBillingData.unbilledWorkOrders.length === 0 && customerBillingData.unbilledBillingSheets.length === 0 && (customerBillingData.unbilledWetCheckBillings ?? []).length === 0}
                         className="bg-orange-600 hover:bg-orange-700 text-white w-full h-8 text-xs"
                       >
                         <Receipt className="w-3 h-3 mr-1" />
@@ -2014,7 +2239,7 @@ export default function CustomerBilling() {
               <Tabs defaultValue="unbilled" className="w-full">
                 <TabsList className="grid w-full grid-cols-6 h-8">
                   <TabsTrigger value="unbilled" className="text-xs px-2">
-                    Unbilled ({customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length + (customerBillingData.unbilledWetCheckBillings ?? []).length})
+                    Unbilled ({customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length + (customerBillingData.unbilledWetCheckBillings ?? []).length + (customerBillingData.pendingApprovalWorkOrders?.length ?? 0) + (customerBillingData.pendingApprovalBillingSheets?.length ?? 0) + (customerBillingData.pendingApprovalWetCheckBillings?.length ?? 0)})
                   </TabsTrigger>
                   <TabsTrigger value="work_orders" className="text-xs px-2">
                     Work Orders ({customerBillingData.workOrders.length})
@@ -2036,17 +2261,18 @@ export default function CustomerBilling() {
                 {/* Unbilled Items Tab */}
                 <TabsContent value="unbilled">
                   <div className="space-y-2">
-                    {customerBillingData.unbilledWorkOrders.length === 0 && customerBillingData.unbilledBillingSheets.length === 0 && (customerBillingData.unbilledWetCheckBillings ?? []).length === 0 ? (
+                    {customerBillingData.unbilledWorkOrders.length === 0 && customerBillingData.unbilledBillingSheets.length === 0 && (customerBillingData.unbilledWetCheckBillings ?? []).length === 0 &&
+                     (customerBillingData.pendingApprovalWorkOrders?.length ?? 0) === 0 && (customerBillingData.pendingApprovalBillingSheets?.length ?? 0) === 0 && (customerBillingData.pendingApprovalWetCheckBillings?.length ?? 0) === 0 ? (
                       <Card>
                         <CardContent className="p-6 text-center text-gray-500">
                           <CheckCircle className="w-8 h-8 mx-auto mb-2 text-green-500" />
                           <div className="font-medium mb-1">All caught up!</div>
-                          <div className="text-sm">No unbilled work for this customer.</div>
+                          <div className="text-sm">No unbilled work for this customer in {billingMonthLabel}.</div>
                         </CardContent>
                       </Card>
                     ) : (
                       <>
-                        {/* Unbilled Work Orders */}
+                        {/* Approved Work Orders */}
                         {customerBillingData.unbilledWorkOrders.map((wo) => (
                           <Card key={`wo-${wo.id}`} className="border-orange-200">
                             <CardContent className="p-3">
@@ -2055,7 +2281,8 @@ export default function CustomerBilling() {
                                   <div className="flex items-center gap-2 mb-1">
                                     <FileText className="w-4 h-4 text-gray-400" />
                                     <span className="font-medium text-sm">WO #{wo.id}</span>
-                                    {getStatusBadge(wo.status)}
+                                    <Badge className="bg-green-100 text-green-800 text-xs">Approved</Badge>
+                                    {wo.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
                                   </div>
                                   <div className="text-xs text-gray-600 mb-2">
                                     {wo.description}
@@ -2107,7 +2334,30 @@ export default function CustomerBilling() {
                           </Card>
                         ))}
 
-                        {/* Unbilled Billing Sheets */}
+                        {/* Pending approval Work Orders — visible but not yet billable */}
+                        {(customerBillingData.pendingApprovalWorkOrders ?? []).map((wo) => (
+                          <Card key={`pending-wo-${wo.id}`} className="border-yellow-300 bg-yellow-50/40">
+                            <CardContent className="p-3">
+                              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <FileText className="w-4 h-4 text-yellow-500" />
+                                    <span className="font-medium text-sm">WO #{wo.id}</span>
+                                    <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
+                                    {wo.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                  </div>
+                                  <div className="text-xs text-gray-600 mb-1">{wo.description}</div>
+                                  <div className="text-xs text-yellow-700">Not yet billable — awaiting manager review</div>
+                                </div>
+                                <div className="text-sm font-medium text-yellow-700 text-right">
+                                  {formatCurrency(parseFloat(wo.totalAmount || '0'))}
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+
+                        {/* Approved Billing Sheets */}
                         {customerBillingData.unbilledBillingSheets.map((bs) => (
                           <Card key={`bs-${bs.id}`} className="border-orange-200">
                             <CardContent className="p-3">
@@ -2116,7 +2366,8 @@ export default function CustomerBilling() {
                                   <div className="flex items-center gap-2 mb-1">
                                     <Receipt className="w-4 h-4 text-gray-400" />
                                     <span className="font-medium text-sm">BS #{bs.id}</span>
-                                    {getStatusBadge(bs.status)}
+                                    <Badge className="bg-green-100 text-green-800 text-xs">Approved</Badge>
+                                    {bs.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
                                   </div>
                                   <div className="text-xs text-gray-600 mb-2">
                                     {bs.description || 'Billing Sheet'}
@@ -2161,7 +2412,30 @@ export default function CustomerBilling() {
                           </Card>
                         ))}
 
-                        {/* Unbilled Wet Check Billings (desktop) */}
+                        {/* Pending approval Billing Sheets — visible but not yet billable */}
+                        {(customerBillingData.pendingApprovalBillingSheets ?? []).map((bs) => (
+                          <Card key={`pending-bs-${bs.id}`} className="border-yellow-300 bg-yellow-50/40">
+                            <CardContent className="p-3">
+                              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <Receipt className="w-4 h-4 text-yellow-500" />
+                                    <span className="font-medium text-sm">BS #{bs.id}</span>
+                                    <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
+                                    {bs.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                  </div>
+                                  <div className="text-xs text-gray-600 mb-1">{bs.description || 'Billing Sheet'}</div>
+                                  <div className="text-xs text-yellow-700">Not yet billable — awaiting manager review</div>
+                                </div>
+                                <div className="text-sm font-medium text-yellow-700 text-right">
+                                  {formatCurrency(bs.laborCost + bs.partsCost)}
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+
+                        {/* Approved Wet Check Billings (desktop) */}
                         {(customerBillingData.unbilledWetCheckBillings ?? []).map((wcb) => (
                           <Card key={`wcb-${wcb.id}`} className="border-jobtype-wcb/30">
                             <CardContent className="p-3">
@@ -2201,6 +2475,29 @@ export default function CustomerBilling() {
                             </CardContent>
                           </Card>
                         ))}
+
+                        {/* Pending approval Wet Check Billings — visible, not yet billable */}
+                        {(customerBillingData.pendingApprovalWetCheckBillings ?? []).map((wcb) => (
+                          <Card key={`pending-wcb-${wcb.id}`} className="border-yellow-300 bg-yellow-50/40">
+                            <CardContent className="p-3">
+                              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <Receipt className="w-4 h-4 text-yellow-500" />
+                                    <span className="font-medium text-sm">{wcb.billingNumber}</span>
+                                    <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
+                                    {wcb.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                  </div>
+                                  <div className="text-xs text-gray-600 mb-1">{wcb.description || 'Wet Check Billing'}</div>
+                                  <div className="text-xs text-yellow-700">Not yet billable — awaiting manager review</div>
+                                </div>
+                                <div className="text-sm font-medium text-yellow-700 text-right">
+                                  {formatCurrency(wcb.laborCost + wcb.partsCost)}
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
                       </>
                     )}
                   </div>
@@ -2219,16 +2516,17 @@ export default function CustomerBilling() {
                       </Card>
                     ) : (
                       <>
-                        {/* Active (non-billed) work orders */}
-                        {customerBillingData.workOrders.filter(wo => !(wo.status === 'billed' || wo.invoiceId)).map((wo) => (
-                          <Card key={wo.id}>
+                        {/* Approved — billing month partition */}
+                        {customerBillingData.unbilledWorkOrders.map((wo) => (
+                          <Card key={`ub-wo-${wo.id}`} className="border-orange-200">
                             <CardContent className="p-3">
                               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                                 <div className="flex-1">
                                   <div className="flex items-center gap-2 mb-1">
                                     <FileText className="w-4 h-4 text-gray-400" />
                                     <span className="font-medium text-sm">WO #{wo.id}</span>
-                                    {getStatusBadge(wo.status)}
+                                    <Badge className="bg-green-100 text-green-800 text-xs">Approved</Badge>
+                                    {wo.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
                                   </div>
                                   <div className="text-xs text-gray-600 mb-2">{wo.description}</div>
                                   <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
@@ -2244,16 +2542,10 @@ export default function CustomerBilling() {
                                         {wo.assignedTo}
                                       </div>
                                     )}
-                                    {wo.branchName && (
-                                      <div className="flex items-center gap-1">
-                                        <span className="font-medium text-gray-700">Branch:</span>
-                                        {wo.branchName}
-                                      </div>
-                                    )}
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <div className="text-sm font-medium text-right">
+                                  <div className="text-sm font-medium text-orange-700 text-right">
                                     <div>{formatCurrency(parseFloat(wo.totalAmount || '0'))}</div>
                                     {wo.hasFinancialBreakdown ? (
                                       <div className="text-xs text-gray-500 font-normal">
@@ -2263,36 +2555,72 @@ export default function CustomerBilling() {
                                       <div className="text-xs text-gray-400 italic">Breakdown unavailable</div>
                                     )}
                                   </div>
-                                  {(wo.status === 'billed' || wo.invoiceId) && (
-                                    <span className="h-6 px-2 text-xs text-purple-700 font-medium flex items-center">Billed</span>
-                                  )}
-                                  {!(wo.status === 'billed' || wo.invoiceId || wo.status === 'pending_manager_review') && (
-                                    <>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => setItemToDelete({ type: "work_order", id: wo.id, label: `Work Order #${wo.id}` })}
-                                        className="h-6 px-2 text-xs hover:bg-red-50 text-red-600"
-                                      >
-                                        <Trash2 className="w-3 h-3 mr-1" />
-                                        Delete
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => { setSelectedWorkOrder(wo); setShowWorkOrderDetail(true); }}
-                                        className="h-6 px-2 text-xs"
-                                      >
-                                        View / Edit
-                                      </Button>
-                                    </>
-                                  )}
+                                  <Button variant="ghost" size="sm" onClick={() => { setSelectedWorkOrder(wo); setShowWorkOrderDetail(true); }} className="h-6 px-2 text-xs hover:bg-orange-50">
+                                    View / Edit
+                                  </Button>
                                 </div>
                               </div>
                             </CardContent>
                           </Card>
                         ))}
-
+                        {/* Pending approval — billing month partition */}
+                        {(customerBillingData.pendingApprovalWorkOrders ?? []).map((wo) => (
+                          <Card key={`pap-wo-${wo.id}`} className="border-yellow-300 bg-yellow-50/40">
+                            <CardContent className="p-3">
+                              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <FileText className="w-4 h-4 text-yellow-500" />
+                                    <span className="font-medium text-sm">WO #{wo.id}</span>
+                                    <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
+                                    {wo.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                  </div>
+                                  <div className="text-xs text-gray-600 mb-1">{wo.description}</div>
+                                  <div className="text-xs text-yellow-700">Awaiting manager review</div>
+                                </div>
+                                <div className="text-sm font-medium text-yellow-700 text-right">
+                                  {formatCurrency(parseFloat(wo.totalAmount || '0'))}
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                        {/* Other active (early-stage / prior period) */}
+                        {(() => {
+                          const pid = new Set([
+                            ...customerBillingData.unbilledWorkOrders.map(w => w.id),
+                            ...(customerBillingData.pendingApprovalWorkOrders ?? []).map(w => w.id),
+                          ]);
+                          const others = customerBillingData.workOrders.filter(wo => !(wo.status === 'billed' || wo.invoiceId) && !pid.has(wo.id));
+                          if (others.length === 0) return null;
+                          return (
+                            <div className="border border-gray-200 rounded-lg p-2 bg-gray-50/60 mb-2">
+                              <div className="text-xs font-medium text-gray-500 mb-2 px-1">In progress / prior period</div>
+                              {others.map((wo) => (
+                                <Card key={wo.id} className="mb-1">
+                                  <CardContent className="p-3">
+                                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                      <div className="flex-1">
+                                        <div className="flex items-center gap-2 mb-1">
+                                          <FileText className="w-4 h-4 text-gray-400" />
+                                          <span className="font-medium text-sm">WO #{wo.id}</span>
+                                          {getStatusBadge(wo.status)}
+                                        </div>
+                                        <div className="text-xs text-gray-600 mb-1">{wo.description}</div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <div className="text-sm font-medium">{formatCurrency(parseFloat(wo.totalAmount || '0'))}</div>
+                                        <Button variant="ghost" size="sm" onClick={() => { setSelectedWorkOrder(wo); setShowWorkOrderDetail(true); }} className="h-6 px-2 text-xs">
+                                          View / Edit
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              ))}
+                            </div>
+                          );
+                        })()}
                         {/* Billed Work Orders — collapsible, collapsed by default */}
                         {(() => {
                           const billedWOs = customerBillingData.workOrders.filter(wo => wo.status === 'billed' || wo.invoiceId);
@@ -2375,61 +2703,94 @@ export default function CustomerBilling() {
                       </Card>
                     ) : (
                       <>
-                        {/* Active (non-billed) billing sheets */}
-                        {customerBillingData.billingSheets.filter(bs => !(bs.status === 'billed' || bs.invoiceId)).map((bs) => (
-                          <Card key={bs.id}>
+                        {/* Approved — billing month partition */}
+                        {customerBillingData.unbilledBillingSheets.map((bs) => (
+                          <Card key={`ub-bs-${bs.id}`} className="border-orange-200">
                             <CardContent className="p-3">
                               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                                 <div className="flex-1">
                                   <div className="flex items-center gap-2 mb-1">
                                     <Receipt className="w-4 h-4 text-gray-400" />
                                     <span className="font-medium text-sm">BS #{bs.id}</span>
-                                    {getStatusBadge(bs.status)}
+                                    <Badge className="bg-green-100 text-green-800 text-xs">Approved</Badge>
+                                    {bs.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
                                   </div>
                                   <div className="text-xs text-gray-600 mb-2">{bs.description || 'Billing Sheet'}</div>
-                                  <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
-                                    {bs.workDate && (
-                                      <div className="flex items-center gap-1">
-                                        <Calendar className="w-3 h-3" />
-                                        Work Date: {formatDate(bs.workDate)}
-                                      </div>
-                                    )}
-                                  </div>
+                                  {bs.workDate && (
+                                    <div className="flex items-center gap-1 text-xs text-gray-500">
+                                      <Calendar className="w-3 h-3" />
+                                      Work Date: {formatDate(bs.workDate)}
+                                    </div>
+                                  )}
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <div className="text-sm font-medium">
-                                    {formatCurrency(bs.laborCost + bs.partsCost)}
-                                  </div>
-                                  {(bs.status === 'billed' || bs.invoiceId) && (
-                                    <span className="h-6 px-2 text-xs text-purple-700 font-medium flex items-center">Billed</span>
-                                  )}
-                                  {!(bs.status === 'billed' || bs.invoiceId || bs.status === 'pending_manager_review') && (
-                                    <>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => setItemToDelete({ type: "billing_sheet", id: bs.id, label: `Billing Sheet #${bs.id}` })}
-                                        className="h-6 px-2 text-xs hover:bg-red-50 text-red-600"
-                                      >
-                                        <Trash2 className="w-3 h-3 mr-1" />
-                                        Delete
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => { setSelectedBillingSheet(bs); setShowBillingSheetDetail(true); }}
-                                        className="h-6 px-2 text-xs"
-                                      >
-                                        View / Edit
-                                      </Button>
-                                    </>
-                                  )}
+                                  <div className="text-sm font-medium text-orange-700">{formatCurrency(bs.laborCost + bs.partsCost)}</div>
+                                  <Button variant="ghost" size="sm" onClick={() => { setSelectedBillingSheet(bs); setShowBillingSheetDetail(true); }} className="h-6 px-2 text-xs hover:bg-orange-50">
+                                    View / Edit
+                                  </Button>
                                 </div>
                               </div>
                             </CardContent>
                           </Card>
                         ))}
-
+                        {/* Pending approval — billing month partition */}
+                        {(customerBillingData.pendingApprovalBillingSheets ?? []).map((bs) => (
+                          <Card key={`pap-bs-${bs.id}`} className="border-yellow-300 bg-yellow-50/40">
+                            <CardContent className="p-3">
+                              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <Receipt className="w-4 h-4 text-yellow-500" />
+                                    <span className="font-medium text-sm">BS #{bs.id}</span>
+                                    <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
+                                    {bs.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                  </div>
+                                  <div className="text-xs text-gray-600 mb-1">{bs.description || 'Billing Sheet'}</div>
+                                  <div className="text-xs text-yellow-700">Awaiting manager review</div>
+                                </div>
+                                <div className="text-sm font-medium text-yellow-700 text-right">
+                                  {formatCurrency(bs.laborCost + bs.partsCost)}
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                        {/* Other active (early-stage / prior period) */}
+                        {(() => {
+                          const pid = new Set([
+                            ...customerBillingData.unbilledBillingSheets.map(b => b.id),
+                            ...(customerBillingData.pendingApprovalBillingSheets ?? []).map(b => b.id),
+                          ]);
+                          const others = customerBillingData.billingSheets.filter(bs => !(bs.status === 'billed' || bs.invoiceId) && !pid.has(bs.id));
+                          if (others.length === 0) return null;
+                          return (
+                            <div className="border border-gray-200 rounded-lg p-2 bg-gray-50/60 mb-2">
+                              <div className="text-xs font-medium text-gray-500 mb-2 px-1">In progress / prior period</div>
+                              {others.map((bs) => (
+                                <Card key={bs.id} className="mb-1">
+                                  <CardContent className="p-3">
+                                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                      <div className="flex-1">
+                                        <div className="flex items-center gap-2 mb-1">
+                                          <Receipt className="w-4 h-4 text-gray-400" />
+                                          <span className="font-medium text-sm">BS #{bs.id}</span>
+                                          {getStatusBadge(bs.status)}
+                                        </div>
+                                        <div className="text-xs text-gray-600 mb-1">{bs.description || 'Billing Sheet'}</div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <div className="text-sm font-medium">{formatCurrency(bs.laborCost + bs.partsCost)}</div>
+                                        <Button variant="ghost" size="sm" onClick={() => { setSelectedBillingSheet(bs); setShowBillingSheetDetail(true); }} className="h-6 px-2 text-xs">
+                                          View / Edit
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              ))}
+                            </div>
+                          );
+                        })()}
                         {/* Billed Billing Sheets — collapsible, collapsed by default */}
                         {(() => {
                           const billedBSs = customerBillingData.billingSheets.filter(bs => bs.status === 'billed' || bs.invoiceId);
@@ -2500,7 +2861,74 @@ export default function CustomerBilling() {
                 {/* WC Billings Tab */}
                 <TabsContent value="wet_check_billings">
                   <div className="space-y-2 mt-2">
-                    {(customerBillingData.wetCheckBillings ?? []).length === 0 ? (
+                    {/* Approved — billing month partition */}
+                    {(customerBillingData.unbilledWetCheckBillings ?? []).map((wcb) => (
+                      <Card key={`ub-wcb-${wcb.id}`} className="border-orange-200">
+                        <CardContent className="p-3">
+                          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <Receipt className="w-4 h-4 text-jobtype-wcb" />
+                                <span className="font-medium text-sm">{wcb.billingNumber}</span>
+                                <Badge className="bg-green-100 text-green-800 text-xs">Approved</Badge>
+                                {wcb.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                              </div>
+                              <div className="text-xs text-gray-600 mb-2">{wcb.description || 'Wet Check Billing'}</div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="text-sm font-medium text-jobtype-wcb">{formatCurrency(wcb.laborCost + wcb.partsCost)}</div>
+                              <Button variant="ghost" size="sm" onClick={() => setOpenWcbId(wcb.id)} className="h-6 px-2 text-xs hover:bg-orange-50">View / Edit</Button>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                    {/* Pending approval — billing month partition */}
+                    {(customerBillingData.pendingApprovalWetCheckBillings ?? []).map((wcb) => (
+                      <Card key={`pap-wcb-${wcb.id}`} className="border-yellow-300 bg-yellow-50/40">
+                        <CardContent className="p-3">
+                          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <Receipt className="w-4 h-4 text-yellow-500" />
+                                <span className="font-medium text-sm">{wcb.billingNumber}</span>
+                                <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
+                                {wcb.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                              </div>
+                              <div className="text-xs text-gray-600 mb-1">{wcb.description || 'Wet Check Billing'}</div>
+                              <div className="text-xs text-yellow-700">Awaiting manager review</div>
+                            </div>
+                            <div className="text-sm font-medium text-yellow-700 text-right">
+                              {formatCurrency(wcb.laborCost + wcb.partsCost)}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                    {/* Other (billed / not in partition) */}
+                    {(() => {
+                      const pid = new Set([
+                        ...(customerBillingData.unbilledWetCheckBillings ?? []).map(w => w.id),
+                        ...(customerBillingData.pendingApprovalWetCheckBillings ?? []).map(w => w.id),
+                      ]);
+                      const others = (customerBillingData.wetCheckBillings ?? []).filter(wcb => !pid.has(wcb.id));
+                      if (others.length === 0) return null;
+                      return (
+                        <div className="border border-gray-200 rounded-lg p-2 bg-gray-50/60">
+                          <div className="text-xs font-medium text-gray-500 mb-2 px-1">Other / billed / prior period</div>
+                          {others.map((wcb) => (
+                            <WetCheckBillingRow
+                              key={wcb.id}
+                              wcb={wcb}
+                              onClick={() => setOpenWcbId(wcb.id)}
+                              userRole={userRole}
+                              customerId={selectedCustomerId}
+                            />
+                          ))}
+                        </div>
+                      );
+                    })()}
+                    {(customerBillingData.wetCheckBillings ?? []).length === 0 && (
                       <Card>
                         <CardContent className="p-6 text-center text-gray-500">
                           <Droplets className="w-8 h-8 mx-auto mb-2 text-jobtype-wcb/40" />
@@ -2508,16 +2936,6 @@ export default function CustomerBilling() {
                           <div className="text-sm">No wet check billings found for this customer.</div>
                         </CardContent>
                       </Card>
-                    ) : (
-                      (customerBillingData.wetCheckBillings ?? []).map((wcb) => (
-                        <WetCheckBillingRow
-                          key={wcb.id}
-                          wcb={wcb}
-                          onClick={() => setOpenWcbId(wcb.id)}
-                          userRole={userRole}
-                          customerId={selectedCustomerId}
-                        />
-                      ))
                     )}
                   </div>
                 </TabsContent>
@@ -3049,6 +3467,43 @@ export default function CustomerBilling() {
                 </div>
               )}
 
+              {/* Pending Work Orders Section (Select Items) */}
+              {(customerBillingData.pendingApprovalWorkOrders ?? []).length > 0 && (
+                <div>
+                  <h3 className="font-medium text-lg mb-3 flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-yellow-600" />
+                    Pending Approval — Work Orders ({(customerBillingData.pendingApprovalWorkOrders ?? []).length})
+                  </h3>
+                  <div className="space-y-2">
+                    {(customerBillingData.pendingApprovalWorkOrders ?? []).map((workOrder) => (
+                      <Card key={`pending-sel-wo-${workOrder.id}`} className="border-yellow-300 bg-yellow-50/40 opacity-80">
+                        <CardContent className="p-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <Checkbox disabled checked={false} />
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="font-medium">Work Order #{workOrder.id}</span>
+                                  <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
+                                  {workOrder.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                </div>
+                                <div className="text-sm text-gray-600 mb-1">{workOrder.description}</div>
+                                <div className="text-xs text-yellow-700">Awaiting manager review — cannot be invoiced yet</div>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-medium text-lg text-yellow-700">
+                                {formatCurrency(parseFloat(workOrder.totalAmount || '0'))}
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Billing Sheets Section */}
               {customerBillingData.unbilledBillingSheets.length > 0 && (
                 <div>
@@ -3102,6 +3557,43 @@ export default function CustomerBilling() {
                 </div>
               )}
 
+              {/* Pending Billing Sheets Section (Select Items) */}
+              {(customerBillingData.pendingApprovalBillingSheets ?? []).length > 0 && (
+                <div>
+                  <h3 className="font-medium text-lg mb-3 flex items-center gap-2">
+                    <DollarSign className="w-5 h-5 text-yellow-600" />
+                    Pending Approval — Billing Sheets ({(customerBillingData.pendingApprovalBillingSheets ?? []).length})
+                  </h3>
+                  <div className="space-y-2">
+                    {(customerBillingData.pendingApprovalBillingSheets ?? []).map((billingSheet) => (
+                      <Card key={`pending-sel-bs-${billingSheet.id}`} className="border-yellow-300 bg-yellow-50/40 opacity-80">
+                        <CardContent className="p-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <Checkbox disabled checked={false} />
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="font-medium">Billing Sheet #{billingSheet.id}</span>
+                                  <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
+                                  {billingSheet.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                </div>
+                                <div className="text-sm text-gray-600 mb-1">{billingSheet.description}</div>
+                                <div className="text-xs text-yellow-700">Awaiting manager review — cannot be invoiced yet</div>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-medium text-lg text-yellow-700">
+                                {formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Wet Check Billings Section */}
               {(customerBillingData.unbilledWetCheckBillings ?? []).length > 0 && (
                 <div>
@@ -3145,6 +3637,43 @@ export default function CustomerBilling() {
                               </div>
                               <div className="text-xs text-gray-500">
                                 Parts: {formatCurrency(wcb.partsCost)}
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Pending Wet Check Billings Section (Select Items) */}
+              {(customerBillingData.pendingApprovalWetCheckBillings ?? []).length > 0 && (
+                <div>
+                  <h3 className="font-medium text-lg mb-3 flex items-center gap-2">
+                    <Receipt className="w-5 h-5 text-yellow-600" />
+                    Pending Approval — Wet Check Billings ({(customerBillingData.pendingApprovalWetCheckBillings ?? []).length})
+                  </h3>
+                  <div className="space-y-2">
+                    {(customerBillingData.pendingApprovalWetCheckBillings ?? []).map((wcb) => (
+                      <Card key={`pending-sel-wcb-${wcb.id}`} className="border-yellow-300 bg-yellow-50/40 opacity-80">
+                        <CardContent className="p-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <Checkbox disabled checked={false} />
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="font-medium">{wcb.billingNumber}</span>
+                                  <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
+                                  {wcb.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
+                                </div>
+                                <div className="text-sm text-gray-600 mb-1">{wcb.description || 'Wet Check Billing'}</div>
+                                <div className="text-xs text-yellow-700">Awaiting manager review — cannot be invoiced yet</div>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-medium text-lg text-yellow-700">
+                                {formatCurrency(wcb.laborCost + wcb.partsCost)}
                               </div>
                             </div>
                           </div>
