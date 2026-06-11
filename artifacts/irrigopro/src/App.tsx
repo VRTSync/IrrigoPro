@@ -39,6 +39,7 @@ const AdminIssueTypesPage = lazyPage(() => import("@/pages/admin-issue-types"));
 const AdminClientErrorsPage = lazyPage(() => import("@/pages/admin-client-errors"));
 const FinancialPulsePage = lazyPage(() => import("@/pages/financial-pulse"));
 const SuperAdminAppHealthPage = lazyPage(() => import("@/pages/super-admin-app-health"));
+const SuperAdminLoosePhotosPage = lazyPage(() => import("@/pages/super-admin-loose-photos"));
 const LaborRateAuditPage = lazyPage(() => import("@/pages/labor-rate-audit"));
 const CustomerBilling = lazyPage(() => import("@/pages/customer-billing"));
 const QuickBooksPage = lazyPage(() => import("@/pages/quickbooks"));
@@ -409,6 +410,7 @@ function Router() {
                   <Route path="/admin/controllers" component={AdminControllers} />
                   <Route path="/admin/client-errors" component={AdminClientErrorsPage} />
                   <Route path="/super-admin/app-health" component={SuperAdminAppHealthPage} />
+                  <Route path="/super-admin/loose-photos" component={SuperAdminLoosePhotosPage} />
                   <Route path="/admin/migrations" component={AdminMigrationsPage} />
                   <Route path="/admin/wc-labor-backfill" component={AdminWcLaborBackfillPage} />
                   <Route path="/quickbooks" component={QuickBooksPage} />

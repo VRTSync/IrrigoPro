@@ -51,6 +51,7 @@ export interface RegisterWetCheckPhotoRouteDeps {
   requireAuthentication: RequestHandler;
   requireCompanyId: (req: any, res: any) => number | null;
   isFieldRole: (role: string | undefined) => boolean;
+  isWetCheckManagerRole: (role: string | undefined) => boolean;
 }
 
 // ── Route registration ───────────────────────────────────────────────────────
@@ -59,7 +60,7 @@ export function registerWetCheckPhotoAttachRoutes(
   app: Express,
   deps: RegisterWetCheckPhotoRouteDeps,
 ): void {
-  const { requireAuthentication, requireCompanyId, isFieldRole } = deps;
+  const { requireAuthentication, requireCompanyId, isFieldRole, isWetCheckManagerRole } = deps;
 
   // POST /api/wet-checks/:id/photos
   // Attaches a newly-uploaded photo to a wet check, optionally anchored to a
@@ -106,10 +107,12 @@ export function registerWetCheckPhotoAttachRoutes(
 
   // PATCH /api/wet-checks/photos/:id
   // Links an already-uploaded photo to a finding (post-hoc anchor, used by
-  // the offline drain when the finding's server ID becomes known).
+  // the offline drain when the finding's server ID becomes known, and by
+  // managers resolving loose photos in the review wizard).
   app.patch("/api/wet-checks/photos/:id", requireAuthentication, async (req: any, res: any) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
+    const role = req.authenticatedUserRole;
+    if (!isFieldRole(role) && !isWetCheckManagerRole(role)) { res.status(403).json({ message: "Forbidden" }); return; }
     const parsed = photoLinkBody.safeParse(req.body ?? {});
     if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     const photoId = parseInt(req.params.id);

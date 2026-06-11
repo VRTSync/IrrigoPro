@@ -2368,6 +2368,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/admin/wet-checks/loose-photos
+  // Super-admin audit endpoint: lists wet checks that have at least one photo
+  // not linked to any finding (finding_id IS NULL), with counts. Supports
+  // ?companyId= filter and standard limit/offset pagination with X-Total-Count.
+  app.get("/api/admin/wet-checks/loose-photos", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const companyIdRaw = typeof req.query.companyId === "string" ? Number(req.query.companyId) : NaN;
+      const companyId = Number.isInteger(companyIdRaw) && companyIdRaw > 0 ? companyIdRaw : null;
+      const limitRaw = typeof req.query.limit === "string" ? Number(req.query.limit) : 50;
+      const offsetRaw = typeof req.query.offset === "string" ? Number(req.query.offset) : 0;
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(200, Math.trunc(limitRaw))) : 50;
+      const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.trunc(offsetRaw)) : 0;
+
+      const companyFilter = companyId ? sql`AND wc.company_id = ${companyId}` : sql``;
+
+      const rowsResult = await db.execute<{
+        wetCheckId: number;
+        customerId: number;
+        customerName: string;
+        propertyAddress: string | null;
+        status: string;
+        loosePhotoCount: number;
+      }>(sql`
+        SELECT
+          wc.id AS "wetCheckId",
+          wc.customer_id AS "customerId",
+          wc.customer_name AS "customerName",
+          wc.property_address AS "propertyAddress",
+          wc.status,
+          COUNT(p.id)::int AS "loosePhotoCount"
+        FROM wet_check_photos p
+        JOIN wet_checks wc ON wc.id = p.wet_check_id
+        WHERE p.finding_id IS NULL
+        ${companyFilter}
+        GROUP BY wc.id, wc.customer_id, wc.customer_name, wc.property_address, wc.status
+        ORDER BY wc.id DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `);
+
+      const totalResult = await db.execute<{ total: number }>(sql`
+        SELECT COUNT(DISTINCT p.wet_check_id)::int AS "total"
+        FROM wet_check_photos p
+        JOIN wet_checks wc ON wc.id = p.wet_check_id
+        WHERE p.finding_id IS NULL
+        ${companyFilter}
+      `);
+
+      const total = totalResult.rows?.[0]?.total ?? 0;
+      res.setHeader("X-Total-Count", String(total));
+      res.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
+      res.json({ rows: rowsResult.rows ?? [], total });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "adminLoosePhotos",
+        ctx: {},
+        fallbackMessage: "Couldn't load loose photos — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
   app.get("/api/admin/app-health/companies/:id", requireAuthentication, async (req, res) => {
     if (!requireSuperAdminGuard(req, res)) return;
     try {
@@ -16359,7 +16421,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // test that imports the REAL production code (not a mirrored copy).
   // See artifacts/api-server/src/routes/wet-check-photo-attach-route.ts
   // and wet-check-photo-attach-regression.test.ts.
-  registerWetCheckPhotoAttachRoutes(app, { requireAuthentication, requireCompanyId, isFieldRole });
+  registerWetCheckPhotoAttachRoutes(app, { requireAuthentication, requireCompanyId, isFieldRole, isWetCheckManagerRole });
 
   // ─── Manager review / routing / convert ──────────────────────────────────
   // NOTE: /api/wet-checks/:id/approve was removed (Task #1090). The approve

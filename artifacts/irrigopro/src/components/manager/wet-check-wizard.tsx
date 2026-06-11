@@ -204,7 +204,16 @@ function AutoBilledPanel({ item, customerLaborRate }: { item: FindingItem; custo
 }
 
 // ─── All-resolved right panel state ──────────────────────────────────────────
-function AllResolvedPanel({ onConvert, id }: { onConvert: () => void; id: number }) {
+function AllResolvedPanel({
+  onConvert,
+  id,
+  loosePhotoCount,
+}: {
+  onConvert: () => void;
+  id: number;
+  loosePhotoCount: number;
+}) {
+  const blocked = loosePhotoCount > 0;
   return (
     <div className="flex flex-col items-center justify-center h-full py-12 text-center space-y-4 px-4">
       <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center">
@@ -213,10 +222,22 @@ function AllResolvedPanel({ onConvert, id }: { onConvert: () => void; id: number
       <div>
         <div className="text-lg font-semibold text-gray-900">All findings triaged</div>
         <p className="text-sm text-gray-500 mt-1">
-          Every finding has a resolution. Click "Approve & Convert" to finalize.
+          {blocked
+            ? `Resolve ${loosePhotoCount} loose photo${loosePhotoCount === 1 ? "" : "s"} before approving.`
+            : `Every finding has a resolution. Click "Approve & Convert" to finalize.`}
         </p>
       </div>
-      <Button onClick={onConvert} data-testid="wizard-convert-now" className="min-w-[180px]">
+      {blocked && (
+        <p className="text-xs text-amber-700 font-medium" data-testid="all-resolved-loose-photos-label">
+          {loosePhotoCount} loose photo{loosePhotoCount === 1 ? "" : "s"} must be attached or deleted first
+        </p>
+      )}
+      <Button
+        onClick={onConvert}
+        disabled={blocked}
+        data-testid="wizard-convert-now"
+        className="min-w-[180px]"
+      >
         Approve &amp; Convert
       </Button>
     </div>
@@ -932,7 +953,7 @@ export function WetCheckWizard({ id }: { id: number }) {
           data-testid="wizard-detail-panel"
         >
           {!active && allResolved ? (
-            <AllResolvedPanel onConvert={handleConvert} id={id} />
+            <AllResolvedPanel onConvert={handleConvert} id={id} loosePhotoCount={loosePhotos.length} />
           ) : !active ? (
             <div className="flex items-center justify-center h-40 text-sm text-gray-500">
               Select a finding from the left panel to begin.
@@ -966,7 +987,7 @@ export function WetCheckWizard({ id }: { id: number }) {
                   photos={loosePhotos}
                   findingOptions={loosePhotoFindingOptions}
                   wetCheckId={id}
-                  readOnly={wc.status !== "submitted"}
+                  readOnly={false}
                 />
               )}
 
@@ -1104,16 +1125,23 @@ export function WetCheckWizard({ id }: { id: number }) {
           className="sticky bottom-0 bg-white border-t px-4 py-3 flex items-center justify-between gap-3"
           data-testid="wizard-cta-bar"
         >
-          <div className="text-sm text-gray-600">
-            {pendingFindings.length > 0
-              ? `${pendingFindings.length} finding${pendingFindings.length === 1 ? "" : "s"} remaining`
-              : "All findings resolved"}
+          <div className="text-sm text-gray-600 space-y-0.5">
+            <div>
+              {pendingFindings.length > 0
+                ? `${pendingFindings.length} finding${pendingFindings.length === 1 ? "" : "s"} remaining`
+                : "All findings resolved"}
+            </div>
+            {loosePhotos.length > 0 && (
+              <div className="text-amber-700 text-xs font-medium" data-testid="loose-photos-gate-label">
+                {loosePhotos.length} loose photo{loosePhotos.length === 1 ? "" : "s"} must be attached or deleted first
+              </div>
+            )}
           </div>
           <Button
             onClick={handleConvert}
-            disabled={!allResolved || isBillingManager}
+            disabled={!allResolved || loosePhotos.length > 0 || isBillingManager}
             data-testid="wizard-approve-convert"
-            className={`min-h-[44px] ${allGreen && !isBillingManager ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}
+            className={`min-h-[44px] ${allGreen && loosePhotos.length === 0 && !isBillingManager ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}
           >
             Approve &amp; Convert
           </Button>

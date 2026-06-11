@@ -81,7 +81,8 @@ function makeDeps(role: string = "field_tech", companyId: number = 1): RegisterW
   const requireCompanyId = (req: any, _res: any): number | null =>
     req.authenticatedUserCompanyId ?? null;
   const isFieldRole = (_role: string | undefined) => true;
-  return { requireAuthentication, requireCompanyId, isFieldRole };
+  const isWetCheckManagerRole = (_role: string | undefined) => true;
+  return { requireAuthentication, requireCompanyId, isFieldRole, isWetCheckManagerRole };
 }
 
 function makeApp(role?: string, companyId?: number): Express {
@@ -228,6 +229,7 @@ describe("POST /api/wet-checks/:id/photos — FK anchor round-trip (Task #1011)"
       }) as express.RequestHandler,
       requireCompanyId: (req: any) => req.authenticatedUserCompanyId,
       isFieldRole: () => false,
+      isWetCheckManagerRole: () => false,
     };
     const app = express();
     app.use(express.json());
