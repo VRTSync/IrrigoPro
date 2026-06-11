@@ -1,0 +1,219 @@
+# #1221 — Command Center Unbilled Reconciliation (As-Of Billing-Month Cutoff)
+
+## What & Why
+
+The Command Center (`pages/customer-billing.tsx`) shows two headline numbers for
+each customer — the left-list "Total" and the right-panel "Unbilled Work" badge —
+but they are computed by two different endpoints using two different rules, so they
+silently disagree. A real customer (Village of Five Parks Heritage) shows
+$1,131.09 on the left and $1,211.09 on the right — an $80 gap caused by two
+independent divergences:
+
+1. The left Total uses a **rolling 30-day window** (a *lower* bound); the right
+   badge is all-time. An approved billing sheet older than 30 days drops out of the
+   left number only. This is a bug: aging unbilled work falls off the back.
+2. The right badge counts approved-only items; the left Total counts approved +
+   unapproved.
+
+The page is an "unbilled work" surface scoped to **the month you are billing for**.
+The correct date rule is **not** a rolling window and **not** all-time — it is an
+**as-of cutoff**: everything with a completion/work date **on or before the end of
+the selected billing month**, with **no lower bound** (open all the way back).
+
+This is the important distinction from the bug in (1): the rolling window had a
+*lower* bound and hid old work. The as-of cutoff has only an *upper* bound and hides
+**future** (next-period) work, never old work. Anything aging and unbilled from any
+prior month still appears as long as it is dated on or before the cutoff. That is
+what guarantees "nothing completed after the previous billing run is left behind,"
+while keeping next month's work out of this month's list.
+
+**Decision locked:**
+
+- The list is scoped by an **as-of cutoff = end of the selected billing month**,
+  applied to the **completion/work date** (WO `completedAt`; BS `workDate`; WCB
+  `workDate`). **Upper bound only; open start.** No 30-day floor, no "since last
+  invoice" lower clamp.
+- The selected billing month **defaults to the previous calendar month relative to
+  today**, recomputed each day (on June 4 → May 2026; on July 10 → June 2026). The
+  header states it plainly: "Billing for: May 2026."
+- Within the selected month, both headline numbers equal **approved + unapproved**.
+  Approved vs unapproved is a breakdown within that total. Invoicing still acts only
+  on approved items.
+- A **null** completion/work date never hides a record: undated unbilled items
+  appear in **every** month's view, flagged "no work date — assign one," so a
+  missing date can't become a hiding place.
+- An **"All open (no cutoff)"** option remains available in the month picker, and
+  Financial Pulse stays all-time, so total exposure is always one selection away and
+  no future-dated work is ever truly invisible — only scoped out of the current
+  billing month.
+- Both endpoints apply the **same** cutoff via one shared selector. The headline
+  match (left Total === right badge) holds only because they receive an identical
+  selected month and identical cutoff/null semantics.
+
+## Done looks like
+
+- Left list "Total" === right "Unbilled Work" badge for every customer, exactly,
+  **under the same selected billing month**.
+- Both = approved + unapproved for that month's cutoff (work/completion date ≤ end
+  of selected month), no lower-bound reduction.
+- Scenario (billing May 2026, today is June 4): work completed in **June is
+  excluded**; approved/unapproved work completed in **May or any earlier unbilled
+  month is included**; an unbilled item with **no work date** is included and
+  flagged.
+- The picker defaults to the previous calendar month; "All open" shows the full
+  all-time unbilled total (the $1,211.09 figure for Village of Five Parks Heritage
+  is the All-open / in-period value with no future work to exclude).
+- Approved/unapproved breakdown and WO/BS/WCB ticket-type tabs still render.
+- "Select Items to Invoice" enables/selects on approved items only; stays disabled
+  when only unapproved work exists.
+- Every item behind a total is visible in the list below it, tagged Approved /
+  Unapproved — no silent contributors.
+- Per tab: `sum(visible row amounts) === tab subtotal`;
+  `sum(tab subtotals) === headline total` (all under the selected month's cutoff).
+- Unapproved rows are visible but their invoice checkbox is disabled.
+- Cutoff + preview-vs-detail invariant tests pass (below).
+- No existing visible billable becomes newly hidden **other than** future-dated
+  (next-period) work, which is reachable by changing the selected month.
+- Invoice construction paths are untouched.
+
+## Out of scope
+
+- Changing WCB creation status or adding a WCB approval step.
+- Removing the `converted` gate from invoice-construction paths.
+- Any QuickBooks sync behavior.
+- Redesigning Financial Pulse math (Step 8 is verification-only).
+- Data-quality handling of far-future-dated records (a fat-fingered completion date
+  in 2027 would scope out of every near-term month); flag separately if needed.
+- The WCB queue/tile double-count work specified in the WCB and Command Center
+  Invisibility slice — coordinate the shared date-rule change; don't duplicate it.
+
+## Steps
+
+1. **Create `billing-unbilled-selectors.ts`** — New file at
+   `artifacts/api-server/src/billing-unbilled-selectors.ts`. Define one canonical
+   "current unbilled" selector. It accepts the records plus an **`asOfCutoff`**
+   argument (a `Date` = last instant of the selected billing month in the company's
+   **local** timezone, computed from local date parts — not `toISOString` UTC; or
+   `null` for the "All open" view).
+
+   **Cutoff rule (upper bound only, open start):** include a record when its
+   completion/work date `<= asOfCutoff` (WO `completedAt`; BS `workDate`; WCB
+   `workDate`). When `asOfCutoff` is `null`, apply no date filter. **Null work date:
+   always include** regardless of cutoff, and mark it `undated: true` so the UI can
+   flag it. There is **no lower bound** under any setting.
+
+   **Legacy normalization (before partitioning):** BS `'approved'` →
+   `'approved_passed_to_billing'` (schema-documented alias still present on records).
+
+   **Partition** the cutoff-included records into `approved`
+   (`status === 'approved_passed_to_billing' && !invoiceId`) and `unapproved`
+   (status in the pending sets: WO `pending_manager_review` / `work_completed`;
+   BS `pending_manager_review` / `completed` / `submitted`; WCB `submitted` /
+   `pending_manager_review`).
+
+   **Exhaustiveness sentinel:** for every record with `!invoiceId` whose normalized
+   status falls outside both the approved and unapproved sets and outside the
+   explicit excluded set (`pending`, `assigned`, `in_progress`, `draft`, `cancelled`,
+   `billed`), emit a loud server-side log
+   (e.g. `logger.warn('floating-billable', { type, id, status })`) so a future new
+   status fails fast rather than silently vanishing.
+
+   Expose per-type arrays (each carrying `undated`), per-type subtotals,
+   `approvedTotal`, `unapprovedTotal`, and `total` (all for the cutoff scope), plus
+   an `allOpenTotal` computed with `asOfCutoff = null` for the safety-net view and
+   Financial Pulse cross-check. Use the existing `safeAmount` coercion semantics from
+   `routes.ts:6103-6111`. Status sets, the normalization map, and the cutoff/null
+   rule are the single source of truth — not redefined inline in either route. Do not
+   apply the `wetCheckStatus === 'converted'` gate here.
+
+2. **Fix the preview endpoint (`/api/customers/billing-preview`)** — In `routes.ts`,
+   resolve the **selected billing month** from the request (`selectedMonth` query
+   param), **defaulting to the previous calendar month relative to the server's
+   current date** when absent. Translate it to `asOfCutoff` = end of that month
+   (local tz), or `null` when the caller selects "All open." Source `approvedTotal`,
+   `unapprovedTotal`, and `total` from the Step-1 selector with that cutoff. **Delete
+   the existing `*InRange` rolling-window logic** (`routes.ts:6079-6096`,
+   `:6114-6126`) — it is replaced by the selector's cutoff. Keep exposing
+   `allOpenTotal` for the All-open view. Update the intra-payload drift guard at
+   `routes.ts:6229-6243` to reconcile the cutoff-scoped fields.
+
+3. **Fix the detail endpoint (`/api/customers/:id/billing`)** — In `routes.ts`,
+   accept the same `selectedMonth` (same default = previous month) and build the same
+   `asOfCutoff`. Source the unbilled partition from the Step-1 selector. Change
+   `totalUnbilledAmount` (`routes.ts:6441-6444`) to `approvedTotal + unapprovedTotal`
+   (the selector's cutoff-scoped `total`). Keep `unbilledWorkOrders` /
+   `unbilledBillingSheets` / `unbilledWetCheckBillings` as the approved
+   (invoice-able) arrays, add parallel `pendingApprovalWorkOrders` /
+   `pendingApprovalBillingSheets` / `pendingApprovalWetCheckBillings` for the
+   unapproved bucket. The frontend must pass the **same** selected month to this
+   endpoint as it does to the preview, or the two headlines will diverge.
+
+4. **Fix the left-list display in `customer-billing.tsx`** — Per-customer card
+   "Total" (`customer-billing.tsx:1036-1038`): use the cutoff-scoped total. Header
+   summary (`customer-billing.tsx:814-816`): base Approved / Unapproved / Total on
+   the cutoff-scoped fields. Sort (`customer-billing.tsx:725-726`): sort by the same
+   total so list order matches the displayed number. The list-inclusion filter
+   (`customer-billing.tsx:715`, `:595-598`) gates on the cutoff-scoped total > 0
+   (with the All-open option using `allOpenTotal`).
+
+5. **Add the billing-month picker + label** — In `customer-billing.tsx`, the month
+   selector drives `selectedMonth` for **both** queries. It **defaults to the
+   previous calendar month** (recomputed from today), offers prior months and an
+   "All open (no cutoff)" entry, and the header reads "Billing for: <Month Year>" (or
+   "All open unbilled"). Changing it refetches both endpoints with the same value.
+
+6. **Fix the right-panel detail UI** — The "Unbilled Work" badge already reads
+   `totalUnbilledAmount` (`customer-billing.tsx:1199`) — now the cutoff-scoped full
+   total. Update the subtext (`customer-billing.tsx:1206`) to show approved counts as
+   "N items ready to bill" and a second line for pending counts ("P items pending
+   approval — not yet billable"). `selectAllUnbilledItems`
+   (`customer-billing.tsx:395`) and the invoice button disabled gate
+   (`customer-billing.tsx:1214`) must continue acting on approved arrays only.
+
+7. **Show all items in every tab, tagged** — In the "Unbilled" tab
+   (`customer-billing.tsx:1255-1256` and its `TabsContent` body): render both approved
+   and `pendingApproval*` arrays as one combined list. Approved rows get an enabled
+   checkbox; unapproved rows get the checkbox disabled with a "pending approval" hint;
+   undated rows show the "no work date" flag. The tab count becomes the total
+   (approved + pending) for the selected month. Apply the same principle to the
+   per-type tabs (Work Orders, Billing Sheets, WC Billings) so each tab's visible rows
+   sum to its subtotal and subtotals sum to the headline. Build row lists and totals
+   from the same Step-1 partition.
+
+8. **Tests — cutoff + preview/detail invariants** — Synthesize a customer with:
+   (a) an approved BS with `workDate` in the **selected month**, (b) an approved WO
+   `completedAt` in an **earlier, never-billed** month, (c) an approved WO
+   `completedAt` in the month **after** the cutoff (future/next period), (d) an
+   unapproved BS in the selected month, and (e) an unbilled item with a **null** work
+   date. Assert: (a), (b), (d), (e) are included; (c) is **excluded**; `total` from
+   `/api/customers/billing-preview` equals `totalUnbilledAmount` from
+   `/api/customers/:id/billing` under the same `selectedMonth`, and both equal
+   `approvedTotal + unapprovedTotal`. Add a default-resolution test: with no
+   `selectedMonth`, the endpoint resolves to the previous calendar month. Add a
+   timezone test: a record dated 10pm local on the last day of the month lands in
+   that month, not the next.
+
+9. **Verify Financial Pulse (no redesign)** — Confirm `routes/financial-pulse.ts`
+   `computeUnbilledExposure` (`:357`) agrees with the Command Center **All-open**
+   (`allOpenTotal`) figure on which customers carry unbilled dollars and how much
+   (Financial Pulse is all-time exposure, so it reconciles to the no-cutoff view, not
+   the month-scoped one). If the definition differs, note it in a code comment — do
+   not silently change Financial Pulse math in this slice.
+
+## Relevant files
+
+- `artifacts/api-server/src/routes/routes.ts:6017-6286` (preview; `*InRange` removal)
+- `artifacts/api-server/src/routes/routes.ts:6322-6463` (detail)
+- `artifacts/api-server/src/routes/routes.ts:6079-6096` (rolling-window helpers — delete)
+- `artifacts/api-server/src/routes/routes.ts:6103-6150` (`safeAmount`, status sets)
+- `artifacts/api-server/src/routes/routes.ts:6182-6243` (all-time rollups + drift guard)
+- `artifacts/api-server/src/routes/routes.ts:6469-6536` (invoice preview — untouched)
+- `artifacts/irrigopro/src/pages/customer-billing.tsx:313-330` (preview query + params)
+- `artifacts/irrigopro/src/pages/customer-billing.tsx:395-401`
+- `artifacts/irrigopro/src/pages/customer-billing.tsx:595-598`
+- `artifacts/irrigopro/src/pages/customer-billing.tsx:715`
+- `artifacts/irrigopro/src/pages/customer-billing.tsx:725-726`
+- `artifacts/irrigopro/src/pages/customer-billing.tsx:814-816`
+- `artifacts/irrigopro/src/pages/customer-billing.tsx:1036-1038`
+- `artifacts/irrigopro/src/pages/customer-billing.tsx:1190-1260`
+- `artifacts/api-server/src/routes/financial-pulse.ts:357`
