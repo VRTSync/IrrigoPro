@@ -632,6 +632,63 @@ describe("Slice 4a — admin-migrations-routes.ts: all routes carry requireAuthe
   });
 });
 
+// ─── Part 8: customer-routes.ts mutation routes (Task #1205) ─────────────────
+//
+// POST /api/customers, PUT /api/customers/:id, and PATCH /api/customers/:id
+// live in a separate extracted module (customer-routes.ts) and are therefore
+// not covered by the broad routes.ts scans above.  This section asserts the
+// same 401-before-403 contract for those three routes.
+
+describe("Task #1205 — customer mutation routes in customer-routes.ts have requireAuthentication before role guard", () => {
+  const customerRouteSrc = readFileSync(
+    join(__dirname, "customer-routes.ts"),
+    "utf8",
+  );
+
+  const CUSTOMER_MUTATION_ROUTES: Array<[string, string, string]> = [
+    ["POST /api/customers", "post", '"/api/customers"'],
+    ["PUT /api/customers/:id", "put", '"/api/customers/:id"'],
+    ["PATCH /api/customers/:id", "patch", '"/api/customers/:id"'],
+  ];
+
+  for (const [label, verb, path] of CUSTOMER_MUTATION_ROUTES) {
+    it(`${label} — requireAuthentication present and before every role guard`, () => {
+      const marker = `app.${verb}(${path}`;
+      const pos = customerRouteSrc.indexOf(marker);
+
+      assert.ok(
+        pos >= 0,
+        `Route registration not found: app.${verb}(${path} in customer-routes.ts — was it removed or renamed?`,
+      );
+
+      const chunk = customerRouteSrc.slice(pos, pos + 800);
+      const asyncIdx = chunk.indexOf(" async ");
+      const slice = asyncIdx >= 0 ? chunk.slice(0, asyncIdx) : chunk;
+
+      assert.ok(
+        slice.includes("requireAuthentication"),
+        `app.${verb}(${path}) in customer-routes.ts is missing requireAuthentication middleware.\n` +
+          `Without it unauthenticated requests receive 403 (from the role guard) ` +
+          `instead of the correct 401.`,
+      );
+
+      const authIdx = slice.indexOf("requireAuthentication");
+
+      for (const guard of ROLE_GUARDS) {
+        const guardIdx = slice.indexOf(guard);
+        if (guardIdx < 0) continue;
+
+        assert.ok(
+          authIdx < guardIdx,
+          `app.${verb}(${path}) in customer-routes.ts: '${guard}' appears at position ${guardIdx} ` +
+            `but requireAuthentication is at ${authIdx} — role guard must come AFTER authentication.\n` +
+            `Relevant source slice:\n${slice}`,
+        );
+      }
+    });
+  }
+});
+
 // ─── Part 5: Task #931 — pin-patch precise message appears exactly once ───────
 
 describe("Task #931 — pin-patch precise 403 message appears exactly once in routes.ts", () => {

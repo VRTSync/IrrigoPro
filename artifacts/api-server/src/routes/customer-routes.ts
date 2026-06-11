@@ -39,7 +39,7 @@ export function registerCustomerRoutes(
     }
   });
 
-  app.post("/api/customers", requireCompanyAdminAccess, requireAuthentication, async (req, res) => {
+  app.post("/api/customers", requireAuthentication, requireCompanyAdminAccess, async (req, res) => {
     try {
       let customerData = insertCustomerSchema.parse(req.body);
       // Only billing_manager may set billingNotes at creation time
@@ -59,7 +59,7 @@ export function registerCustomerRoutes(
     }
   });
 
-  app.put("/api/customers/:id", requireCustomerEditAccess, requireAuthentication, async (req, res) => {
+  app.put("/api/customers/:id", requireAuthentication, requireCustomerEditAccess, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id));
       let customerData = insertCustomerSchema.partial().parse(req.body);
@@ -84,7 +84,7 @@ export function registerCustomerRoutes(
     }
   });
 
-  app.patch("/api/customers/:id", requireCustomerEditAccess, requireAuthentication, async (req, res) => {
+  app.patch("/api/customers/:id", requireAuthentication, requireCustomerEditAccess, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id));
       let customerData = insertCustomerSchema.partial().parse(req.body);
