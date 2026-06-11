@@ -971,7 +971,7 @@ export default function BillingWorkspacePage() {
       {/* Zone A — 4-tile status strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatusTile
-          label="Awaiting Approval"
+          label="Awaiting Action"
           value={strip ? strip.awaitingApproval : <Skeleton className="h-7 w-12" />}
           intent={
             !strip
@@ -984,7 +984,7 @@ export default function BillingWorkspacePage() {
           }
           icon={<ClipboardList className="w-5 h-5" />}
           testId="status-awaiting-approval"
-          infoTip="Open billing sheets and work orders awaiting manager review (point-in-time)."
+          infoTip="Open billing sheets, work orders, and wet-check billings awaiting billing action (point-in-time)."
         />
         <StatusTile
           label="Approved This Week"

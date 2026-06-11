@@ -49,11 +49,16 @@ export const ACTIVE_WO = new Set([
 export const ACTIVE_WCB = new Set([
   "submitted",
   "pending_manager_review",
+  // WCBs are born at approved_passed_to_billing (no separate approval step),
+  // so this is where they live until invoiced — they still need billing action.
+  "approved_passed_to_billing",
 ]);
 // Approved (this week tile).
 const APPROVED_BS = new Set(["approved", "billed", "invoiced"]);
 const APPROVED_WO = new Set(["approved", "billed", "invoiced", "completed_approved"]);
-const APPROVED_WCB = new Set(["approved_passed_to_billing", "billed"]);
+// NOTE: approved_passed_to_billing is intentionally absent here — it lives in
+// ACTIVE_WCB above. ACTIVE_* and APPROVED_* must remain disjoint per tile.
+const APPROVED_WCB = new Set(["billed"]);
 // Draft states (last 24h tile).
 const DRAFT_BS = new Set(["draft", "in_progress"]);
 const DRAFT_WO = new Set(["draft", "scheduled", "in_progress"]);

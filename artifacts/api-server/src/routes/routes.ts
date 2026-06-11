@@ -6117,8 +6117,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const unbilledBillingSheets = billingSheets.filter(bs =>
             (bs.status === 'approved_passed_to_billing') && !bs.invoiceId && bsInRange(bs)
           );
+          // Visibility filter: wetCheckStatus === 'converted' is intentionally absent here.
+          // Partially-converted-parent WCBs must still be visible so billing managers
+          // can act on them. The 'converted' gate is only appropriate on invoice-construction
+          // paths (see eligibleWcbs / eligibleWcbsMonthly below) — not on visibility paths.
           const unbilledWetCheckBillings = wetCheckBillingsForCustomer.filter(wcb =>
-            wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId && wcb.wetCheckStatus === 'converted' && wcbInRange(wcb)
+            wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId && wcbInRange(wcb)
           );
 
           // Use stored totalAmount as the authoritative total (historical backfill guardrail)
@@ -6248,6 +6252,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             unapprovedTotal,
             combinedTotal: combinedTotalForPayload,
             totalUnbilled,
+            allTimeApprovedTotal,
             currentMonthUnbilled,
             currentMonthBilling: 0,
             monthlyAverage: 0,
@@ -6269,6 +6274,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             unapprovedTotal: 0,
             combinedTotal: 0,
             totalUnbilled: 0,
+            allTimeApprovedTotal: 0,
             currentMonthUnbilled: 0,
             currentMonthBilling: 0,
             monthlyAverage: 0,
@@ -6424,8 +6430,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (bs.status === 'approved_passed_to_billing') && !bs.invoiceId
       );
       // Unbilled wet check billings: approved_passed_to_billing, wet check converted, no invoiceId
+      // Visibility filter: wetCheckStatus === 'converted' is intentionally absent here.
+      // Partially-converted-parent WCBs must still be visible on the single-customer
+      // billing page. The 'converted' gate belongs only on invoice-construction paths.
       const unbilledWetCheckBillings = wetCheckBillings.filter(wcb =>
-        wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId && wcb.wetCheckStatus === 'converted'
+        wcb.status === 'approved_passed_to_billing' && !wcb.invoiceId
       );
 
       // Calculate total unbilled amount (includes wet check billings)
@@ -6479,6 +6488,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Query eligible wet check billings for this customer (Slice 2+)
       const allWcbsForPreview = await storage.getWetCheckBillingsByCustomer(customerId);
+      // INVOICE-CONSTRUCTION gate: wetCheckStatus === 'converted' is intentional here.
+      // Do NOT remove it — a WCB whose parent wet check is still partially_converted
+      // should not yet be included in an invoice. This is tracked separately from the
+      // visibility filters above which must NOT gate on wetCheckStatus.
       const eligibleWcbs = allWcbsForPreview.filter(wcb =>
         wcb.status === 'approved_passed_to_billing' && wcb.invoiceId == null && wcb.wetCheckStatus === 'converted',
       );
@@ -6769,6 +6782,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Query eligible wet check billings for this customer (Slice 2+)
       const allWcbsForMonthly = await storage.getWetCheckBillingsByCustomer(customerId);
+      // INVOICE-CONSTRUCTION gate: wetCheckStatus === 'converted' is intentional here.
+      // Do NOT remove it — a WCB whose parent wet check is still partially_converted
+      // should not yet be included in an invoice. This is tracked separately from the
+      // visibility filters above which must NOT gate on wetCheckStatus.
       const eligibleWcbsMonthly = allWcbsForMonthly.filter(wcb =>
         wcb.status === 'approved_passed_to_billing' && wcb.invoiceId == null && wcb.wetCheckStatus === 'converted',
       );

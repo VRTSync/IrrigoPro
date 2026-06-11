@@ -109,6 +109,7 @@ interface CustomerPreview {
   unapprovedTotal: number;
   combinedTotal: number;
   totalUnbilled?: number;
+  allTimeApprovedTotal?: number;
   currentMonthUnbilled?: number;
   lastInvoiceDate?: string;
   totalWorkOrders: number;
@@ -592,9 +593,9 @@ export default function CustomerBilling() {
       if (statusFilter !== "all") {
         switch (statusFilter) {
           case "has_unbilled":
-            // Derive from the two component subtotals to stay in single-source
-            // sync with the displayed Total cells (no reliance on combinedTotal).
-            if (((Number(preview.approvedTotal) || 0) + (Number(preview.unapprovedTotal) || 0)) <= 0) return false;
+            // Use totalUnbilled (date-window-free) so WCBs older than 30 days
+            // still surface — billing managers must be able to find all unbilled exposure.
+            if ((Number(preview.totalUnbilled) || 0) <= 0) return false;
             break;
           case "no_activity":
             if (preview.totalWorkOrders > 0) return false;
@@ -711,7 +712,9 @@ export default function CustomerBilling() {
   const openBillingCustomers = filteredCustomers
     .filter(c => {
       const preview = getCustomerPreview(c);
-      return (preview.approvedTotal || 0) > 0 || (preview.unapprovedTotal || 0) > 0;
+      // Use totalUnbilled (date-window-free) so aging WCBs don't silently
+      // drop the customer from the list when the default 30-day window passes.
+      return (Number(preview.totalUnbilled) || 0) > 0;
     })
     .sort((a, b) => {
       // Sort by displayed Total (approved + unapproved) so list order tracks
@@ -851,7 +854,7 @@ export default function CustomerBilling() {
                       </span>
                     </div>
                     <div className="text-xs text-orange-600 mt-2 text-center">
-                      {customerPreviews.filter(p => (Number(p.approvedTotal) || 0) > 0).length} customers need billing
+                      {customerPreviews.filter(p => (Number(p.allTimeApprovedTotal) || 0) > 0).length} customers need billing
                     </div>
                   </div>
                 </div>
@@ -1612,7 +1615,7 @@ export default function CustomerBilling() {
                   </span>
                 </div>
                 <div className="text-xs text-orange-600 mt-2 text-center">
-                  {customerPreviews.filter(p => (Number(p.approvedTotal) || 0) > 0).length} customers need billing
+                  {customerPreviews.filter(p => (Number(p.allTimeApprovedTotal) || 0) > 0).length} customers need billing
                 </div>
               </div>
             </div>
@@ -1801,7 +1804,7 @@ export default function CustomerBilling() {
                             </div>
                             <div className="flex items-center justify-between border-t border-gray-100 pt-0.5">
                               <span className="text-xs text-orange-700 font-medium">Total:</span>
-                              <span className="text-xs font-semibold text-orange-800">{formatCurrency((Number(preview.approvedTotal) || 0) + (Number(preview.unapprovedTotal) || 0))}</span>
+                              <span className="text-xs font-semibold text-orange-800">{formatCurrency(Number(preview.totalUnbilled) || 0)}</span>
                             </div>
                             {preview.lastInvoiceDate && (
                               <div className="flex items-center justify-between">
