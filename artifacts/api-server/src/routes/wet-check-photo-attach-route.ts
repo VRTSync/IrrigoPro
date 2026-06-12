@@ -141,21 +141,32 @@ export function registerWetCheckPhotoAttachRoutes(
   });
 
   // DELETE /api/wet-checks/photos/:id
+  // Field roles use the standard path (editability guard enforced by storage).
+  // Manager roles dispatch deleteLooseWetCheckPhotoAsManager which skips the
+  // editability guard but only permits loose (unattached) photos.
   app.delete("/api/wet-checks/photos/:id", requireAuthentication, async (req: any, res: any) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
+    const role = req.authenticatedUserRole;
+    const isManager = isWetCheckManagerRole(role);
+    const isField = isFieldRole(role);
+    if (!isField && !isManager) { res.status(403).json({ message: "Forbidden" }); return; }
     const photoId = parseInt(req.params.id);
     if (!Number.isFinite(photoId)) {
       res.status(400).json({ message: "Invalid photo id" });
       return;
     }
     try {
-      const ok = await storage.deleteWetCheckPhoto(photoId, cid);
+      const ok = isManager
+        ? await storage.deleteLooseWetCheckPhotoAsManager(photoId, cid)
+        : await storage.deleteWetCheckPhoto(photoId, cid);
       res.json({ ok });
     } catch (e: any) {
       const cls = classifyWetCheckPhotoError(e);
       const message = cls.status === 500 ? "Couldn't remove photo — please retry" : cls.message;
-      logPhotoErrorContext(req, e, { op: "deleteWetCheckPhoto", photoId });
+      logPhotoErrorContext(req, e, {
+        op: isManager ? "deleteLooseWetCheckPhotoAsManager" : "deleteWetCheckPhoto",
+        photoId,
+      });
       res.status(cls.status).json({ message });
     }
   });

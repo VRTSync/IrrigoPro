@@ -8377,6 +8377,35 @@ export class DatabaseStorage implements IStorage {
     return ok;
   }
 
+  // Manager-only escape hatch: delete a loose (unattached) photo on a
+  // submitted wet check. Attached photos (findingId or zoneRecordId set)
+  // remain fully locked — only loose photos may be removed.  No
+  // editability guard: managers are allowed to clean up loose photos
+  // regardless of wet check status.  Company-scoped ownership is still
+  // enforced via assertWetCheckBelongsToCompany.
+  async deleteLooseWetCheckPhotoAsManager(id: number, companyId: number): Promise<boolean> {
+    const [p] = await db.select().from(wetCheckPhotos).where(eq(wetCheckPhotos.id, id));
+    if (!p) return false;
+    // Ensure the wet check belongs to the caller's company (no edit-state guard).
+    await this.assertWetCheckBelongsToCompany(p.wetCheckId, companyId);
+    // Reject the request if the photo is attached — only loose photos may be
+    // removed via this path.
+    if (p.findingId != null || p.zoneRecordId != null) {
+      const err = new Error(
+        "Only unattached photos can be removed after a wet check is submitted",
+      ) as Error & { code?: string };
+      err.code = "WET_CHECK_PHOTO_NOT_LOOSE";
+      throw err;
+    }
+    const result = await db.delete(wetCheckPhotos).where(eq(wetCheckPhotos.id, id));
+    const ok = (result.rowCount ?? 0) > 0;
+    if (ok) {
+      const objectStorage = new ObjectStorageService();
+      await objectStorage.deletePhotoBlobs(p.url);
+    }
+    return ok;
+  }
+
   async getWetCheckPhotoUrls(wetCheckId: number): Promise<string[]> {
     const rows = await db
       .select({ url: wetCheckPhotos.url })

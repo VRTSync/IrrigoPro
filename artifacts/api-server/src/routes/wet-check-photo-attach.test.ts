@@ -12,10 +12,16 @@
 //      cross-record linkage mismatch, UUID-collision-across-wet-checks)
 //      must surface their tech-friendly messages with the right status.
 //
+// Task #1230 adds a second describe block that exercises the DELETE
+// handler's manager escape hatch:
+//   - Manager can delete a loose photo on a submitted wet check (200).
+//   - Manager is blocked (409) from deleting an attached photo.
+//   - Field tech is still blocked (409) from deleting on a submitted check.
+//
 // We do NOT exercise the storage path against a real DB here — the
 // logic under test is purely the handler's classify/sanitize step. A
-// stub `storage` module with a swappable `attachWetCheckPhoto` lets us
-// drive every error branch deterministically.
+// stub `storage` module with a swappable handler lets us drive every
+// error branch deterministically.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -42,6 +48,9 @@ const photoBody = z.object({
   takenAt: z.union([z.string().datetime(), z.number(), z.date()]).nullish(),
   clientId: z.string().uuid().nullish(),
 });
+
+const MANAGER_ROLES = new Set(["irrigation_manager", "company_admin", "super_admin"]);
+const FIELD_ROLES = new Set(["field_tech"]);
 
 interface ServerHarness {
   baseUrl: string;
@@ -108,6 +117,77 @@ async function startServer(): Promise<ServerHarness> {
     baseUrl: `http://127.0.0.1:${port}`,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
     setAttach: (fn) => { attach = fn; },
+    loggedErrors,
+  };
+}
+
+// ── DELETE harness ────────────────────────────────────────────────────────────
+// Mirrors the production DELETE /api/wet-checks/photos/:id handler from
+// wet-check-photo-attach-route.ts.  Two swappable stubs replace:
+//   deleteWetCheckPhoto          — field-tech path
+//   deleteLooseWetCheckPhotoAsManager — manager path
+
+interface DeleteHarness {
+  baseUrl: string;
+  close: () => Promise<void>;
+  setRole: (role: string) => void;
+  setDeleteField: (fn: (id: number, cid: number) => Promise<boolean>) => void;
+  setDeleteManager: (fn: (id: number, cid: number) => Promise<boolean>) => void;
+  loggedErrors: any[];
+}
+
+async function startDeleteServer(): Promise<DeleteHarness> {
+  const app: Express = express();
+  app.use(express.json());
+
+  let currentRole = "field_tech";
+  let deleteField: (id: number, cid: number) => Promise<boolean> = async () => true;
+  let deleteManager: (id: number, cid: number) => Promise<boolean> = async () => true;
+  const loggedErrors: any[] = [];
+
+  const noopAuth: RequestHandler = (req, _res, next) => {
+    (req as any).authenticatedUserId = 7;
+    (req as any).authenticatedUserCompanyId = 1;
+    (req as any).authenticatedUserRole = currentRole;
+    (req as any).log = { error: (obj: any) => loggedErrors.push(obj) };
+    next();
+  };
+
+  app.delete("/api/wet-checks/photos/:id", noopAuth, async (req: any, res) => {
+    const cid = 1;
+    const role: string = req.authenticatedUserRole;
+    const isManager = MANAGER_ROLES.has(role);
+    const isField = FIELD_ROLES.has(role);
+    if (!isField && !isManager) { res.status(403).json({ message: "Forbidden" }); return; }
+
+    const photoId = parseInt(req.params.id);
+    if (!Number.isFinite(photoId)) { res.status(400).json({ message: "Invalid photo id" }); return; }
+
+    try {
+      const ok = isManager
+        ? await deleteManager(photoId, cid)
+        : await deleteField(photoId, cid);
+      res.json({ ok });
+    } catch (e: any) {
+      const cls = classifyWetCheckPhotoError(e);
+      const message = cls.status === 500 ? "Couldn't remove photo — please retry" : cls.message;
+      logPhotoErrorContext(req, e, {
+        op: isManager ? "deleteLooseWetCheckPhotoAsManager" : "deleteWetCheckPhoto",
+        photoId,
+      });
+      res.status(cls.status).json({ message });
+    }
+  });
+
+  const server: Server = createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const port = (server.address() as AddressInfo).port;
+  return {
+    baseUrl: `http://127.0.0.1:${port}`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    setRole: (r) => { currentRole = r; },
+    setDeleteField: (fn) => { deleteField = fn; },
+    setDeleteManager: (fn) => { deleteManager = fn; },
     loggedErrors,
   };
 }
@@ -234,6 +314,73 @@ describe("POST /api/wet-checks/:id/photos — error sanitization (Task #495)", (
       const json = await res.json() as any;
       assert.equal(json.id, 999);
       assert.equal(h.loggedErrors.length, 0);
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+describe("DELETE /api/wet-checks/photos/:id — manager loose-photo escape hatch (Task #1230)", () => {
+  it("manager can delete a loose photo on a submitted wet check (200)", async () => {
+    const h = await startDeleteServer();
+    h.setRole("irrigation_manager");
+    // deleteLooseWetCheckPhotoAsManager resolves true — photo existed and was deleted.
+    h.setDeleteManager(async (_id, _cid) => true);
+    try {
+      const res = await fetch(`${h.baseUrl}/api/wet-checks/photos/42`, { method: "DELETE" });
+      assert.equal(res.status, 200);
+      const json = await res.json() as any;
+      assert.equal(json.ok, true);
+      assert.equal(h.loggedErrors.length, 0);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("manager cannot delete an attached photo on a submitted wet check (409)", async () => {
+    const h = await startDeleteServer();
+    h.setRole("company_admin");
+    // storage throws WET_CHECK_PHOTO_NOT_LOOSE when findingId / zoneRecordId is set.
+    h.setDeleteManager(async () => {
+      const err = Object.assign(
+        new Error("Only unattached photos can be removed after a wet check is submitted"),
+        { code: "WET_CHECK_PHOTO_NOT_LOOSE" },
+      );
+      throw err;
+    });
+    try {
+      const res = await fetch(`${h.baseUrl}/api/wet-checks/photos/99`, { method: "DELETE" });
+      assert.equal(res.status, 409);
+      const json = await res.json() as any;
+      assert.equal(json.message, "Only unattached photos can be removed after a wet check is submitted");
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("field tech is still blocked from deleting a photo on a submitted wet check (409)", async () => {
+    const h = await startDeleteServer();
+    h.setRole("field_tech");
+    // deleteWetCheckPhoto throws the editability guard error for non-in-progress wet checks.
+    h.setDeleteField(async () => {
+      throw new Error("Wet check 55 is submitted; only in-progress wet checks can be edited");
+    });
+    try {
+      const res = await fetch(`${h.baseUrl}/api/wet-checks/photos/55`, { method: "DELETE" });
+      assert.equal(res.status, 409);
+      const json = await res.json() as any;
+      assert.equal(json.message, "This wet check is no longer editable");
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("non-manager non-field roles are rejected with 403", async () => {
+    const h = await startDeleteServer();
+    h.setRole("billing_manager");
+    try {
+      const res = await fetch(`${h.baseUrl}/api/wet-checks/photos/10`, { method: "DELETE" });
+      assert.equal(res.status, 403);
     } finally {
       await h.close();
     }

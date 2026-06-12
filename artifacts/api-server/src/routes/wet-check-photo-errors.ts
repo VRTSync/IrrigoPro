@@ -18,6 +18,9 @@ export function classifyWetCheckPhotoError(e: any): ClassifiedPhotoError {
   // assertWetCheckEditableByTech / assertWetCheckBelongsToCompany throw
   // plain Errors with informative messages — treat the recognizable
   // shapes as expected and surface a tech-friendly version.
+  if (code === "WET_CHECK_PHOTO_NOT_LOOSE") {
+    return { status: 409, message: "Only unattached photos can be removed after a wet check is submitted" };
+  }
   if (/only in-progress wet checks can be edited/i.test(raw)) {
     return { status: 409, message: "This wet check is no longer editable" };
   }
