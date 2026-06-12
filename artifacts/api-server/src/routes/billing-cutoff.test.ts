@@ -283,22 +283,24 @@ describe('cutoff boundary — end-of-month records', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Scenario 8 — route-level parity and realistic Drizzle date shapes
+// Scenario 8 — selector determinism and realistic Drizzle date shapes
 //
 // Drizzle returns different types depending on column kind:
 //   - timestamp columns (e.g. completedAt)  → JS Date objects
 //   - date columns      (e.g. workDate)      → "YYYY-MM-DD" strings
 //
-// Both the billing-preview and billing-detail routes call
-// computeUnbilledPartition with the same raw data.  These tests verify:
-//   (a) preview/detail parity: same inputs → identical approvedTotal
+// These tests verify that computeUnbilledPartition is a pure, deterministic
+// function — the same inputs always produce identical outputs regardless of
+// call order.  They do NOT prove that the two HTTP endpoints agree; that is
+// covered by customer-billing-parity.test.ts (HTTP-level integration test).
+//   (a) Selector purity: same inputs → identical approvedTotal on repeated calls
 //   (b) Date-object inputs work correctly alongside string-date inputs
 //   (c) "YYYY-MM-DD" strings are parsed as local midnight (not UTC midnight)
 //       so a May 31 date-string is not accidentally shifted to April 30
 //       in UTC-offset-negative timezones.
 // ---------------------------------------------------------------------------
 
-describe('route-level parity — preview/detail produce identical approvedTotal', () => {
+describe('computeUnbilledPartition — selector determinism / purity with Drizzle date shapes', () => {
   it('Date-object completedAt (Drizzle timestamp) passes cutoff correctly', () => {
     // Drizzle returns Date objects for timestamp columns.
     // A Date at local noon on 2025-05-20 must be ≤ May cutoff.
@@ -381,9 +383,7 @@ describe('route-level parity — preview/detail produce identical approvedTotal'
     const bss: BillingSheetLike[] = [
       { id: 422, status: 'approved_passed_to_billing', workDate: '2025-05-01', totalAmount: '250.00', invoiceId: null },
     ];
-    // Call 1 — simulates billing-preview route
     const preview = computeUnbilledPartition(wos, bss, [], cutoff);
-    // Call 2 — simulates billing-detail route
     const detail  = computeUnbilledPartition(wos, bss, [], cutoff);
 
     assert.equal(preview.approvedTotal, detail.approvedTotal, 'preview/detail approvedTotal must match');
