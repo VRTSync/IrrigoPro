@@ -153,6 +153,7 @@ export function registerApproveRoutes(
 
       const updated = await storage.updateBillingSheet(id, {
         status: "draft",
+        returnedForCorrectionAt: new Date(),
         ...(notes
           ? { notes: `${billingSheet.notes ? billingSheet.notes + "\n" : ""}[Returned for correction: ${notes}]` }
           : {}),
@@ -254,6 +255,7 @@ export function registerApproveRoutes(
 
       const updated = await storage.updateWorkOrder(id, {
         status: "in_progress",
+        returnedForCorrectionAt: new Date(),
         ...(notes
           ? { notes: `${workOrder.notes ? workOrder.notes + "\n" : ""}[Returned for correction: ${notes}]` }
           : {}),

@@ -35,10 +35,6 @@ const MW_SRC = readFileSync(
   "utf8",
 );
 
-const BW_SRC = readFileSync(
-  resolve(import.meta.dirname, "../../pages/billing-workspace.tsx"),
-  "utf8",
-);
 
 // ---------------------------------------------------------------------------
 // customer-profile.tsx — TYPE-axis card classes
@@ -106,33 +102,25 @@ describe("customer-billing.tsx — WCB jobtype-wcb token assertions", () => {
 });
 
 // ---------------------------------------------------------------------------
-// manager-workspace.tsx + billing-workspace.tsx — StatusTile borders
+// manager-workspace.tsx — stage tile border classes use stage-specific tokens
+// (not jobtype tokens; the merged workspace uses its own STAGE_META borderClass)
 // ---------------------------------------------------------------------------
-describe("manager-workspace.tsx — jobtype border tokens in StatusTile", () => {
-  it("ok intent uses border-l-jobtype-wo", () => {
-    expect(MW_SRC).toContain('"border-l-jobtype-wo"');
+describe("manager-workspace.tsx — stage border classes present", () => {
+  it("needs_review stage uses border-l-blue-500", () => {
+    expect(MW_SRC).toContain("border-l-blue-500");
   });
 
-  it("warn intent uses border-l-jobtype-bs", () => {
-    expect(MW_SRC).toContain('"border-l-jobtype-bs"');
+  it("passed_to_billing stage uses border-l-purple-500", () => {
+    expect(MW_SRC).toContain("border-l-purple-500");
   });
 
-  it("ok intent does NOT use legacy border-l-green-500", () => {
-    expect(MW_SRC).not.toContain('"border-l-green-500"');
-  });
-});
-
-describe("billing-workspace.tsx — jobtype border tokens in StatusTile", () => {
-  it("ok intent uses border-l-jobtype-wo", () => {
-    expect(BW_SRC).toContain('"border-l-jobtype-wo"');
+  it("billed_7d stage uses border-l-green-500", () => {
+    // border-l-green-500 IS intentional here (billed stage), not a legacy class
+    expect(MW_SRC).toContain("border-l-green-500");
   });
 
-  it("warn intent uses border-l-jobtype-bs", () => {
-    expect(BW_SRC).toContain('"border-l-jobtype-bs"');
-  });
-
-  it("ok intent does NOT use legacy border-l-green-500", () => {
-    expect(BW_SRC).not.toContain('"border-l-green-500"');
+  it("outer wrapper has data-testid manager-workspace", () => {
+    expect(MW_SRC).toContain('data-testid="manager-workspace"');
   });
 });
 

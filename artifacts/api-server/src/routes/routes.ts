@@ -9709,7 +9709,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   app.patch("/api/wet-check-billings/:id/labor-rate", requireAuthentication, async (req, res) => {
     const role = req.authenticatedUserRole;
-    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin") {
+    if (role !== "billing_manager" && role !== "irrigation_manager" && role !== "company_admin" && role !== "super_admin") {
       res.status(403).json({ message: "Forbidden" }); return;
     }
     const parsed = wcbLaborRateBody.safeParse(req.body ?? {});
@@ -9760,7 +9760,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   app.patch("/api/wet-check-billings/:id/rate-mode", requireAuthentication, async (req, res) => {
     const role = req.authenticatedUserRole;
-    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin") {
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin" && role !== "irrigation_manager") {
       res.status(403).json({ message: "Forbidden" }); return;
     }
     const parsed = rateModeBody.safeParse(req.body ?? {});
@@ -10457,7 +10457,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Task #1093 — rate-mode toggle for billing sheets.
   app.patch("/api/billing-sheets/:id/rate-mode", requireAuthentication, requireSameCompanyAsBillingSheet, async (req: any, res) => {
     const role = req.authenticatedUserRole;
-    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin") {
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin" && role !== "irrigation_manager") {
       res.status(403).json({ message: "Forbidden" }); return;
     }
     const parsed = rateModeBody.safeParse(req.body ?? {});
@@ -10499,7 +10499,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   app.patch("/api/billing-sheets/:id/items", requireAuthentication, requireSameCompanyAsBillingSheet, async (req: any, res) => {
     const role = req.authenticatedUserRole;
-    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin") {
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin" && role !== "irrigation_manager") {
       res.status(403).json({ message: "Forbidden" }); return;
     }
     const parsed = itemsBody.safeParse(req.body ?? {});
@@ -11911,7 +11911,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Task #1093 — rate-mode toggle for work orders.
   app.patch("/api/work-orders/:id/rate-mode", requireAuthentication, requireSameCompanyAsWorkOrder, async (req: any, res) => {
     const role = req.authenticatedUserRole;
-    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin") {
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin" && role !== "irrigation_manager") {
       res.status(403).json({ message: "Forbidden" }); return;
     }
     const parsed = rateModeBody.safeParse(req.body ?? {});
@@ -11943,7 +11943,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Task #1093 — item replacement for work orders.
   app.patch("/api/work-orders/:id/items", requireAuthentication, requireSameCompanyAsWorkOrder, async (req: any, res) => {
     const role = req.authenticatedUserRole;
-    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin") {
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin" && role !== "irrigation_manager") {
       res.status(403).json({ message: "Forbidden" }); return;
     }
     const parsed = itemsBody.safeParse(req.body ?? {});

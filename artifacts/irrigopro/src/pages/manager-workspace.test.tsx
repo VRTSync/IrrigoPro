@@ -1,23 +1,19 @@
-// Task #1005 — Manager Workspace page unit tests.
+// Task #1238 — Manager Workspace (merged) source-level assertions.
 //
 // Covers:
-//   1. Four status tiles render with correct data-testid attributes.
-//   2. Queue defaults to type=all + sort=age_desc.
-//   3. Clicking the wet-checks tile sets type filter to wet_check.
-//   4. Outer chrome class parity: manager-workspace and billing-workspace
-//      share the same top-level wrapper structure.
+//   1. Outer wrapper has data-testid="manager-workspace".
+//   2. Five stage tile testIds are present.
+//   3. Five stage section testIds are present.
+//   4. Keyboard shortcut keys (J/K/A/B/F/Ctrl+S/Shift+A) are wired.
+//   5. Queue and status-strip URLs point to /api/manager-workspace/*.
+//   6. Approve / kickback / save action testIds are present.
+//   7. Stage filter chip testId is present.
+//   8. Shortcuts cheatsheet testId is present.
+//   9. Header uses bg-gradient-brand.
+//  10. billing_manager findings_to_route section is conditionally hidden.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-
-// ---------------------------------------------------------------------------
-// Structural / smoke tests that don't require a DOM renderer.
-// We verify:
-//   a) The four tile testIds are referenced in the source.
-//   b) The outer wrapper data-testid is "manager-workspace" (parity check).
-//   c) The default sort is "age_desc" and the default type is "all".
-//   d) Clicking the WCS tile sets type to "wet_check".
-// ---------------------------------------------------------------------------
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -26,91 +22,70 @@ const MW_SRC = readFileSync(
   resolve(import.meta.dirname, "./manager-workspace.tsx"),
   "utf8",
 );
-const BW_SRC = readFileSync(
-  resolve(import.meta.dirname, "./billing-workspace.tsx"),
-  "utf8",
-);
 
 describe("manager-workspace.tsx — source-level assertions", () => {
-  it("renders four status tiles with correct data-testid attributes", () => {
-    for (const id of [
-      "status-wcs-pending",
-      "status-wos-awaiting",
-      "status-findings-routing",
-      "status-approved-this-week",
+  it("outer wrapper has data-testid=\"manager-workspace\"", () => {
+    assert.ok(
+      MW_SRC.includes('data-testid="manager-workspace"'),
+      'missing data-testid="manager-workspace" on outer wrapper',
+    );
+  });
+
+  it("has five stage tile testIds", () => {
+    for (const stage of [
+      "needs_review",
+      "waiting_on_tech",
+      "findings_to_route",
+      "passed_to_billing",
+      "billed_7d",
     ]) {
       assert.ok(
-        MW_SRC.includes(`testId="${id}"`),
-        `missing tile testId="${id}"`,
+        MW_SRC.includes(`stage-tile-${stage}`) ||
+          MW_SRC.includes("`stage-tile-${stage}`"),
+        `missing stage tile testId for ${stage}`,
       );
     }
   });
 
-  it("outer wrapper has data-testid=\"manager-workspace\"", () => {
-    assert.ok(
-      MW_SRC.includes('data-testid="manager-workspace"'),
-      "missing data-testid=\"manager-workspace\" on outer wrapper",
-    );
+  it("has five stage section testIds", () => {
+    for (const stage of [
+      "needs_review",
+      "waiting_on_tech",
+      "findings_to_route",
+      "passed_to_billing",
+      "billed_7d",
+    ]) {
+      assert.ok(
+        MW_SRC.includes(`stage-section-${stage}`) ||
+          MW_SRC.includes("`stage-section-${stage}`"),
+        `missing stage section testId for ${stage}`,
+      );
+    }
   });
 
-  it("billing-workspace outer wrapper has data-testid=\"billing-workspace\" (parity reference)", () => {
-    assert.ok(
-      BW_SRC.includes('data-testid="billing-workspace"'),
-      "billing-workspace missing its data-testid (parity check broken)",
-    );
+  it("keyboard shortcuts: J next / K previous wired", () => {
+    assert.ok(MW_SRC.includes('"j"') || MW_SRC.includes('"J"'), "J key handler missing");
+    assert.ok(MW_SRC.includes('"k"') || MW_SRC.includes('"K"'), "K key handler missing");
   });
 
-  it("both workspaces share the same outer wrapper class prefix", () => {
-    const mwClass = MW_SRC.match(/data-testid="manager-workspace"\s*>/)?.[0];
-    const bwClass = BW_SRC.match(/data-testid="billing-workspace"\s*>/)?.[0];
-    // Both should use the max-w-7xl mx-auto py-4 px-4 space-y-4 classes.
-    assert.ok(
-      MW_SRC.includes("max-w-7xl mx-auto py-4 px-4 space-y-4"),
-      "manager-workspace outer wrapper should use same chrome classes as billing-workspace",
-    );
-    assert.ok(
-      BW_SRC.includes("max-w-7xl mx-auto py-4 px-4 space-y-4"),
-      "billing-workspace outer wrapper should have chrome classes (reference unchanged)",
-    );
+  it("keyboard shortcuts: A approve / Shift+A bulk approve", () => {
+    assert.ok(MW_SRC.includes("approveActive"), "A approve handler missing");
+    assert.ok(MW_SRC.includes("bulkApprove"), "Shift+A bulk approve handler missing");
   });
 
-  it("default sort state is age_desc", () => {
-    assert.ok(
-      MW_SRC.includes('"age_desc"'),
-      "default sort should be age_desc",
-    );
-    // The useState call for sort defaults to "age_desc"
-    assert.ok(
-      MW_SRC.includes('useState<string>("age_desc")'),
-      'useState for sort should default to "age_desc"',
-    );
+  it("keyboard shortcuts: B kickback / F detail focus", () => {
+    assert.ok(MW_SRC.includes('"b"') || MW_SRC.includes('"B"'), "B key handler missing");
+    assert.ok(MW_SRC.includes('"f"') || MW_SRC.includes('"F"'), "F key handler missing");
   });
 
-  it("default type state is all", () => {
+  it("keyboard shortcuts: Ctrl+S save / ? cheatsheet", () => {
     assert.ok(
-      MW_SRC.includes('useState<QueueType>("all")'),
-      'useState for type should default to "all"',
+      MW_SRC.includes("saveActiveEdits"),
+      "Ctrl+S save-edits handler missing",
     );
-  });
-
-  it("clicking wet-checks tile calls setType with wet_check", () => {
     assert.ok(
-      MW_SRC.includes('setType("wet_check")'),
-      'tile click handler should call setType("wet_check")',
-    );
-  });
-
-  it("clicking work-orders tile calls setType with work_order", () => {
-    assert.ok(
-      MW_SRC.includes('setType("work_order")'),
-      'tile click handler should call setType("work_order")',
-    );
-  });
-
-  it("clicking findings tile calls setType with finding", () => {
-    assert.ok(
-      MW_SRC.includes('setType("finding")'),
-      'tile click handler should call setType("finding")',
+      MW_SRC.includes("cheatsheetOpen"),
+      "? cheatsheet state missing",
     );
   });
 
@@ -128,47 +103,248 @@ describe("manager-workspace.tsx — source-level assertions", () => {
     );
   });
 
-  it("queue filter chip test-ids are generated from the four type values", () => {
-    // Filter chips use a template literal: `filter-chip-${t}` — the template
-    // pattern itself must appear in source, plus each type value must be in
-    // the types array so every chip gets a unique testId at runtime.
+  it("approve button testId is present", () => {
     assert.ok(
-      MW_SRC.includes("filter-chip-${t}") || MW_SRC.includes('data-testid={`filter-chip-'),
-      "filter chip testId template must be present",
-    );
-    for (const t of ["all", "wet_check", "work_order", "finding"]) {
-      // Each type value must appear in the chip loop (as a string literal in
-      // the types array, the TYPE_LABEL keys, or the TYPE_FILTER_PARAM keys).
-      assert.ok(
-        MW_SRC.includes(`"${t}"`) || MW_SRC.includes(`'${t}'`),
-        `type value "${t}" must appear as a string literal in the source`,
-      );
-    }
-  });
-
-  it("row navigation hrefs use correct paths", () => {
-    assert.ok(
-      MW_SRC.includes("/wet-checks/"),
-      "wet_check rows must navigate to /wet-checks/:id",
-    );
-    assert.ok(
-      MW_SRC.includes("/work-orders?id="),
-      "work_order rows must navigate to /work-orders?id=:id",
-    );
-    assert.ok(
-      MW_SRC.includes("#finding-"),
-      "finding rows must include fragment anchor",
+      MW_SRC.includes('data-testid="approve-button"'),
+      'missing data-testid="approve-button"',
     );
   });
 
-  it("gradient header matches billing-workspace chrome class", () => {
+  it("kickback reason textarea testId is present", () => {
+    assert.ok(
+      MW_SRC.includes('data-testid="kickback-reason"'),
+      'missing data-testid="kickback-reason"',
+    );
+  });
+
+  it("kickback button testId is present", () => {
+    assert.ok(
+      MW_SRC.includes('data-testid="kickback-button"'),
+      'missing data-testid="kickback-button"',
+    );
+  });
+
+  it("save-edits button testId is present", () => {
+    assert.ok(
+      MW_SRC.includes('data-testid="save-edits-button"'),
+      'missing data-testid="save-edits-button"',
+    );
+  });
+
+  it("clear-stage-filter chip testId is present", () => {
+    assert.ok(
+      MW_SRC.includes('data-testid="clear-stage-filter"'),
+      'missing data-testid="clear-stage-filter"',
+    );
+  });
+
+  it("shortcuts cheatsheet testId is present", () => {
+    assert.ok(
+      MW_SRC.includes('data-testid="shortcuts-cheatsheet"'),
+      'missing data-testid="shortcuts-cheatsheet"',
+    );
+  });
+
+  it("header uses bg-gradient-brand", () => {
     assert.ok(
       MW_SRC.includes("bg-gradient-brand"),
-      "header should use bg-gradient-brand (same as billing-workspace)",
+      "header should use bg-gradient-brand",
+    );
+  });
+
+  it("billing_manager findings_to_route section is conditionally hidden", () => {
+    assert.ok(
+      MW_SRC.includes("isBillingManager") && MW_SRC.includes("findings_to_route"),
+      "billing_manager guard for findings_to_route must be present",
+    );
+  });
+
+  it("FinancialPulseWidget billing-header variant is rendered", () => {
+    assert.ok(
+      MW_SRC.includes('variant="billing-header"'),
+      'FinancialPulseWidget must use variant="billing-header"',
+    );
+  });
+
+  it("bulk-approve endpoint is /api/billing-workspace/bulk-approve (reused)", () => {
+    assert.ok(
+      MW_SRC.includes("/api/billing-workspace/bulk-approve"),
+      "bulk-approve must reuse the billing-workspace endpoint",
+    );
+  });
+
+  it("outer wrapper uses max-w-7xl mx-auto py-4 px-4 space-y-4", () => {
+    assert.ok(
+      MW_SRC.includes("max-w-7xl mx-auto py-4 px-4 space-y-4"),
+      "outer wrapper chrome class must match standard layout",
+    );
+  });
+
+  it("StageSection row-cap constant ROW_CAP is declared", () => {
+    assert.ok(
+      MW_SRC.includes("ROW_CAP") && MW_SRC.includes("= 10"),
+      "ROW_CAP = 10 constant must be declared for stage section windowing",
+    );
+  });
+
+  it("show-all-rows button testId is present (10-row cap expander)", () => {
+    assert.ok(
+      MW_SRC.includes('data-testid="show-all-rows"'),
+      'missing data-testid="show-all-rows" for stage section expander',
+    );
+  });
+
+  it("show-less-rows button testId is present (collapse back to 10)", () => {
+    assert.ok(
+      MW_SRC.includes('data-testid="show-less-rows"'),
+      'missing data-testid="show-less-rows" for stage section collapse',
+    );
+  });
+
+  it("DetailPaneInline covers part and manual_review types", () => {
+    assert.ok(
+      MW_SRC.includes('"part"') && MW_SRC.includes('"manual_review"'),
+      "part and manual_review type strings must appear in DetailPaneInline branch",
     );
     assert.ok(
-      BW_SRC.includes("bg-gradient-brand"),
-      "billing-workspace should also use bg-gradient-brand (reference check)",
+      MW_SRC.includes("active.type === \"part\""),
+      "part type guard must be present in DetailPaneInline condition",
+    );
+    assert.ok(
+      MW_SRC.includes("active.type === \"manual_review\""),
+      "manual_review type guard must be present in DetailPaneInline condition",
+    );
+  });
+
+  it("wet_check detail pane has begin-review-button testId", () => {
+    assert.ok(
+      MW_SRC.includes('data-testid="begin-review-button"'),
+      'missing data-testid="begin-review-button" for wet_check detail pane',
+    );
+  });
+
+  it("finding detail pane has open-wet-check-button testId", () => {
+    assert.ok(
+      MW_SRC.includes('data-testid="open-wet-check-button"'),
+      'missing data-testid="open-wet-check-button" for finding detail pane',
+    );
+  });
+
+  it("B-key has no-op toast guard for wet_check type", () => {
+    assert.ok(
+      MW_SRC.includes('active.type === "wet_check"') &&
+        MW_SRC.includes("Cannot kick back from here"),
+      "B-key must show no-op toast for wet_check type",
+    );
+  });
+
+  it("expanded stage state is lifted (expandedStages + toggleStageExpanded)", () => {
+    assert.ok(
+      MW_SRC.includes("expandedStages") && MW_SRC.includes("toggleStageExpanded"),
+      "collapsed state must be lifted to parent for correct J/K traversal",
+    );
+  });
+
+  it("age filter state and select are present", () => {
+    assert.ok(
+      MW_SRC.includes('data-testid="manager-age-filter"'),
+      'missing data-testid="manager-age-filter" select',
+    );
+    assert.ok(
+      MW_SRC.includes('params.set("age", age)'),
+      "age param must be wired to queue URL",
+    );
+  });
+
+  it("sort filter state and select are present", () => {
+    assert.ok(
+      MW_SRC.includes('data-testid="manager-sort"'),
+      'missing data-testid="manager-sort" select',
+    );
+    assert.ok(
+      MW_SRC.includes('params.set("sort", sort)'),
+      "sort param must be wired to queue URL",
+    );
+  });
+
+  it("advanceToNext is constrained to needs_review section", () => {
+    assert.ok(
+      MW_SRC.includes("grouped.needs_review"),
+      "advanceToNext must reference grouped.needs_review, not global flatItems",
+    );
+    assert.ok(
+      !MW_SRC.includes("Math.min(activeIndex + 1, flatItems.length - 1)"),
+      "advanceToNext must NOT advance globally via flatItems",
+    );
+  });
+
+  it("customer and tech filter controls are in the filter bar", () => {
+    assert.ok(
+      MW_SRC.includes('data-testid="manager-customer-filter"'),
+      'missing data-testid="manager-customer-filter"',
+    );
+    assert.ok(
+      MW_SRC.includes('data-testid="manager-tech-filter"'),
+      'missing data-testid="manager-tech-filter"',
+    );
+  });
+
+  it("age filter <1 option value is not HTML-encoded", () => {
+    // JSX value={"<1"} renders as the literal string <1, not &lt;1
+    const idx = MW_SRC.indexOf('"manager-age-filter"');
+    const nearby = MW_SRC.slice(Math.max(0, idx - 500), idx + 500);
+    assert.ok(
+      !nearby.includes("&lt;1"),
+      'age filter must not use HTML entity &lt;1 — use value={"<1"} instead',
+    );
+    assert.ok(
+      nearby.includes('"<1"') || nearby.includes("'<1'"),
+      'age filter must have a <1 option with the literal string "<1"',
+    );
+  });
+
+  it("only wet_check and finding have no-op approve toast; other types fall through", () => {
+    // wet_check_billing / part / manual_review should NOT have their own blocking toast
+    assert.ok(
+      !MW_SRC.includes("Wet check billings are passed to billing automatically"),
+      "wet_check_billing must not block approve with a no-op toast",
+    );
+    assert.ok(
+      !MW_SRC.includes("Part approvals must be handled from the Parts Pending Approval"),
+      "part/manual_review must not block approve with a no-op toast",
+    );
+    // wet_check and finding still have no-op toasts
+    assert.ok(
+      MW_SRC.includes("Wet checks must be reviewed in their detail screen"),
+      "wet_check still requires its no-op approve toast",
+    );
+  });
+
+  it("kickback handler does not show 'Not supported' toast for non-BS/WO types", () => {
+    assert.ok(
+      !MW_SRC.includes('"Not supported"'),
+      "kickback must not show a blocking Not-supported toast; use silent null-path guard instead",
+    );
+  });
+
+  it("waiting_on_tech items render read-only panel (no DetailPaneInline, no action buttons)", () => {
+    assert.ok(
+      MW_SRC.includes('data-testid="waiting-on-tech-readonly"'),
+      'missing data-testid="waiting-on-tech-readonly" read-only panel for waiting_on_tech stage',
+    );
+    // The waiting_on_tech check must come BEFORE the DetailPaneInline branch
+    const witIdx = MW_SRC.indexOf('waiting_on_tech" ?');
+    const dpiIdx = MW_SRC.indexOf("DetailPaneInline");
+    assert.ok(
+      witIdx >= 0 && dpiIdx >= 0 && witIdx < dpiIdx,
+      "waiting_on_tech stage guard must appear before DetailPaneInline in the detail pane",
+    );
+  });
+
+  it("view-record-button testId present in waiting_on_tech panel", () => {
+    assert.ok(
+      MW_SRC.includes('data-testid="view-record-button"'),
+      'missing data-testid="view-record-button" in waiting_on_tech read-only panel',
     );
   });
 });

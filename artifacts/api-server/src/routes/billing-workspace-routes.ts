@@ -54,14 +54,14 @@ export const ACTIVE_WCB = new Set([
   "approved_passed_to_billing",
 ]);
 // Approved (this week tile).
-const APPROVED_BS = new Set(["approved", "billed", "invoiced"]);
-const APPROVED_WO = new Set(["approved", "billed", "invoiced", "completed_approved"]);
+export const APPROVED_BS = new Set(["approved", "billed", "invoiced"]);
+export const APPROVED_WO = new Set(["approved", "billed", "invoiced", "completed_approved"]);
 // NOTE: approved_passed_to_billing is intentionally absent here — it lives in
 // ACTIVE_WCB above. ACTIVE_* and APPROVED_* must remain disjoint per tile.
-const APPROVED_WCB = new Set(["billed"]);
+export const APPROVED_WCB = new Set(["billed"]);
 // Draft states (last 24h tile).
-const DRAFT_BS = new Set(["draft", "in_progress"]);
-const DRAFT_WO = new Set(["draft", "scheduled", "in_progress"]);
+export const DRAFT_BS = new Set(["draft", "in_progress"]);
+export const DRAFT_WO = new Set(["draft", "scheduled", "in_progress"]);
 
 function numOr0(v: unknown): number {
   if (v == null) return 0;
@@ -74,7 +74,7 @@ function parseIntOr(v: unknown, dflt: number): number {
   return Number.isFinite(n) ? Math.trunc(n) : dflt;
 }
 
-async function scopedWetCheckBillings(req: any): Promise<any[]> {
+export async function scopedWetCheckBillings(req: any): Promise<any[]> {
   const role = req.authenticatedUserRole;
   const all = await storage.getAllWetCheckBillingsWithCounts();
   if (role === "super_admin") return all as any[];
@@ -97,7 +97,7 @@ async function scopedWetCheckBillings(req: any): Promise<any[]> {
   return out;
 }
 
-async function scopedBillingSheets(req: any): Promise<any[]> {
+export async function scopedBillingSheets(req: any): Promise<any[]> {
   const role = req.authenticatedUserRole;
   const cid0: number | null = req.authenticatedUserCompanyId ?? null;
   const all = await storage.getAllBillingSheets(role === "super_admin" ? null : cid0);
@@ -121,7 +121,7 @@ async function scopedBillingSheets(req: any): Promise<any[]> {
   return out;
 }
 
-async function scopedWorkOrders(req: any): Promise<any[]> {
+export async function scopedWorkOrders(req: any): Promise<any[]> {
   const role = req.authenticatedUserRole;
   const cid0: number | null = req.authenticatedUserCompanyId ?? null;
   const all = await storage.getWorkOrders(role === "super_admin" ? null : cid0);
@@ -312,7 +312,7 @@ async function getScopedSyncRows(
   return rows as Array<typeof quickbooksSync.$inferSelect>;
 }
 
-async function loadQbSyncStatus(req: any): Promise<QbSyncStatus> {
+export async function loadQbSyncStatus(req: any): Promise<QbSyncStatus> {
   const integrations = await getScopedQbIntegrations(req);
 
   // Determine the most recent successful sync across integrations

@@ -60,7 +60,7 @@ interface DetailRecord {
   };
 }
 
-const EDITABLE_ROLES = ["billing_manager", "company_admin", "super_admin"];
+const EDITABLE_ROLES = ["billing_manager", "company_admin", "super_admin", "irrigation_manager"];
 
 function isLocked(record: DetailRecord | undefined, type: QueueItemType): boolean {
   if (!record) return true;

@@ -175,16 +175,16 @@ describe("manager-workspace routes", () => {
   // Access control
   // -------------------------------------------------------------------
 
-  it("rejects billing_manager with 403", async () => {
+  it("allows billing_manager on queue", async () => {
     role = "billing_manager";
     const r = await fetch(`${base}/api/manager-workspace/queue`);
-    assert.equal(r.status, 403);
+    assert.equal(r.status, 200);
   });
 
-  it("rejects billing_manager from status-strip with 403", async () => {
+  it("allows billing_manager on status-strip", async () => {
     role = "billing_manager";
     const r = await fetch(`${base}/api/manager-workspace/status-strip`);
-    assert.equal(r.status, 403);
+    assert.equal(r.status, 200);
   });
 
   it("allows irrigation_manager", async () => {
@@ -197,6 +197,12 @@ describe("manager-workspace routes", () => {
     role = "company_admin";
     const r = await fetch(`${base}/api/manager-workspace/queue`);
     assert.equal(r.status, 200);
+  });
+
+  it("rejects field_tech with 403", async () => {
+    role = "field_tech";
+    const r = await fetch(`${base}/api/manager-workspace/queue`);
+    assert.equal(r.status, 403);
   });
 
   // -------------------------------------------------------------------

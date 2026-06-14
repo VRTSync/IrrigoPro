@@ -288,6 +288,10 @@ export const billingSheets = pgTable("billing_sheets", {
   noPhotosNeeded: boolean("no_photos_needed").notNull().default(false),
   noPhotosNeededBy: integer("no_photos_needed_by").references(() => users.id),
   noPhotosNeededAt: timestamp("no_photos_needed_at"),
+  // Task #1238 — set by return-for-correction; cleared when tech resubmits
+  // (status → submitted/pending_manager_review/completed). Drives the
+  // "Waiting on tech" stage section in the merged Manager Workspace.
+  returnedForCorrectionAt: timestamp("returned_for_correction_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
@@ -729,6 +733,10 @@ export const workOrders = pgTable("work_orders", {
   noPhotosNeeded: boolean("no_photos_needed").notNull().default(false),
   noPhotosNeededBy: integer("no_photos_needed_by").references(() => users.id),
   noPhotosNeededAt: timestamp("no_photos_needed_at"),
+  // Task #1238 — set by return-for-correction; cleared when tech resubmits
+  // (status → pending_manager_review/work_completed). Drives the
+  // "Waiting on tech" stage section in the merged Manager Workspace.
+  returnedForCorrectionAt: timestamp("returned_for_correction_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({

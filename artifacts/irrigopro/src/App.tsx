@@ -13,7 +13,7 @@ import Login from "@/pages/login";
 import NotFound from "@/pages/not-found";
 import FieldTechDashboard from "@/pages/field-tech-dashboard";
 import AdminDashboard from "@/pages/admin-dashboard";
-import BillingWorkspace from "@/pages/billing-workspace";
+import ManagerWorkspace from "@/pages/manager-workspace";
 
 // Task #532 — every other page is route-split via React.lazy. Vite emits
 // per-route chunks; shared deps (React, React Query, Wouter, Tailwind
@@ -22,7 +22,6 @@ const lazyPage = <T extends ComponentType<any>>(loader: () => Promise<{ default:
   lazy(loader);
 
 const Dashboard = lazyPage(() => import("@/pages/dashboard"));
-const ManagerWorkspace = lazyPage(() => import("@/pages/manager-workspace"));
 const Estimates = lazyPage(() => import("@/pages/estimates"));
 const PartsCatalog = lazyPage(() => import("@/pages/parts-catalog"));
 const Customers = lazyPage(() => import("@/pages/customers"));
@@ -92,12 +91,12 @@ function RedirectToCommandCenter() {
   return null;
 }
 
-// Task #709 — legacy billing-dashboard URLs redirect to the new
-// /billing-workspace. We use a `replace` navigation (no history
-// entry) so back-button still works, mirroring a 301.
+// Legacy billing-dashboard / billing-workspace URLs redirect to the merged
+// /manager-workspace. We use a `replace` navigation (no history entry) so
+// back-button still works, mirroring a 301.
 function RedirectToBillingWorkspace() {
   const [, navigate] = useLocation();
-  useEffect(() => { navigate("/billing-workspace", { replace: true }); }, [navigate]);
+  useEffect(() => { navigate("/manager-workspace", { replace: true }); }, [navigate]);
   return null;
 }
 
@@ -293,7 +292,7 @@ function Router() {
                   <Route path="/manager/wet-checks/:id" component={WetCheckReviewPage} />
                   <Route path="/wet-checks/admin" component={RedirectToWetChecks} />
                   <Route path="/financial-pulse" component={FinancialPulsePage} />
-                  <Route path="/billing-workspace" component={BillingWorkspace} />
+                  <Route path="/billing-workspace" component={RedirectToBillingWorkspace} />
                   <Route path="/billing" component={RedirectToBillingWorkspace} />
                   <Route path="/billing/dashboard" component={RedirectToBillingWorkspace} />
                   <Route path="/billing-dashboard" component={RedirectToBillingWorkspace} />
@@ -329,8 +328,9 @@ function Router() {
             <div className="px-4">
               <Suspense fallback={<RouteSuspenseFallback />}>
                 <Switch>
-                  <Route path="/" component={BillingWorkspace} />
-                  <Route path="/billing-workspace" component={BillingWorkspace} />
+                  <Route path="/" component={ManagerWorkspace} />
+                  <Route path="/manager-workspace" component={ManagerWorkspace} />
+                  <Route path="/billing-workspace" component={RedirectToBillingWorkspace} />
                   <Route path="/billing" component={RedirectToBillingWorkspace} />
                   <Route path="/billing/dashboard" component={RedirectToBillingWorkspace} />
                   <Route path="/billing-dashboard" component={RedirectToBillingWorkspace} />
@@ -389,6 +389,8 @@ function Router() {
                 <Switch>
                   <Route path="/" component={RedirectToAppHealth} />
                   <Route path="/super-admin" component={SuperAdminAppHealthPage} />
+                  <Route path="/manager-workspace" component={ManagerWorkspace} />
+                  <Route path="/billing-workspace" component={RedirectToBillingWorkspace} />
                   <Route path="/manager/wet-checks" component={RedirectToWetChecks} />
                   <Route path="/manager/wet-checks/:id/confirm">
                     {(params) => <WetCheckConfirm id={parseInt(params.id)} />}

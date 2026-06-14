@@ -16,11 +16,11 @@ import SiteMapsPage from "@/pages/site-maps";
 import CustomerSiteMapsPage from "@/pages/customer-site-maps-page";
 import CustomerProfile from "@/pages/customer-profile";
 import CustomerBilling from "@/pages/customer-billing";
-import BillingWorkspace from "@/pages/billing-workspace";
+import ManagerWorkspace from "@/pages/manager-workspace";
 
 function RedirectToBillingWorkspace() {
   const [, navigate] = useLocation();
-  useEffect(() => { navigate("/billing-workspace", { replace: true }); }, [navigate]);
+  useEffect(() => { navigate("/manager-workspace", { replace: true }); }, [navigate]);
   return null;
 }
 
@@ -170,7 +170,8 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/customers/:id/profile" component={CustomerProfile} />
           <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />
           <Route path="/site-maps" component={SiteMapsPage} />
-          <Route path="/billing-workspace" component={BillingWorkspace} />
+          <Route path="/manager-workspace" component={ManagerWorkspace} />
+          <Route path="/billing-workspace" component={RedirectToBillingWorkspace} />
           <Route path="/billing" component={RedirectToBillingWorkspace} />
           <Route path="/billing/dashboard" component={RedirectToBillingWorkspace} />
           <Route path="/billing-dashboard" component={RedirectToBillingWorkspace} />

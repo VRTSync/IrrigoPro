@@ -3584,7 +3584,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateWorkOrder(id: number, workOrder: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined> {
-    const [updatedWorkOrder] = await db.update(workOrders).set(workOrder).where(eq(workOrders.id, id)).returning();
+    // Task #1238 — auto-clear returnedForCorrectionAt when the tech resubmits
+    // (status transitions to pending_manager_review or work_completed).
+    const clearTimestamp =
+      workOrder.status === "pending_manager_review" ||
+      workOrder.status === "work_completed";
+    const payload = clearTimestamp
+      ? { ...workOrder, returnedForCorrectionAt: null }
+      : workOrder;
+    const [updatedWorkOrder] = await db.update(workOrders).set(payload).where(eq(workOrders.id, id)).returning();
     return updatedWorkOrder || undefined;
   }
 
@@ -4263,7 +4271,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateBillingSheet(id: number, billingSheetData: Partial<InsertBillingSheet>): Promise<BillingSheet | undefined> {
-    const [updatedSheet] = await db.update(billingSheets).set(billingSheetData).where(eq(billingSheets.id, id)).returning();
+    // Task #1238 — auto-clear returnedForCorrectionAt when the tech resubmits
+    // (status transitions to pending_manager_review, submitted, or completed).
+    const clearTimestamp =
+      billingSheetData.status === "pending_manager_review" ||
+      billingSheetData.status === "submitted" ||
+      billingSheetData.status === "completed";
+    const payload = clearTimestamp
+      ? { ...billingSheetData, returnedForCorrectionAt: null }
+      : billingSheetData;
+    const [updatedSheet] = await db.update(billingSheets).set(payload).where(eq(billingSheets.id, id)).returning();
     return updatedSheet || undefined;
   }
 
