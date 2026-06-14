@@ -1,0 +1,227 @@
+# Manager Workspace Merge — Slice 1: One Stage-Based Manager Page
+
+**Source:** product feedback (Randy, 2026-06-12) — "I want to reimagine it as the manager's view of what is going on and what is at the different stages for his action being needed. The review/approval process should be very easy and use the inline editing." Scope confirmed 2026-06-12: **merge the Manager Dashboard and the Billing Workspace into one page**; layout is Option A (stage sections, one column); merged page is named **"Manager Workspace" at `/manager-workspace`**.
+**Severity:** P1 — two near-twin pages confuse every role that sees both; neither answers "what's waiting on me at each stage."
+**Prerequisite slices:** Command Center Inline Edit — Slice 1 (shipped; its components are reused). "CC Kickback Fix — Slice 1" (independent interim fix; see note in 1.3).
+
+This is a single self-contained slice family. Do not deviate from the scope below. If a question arises mid-implementation that is not answered here, stop and flag it rather than guessing.
+
+---
+
+## What merges, what doesn't
+
+**Merging (two pages → one):**
+
+| Today | Route | File | Queue contents |
+|---|---|---|---|
+| Manager Dashboard | `/manager-workspace` | `pages/manager-workspace.tsx` (Task #1005) | wet checks, work orders, unrouted findings |
+| Billing Workspace | `/billing-workspace` | `pages/billing-workspace.tsx` (Task #709) | billing sheets, work orders, wet check billings, parts, manual review |
+
+The merged page lives at **`/manager-workspace`**, titled **"Manager Workspace"** everywhere (route, page header, browser title, nav label, all roles). `/billing-workspace` becomes a redirect. The merged queue is the UNION of both queues, with work orders deduplicated (each WO appears exactly once).
+
+**HARD BOUNDARY — not touched, zero file edits:**
+- **Command Center** — `/billing/command-center` → `pages/customer-billing.tsx`. Completely separate page. Do not modify it, do not redirect it, do not rename it.
+- `components/billing-workspace/*` are import-only shared components (`DetailPaneInline`, `LineItemsEditor`, `RateModeToggle`, `bulk-approve-bar`, `activity-feed`) — reused, not edited. If reuse requires changing one, stop and flag.
+- The standalone `/wet-check-billings` page, the wet-check review dashboard (`/wet-checks/:id` — `ManagerWetCheckDetailPage`), all wizards, and the Estimate Command Center.
+
+---
+
+## Design Context (locked decisions)
+
+1. **One page, one name, four roles.** The merged page is served to `irrigation_manager` (as homepage — his `/` already renders the manager page, App.tsx:267), `company_admin`, `super_admin`, and `billing_manager`. The Billing Workspace API already admits all four (`BW_ROLES`, `billing-workspace-routes.ts:28`); the manager-workspace API currently 403s `billing_manager` (`MW_ROLES`, `manager-workspace-routes.ts:26`) — Slice 1.2 admits billing_manager with item-type scoping (decision 3).
+2. **Layout is Option A — stacked stage sections, one column** (chosen from three mocked options), detail pane on the right. Five sections, priority order:
+   - **Needs my review** (red) — everything awaiting manager action: wet checks (`submitted`/`pending_manager_review`), work orders (`pending_manager_review`/`work_completed`), billing sheets (`ACTIVE_BS`: `pending_manager_review`/`submitted`/`completed`), wet check billings (`submitted`/`pending_manager_review`), parts pending price approval, manual-review items. (Status sets already exported from `billing-workspace-routes.ts:40-56` — import, don't copy.)
+   - **Waiting on tech** (amber) — work orders and billing sheets the manager returned for correction that haven't been resubmitted. Requires Slice 1.1 schema.
+   - **Findings to route** (purple) — unrouted findings (no billingSheetId/estimateId/workOrderId).
+   - **Passed to billing** (blue) — items at `approved_passed_to_billing` not yet invoiced (incl. WCBs, which are born at this status). The manager sees what's approved but not yet billed.
+   - **Billed (7d)** (teal, collapsed by default) — billed/invoiced in the trailing 7 days. Confirmation feed, capped at 25 server-side.
+3. **Role scoping of sections.** irrigation_manager / company_admin / super_admin see all five sections. **billing_manager** sees no wet checks and no findings (their items: billing sheets, work orders, WCBs, parts, manual review) — the Findings section is hidden entirely for them; everything else renders with their scoped data. This mirrors exactly what each role can see today across the two pages.
+4. **Inline actions in the detail pane:**
+   - **billing_sheet / work_order / wet_check_billing / part / manual_review** → reuse `DetailPaneInline` (it already handles all five types: header, rate-mode toggle, line-items editor, note, kickback reason, approve/kickback/save/flag/open action row, activity log). The merged page provides the action handlers.
+   - **Approve** → existing `POST /api/{billing-sheets|work-orders|wet-check-billings}/:id/approve` (`approve-routes.ts`; all allow irrigation_manager/company_admin/super_admin — and billing_manager where it does today).
+   - **Kickback** → `POST /api/{billing-sheets|work-orders}/:id/return-for-correction` with body `{ notes }`. NEVER `/kickback` — that route does not exist (the old Billing Workspace page calls it and 404s; interim fix is the separate "CC Kickback Fix — Slice 1" doc, which this merge supersedes once the old page is retired in 1.4).
+   - **wet_check** → NO inline edit/approve (the WC approve endpoint was removed in Task #1090; wet checks finalize via the convert route). Pane = read-only summary + primary **Begin review** button → `/wet-checks/:id` (the purpose-built review dashboard). Locked per Randy: "wet check editing should jump to that review dashboard."
+   - **finding** → read-only summary + **Open in wet check** → existing `href` with `#finding-` anchor. Inline routing is a follow-up.
+5. **Role-guard widening for inline edit.** `PATCH /api/work-orders/:id/items` (`routes.ts:11944`), `PATCH /api/work-orders/:id/rate-mode` (`routes.ts:11912`), and the analogous billing-sheet `items`/`rate-mode` handlers in the same file currently allow only billing_manager/company_admin/super_admin. Slice 1.2 adds `irrigation_manager` to these four guards (and the WCB `rate-mode`/`labor-rate` guards, same pattern) so the irrigation manager can actually use the inline editor. Server lock guards (`billed`/`invoiceId`) unchanged.
+6. **"Waiting on tech" needs one new column on two tables.** Nothing distinguishes a kicked-back WO (`in_progress`) or BS (`draft`) from one never submitted. Slice 1.1 adds nullable `returned_for_correction_at` to `work_orders` AND `billing_sheets`; set by the return-for-correction routes, cleared when the item re-enters a Needs-review status.
+7. **Zone 0 (slim Financial Pulse header) and the QuickBooks tile carry over** from the Billing Workspace to the merged page, rendered for all four roles (irrigation_manager already has nav access to Financial Pulse, so this exposes nothing new).
+8. **Keyboard map carries over** from the Billing Workspace: `J`/`K` row nav across visible rows of all expanded sections, `A` approve, `B` focus kickback reason, `F`/`Enter` open detail, `/` focus search, `Ctrl+S` save edits (not approve), `Esc` close, `?` cheat sheet. `A`/`B` no-op with a toast on wet_check/finding rows.
+9. **The old Billing Workspace "Wet Checks" tab is not carried over.** WCBs are first-class queue items in the stage sections, and the standalone `/wet-check-billings` page (which already wraps `WetChecksTab`) stays for the list-centric view.
+10. **Redirects, not dead links.** `/billing-workspace` → `/manager-workspace` (replace navigation, same pattern as `RedirectToBillingWorkspace`). billing_manager's `/` renders the merged page. All legacy redirects that point at `/billing-workspace` now chain to `/manager-workspace`.
+
+---
+
+## Slice 1.1 — Schema: `returned_for_correction_at` on work orders and billing sheets
+
+### Files added
+- `lib/db/migrations/0007_returned_for_correction.sql` (latest existing is `0006_add_rate_mode.sql`).
+
+### Files modified
+- `lib/db/src/schema/schema.ts` — add to BOTH `workOrders` and `billingSheets`:
+
+```ts
+// Set when a manager returns the item for correction; cleared when the
+// tech resubmits (status re-enters a Needs-review status).
+// Drives the "Waiting on tech" stage in /manager-workspace.
+returnedForCorrectionAt: timestamp("returned_for_correction_at"),
+```
+
+Migration SQL:
+
+```sql
+ALTER TABLE work_orders
+  ADD COLUMN IF NOT EXISTS returned_for_correction_at timestamp;
+ALTER TABLE billing_sheets
+  ADD COLUMN IF NOT EXISTS returned_for_correction_at timestamp;
+```
+
+No backfill — historical kickbacks predate tracking and start out of the stage.
+
+### Acceptance
+- Both columns exist, nullable, no default; Drizzle types include `returnedForCorrectionAt: Date | null`.
+
+---
+
+## Slice 1.2 — Server: unified staged queue
+
+### Files modified
+- `artifacts/api-server/src/routes/approve-routes.ts` — both return-for-correction handlers also set `returnedForCorrectionAt: new Date()`.
+- `artifacts/api-server/src/storage.ts` — `updateWorkOrder`: when incoming `status` is `pending_manager_review`/`work_completed`, set `returnedForCorrectionAt: null`. `updateBillingSheet`: same for `pending_manager_review`/`submitted`/`completed`.
+- `artifacts/api-server/src/routes/manager-workspace-routes.ts` — becomes the merged queue (below).
+- `artifacts/api-server/src/routes/routes.ts` — guard widening (locked decision 5): add `irrigation_manager` to the role checks of work-order `items` (line 11946) + `rate-mode` (line 11914), billing-sheet `items` + `rate-mode`, and WCB `rate-mode` + `labor-rate`. Six guards, one-line change each. Nothing else in those handlers.
+
+### Queue changes (`GET /api/manager-workspace/queue`)
+
+1. **Roles:** add `billing_manager` to `MW_ROLES`. Item-type scoping per locked decision 3: billing_manager never receives `wet_check` or `finding` items (server-side filter, not just UI).
+2. **Item types:** existing `wet_check`/`work_order`/`finding` plus `billing_sheet`, `wet_check_billing`, `part`, `manual_review`. Import the scoped fetchers and `ACTIVE_*` status sets from `billing-workspace-routes.ts` rather than duplicating them (export what isn't exported yet). Work orders are emitted ONCE — the WO loop assigns the stage; never push the same WO from two code paths.
+3. **`stage` field on every item** + optional `?stage=` filter: `needs_review | waiting_on_tech | findings | passed_to_billing | billed_7d`:
+   - `needs_review` — per the status sets in locked decision 2.
+   - `waiting_on_tech` — WO `in_progress` + `returnedForCorrectionAt != null`; BS `draft` + `returnedForCorrectionAt != null`. Items carry `flags: ['kicked_back']` and `returnedAt`.
+   - `findings` — unrouted findings (existing predicate).
+   - `passed_to_billing` — BS/WO/WCB at `approved_passed_to_billing` with `invoiceId == null`.
+   - `billed_7d` — billed/invoiced within trailing 7×24h, newest 25, server-capped.
+4. **Type filter param values** extend to: `wc | wo | bs | wcb | part | manual | finding`. Existing filters (`q`, `customer`, `tech`, `age`, `status`, `sort`, paging) unchanged in behavior.
+5. `flags` keeps the existing `missing_photos`/`stale` logic for all types that have it today (the BS/WCB flag logic lives in the billing queue — port it over with the fetchers).
+
+### Status-strip changes (`GET /api/manager-workspace/status-strip`)
+
+Add `stageCounts` (keep `indicators` for backward compatibility):
+
+```json
+{
+  "indicators": { ...unchanged... },
+  "stageCounts": { "needsReview": 12, "waitingOnTech": 3, "findingsToRoute": 5, "passedToBilling": 9, "billed7d": 14 },
+  "oldestAgeHours": { ...unchanged... }
+}
+```
+
+For billing_manager, `findingsToRoute` is omitted and WC counts are excluded from `needsReview`.
+
+### Tests
+- `manager-workspace-routes.test.ts` (extend):
+  - Each of the seven item types lands in the right stage with fixture data.
+  - WO appears exactly once even when active in both legacy queues' criteria.
+  - billing_manager: 200 (no longer 403); response contains no `wet_check`/`finding` items; `stageCounts` omits `findingsToRoute`.
+  - Kicked-back WO (`in_progress` + timestamp) → `waiting_on_tech`; timestamp null → absent.
+  - `passed_to_billing` excludes items with `invoiceId` set.
+- `rate-mode-routes.test.ts` (extend): irrigation_manager → 200 on all six widened guards; field_tech still 403 everywhere.
+- approve-routes tests (extend): return-for-correction sets the timestamp on BOTH types; resubmit clears it.
+
+### Acceptance
+- One queue call (no `stage` param) returns the full merged, deduplicated, stage-tagged queue scoped to the caller's role.
+
+---
+
+## Slice 1.3 — Frontend: the merged page
+
+### Files modified
+- `artifacts/irrigopro/src/pages/manager-workspace.tsx` — rebuilt as the merged page (it keeps the route and test ids).
+
+### Files added
+- `artifacts/irrigopro/src/components/manager-workspace/stage-section.tsx` (+ test)
+- `artifacts/irrigopro/src/components/manager-workspace/manager-detail-pane.tsx` (+ test)
+
+### Concrete changes
+
+**Page structure, top to bottom:** gradient header ("Manager Workspace") → Zone 0 slim Financial Pulse + QuickBooks tile (ported from `billing-workspace.tsx`, same components) → slim filter bar (search `/`, customer #, tech #, age, sort — filters all sections at once) → five `StageSection`s → right-hand sticky detail pane (`lg:col-span-2`, same proportions as today).
+
+**`StageSection`** — props: `stage`, `title`, `accent`, `count`, `items`, `activeId`, `onSelect`, `defaultCollapsed?`. Colored-left-border header with count badge and collapse chevron; rows reuse the existing `QueueRow` pattern (type icon, number, flag badges, customer · tech, $ total, status). Empty sections render the header + muted "All clear" — they never disappear. Each section shows up to 10 rows with a "Show all N" expander; **Billed (7d)** is collapsed by default. Findings section not rendered at all for billing_manager.
+
+**`ManagerDetailPane`** — branches on `item.type`:
+- `billing_sheet` / `work_order` / `wet_check_billing` / `part` / `manual_review` → render `DetailPaneInline` (imported from `@/components/billing-workspace/detail-pane-inline`, unmodified). The page supplies the handlers:
+  - Approve → `POST .../:id/approve`; on success toast + invalidate queue/strip + auto-advance to next row in Needs my review (port the auto-advance from `billing-workspace.tsx` ~line 653). Disabled while line items dirty ("Save line items first").
+  - Kickback → `POST .../:id/return-for-correction` `{ notes }` (reason required; WCB/part/manual_review keep the existing "Not supported" toast). On success the item visibly moves to **Waiting on tech** on refetch.
+  - Save / Flag → same endpoints the old page uses (`PATCH :id` note, `POST /api/billing-workspace/flag`).
+- `wet_check` → summary (number, customer, tech, status, age) + primary **Begin review** → `/wet-checks/:id`.
+- `finding` → summary (issue type, severity, part × qty, customer) + **Open in wet check** → `item.href`.
+- Waiting-on-tech items → read-only + kickback reason (latest `[Returned for correction: …]` note suffix or `returnedAt`) + Open link.
+- Locked items (`billed`/`invoiceId`) → `DetailPaneInline` already renders read-only + lock badge.
+
+**Keyboard** per locked decision 8 — port the handler from `billing-workspace.tsx` (it is the superset), extend J/K to traverse concatenated visible rows of expanded sections, no-op toast for A/B on wet_check/finding.
+
+**Interim note:** "CC Kickback Fix — Slice 1" patches the OLD Billing Workspace page's kickback 404. Ship it independently/first; it dies with that page in Slice 1.4. The merged page never calls `/kickback`.
+
+### Tests
+- `stage-section.test.tsx` — header/rows/collapse/All clear/expander.
+- `manager-detail-pane.test.tsx` — WO renders DetailPaneInline and Approve fires `/approve`; kickback posts `/return-for-correction` `{ notes }`; wet check renders Begin review (no editor); finding link keeps the anchor; billed item read-only.
+- `manager-workspace.test.tsx` (rewrite) — grouping by stage, section order, billing_manager sees no Findings section, search filters across sections.
+
+### Acceptance
+- Any of the four roles opens `/manager-workspace` and sees what's at each stage at a glance; works Needs my review top to bottom: select → edit qty/hours inline → Save → Approve → auto-advance, never leaving the page.
+- Kickback requires a reason and the item visibly lands in Waiting on tech.
+- Wet checks jump to their review dashboard in one click; billing_manager sees no wet checks or findings anywhere.
+
+---
+
+## Slice 1.4 — Routing, nav, and retirement of the old page
+
+Only after 1.3 is accepted.
+
+### Files modified
+- `artifacts/irrigopro/src/App.tsx`:
+  - irrigation_manager block: `/billing-workspace` (line ~296) → `RedirectToManagerWorkspace`; drop now-unused `BillingWorkspace` import if unreferenced.
+  - billing_manager block: `/` and `/billing-workspace` → render the merged `ManagerWorkspace`; legacy `/billing`, `/billing/dashboard`, `/billing-dashboard` redirects now chain to `/manager-workspace`. `/billing/command-center` UNTOUCHED.
+  - company_admin and super_admin blocks: add `/manager-workspace` → `ManagerWorkspace` and `/billing-workspace` → `RedirectToManagerWorkspace`. (Verified 2026-06-12: the company_admin block, App.tsx lines 437–509, currently has NO route for either page despite the nav linking to them.)
+- `artifacts/irrigopro/src/components/layout/nav-config.ts`:
+  - `managerNav` (line ~171): "Manager Dashboard" → **"Manager Workspace"**; remove the Billing group's "Billing Workspace" leaf (line ~192).
+  - `billingManagerNav` (line ~116): "Billing Workspace" leaf → label "Manager Workspace", path `/manager-workspace`, keep `badgeKey: "awaitingApproval"`. "Command Center" leaf untouched.
+  - admin nav (line ~291): same rename/repoint as billingManagerNav. "Command Center" leaf untouched.
+- Delete `artifacts/irrigopro/src/pages/billing-workspace.tsx` and its page-level tests (`billing-workspace-keyboard.test.ts`, `billing-workspace-url-state.test.ts`, `billing-workspace-wet-check.test.tsx`) — first porting any assertion not already covered by the new page tests. `components/billing-workspace/*` are NOT deleted (shared, reused).
+
+### Acceptance
+- Every role's nav shows exactly one "Manager Workspace" entry (with the awaiting-approval badge) and — for billing roles — the untouched "Command Center" entry.
+- `/billing-workspace` redirects to `/manager-workspace` for all roles; no NotFound from any old bookmark.
+- `billing-workspace.tsx` is gone; the app builds; no import references remain.
+
+---
+
+## Cross-cutting acceptance checklist
+
+- [ ] Command Center (`customer-billing.tsx`, `/billing/command-center`) byte-identical — zero edits, zero redirect changes.
+- [ ] `components/billing-workspace/*` unmodified (imports only).
+- [ ] `returned_for_correction_at` on both tables; set on return, cleared on resubmit.
+- [ ] Merged queue: seven item types, five stages, WO deduplicated, role-scoped (billing_manager: no WCs/findings).
+- [ ] Six edit guards widened to irrigation_manager; field_tech still 403; lock guards unchanged.
+- [ ] One page at `/manager-workspace` named "Manager Workspace" in route/header/title/nav for all four roles; irrigation manager lands on it at `/`.
+- [ ] Inline approve / kickback (`/return-for-correction` + `{ notes }`) / line-item edit / rate-mode in the pane via reused `DetailPaneInline`.
+- [ ] Wet checks and findings link out; no inline affordances for them.
+- [ ] `/billing-workspace` redirects; old page file deleted only in 1.4 after 1.3 acceptance.
+- [ ] Keyboard parity (J/K/A/B/F///Ctrl+S/Esc/?).
+
+---
+
+## Out of scope (do NOT do in this slice)
+
+- ANY edit to Command Center files or its route.
+- Inline finding routing; inline wet-check editing or approval; bulk approve (port `bulk-approve-bar` later).
+- Kanban layout, drag-and-drop, stage animations.
+- Changes to `/wet-check-billings`, `ManagerWetCheckDetailPage`, wizards, estimates pages, or any invoice endpoint.
+- Per-user persisted collapse state (local component state only).
+- Removing the legacy `indicators` block from status-strip.
+
+## Follow-ups to file as separate slices
+
+1. **Bulk approve** in Needs my review (reuse `bulk-approve-bar.tsx`).
+2. **Inline finding routing** from the pane (`PATCH /api/wet-checks/findings/:id/route` exists).
+3. **Stage-aware nudges** — "Waiting on tech > 3 days" escalation.
+4. **Retire `manual_review`/`part` link-outs** into richer inline panes.
