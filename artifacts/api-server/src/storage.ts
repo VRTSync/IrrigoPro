@@ -8388,9 +8388,11 @@ export class DatabaseStorage implements IStorage {
     if (!p) return false;
     // Ensure the wet check belongs to the caller's company (no edit-state guard).
     await this.assertWetCheckBelongsToCompany(p.wetCheckId, companyId);
-    // Reject the request if the photo is attached — only loose photos may be
-    // removed via this path.
-    if (p.findingId != null || p.zoneRecordId != null) {
+    // Reject the request if the photo is attached to a finding — only loose
+    // photos (findingId == null) may be removed via this path.  Zone-level
+    // photos (zoneRecordId set, findingId null) count as loose because the UI
+    // defines "loose" as findingId == null, not zoneRecordId == null.
+    if (p.findingId != null) {
       const err = new Error(
         "Only unattached photos can be removed after a wet check is submitted",
       ) as Error & { code?: string };
@@ -8404,6 +8406,25 @@ export class DatabaseStorage implements IStorage {
       await objectStorage.deletePhotoBlobs(p.url);
     }
     return ok;
+  }
+
+  // Bulk-delete all loose (findingId IS NULL) photos on a wet check.
+  // companyId=null skips the ownership check (super_admin path).
+  // Returns the count of deleted photos.
+  async deleteAllLooseWetCheckPhotos(wetCheckId: number, companyId: number | null): Promise<number> {
+    if (companyId !== null) {
+      await this.assertWetCheckBelongsToCompany(wetCheckId, companyId);
+    }
+    const rows = await db
+      .select()
+      .from(wetCheckPhotos)
+      .where(and(eq(wetCheckPhotos.wetCheckId, wetCheckId), isNull(wetCheckPhotos.findingId)));
+    if (rows.length === 0) return 0;
+    const ids = rows.map((r) => r.id);
+    await db.delete(wetCheckPhotos).where(inArray(wetCheckPhotos.id, ids));
+    const objectStorage = new ObjectStorageService();
+    await Promise.all(rows.map((r) => objectStorage.deletePhotoBlobs(r.url).catch(() => {})));
+    return rows.length;
   }
 
   async getWetCheckPhotoUrls(wetCheckId: number): Promise<string[]> {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { AlertTriangle, Loader2, Upload } from "lucide-react";
+import { AlertTriangle, Loader2, Trash2, Upload } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Select,
@@ -9,6 +9,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import type { WetCheckPhoto } from "@workspace/db/schema";
 import { PhotoThumb } from "./PhotoThumb";
@@ -54,25 +66,85 @@ export function LoosePhotosSection({
     onSettled: () => setBusyPhotoId(null),
   });
 
+  const deleteAllMut = useMutation({
+    mutationFn: async () => {
+      return apiRequest(`/api/wet-checks/${wetCheckId}/loose-photos`, "DELETE");
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
+      const n = data?.deleted ?? photos.length;
+      toast({ title: `${n} loose photo${n === 1 ? "" : "s"} deleted` });
+    },
+    onError: (e: any) =>
+      toast({
+        title: "Couldn't delete loose photos",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      }),
+  });
+
   if (photos.length === 0) return null;
+
+  const uploadingCount = photos.filter((p) => p.id <= 0).length;
+  const deletableCount = photos.length - uploadingCount;
 
   return (
     <div
       className="rounded border border-amber-300 bg-amber-50 p-3 space-y-2"
       data-testid="loose-photos-section"
     >
-      <div className="flex items-start gap-2 text-sm text-amber-900">
-        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-        <div>
-          <div className="font-medium">
-            {photos.length} loose photo{photos.length === 1 ? "" : "s"} — not attached to a work item
-          </div>
-          <div className="text-xs text-amber-800">
-            {readOnly
-              ? "These photos were captured but never linked to a specific finding."
-              : "Attach each photo to the matching work item, or delete it if it isn't needed."}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2 text-sm text-amber-900">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div>
+            <div className="font-medium">
+              {photos.length} loose photo{photos.length === 1 ? "" : "s"} — not attached to a work item
+            </div>
+            <div className="text-xs text-amber-800">
+              {readOnly
+                ? "These photos were captured but never linked to a specific finding."
+                : "Attach each photo to the matching work item, or delete it if it isn't needed."}
+            </div>
           </div>
         </div>
+        {!readOnly && deletableCount > 0 && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="shrink-0"
+                disabled={deleteAllMut.isPending}
+                data-testid="delete-all-loose-photos"
+              >
+                {deleteAllMut.isPending ? (
+                  <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                )}
+                Delete all
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete all loose photos?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete {deletableCount} loose photo{deletableCount === 1 ? "" : "s"} from this wet check. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={() => deleteAllMut.mutate()}
+                  data-testid="delete-all-loose-photos-confirm"
+                >
+                  Delete all {deletableCount} photo{deletableCount === 1 ? "" : "s"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
       </div>
       <div className="space-y-2">
         {photos.map((p) => {

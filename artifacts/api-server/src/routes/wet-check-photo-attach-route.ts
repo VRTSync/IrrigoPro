@@ -3,6 +3,7 @@
 // POST   /api/wet-checks/:id/photos      — attach a new photo (FK-anchored or loose)
 // PATCH  /api/wet-checks/photos/:id      — link an existing photo to a finding
 // DELETE /api/wet-checks/photos/:id      — remove a photo
+// DELETE /api/wet-checks/:id/loose-photos — bulk-delete all loose photos on a wet check
 //
 // Extracted so the FK-anchor write path (zoneRecordId / findingId survive
 // Zod-parse → handler → storage.attachWetCheckPhoto) can be locked in by a
@@ -137,6 +138,39 @@ export function registerWetCheckPhotoAttachRoutes(
         findingId: parsed.data.findingId,
       });
       res.status(cls.status).json({ message });
+    }
+  });
+
+  // DELETE /api/wet-checks/:id/loose-photos
+  // Bulk-deletes every photo on this wet check where findingId IS NULL.
+  // Accessible by manager roles (company-scoped) and super_admin (unscoped).
+  // Returns { deleted: N }.
+  app.delete("/api/wet-checks/:id/loose-photos", requireAuthentication, async (req: any, res: any) => {
+    const role = req.authenticatedUserRole;
+    const isSuperAdmin = role === "super_admin";
+    const isManager = isWetCheckManagerRole(role);
+    if (!isManager && !isSuperAdmin) { res.status(403).json({ message: "Forbidden" }); return; }
+    const wetCheckId = parseInt(req.params.id);
+    if (!Number.isFinite(wetCheckId) || wetCheckId <= 0) {
+      res.status(400).json({ message: "Invalid wet check id" });
+      return;
+    }
+    // super_admin bypasses company-scope check; managers are scoped to their company.
+    const cid = isSuperAdmin ? null : (() => {
+      const raw = req.authenticatedUserCompanyId;
+      return typeof raw === "number" && raw > 0 ? raw : null;
+    })();
+    if (!isSuperAdmin && cid === null) {
+      res.status(400).json({ message: "Company id required" });
+      return;
+    }
+    try {
+      const deleted = await storage.deleteAllLooseWetCheckPhotos(wetCheckId, cid);
+      res.json({ deleted });
+    } catch (e: any) {
+      const { status, message } = classifyWetCheckPhotoError(e);
+      logPhotoErrorContext(req, e, { op: "deleteAllLooseWetCheckPhotos", wetCheckId });
+      res.status(status).json({ message });
     }
   });
 

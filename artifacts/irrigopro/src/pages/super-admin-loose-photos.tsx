@@ -1,12 +1,24 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { safeGet } from "@/utils/safeStorage";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AlertTriangle, ExternalLink, Loader2, RefreshCw } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { AlertTriangle, ExternalLink, Loader2, RefreshCw, Trash2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 type LoosePhotoRow = {
   wetCheckId: number;
@@ -54,6 +66,78 @@ function buildAuthHeaders(): Record<string, string> {
 }
 
 const PAGE_SIZE = 50;
+
+function PurgeButton({
+  row,
+  onPurged,
+}: {
+  row: LoosePhotoRow;
+  onPurged: () => void;
+}) {
+  const { toast } = useToast();
+  const purgeMut = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/wet-checks/${row.wetCheckId}/loose-photos`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: buildAuthHeaders(),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json() as Promise<{ deleted: number }>;
+    },
+    onSuccess: (data) => {
+      const n = data.deleted;
+      toast({ title: `Purged ${n} loose photo${n === 1 ? "" : "s"} from WC-${row.wetCheckId}` });
+      onPurged();
+    },
+    onError: (e: any) => {
+      toast({
+        title: "Purge failed",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button
+          variant="destructive"
+          size="sm"
+          className="gap-1.5"
+          disabled={purgeMut.isPending}
+          data-testid={`purge-loose-photos-${row.wetCheckId}`}
+        >
+          {purgeMut.isPending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Trash2 className="h-3.5 w-3.5" />
+          )}
+          Purge
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Purge all loose photos?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This will permanently delete all {row.loosePhotoCount} loose photo{row.loosePhotoCount === 1 ? "" : "s"} from wet check WC-{new Date().getFullYear()}-{String(row.wetCheckId).padStart(4, "0")} ({row.customerName}). This cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={() => purgeMut.mutate()}
+            data-testid={`purge-loose-photos-${row.wetCheckId}-confirm`}
+          >
+            Purge {row.loosePhotoCount} photo{row.loosePhotoCount === 1 ? "" : "s"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
 
 export default function SuperAdminLoosePhotosPage() {
   const role = readUserRole();
@@ -103,7 +187,8 @@ export default function SuperAdminLoosePhotosPage() {
           <h1 className="text-2xl font-semibold">Loose Photos Audit</h1>
           <p className="text-sm text-gray-600 mt-1">
             Wet checks with photos that are not linked to any finding. Ops can open each
-            wet check and use the "Attach to finding" picker to resolve the backlog.
+            wet check and use the "Attach to finding" picker to resolve the backlog, or
+            use "Purge" to delete all loose photos for a wet check at once.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -184,17 +269,20 @@ export default function SuperAdminLoosePhotosPage() {
                           </Badge>
                         </td>
                         <td className="px-4 py-3">
-                          <Link href={`/manager/wet-checks/${row.wetCheckId}`}>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="gap-1.5"
-                              data-testid={`view-wc-${row.wetCheckId}`}
-                            >
-                              <ExternalLink className="h-3.5 w-3.5" />
-                              View
-                            </Button>
-                          </Link>
+                          <div className="flex items-center gap-2">
+                            <Link href={`/manager/wet-checks/${row.wetCheckId}`}>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="gap-1.5"
+                                data-testid={`view-wc-${row.wetCheckId}`}
+                              >
+                                <ExternalLink className="h-3.5 w-3.5" />
+                                View
+                              </Button>
+                            </Link>
+                            <PurgeButton row={row} onPurged={() => refetch()} />
+                          </div>
                         </td>
                       </tr>
                     );
