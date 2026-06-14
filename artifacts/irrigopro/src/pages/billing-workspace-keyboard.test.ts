@@ -101,4 +101,34 @@ describe("billing-workspace keyboard contract (Task #709)", () => {
   it("cheat sheet documents the K disambiguation", () => {
     expect(SRC).toMatch(/Previous row[\s\S]{0,40}Kickback/i);
   });
+
+  it("kickbackActive posts to /return-for-correction (not /kickback)", () => {
+    const fn = sliceBetween(
+      SRC,
+      /const kickbackActive = useCallback/,
+      /const saveActiveEdits = useCallback/,
+    );
+    expect(fn).toContain("/return-for-correction");
+    expect(fn).not.toMatch(/\/kickback[^s]/);
+  });
+
+  it("kickbackActive sends body key 'notes' (not 'reason')", () => {
+    const fn = sliceBetween(
+      SRC,
+      /const kickbackActive = useCallback/,
+      /const saveActiveEdits = useCallback/,
+    );
+    expect(fn).toMatch(/\{\s*notes:/);
+    expect(fn).not.toMatch(/\{\s*reason:/);
+  });
+
+  it("kickbackActive short-circuits with 'Not supported' toast for unsupported item types", () => {
+    const fn = sliceBetween(
+      SRC,
+      /const kickbackActive = useCallback/,
+      /const saveActiveEdits = useCallback/,
+    );
+    expect(fn).toContain("Not supported");
+    expect(fn).toMatch(/else\s*\{[\s\S]{0,200}Not supported/);
+  });
 });

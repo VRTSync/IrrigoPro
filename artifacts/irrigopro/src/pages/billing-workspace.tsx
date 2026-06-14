@@ -703,13 +703,13 @@ export default function BillingWorkspacePage() {
       setKickingBack(true);
       try {
         let path: string | null = null;
-        if (active.type === "billing_sheet") path = `/api/billing-sheets/${active.refId}/kickback`;
-        else if (active.type === "work_order") path = `/api/work-orders/${active.refId}/kickback`;
+        if (active.type === "billing_sheet") path = `/api/billing-sheets/${active.refId}/return-for-correction`;
+        else if (active.type === "work_order") path = `/api/work-orders/${active.refId}/return-for-correction`;
         else {
           toast({ title: "Not supported", description: "Use Open to handle this item." });
           return;
         }
-        await apiRequest(path, "POST", { reason: trimmed });
+        await apiRequest(path, "POST", { notes: trimmed });
         toast({ title: "Kicked back", description: "Technician notified." });
         setKickbackReason("");
         advanceToNext();
