@@ -16370,6 +16370,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ctx: { cid, wetCheckId: req.params.id },
         fallbackStatus: 400,
         fallbackMessage: "Couldn't convert wet check — please retry",
+        recognized: [
+          {
+            test: (_e: any, raw: string) => raw.startsWith("Cannot auto-bill"),
+            status: 400,
+            message: (_e: any, raw: string) => raw,
+          },
+        ],
       });
       res.status(status).json({ message });
     }
