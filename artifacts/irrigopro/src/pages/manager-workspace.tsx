@@ -252,7 +252,8 @@ function QueueRow({
   const isSelectable =
     item.type === "billing_sheet" ||
     item.type === "work_order" ||
-    item.type === "wet_check_billing";
+    item.type === "wet_check_billing" ||
+    item.type === "finding";
 
   return (
     <button
@@ -340,6 +341,7 @@ function StageSection({
   expanded,
   onToggleExpanded,
   hidden,
+  onSelectAll,
 }: {
   stage: Stage;
   items: ManagerQueueItem[];
@@ -350,6 +352,7 @@ function StageSection({
   expanded: boolean;
   onToggleExpanded: (stage: Stage) => void;
   hidden?: boolean;
+  onSelectAll?: (items: ManagerQueueItem[]) => void;
 }) {
   const meta = STAGE_META[stage];
 
@@ -374,9 +377,25 @@ function StageSection({
             {items.length}
           </Badge>
         </div>
-        {!expanded
-          ? <ChevronRight className="w-4 h-4 text-gray-400" />
-          : <ChevronDown className="w-4 h-4 text-gray-400" />}
+        <div className="flex items-center gap-2">
+          {onSelectAll && items.length > 0 && (
+            <span
+              role="button"
+              tabIndex={0}
+              className="text-xs text-teal-600 hover:text-teal-800 hover:underline px-1 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-teal-400"
+              data-testid={`stage-select-all-${stage}`}
+              onClick={(e) => { e.stopPropagation(); onSelectAll(items); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); onSelectAll(items); }
+              }}
+            >
+              Select all {items.length}
+            </span>
+          )}
+          {!expanded
+            ? <ChevronRight className="w-4 h-4 text-gray-400" />
+            : <ChevronDown className="w-4 h-4 text-gray-400" />}
+        </div>
       </button>
       {expanded && items.length === 0 && (
         <div className="px-3 py-4 text-sm text-gray-400 italic text-center bg-white">
@@ -551,6 +570,10 @@ export default function ManagerWorkspacePage() {
   const [kickbackReason, setKickbackReason] = useState("");
   const [approving, setApproving] = useState(false);
   const [bulkApproving, setBulkApproving] = useState(false);
+  const [bulkRoutingFindings, setBulkRoutingFindings] = useState(false);
+  const [bulkRouteFindingAction, setBulkRouteFindingAction] = useState<
+    "wet_check_billing" | "documented_only" | "new_work_order" | "new_estimate"
+  >("wet_check_billing");
   const [saving, setSaving] = useState(false);
   const [editedNote, setEditedNote] = useState("");
   const [isDirty, setIsDirty] = useState(false);
@@ -604,6 +627,16 @@ export default function ManagerWorkspacePage() {
     }
     return g;
   }, [allItems]);
+
+  // Separate selected items by type so we can show the right bulk toolbar.
+  const selectedFindingItems = useMemo(
+    () => Array.from(selectedItemsMap.values()).filter((it) => it.type === "finding"),
+    [selectedItemsMap],
+  );
+  const selectedApprovableItems = useMemo(
+    () => Array.from(selectedItemsMap.values()).filter((it) => it.type !== "finding"),
+    [selectedItemsMap],
+  );
 
   // Flat ordered list for keyboard navigation — only from expanded, visible stages
   const flatItems = useMemo<ManagerQueueItem[]>(() => {
@@ -670,6 +703,19 @@ export default function ManagerWorkspacePage() {
       const next = new Map(prev);
       if (next.has(item.id)) next.delete(item.id);
       else next.set(item.id, item);
+      return next;
+    });
+  }, []);
+
+  const selectAllFindings = useCallback((items: ManagerQueueItem[]) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      items.forEach((item) => next.add(item.id));
+      return next;
+    });
+    setSelectedItemsMap((prev) => {
+      const next = new Map(prev);
+      items.forEach((item) => next.set(item.id, item));
       return next;
     });
   }, []);
@@ -873,6 +919,76 @@ export default function ManagerWorkspacePage() {
       setBulkApproving(false);
     }
   }, [bulkApproving, selectedItemsMap, toast, clearSelected, invalidateAll]);
+
+  const bulkRouteFindings = useCallback(async () => {
+    if (bulkRoutingFindings || selectedFindingItems.length === 0) return;
+    const findingIds = selectedFindingItems.map((it) => it.refId);
+    setBulkRoutingFindings(true);
+    try {
+      const result = (await apiRequest(
+        "/api/manager-workspace/findings/bulk-route",
+        "POST",
+        { findingIds, action: bulkRouteFindingAction },
+      )) as { routed: number[]; errors: { findingId: number; message: string }[] };
+      const n = Array.isArray(result.routed) ? result.routed.length : (result.routed as unknown as number);
+      toast({
+        title: `Routed ${n} finding${n === 1 ? "" : "s"}`,
+        description:
+          result.errors.length > 0
+            ? `${result.errors.length} finding${result.errors.length === 1 ? "" : "s"} could not be routed.`
+            : undefined,
+      });
+      clearSelected();
+      invalidateAll();
+    } catch (err) {
+      toast({
+        title: "Bulk route failed",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setBulkRoutingFindings(false);
+    }
+  }, [
+    bulkRoutingFindings,
+    selectedFindingItems,
+    bulkRouteFindingAction,
+    toast,
+    clearSelected,
+    invalidateAll,
+  ]);
+
+  // Routes ALL findings in the queue (server-side resolution via selectAll: true).
+  // This handles the case where the queue has more items than are loaded on screen.
+  const bulkRouteAllFindings = useCallback(async () => {
+    if (bulkRoutingFindings) return;
+    setBulkRoutingFindings(true);
+    try {
+      const result = (await apiRequest(
+        "/api/manager-workspace/findings/bulk-route",
+        "POST",
+        { selectAll: true, action: bulkRouteFindingAction },
+      )) as { routed: number[]; errors: { findingId: number; message: string }[] };
+      const n = Array.isArray(result.routed) ? result.routed.length : (result.routed as unknown as number);
+      toast({
+        title: `Routed ${n} finding${n === 1 ? "" : "s"}`,
+        description:
+          result.errors.length > 0
+            ? `${result.errors.length} finding${result.errors.length === 1 ? "" : "s"} could not be routed.`
+            : undefined,
+      });
+      clearSelected();
+      invalidateAll();
+    } catch (err) {
+      toast({
+        title: "Bulk route all failed",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setBulkRoutingFindings(false);
+    }
+  }, [bulkRoutingFindings, bulkRouteFindingAction, toast, clearSelected, invalidateAll]);
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -1101,14 +1217,95 @@ export default function ManagerWorkspacePage() {
         </div>
       )}
 
-      {/* ── Bulk approve bar ────────────────────────────────────────────── */}
-      {selected.size > 0 && (
+      {/* ── Bulk approve bar (billing sheets, work orders, WCBs) ────────── */}
+      {selectedApprovableItems.length > 0 && (
         <BulkApproveBar
-          selectedCount={selected.size}
+          selectedCount={selectedApprovableItems.length}
           onClear={clearSelected}
           onApprove={bulkApprove}
           approving={bulkApproving}
         />
+      )}
+
+      {/* ── Bulk route bar (findings_to_route lane) ──────────────────── */}
+      {selectedFindingItems.length > 0 && (
+        <div
+          className="mx-4 my-1 flex flex-wrap items-center gap-2 px-3 py-2 bg-teal-50 border border-teal-200 rounded-lg"
+          data-testid="bulk-route-bar"
+        >
+          <Droplets className="w-4 h-4 text-teal-600 shrink-0" aria-hidden="true" />
+          {/* Use the server total (findingsNeedingRouting from status strip) as
+              the authoritative count — it is not affected by client-side page
+              size limits, so it reflects the true backlog depth. */}
+          {(() => {
+            const serverTotal = strip?.indicators?.findingsNeedingRouting ?? grouped.findings_to_route.length;
+            const showTotal = serverTotal > selectedFindingItems.length;
+            return (
+              <span className="text-sm font-medium text-teal-800 shrink-0">
+                {selectedFindingItems.length} finding{selectedFindingItems.length === 1 ? "" : "s"} selected
+                {showTotal && (
+                  <span className="text-teal-600 font-normal"> of {serverTotal}</span>
+                )}
+              </span>
+            );
+          })()}
+          <select
+            value={bulkRouteFindingAction}
+            onChange={(e) =>
+              setBulkRouteFindingAction(
+                e.target.value as typeof bulkRouteFindingAction,
+              )
+            }
+            className="flex-1 min-w-[180px] text-sm border border-teal-300 rounded px-2 py-1 bg-white text-gray-700"
+            data-testid="bulk-route-action-select"
+          >
+            <option value="wet_check_billing">Route to Wet Check Billing</option>
+            <option value="new_work_order">Route to New Work Order</option>
+            <option value="new_estimate">Route to New Estimate</option>
+            <option value="documented_only">Mark as Documented Only</option>
+          </select>
+          <Button
+            size="sm"
+            className="bg-teal-600 hover:bg-teal-700 text-white shrink-0"
+            onClick={() => void bulkRouteFindings()}
+            disabled={bulkRoutingFindings}
+            data-testid="bulk-route-submit"
+          >
+            {bulkRoutingFindings && (
+              <Loader2 className="w-3 h-3 mr-1 animate-spin" aria-hidden="true" />
+            )}
+            Route {selectedFindingItems.length}
+          </Button>
+          {(() => {
+            const serverTotal = strip?.indicators?.findingsNeedingRouting ?? grouped.findings_to_route.length;
+            // Show "Route all N" whenever the authoritative server count exceeds
+            // the current selection — this covers paginated backlogs where
+            // grouped.findings_to_route.length < true queue depth.
+            return serverTotal > selectedFindingItems.length ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-teal-300 text-teal-700 hover:bg-teal-100 shrink-0"
+                onClick={() => void bulkRouteAllFindings()}
+                disabled={bulkRoutingFindings}
+                data-testid="bulk-route-all-submit"
+                title={`Route all ${serverTotal} findings in queue (server-side, includes any beyond the loaded page)`}
+              >
+                Route all {serverTotal}
+              </Button>
+            ) : null;
+          })()}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-gray-500 shrink-0"
+            onClick={clearSelected}
+            aria-label="Clear selection"
+            data-testid="bulk-route-clear"
+          >
+            <X className="w-3 h-3" />
+          </Button>
+        </div>
       )}
 
       {/* ── Filter bar ──────────────────────────────────────────────────── */}
@@ -1244,6 +1441,7 @@ export default function ManagerWorkspacePage() {
                   expanded={expandedStages[stage]}
                   onToggleExpanded={toggleStageExpanded}
                   hidden={hidden}
+                  onSelectAll={stage === "findings_to_route" ? selectAllFindings : undefined}
                 />
               );
             })

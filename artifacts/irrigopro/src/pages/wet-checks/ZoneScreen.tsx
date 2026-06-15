@@ -240,6 +240,7 @@ function InlineFindingEditor({
         billingSheetId: null,
         estimateId: null,
         workOrderId: null,
+        wetCheckBillingId: null,
         convertedAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),

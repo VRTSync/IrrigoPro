@@ -7,8 +7,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import {
-  ChevronLeft, Loader2, FileText, Wrench, FileCheck, CheckCircle2, ListChecks, X, Lightbulb,
-  HelpCircle,
+  AlertTriangle, ChevronLeft, Loader2, FileText, Wrench, FileCheck, CheckCircle2, ListChecks, X,
+  Lightbulb, HelpCircle,
 } from "lucide-react";
 import { DismissibleHelp, isHelpDismissed, resetHelpDismissal } from "@/components/shared/dismissible-help";
 import { safeGet } from "@/utils/safeStorage";
@@ -18,6 +18,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type {
   Customer, IssueTypeConfig, Part, WetCheckFindingWithReason, WetCheckPhoto,
   WetCheckWithDetails, WetCheckZoneRecord,
@@ -409,6 +419,23 @@ export function WetCheckWizard({ id }: { id: number }) {
   const allFindingsResolved = pendingFindings.length === 0;
   const allGreen = allZonesReviewed && allFindingsResolved;
 
+  // All findings in this wet check that have no billing route and are not
+  // deliberately documented_only. Includes every techDisposition — not just
+  // completed_in_field — so the manager can't silently approve a wet check
+  // that still has findings floating without a route.
+  const unroutedCompletedInField = useMemo(
+    () =>
+      allFindings.filter(
+        ({ f }) =>
+          f.billingSheetId == null &&
+          f.estimateId == null &&
+          f.workOrderId == null &&
+          f.wetCheckBillingId == null &&
+          f.resolution !== "documented_only",
+      ),
+    [allFindings],
+  );
+
   const [activeId, setActiveId] = useState<number | null>(null);
   const [edits, setEdits] = useState<FindingEdits | null>(null);
 
@@ -592,9 +619,19 @@ export function WetCheckWizard({ id }: { id: number }) {
     }
   };
 
+  const [showUnroutedConfirm, setShowUnroutedConfirm] = useState(false);
+
   const handleConvert = useCallback(() => {
     navigate(`/manager/wet-checks/${id}/confirm`);
   }, [id, navigate]);
+
+  const handleConvertClick = useCallback(() => {
+    if (unroutedCompletedInField.length > 0) {
+      setShowUnroutedConfirm(true);
+    } else {
+      handleConvert();
+    }
+  }, [unroutedCompletedInField.length, handleConvert]);
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────
   useEffect(() => {
@@ -1122,31 +1159,112 @@ export function WetCheckWizard({ id }: { id: number }) {
       {/* ── Bottom CTA bar ───────────────────────────────────────────── */}
       {!editMode && (
         <div
-          className="sticky bottom-0 bg-white border-t px-4 py-3 flex items-center justify-between gap-3"
+          className="sticky bottom-0 bg-white border-t"
           data-testid="wizard-cta-bar"
         >
-          <div className="text-sm text-gray-600 space-y-0.5">
-            <div>
-              {pendingFindings.length > 0
-                ? `${pendingFindings.length} finding${pendingFindings.length === 1 ? "" : "s"} remaining`
-                : "All findings resolved"}
+          {/* Unrouted completed-in-field warning — shown when all decisions are made
+              but some tech-repaired findings still have no billing route. */}
+          {unroutedCompletedInField.length > 0 && (
+            <div
+              className="flex items-start gap-2 px-4 py-2.5 bg-amber-50 border-b border-amber-200"
+              data-testid="wizard-unrouted-warning"
+            >
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" aria-hidden="true" />
+              <p className="text-xs text-amber-800">
+                <strong>{unroutedCompletedInField.length} finding{unroutedCompletedInField.length === 1 ? "" : "s"}</strong>{" "}
+                {unroutedCompletedInField.length === 1 ? "was" : "were"} completed in the field but{" "}
+                {unroutedCompletedInField.length === 1 ? "has" : "have"} no billing route.
+                Open the Manager Workspace findings queue to route{" "}
+                {unroutedCompletedInField.length === 1 ? "it" : "them"} to a Wet Check Billing record.
+              </p>
             </div>
-            {loosePhotos.length > 0 && (
-              <div className="text-amber-700 text-xs font-medium" data-testid="loose-photos-gate-label">
-                {loosePhotos.length} loose photo{loosePhotos.length === 1 ? "" : "s"} must be attached or deleted first
+          )}
+          <div className="px-4 py-3 flex items-center justify-between gap-3">
+            <div className="text-sm text-gray-600 space-y-0.5">
+              <div>
+                {pendingFindings.length > 0
+                  ? `${pendingFindings.length} finding${pendingFindings.length === 1 ? "" : "s"} remaining`
+                  : "All findings resolved"}
               </div>
-            )}
+              {loosePhotos.length > 0 && (
+                <div className="text-amber-700 text-xs font-medium" data-testid="loose-photos-gate-label">
+                  {loosePhotos.length} loose photo{loosePhotos.length === 1 ? "" : "s"} must be attached or deleted first
+                </div>
+              )}
+            </div>
+            <Button
+              onClick={handleConvertClick}
+              disabled={!allResolved || loosePhotos.length > 0 || isBillingManager}
+              data-testid="wizard-approve-convert"
+              className={`min-h-[44px] ${allGreen && loosePhotos.length === 0 && !isBillingManager ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}
+            >
+              {unroutedCompletedInField.length > 0 && allResolved
+                ? "Approve anyway…"
+                : "Approve & Convert"}
+            </Button>
           </div>
-          <Button
-            onClick={handleConvert}
-            disabled={!allResolved || loosePhotos.length > 0 || isBillingManager}
-            data-testid="wizard-approve-convert"
-            className={`min-h-[44px] ${allGreen && loosePhotos.length === 0 && !isBillingManager ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}
-          >
-            Approve &amp; Convert
-          </Button>
         </div>
       )}
+
+      {/* ── Unrouted findings confirmation dialog ────────────────────── */}
+      <AlertDialog open={showUnroutedConfirm} onOpenChange={setShowUnroutedConfirm}>
+        <AlertDialogContent data-testid="wizard-unrouted-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {unroutedCompletedInField.length} finding
+              {unroutedCompletedInField.length === 1 ? "" : "s"} not yet billed
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                <p>
+                  {unroutedCompletedInField.length === 1
+                    ? "1 finding was"
+                    : `${unroutedCompletedInField.length} findings were`}{" "}
+                  completed in the field but{" "}
+                  {unroutedCompletedInField.length === 1 ? "has" : "have"} no billing
+                  route:
+                </p>
+                <ul className="mt-2 mb-3 space-y-0.5 text-sm">
+                  {unroutedCompletedInField.slice(0, 5).map(({ f, zr }) => {
+                    const cfg = issueConfigs.find((c) => c.issueType === f.issueType);
+                    const label = cfg?.displayLabel ?? f.issueType.replace(/_/g, " ");
+                    return (
+                      <li key={f.id} className="flex items-start gap-1">
+                        <span className="text-amber-600 shrink-0">•</span>
+                        <span>
+                          {label}
+                          {zr ? ` — Controller ${zr.controllerLetter}, Zone ${zr.zoneNumber}` : ""}
+                        </span>
+                      </li>
+                    );
+                  })}
+                  {unroutedCompletedInField.length > 5 && (
+                    <li className="text-gray-500 italic">
+                      and {unroutedCompletedInField.length - 5} more…
+                    </li>
+                  )}
+                </ul>
+                <p>
+                  The Manager Workspace findings queue lets you bulk-route them to a
+                  Wet Check Billing, Work Order, or Estimate before approving. You can
+                  still approve now — they will remain in the findings queue until routed.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="wizard-unrouted-cancel">
+              Go back
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConvert}
+              data-testid="wizard-unrouted-approve-anyway"
+            >
+              Approve anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ── Route dialog (R shortcut) ─────────────────────────────────── */}
       <Dialog open={routeDialogOpen} onOpenChange={setRouteDialogOpen}>

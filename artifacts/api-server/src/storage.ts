@@ -1041,6 +1041,11 @@ export interface IStorage {
   // by the caller via getNextWetCheckBillingNumber() (mirrors createBillingSheet).
   // billingNumber is a required field on InsertWetCheckBilling (NOT NULL in schema).
   createWetCheckBilling(data: InsertWetCheckBilling): Promise<WetCheckBilling>;
+  routeFindingsToWetCheckBillingBulk(
+    findingIds: number[],
+    companyId: number | null,
+    userId: number | null,
+  ): Promise<{ routed: number[]; errors: { findingId: number; message: string }[] }>;
   getAllWetCheckBillings(): Promise<WetCheckBilling[]>;
   getAllWetCheckBillingsWithCounts(): Promise<WetCheckBillingListItem[]>;
   getWetCheckBillingById(id: number, companyId: number | null): Promise<WetCheckBilling | undefined>;
@@ -3894,6 +3899,104 @@ export class DatabaseStorage implements IStorage {
       .returning();
     if (!row) throw new Error(`WetCheckBilling id=${id} not found`);
     return row;
+  }
+
+  // Bulk-route findings to a WetCheckBilling.  Groups the requested finding IDs
+  // by wetCheckId and, for each group, creates or appends to the WCB for that
+  // wet check (same financial math as the submit-time auto-bill path).
+  // Stamps resolution='repaired_in_field' on findings that didn't have it yet.
+  // Company-scoped: findings whose parent wet check doesn't belong to companyId
+  // are silently ignored (companyId=null means super_admin — no restriction).
+  async routeFindingsToWetCheckBillingBulk(
+    findingIds: number[],
+    companyId: number | null,
+    userId: number | null,
+  ): Promise<{ routed: number[]; errors: { findingId: number; message: string }[] }> {
+    if (findingIds.length === 0) return { routed: [], errors: [] };
+
+    const findingRows = await db
+      .select({
+        f: wetCheckFindings,
+        wcCompanyId: wetChecks.companyId,
+      })
+      .from(wetCheckFindings)
+      .innerJoin(wetChecks, eq(wetCheckFindings.wetCheckId, wetChecks.id))
+      .where(
+        and(
+          inArray(wetCheckFindings.id, findingIds),
+          companyId != null ? eq(wetChecks.companyId, companyId) : undefined,
+        ),
+      );
+
+    // Group by wetCheckId.
+    const groups = new Map<number, (typeof findingRows[0])[]>();
+    for (const row of findingRows) {
+      const key = row.f.wetCheckId;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(row);
+    }
+
+    const routed: number[] = [];
+    const errors: { findingId: number; message: string }[] = [];
+
+    for (const [wetCheckId, groupRows] of groups) {
+      try {
+        await db.transaction(async (tx) => {
+          const [wc] = await tx.select().from(wetChecks).where(eq(wetChecks.id, wetCheckId));
+          if (!wc) throw new Error(`Wet check ${wetCheckId} not found`);
+
+          const [cust] = await tx.select({ laborRate: customers.laborRate })
+            .from(customers)
+            .where(eq(customers.id, wc.customerId));
+          const laborRate = parseFloat(String(cust?.laborRate ?? "45.00")) || 45;
+
+          // Find the existing WCB for this wet check (if any).
+          const [priorWcb] = await tx
+            .select({ id: wetCheckBillings.id })
+            .from(wetCheckBillings)
+            .where(eq(wetCheckBillings.wetCheckId, wetCheckId));
+
+          // Filter to findings that are genuinely unrouted.
+          const unrouted = groupRows
+            .map((r) => r.f)
+            .filter(
+              (f) =>
+                f.billingSheetId == null &&
+                f.estimateId == null &&
+                f.workOrderId == null &&
+                f.wetCheckBillingId == null &&
+                f.convertedAt == null,
+            );
+
+          if (unrouted.length === 0) return;
+
+          const now = new Date();
+          await this._writeRepairedInFieldBilling(
+            tx, wc, laborRate, unrouted, priorWcb?.id ?? null, now,
+          );
+
+          // Stamp resolution for findings that didn't have it set yet.
+          const needsResolution = unrouted.filter((f) => f.resolution !== "repaired_in_field").map((f) => f.id);
+          if (needsResolution.length > 0) {
+            await tx.update(wetCheckFindings)
+              .set({
+                resolution: "repaired_in_field",
+                resolutionDecidedAt: now,
+                ...(userId != null ? { resolutionDecidedBy: userId } : {}),
+              })
+              .where(inArray(wetCheckFindings.id, needsResolution));
+          }
+
+          for (const f of unrouted) routed.push(f.id);
+        });
+      } catch (err: any) {
+        for (const { f } of groupRows) {
+          errors.push({ findingId: f.id, message: String(err?.message ?? err) });
+        }
+      }
+    }
+
+    return { routed, errors };
   }
 
   // Task #977 — billing-manager-tier labor-rate override on an unbilled WCB.
@@ -7431,6 +7534,37 @@ export class DatabaseStorage implements IStorage {
           tx, wc, laborRate, repaired, /* priorWcbId */ null, now,
         );
         autoBilledCount = repaired.length;
+      }
+
+      // Auto-route: any findings where the tech indicated completion
+      // (techDisposition='completed_in_field') but resolution wasn't already set
+      // to 'repaired_in_field' (e.g., submissions before auto-bill was enabled,
+      // or findings that slipped through).  Route them into the same WCB just
+      // created (or create one if the auto-bill block didn't fire).
+      const completedInFieldUnrouted = allFindings.filter(
+        (f) =>
+          f.techDisposition === "completed_in_field" &&
+          f.convertedAt == null &&
+          f.wetCheckBillingId == null &&
+          f.billingSheetId == null &&
+          f.estimateId == null &&
+          f.workOrderId == null &&
+          f.resolution !== "repaired_in_field",
+      );
+      if (completedInFieldUnrouted.length > 0) {
+        const [custForRoute] = await tx.select().from(customers)
+          .where(eq(customers.id, wc.customerId));
+        const routeLaborRate = parseFloat(String(custForRoute?.laborRate ?? "45.00")) || 45;
+        const newWcbId = await this._writeRepairedInFieldBilling(
+          tx, wc, routeLaborRate, completedInFieldUnrouted, wetCheckBillingId, now,
+        );
+        if (wetCheckBillingId == null) wetCheckBillingId = newWcbId;
+        // _writeRepairedInFieldBilling stamps wetCheckBillingId + convertedAt but
+        // not resolution.  Stamp it here so these rows leave the routing queue.
+        await tx.update(wetCheckFindings)
+          .set({ resolution: "repaired_in_field", resolutionDecidedAt: now })
+          .where(inArray(wetCheckFindings.id, completedInFieldUnrouted.map((f) => f.id)));
+        autoBilledCount += completedInFieldUnrouted.length;
       }
 
       // Determine final status. With WET_CHECK_AUTO_BILL OFF, mirror
