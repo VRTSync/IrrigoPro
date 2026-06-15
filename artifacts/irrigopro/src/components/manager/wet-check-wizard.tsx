@@ -213,6 +213,39 @@ function AutoBilledPanel({ item, customerLaborRate }: { item: FindingItem; custo
   );
 }
 
+// ─── Read-only converted finding panel ────────────────────────────────────────
+function ConvertedFindingPanel({ item }: { item: FindingItem }) {
+  const { f, zr } = item;
+  return (
+    <div
+      className="flex flex-col items-center justify-center h-full py-12 text-center space-y-3 px-4"
+      data-testid="converted-finding-panel"
+    >
+      <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
+        <CheckCircle2 className="w-6 h-6 text-gray-500" />
+      </div>
+      <div>
+        <div className="font-semibold text-gray-900">Already converted</div>
+        <div className="text-sm text-gray-500 mt-0.5">
+          Controller {zr.controllerLetter} · Zone {zr.zoneNumber}
+        </div>
+        {f.resolution && (
+          <div className="text-xs text-gray-500 mt-1">
+            Decision: <span className="font-medium">{f.resolution.replace(/_/g, " ")}</span>
+          </div>
+        )}
+      </div>
+      <div
+        className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-600"
+        data-testid="converted-finding-notice"
+      >
+        <CheckCircle2 className="w-3 h-3 shrink-0" aria-hidden />
+        This finding has already been converted and cannot be edited.
+      </div>
+    </div>
+  );
+}
+
 // ─── All-resolved right panel state ──────────────────────────────────────────
 function AllResolvedPanel({
   onConvert,
@@ -383,9 +416,19 @@ export function WetCheckWizard({ id }: { id: number }) {
     [allFindings],
   );
 
-  // Findings that need (or needed) a manager decision — excludes auto-billed.
+  // Findings that have been stamped by WCB convert — immutable, shown read-only.
+  const convertedFindings = useMemo(
+    () => allFindings.filter(({ f }) => f.convertedAt != null),
+    [allFindings],
+  );
+
+  // Findings that need (or needed) a manager decision — excludes auto-billed and already-converted.
   const decisionFindings = useMemo(
-    () => allFindings.filter(({ f }) => !(f.resolution === "repaired_in_field" && f.billingSheetId != null)),
+    () => allFindings.filter(
+      ({ f }) =>
+        !(f.resolution === "repaired_in_field" && f.billingSheetId != null) &&
+        f.convertedAt == null,
+    ),
     [allFindings],
   );
 
@@ -455,6 +498,10 @@ export function WetCheckWizard({ id }: { id: number }) {
 
   const isActiveFindingAutoBilled = active
     ? autoBilled.some(({ f }) => f.id === active.f.id)
+    : false;
+
+  const isActiveFindingConverted = active
+    ? active.f.convertedAt != null
     : false;
 
   const photosByFinding = useMemo(() => {
@@ -771,7 +818,10 @@ export function WetCheckWizard({ id }: { id: number }) {
             </div>
           )}
         </div>
-        {active && edits && (
+        {active && isActiveFindingConverted && (
+          <ConvertedFindingPanel item={active} />
+        )}
+        {active && !isActiveFindingConverted && edits && (
           <>
             <div
               ref={findingCardRef}
@@ -997,6 +1047,8 @@ export function WetCheckWizard({ id }: { id: number }) {
             </div>
           ) : isActiveFindingAutoBilled ? (
             <AutoBilledPanel item={active} customerLaborRate={customerLaborRate} />
+          ) : isActiveFindingConverted ? (
+            <ConvertedFindingPanel item={active} />
           ) : (
             <div className="space-y-4">
               {edits && (

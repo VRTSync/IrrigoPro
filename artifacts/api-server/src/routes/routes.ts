@@ -16187,6 +16187,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ctx: { cid, findingId },
         fallbackStatus: 400,
         fallbackMessage: "Couldn't save finding — please retry",
+        recognized: [
+          {
+            test: (_e, raw) => raw.startsWith("Finding") && raw.includes("already converted"),
+            status: 400,
+            message: (_e, raw) => raw,
+          },
+        ],
       });
       res.status(status).json({ message });
     }

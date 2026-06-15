@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import {
-  ChevronLeft, Loader2, FileText, Wrench, FileCheck, CheckCircle2,
+  AlertTriangle, ChevronLeft, Loader2, FileText, Wrench, FileCheck, CheckCircle2,
 } from "lucide-react";
 import type {
   Customer, IssueTypeConfig, WetCheckFinding, WetCheckWithDetails, WetCheckZoneRecord,
@@ -113,6 +113,21 @@ export function WetCheckConfirm({ id }: { id: number }) {
     workOrder: groups.deferred.reduce((s, it) => s + lineTotal(it.f, customerLaborRate), 0),
     repaired:  groups.repaired.reduce((s, it) => s + lineTotal(it.f, customerLaborRate), 0),
   }), [groups, customerLaborRate]);
+
+  // Pre-flight: unconverted repaired_in_field findings that are missing a part
+  // assignment and have not been marked as no-part-needed. The convert POST will
+  // 400 if any of these exist, so block the button and surface them here.
+  const blockingFindings = useMemo(
+    () =>
+      allFindings.filter(
+        ({ f }) =>
+          f.resolution === "repaired_in_field" &&
+          f.convertedAt == null &&
+          f.partId == null &&
+          !f.noPartNeeded,
+      ),
+    [allFindings],
+  );
 
   const convertMut = useMutation({
     mutationFn: () => apiRequest(`/api/wet-checks/${id}/convert`, "POST", {}),
@@ -223,6 +238,48 @@ export function WetCheckConfirm({ id }: { id: number }) {
         </CardContent>
       </Card>
 
+      {blockingFindings.length > 0 && (
+        <div
+          className="rounded-lg border border-yellow-300 bg-yellow-50 px-4 py-3 space-y-2"
+          data-testid="confirm-preflight-warning"
+          role="alert"
+        >
+          <div className="flex items-center gap-2 text-sm font-semibold text-yellow-800">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-yellow-600" aria-hidden />
+            {blockingFindings.length === 1
+              ? "1 finding is missing a part — resolve it before converting."
+              : `${blockingFindings.length} findings are missing a part — resolve them before converting.`}
+          </div>
+          <ul className="space-y-1">
+            {blockingFindings.map(({ f, zr }) => {
+              const cfg = issueConfigs.find(c => c.issueType === f.issueType);
+              const label = cfg?.displayLabel ?? f.issueType.replace(/_/g, " ");
+              return (
+                <li
+                  key={f.id}
+                  className="flex items-center justify-between gap-2 text-xs text-yellow-800"
+                  data-testid={`confirm-preflight-finding-${f.id}`}
+                >
+                  <span>
+                    {label} at Zone {zr.zoneNumber}
+                  </span>
+                  <Link href={`/manager/wet-checks/${id}?edit=${f.id}`}>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="text-xs text-yellow-700 h-auto p-0 shrink-0 font-medium underline-offset-2"
+                      data-testid={`confirm-preflight-edit-${f.id}`}
+                    >
+                      Edit
+                    </Button>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
       <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-4">
         <Link
           href={
@@ -237,7 +294,8 @@ export function WetCheckConfirm({ id }: { id: number }) {
         </Link>
         <Button
           onClick={() => convertMut.mutate()}
-          disabled={convertMut.isPending}
+          disabled={convertMut.isPending || blockingFindings.length > 0}
+          title={blockingFindings.length > 0 ? "Resolve missing-part findings above before converting" : undefined}
           data-testid="confirm-convert"
         >
           {convertMut.isPending && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}
