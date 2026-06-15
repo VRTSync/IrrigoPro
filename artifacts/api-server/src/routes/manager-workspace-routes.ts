@@ -112,6 +112,10 @@ let _billingSheetOverride: (() => Promise<any[]>) | null = null;
 let _wcbOverride: (() => Promise<any[]>) | null = null;
 let _partsOverride: (() => Promise<any[]>) | null = null;
 let _reviewsOverride: (() => Promise<any[]>) | null = null;
+// Returns the set of wetCheckIds already invoiced via a billing sheet
+// (wet_check_findings.billingSheetId → billing_sheets.invoiceId IS NOT NULL).
+// Tests inject this directly to avoid hitting the real DB.
+let _invoicedBsWcIdsOverride: (() => Promise<Set<number>>) | null = null;
 
 export function _setWetChecksForTests(fn: () => Promise<any[]>): void {
   _wetCheckOverride = fn;
@@ -134,6 +138,9 @@ export function _setPartsForTests(fn: () => Promise<any[]>): void {
 export function _setReviewsForTests(fn: () => Promise<any[]>): void {
   _reviewsOverride = fn;
 }
+export function _setInvoicedBsWcIdsForTests(fn: () => Promise<Set<number>>): void {
+  _invoicedBsWcIdsOverride = fn;
+}
 export function _resetManagerWorkspaceOverridesForTests(): void {
   _wetCheckOverride = null;
   _workOrderOverride = null;
@@ -142,6 +149,7 @@ export function _resetManagerWorkspaceOverridesForTests(): void {
   _wcbOverride = null;
   _partsOverride = null;
   _reviewsOverride = null;
+  _invoicedBsWcIdsOverride = null;
 }
 
 // -----------------------------------------------------------------------
@@ -278,6 +286,35 @@ async function scopedManualReviews(req: any): Promise<any[]> {
   return (await storage.getManualPartReviews(cid ?? 0)) as any[];
 }
 
+// Returns the set of wetCheckIds that are already invoiced because one of
+// their findings was routed to a billing sheet that now has an invoiceId.
+// Link chain: wet_check_findings.billingSheetId → billing_sheets.invoiceId.
+async function getWetCheckIdsInvoicedViaBillingSheets(
+  req: any,
+): Promise<Set<number>> {
+  if (_invoicedBsWcIdsOverride) return _invoicedBsWcIdsOverride();
+
+  // Derive invoiced BS ids from the already-scoped billing-sheet list so we
+  // honour company scope without a separate query.
+  const bss = await scopedBillingSheets(req);
+  const invoicedBsIds = bss
+    .filter((bs: any) => bs.invoiceId != null)
+    .map((bs: any) => bs.id as number);
+
+  if (invoicedBsIds.length === 0) return new Set();
+
+  const rows = await db
+    .select({ wetCheckId: wetCheckFindings.wetCheckId })
+    .from(wetCheckFindings)
+    .where(inArray(wetCheckFindings.billingSheetId, invoicedBsIds));
+
+  const out = new Set<number>();
+  for (const r of rows) {
+    if (r.wetCheckId != null) out.add(r.wetCheckId);
+  }
+  return out;
+}
+
 // -----------------------------------------------------------------------
 // Types
 // -----------------------------------------------------------------------
@@ -334,6 +371,11 @@ function assignStage(
   // findings always go to their own stage
   if (type === "finding") return "findings_to_route";
 
+  // Any item that has been attached to an invoice is already billed,
+  // regardless of what status string it carries.  Route to billed_7d
+  // so it drops off naturally after the 7-day window.
+  if (invoiceId != null) return "billed_7d";
+
   // Kicked-back items — returnedForCorrectionAt is set and status is
   // the "returned" status (in_progress for WO, draft for BS).
   if (returnedForCorrectionAt) return "waiting_on_tech";
@@ -342,9 +384,7 @@ function assignStage(
   if (status === "billed") return "billed_7d";
 
   // Passed to billing — approved but not yet invoiced
-  if (status === "approved_passed_to_billing") {
-    return !invoiceId ? "passed_to_billing" : "billed_7d";
-  }
+  if (status === "approved_passed_to_billing") return "passed_to_billing";
 
   // Everything else is needs_review
   return "needs_review";
@@ -428,10 +468,30 @@ export function registerManagerWorkspaceRoutes(
 
         const items: ManagerQueueItem[] = [];
 
+        // Build the set of wetCheckIds already invoiced — either via a WCB
+        // (direct wetCheckId link) or via a billing sheet (findings bridge).
+        // Load both sources in parallel so we suppress all invoiced wet checks
+        // from the needs_review bucket regardless of how they were billed.
+        let invoicedWetCheckIds = new Set<number>();
+        if (wantWc) {
+          const [wcbRows, bsWcIds] = await Promise.all([
+            scopedWcb(req),
+            getWetCheckIdsInvoicedViaBillingSheets(req),
+          ]);
+          for (const w of wcbRows) {
+            if (w.invoiceId != null && w.wetCheckId != null) {
+              invoicedWetCheckIds.add(w.wetCheckId as number);
+            }
+          }
+          for (const id of bsWcIds) invoicedWetCheckIds.add(id);
+        }
+
         // ── Wet checks (irrigation_manager / company_admin / super_admin only) ──
         if (wantWc) {
           for (const wc of await scopedWetChecks(req)) {
             if (!ACTIVE_WC.has(wc.status)) continue;
+            // Skip wet checks already invoiced via WCB or billing sheet.
+            if (invoicedWetCheckIds.has(wc.id)) continue;
             const created = wc.createdAt
               ? new Date(wc.createdAt).toISOString()
               : null;

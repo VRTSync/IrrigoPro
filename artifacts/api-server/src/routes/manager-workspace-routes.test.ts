@@ -16,6 +16,10 @@ import {
   _setWorkOrdersForTests,
   _setFindingsForTests,
   _setBilingSheetsForTests,
+  _setWcbForTests,
+  _setPartsForTests,
+  _setReviewsForTests,
+  _setInvoicedBsWcIdsForTests,
   _resetManagerWorkspaceOverridesForTests,
 } from "./manager-workspace-routes";
 import { storage } from "../storage";
@@ -119,6 +123,12 @@ describe("manager-workspace routes", () => {
         approvedAt: null,
       },
     ]);
+
+    // WCBs: none by default in the shared fixture — keeps existing tests from
+    // hitting the real DB when the wet-check path now pre-loads WCBs.
+    _setWcbForTests(async () => []);
+    _setPartsForTests(async () => []);
+    _setReviewsForTests(async () => []);
 
     // Findings: id=1 unrouted in co1 wc=50; id=2 routed (billingSheetId set);
     // id=3 unrouted in co2 wc=52.
@@ -376,5 +386,183 @@ describe("manager-workspace routes", () => {
       .filter((a: any) => a != null) as number[];
     const sorted = [...ages].sort((a, b) => b - a);
     assert.deepEqual(ages, sorted, "items should be oldest first");
+  });
+
+  // -------------------------------------------------------------------
+  // Already-billed item filtering (Task #1250)
+  // -------------------------------------------------------------------
+
+  describe("already-billed items are excluded from needs_review / waiting_on_tech", () => {
+    // Each nested test fully overrides all data fixtures so the shared
+    // before() fixtures don't interfere, then resets them afterward.
+
+    it("WO with pending_manager_review status + invoiceId is absent from needs_review", async () => {
+      _setWorkOrdersForTests(async () => [
+        {
+          id: 900, workOrderNumber: "WO-BILLED", assignedTechnicianId: 100,
+          customerId: 10, customerName: "Acme",
+          status: "pending_manager_review",
+          invoiceId: 42,
+          totalAmount: "300.00", photos: [],
+          createdAt: iso(2 * 86400_000), updatedAt: iso(1 * 86400_000),
+          billedAt: iso(1 * 86400_000),
+        },
+      ]);
+      _setWetChecksForTests(async () => []);
+      _setFindingsForTests(async () => []);
+      _setBilingSheetsForTests(async () => []);
+      _setWcbForTests(async () => []);
+
+      role = "super_admin";
+      companyId = null;
+      const r = await fetch(`${base}/api/manager-workspace/queue?type=wo`);
+      assert.equal(r.status, 200);
+      const body = (await r.json()) as any;
+      const needsReview = body.items.filter((x: any) => x.stage === "needs_review");
+      const waitingOnTech = body.items.filter((x: any) => x.stage === "waiting_on_tech");
+      assert.equal(needsReview.length, 0, "invoiced WO must not appear in needs_review");
+      assert.equal(waitingOnTech.length, 0, "invoiced WO must not appear in waiting_on_tech");
+      // It is in billed_7d (within 7 days)
+      const billed7d = body.items.filter((x: any) => x.stage === "billed_7d");
+      assert.equal(billed7d.length, 1, "invoiced WO should appear in billed_7d");
+
+      _resetManagerWorkspaceOverridesForTests();
+    });
+
+    it("billing sheet with submitted status + invoiceId is absent from needs_review", async () => {
+      _setWorkOrdersForTests(async () => []);
+      _setWetChecksForTests(async () => []);
+      _setFindingsForTests(async () => []);
+      _setBilingSheetsForTests(async () => [
+        {
+          id: 200, billingNumber: "BS-BILLED", technicianId: 100,
+          customerId: 10, customerName: "Acme",
+          status: "submitted",
+          invoiceId: 77,
+          totalAmount: "500.00", photos: [],
+          createdAt: iso(2 * 86400_000), updatedAt: iso(1 * 86400_000),
+          billedAt: iso(1 * 86400_000),
+        },
+      ]);
+      _setWcbForTests(async () => []);
+
+      role = "super_admin";
+      companyId = null;
+      const r = await fetch(`${base}/api/manager-workspace/queue?type=bs`);
+      assert.equal(r.status, 200);
+      const body = (await r.json()) as any;
+      const needsReview = body.items.filter((x: any) => x.stage === "needs_review");
+      const waitingOnTech = body.items.filter((x: any) => x.stage === "waiting_on_tech");
+      assert.equal(needsReview.length, 0, "invoiced BS must not appear in needs_review");
+      assert.equal(waitingOnTech.length, 0, "invoiced BS must not appear in waiting_on_tech");
+      const billed7d = body.items.filter((x: any) => x.stage === "billed_7d");
+      assert.equal(billed7d.length, 1, "invoiced BS should appear in billed_7d");
+
+      _resetManagerWorkspaceOverridesForTests();
+    });
+
+    it("WCB with pending_manager_review status + invoiceId is absent from needs_review", async () => {
+      _setWorkOrdersForTests(async () => []);
+      _setWetChecksForTests(async () => []);
+      _setFindingsForTests(async () => []);
+      _setBilingSheetsForTests(async () => []);
+      _setWcbForTests(async () => [
+        {
+          id: 300, billingNumber: "WCB-BILLED", technicianId: 100,
+          customerId: 10, customerName: "Acme",
+          status: "pending_manager_review",
+          invoiceId: 99,
+          wetCheckId: 50,
+          totalAmount: "150.00",
+          createdAt: iso(2 * 86400_000), updatedAt: iso(1 * 86400_000),
+        },
+      ]);
+
+      role = "super_admin";
+      companyId = null;
+      const r = await fetch(`${base}/api/manager-workspace/queue?type=wcb`);
+      assert.equal(r.status, 200);
+      const body = (await r.json()) as any;
+      const needsReview = body.items.filter((x: any) => x.stage === "needs_review");
+      const waitingOnTech = body.items.filter((x: any) => x.stage === "waiting_on_tech");
+      assert.equal(needsReview.length, 0, "invoiced WCB must not appear in needs_review");
+      assert.equal(waitingOnTech.length, 0, "invoiced WCB must not appear in waiting_on_tech");
+      const billed7d = body.items.filter((x: any) => x.stage === "billed_7d");
+      assert.equal(billed7d.length, 1, "invoiced WCB should appear in billed_7d");
+
+      _resetManagerWorkspaceOverridesForTests();
+    });
+
+    it("wet check whose linked WCB is billed is absent from needs_review", async () => {
+      // wc.id=50 is linked via WCB.wetCheckId=50 which has invoiceId set.
+      _setWetChecksForTests(async () => [
+        {
+          id: 50, companyId: 1, customerId: 10, customerName: "Acme",
+          technicianId: 100, technicianName: "Tech A",
+          status: "submitted",
+          createdAt: iso(2 * 86400_000), updatedAt: iso(2 * 86400_000),
+          approvedAt: null,
+        },
+      ]);
+      _setWorkOrdersForTests(async () => []);
+      _setFindingsForTests(async () => []);
+      _setBilingSheetsForTests(async () => []);
+      _setInvoicedBsWcIdsForTests(async () => new Set());
+      _setWcbForTests(async () => [
+        {
+          id: 400, billingNumber: "WCB-400", technicianId: 100,
+          customerId: 10, customerName: "Acme",
+          status: "billed",
+          invoiceId: 55,
+          wetCheckId: 50,
+          totalAmount: "200.00",
+          createdAt: iso(2 * 86400_000), updatedAt: iso(1 * 86400_000),
+        },
+      ]);
+
+      role = "super_admin";
+      companyId = null;
+      const r = await fetch(`${base}/api/manager-workspace/queue?type=wc`);
+      assert.equal(r.status, 200);
+      const body = (await r.json()) as any;
+      const refIds = body.items.map((x: any) => x.refId);
+      assert.ok(!refIds.includes(50), "WC 50 must not appear in needs_review when its WCB is invoiced");
+
+      _resetManagerWorkspaceOverridesForTests();
+    });
+
+    it("wet check whose findings were billed via a billing sheet is absent from needs_review", async () => {
+      // wc.id=60 had its finding routed to billing sheet id=500, which now
+      // has invoiceId=88.  The DB join is mocked via _setInvoicedBsWcIdsForTests
+      // returning {60} directly.
+      _setWetChecksForTests(async () => [
+        {
+          id: 60, companyId: 1, customerId: 10, customerName: "Acme",
+          technicianId: 100, technicianName: "Tech A",
+          status: "submitted",
+          createdAt: iso(2 * 86400_000), updatedAt: iso(2 * 86400_000),
+          approvedAt: null,
+        },
+      ]);
+      _setWorkOrdersForTests(async () => []);
+      _setFindingsForTests(async () => []);
+      _setBilingSheetsForTests(async () => []);
+      _setWcbForTests(async () => []);
+      // Inject the billing-sheet → wet-check link directly (bypasses real DB join)
+      _setInvoicedBsWcIdsForTests(async () => new Set([60]));
+
+      role = "super_admin";
+      companyId = null;
+      const r = await fetch(`${base}/api/manager-workspace/queue?type=wc`);
+      assert.equal(r.status, 200);
+      const body = (await r.json()) as any;
+      const refIds = body.items.map((x: any) => x.refId);
+      assert.ok(
+        !refIds.includes(60),
+        "WC 60 must not appear in needs_review when its findings are on an invoiced billing sheet",
+      );
+
+      _resetManagerWorkspaceOverridesForTests();
+    });
   });
 });
