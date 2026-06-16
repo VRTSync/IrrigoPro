@@ -496,6 +496,11 @@ export const estimates = pgTable("estimates", {
   // see deleted rows via `?includeDeleted=1`.
   deletedAt: timestamp("deleted_at"),
   deletedBy: integer("deleted_by").references(() => users.id),
+  // Slice 2 of WC Inspection Mode — stamped when this estimate was generated
+  // from an Inspection wet check's findings. Nullable (most estimates have no
+  // origin wet check). Used by the Needs Review membership rule and the review
+  // surface to branch on mode === 'inspection'.
+  originWetCheckId: integer("origin_wet_check_id").references(() => wetChecks.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({

@@ -15518,11 +15518,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
-      // ── Step 3: load findings and WCBs for this candidate set ──────────────
+      // ── Step 3: load findings, WCBs, and inspection estimates ─────────────
       const wcIds = candidates.map(w => w.id);
-      const [findings, wcbs] = await Promise.all([
+      const [findings, wcbs, inspectionEstimates] = await Promise.all([
         db.select().from(wetCheckFindings).where(inArray(wetCheckFindings.wetCheckId, wcIds)),
         db.select().from(wetCheckBillings).where(inArray(wetCheckBillings.wetCheckId, wcIds)),
+        // Inspection-mode Rule 4: fetch estimates whose origin is one of the
+        // candidate wet checks. Used to determine if the estimate still needs
+        // manager review (lifecycle != 'approved').
+        db.select({
+          id: estimates.id,
+          originWetCheckId: estimates.originWetCheckId,
+          lifecycle: estimates.lifecycle,
+        }).from(estimates).where(inArray(estimates.originWetCheckId, wcIds)),
       ]);
 
       // Index by wet check id for O(1) lookup.
@@ -15538,10 +15546,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const existing = wcbByWc.get(wcb.wetCheckId);
         if (!existing || wcb.id > existing.id) wcbByWc.set(wcb.wetCheckId, wcb);
       }
+      // Index inspection estimate by origin wet check id.
+      const inspEstByWc = new Map<number, { lifecycle: string | null }>();
+      for (const e of inspectionEstimates) {
+        if (e.originWetCheckId != null) inspEstByWc.set(e.originWetCheckId, e);
+      }
 
       // ── Step 4: apply membership rule in-memory and annotate ────────────────
       type NeedsReviewItem = (typeof candidates)[number] & {
-        outstandingWork: { unroutedFindings: number; snapshotPending: boolean };
+        outstandingWork: {
+          unroutedFindings: number;
+          snapshotPending: boolean;
+          inspectionEstimatePending: boolean;
+        };
       };
       const items: NeedsReviewItem[] = [];
 
@@ -15551,6 +15568,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Rule 3 signal: WCB snapshot exists and is in pre-approval state.
         const snapshotPending = wcb != null && ACTIVE_WCB.has(wcb.status);
+
+        // Rule 4 signal (Inspection Mode — Slice 2): this is an inspection
+        // wet check that either has no estimate yet or has one that is not
+        // yet in the 'approved' lifecycle. Once approved the wet check
+        // transitions to 'converted' and leaves the queue naturally.
+        const inspEst = inspEstByWc.get(wc.id);
+        const inspectionEstimatePending =
+          (wc as any).mode === "inspection" &&
+          (inspEst == null || inspEst.lifecycle !== "approved");
 
         // Unrouted = finding has no routing FK and is not documented_only.
         const unroutedFindings = wFindings.filter(
@@ -15571,9 +15597,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (s === "partially_converted" && unroutedFindings > 0) qualifies = true;
         // Rule 3: snapshot exists and is not yet in an approved/billed state.
         if (snapshotPending) qualifies = true;
+        // Rule 4: inspection wet check whose estimate has not been approved yet.
+        if (inspectionEstimatePending) qualifies = true;
 
         if (qualifies) {
-          items.push({ ...wc, outstandingWork: { unroutedFindings, snapshotPending } });
+          items.push({ ...wc, outstandingWork: { unroutedFindings, snapshotPending, inspectionEstimatePending } });
         }
       }
 
@@ -16560,6 +16588,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // submitted/partially_converted to converted via the convert route.
   app.post("/api/wet-checks/:id/approve", (_req, res) => {
     res.status(404).json({ message: "This endpoint has been removed. Wet checks are finalized via the convert route." });
+  });
+
+  // ── WC Inspection Mode — Slice 2 ─────────────────────────────────────────
+  //
+  // POST /api/wet-checks/:id/build-inspection-estimate
+  //   Idempotent: builds one estimate from the Inspection wet check's findings,
+  //   or returns the existing one if it was already built. Returns EstimateWithItems.
+  //   Role: any manager-tier role with company scope.
+  //
+  app.post("/api/wet-checks/:id/build-inspection-estimate", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isWetCheckManagerRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
+    const userId = req.authenticatedUserId;
+    if (!userId) { res.status(401).json({ message: "Authentication required" }); return; }
+    const wcId = parseInt(req.params.id);
+    if (isNaN(wcId)) { res.status(400).json({ message: "Invalid wet check id" }); return; }
+    try {
+      const me = await storage.getUser(userId);
+      if (!me) { res.status(401).json({ message: "User not found" }); return; }
+      const estimate = await storage.buildEstimateFromInspectionWetCheck(wcId, cid, { id: me.id, name: me.name });
+      res.json(estimate);
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "buildEstimateFromInspectionWetCheck",
+        ctx: { cid, wcId },
+        fallbackMessage: "Could not build inspection estimate — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // POST /api/wet-checks/:id/approve-inspection
+  //   Approves the estimate linked to an Inspection wet check and transitions
+  //   the wet check to `converted`. Atomic transaction.
+  //   Role: any manager-tier role with company scope.
+  //
+  app.post("/api/wet-checks/:id/approve-inspection", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isWetCheckManagerRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
+    const userId = req.authenticatedUserId;
+    if (!userId) { res.status(401).json({ message: "Authentication required" }); return; }
+    const wcId = parseInt(req.params.id);
+    if (isNaN(wcId)) { res.status(400).json({ message: "Invalid wet check id" }); return; }
+    try {
+      const result = await storage.approveInspectionEstimate(wcId, cid);
+      await recordLifecycleAudit(req, {
+        resource: "wet_check",
+        action: "wet_check.inspection_approved",
+        targetId: wcId,
+        companyId: cid,
+        after: { estimateId: result.estimate.id, wetCheckStatus: result.wetCheck.status },
+        summary: `Inspection wet check ${wcId} approved → estimate #${result.estimate.id} approved, WC converted`,
+        extra: { estimateId: result.estimate.id },
+      });
+      res.json(result);
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "approveInspectionEstimate",
+        ctx: { cid, wcId },
+        fallbackMessage: "Could not approve inspection estimate — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   const findingRouteBody = z.object({

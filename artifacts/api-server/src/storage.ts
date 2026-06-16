@@ -1019,6 +1019,24 @@ export interface IStorage {
     workOrderId: number | null;
   }>;
 
+  // WC Inspection Mode — Slice 2
+  // Build (or return the existing) estimate from an Inspection wet check's
+  // findings. Idempotent: if an estimate with originWetCheckId = wcId already
+  // exists it is returned without creating a duplicate.
+  buildEstimateFromInspectionWetCheck(
+    wcId: number,
+    companyId: number,
+    manager: { id: number; name: string },
+  ): Promise<EstimateWithItems>;
+
+  // Approve the estimate linked to an Inspection wet check and transition the
+  // wet check to `converted`. Atomically stamps `approvedAt` / lifecycle on the
+  // estimate and `fullyConvertedAt` / status='converted' on the wet check.
+  approveInspectionEstimate(
+    wcId: number,
+    companyId: number,
+  ): Promise<{ estimate: EstimateWithItems; wetCheck: WetCheck }>;
+
   attachWetCheckPhoto(
     wetCheckId: number,
     companyId: number,
@@ -9102,6 +9120,207 @@ export class DatabaseStorage implements IStorage {
       }).where(eq(wetChecks.id, id)).returning();
 
       return { wetCheck: updated, billingSheetId, estimateId, workOrderId };
+    });
+  }
+
+  // ─── WC Inspection Mode — Slice 2 ───────────────────────────────────────────
+  //
+  // buildEstimateFromInspectionWetCheck
+  // ------------------------------------
+  // Idempotent: if an estimate with originWetCheckId = wcId already exists it
+  // is returned without creating a duplicate. Otherwise builds one from the wet
+  // check's findings (all findings contribute — Inspection wet checks have no
+  // per-finding resolution triage). Each contributing finding gets its
+  // `estimateId` FK stamped. Runs inside a single transaction.
+  async buildEstimateFromInspectionWetCheck(
+    wcId: number,
+    companyId: number,
+    manager: { id: number; name: string },
+  ): Promise<EstimateWithItems> {
+    return db.transaction(async (tx) => {
+      // 1. Load and validate wet check.
+      const [wc] = await tx.select().from(wetChecks)
+        .where(and(eq(wetChecks.id, wcId), eq(wetChecks.companyId, companyId)));
+      if (!wc) throw new Error(`Wet check #${wcId} not found`);
+      if (wc.mode !== "inspection") {
+        throw new Error(`Wet check #${wcId} is not an inspection wet check (mode=${wc.mode})`);
+      }
+
+      // 2. Duplicate guard: return existing estimate if one is already linked.
+      const [existing] = await tx.select().from(estimates)
+        .where(eq(estimates.originWetCheckId, wcId));
+      if (existing) {
+        const items = await tx.select().from(estimateItems)
+          .where(eq(estimateItems.estimateId, existing.id));
+        return { ...existing, lifecycleStatus: computeLifecycleStatus(existing), items } as EstimateWithItems;
+      }
+
+      // 3. Load customer for pricing context.
+      const [cust] = await tx.select().from(customers).where(eq(customers.id, wc.customerId));
+      if (!cust) throw new Error(`Customer ${wc.customerId} not found for wet check #${wcId}`);
+      const laborRate = parseFloat(String(cust.laborRate ?? "45.00")) || 45;
+
+      // 4. Load findings.
+      const allFindings = await tx.select().from(wetCheckFindings)
+        .where(eq(wetCheckFindings.wetCheckId, wcId));
+
+      // 5. Build estimate line items from ALL findings.
+      // Inspection mode is documentation-first: every finding becomes a line
+      // item regardless of whether a part was assigned. Part price is included
+      // when available; labor is captured at the flat header level only (flat
+      // mode per Task #657). Zero-price / no-part findings still appear so the
+      // manager can see everything that was documented and edit before approval.
+      const now = new Date();
+      const totalLaborHours = allFindings.reduce(
+        (s, f) => s + (parseFloat(String(f.laborHours ?? "0")) || 0),
+        0,
+      );
+      const lineItems: (typeof estimateItems.$inferInsert)[] = allFindings
+        .map((f, idx) => {
+          const partPrice = parseFloat(String(f.partPrice ?? "0")) || 0;
+          const qty = f.quantity ?? 1;
+          return {
+            description: f.notes ?? f.issueType ?? "Finding",
+            partId: f.partId ?? null,
+            partName: f.partName ?? f.issueType ?? null,
+            partPrice: partPrice.toFixed(2),
+            // Flat mode — individual labor hours appear on the header only.
+            laborHours: "0.00",
+            quantity: qty,
+            totalPrice: (partPrice * qty).toFixed(2),
+            sortOrder: idx,
+          } as typeof estimateItems.$inferInsert;
+        });
+
+      const partsSubtotal = lineItems.reduce(
+        (s, it) => s + parseFloat(String(it.totalPrice ?? "0")), 0,
+      );
+      const laborSubtotal = totalLaborHours * laborRate;
+      const totalAmount = partsSubtotal + laborSubtotal;
+
+      // 6. Create the estimate with originWetCheckId stamped.
+      const estimatePayload: InsertEstimate & { companyId: number; originWetCheckId: number } = {
+        companyId,
+        customerId: wc.customerId,
+        customerName: cust.name,
+        customerEmail: cust.email ?? "",
+        customerPhone: cust.phone ?? null,
+        projectName: `Inspection report (#${wcId})`,
+        projectAddress: wc.propertyAddress ?? null,
+        createdBy: manager.name,
+        createdByUserId: manager.id,
+        estimateDate: now,
+        status: "pending",
+        internalStatus: "pending_approval",
+        lifecycle: "pending_review",
+        laborRate: laborRate.toFixed(2),
+        appliedLaborRate: laborRate.toFixed(2),
+        laborMode: "flat",
+        totalLaborHours: totalLaborHours.toFixed(2),
+        partsSubtotal: partsSubtotal.toFixed(2),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
+        originWetCheckId: wcId,
+      };
+
+      const est = await this._writeEstimateWithItems(
+        tx,
+        estimatePayload,
+        lineItems as InsertEstimateItem[],
+      );
+
+      // 7. Stamp estimateId on each contributing finding.
+      if (allFindings.length > 0) {
+        await tx.update(wetCheckFindings)
+          .set({ estimateId: est.id, updatedAt: now })
+          .where(inArray(wetCheckFindings.id, allFindings.map(f => f.id)));
+      }
+
+      return est;
+    });
+  }
+
+  // approveInspectionEstimate
+  // --------------------------
+  // Approves the estimate linked to an Inspection wet check and transitions the
+  // wet check to `converted`. Must be called by a manager-tier role. Atomic.
+  async approveInspectionEstimate(
+    wcId: number,
+    companyId: number,
+  ): Promise<{ estimate: EstimateWithItems; wetCheck: WetCheck }> {
+    return db.transaction(async (tx) => {
+      // 1. Load and validate the wet check.
+      const [wc] = await tx.select().from(wetChecks)
+        .where(and(eq(wetChecks.id, wcId), eq(wetChecks.companyId, companyId)));
+      if (!wc) throw new Error(`Wet check #${wcId} not found`);
+      if (wc.mode !== "inspection") {
+        throw new Error(`Wet check #${wcId} is not an inspection wet check`);
+      }
+
+      // 2. Find the linked estimate.
+      const [existingEst] = await tx.select().from(estimates)
+        .where(eq(estimates.originWetCheckId, wcId));
+      if (!existingEst) {
+        throw new Error(`No estimate found for inspection wet check #${wcId}. Build the estimate first.`);
+      }
+      // 3. Acquire a row-lock on the estimate, then use a conditional
+      // WHERE guard (same CAS-style pattern as approveEstimateAndCreateWorkOrder)
+      // so two concurrent approve requests serialize and the second writer
+      // sees zero rows from the guard and hits the idempotency branch.
+      const [lockedEst] = await tx.select().from(estimates)
+        .where(eq(estimates.id, existingEst.id))
+        .for("update");
+      if (!lockedEst) throw new Error(`Estimate for wet check #${wcId} not found`);
+
+      if (lockedEst.lifecycle === "approved") {
+        // Already approved — return stable result (idempotent).
+        const items = await tx.select().from(estimateItems)
+          .where(eq(estimateItems.estimateId, lockedEst.id));
+        const [currentWc] = await tx.select().from(wetChecks).where(eq(wetChecks.id, wcId));
+        return {
+          estimate: { ...lockedEst, lifecycleStatus: computeLifecycleStatus(lockedEst), items } as EstimateWithItems,
+          wetCheck: currentWc,
+        };
+      }
+
+      const now = new Date();
+
+      // 4. Flip the estimate to approved using a status-gated WHERE clause.
+      // The `status = 'pending'` guard is belt-and-braces: combined with
+      // the FOR UPDATE row lock above it makes the transition idempotent
+      // under concurrency (the same pattern used by approveEstimateAndCreateWorkOrder).
+      const [approvedEst] = await tx.update(estimates)
+        .set({
+          status: "approved",
+          internalStatus: "approved_internal",
+          // Task #642 — dual-write the canonical lifecycle column.
+          lifecycle: "approved",
+          approvedAt: now,
+          updatedAt: now,
+        } as Partial<typeof estimates.$inferInsert>)
+        .where(and(eq(estimates.id, lockedEst.id), eq(estimates.status, "pending")))
+        .returning();
+      if (!approvedEst) {
+        throw new Error(`Estimate for wet check #${wcId} is not in a pending state and cannot be approved`);
+      }
+
+      const items = await tx.select().from(estimateItems)
+        .where(eq(estimateItems.estimateId, approvedEst.id));
+
+      // 4. Transition the wet check to `converted`.
+      const [updatedWc] = await tx.update(wetChecks)
+        .set({
+          status: "converted",
+          fullyConvertedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(wetChecks.id, wcId))
+        .returning();
+
+      return {
+        estimate: { ...approvedEst, lifecycleStatus: computeLifecycleStatus(approvedEst), items } as EstimateWithItems,
+        wetCheck: updatedWc,
+      };
     });
   }
 }
