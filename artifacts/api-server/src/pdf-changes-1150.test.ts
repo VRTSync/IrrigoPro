@@ -328,9 +328,10 @@ describe('Change 5a — aggregated Repairs Summary', () => {
     // The summary table header should not contain "Unit Price"
     // We check that the summary table (which precedes zone blocks) does not have Unit Price
     const summaryTableIdx = html.indexOf('Repairs Summary');
-    const firstZoneIdx = html.indexOf('Zone A-1');
+    // Zone block headers now render as "Clock A · Zone 1" when controllerLetter + zoneNumber present
+    const firstZoneIdx = html.indexOf('Clock A');
     assert.ok(summaryTableIdx !== -1, 'Expected Repairs Summary section');
-    assert.ok(firstZoneIdx !== -1, 'Expected Zone A-1 block');
+    assert.ok(firstZoneIdx !== -1, 'Expected Clock A zone block');
     const summarySection = html.slice(summaryTableIdx, firstZoneIdx);
     assert.ok(!summarySection.includes('Unit Price'), 'Expected no Unit Price column in aggregated summary');
   });

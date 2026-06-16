@@ -115,6 +115,8 @@ const bsFixture: PdfBillingSheetRow = {
   aiDetailedDescription: "",
   propertyAddress: PROPERTY_ADDRESS,
   branchName: null,
+  controllerLetter: null,
+  zoneNumber: null,
   technicianName: "Parity Tech",
   workDate: new Date("2026-05-20"),
   totalHours: 3,

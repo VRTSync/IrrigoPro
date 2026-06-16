@@ -256,12 +256,14 @@ describe("reconciliationPage — branch-aware HTML (Task #479)", () => {
 
 // ── ticketPageWO / ticketPageBS ─────────────────────────────────────────────
 
-function woRow(branchName: string | null): PdfWorkOrderRow {
+function woRow(branchName: string | null, controllerLetter: string | null = null, zoneNumber: number | null = null): PdfWorkOrderRow {
   return {
     workOrderNumber: "WO-1",
     projectName: "Job",
     projectAddress: "123 Main",
     branchName,
+    controllerLetter,
+    zoneNumber,
     locationNotes: "",
     technicianName: "Tech",
     completedAt: new Date("2026-01-15"),
@@ -280,12 +282,14 @@ function woRow(branchName: string | null): PdfWorkOrderRow {
   };
 }
 
-function bsRow(branchName: string | null): PdfBillingSheetRow {
+function bsRow(branchName: string | null, controllerLetter: string | null = null, zoneNumber: number | null = null): PdfBillingSheetRow {
   return {
     billingNumber: "BS-1",
     workDescription: "Extra",
     propertyAddress: "456 Side",
     branchName,
+    controllerLetter,
+    zoneNumber,
     technicianName: "Tech",
     workDate: new Date("2026-01-20"),
     totalHours: 1,
@@ -322,6 +326,33 @@ describe("ticketPageWO — Branch header line (Task #479)", () => {
   });
 });
 
+describe("ticketPageWO — Clock/Zone header line (Task #1333)", () => {
+  it("renders 'Clock A · Zone 3' when both fields are set", () => {
+    const html = ticketPageWO(woRow(null, "A", 3), "INV-1", []);
+    assert.match(html, /Clock A/);
+    assert.match(html, /Zone 3/);
+    assert.match(html, /\u00b7/);
+  });
+
+  it("renders 'Clock B' only when zoneNumber is null", () => {
+    const html = ticketPageWO(woRow(null, "B", null), "INV-1", []);
+    assert.match(html, /Clock B/);
+    assert.doesNotMatch(html, /Zone \d/);
+  });
+
+  it("renders 'Zone 5' only when controllerLetter is null", () => {
+    const html = ticketPageWO(woRow(null, null, 5), "INV-1", []);
+    assert.match(html, /Zone 5/);
+    assert.doesNotMatch(html, /Clock /);
+  });
+
+  it("omits the clock/zone line when both fields are null", () => {
+    const html = ticketPageWO(woRow(null, null, null), "INV-1", []);
+    assert.doesNotMatch(html, /Clock /);
+    assert.doesNotMatch(html, /&#128336;/);
+  });
+});
+
 describe("ticketPageBS — Branch header line (Task #479)", () => {
   it("renders the Branch line when branchName is set", () => {
     const html = ticketPageBS(bsRow("PNC"), "INV-1", []);
@@ -339,6 +370,21 @@ describe("ticketPageBS — Branch header line (Task #479)", () => {
     const html = ticketPageBS(bsRow(""), "INV-1", []);
     assert.doesNotMatch(html, /ticket-header-branch/);
     assert.doesNotMatch(html, /Branch: /);
+  });
+});
+
+describe("ticketPageBS — Clock/Zone header line (Task #1333)", () => {
+  it("renders 'Clock C · Zone 7' when both fields are set", () => {
+    const html = ticketPageBS(bsRow(null, "C", 7), "INV-1", []);
+    assert.match(html, /Clock C/);
+    assert.match(html, /Zone 7/);
+    assert.match(html, /\u00b7/);
+  });
+
+  it("omits the clock/zone line when both fields are null", () => {
+    const html = ticketPageBS(bsRow(null, null, null), "INV-1", []);
+    assert.doesNotMatch(html, /Clock /);
+    assert.doesNotMatch(html, /&#128336;/);
   });
 });
 

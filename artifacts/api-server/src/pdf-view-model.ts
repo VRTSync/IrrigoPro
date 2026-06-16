@@ -37,6 +37,8 @@ export interface PdfWorkOrderRow {
   projectName: string;
   projectAddress: string;
   branchName: string | null;
+  controllerLetter: string | null;
+  zoneNumber: number | null;
   locationNotes: string;
   technicianName: string;
   completedAt: Date | null;
@@ -69,6 +71,8 @@ export interface PdfBillingSheetRow {
   workDescription: string;
   propertyAddress: string;
   branchName: string | null;
+  controllerLetter: string | null;
+  zoneNumber: number | null;
   technicianName: string;
   workDate: Date;
   totalHours: number;
@@ -295,6 +299,8 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
       projectName: safeStr(workOrder.projectName, 'Service Work'),
       projectAddress: safeStr(workOrder.projectAddress),
       branchName: workOrder.branchName && workOrder.branchName.trim().length > 0 ? workOrder.branchName.trim() : null,
+      controllerLetter: safeStr(workOrder.controllerLetter) || null,
+      zoneNumber: workOrder.zoneNumber != null ? Number(workOrder.zoneNumber) : null,
       locationNotes: safeStr(workOrder.locationNotes),
       technicianName: safeStr(workOrder.completedByUserName || workOrder.assignedTechnicianName, 'N/A'),
       completedAt: workOrder.completedAt ? new Date(workOrder.completedAt) : null,
@@ -348,6 +354,8 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
       workDescription: safeStr(billingSheet.workDescription, 'Additional Work'),
       propertyAddress: safeStr(billingSheet.propertyAddress),
       branchName: billingSheet.branchName && billingSheet.branchName.trim().length > 0 ? billingSheet.branchName.trim() : null,
+      controllerLetter: safeStr(billingSheet.controllerLetter) || null,
+      zoneNumber: billingSheet.zoneNumber != null ? Number(billingSheet.zoneNumber) : null,
       technicianName: safeStr(billingSheet.technicianName, 'N/A'),
       workDate: new Date(billingSheet.workDate),
       totalHours,

@@ -176,6 +176,8 @@ describe('ticketPageBS — wet check financial breakdown', () => {
       workDescription: 'Regular service',
       propertyAddress: '456 Elm St',
       branchName: null,
+      controllerLetter: null,
+      zoneNumber: null,
       technicianName: 'Joe Tech',
       workDate: new Date('2026-05-01'),
       totalHours: 3,

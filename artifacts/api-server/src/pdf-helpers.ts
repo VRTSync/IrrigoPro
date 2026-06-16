@@ -281,6 +281,12 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
   const branchLine = wo.branchName
     ? `<div class="ticket-header-branch">&#127970; Branch: ${wo.branchName}</div>`
     : '';
+  const clockZoneParts: string[] = [];
+  if (wo.controllerLetter) clockZoneParts.push(`Clock ${wo.controllerLetter}`);
+  if (wo.zoneNumber != null) clockZoneParts.push(`Zone ${wo.zoneNumber}`);
+  const clockZoneLine = clockZoneParts.length > 0
+    ? `<div class="ticket-header-branch">&#128336; ${clockZoneParts.join(' \u00b7 ')}</div>`
+    : '';
 
   const logoHtml = logoDataUri
     ? `<img src="${logoDataUri}" class="ticket-header-logo" alt="Company logo">`
@@ -297,6 +303,7 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
         <div class="ticket-header-line2">Date: ${wo.completedAt ? formatDate(wo.completedAt) : 'N/A'} &nbsp;|&nbsp; Technician: ${wo.technicianName} &nbsp;|&nbsp; Hours: ${wo.totalHours} hrs</div>
         ${locationLine ? `<div class="ticket-header-line3">&#128205; ${locationLine}</div>` : ''}
         ${branchLine}
+        ${clockZoneLine}
       </div>
     </div>
 
@@ -354,6 +361,13 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
       ? `<div class="ticket-header-company-name">${companyName}</div>`
       : '';
 
+  const bsClockZoneParts: string[] = [];
+  if (bs.controllerLetter) bsClockZoneParts.push(`Clock ${bs.controllerLetter}`);
+  if (bs.zoneNumber != null) bsClockZoneParts.push(`Zone ${bs.zoneNumber}`);
+  const bsClockZoneLine = bsClockZoneParts.length > 0
+    ? `<div class="ticket-header-branch">&#128336; ${bsClockZoneParts.join(' \u00b7 ')}</div>`
+    : '';
+
   return `
   <div class="ticket-page ticket-type-bs">
     <div class="ticket-header ticket-header-bs">
@@ -363,6 +377,7 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
         <div class="ticket-header-line2">Date: ${formatDate(bs.workDate)} &nbsp;|&nbsp; Technician: ${bs.technicianName} &nbsp;|&nbsp; Hours: ${bs.totalHours} hrs</div>
         ${bs.propertyAddress ? `<div class="ticket-header-line3">&#128205; ${bs.propertyAddress}</div>` : ''}
         ${bs.branchName ? `<div class="ticket-header-branch">&#127970; Branch: ${bs.branchName}</div>` : ''}
+        ${bsClockZoneLine}
       </div>
     </div>
 
@@ -658,10 +673,14 @@ export function partsBlockForWetCheckBS(
       }
     }
 
+    const zoneHeaderLabel = (zone.controllerLetter && zone.zoneNumber != null)
+      ? `Clock ${zone.controllerLetter} \u00b7 Zone ${zone.zoneNumber}`
+      : `Zone ${zone.zoneLabel}`;
+
     return `
   <div class="zone-block">
     <div class="ticket-section ticket-parts-section">
-      <div class="ticket-section-label">Zone ${zone.zoneLabel}</div>
+      <div class="ticket-section-label">${zoneHeaderLabel}</div>
       <table class="items-table">
         <thead>
           <tr>
