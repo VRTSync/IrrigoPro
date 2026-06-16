@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import {
-  AlertTriangle, ChevronLeft, Loader2, FileText, Wrench, FileCheck, CheckCircle2, ListChecks, X,
+  ChevronLeft, Loader2, FileText, Wrench, FileCheck, CheckCircle2, ListChecks, X,
   Lightbulb, HelpCircle,
 } from "lucide-react";
 import { DismissibleHelp, isHelpDismissed, resetHelpDismissal } from "@/components/shared/dismissible-help";
@@ -18,16 +18,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import type {
   Customer, IssueTypeConfig, Part, WetCheckFindingWithReason, WetCheckPhoto,
   WetCheckWithDetails, WetCheckZoneRecord,
@@ -432,19 +422,33 @@ export function WetCheckWizard({ id }: { id: number }) {
     [allFindings],
   );
 
+  // Findings that genuinely need a manager routing decision — excludes
+  // completed_in_field (auto-routed to WCB snapshot on Approve & Convert).
   const pendingFindings = useMemo(
-    () => decisionFindings.filter(({ f }) => (f.resolution ?? "pending") === "pending" && f.convertedAt == null),
+    () => decisionFindings.filter(
+      ({ f }) =>
+        (f.resolution ?? "pending") === "pending" &&
+        f.convertedAt == null &&
+        f.techDisposition !== "completed_in_field",
+    ),
     [decisionFindings],
   );
 
-  // Left-panel display order: pending first, then resolved/auto-billed.
-  // Stable within each group (preserves relative API order).
+  // Left-panel display order: pending (needs decision) first, then
+  // completed-in-field (auto-routed), then resolved/converted.
   const sortedFindings = useMemo(() => {
     const pending = allFindings.filter(
-      ({ f }) => (f.resolution ?? "pending") === "pending" && f.convertedAt == null,
+      ({ f }) =>
+        (f.resolution ?? "pending") === "pending" &&
+        f.convertedAt == null &&
+        f.techDisposition !== "completed_in_field",
     );
     const resolved = allFindings.filter(
-      ({ f }) => !((f.resolution ?? "pending") === "pending" && f.convertedAt == null),
+      ({ f }) => !(
+        (f.resolution ?? "pending") === "pending" &&
+        f.convertedAt == null &&
+        f.techDisposition !== "completed_in_field"
+      ),
     );
     return [...pending, ...resolved];
   }, [allFindings]);
@@ -462,19 +466,19 @@ export function WetCheckWizard({ id }: { id: number }) {
   const allFindingsResolved = pendingFindings.length === 0;
   const allGreen = allZonesReviewed && allFindingsResolved;
 
-  // All findings in this wet check that have no billing route and are not
-  // deliberately documented_only. Includes every techDisposition — not just
-  // completed_in_field — so the manager can't silently approve a wet check
-  // that still has findings floating without a route.
+  // Completed-in-field findings that have not yet been routed to any billing
+  // record. These are auto-routed into the WCB snapshot by the convert path,
+  // so we show an informational notice (not a blocker) when any are present.
   const unroutedCompletedInField = useMemo(
     () =>
       allFindings.filter(
         ({ f }) =>
+          f.techDisposition === "completed_in_field" &&
           f.billingSheetId == null &&
           f.estimateId == null &&
           f.workOrderId == null &&
           f.wetCheckBillingId == null &&
-          f.resolution !== "documented_only",
+          f.convertedAt == null,
       ),
     [allFindings],
   );
@@ -671,19 +675,13 @@ export function WetCheckWizard({ id }: { id: number }) {
     }
   };
 
-  const [showUnroutedConfirm, setShowUnroutedConfirm] = useState(false);
-
   const handleConvert = useCallback(() => {
     navigate(`/manager/wet-checks/${id}/confirm`);
   }, [id, navigate]);
 
   const handleConvertClick = useCallback(() => {
-    if (unroutedCompletedInField.length > 0) {
-      setShowUnroutedConfirm(true);
-    } else {
-      handleConvert();
-    }
-  }, [unroutedCompletedInField.length, handleConvert]);
+    handleConvert();
+  }, [handleConvert]);
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────
   useEffect(() => {
@@ -1219,20 +1217,18 @@ export function WetCheckWizard({ id }: { id: number }) {
           className="sticky bottom-0 bg-white border-t"
           data-testid="wizard-cta-bar"
         >
-          {/* Unrouted completed-in-field warning — shown when all decisions are made
-              but some tech-repaired findings still have no billing route. */}
+          {/* Completed-in-field info notice — these are auto-routed to the
+              WCB snapshot by the convert path; no manual routing needed. */}
           {unroutedCompletedInField.length > 0 && (
             <div
-              className="flex items-start gap-2 px-4 py-2.5 bg-amber-50 border-b border-amber-200"
-              data-testid="wizard-unrouted-warning"
+              className="flex items-start gap-2 px-4 py-2.5 bg-green-50 border-b border-green-200"
+              data-testid="wizard-completed-in-field-notice"
             >
-              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" aria-hidden="true" />
-              <p className="text-xs text-amber-800">
+              <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0 mt-0.5" aria-hidden="true" />
+              <p className="text-xs text-green-800">
                 <strong>{unroutedCompletedInField.length} finding{unroutedCompletedInField.length === 1 ? "" : "s"}</strong>{" "}
-                {unroutedCompletedInField.length === 1 ? "was" : "were"} completed in the field but{" "}
-                {unroutedCompletedInField.length === 1 ? "has" : "have"} no billing route.
-                Open the Manager Workspace findings queue to route{" "}
-                {unroutedCompletedInField.length === 1 ? "it" : "them"} to a Wet Check Billing record.
+                {unroutedCompletedInField.length === 1 ? "was" : "were"} completed in the field.{" "}
+                {unroutedCompletedInField.length === 1 ? "It" : "They"} will be added to this wet check&apos;s snapshot automatically when you Approve &amp; Convert.
               </p>
             </div>
           )}
@@ -1255,73 +1251,11 @@ export function WetCheckWizard({ id }: { id: number }) {
               data-testid="wizard-approve-convert"
               className={`min-h-[44px] ${allGreen && loosePhotos.length === 0 && !isBillingManager ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}
             >
-              {unroutedCompletedInField.length > 0 && allResolved
-                ? "Approve anyway…"
-                : "Approve & Convert"}
+              Approve &amp; Convert
             </Button>
           </div>
         </div>
       )}
-
-      {/* ── Unrouted findings confirmation dialog ────────────────────── */}
-      <AlertDialog open={showUnroutedConfirm} onOpenChange={setShowUnroutedConfirm}>
-        <AlertDialogContent data-testid="wizard-unrouted-confirm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {unroutedCompletedInField.length} finding
-              {unroutedCompletedInField.length === 1 ? "" : "s"} not yet billed
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div>
-                <p>
-                  {unroutedCompletedInField.length === 1
-                    ? "1 finding was"
-                    : `${unroutedCompletedInField.length} findings were`}{" "}
-                  completed in the field but{" "}
-                  {unroutedCompletedInField.length === 1 ? "has" : "have"} no billing
-                  route:
-                </p>
-                <ul className="mt-2 mb-3 space-y-0.5 text-sm">
-                  {unroutedCompletedInField.slice(0, 5).map(({ f, zr }) => {
-                    const cfg = issueConfigs.find((c) => c.issueType === f.issueType);
-                    const label = cfg?.displayLabel ?? f.issueType.replace(/_/g, " ");
-                    return (
-                      <li key={f.id} className="flex items-start gap-1">
-                        <span className="text-amber-600 shrink-0">•</span>
-                        <span>
-                          {label}
-                          {zr ? ` — Controller ${zr.controllerLetter}, Zone ${zr.zoneNumber}` : ""}
-                        </span>
-                      </li>
-                    );
-                  })}
-                  {unroutedCompletedInField.length > 5 && (
-                    <li className="text-gray-500 italic">
-                      and {unroutedCompletedInField.length - 5} more…
-                    </li>
-                  )}
-                </ul>
-                <p>
-                  You can approve now and route each finding individually from the
-                  wet-check review screen, or go back and set a resolution for each
-                  finding before approving.
-                </p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel data-testid="wizard-unrouted-cancel">
-              Go back
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleConvert}
-              data-testid="wizard-unrouted-approve-anyway"
-            >
-              Approve anyway
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* ── Route dialog (R shortcut) ─────────────────────────────────── */}
       <Dialog open={routeDialogOpen} onOpenChange={setRouteDialogOpen}>

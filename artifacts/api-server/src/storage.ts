@@ -8782,6 +8782,35 @@ export class DatabaseStorage implements IStorage {
 
       const allFindings = await tx.select().from(wetCheckFindings)
         .where(eq(wetCheckFindings.wetCheckId, id));
+
+      const now = new Date();
+
+      // Rescue: completed-in-field findings at resolution='pending' with no
+      // billing route. Mirrors the submit path auto-route block so the convert
+      // path reaches parity — these findings are stamped repaired_in_field and
+      // flow into the WCB snapshot below without requiring manual manager routing.
+      const completedInFieldRescue = allFindings.filter(
+        f =>
+          f.techDisposition === "completed_in_field" &&
+          f.convertedAt == null &&
+          f.wetCheckBillingId == null &&
+          f.billingSheetId == null &&
+          f.estimateId == null &&
+          f.workOrderId == null &&
+          f.resolution !== "repaired_in_field",
+      );
+      if (completedInFieldRescue.length > 0) {
+        await tx.update(wetCheckFindings)
+          .set({ resolution: "repaired_in_field", resolutionDecidedAt: now, updatedAt: now })
+          .where(inArray(wetCheckFindings.id, completedInFieldRescue.map(f => f.id)));
+        // Update in-memory so the eligible filter below sees the stamped resolution.
+        for (const f of allFindings) {
+          if (completedInFieldRescue.some(r => r.id === f.id)) {
+            (f as any).resolution = "repaired_in_field";
+          }
+        }
+      }
+
       // Eligible = routed AND not already converted. documented_only rows
       // have no FK so we must also gate on convertedAt or repeated converts
       // would re-stamp/re-process them (idempotency bug).
@@ -8803,8 +8832,6 @@ export class DatabaseStorage implements IStorage {
         const laborTotal = laborHours * laborRate;
         return { qty, partPrice, laborHours, partsTotal, laborTotal, lineTotal: partsTotal + laborTotal };
       };
-
-      const now = new Date();
       // Reuse destinations created on a prior partial conversion of THIS
       // wet check so we satisfy the "at most one BS / one estimate / one WO
       // per wet check lifecycle" invariant. Subsequent runs append items
