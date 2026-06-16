@@ -366,7 +366,7 @@ import { recordAuditEvent } from "./audit-log";
 import { paginate } from "./pagination";
 import { registerSiteMapRoutes } from "./site-map-routes";
 import { registerPartRoutes } from "./parts-routes";
-import { registerBillingWorkspaceRoutes, ACTIVE_WCB } from "./billing-workspace-routes";
+import { registerBillingWorkspaceRoutes, ACTIVE_WCB, PENDING_REVIEW_WCB } from "./billing-workspace-routes";
 import { registerBillingWorkspaceBulkApproveRoutes } from "./billing-workspace-bulk-approve";
 import { registerManagerWorkspaceRoutes, ACTIVE_WC, APPROVED_WC } from "./manager-workspace-routes";
 import { registerAssemblyRoutes } from "./assembly-routes";
@@ -15430,11 +15430,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   //   Returns wet checks requiring manager attention per the membership rule:
   //     1. status ∈ {submitted, pending_manager_review}  — always in queue
   //     2. status = partially_converted AND ≥1 unrouted non-documented finding
-  //     3. wet check has a WCB snapshot with status ∈ ACTIVE_WCB (pre-approval)
+  //     3. wet check has a WCB snapshot with status ∈ PENDING_REVIEW_WCB (pre-approval)
   //   Wet checks with status ∈ {approved, converted} (non-overlapping APPROVED_WC
   //   members) are excluded even when rule 3 fires.
   //   Status constants are imported from manager-workspace-routes (ACTIVE_WC,
-  //   APPROVED_WC) and billing-workspace-routes (ACTIVE_WCB) — never hardcoded.
+  //   APPROVED_WC) and billing-workspace-routes (PENDING_REVIEW_WCB) — never hardcoded.
   //
   // Scoping: super_admin sees every company; all other roles are company-scoped.
   //
@@ -15461,7 +15461,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       // ── Step 1: discover WCB-qualified wet check IDs ────────────────────────
       // A wet check qualifies via rule 3 when it has a WCB snapshot whose
-      // status ∈ ACTIVE_WCB. Fetch those IDs first so the main query can
+      // status ∈ PENDING_REVIEW_WCB (pre-approval only — submitted or
+      // pending_manager_review). Fetch those IDs first so the main query can
       // include them even when the wet check's own status is outside ACTIVE_WC.
       // Simple fetch: company-scoped or all
       const wcbRows = cid != null
@@ -15470,13 +15471,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .from(wetCheckBillings)
             .innerJoin(wetChecks, eq(wetCheckBillings.wetCheckId, wetChecks.id))
             .where(and(
-              inArray(wetCheckBillings.status, [...ACTIVE_WCB]),
+              inArray(wetCheckBillings.status, [...PENDING_REVIEW_WCB]),
               eq(wetChecks.companyId, cid),
             ))
         : await db
             .select({ wetCheckId: wetCheckBillings.wetCheckId, status: wetCheckBillings.status })
             .from(wetCheckBillings)
-            .where(inArray(wetCheckBillings.status, [...ACTIVE_WCB]));
+            .where(inArray(wetCheckBillings.status, [...PENDING_REVIEW_WCB]));
 
       const wcbQualifiedIdSet = new Set(wcbRows.map(r => r.wetCheckId));
 
@@ -15583,8 +15584,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const wFindings = findingsByWc.get(wc.id) ?? [];
         const wcb = wcbByWc.get(wc.id);
 
-        // Rule 3 signal: WCB snapshot exists and is in pre-approval state.
-        const snapshotPending = wcb != null && ACTIVE_WCB.has(wcb.status);
+        // Rule 3 signal: WCB snapshot exists and is in pre-approval state
+        // (submitted or pending_manager_review only — not approved_passed_to_billing).
+        const snapshotPending = wcb != null && PENDING_REVIEW_WCB.has(wcb.status);
 
         // Rule 4 signal (Inspection Mode — Slice 2): this is an inspection
         // wet check that either has no estimate yet or has one that is not

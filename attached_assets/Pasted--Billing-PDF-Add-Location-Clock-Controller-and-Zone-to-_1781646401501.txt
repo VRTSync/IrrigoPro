@@ -1,0 +1,70 @@
+# Billing PDF — Add Location + Clock (Controller) and Zone to Each Ticket
+
+**What & Why**
+Each ticket page in the invoice/billing PDF should show **where** the work was done — the **location** plus the **clock (controller) and zone**. Today the work-order and billing-sheet ticket headers print the location (📍 address + branch) but **not** the controller/zone, even though the data exists on the records. This adds the clock + zone to each ticket so the billing clearly states which controller and zone the work was performed on.
+
+**Data already exists (no schema change):**
+- `work_orders.controllerLetter` + `work_orders.zoneNumber` (schema ~722–723)
+- `billing_sheets.controllerLetter` + `billing_sheets.zoneNumber` (~239–240)
+- `estimates.controllerLetter` + `estimates.zoneNumber` (~491–492) — for the future inspection-estimate PDF
+- WCB tickets are already organized **by zone** (`zoneLabel` groups), so the zone is present there; this slice just ensures the controller (clock) is labeled consistently.
+
+The gap is purely the **PDF view model + rendering** — these fields aren't carried into the view model, so they never print.
+
+Two slices. No schema change. Uses the existing HTML→PDF pipeline (`pdf-view-model.ts`, `pdf-helpers.ts`, `pdf-generator.ts`) — no new PDF library.
+
+---
+
+## Slice 1 — Surface controller + zone into the PDF view model
+
+### Files
+- `artifacts/api-server/src/pdf-view-model.ts` — the WO and BS row shapes + the builder that maps DB rows → view-model rows.
+
+### Concrete changes
+- Add `controllerLetter: string | null` and `zoneNumber: number | null` to the work-order and billing-sheet PDF row types.
+- In the view-model builder, copy these from the source `work_orders` / `billing_sheets` records into the rows (alongside the existing `projectAddress` / `propertyAddress` / `branchName` fields).
+- (Optional, forward-looking) add the same two fields to the estimate row shape so the inspection-estimate PDF can show them later — only if the estimate PDF path is in scope; otherwise leave for the Inspection build.
+
+### Acceptance
+- The PDF view model exposes `controllerLetter` + `zoneNumber` for every WO and BS ticket; values match the source records (null when unset).
+
+---
+
+## Slice 2 — Render the location + clock/zone line on each ticket
+
+### Files
+- `artifacts/api-server/src/pdf-helpers.ts` — `ticketPageWO` (~270–305) and `ticketPageBS` (~355–370) headers; verify `ticketPageWCB` zone labels.
+
+### Concrete changes
+- **Work Order header (`ticketPageWO`):** keep the existing location line (`📍 {projectAddress} — {locationNotes}`) and add a **clock/zone line** beneath it when present, e.g.:
+  ```
+  🕐 Clock {controllerLetter} · Zone {zoneNumber}
+  ```
+  Render only the parts that exist (e.g. controller without zone, or vice versa); omit the line entirely if both are null.
+- **Billing Sheet header (`ticketPageBS`):** same — keep `📍 {propertyAddress}` and add the `🕐 Clock {controllerLetter} · Zone {zoneNumber}` line when present.
+- Use a consistent label — pick **"Clock"** (Randy's term) or **"Controller"**; recommend showing it as `Clock A · Zone 12` to match field vocabulary. Lock the wording with Randy before shipping.
+- **WCB header (`ticketPageWCB`):** the body is already zone-grouped; confirm each `zoneLabel` reads as controller+zone (e.g. `A-12` or `Clock A · Zone 12`). If it currently shows only the zone number, prefix the controller so the clock is explicit and consistent with WO/BS.
+- Add minimal CSS for the new header line (reuse the existing `ticket-header-line3` / branch line styling so it matches).
+
+### Acceptance
+- Every WO and BS ticket page shows the location line **and** a clock/zone line (when data exists).
+- WCB ticket zones clearly show the controller (clock) + zone.
+- Tickets with no controller/zone simply omit the line (no empty "Clock · Zone" label).
+- Existing PDF parity tests still pass (update snapshots/expected strings to include the new line).
+
+---
+
+## Out of scope
+- Any schema change (the columns already exist).
+- Adding a new PDF library or rebuilding the PDF pipeline.
+- The estimate PDF (only touch if explicitly in scope; otherwise it rides the Inspection build).
+- Changing financial/line-item content.
+
+## Open decision for Randy
+- Label wording: **"Clock A · Zone 12"** vs **"Controller A · Zone 12"** — and whether you want it on its own line under the address or appended to the address line.
+
+## Relevant files
+- `artifacts/api-server/src/pdf-view-model.ts` (row shapes + builder)
+- `artifacts/api-server/src/pdf-helpers.ts` (`ticketPageWO` ~270–305, `ticketPageBS` ~355–370, `ticketPageWCB`)
+- `artifacts/api-server/src/pdf-generator.ts` (orchestration — likely no change)
+- Parity tests: `pdf-ticket-parity.test.ts`, `pdf-view-model.test.ts`, `pdf-changes-1150.test.ts` (update expectations)

@@ -53,6 +53,10 @@ export const ACTIVE_WCB = new Set([
   // so this is where they live until invoiced — they still need billing action.
   "approved_passed_to_billing",
 ]);
+// Snapshot states that still need MANAGER APPROVAL (pre-approval only).
+// Distinct from ACTIVE_WCB, which also includes approved_passed_to_billing
+// (approved, awaiting invoicing — a billing concern, not a review concern).
+export const PENDING_REVIEW_WCB = new Set(["submitted", "pending_manager_review"]);
 // Approved (this week tile).
 export const APPROVED_BS = new Set(["approved", "billed", "invoiced"]);
 export const APPROVED_WO = new Set(["approved", "billed", "invoiced", "completed_approved"]);

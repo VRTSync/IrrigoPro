@@ -1,0 +1,53 @@
+# Needs Review — Stop Showing Already-Approved Snapshots (Pre-Approval WCB Set)
+
+**What & Why**
+The Wet Checks **Needs Review** tab is now showing wet checks whose snapshot is **already approved** (e.g. WC-88: "Snapshot approved and passed to billing," `WC-2026-1058 Approved`). They should have left Needs Review and now live in the **Approved** tab.
+
+**Root cause (`/api/wet-checks/needs-review` in `routes.ts` ~15400–15480):** the "snapshot pending review" rule keys off **`ACTIVE_WCB`**, which is:
+```
+ACTIVE_WCB = { submitted, pending_manager_review, approved_passed_to_billing }
+```
+`ACTIVE_WCB` means "WCB not yet **invoiced** — still needs *billing* action" (correct for the billing workspace). But Needs Review is asking a different question — "does the **manager** still need to **approve** the snapshot?" — which is **pre-approval only**: `{ submitted, pending_manager_review }`. Because `ACTIVE_WCB` also contains `approved_passed_to_billing` (the approved state), already-approved snapshots are wrongly counted as pending and stay in the queue. (The code comment calling `ACTIVE_WCB` "pre-approval" is inaccurate.)
+
+The earlier #1328 fix was right about the converted-exclusion; it just reused a set that's one status too broad.
+
+Single small backend slice. No schema change. No frontend change.
+
+---
+
+## Done looks like
+- A wet check whose snapshot is `approved_passed_to_billing` (or `billed`) **does not** appear in Needs Review; it appears in the **Approved** tab.
+- A wet check whose snapshot is `submitted` or `pending_manager_review` **still** appears in Needs Review (the First Bank pre-approval backlog is unaffected).
+- The Needs Review count badge (launchpad tile / Manager Workspace hub) drops these approved items accordingly.
+
+## Steps
+1. **Add a pre-approval-only set.** In `billing-workspace-routes.ts`, export:
+   ```ts
+   // Snapshot states that still need MANAGER APPROVAL (pre-approval only).
+   // Distinct from ACTIVE_WCB, which also includes approved_passed_to_billing
+   // (approved, awaiting invoicing — a billing concern, not a review concern).
+   export const PENDING_REVIEW_WCB = new Set(["submitted", "pending_manager_review"]);
+   ```
+2. **Use it in needs-review.** In `routes.ts`, import `PENDING_REVIEW_WCB` and replace **every** `ACTIVE_WCB` reference in the `/api/wet-checks/needs-review` handler with `PENDING_REVIEW_WCB`:
+   - the SQL candidate fetch (`inArray(wetCheckBillings.status, [...ACTIVE_WCB])`, ~15409 and ~15415),
+   - the in-memory `snapshotPending` computation (`ACTIVE_WCB.has(wcb.status)`).
+   Leave `ACTIVE_WCB` imports/usages elsewhere (billing workspace, etc.) untouched — only the needs-review handler changes.
+3. **Fix the stale comment** (~15369, ~15373) that calls `ACTIVE_WCB` "pre-approval" — it now reads `PENDING_REVIEW_WCB` and the wording is accurate.
+4. Confirm the in-memory `reviewType` classification (#1328) still routes these correctly: a snapshot in `PENDING_REVIEW_WCB` → `reviewType: "snapshot"`; once approved it no longer qualifies, so it's not classified at all.
+
+## Tests
+- Wet check with snapshot `pending_manager_review` → in Needs Review (`reviewType: snapshot`).
+- Wet check with snapshot `submitted` → in Needs Review.
+- Wet check with snapshot `approved_passed_to_billing` → **not** in Needs Review; present in Approved tab.
+- Wet check with snapshot `billed` → not in Needs Review.
+- Needs Review count excludes the approved ones.
+
+## Out of scope
+- `ACTIVE_WCB` itself and its billing-workspace uses (correct there — don't change).
+- The Approved tab (already shows `approved_passed_to_billing`/`billed`).
+- The converted-exclusion fix from #1328 (correct — keep).
+- Findings-triage and inspection-estimate membership rules.
+
+## Relevant files
+- `artifacts/api-server/src/routes/billing-workspace-routes.ts` (add `PENDING_REVIEW_WCB`)
+- `artifacts/api-server/src/routes/routes.ts` (`/api/wet-checks/needs-review` ~15400–15480 — swap `ACTIVE_WCB` → `PENDING_REVIEW_WCB`, fix comment)
