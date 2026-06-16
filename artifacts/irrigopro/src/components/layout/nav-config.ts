@@ -55,35 +55,39 @@ export interface NavConfig {
   items: NavItem[];
 }
 
+const baseReportItems: NavItem[] = [
+  {
+    type: "leaf",
+    label: "Missing Photos – Work Orders",
+    path: "/work-orders/missing-photos",
+    icon: ShieldCheck,
+  },
+  {
+    type: "leaf",
+    label: "Missing Photos – Billing",
+    path: "/billing-sheets/missing-photos",
+    icon: ShieldCheck,
+  },
+  {
+    type: "leaf",
+    label: "Zero Price Audit",
+    path: "/billing-sheets/zero-price-audit",
+    icon: ShieldCheck,
+  },
+  {
+    type: "leaf",
+    label: "Labor Rate Audit",
+    path: "/billing-sheets/labor-rate-audit",
+    icon: ShieldCheck,
+  },
+];
+
 export const reportsGroup: NavGroup = {
   type: "group",
   label: "Reports",
   icon: BarChart3,
   items: [
-    {
-      type: "leaf",
-      label: "Missing Photos – Work Orders",
-      path: "/work-orders/missing-photos",
-      icon: ShieldCheck,
-    },
-    {
-      type: "leaf",
-      label: "Missing Photos – Billing",
-      path: "/billing-sheets/missing-photos",
-      icon: ShieldCheck,
-    },
-    {
-      type: "leaf",
-      label: "Zero Price Audit",
-      path: "/billing-sheets/zero-price-audit",
-      icon: ShieldCheck,
-    },
-    {
-      type: "leaf",
-      label: "Labor Rate Audit",
-      path: "/billing-sheets/labor-rate-audit",
-      icon: ShieldCheck,
-    },
+    ...baseReportItems,
     {
       type: "leaf",
       label: "WC Reconciliation",
@@ -91,6 +95,15 @@ export const reportsGroup: NavGroup = {
       icon: ShieldCheck,
     },
   ],
+};
+
+// Billing managers get the same reports except WC Reconciliation
+// (that page is company_admin / super_admin only).
+export const billingManagerReportsGroup: NavGroup = {
+  type: "group",
+  label: "Reports",
+  icon: BarChart3,
+  items: baseReportItems,
 };
 
 export const wetCheckGroup: NavGroup = {
@@ -124,7 +137,7 @@ export const billingManagerNav: NavConfig = {
         { type: "leaf", label: "Command Center", path: "/billing/command-center", icon: ClipboardList },
         { type: "leaf", label: "Billing Sheets", path: "/billing-sheets", icon: ClipboardList },
         { type: "leaf", label: "Invoices", path: "/invoices", icon: Receipt },
-        reportsGroup,
+        billingManagerReportsGroup,
       ],
     },
     {
