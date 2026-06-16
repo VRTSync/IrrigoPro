@@ -632,6 +632,7 @@ export default function WetCheckReconciliationPage() {
       )}
 
       <ReassignModal
+        key={reassignRow?.wetCheckId ?? 0}
         row={reassignRow}
         onClose={() => setReassignRow(null)}
         onSuccess={handleReassignSuccess}
