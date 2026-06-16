@@ -1,12 +1,15 @@
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { Droplets, Loader2, Eye, FileText } from "lucide-react";
-import { useArrayQuery } from "@/lib/queryClient";
-import { Card, CardContent } from "@/components/ui/card";
+import { Droplets, Loader2, Eye, FileText, CheckCircle2, User, Clock, AlertTriangle, ArrowRight } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { useArrayQuery, apiRequest } from "@/lib/queryClient";
+import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { WetCheckBillingViewModal } from "@/components/wet-check-billings/wet-check-billing-view-modal";
 import { ListPageEmptyState } from "@/components/shared/list-page-empty-state";
-import type { WetCheckBillingListItem } from "@workspace/db/schema";
+import type { WetCheckBillingListItem, WetCheck } from "@workspace/db/schema";
 import WetChecksListPage, { type WcbMapEntry } from "./WetChecksListPage";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -87,21 +90,174 @@ function AllWetChecksTab() {
   );
 }
 
-// ─── Needs Review tab (Slice 2 stub) ─────────────────────────────────────────
+// ─── Needs Review tab ─────────────────────────────────────────────────────────
+
+type NeedsReviewItem = WetCheck & {
+  outstandingWork: { unroutedFindings: number; snapshotPending: boolean };
+};
+
+type NeedsReviewResponse = { count: number; items: NeedsReviewItem[] };
+
+function timeAgoNR(iso: string | Date | null | undefined): string {
+  if (!iso) return "—";
+  const ms = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function NRStatusBadge({ status }: { status: string }) {
+  if (status === "submitted") return <Badge variant="info">Submitted</Badge>;
+  if (status === "pending_manager_review") return <Badge variant="warning">Pending Review</Badge>;
+  if (status === "partially_converted") return <Badge variant="secondary">Partial</Badge>;
+  return (
+    <Badge variant="secondary">
+      {status.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
+    </Badge>
+  );
+}
+
+function NRCardSkeleton() {
+  return (
+    <Card>
+      <CardContent className="pt-4 pb-3 space-y-2">
+        <Skeleton className="h-5 w-48" />
+        <Skeleton className="h-4 w-64" />
+        <Skeleton className="h-4 w-40" />
+      </CardContent>
+      <CardFooter className="border-t border-slate-100 pt-2 pb-3 justify-end">
+        <Skeleton className="h-8 w-28" />
+      </CardFooter>
+    </Card>
+  );
+}
+
+function NRCard({ item, onReview }: { item: NeedsReviewItem; onReview: () => void }) {
+  const { unroutedFindings, snapshotPending } = item.outstandingWork;
+  const hasWork = unroutedFindings > 0 || snapshotPending;
+
+  return (
+    <Card
+      className="border-l-4 border-l-cyan-500 hover:shadow-md transition-shadow cursor-pointer"
+      onClick={onReview}
+      data-testid={`nr-row-${item.id}`}
+    >
+      <CardContent className="pt-4 pb-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-slate-900 truncate">
+                {item.customerName ?? "Unknown Customer"}
+              </span>
+              <NRStatusBadge status={item.status ?? "submitted"} />
+            </div>
+
+            <div className="flex items-center gap-3 text-xs text-slate-500 flex-wrap">
+              {item.technicianName && (
+                <span className="flex items-center gap-1">
+                  <User className="w-3 h-3" />
+                  {item.technicianName}
+                </span>
+              )}
+              <span className="flex items-center gap-1">
+                <Clock className="w-3 h-3" />
+                {timeAgoNR(item.submittedAt)}
+              </span>
+            </div>
+
+            {hasWork && (
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {unroutedFindings > 0 && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"
+                    data-testid={`nr-row-${item.id}-unrouted`}
+                  >
+                    <AlertTriangle className="w-3 h-3" />
+                    Triage: {unroutedFindings} finding{unroutedFindings !== 1 ? "s" : ""}
+                  </span>
+                )}
+                {snapshotPending && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200"
+                    data-testid={`nr-row-${item.id}-snapshot`}
+                  >
+                    Snapshot: pending
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </CardContent>
+
+      <CardFooter className="border-t border-slate-100 pt-2 pb-3 justify-end">
+        <Button
+          size="sm"
+          className="bg-cyan-600 hover:bg-cyan-700 text-white"
+          onClick={e => {
+            e.stopPropagation();
+            onReview();
+          }}
+          data-testid={`nr-row-${item.id}-review`}
+        >
+          Review
+          <ArrowRight className="w-3.5 h-3.5 ml-1" />
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
 
 function NeedsReviewTab() {
-  return (
-    <div
-      className="flex flex-col items-center justify-center py-20 text-center px-6"
-      data-testid="needs-review-tab-stub"
-    >
-      <div className="w-16 h-16 rounded-2xl bg-blue-50 flex items-center justify-center mb-5">
-        <div className="animate-pulse w-8 h-8 rounded-full bg-blue-200" />
+  const [, navigate] = useLocation();
+
+  const { data, isLoading } = useQuery<NeedsReviewResponse>({
+    queryKey: ["/api/wet-checks/needs-review"],
+    queryFn: () => apiRequest("/api/wet-checks/needs-review"),
+    refetchInterval: 30_000,
+  });
+
+  const items = data?.items ?? [];
+
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        {[...Array(3)].map((_, i) => <NRCardSkeleton key={i} />)}
       </div>
-      <h2 className="text-lg font-semibold text-slate-800 mb-1">Loading review queue…</h2>
-      <p className="text-sm text-slate-500 max-w-xs">
-        The Needs Review tab is coming soon. Check back shortly.
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center px-6" data-testid="nr-empty">
+        <div className="w-16 h-16 rounded-2xl bg-emerald-50 flex items-center justify-center mb-5">
+          <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+        </div>
+        <h2 className="text-lg font-semibold text-slate-800 mb-1">No wet checks need review</h2>
+        <p className="text-sm text-slate-500 max-w-xs">
+          New submissions will appear here automatically as technicians complete their checks.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3" data-testid="nr-list">
+      <p className="text-sm text-slate-500">
+        {items.length} wet check{items.length !== 1 ? "s" : ""} awaiting review
       </p>
+      {items.map(item => (
+        <NRCard
+          key={item.id}
+          item={item}
+          onReview={() => navigate(`/manager/wet-checks/${item.id}`)}
+        />
+      ))}
     </div>
   );
 }

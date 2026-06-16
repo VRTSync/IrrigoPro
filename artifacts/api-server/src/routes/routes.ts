@@ -366,9 +366,9 @@ import { recordAuditEvent } from "./audit-log";
 import { paginate } from "./pagination";
 import { registerSiteMapRoutes } from "./site-map-routes";
 import { registerPartRoutes } from "./parts-routes";
-import { registerBillingWorkspaceRoutes } from "./billing-workspace-routes";
+import { registerBillingWorkspaceRoutes, ACTIVE_WCB } from "./billing-workspace-routes";
 import { registerBillingWorkspaceBulkApproveRoutes } from "./billing-workspace-bulk-approve";
-import { registerManagerWorkspaceRoutes } from "./manager-workspace-routes";
+import { registerManagerWorkspaceRoutes, ACTIVE_WC, APPROVED_WC } from "./manager-workspace-routes";
 import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
 import { registerBudgetRoutes } from "./budget-routes";
@@ -940,7 +940,7 @@ import {
   customers, estimates, workOrders, estimateItems, parts, billingSheets, billingSheetItems, 
   users, invoices, invoiceItems, zones, fieldWorkSessions, fieldWorkItems, notifications,
   companies, siteMaps, controllers, irrigationZones, partUsage, utilityMarkers, propertyZones, invoicePdfs,
-  wetCheckPhotos, wetChecks, wetCheckFindings,
+  wetCheckPhotos, wetChecks, wetCheckFindings, wetCheckBillings,
 } from "@workspace/db";
 import { eq, desc, and, or, gte, lte, like, isNull, asc, sql, inArray, type SQL } from "drizzle-orm";
 
@@ -15341,6 +15341,172 @@ export async function registerRoutes(app: Express): Promise<Server> {
         op: "patchPropertyController",
         ctx: { cid, customerId, controllerLetter },
         fallbackMessage: "Couldn't save controller — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // ─── Needs Review queue (Spec B cross-spec interface) ───────────────────────
+  //
+  // GET /api/wet-checks/needs-review
+  //   Returns wet checks requiring manager attention per the membership rule:
+  //     1. status ∈ {submitted, pending_manager_review}  — always in queue
+  //     2. status = partially_converted AND ≥1 unrouted non-documented finding
+  //     3. wet check has a WCB snapshot with status ∈ ACTIVE_WCB (pre-approval)
+  //   Wet checks with status ∈ {approved, converted} (non-overlapping APPROVED_WC
+  //   members) are excluded even when rule 3 fires.
+  //   Status constants are imported from manager-workspace-routes (ACTIVE_WC,
+  //   APPROVED_WC) and billing-workspace-routes (ACTIVE_WCB) — never hardcoded.
+  //
+  // Scoping: super_admin sees every company; all other roles are company-scoped.
+  //
+  // Response: { count: number, items: NeedsReviewItem[] }
+  //   NeedsReviewItem = WetCheck & { outstandingWork: { unroutedFindings: number, snapshotPending: boolean } }
+  //
+  // The `count` field is the stable Spec B cross-spec interface consumed by
+  // the Manager Workspace hub tile. Treat it as a contract: do not rename or
+  // remove it without a version bump.
+  app.get("/api/wet-checks/needs-review", requireAuthentication, async (req, res) => {
+    if (!isWetCheckManagerRole(req.authenticatedUserRole)) {
+      res.status(403).json({ message: "Forbidden" });
+      return;
+    }
+
+    // super_admin is unscoped; all other manager roles must have a company.
+    const isSuperAdmin = req.authenticatedUserRole === "super_admin";
+    const cid = isSuperAdmin ? null : req.authenticatedUserCompanyId;
+    if (!isSuperAdmin && !cid) {
+      res.status(403).json({ message: "Company scope required" });
+      return;
+    }
+
+    try {
+      // ── Step 1: discover WCB-qualified wet check IDs ────────────────────────
+      // A wet check qualifies via rule 3 when it has a WCB snapshot whose
+      // status ∈ ACTIVE_WCB. Fetch those IDs first so the main query can
+      // include them even when the wet check's own status is outside ACTIVE_WC.
+      // Simple fetch: company-scoped or all
+      const wcbRows = cid != null
+        ? await db
+            .select({ wetCheckId: wetCheckBillings.wetCheckId, status: wetCheckBillings.status })
+            .from(wetCheckBillings)
+            .innerJoin(wetChecks, eq(wetCheckBillings.wetCheckId, wetChecks.id))
+            .where(and(
+              inArray(wetCheckBillings.status, [...ACTIVE_WCB]),
+              eq(wetChecks.companyId, cid),
+            ))
+        : await db
+            .select({ wetCheckId: wetCheckBillings.wetCheckId, status: wetCheckBillings.status })
+            .from(wetCheckBillings)
+            .where(inArray(wetCheckBillings.status, [...ACTIVE_WCB]));
+
+      const wcbQualifiedIdSet = new Set(wcbRows.map(r => r.wetCheckId));
+
+      // ── Step 2: fetch all candidate wet checks ──────────────────────────────
+      // Candidates are wet checks where:
+      //   (status ∈ ACTIVE_WC) OR (id ∈ wcbQualifiedIds)
+      // Wet checks with status ∈ {approved, converted} are always excluded —
+      // these are the APPROVED_WC members that do NOT overlap with ACTIVE_WC.
+      // (partially_converted overlaps both sets and is handled by in-memory rule 2.)
+      const excludedStatuses = [...APPROVED_WC].filter(s => !ACTIVE_WC.has(s));
+
+      // Build the WHERE conditions piece by piece to stay type-safe.
+      const statusInActiveWc = inArray(wetChecks.status, [...ACTIVE_WC]);
+      const notExcluded = excludedStatuses.length > 0
+        ? sql`${wetChecks.status} NOT IN (${sql.join(excludedStatuses.map(s => sql`${s}`), sql`, `)})`
+        : undefined;
+
+      // OR-combine the two inclusion paths.
+      const wcbIds = [...wcbQualifiedIdSet];
+      const inclusionClause = wcbIds.length > 0
+        ? or(statusInActiveWc, inArray(wetChecks.id, wcbIds))
+        : statusInActiveWc;
+
+      const conditions: (ReturnType<typeof and> | ReturnType<typeof sql.join> | undefined)[] = [
+        inclusionClause,
+        notExcluded,
+      ].filter(Boolean);
+
+      if (cid != null) {
+        conditions.push(eq(wetChecks.companyId, cid));
+      }
+
+      const candidates = await db.select().from(wetChecks)
+        .where(and(...(conditions as Parameters<typeof and>)))
+        .orderBy(desc(wetChecks.submittedAt));
+
+      if (candidates.length === 0) {
+        res.json({ count: 0, items: [] });
+        return;
+      }
+
+      // ── Step 3: load findings and WCBs for this candidate set ──────────────
+      const wcIds = candidates.map(w => w.id);
+      const [findings, wcbs] = await Promise.all([
+        db.select().from(wetCheckFindings).where(inArray(wetCheckFindings.wetCheckId, wcIds)),
+        db.select().from(wetCheckBillings).where(inArray(wetCheckBillings.wetCheckId, wcIds)),
+      ]);
+
+      // Index by wet check id for O(1) lookup.
+      const findingsByWc = new Map<number, (typeof findings)[number][]>();
+      for (const f of findings) {
+        const arr = findingsByWc.get(f.wetCheckId) ?? [];
+        arr.push(f);
+        findingsByWc.set(f.wetCheckId, arr);
+      }
+      // Keep the highest-id WCB per wet check (one per wet check by design).
+      const wcbByWc = new Map<number, (typeof wcbs)[number]>();
+      for (const wcb of wcbs) {
+        const existing = wcbByWc.get(wcb.wetCheckId);
+        if (!existing || wcb.id > existing.id) wcbByWc.set(wcb.wetCheckId, wcb);
+      }
+
+      // ── Step 4: apply membership rule in-memory and annotate ────────────────
+      type NeedsReviewItem = (typeof candidates)[number] & {
+        outstandingWork: { unroutedFindings: number; snapshotPending: boolean };
+      };
+      const items: NeedsReviewItem[] = [];
+
+      for (const wc of candidates) {
+        const wFindings = findingsByWc.get(wc.id) ?? [];
+        const wcb = wcbByWc.get(wc.id);
+
+        // Rule 3 signal: WCB snapshot exists and is in pre-approval state.
+        const snapshotPending = wcb != null && ACTIVE_WCB.has(wcb.status);
+
+        // Unrouted = finding has no routing FK and is not documented_only.
+        const unroutedFindings = wFindings.filter(
+          f =>
+            f.resolution !== "documented_only" &&
+            f.billingSheetId == null &&
+            f.estimateId == null &&
+            f.workOrderId == null &&
+            f.wetCheckBillingId == null,
+        ).length;
+
+        const s = wc.status;
+        let qualifies = false;
+
+        // Rule 1: freshly submitted or pending manager review.
+        if (s === "submitted" || s === "pending_manager_review") qualifies = true;
+        // Rule 2: partially converted but still has unrouted findings.
+        if (s === "partially_converted" && unroutedFindings > 0) qualifies = true;
+        // Rule 3: snapshot exists and is not yet in an approved/billed state.
+        if (snapshotPending) qualifies = true;
+
+        if (qualifies) {
+          items.push({ ...wc, outstandingWork: { unroutedFindings, snapshotPending } });
+        }
+      }
+
+      // `count` is computed from the full filtered set — no cap, no offset.
+      // This is the Spec B stable cross-spec contract for the hub tile.
+      res.json({ count: items.length, items });
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "listWetChecksNeedsReview",
+        ctx: { cid: cid ?? "super_admin" },
+        fallbackMessage: "Couldn't load needs review queue — please retry",
       });
       res.status(status).json({ message });
     }

@@ -53,7 +53,8 @@ const HANGING_THRESHOLD_DAYS = 7;
 // Statuses considered "active" for wet checks awaiting manager review.
 // partially_converted is included so those wet checks are never silently
 // dropped from the queue — they still need a follow-up action.
-const ACTIVE_WC = new Set(["submitted", "pending_manager_review", "partially_converted"]);
+// Exported for use by the needs-review endpoint in routes.ts.
+export const ACTIVE_WC = new Set(["submitted", "pending_manager_review", "partially_converted"]);
 // Work-order statuses manager must act on (needs_review).
 const ACTIVE_WO_FOR_MANAGER = new Set(["pending_manager_review", "work_completed"]);
 // Work-order statuses that appear in the merged queue.
@@ -81,7 +82,8 @@ const ALL_WCB_STAGES = new Set([
   "billed",
 ]);
 // Approved status sets for the "approved this week" tile.
-const APPROVED_WC = new Set(["approved", "partially_converted", "converted"]);
+// Exported for use by the needs-review endpoint in routes.ts.
+export const APPROVED_WC = new Set(["approved", "partially_converted", "converted"]);
 
 // A finding is pending routing when it hasn't been sent to any target bucket
 // and isn't already resolved as documented-only.
