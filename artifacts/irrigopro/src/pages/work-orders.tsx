@@ -1103,26 +1103,37 @@ export default function WorkOrders() {
                       {currentUser?.role === 'field_tech' ? (
                         // Field Tech View - Only green View button for assigned work orders
                         <>
-                          {(workOrder.assignedTechnicianId === currentUser.id || workOrder.assignedTechnicianName === currentUser.name) && (
-                            <Button
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedWorkOrder(workOrder);
-                              }}
-                              className={`w-full ${
-                                workOrder.status === 'work_completed'
-                                  ? 'bg-green-700 hover:bg-green-800 text-white border border-green-600'
-                                  : 'bg-green-600 hover:bg-green-700 text-white'
-                              }`}
-                            >
-                              <Eye className="w-4 h-4 mr-1" />
-                              {workOrder.status === 'work_completed' ? 'View Completed' : 'View'}
-                            </Button>
-                          )}
-                          
+                          {workOrder.assignedTechnicianId === currentUser.id && (() => {
+                            const isTerminal =
+                              workOrder.status === 'work_completed' ||
+                              workOrder.status === 'approved_passed_to_billing' ||
+                              workOrder.status === 'billed' ||
+                              workOrder.invoiceId != null;
+                            return (
+                              <Button
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (isTerminal) {
+                                    setSelectedWorkOrder(workOrder);
+                                  } else {
+                                    setSelectedWorkOrderForStart(workOrder);
+                                  }
+                                }}
+                                className={`w-full ${
+                                  isTerminal
+                                    ? 'bg-green-700 hover:bg-green-800 text-white border border-green-600'
+                                    : 'bg-green-600 hover:bg-green-700 text-white'
+                                }`}
+                              >
+                                <Eye className="w-4 h-4 mr-1" />
+                                {isTerminal ? 'View Completed' : 'View'}
+                              </Button>
+                            );
+                          })()}
+
                           {/* Show message for unassigned work orders */}
-                          {!(workOrder.assignedTechnicianId === currentUser.id || workOrder.assignedTechnicianName === currentUser.name) && (
+                          {workOrder.assignedTechnicianId !== currentUser.id && (
                             <div className="text-center text-gray-500 text-sm py-2">
                               Work order not assigned to you
                             </div>
