@@ -5,9 +5,10 @@ interface BillingSheetViewModalProps {
   sheet: BillingSheet;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onApproveSuccess?: () => void;
 }
 
-export function BillingSheetViewModal({ sheet, open, onOpenChange }: BillingSheetViewModalProps) {
+export function BillingSheetViewModal({ sheet, open, onOpenChange, onApproveSuccess }: BillingSheetViewModalProps) {
   return (
     <CompletedWorkDetailModal
       type="billing_sheet"
@@ -15,6 +16,7 @@ export function BillingSheetViewModal({ sheet, open, onOpenChange }: BillingShee
       data={sheet}
       open={open}
       onOpenChange={onOpenChange}
+      onApproveSuccess={onApproveSuccess}
     />
   );
 }

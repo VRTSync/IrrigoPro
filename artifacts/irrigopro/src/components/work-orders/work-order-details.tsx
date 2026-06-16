@@ -1,6 +1,6 @@
 import { safeGet } from "@/utils/safeStorage";
 import { ActivityTab } from "@/components/activity/ActivityTab";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useContext } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import {
   Phone, 
   Mail,
   CheckCircle,
+  CheckCircle2,
   Play,
   Pause,
   AlertCircle,
@@ -48,14 +49,159 @@ import {
   Navigation,
   Cpu,
   ExternalLink,
+  Loader2,
+  Save,
 } from "lucide-react";
 import { PricingAuditHistory } from "@/components/billing/pricing-audit-history";
-import { EditableField, InlineEditProvider } from "@/components/ui/editable-field";
+import { EditableField, InlineEditProvider, InlineEditContext } from "@/components/ui/editable-field";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
 import type { WorkOrder, User as UserType } from "@workspace/db/schema";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { buildMapsUrl } from "@/lib/maps-url";
+
+// ─── Approval Action Row ──────────────────────────────────────────────────────
+// Rendered inside InlineEditProvider when opened from Manager Workspace.
+function WOApprovalActionRow({
+  workOrderId,
+  isLocked,
+  onClose,
+  onSuccess,
+}: {
+  workOrderId: number;
+  isLocked: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const { triggerSave } = useContext(InlineEditContext);
+  const [approving, setApproving] = useState(false);
+  const [showReturnInput, setShowReturnInput] = useState(false);
+  const [returnNotes, setReturnNotes] = useState("");
+
+  const doSave = async () => {
+    try {
+      await triggerSave();
+      toast({ title: "Saved", description: "Work order changes saved." });
+    } catch (err: any) {
+      toast({ title: "Save failed", description: parseApiError(err, "Save failed"), variant: "destructive" });
+    }
+  };
+
+  const doApprove = async () => {
+    setApproving(true);
+    try {
+      await apiRequest(`/api/work-orders/${workOrderId}/approve`, "POST", {});
+      toast({ title: "Approved", description: "Work order approved and passed to billing." });
+      onClose();
+      onSuccess();
+    } catch (err: any) {
+      toast({ title: "Approval failed", description: parseApiError(err, "Approval failed"), variant: "destructive" });
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const doSaveAndApprove = async () => {
+    setApproving(true);
+    try {
+      const saved = await triggerSave();
+      if (!saved) { setApproving(false); return; }
+      await apiRequest(`/api/work-orders/${workOrderId}/approve`, "POST", {});
+      toast({ title: "Saved & Approved", description: "Work order saved and passed to billing." });
+      onClose();
+      onSuccess();
+    } catch (err: any) {
+      toast({ title: "Save & Approve failed", description: parseApiError(err, "Save & Approve failed"), variant: "destructive" });
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const doReturn = async () => {
+    setApproving(true);
+    try {
+      await apiRequest(`/api/work-orders/${workOrderId}/return-for-correction`, "POST", { notes: returnNotes });
+      toast({ title: "Returned for correction", description: "Work order returned to technician." });
+      onClose();
+      onSuccess();
+    } catch (err: any) {
+      toast({ title: "Return failed", description: parseApiError(err, "Return failed"), variant: "destructive" });
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  return (
+    <div className="flex-shrink-0 border-t border-amber-100 bg-amber-50 px-5 py-3 space-y-2" data-testid="approval-action-row">
+      {showReturnInput ? (
+        <div className="space-y-2">
+          <p className="text-xs text-gray-600 font-medium">Return notes (optional)</p>
+          <textarea
+            className="w-full rounded-md border border-gray-200 text-sm px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            rows={2}
+            value={returnNotes}
+            onChange={(e) => setReturnNotes(e.target.value)}
+            placeholder="Describe what needs to be corrected…"
+            data-testid="return-notes-input"
+          />
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="destructive" onClick={() => void doReturn()} disabled={approving} data-testid="confirm-return-button">
+              {approving && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+              Send back
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => { setShowReturnInput(false); setReturnNotes(""); }}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void doSave()}
+            disabled={isLocked || approving}
+            data-testid="save-button"
+          >
+            <Save className="w-3.5 h-3.5 mr-1.5" />
+            Save
+          </Button>
+          <Button
+            size="sm"
+            className="bg-green-600 hover:bg-green-700 text-white"
+            onClick={() => void doApprove()}
+            disabled={isLocked || approving}
+            data-testid="approve-button"
+          >
+            {approving ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />}
+            Approve
+          </Button>
+          <Button
+            size="sm"
+            className="bg-blue-600 hover:bg-blue-700 text-white"
+            onClick={() => void doSaveAndApprove()}
+            disabled={isLocked || approving}
+            data-testid="save-and-approve-button"
+          >
+            {approving ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />}
+            Save & Approve
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-amber-700 border-amber-300 hover:bg-amber-100"
+            onClick={() => setShowReturnInput(true)}
+            disabled={isLocked || approving}
+            data-testid="return-for-correction-button"
+          >
+            Return for Correction
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface WorkOrderDetailsProps {
   workOrder: WorkOrder;
@@ -63,9 +209,10 @@ interface WorkOrderDetailsProps {
   onUpdate: () => void;
   showAddDetailsButton?: boolean;
   onStartWork?: (workOrder: WorkOrder) => void;
+  onApproveSuccess?: () => void;
 }
 
-export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsButton = false, onStartWork }: WorkOrderDetailsProps) {
+export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsButton = false, onStartWork, onApproveSuccess }: WorkOrderDetailsProps) {
   const [activeTab, setActiveTab] = useState("overview");
   const [showCompletionForm, setShowCompletionForm] = useState(false);
   const [selectedTechnicianId, setSelectedTechnicianId] = useState<string>("");
@@ -436,10 +583,10 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
           </div>
         )}
 
+        <InlineEditProvider>
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto overscroll-contain p-3 sm:p-6">
 
-        <InlineEditProvider>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -1275,8 +1422,8 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
             )}
           </TabsContent>
         </Tabs>
-        </InlineEditProvider>
 
+        </div>
         {/* Action Buttons - Bottom Section */}
         {/* Start Work Order button - for pending/assigned work orders */}
         {!isBilledWorkOrder && (workOrder.status === 'pending' || workOrder.status === 'assigned') && (
@@ -1316,7 +1463,18 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
             </div>
           </div>
         )}
-        </div>
+        {/* Approval action row — only when opened from Manager Workspace */}
+        {onApproveSuccess && (
+          <WOApprovalActionRow
+            workOrderId={workOrder.id}
+            isLocked={workOrder.status === 'billed' || workOrder.invoiceId != null}
+            onClose={onClose}
+            onSuccess={onApproveSuccess}
+          />
+        )}
+
+        </InlineEditProvider>
+
       </DialogContent>
     </Dialog>
 

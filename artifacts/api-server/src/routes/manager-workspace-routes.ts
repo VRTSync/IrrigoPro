@@ -947,227 +947,70 @@ export function registerManagerWorkspaceRoutes(
   );
 
   // -------------------------------------------------------------------
-  // POST /api/manager-workspace/findings/bulk-route
+  // GET /api/manager-workspace/needs-approval
   //
-  // Bulk-routes a set of findings to one of four targets:
-  //   wet_check_billing  — creates/appends a WCB and stamps wetCheckBillingId
-  //   documented_only    — sets resolution='documented_only' (no billing)
-  //   new_work_order     — creates a stub WO per wetCheck group, stamps workOrderId
-  //   new_estimate       — creates a stub estimate per wetCheck group, stamps estimateId
+  // Returns Work Orders and Billing Sheets awaiting manager approval:
+  //   workOrders   — status in pending_manager_review | work_completed, no invoiceId
+  //   billingSheets — status in pending_manager_review | submitted, no invoiceId
   //
-  // Returns: { routed: number, errors: { findingId, message }[] }
+  // Both arrays are sorted oldest-first (createdAt asc).
   // -------------------------------------------------------------------
-  app.post(
-    "/api/manager-workspace/findings/bulk-route",
+  const NEEDS_APPROVAL_WO = new Set(["pending_manager_review", "work_completed"]);
+  const NEEDS_APPROVAL_BS = new Set(["pending_manager_review", "submitted"]);
+
+  app.get(
+    "/api/manager-workspace/needs-approval",
     requireAuthentication,
     async (req: any, res) => {
       try {
-        if (!isManagerAllowed(req) || req.authenticatedUserRole === "billing_manager") {
+        if (!isManagerAllowed(req)) {
           res.status(403).json({ message: "Access denied." });
           return;
         }
 
-        const { findingIds: rawFindingIds, action, selectAll } = req.body as {
-          findingIds?: unknown;
-          action?: unknown;
-          selectAll?: boolean;
-        };
+        const [wos, bss] = await Promise.all([
+          scopedWorkOrdersForManager(req),
+          scopedBillingSheets(req),
+        ]);
 
-        // selectAll: true — server resolves the full findings backlog for this
-        // company so the caller doesn't need to page through the queue first.
-        let findingIds: number[];
-        if (selectAll === true) {
-          const allFindings = await scopedFindingsNeedingRouting(req);
-          findingIds = allFindings.map((f: { id: number }) => f.id);
-          if (findingIds.length === 0) {
-            res.json({ routed: [], errors: [], total: 0 });
-            return;
-          }
-        } else {
-          if (
-            !Array.isArray(rawFindingIds) ||
-            rawFindingIds.length === 0 ||
-            !rawFindingIds.every((id) => typeof id === "number" && Number.isInteger(id) && id > 0)
-          ) {
-            res.status(400).json({
-              message: "findingIds must be a non-empty array of positive integers, or set selectAll: true.",
-            });
-            return;
-          }
-          findingIds = rawFindingIds as number[];
-        }
+        const workOrders = wos
+          .filter((w: any) => NEEDS_APPROVAL_WO.has(w.status) && !w.invoiceId)
+          .sort((a: any, b: any) => {
+            const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return ta - tb;
+          });
 
-        const VALID_ACTIONS = [
-          "wet_check_billing",
-          "documented_only",
-          "new_work_order",
-          "new_estimate",
-        ] as const;
-        type BulkAction = (typeof VALID_ACTIONS)[number];
-        if (!VALID_ACTIONS.includes(action as BulkAction)) {
-          res.status(400).json({ message: `action must be one of: ${VALID_ACTIONS.join(", ")}` });
-          return;
-        }
-        const typedAction = action as BulkAction;
+        const billingSheets = bss
+          .filter((s: any) => NEEDS_APPROVAL_BS.has(s.status) && !s.invoiceId)
+          .sort((a: any, b: any) => {
+            const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return ta - tb;
+          });
 
-        const companyId: number | null = req.authenticatedUserCompanyId ?? null;
-        const userId: number | null = req.authenticatedUserId ?? null;
-        const now = new Date();
-
-        // ── wet_check_billing ──────────────────────────────────────────────────
-        if (typedAction === "wet_check_billing") {
-          const result = await storage.routeFindingsToWetCheckBillingBulk(
-            findingIds as number[],
-            companyId,
-            userId,
-          );
-          res.json({ routed: result.routed, errors: result.errors });
-          return;
-        }
-
-        // ── documented_only ────────────────────────────────────────────────────
-        if (typedAction === "documented_only") {
-          const scopeRows = await db
-            .select({ id: wetCheckFindings.id })
-            .from(wetCheckFindings)
-            .innerJoin(wetChecks, eq(wetCheckFindings.wetCheckId, wetChecks.id))
-            .where(
-              and(
-                inArray(wetCheckFindings.id, findingIds as number[]),
-                companyId != null ? eq(wetChecks.companyId, companyId) : undefined,
-              ),
-            );
-          const scopedIds = scopeRows.map((r) => r.id);
-          if (scopedIds.length > 0) {
-            await db.update(wetCheckFindings)
-              .set({
-                resolution: "documented_only",
-                resolutionDecidedAt: now,
-                ...(userId != null ? { resolutionDecidedBy: userId } : {}),
-              })
-              .where(inArray(wetCheckFindings.id, scopedIds));
-          }
-          res.json({ routed: scopedIds, errors: [] });
-          return;
-        }
-
-        // ── new_work_order / new_estimate ──────────────────────────────────────
-        // Fetch all scoped rows, then create ONE work order / estimate for all
-        // selected findings (regardless of which wet check they came from).
-        const rows = await db
-          .select({
-            fId: wetCheckFindings.id,
-            wetCheckId: wetCheckFindings.wetCheckId,
-            billingSheetId: wetCheckFindings.billingSheetId,
-            estimateId: wetCheckFindings.estimateId,
-            workOrderId: wetCheckFindings.workOrderId,
-            wetCheckBillingId: wetCheckFindings.wetCheckBillingId,
-            wcCompanyId: wetChecks.companyId,
-            wcCustomerId: wetChecks.customerId,
-            wcCustomerName: wetChecks.customerName,
-            wcTechnicianId: wetChecks.technicianId,
-            wcTechnicianName: wetChecks.technicianName,
-          })
-          .from(wetCheckFindings)
-          .innerJoin(wetChecks, eq(wetCheckFindings.wetCheckId, wetChecks.id))
-          .where(
-            and(
-              inArray(wetCheckFindings.id, findingIds as number[]),
-              companyId != null ? eq(wetChecks.companyId, companyId) : undefined,
-            ),
-          );
-
-        if (rows.length === 0) {
-          res.json({ routed: [], errors: [] });
-          return;
-        }
-
-        const unroutedRows = rows.filter(
-          (r) =>
-            r.billingSheetId == null &&
-            r.estimateId == null &&
-            r.workOrderId == null &&
-            r.wetCheckBillingId == null,
-        );
-
-        const routed: number[] = [];
-        const errs: { findingId: number; message: string }[] = [];
-
-        if (unroutedRows.length > 0) {
-          try {
-            const first = unroutedRows[0];
-            const targetCompanyId = first.wcCompanyId ?? companyId ?? 0;
-            const resolution =
-              typedAction === "new_work_order" ? "deferred_to_work_order" : "sent_to_estimate";
-
-            let fkId: number;
-
-            if (typedAction === "new_work_order") {
-              const woNumber = `WO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-              const [wo] = await db.insert(workOrders).values({
-                workOrderNumber: woNumber,
-                companyId: targetCompanyId,
-                customerId: first.wcCustomerId,
-                customerName: first.wcCustomerName,
-                customerEmail: "",
-                projectName: `Wet Check Findings — ${now.toLocaleDateString()}`,
-                workType: "direct_billing",
-                status: "pending",
-                priority: "medium",
-                assignedTechnicianId: first.wcTechnicianId ?? undefined,
-                assignedTechnicianName: first.wcTechnicianName ?? undefined,
-                description: "Created from Manager Workspace bulk findings route.",
-              } as typeof workOrders.$inferInsert).returning({ id: workOrders.id });
-              fkId = wo.id;
-            } else {
-              const est = await storage.createEstimate(
-                {
-                  customerName: first.wcCustomerName,
-                  customerId: first.wcCustomerId,
-                  status: "pending",
-                  internalStatus: "pending_approval",
-                  lifecycle: "draft",
-                  estimateDate: now,
-                  laborMode: "flat" as "flat",
-                  totalLaborHours: "0.00",
-                  laborRate: "45.00",
-                  totalLabor: "0.00",
-                  totalParts: "0.00",
-                  subtotal: "0.00",
-                  totalAmount: "0.00",
-                  companyId: targetCompanyId,
-                } as any,
-                [],
-              );
-              fkId = est.id;
-            }
-
-            await db.update(wetCheckFindings)
-              .set({
-                ...(typedAction === "new_work_order"
-                  ? { workOrderId: fkId }
-                  : { estimateId: fkId }),
-                resolution,
-                resolutionDecidedAt: now,
-                ...(userId != null ? { resolutionDecidedBy: userId } : {}),
-                convertedAt: now,
-              })
-              .where(inArray(wetCheckFindings.id, unroutedRows.map((r) => r.fId)));
-
-            for (const r of unroutedRows) routed.push(r.fId);
-          } catch (err: any) {
-            for (const r of unroutedRows) {
-              errs.push({ findingId: r.fId, message: String(err?.message ?? err) });
-            }
-          }
-        }
-
-        res.json({ routed, errors: errs });
-      } catch (err: any) {
-        res.status(500).json({ message: err.message ?? "Internal server error" });
+        res.json({ workOrders, billingSheets });
+      } catch (error) {
+        req.log?.error?.({ err: error }, "manager-workspace needs-approval failed");
+        res.status(500).json({ message: "Failed to load needs-approval list" });
       }
     },
   );
+
+  // -------------------------------------------------------------------
+  // POST /api/manager-workspace/findings/bulk-route
+  //
+  // REMOVED in Slice 1 (Manager Workspace Simplification).
+  // Returns 404 so any stale client references surface a clear error.
+  // -------------------------------------------------------------------
+  app.post(
+    "/api/manager-workspace/findings/bulk-route",
+    requireAuthentication,
+    (_req: any, res) => {
+      res.status(404).json({ message: "This endpoint has been removed. Use the wet-check review screen to route findings." });
+    },
+  );
+
 
   // -------------------------------------------------------------------
   // GET /api/manager-workspace/status-strip

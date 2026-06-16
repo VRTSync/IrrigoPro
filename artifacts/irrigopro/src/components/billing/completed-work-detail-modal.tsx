@@ -82,6 +82,7 @@ interface CompletedWorkDetailModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   showPricing?: boolean;
+  onApproveSuccess?: () => void;
 }
 
 const fmt = (date: string | Date | null | undefined) => {
@@ -438,6 +439,147 @@ function ModalFooter({ title, onClose }: { title: string; onClose: () => void })
   );
 }
 
+// ─── Approval Action Row ──────────────────────────────────────────────────────
+// Rendered when the modal is opened from the Manager Workspace.
+// Must be mounted inside <InlineEditProvider> to access InlineEditContext.
+function ApprovalActionRow({
+  type,
+  id,
+  isLocked,
+  onSuccess,
+}: {
+  type: "work_order" | "billing_sheet";
+  id: number;
+  isLocked: boolean;
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const { triggerSave } = useContext(InlineEditContext);
+  const [approving, setApproving] = useState(false);
+  const [showReturnInput, setShowReturnInput] = useState(false);
+  const [returnNotes, setReturnNotes] = useState("");
+  const [returning, setReturning] = useState(false);
+
+  const prefix = type === "billing_sheet" ? "/api/billing-sheets" : "/api/work-orders";
+
+  const doApprove = async () => {
+    setApproving(true);
+    try {
+      await apiRequest(`${prefix}/${id}/approve`, "POST", {});
+      toast({ title: "Approved", description: "Item approved and passed to billing." });
+      onSuccess();
+    } catch (err: any) {
+      toast({ title: "Approval failed", description: parseApiError(err, "Approval failed"), variant: "destructive" });
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const doSaveAndApprove = async () => {
+    setApproving(true);
+    try {
+      const saved = await triggerSave();
+      if (!saved) { setApproving(false); return; }
+      await apiRequest(`${prefix}/${id}/approve`, "POST", {});
+      toast({ title: "Saved & Approved", description: "Item saved and passed to billing." });
+      onSuccess();
+    } catch (err: any) {
+      toast({ title: "Save & Approve failed", description: parseApiError(err, "Save & Approve failed"), variant: "destructive" });
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const doReturn = async () => {
+    setReturning(true);
+    try {
+      await apiRequest(`${prefix}/${id}/return-for-correction`, "POST", { notes: returnNotes });
+      toast({ title: "Returned for correction", description: "Item returned to technician." });
+      onSuccess();
+    } catch (err: any) {
+      toast({ title: "Return failed", description: parseApiError(err, "Return failed"), variant: "destructive" });
+    } finally {
+      setReturning(false);
+    }
+  };
+
+  return (
+    <div className="flex-shrink-0 border-t border-amber-100 bg-amber-50 px-5 py-3 space-y-2" data-testid="approval-action-row">
+      {showReturnInput ? (
+        <div className="space-y-2">
+          <p className="text-xs text-gray-600 font-medium">Return notes (optional)</p>
+          <textarea
+            className="w-full rounded-md border border-gray-200 text-sm px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            rows={2}
+            value={returnNotes}
+            onChange={(e) => setReturnNotes(e.target.value)}
+            placeholder="Describe what needs to be corrected…"
+            data-testid="return-notes-input"
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={doReturn}
+              disabled={returning}
+              data-testid="confirm-return-button"
+            >
+              {returning && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+              Send back
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => { setShowReturnInput(false); setReturnNotes(""); }}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={async () => { await triggerSave(); }}
+            disabled={isLocked || approving}
+            data-testid="save-button"
+          >
+            <Save className="w-3.5 h-3.5 mr-1.5" />
+            Save
+          </Button>
+          <Button
+            size="sm"
+            className="bg-green-600 hover:bg-green-700 text-white"
+            onClick={doApprove}
+            disabled={isLocked || approving}
+            data-testid="approve-button"
+          >
+            {approving ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />}
+            Approve
+          </Button>
+          <Button
+            size="sm"
+            className="bg-blue-600 hover:bg-blue-700 text-white"
+            onClick={doSaveAndApprove}
+            disabled={isLocked || approving}
+            data-testid="save-and-approve-button"
+          >
+            {approving ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />}
+            Save & Approve
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-amber-700 border-amber-300 hover:bg-amber-100"
+            onClick={() => setShowReturnInput(true)}
+            disabled={isLocked || approving}
+            data-testid="return-for-correction-button"
+          >
+            Return for Correction
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function CompletedWorkDetailModal({
   type,
   id,
@@ -445,6 +587,7 @@ export function CompletedWorkDetailModal({
   open,
   onOpenChange,
   showPricing,
+  onApproveSuccess,
 }: CompletedWorkDetailModalProps) {
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -1639,6 +1782,16 @@ export function CompletedWorkDetailModal({
               </SectionCard>
             )}
           </div>
+
+          {/* Approval action row — only when opened from Manager Workspace */}
+          {onApproveSuccess && (
+            <ApprovalActionRow
+              type={type}
+              id={id}
+              isLocked={isBilledOrInvoiced}
+              onSuccess={() => { onOpenChange(false); onApproveSuccess!(); }}
+            />
+          )}
 
           {/* Footer */}
           <ModalFooter title={title} onClose={() => onOpenChange(false)} />
