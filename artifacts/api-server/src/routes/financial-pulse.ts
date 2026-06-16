@@ -378,6 +378,12 @@ async function computeUnbilledExposure(
   // billing_sheets that are in an unbilled status and have no invoice id.
   // EXCLUDE customers flagged hiddenFromBilling — parity with the
   // `/api/customers/billing-preview` rollup which filters the same way.
+  //
+  // NOTE (WC System Slice 1): wet_check_billings rows in "submitted" /
+  // "pending_manager_review" status are deliberately included in this KPI
+  // (via wcbRows below). Even though those snapshots are now labeled
+  // "Pending approval" in the UI, they still represent uncommitted pipeline
+  // value. Do NOT filter them out here — that would undercount exposure.
   const cidRows = companyId == null
     ? await db
         .select({ id: customers.id, hiddenFromBilling: customers.hiddenFromBilling })

@@ -33,6 +33,8 @@ export interface WetCheckRowProps {
   showCompanyCol: boolean;
   canAdminActions: boolean;
   bulkBlocked?: boolean;
+  snapshotChip?: React.ReactNode;
+  actionButton?: React.ReactNode;
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -77,6 +79,8 @@ export function WetCheckRow({
   showCompanyCol,
   canAdminActions,
   bulkBlocked = false,
+  snapshotChip,
+  actionButton,
 }: WetCheckRowProps) {
   const actions: ListRowAction[] = [
     {
@@ -130,6 +134,7 @@ export function WetCheckRow({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium truncate">{row.customerName}</span>
             <WetCheckStatusBadge status={row.status} />
+            {snapshotChip}
             <span className="text-xs text-gray-500">#{row.id}</span>
             {showCompanyCol && row.companyName && (
               <span
@@ -157,15 +162,17 @@ export function WetCheckRow({
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
-          <Link href={`/wet-checks/${row.id}/review`}>
-            <button
-              className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-medium"
-              data-testid={`button-wc-view-${row.id}`}
-            >
-              <Eye className="h-3 w-3" />
-              View
-            </button>
-          </Link>
+          {actionButton ?? (
+            <Link href={`/wet-checks/${row.id}/review`}>
+              <button
+                className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-medium"
+                data-testid={`button-wc-view-${row.id}`}
+              >
+                <Eye className="h-3 w-3" />
+                View
+              </button>
+            </Link>
+          )}
           <ListRowOverflowMenu
             actions={actions}
             triggerTestId={`overflow-menu-wc-${row.id}`}

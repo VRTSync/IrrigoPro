@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, Droplets, Trash2, Search } from "lucide-react";
@@ -197,7 +197,95 @@ function WcEmptyStatePicker({ onPick }: { onPick: (customerId: number) => void }
   );
 }
 
-export default function WetChecksListPage() {
+export type WcbMapEntry = {
+  status: string;
+  totalAmount: string;
+  billingId: number;
+  invoiceId: number | null;
+};
+
+function SnapshotStatusChip({ status }: { status: string }) {
+  if (status === "approved_passed_to_billing") {
+    return (
+      <span
+        className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 border border-emerald-300"
+        data-testid="snapshot-chip-approved"
+      >
+        Approved
+      </span>
+    );
+  }
+  if (status === "billed") {
+    return (
+      <span
+        className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 border border-blue-300"
+        data-testid="snapshot-chip-billed"
+      >
+        Billed
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 border border-amber-300"
+      data-testid="snapshot-chip-pending"
+    >
+      Pending approval
+    </span>
+  );
+}
+
+function buildSnapshotActionButton(
+  wetCheckId: number,
+  wcbEntry: WcbMapEntry,
+  navigate: (to: string) => void,
+): ReactNode {
+  const isLocked = wcbEntry.status === "billed" || wcbEntry.invoiceId != null;
+  const isApproved = wcbEntry.status === "approved_passed_to_billing";
+
+  if (isLocked) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-gray-200 bg-gray-50 text-gray-400 font-medium cursor-default select-none">
+        View (locked)
+      </span>
+    );
+  }
+
+  if (isApproved) {
+    return (
+      <button
+        className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-medium"
+        onClick={(e) => {
+          e.preventDefault();
+          navigate(`/wet-checks/${wetCheckId}/review`);
+        }}
+        data-testid={`button-wc-view-edit-${wetCheckId}`}
+      >
+        View / Edit
+      </button>
+    );
+  }
+
+  return (
+    <button
+      className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-cyan-300 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 font-medium"
+      onClick={(e) => {
+        e.preventDefault();
+        navigate(`/wet-checks/${wetCheckId}/review`);
+      }}
+      data-testid={`button-wc-review-${wetCheckId}`}
+    >
+      Review
+    </button>
+  );
+}
+
+interface WetChecksListPageProps {
+  asTab?: boolean;
+  wcbStatusMap?: Map<number, WcbMapEntry>;
+}
+
+export default function WetChecksListPage({ asTab, wcbStatusMap }: WetChecksListPageProps = {}) {
   const { toast } = useToast();
   const [, navigate] = useLocation();
   const me = useMemo(() => getCurrentUser(), []);
@@ -431,14 +519,16 @@ export default function WetChecksListPage() {
   const isEmptyNoFilters = !isLoading && !isError && rows.length === 0 && !filtersActive;
   const isEmptyWithFilters = !isLoading && !isError && filtered.length === 0 && filtersActive;
 
-  return (
-    <div className="max-w-6xl mx-auto py-6 space-y-4 px-4" data-testid="page-wet-checks-list">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-2">
-          <Droplets className="h-6 w-6 text-blue-600" />
-          <h1 className="text-2xl font-semibold">Wet Checks</h1>
+  const content = (
+    <div className={asTab ? "space-y-4" : "max-w-6xl mx-auto py-6 space-y-4 px-4"} data-testid="page-wet-checks-list">
+      {!asTab && (
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Droplets className="h-6 w-6 text-blue-600" />
+            <h1 className="text-2xl font-semibold">Wet Checks</h1>
+          </div>
         </div>
-      </div>
+      )}
 
       <DismissibleHelp guideId="wc-list-first-time">
         Use the filters below to find wet checks. For irrigation managers: submitted wet
@@ -566,29 +656,38 @@ export default function WetChecksListPage() {
               <span>Company</span>
             </div>
           )}
-          {filtered.map((row) => (
-            <WetCheckRow
-              key={row.id}
-              row={row}
-              canSelect={bulkEnabled}
-              selected={selectedIds.has(row.id)}
-              onToggleSelect={() => toggleSelect(row.id)}
-              onDelete={() => {
-                setConflictMessage(null);
-                setConflictBlockers([]);
-                setPendingDelete(row);
-              }}
-              onReassign={() => {
-                toast({
-                  title: "Reassign technician",
-                  description: "Select a technician from the wet check detail page.",
-                });
-              }}
-              showCompanyCol={companyColVisible}
-              canAdminActions={adminActionsEnabled}
-              bulkBlocked={bulkBlockedIds.has(row.id)}
-            />
-          ))}
+          {filtered.map((row) => {
+            const wcbEntry = wcbStatusMap?.get(row.id);
+            const snapshotChip = wcbEntry ? (
+              <SnapshotStatusChip status={wcbEntry.status} />
+            ) : undefined;
+            const actionButton = wcbEntry ? buildSnapshotActionButton(row.id, wcbEntry, navigate) : undefined;
+            return (
+              <WetCheckRow
+                key={row.id}
+                row={row}
+                canSelect={bulkEnabled}
+                selected={selectedIds.has(row.id)}
+                onToggleSelect={() => toggleSelect(row.id)}
+                onDelete={() => {
+                  setConflictMessage(null);
+                  setConflictBlockers([]);
+                  setPendingDelete(row);
+                }}
+                onReassign={() => {
+                  toast({
+                    title: "Reassign technician",
+                    description: "Select a technician from the wet check detail page.",
+                  });
+                }}
+                showCompanyCol={companyColVisible}
+                canAdminActions={adminActionsEnabled}
+                bulkBlocked={bulkBlockedIds.has(row.id)}
+                snapshotChip={snapshotChip}
+                actionButton={actionButton}
+              />
+            );
+          })}
         </div>
       )}
 
@@ -693,4 +792,5 @@ export default function WetChecksListPage() {
       </AlertDialog>
     </div>
   );
+  return content;
 }

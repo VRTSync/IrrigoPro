@@ -29,14 +29,25 @@ function RedirectToWetChecks() {
   useEffect(() => { navigate("/wet-checks", { replace: true }); }, [navigate]);
   return null;
 }
+
+function RedirectToWetChecksNeedsReview() {
+  const [, navigate] = useLocation();
+  useEffect(() => { navigate("/wet-checks?tab=needs-review", { replace: true }); }, [navigate]);
+  return null;
+}
+
+function RedirectToWetChecksApproved() {
+  const [, navigate] = useLocation();
+  useEffect(() => { navigate("/wet-checks?tab=approved", { replace: true }); }, [navigate]);
+  return null;
+}
 import FinancialPulsePage from "@/pages/financial-pulse";
 import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
 import WorkOrders from "@/pages/work-orders";
-import WetChecksListPage from "@/pages/wet-checks";
+import WetCheckSystemPage from "@/pages/wet-checks/WetCheckSystemPage";
 import WetChecksRoutingPage from "@/pages/wet-checks/WetChecksPage";
 import NewWetCheckPage from "@/pages/wet-checks/NewWetCheckPage";
-import WetCheckBillingsPage from "@/pages/wet-check-billings";
 import WetCheckReviewPage from "@/pages/wet-check-review";
 const WetCheckConfirm = lazy(() => import("@/components/manager/wet-check-confirm").then((m) => ({ default: m.WetCheckConfirm })));
 const WetCheckDone = lazy(() => import("@/components/manager/wet-check-done").then((m) => ({ default: m.WetCheckDone })));
@@ -184,7 +195,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
           <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
           <Route path="/billing-sheets" component={BillingSheets} />
-          <Route path="/wet-check-billings" component={WetCheckBillingsPage} />
+          <Route path="/wet-check-billings" component={RedirectToWetChecksApproved} />
           <Route path="/manager/wet-checks" component={RedirectToWetChecks} />
           <Route path="/manager/wet-checks/:id/confirm">
             {(params) => <Suspense fallback={null}><WetCheckConfirm id={parseInt(params.id)} /></Suspense>}
@@ -192,13 +203,13 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/manager/wet-checks/:id/done">
             {(params) => <Suspense fallback={null}><WetCheckDone id={parseInt(params.id)} returnTo="/wet-checks/pending-review" /></Suspense>}
           </Route>
-          <Route path="/manager/wet-checks/:id" component={WetCheckReviewPage} />
+          <Route path="/manager/wet-checks/:id" component={RedirectToWetChecksNeedsReview} />
           <Route path="/wet-checks/admin" component={RedirectToWetChecks} />
           <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
           <Route path="/admin/client-errors" component={AdminClientErrorsPage} />
-          <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
+          <Route path="/wet-checks/pending-review" component={RedirectToWetChecksNeedsReview} />
           <Route path="/wet-checks/:id/review" component={ManagerWetCheckDetailPage} />
-          <Route path="/wet-checks" component={WetChecksListPage} />
+          <Route path="/wet-checks" component={WetCheckSystemPage} />
           <Route path="/wet-checks/c/:customerId/new" component={NewWetCheckPage} />
           <Route path="/wet-checks/c/:clientId" component={WetChecksRoutingPage} />
           <Route path="/wet-checks/:id/summary" component={WetCheckInspectionSummaryPage} />
