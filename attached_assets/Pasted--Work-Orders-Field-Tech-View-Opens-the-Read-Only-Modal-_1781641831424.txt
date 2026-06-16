@@ -1,0 +1,43 @@
+# Work Orders — Field Tech "View" Opens the Read-Only Modal (Can't Start/Complete)
+
+**What & Why**
+When a manager assigns/reassigns a work order to a field tech, the tech sees it in their list but can only **View** it — there's no way to start or complete the work. The detail that opens is a **read-only bill summary** ($0 totals, photos, notes, just a "Close" button).
+
+**Root cause — not assignment, a wrong-modal routing bug (`artifacts/irrigopro/src/pages/work-orders.tsx`):**
+- The field-tech card's **"View"** button calls `setSelectedWorkOrder(workOrder)` (~lines 1111, 1138).
+- `selectedWorkOrder` renders **`CompletedWorkDetailModal`** (~line 1353) — the **read-only** "completed work" view. It has no Start/Complete action.
+- The **actionable** component, **`WorkOrderDetails`** — which contains the **"Start Work Order"** button and the completion flow — is rendered by a *different* state, **`selectedWorkOrderForStart`** (~line 1365), that the field-tech card **never sets**.
+
+So regardless of status, a field tech's "View" opens the read-only modal. The "Start Work Order" button itself has **no** role/assignment restriction — it shows for any `pending`/`assigned`, non-billed WO (`work-order-details.tsx:1429`) — the tech is just never routed to the component that renders it.
+
+Confirmed: the reassign is correct (the WO is in the tech's id-filtered list, so `assignedTechnicianId` already matches them). The only bug is which modal "View" opens.
+
+Single frontend slice. No backend/schema change.
+
+---
+
+## Done looks like
+- A field tech opening an **assigned/pending/in-progress** work order gets the **actionable** detail with the **"Start Work Order"** button and the completion flow — they can start and complete the work.
+- A field tech opening a **completed/billed** work order still gets the read-only `CompletedWorkDetailModal` ("View Completed").
+- Managers/admins are unaffected.
+
+## Steps
+1. **Route the field-tech "View" by status.** In `work-orders.tsx`, where the field-tech card's View button fires (`setSelectedWorkOrder(workOrder)`, ~1111 and the equivalent ~1138), branch on status:
+   - **Completed/terminal** (`status ∈ {work_completed, approved_passed_to_billing, billed}` or `invoiceId != null`): keep `setSelectedWorkOrder(workOrder)` → `CompletedWorkDetailModal` (read-only). The button already labels this "View Completed."
+   - **Otherwise** (`pending` / `assigned` / `in_progress`): `setSelectedWorkOrderForStart(workOrder)` → `WorkOrderDetails`, which renders the "Start Work Order" button and completion flow. Label the button "View" (or "Start") as today.
+2. **Verify the `WorkOrderDetails` render** at ~line 1365 passes the handlers it needs (`onStartWork` / completion) so the field tech can complete end-to-end. `WorkOrderDetails` falls back to its internal `setShowCompletionForm(true)` if `onStartWork` isn't provided, so completion works either way — just confirm it opens `WorkOrderCompletion`.
+3. **Clean up the dead actionability fallback.** The field-tech card gates its View button on `assignedTechnicianId === currentUser.id` **OR** `assignedTechnicianName === currentUser.name` (~line 1106). Since the server already returns *only* the tech's own WOs (id-filtered), the name fallback is dead and inconsistent with every other id-only check — simplify to id-only to avoid future confusion.
+
+## Tests
+- As a field tech, opening an `assigned`/`pending` WO shows the "Start Work Order" button; starting it moves to `in_progress` and the completion form opens; completing it succeeds.
+- Opening a `work_completed`/`billed` WO shows the read-only `CompletedWorkDetailModal` (no Start button).
+- Manager/admin views unchanged.
+
+## Out of scope
+- The reassign/assignment path (already correct).
+- Backend completion endpoints (`/api/work-orders/complete`, the field-tech PATCH guard) — they already allow the assigned tech.
+- The work order status model.
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/work-orders.tsx` (field-tech View button ~1106–1138; `selectedWorkOrder` → `CompletedWorkDetailModal` ~1353; `selectedWorkOrderForStart` → `WorkOrderDetails` ~1365)
+- `artifacts/irrigopro/src/components/work-orders/work-order-details.tsx` (`Start Work Order` button ~1429 — reference, no change needed)
