@@ -21,6 +21,8 @@ import {
   scopedWetCheckBillings,
   loadQbSyncStatus,
   ACTIVE_WCB,
+  ACTIVE_WO,
+  ACTIVE_BS,
   APPROVED_WCB,
   APPROVED_BS,
   APPROVED_WO,
@@ -161,51 +163,29 @@ async function scopedWetChecks(req: any): Promise<any[]> {
 async function scopedWorkOrdersForManager(req: any): Promise<any[]> {
   if (_workOrderOverride) return _workOrderOverride();
   const role = req.authenticatedUserRole;
-  const cid0: number | null = req.authenticatedUserCompanyId ?? null;
-  const all = await storage.getWorkOrders(role === "super_admin" ? null : cid0);
-  if (role === "super_admin") return all as any[];
   const cid: number | null = req.authenticatedUserCompanyId ?? null;
+  const all = await storage.getWorkOrders(role === "super_admin" ? null : cid);
+  if (role === "super_admin") return all as any[];
   if (cid == null) return [];
-  const cache = new Map<number, number | null>();
-  const techCid = async (id: number | null | undefined) => {
-    if (!id) return null;
-    if (cache.has(id)) return cache.get(id) ?? null;
-    const u = await storage.getUser(id);
-    const c = u?.companyId ?? null;
-    cache.set(id, c);
-    return c;
-  };
-  const out: any[] = [];
-  for (const w of all as any[]) {
-    const c = await techCid(w.assignedTechnicianId);
-    if (c === cid) out.push(w);
-  }
-  return out;
+  // storage.getWorkOrders(cid) already scopes by company — return directly.
+  // A previous version re-filtered by resolving each row's assignedTechnicianId
+  // to a company, which silently dropped unassigned work orders (null tech → null
+  // company → never equal to cid). The storage layer is the correct scoping boundary.
+  return all as any[];
 }
 
 async function scopedBillingSheets(req: any): Promise<any[]> {
   if (_billingSheetOverride) return _billingSheetOverride();
   const role = req.authenticatedUserRole;
-  const cid0: number | null = req.authenticatedUserCompanyId ?? null;
-  const all = await storage.getAllBillingSheets(role === "super_admin" ? null : cid0);
-  if (role === "super_admin") return all as any[];
   const cid: number | null = req.authenticatedUserCompanyId ?? null;
+  const all = await storage.getAllBillingSheets(role === "super_admin" ? null : cid);
+  if (role === "super_admin") return all as any[];
   if (cid == null) return [];
-  const cache = new Map<number, number | null>();
-  const techCid = async (id: number | null | undefined) => {
-    if (!id) return null;
-    if (cache.has(id)) return cache.get(id) ?? null;
-    const u = await storage.getUser(id);
-    const c = u?.companyId ?? null;
-    cache.set(id, c);
-    return c;
-  };
-  const out: any[] = [];
-  for (const s of all as any[]) {
-    const c = await techCid(s.technicianId);
-    if (c === cid) out.push(s);
-  }
-  return out;
+  // storage.getAllBillingSheets(cid) already scopes by company — return directly.
+  // A previous version re-filtered by resolving each row's technicianId to a
+  // company, which silently dropped unassigned billing sheets (null tech → null
+  // company → never equal to cid). The storage layer is the correct scoping boundary.
+  return all as any[];
 }
 
 async function scopedWcb(req: any): Promise<any[]> {
@@ -845,8 +825,10 @@ export function registerManagerWorkspaceRoutes(
   //
   // Both arrays are sorted oldest-first (createdAt asc).
   // -------------------------------------------------------------------
-  const NEEDS_APPROVAL_WO = new Set(["pending_manager_review", "work_completed"]);
-  const NEEDS_APPROVAL_BS = new Set(["pending_manager_review", "submitted"]);
+  // ACTIVE_WO and ACTIVE_BS are imported from billing-workspace-routes.ts.
+  // Using the canonical constants (rather than local copies) ensures the
+  // needs-approval list stays in sync with the billing workspace queue,
+  // including the "completed" status that was previously missing.
 
   app.get(
     "/api/manager-workspace/needs-approval",
@@ -864,7 +846,7 @@ export function registerManagerWorkspaceRoutes(
         ]);
 
         const workOrders = wos
-          .filter((w: any) => NEEDS_APPROVAL_WO.has(w.status) && !w.invoiceId)
+          .filter((w: any) => ACTIVE_WO.has(w.status) && !w.invoiceId)
           .sort((a: any, b: any) => {
             const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
             const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -872,7 +854,7 @@ export function registerManagerWorkspaceRoutes(
           });
 
         const billingSheets = bss
-          .filter((s: any) => NEEDS_APPROVAL_BS.has(s.status) && !s.invoiceId)
+          .filter((s: any) => ACTIVE_BS.has(s.status) && !s.invoiceId)
           .sort((a: any, b: any) => {
             const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
             const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
