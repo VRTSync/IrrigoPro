@@ -205,12 +205,8 @@ function ReassignModal({ row, onClose, onSuccess }: ReassignModalProps) {
       if (selectedBranch && selectedBranch !== "__none__") {
         body.branchName = selectedBranch;
       }
-      const res = await apiRequest("POST", `/api/wet-checks/${row.wetCheckId}/reassign-customer`, body);
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error((err as any).message ?? "Reassignment failed");
-      }
-      return res.json() as Promise<ReassignResult>;
+      const result = await apiRequest(`/api/wet-checks/${row.wetCheckId}/reassign-customer`, "POST", body);
+      return result as ReassignResult;
     },
     onSuccess: (result) => {
       setLastResult(result);
@@ -404,9 +400,7 @@ export default function WetCheckReconciliationPage() {
     queryKey,
     queryFn: async () => {
       const params = new URLSearchParams({ from, to });
-      const res = await apiRequest("GET", `/api/admin/wet-check-reconciliation?${params}`);
-      if (!res.ok) throw new Error("Failed to load reconciliation data");
-      return res.json();
+      return apiRequest(`/api/admin/wet-check-reconciliation?${params}`, "GET");
     },
   });
 
