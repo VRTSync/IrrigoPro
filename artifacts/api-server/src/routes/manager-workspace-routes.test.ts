@@ -564,5 +564,295 @@ describe("manager-workspace routes", () => {
 
       _resetManagerWorkspaceOverridesForTests();
     });
+
+    // Suppression invariant — locked permanently (anti-regression for Task #1250).
+    // These two cases pin the exact contract: suppression is driven by invoiceId
+    // presence, never by status string alone.
+
+    it("[suppression invariant] needs_review WO WITH invoiceId is NOT in needs_review", async () => {
+      _setWorkOrdersForTests(async () => [
+        {
+          id: 901, workOrderNumber: "WO-INV", assignedTechnicianId: 100,
+          customerId: 10, customerName: "Acme",
+          status: "pending_manager_review",
+          invoiceId: 42,          // billed — must suppress
+          totalAmount: "300.00", photos: [],
+          createdAt: iso(2 * 86400_000), updatedAt: iso(1 * 86400_000),
+          billedAt: iso(1 * 86400_000),
+        },
+      ]);
+      _setWetChecksForTests(async () => []);
+      _setFindingsForTests(async () => []);
+      _setBilingSheetsForTests(async () => []);
+      _setWcbForTests(async () => []);
+
+      role = "super_admin"; companyId = null;
+      const r = await fetch(`${base}/api/manager-workspace/queue?type=wo`);
+      const body = (await r.json()) as any;
+      const needsReview = body.items.filter((x: any) => x.stage === "needs_review");
+      assert.equal(needsReview.length, 0, "WO with invoiceId must not appear in needs_review");
+      _resetManagerWorkspaceOverridesForTests();
+    });
+
+    it("[suppression invariant] needs_review WO WITHOUT invoiceId IS in needs_review", async () => {
+      _setWorkOrdersForTests(async () => [
+        {
+          id: 902, workOrderNumber: "WO-UNBILLED", assignedTechnicianId: 100,
+          customerId: 10, customerName: "Acme",
+          status: "pending_manager_review",
+          invoiceId: null,        // no invoice — must be visible
+          totalAmount: "300.00", photos: [],
+          createdAt: iso(2 * 86400_000), updatedAt: iso(1 * 86400_000),
+        },
+      ]);
+      _setWetChecksForTests(async () => []);
+      _setFindingsForTests(async () => []);
+      _setBilingSheetsForTests(async () => []);
+      _setWcbForTests(async () => []);
+
+      role = "super_admin"; companyId = null;
+      const r = await fetch(`${base}/api/manager-workspace/queue?type=wo`);
+      const body = (await r.json()) as any;
+      const needsReview = body.items.filter((x: any) => x.stage === "needs_review");
+      assert.equal(needsReview.length, 1, "WO without invoiceId must appear in needs_review");
+      _resetManagerWorkspaceOverridesForTests();
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Anti-leakage flags (Task #1257 — Slice 3)
+  // -------------------------------------------------------------------
+
+  describe("anti-leakage flags", () => {
+    it("approved_passed_to_billing WO, 10 days old, no invoiceId → aging_unbilled flag", async () => {
+      _setWorkOrdersForTests(async () => [
+        {
+          id: 1001, workOrderNumber: "WO-AGING", assignedTechnicianId: 100,
+          customerId: 10, customerName: "Acme",
+          status: "approved_passed_to_billing",
+          invoiceId: null,
+          totalAmount: "400.00", photos: ["p.jpg"],
+          createdAt: iso(10 * 86400_000), updatedAt: iso(10 * 86400_000),
+        },
+      ]);
+      _setWetChecksForTests(async () => []);
+      _setFindingsForTests(async () => []);
+      _setBilingSheetsForTests(async () => []);
+      _setWcbForTests(async () => []);
+
+      role = "super_admin"; companyId = null;
+      const r = await fetch(`${base}/api/manager-workspace/queue?type=wo`);
+      const body = (await r.json()) as any;
+      const item = body.items.find((x: any) => x.refId === 1001);
+      assert.ok(item, "WO-AGING should be in the queue");
+      assert.ok(item.flags.includes("aging_unbilled"), "10-day-old unbilled WO must have aging_unbilled flag");
+      assert.equal(item.stage, "passed_to_billing");
+      _resetManagerWorkspaceOverridesForTests();
+    });
+
+    it("approved_passed_to_billing WO, 2 days old, no invoiceId → no aging_unbilled flag", async () => {
+      _setWorkOrdersForTests(async () => [
+        {
+          id: 1002, workOrderNumber: "WO-FRESH", assignedTechnicianId: 100,
+          customerId: 10, customerName: "Acme",
+          status: "approved_passed_to_billing",
+          invoiceId: null,
+          totalAmount: "200.00", photos: ["p.jpg"],
+          createdAt: iso(2 * 86400_000), updatedAt: iso(2 * 86400_000),
+        },
+      ]);
+      _setWetChecksForTests(async () => []);
+      _setFindingsForTests(async () => []);
+      _setBilingSheetsForTests(async () => []);
+      _setWcbForTests(async () => []);
+
+      role = "super_admin"; companyId = null;
+      const r = await fetch(`${base}/api/manager-workspace/queue?type=wo`);
+      const body = (await r.json()) as any;
+      const item = body.items.find((x: any) => x.refId === 1002);
+      assert.ok(item, "WO-FRESH should be in the queue");
+      assert.ok(!item.flags.includes("aging_unbilled"), "2-day-old WO must NOT have aging_unbilled flag");
+      _resetManagerWorkspaceOverridesForTests();
+    });
+
+    it("pending finding, no routing target, 10 days old → orphaned_finding flag", async () => {
+      _setWorkOrdersForTests(async () => []);
+      _setWetChecksForTests(async () => []);
+      _setBilingSheetsForTests(async () => []);
+      _setWcbForTests(async () => []);
+      _setFindingsForTests(async () => [
+        {
+          id: 200, wetCheckId: 50, issueType: "leak", issueGroup: "zone",
+          resolution: "pending",
+          billingSheetId: null, estimateId: null, workOrderId: null, wetCheckBillingId: null,
+          customerId: 10, customerName: "Acme",
+          technicianId: 100, technicianName: "Tech A",
+          wcCompanyId: 1, wcStatus: "submitted",
+          partPrice: "30.00", quantity: 1,
+          createdAt: iso(10 * 86400_000),
+        },
+      ]);
+
+      role = "super_admin"; companyId = null;
+      const r = await fetch(`${base}/api/manager-workspace/queue?type=finding`);
+      const body = (await r.json()) as any;
+      const item = body.items.find((x: any) => x.refId === 200);
+      assert.ok(item, "orphaned finding should appear in the queue");
+      assert.ok(item.flags.includes("orphaned_finding"), "10-day-old unrouted pending finding must have orphaned_finding flag");
+      _resetManagerWorkspaceOverridesForTests();
+    });
+
+    it("pending finding, no routing target, 2 days old → no orphaned_finding flag", async () => {
+      _setWorkOrdersForTests(async () => []);
+      _setWetChecksForTests(async () => []);
+      _setBilingSheetsForTests(async () => []);
+      _setWcbForTests(async () => []);
+      _setFindingsForTests(async () => [
+        {
+          id: 201, wetCheckId: 50, issueType: "leak", issueGroup: "zone",
+          resolution: "pending",
+          billingSheetId: null, estimateId: null, workOrderId: null, wetCheckBillingId: null,
+          customerId: 10, customerName: "Acme",
+          technicianId: 100, technicianName: "Tech A",
+          wcCompanyId: 1, wcStatus: "submitted",
+          partPrice: "30.00", quantity: 1,
+          createdAt: iso(2 * 86400_000),
+        },
+      ]);
+
+      role = "super_admin"; companyId = null;
+      const r = await fetch(`${base}/api/manager-workspace/queue?type=finding`);
+      const body = (await r.json()) as any;
+      const item = body.items.find((x: any) => x.refId === 201);
+      assert.ok(item, "finding 201 should appear");
+      assert.ok(!item.flags.includes("orphaned_finding"), "2-day-old finding must NOT have orphaned_finding");
+      _resetManagerWorkspaceOverridesForTests();
+    });
+
+    it("needs_review WO, 10 days old → cold_review flag", async () => {
+      _setWorkOrdersForTests(async () => [
+        {
+          id: 1003, workOrderNumber: "WO-COLD", assignedTechnicianId: 100,
+          customerId: 10, customerName: "Acme",
+          status: "pending_manager_review",
+          invoiceId: null,
+          totalAmount: "100.00", photos: [],
+          createdAt: iso(10 * 86400_000), updatedAt: iso(10 * 86400_000),
+        },
+      ]);
+      _setWetChecksForTests(async () => []);
+      _setFindingsForTests(async () => []);
+      _setBilingSheetsForTests(async () => []);
+      _setWcbForTests(async () => []);
+
+      role = "super_admin"; companyId = null;
+      const r = await fetch(`${base}/api/manager-workspace/queue?type=wo`);
+      const body = (await r.json()) as any;
+      const item = body.items.find((x: any) => x.refId === 1003);
+      assert.ok(item, "WO-COLD should appear");
+      assert.equal(item.stage, "needs_review");
+      assert.ok(item.flags.includes("cold_review"), "10-day-old needs_review WO must have cold_review flag");
+      _resetManagerWorkspaceOverridesForTests();
+    });
+
+    it("partially_converted wet check always appears in queue with partially_converted flag", async () => {
+      _setWetChecksForTests(async () => [
+        {
+          id: 70, companyId: 1, customerId: 10, customerName: "Acme",
+          technicianId: 100, technicianName: "Tech A",
+          status: "partially_converted",
+          createdAt: iso(3 * 86400_000), updatedAt: iso(3 * 86400_000),
+          approvedAt: null,
+        },
+      ]);
+      _setWorkOrdersForTests(async () => []);
+      _setFindingsForTests(async () => []);
+      _setBilingSheetsForTests(async () => []);
+      _setWcbForTests(async () => []);
+      _setInvoicedBsWcIdsForTests(async () => new Set());
+
+      role = "super_admin"; companyId = null;
+      const r = await fetch(`${base}/api/manager-workspace/queue?type=wc`);
+      const body = (await r.json()) as any;
+      const item = body.items.find((x: any) => x.refId === 70);
+      assert.ok(item, "partially_converted wet check must appear in the queue");
+      assert.ok(item.flags.includes("partially_converted"), "must carry partially_converted flag");
+      _resetManagerWorkspaceOverridesForTests();
+    });
+
+    it("attentionCount in status-strip equals count of flagged items", async () => {
+      // One aging_unbilled WO (10 days, approved_passed_to_billing, no invoice)
+      // One cold_review WO (10 days, needs_review, no invoice) — combined total = 2
+      _setWorkOrdersForTests(async () => [
+        {
+          id: 2001, workOrderNumber: "WO-A", assignedTechnicianId: 100,
+          customerId: 10, customerName: "Acme",
+          status: "approved_passed_to_billing",
+          invoiceId: null,
+          totalAmount: "100.00", photos: [],
+          createdAt: iso(10 * 86400_000), updatedAt: iso(10 * 86400_000),
+        },
+        {
+          id: 2002, workOrderNumber: "WO-B", assignedTechnicianId: 100,
+          customerId: 10, customerName: "Acme",
+          status: "pending_manager_review",
+          invoiceId: null,
+          totalAmount: "50.00", photos: [],
+          createdAt: iso(10 * 86400_000), updatedAt: iso(10 * 86400_000),
+        },
+      ]);
+      _setWetChecksForTests(async () => []);
+      _setFindingsForTests(async () => []);
+      _setBilingSheetsForTests(async () => []);
+      _setWcbForTests(async () => []);
+
+      role = "super_admin"; companyId = null;
+      const r = await fetch(`${base}/api/manager-workspace/status-strip`);
+      assert.equal(r.status, 200);
+      const body = (await r.json()) as any;
+      assert.ok("attentionCount" in body, "status-strip must include attentionCount");
+      assert.equal(body.attentionCount, 2, "attentionCount must equal count of flagged items (aging_unbilled + cold_review)");
+      _resetManagerWorkspaceOverridesForTests();
+    });
+
+    it("invoiced wet check is NOT counted in attentionCount even if old", async () => {
+      // wc.id=80 is 10 days old and active but its WCB is invoiced —
+      // the queue suppresses it and attentionCount must too.
+      _setWetChecksForTests(async () => [
+        {
+          id: 80, companyId: 1, customerId: 10, customerName: "Acme",
+          technicianId: 100, technicianName: "Tech A",
+          status: "submitted",
+          createdAt: iso(10 * 86400_000), updatedAt: iso(10 * 86400_000),
+          approvedAt: null,
+        },
+      ]);
+      _setWorkOrdersForTests(async () => []);
+      _setFindingsForTests(async () => []);
+      _setBilingSheetsForTests(async () => []);
+      _setInvoicedBsWcIdsForTests(async () => new Set());
+      _setWcbForTests(async () => [
+        {
+          id: 500, billingNumber: "WCB-500", technicianId: 100,
+          customerId: 10, customerName: "Acme",
+          status: "billed",
+          invoiceId: 99,    // invoiced — WC should be suppressed
+          wetCheckId: 80,
+          totalAmount: "200.00",
+          createdAt: iso(2 * 86400_000), updatedAt: iso(1 * 86400_000),
+        },
+      ]);
+
+      role = "super_admin"; companyId = null;
+      const r = await fetch(`${base}/api/manager-workspace/status-strip`);
+      assert.equal(r.status, 200);
+      const body = (await r.json()) as any;
+      assert.equal(
+        body.attentionCount,
+        0,
+        "invoiced wet check must NOT count toward attentionCount",
+      );
+      _resetManagerWorkspaceOverridesForTests();
+    });
   });
 });

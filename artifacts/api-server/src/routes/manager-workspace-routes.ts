@@ -45,8 +45,15 @@ function isManagerAllowed(req: any): boolean {
   return MW_ROLES.has(String(req.authenticatedUserRole || ""));
 }
 
+// Days after which an unbilled or unrouted item is considered hanging.
+// All aging checks in this file reference this constant — change it here to
+// adjust the threshold globally.
+const HANGING_THRESHOLD_DAYS = 7;
+
 // Statuses considered "active" for wet checks awaiting manager review.
-const ACTIVE_WC = new Set(["submitted", "pending_manager_review"]);
+// partially_converted is included so those wet checks are never silently
+// dropped from the queue — they still need a follow-up action.
+const ACTIVE_WC = new Set(["submitted", "pending_manager_review", "partially_converted"]);
 // Work-order statuses manager must act on (needs_review).
 const ACTIVE_WO_FOR_MANAGER = new Set(["pending_manager_review", "work_completed"]);
 // Work-order statuses that appear in the merged queue.
@@ -501,7 +508,9 @@ export function registerManagerWorkspaceRoutes(
               : null;
             const age = ageDays(created);
             const flags: string[] = [];
-            if (age != null && age > 7) flags.push("stale");
+            if (age != null && age > HANGING_THRESHOLD_DAYS) flags.push("stale");
+            if (wc.status === "partially_converted") flags.push("partially_converted");
+            if (age != null && age > HANGING_THRESHOLD_DAYS) flags.push("cold_review");
             items.push({
               id: `wc-${wc.id}`,
               type: "wet_check",
@@ -534,7 +543,7 @@ export function registerManagerWorkspaceRoutes(
             const age = ageDays(created);
             const flags: string[] = [];
             if (photos.length === 0) flags.push("missing_photos");
-            if (age != null && age > 7) flags.push("stale");
+            if (age != null && age > HANGING_THRESHOLD_DAYS) flags.push("stale");
 
             const rfcAt: string | null = w.returnedForCorrectionAt
               ? new Date(w.returnedForCorrectionAt).toISOString()
@@ -573,6 +582,12 @@ export function registerManagerWorkspaceRoutes(
 
             if (rfcAt) flags.push("kicked_back");
             if (billedWithoutReview && !isBillingManager) flags.push("no_manager_review");
+            if (stage === "passed_to_billing" && age != null && age > HANGING_THRESHOLD_DAYS) {
+              flags.push("aging_unbilled");
+            }
+            if (stage === "needs_review" && age != null && age > HANGING_THRESHOLD_DAYS) {
+              flags.push("cold_review");
+            }
 
             items.push({
               id: `wo-${w.id}`,
@@ -607,7 +622,14 @@ export function registerManagerWorkspaceRoutes(
               : null;
             const age = ageDays(created);
             const flags: string[] = [];
-            if (age != null && age > 7) flags.push("stale");
+            if (age != null && age > HANGING_THRESHOLD_DAYS) flags.push("stale");
+            if (
+              f.resolution === "pending" &&
+              age != null &&
+              age > HANGING_THRESHOLD_DAYS
+            ) {
+              flags.push("orphaned_finding");
+            }
             const total = numOr0(f.partPrice) * numOr0(f.quantity);
             items.push({
               id: `finding-${f.id}`,
@@ -640,7 +662,7 @@ export function registerManagerWorkspaceRoutes(
             if (photos.length === 0) flags.push("missing_photos");
             const created = s.createdAt ? new Date(s.createdAt).toISOString() : null;
             const age = ageDays(created);
-            if (age != null && age > 7) flags.push("stale");
+            if (age != null && age > HANGING_THRESHOLD_DAYS) flags.push("stale");
 
             const rfcAt: string | null = s.returnedForCorrectionAt
               ? new Date(s.returnedForCorrectionAt).toISOString()
@@ -682,6 +704,12 @@ export function registerManagerWorkspaceRoutes(
 
             if (rfcAt) flags.push("kicked_back");
             if (billedWithoutReview && !isBillingManager) flags.push("no_manager_review");
+            if (stage === "passed_to_billing" && age != null && age > HANGING_THRESHOLD_DAYS) {
+              flags.push("aging_unbilled");
+            }
+            if (stage === "needs_review" && age != null && age > HANGING_THRESHOLD_DAYS) {
+              flags.push("cold_review");
+            }
 
             items.push({
               id: `bs-${s.id}`,
@@ -714,7 +742,7 @@ export function registerManagerWorkspaceRoutes(
             const created = w.createdAt ? new Date(w.createdAt).toISOString() : null;
             const age = ageDays(created);
             const flags: string[] = [];
-            if (age != null && age > 7) flags.push("stale");
+            if (age != null && age > HANGING_THRESHOLD_DAYS) flags.push("stale");
 
             const stage = assignStage(
               "wet_check_billing",
@@ -748,6 +776,12 @@ export function registerManagerWorkspaceRoutes(
             }
 
             if (billedWithoutReview && !isBillingManager) flags.push("no_manager_review");
+            if (stage === "passed_to_billing" && age != null && age > HANGING_THRESHOLD_DAYS) {
+              flags.push("aging_unbilled");
+            }
+            if (stage === "needs_review" && age != null && age > HANGING_THRESHOLD_DAYS) {
+              flags.push("cold_review");
+            }
 
             items.push({
               id: `wcb-${w.id}`,
@@ -1189,6 +1223,20 @@ export function registerManagerWorkspaceRoutes(
               scopedFindingsNeedingRouting(req),
             ]);
 
+        // Build the same invoicedWetCheckIds set the queue uses so that
+        // attentionCount never counts a WC that is already suppressed.
+        // Load from WCBs (already available) + billed-via-billing-sheet bridge.
+        let stripInvoicedWcIds = new Set<number>();
+        if (!isBillingManager) {
+          const bsWcIds = await getWetCheckIdsInvoicedViaBillingSheets(req);
+          for (const w of wcbs) {
+            if (w.invoiceId != null && w.wetCheckId != null) {
+              stripInvoicedWcIds.add(w.wetCheckId as number);
+            }
+          }
+          for (const id of bsWcIds) stripInvoicedWcIds.add(id);
+        }
+
         // ── Legacy indicators ──
         const activeWcs = wcs.filter((w) => ACTIVE_WC.has(w.status));
         const activeWos = wos.filter((w) => ACTIVE_WO_FOR_MANAGER.has(w.status));
@@ -1281,6 +1329,91 @@ export function registerManagerWorkspaceRoutes(
           }
         }
 
+        // ── attentionCount — hanging / never-billed items ──
+        // Counts every queue item that would carry an anti-leakage flag:
+        // aging_unbilled, cold_review, orphaned_finding, or partially_converted.
+        const msPerDay = 86_400_000;
+        const ageFromCreatedAt = (v: any): number => {
+          const t = new Date(v).getTime();
+          return Number.isFinite(t) ? (now - t) / msPerDay : 0;
+        };
+        let attentionCount = 0;
+
+        if (!isBillingManager) {
+          for (const wc of wcs) {
+            if (!ACTIVE_WC.has(wc.status)) continue;
+            // Mirror the queue's invoiced-WC suppression — don't count items
+            // that are already suppressed from the queue.
+            if (stripInvoicedWcIds.has(wc.id)) continue;
+            // partially_converted always counts; old active WCs get cold_review
+            if (wc.status === "partially_converted") {
+              attentionCount++;
+            } else if (ageFromCreatedAt(wc.createdAt) > HANGING_THRESHOLD_DAYS) {
+              attentionCount++;
+            }
+          }
+        }
+
+        for (const w of wos) {
+          const age = ageFromCreatedAt(w.createdAt);
+          if (w.status === "approved_passed_to_billing" && !w.invoiceId && age > HANGING_THRESHOLD_DAYS) {
+            attentionCount++; // aging_unbilled
+          } else if (
+            w.invoiceId == null &&
+            !w.returnedForCorrectionAt &&
+            w.status !== "billed" &&
+            w.status !== "approved_passed_to_billing" &&
+            ALL_WO_STAGES.has(w.status) &&
+            age > HANGING_THRESHOLD_DAYS
+          ) {
+            attentionCount++; // cold_review
+          }
+        }
+
+        for (const s of bss) {
+          const age = ageFromCreatedAt(s.createdAt);
+          if (s.status === "approved_passed_to_billing" && !s.invoiceId && age > HANGING_THRESHOLD_DAYS) {
+            attentionCount++; // aging_unbilled
+          } else if (
+            s.invoiceId == null &&
+            !s.returnedForCorrectionAt &&
+            s.status !== "billed" &&
+            s.status !== "approved_passed_to_billing" &&
+            s.status !== "draft" &&
+            ALL_BS_STAGES.has(s.status) &&
+            age > HANGING_THRESHOLD_DAYS
+          ) {
+            attentionCount++; // cold_review
+          }
+        }
+
+        for (const w of wcbs) {
+          const age = ageFromCreatedAt(w.createdAt);
+          if (w.status === "approved_passed_to_billing" && !w.invoiceId && age > HANGING_THRESHOLD_DAYS) {
+            attentionCount++; // aging_unbilled
+          } else if (
+            w.invoiceId == null &&
+            w.status !== "billed" &&
+            w.status !== "approved_passed_to_billing" &&
+            ALL_WCB_STAGES.has(w.status) &&
+            age > HANGING_THRESHOLD_DAYS
+          ) {
+            attentionCount++; // cold_review
+          }
+        }
+
+        if (!isBillingManager) {
+          for (const f of findings) {
+            if (
+              isFindingPendingRouting(f) &&
+              f.resolution === "pending" &&
+              ageFromCreatedAt(f.createdAt) > HANGING_THRESHOLD_DAYS
+            ) {
+              attentionCount++; // orphaned_finding
+            }
+          }
+        }
+
         // Compute oldest createdAt for each active indicator bucket.
         const oldestHours = (rows: any[]): number | null => {
           let oldest: number | null = null;
@@ -1318,6 +1451,7 @@ export function registerManagerWorkspaceRoutes(
             findingsNeedingRouting,
             approvedThisWeek,
           },
+          attentionCount,
           stageCounts,
           oldestAgeHours: {
             wcsPendingReview: oldestHours(activeWcs),
