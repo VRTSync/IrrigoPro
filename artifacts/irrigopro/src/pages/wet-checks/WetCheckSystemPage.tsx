@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { Droplets, Loader2, Eye, FileText, CheckCircle2, User, Clock, AlertTriangle, ArrowRight } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useArrayQuery, apiRequest } from "@/lib/queryClient";
@@ -476,9 +476,10 @@ function ApprovedTab() {
 // ─── Page shell ───────────────────────────────────────────────────────────────
 
 export default function WetCheckSystemPage() {
-  const [location, navigate] = useLocation();
+  const [, navigate] = useLocation();
+  const search = useSearch();
 
-  const params = new URLSearchParams(location.split("?")[1] ?? "");
+  const params = new URLSearchParams(search);
   const tab = parseTab(params.get("tab"));
 
   function setTab(t: Tab) {

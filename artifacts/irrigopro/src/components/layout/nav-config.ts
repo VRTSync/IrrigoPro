@@ -27,7 +27,6 @@ import {
 
 export type NavBadgeKey =
   | "partsPendingApproval"
-  | "wetCheckReviews"
   | "estimatesPendingApproval"
   | "awaitingApproval";
 
@@ -112,14 +111,6 @@ export const wetCheckGroup: NavGroup = {
   icon: Droplets,
   items: [
     { type: "leaf", label: "Wet Checks", path: "/wet-checks", icon: Droplets },
-    {
-      type: "leaf",
-      label: "Wet Check Reviews",
-      path: "/wet-checks/pending-review",
-      icon: ShieldCheck,
-      badgeKey: "wetCheckReviews",
-    },
-    { type: "leaf", label: "Wet Check Billings", path: "/wet-check-billings", icon: ClipboardList },
   ],
 };
 

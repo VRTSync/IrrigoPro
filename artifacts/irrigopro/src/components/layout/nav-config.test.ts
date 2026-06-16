@@ -1,5 +1,6 @@
 /**
- * nav-config.test.ts (Task #803 — Slice 7, extended in Task #1004 — Slice 5)
+ * nav-config.test.ts (Task #803 — Slice 7, extended in Task #1004 — Slice 5,
+ * updated in Task #1321 — removed stale Wet Check Reviews / Billings entries)
  *
  * Asserts that the Wet Check group is present in billingManagerNav,
  * companyAdminNav, superAdminNav, and managerNav, and that wet-check leaf
@@ -20,11 +21,7 @@ import {
   type NavItem,
 } from "./nav-config";
 
-const WET_CHECK_PATHS = [
-  "/wet-checks",
-  "/wet-checks/pending-review",
-  "/wet-check-billings",
-];
+const WET_CHECK_PATHS = ["/wet-checks"];
 
 function findGroup(config: NavConfig, label: string): NavGroup | undefined {
   return config.items.find(
@@ -64,18 +61,18 @@ describe("nav-config Wet Check group (Task #803)", () => {
         expect(group!.type).toBe("group");
       });
 
-      it("Wet Check group has exactly three leaves", () => {
+      it("Wet Check group has exactly one leaf", () => {
         const group = findGroup(config, "Wet Check")!;
         const leaves = leafPaths(group);
-        expect(leaves).toHaveLength(3);
+        expect(leaves).toHaveLength(1);
       });
 
-      it("Wet Check group contains /wet-checks, /wet-checks/pending-review, /wet-check-billings", () => {
+      it("Wet Check group contains /wet-checks only", () => {
         const group = findGroup(config, "Wet Check")!;
         const leaves = leafPaths(group);
         expect(leaves).toContain("/wet-checks");
-        expect(leaves).toContain("/wet-checks/pending-review");
-        expect(leaves).toContain("/wet-check-billings");
+        expect(leaves).not.toContain("/wet-checks/pending-review");
+        expect(leaves).not.toContain("/wet-check-billings");
       });
 
       it("Operations group does not contain wet-check leaf paths", () => {
@@ -101,11 +98,15 @@ describe("managerNav — omits admin-only paths (Task #1004)", () => {
     expect(all).not.toContain("/admin/migrate-wet-check");
   });
 
-  it("includes wetCheckGroup paths", () => {
+  it("includes /wet-checks in wetCheckGroup", () => {
     const all = collectAllLeafPaths(managerNav.items);
     expect(all).toContain("/wet-checks");
-    expect(all).toContain("/wet-checks/pending-review");
-    expect(all).toContain("/wet-check-billings");
+  });
+
+  it("does not include stale /wet-checks/pending-review or /wet-check-billings", () => {
+    const all = collectAllLeafPaths(managerNav.items);
+    expect(all).not.toContain("/wet-checks/pending-review");
+    expect(all).not.toContain("/wet-check-billings");
   });
 
   it("includes Operations group with work orders and billing sheets", () => {
