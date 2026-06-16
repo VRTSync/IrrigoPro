@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Loader2, Droplets, Trash2, Search } from "lucide-react";
+import { Loader2, Droplets, Trash2, Search, FileSearch } from "lucide-react";
 import {
   apiRequest,
   queryClient,
@@ -283,9 +283,15 @@ function buildSnapshotActionButton(
 interface WetChecksListPageProps {
   asTab?: boolean;
   wcbStatusMap?: Map<number, WcbMapEntry>;
+  /**
+   * When provided, a secondary "View Snapshot" button is rendered on rows that
+   * have a WCB entry. The callback receives the WCB billing-record id so the
+   * caller can open a SnapshotQuickViewModal without navigating away.
+   */
+  onViewSnapshot?: (wcbId: number) => void;
 }
 
-export default function WetChecksListPage({ asTab, wcbStatusMap }: WetChecksListPageProps = {}) {
+export default function WetChecksListPage({ asTab, wcbStatusMap, onViewSnapshot }: WetChecksListPageProps = {}) {
   const { toast } = useToast();
   const [, navigate] = useLocation();
   const me = useMemo(() => getCurrentUser(), []);
@@ -662,6 +668,21 @@ export default function WetChecksListPage({ asTab, wcbStatusMap }: WetChecksList
               <SnapshotStatusChip status={wcbEntry.status} />
             ) : undefined;
             const actionButton = wcbEntry ? buildSnapshotActionButton(row.id, wcbEntry, navigate) : undefined;
+            const viewSnapshotButton =
+              wcbEntry && onViewSnapshot ? (
+                <button
+                  className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-violet-300 bg-violet-50 hover:bg-violet-100 text-violet-700 font-medium"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onViewSnapshot(wcbEntry.billingId);
+                  }}
+                  data-testid={`button-view-snapshot-${row.id}`}
+                >
+                  <FileSearch className="h-3 w-3" />
+                  View Snapshot
+                </button>
+              ) : undefined;
             return (
               <WetCheckRow
                 key={row.id}
@@ -685,6 +706,7 @@ export default function WetChecksListPage({ asTab, wcbStatusMap }: WetChecksList
                 bulkBlocked={bulkBlockedIds.has(row.id)}
                 snapshotChip={snapshotChip}
                 actionButton={actionButton}
+                viewSnapshotButton={viewSnapshotButton}
               />
             );
           })}

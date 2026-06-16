@@ -35,6 +35,8 @@ export interface WetCheckRowProps {
   bulkBlocked?: boolean;
   snapshotChip?: React.ReactNode;
   actionButton?: React.ReactNode;
+  /** Secondary "View Snapshot" button rendered alongside the primary action. */
+  viewSnapshotButton?: React.ReactNode;
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -81,6 +83,7 @@ export function WetCheckRow({
   bulkBlocked = false,
   snapshotChip,
   actionButton,
+  viewSnapshotButton,
 }: WetCheckRowProps) {
   const actions: ListRowAction[] = [
     {
@@ -162,6 +165,7 @@ export function WetCheckRow({
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
+          {viewSnapshotButton}
           {actionButton ?? (
             <Link href={`/wet-checks/${row.id}/review`}>
               <button

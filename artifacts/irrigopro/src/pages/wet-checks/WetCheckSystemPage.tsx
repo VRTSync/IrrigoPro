@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { WetCheckBillingViewModal } from "@/components/wet-check-billings/wet-check-billing-view-modal";
+import { SnapshotQuickViewModal } from "@/components/wet-check-billings/snapshot-quick-view-modal";
 import { ListPageEmptyState } from "@/components/shared/list-page-empty-state";
 import type { WetCheckBillingListItem, WetCheck } from "@workspace/db/schema";
 import WetChecksListPage, { type WcbMapEntry } from "./WetChecksListPage";
@@ -55,6 +56,8 @@ function TabButton({
 // ─── All Wet Checks tab ───────────────────────────────────────────────────────
 
 function AllWetChecksTab() {
+  const [snapshotModalId, setSnapshotModalId] = useState<number | null>(null);
+
   const { data: wcbs = [], isLoading: wcbsLoading } = useArrayQuery<WetCheckBillingListItem>({
     queryKey: ["/api/wet-check-billings"],
   });
@@ -75,18 +78,37 @@ function AllWetChecksTab() {
   }, [wcbs]);
 
   return (
-    <div>
-      {wcbsLoading && (
-        <div className="mb-3 flex items-center gap-2 text-xs text-gray-400">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Loading WC snapshot statuses…
-        </div>
+    <>
+      <div>
+        {wcbsLoading && (
+          <div className="mb-3 flex items-center gap-2 text-xs text-gray-400">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Loading WC snapshot statuses…
+          </div>
+        )}
+        <WetChecksListPage
+          asTab
+          wcbStatusMap={wcbStatusMap}
+          onViewSnapshot={setSnapshotModalId}
+        />
+      </div>
+
+      {/* SnapshotQuickViewModal — compact glance view for rows that have a WCB.
+          Reuses WetCheckBillingViewModal (no editor logic is duplicated).
+          Edit gating is state-driven inside the modal:
+            - Pre-approval: rate/hours editable; approve action not present here.
+            - Approved-not-invoiced: fully editable.
+            - Invoiced/billed: read-only. */}
+      {snapshotModalId != null && (
+        <SnapshotQuickViewModal
+          wetCheckBillingId={snapshotModalId}
+          open={snapshotModalId != null}
+          onOpenChange={(open) => {
+            if (!open) setSnapshotModalId(null);
+          }}
+        />
       )}
-      <WetChecksListPage
-        asTab
-        wcbStatusMap={wcbStatusMap}
-      />
-    </div>
+    </>
   );
 }
 

@@ -3661,6 +3661,18 @@ export default function CustomerBilling() {
                 </div>
               )}
 
+              {/*
+                Command Center affordance evaluation (WC System Slice 4):
+                A billing manager can already reach the Slice 3 review surface
+                (/manager/wet-checks/:id) without an extra button here:
+                  1. Navigation sidebar → "Wet Checks" → "Needs Review" tab lists
+                     all pending-approval submissions with a direct "Review" link.
+                  2. Clicking a pending WCB row (below) opens WetCheckBillingViewModal,
+                     whose "View originating wet check" link navigates to the wet-check
+                     detail, from which the "Review" action is one click away.
+                No additional affordance is added to this Command Center panel.
+              */}
+
               {/* Pending Wet Check Billings Section (Select Items) */}
               {(customerBillingData.pendingApprovalWetCheckBillings ?? []).length > 0 && (
                 <div>
