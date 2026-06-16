@@ -64,8 +64,8 @@ export async function seedIssueTypeConfigsForCompany(companyId: number): Promise
   for (const seed of WET_CHECK_ISSUE_TYPE_SEED) {
     const res = await pool.query(
       `INSERT INTO issue_type_configs
-         (company_id, issue_type, issue_group, display_label, default_labor_hours, part_category_filter, sort_order)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+         (company_id, issue_type, issue_group, display_label, default_labor_hours, part_category_filter, sort_order, labor_only)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (company_id, issue_type) DO NOTHING
        RETURNING id`,
       [
@@ -76,9 +76,24 @@ export async function seedIssueTypeConfigsForCompany(companyId: number): Promise
         seed.defaultLaborHours,
         seed.partCategoryFilter,
         seed.sortOrder,
+        seed.laborOnly ?? false,
       ],
     );
     inserted += res.rowCount ?? 0;
   }
   return inserted;
+}
+
+/**
+ * One-time migration: set labor_only = true for all existing head_adjustment
+ * rows. Safe to call repeatedly — it is a no-op when already set.
+ * Called automatically by seedIssueTypeConfigsForActiveCompanies on startup.
+ */
+export async function patchLaborOnlyColumn(): Promise<number> {
+  const res = await pool.query(
+    `UPDATE issue_type_configs
+     SET labor_only = true
+     WHERE issue_type = 'head_adjustment' AND labor_only = false`,
+  );
+  return res.rowCount ?? 0;
 }

@@ -1,6 +1,6 @@
 import { pool } from "./db";
 import { WET_CHECK_ISSUE_TYPE_SEED } from "@workspace/db";
-import { seedIssueTypeConfigsForCompany } from "./seeds/issue-type-configs";
+import { seedIssueTypeConfigsForCompany, patchLaborOnlyColumn } from "./seeds/issue-type-configs";
 
 // Re-export per-company seeder so callers (createCompany, admin endpoint,
 // scripts) all share the same implementation.
@@ -15,8 +15,8 @@ export async function seedIssueTypeConfigsForActiveCompanies(): Promise<number> 
     for (const seed of WET_CHECK_ISSUE_TYPE_SEED) {
       await pool.query(
         `INSERT INTO issue_type_configs
-           (company_id, issue_type, issue_group, display_label, default_labor_hours, part_category_filter, sort_order)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+           (company_id, issue_type, issue_group, display_label, default_labor_hours, part_category_filter, sort_order, labor_only)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (company_id, issue_type) DO NOTHING`,
         [
           row.id,
@@ -26,9 +26,13 @@ export async function seedIssueTypeConfigsForActiveCompanies(): Promise<number> 
           seed.defaultLaborHours,
           seed.partCategoryFilter,
           seed.sortOrder,
+          seed.laborOnly ?? false,
         ]
       );
     }
   }
+  // One-time migration: patch existing head_adjustment rows to labor_only=true.
+  // Safe to call on every startup — no-op when already patched.
+  await patchLaborOnlyColumn();
   return allCompaniesRows.rowCount ?? 0;
 }

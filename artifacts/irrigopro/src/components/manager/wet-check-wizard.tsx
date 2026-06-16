@@ -578,13 +578,14 @@ export function WetCheckWizard({ id }: { id: number }) {
   }, []);
 
   const editMut = useMutation({
-    mutationFn: (vars: { fid: number; patch: FindingEdits }) =>
+    mutationFn: (vars: { fid: number; patch: FindingEdits & { noPartNeeded?: boolean } }) =>
       apiRequest(`/api/wet-checks/findings/${vars.fid}`, "PATCH", {
         partId: vars.patch.partId,
         partName: vars.patch.partName,
         partPrice: vars.patch.partPrice,
         quantity: vars.patch.quantity,
         laborHours: vars.patch.laborHours,
+        ...(vars.patch.noPartNeeded !== undefined ? { noPartNeeded: vars.patch.noPartNeeded } : {}),
       }),
   });
 
@@ -598,7 +599,11 @@ export function WetCheckWizard({ id }: { id: number }) {
   const handleDecision = useCallback(async (resolution: Exclude<Resolution, "pending">) => {
     if (!active || !edits) return;
     try {
-      await editMut.mutateAsync({ fid: active.f.id, patch: edits });
+      const activeCfg = issueConfigs.find(c => c.issueType === active.f.issueType);
+      const patchPayload: FindingEdits & { noPartNeeded?: boolean } = activeCfg?.laborOnly
+        ? { ...edits, partId: null, partName: null, partPrice: null, noPartNeeded: true }
+        : edits;
+      await editMut.mutateAsync({ fid: active.f.id, patch: patchPayload });
       await routeMut.mutateAsync({ fid: active.f.id, resolution });
       if (resolution === "sent_to_estimate") {
         const t = lineTotal(edits, customerLaborRate);

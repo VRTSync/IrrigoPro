@@ -117,16 +117,20 @@ export function WetCheckConfirm({ id }: { id: number }) {
   // Pre-flight: unconverted repaired_in_field findings that are missing a part
   // assignment and have not been marked as no-part-needed. The convert POST will
   // 400 if any of these exist, so block the button and surface them here.
+  // Labor-only issue types (e.g. head_adjustment) are excluded — they never
+  // require a part, so noPartNeeded is auto-injected on save.
   const blockingFindings = useMemo(
     () =>
-      allFindings.filter(
-        ({ f }) =>
-          f.resolution === "repaired_in_field" &&
-          f.convertedAt == null &&
-          f.partId == null &&
-          !f.noPartNeeded,
-      ),
-    [allFindings],
+      allFindings.filter(({ f }) => {
+        if (f.resolution !== "repaired_in_field") return false;
+        if (f.convertedAt != null) return false;
+        if (f.partId != null) return false;
+        if (f.noPartNeeded) return false;
+        const cfg = issueConfigs.find(c => c.issueType === f.issueType);
+        if (cfg?.laborOnly) return false;
+        return true;
+      }),
+    [allFindings, issueConfigs],
   );
 
   const convertMut = useMutation({

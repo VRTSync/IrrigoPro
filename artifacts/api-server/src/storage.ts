@@ -139,6 +139,7 @@ import {
   type InsertWetCheckBilling,
   type WetCheckWithDetails,
   deriveIssueGroup,
+  WET_CHECK_ISSUE_TYPE_SEED,
 } from "@workspace/db";
 import { db } from "./db";
 import { sql, eq, like, ilike, desc, and, gte, lte, or, isNull, inArray, gt } from "drizzle-orm";
@@ -155,6 +156,12 @@ import { computeEstimateSummary } from "./estimate-summary";
 import type { EstimateSummary, WetCheckBillingListItem } from "@workspace/db";
 import { ObjectStorageService } from "./objectStorage";
 import { resolveIssueTypeKey, seedIssueTypeConfigsForCompany } from "./seeds/issue-type-configs";
+
+// Set of issue types that never require a part (labor-only). Built once from
+// the canonical seed so the convert guard stays in sync with the schema.
+const LABOR_ONLY_ISSUE_TYPES: ReadonlySet<string> = new Set(
+  WET_CHECK_ISSUE_TYPE_SEED.filter(s => s.laborOnly).map(s => s.issueType),
+);
 
 // WetCheckBillingListItem is defined in @workspace/db (schema.ts) so both the
 // API server and the frontend can import it from the same source. Re-exported
@@ -7711,7 +7718,10 @@ export class DatabaseStorage implements IStorage {
       // Task #464 — labor-only Mark Complete. A finding marked complete
       // with no part is valid when the tech ticked "No part needed"; the
       // line is written below with qty 0 / unit price 0.
-      if (f.partId == null && !f.noPartNeeded) {
+      // Also skip the check for issue types that are inherently labor-only
+      // (e.g. head_adjustment) — the wizard auto-injects noPartNeeded=true
+      // for those, but we guard here too so pre-existing rows are safe.
+      if (f.partId == null && !f.noPartNeeded && !LABOR_ONLY_ISSUE_TYPES.has(f.issueType)) {
         throw new Error(
           `Cannot auto-bill finding ${f.id}: marked complete but has no part assigned. ` +
           `Add a part before submitting, tick "No part needed" for a labor-only fix, ` +

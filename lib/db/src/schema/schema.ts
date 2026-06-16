@@ -1268,6 +1268,10 @@ export const issueTypeConfigs = pgTable("issue_type_configs", {
   displayLabel: text("display_label").notNull(),
   defaultLaborHours: decimal("default_labor_hours", { precision: 5, scale: 2 }).notNull(),
   partCategoryFilter: text("part_category_filter"),
+  // When true, no part is ever needed for this issue type (e.g. head_adjustment).
+  // The part picker is hidden on the FindingCard and the convert guard skips the
+  // missing-part check. noPartNeeded is auto-injected before saving.
+  laborOnly: boolean("labor_only").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -1545,10 +1549,11 @@ export const WET_CHECK_ISSUE_TYPE_SEED: ReadonlyArray<{
   defaultLaborHours: string;
   partCategoryFilter: string | null;
   sortOrder: number;
+  laborOnly?: boolean;
 }> = [
   { issueType: "head_replacement",   issueGroup: "quick_fix", displayLabel: "Head Replace",     defaultLaborHours: "0.25", partCategoryFilter: "Head",       sortOrder: 10 },
   { issueType: "nozzle_replacement", issueGroup: "quick_fix", displayLabel: "Nozzle Replace",   defaultLaborHours: "0.25", partCategoryFilter: "Nozzle",     sortOrder: 20 },
-  { issueType: "head_adjustment",    issueGroup: "quick_fix", displayLabel: "Adjust",           defaultLaborHours: "0.25", partCategoryFilter: null,         sortOrder: 30 },
+  { issueType: "head_adjustment",    issueGroup: "quick_fix", displayLabel: "Adjust",           defaultLaborHours: "0.25", partCategoryFilter: null,         sortOrder: 30, laborOnly: true },
   { issueType: "leak_repair",        issueGroup: "advanced",  displayLabel: "Leak",             defaultLaborHours: "1.00", partCategoryFilter: "Fitting",    sortOrder: 40 },
   { issueType: "pressure_issue",     issueGroup: "advanced",  displayLabel: "Pressure Issue",   defaultLaborHours: "0.50", partCategoryFilter: null,         sortOrder: 50 },
   { issueType: "coverage_issue",     issueGroup: "advanced",  displayLabel: "Coverage Issue",   defaultLaborHours: "0.50", partCategoryFilter: null,         sortOrder: 60 },

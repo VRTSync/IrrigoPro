@@ -158,36 +158,48 @@ export function FindingCard({
 
         <div className="rounded-md border p-3 space-y-3 bg-white">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="sm:col-span-3 space-y-1">
-              <div className="text-xs text-gray-500">Part</div>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 text-sm" data-testid={`wizard-finding-${finding.id}-part-name`}>
-                  {edits.partName
-                    ? edits.partName
-                    : <span className="text-gray-400 italic">No part selected</span>}
+            {issueConfig?.laborOnly ? (
+              <div className="sm:col-span-3 space-y-1" data-testid={`wizard-finding-${finding.id}-labor-only`}>
+                <div className="text-xs text-gray-500">Part</div>
+                <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
+                  <Info className="w-4 h-4 text-blue-500 shrink-0" aria-hidden />
+                  <span className="text-sm text-blue-700 font-medium">Labor only — no part required</span>
                 </div>
-                <Button
-                  type="button" variant="outline" size="sm"
-                  onClick={() => setPartPickerOpen(true)}
-                  data-testid={`wizard-finding-${finding.id}-pick-part`}
-                >
-                  <Pencil className="w-3 h-3 mr-1" /> Change
-                </Button>
               </div>
-              <div className="text-xs text-gray-500">
-                Part price: ${parseFloat(edits.partPrice ?? "0").toFixed(2)}
+            ) : (
+              <div className="sm:col-span-3 space-y-1">
+                <div className="text-xs text-gray-500">Part</div>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 text-sm" data-testid={`wizard-finding-${finding.id}-part-name`}>
+                    {edits.partName
+                      ? edits.partName
+                      : <span className="text-gray-400 italic">No part selected</span>}
+                  </div>
+                  <Button
+                    type="button" variant="outline" size="sm"
+                    onClick={() => setPartPickerOpen(true)}
+                    data-testid={`wizard-finding-${finding.id}-pick-part`}
+                  >
+                    <Pencil className="w-3 h-3 mr-1" /> Change
+                  </Button>
+                </div>
+                <div className="text-xs text-gray-500">
+                  Part price: ${parseFloat(edits.partPrice ?? "0").toFixed(2)}
+                </div>
               </div>
-            </div>
+            )}
 
-            <label className="text-xs space-y-1">
-              <span className="text-gray-500 block">Quantity</span>
-              <Input
-                type="number" min={1} step={1}
-                value={edits.quantity}
-                onChange={e => onChange({ ...edits, quantity: Math.max(1, parseInt(e.target.value || "1") || 1) })}
-                data-testid={`wizard-finding-${finding.id}-qty`}
-              />
-            </label>
+            {!issueConfig?.laborOnly && (
+              <label className="text-xs space-y-1">
+                <span className="text-gray-500 block">Quantity</span>
+                <Input
+                  type="number" min={1} step={1}
+                  value={edits.quantity}
+                  onChange={e => onChange({ ...edits, quantity: Math.max(1, parseInt(e.target.value || "1") || 1) })}
+                  data-testid={`wizard-finding-${finding.id}-qty`}
+                />
+              </label>
+            )}
 
             <label className="text-xs space-y-1">
               <span className="text-gray-500 block">Labor hours</span>
