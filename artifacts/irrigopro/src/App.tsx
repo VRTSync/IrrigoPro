@@ -75,6 +75,7 @@ const CombinedReviewPage = lazyPage(() => import("@/pages/wet-checks/CombinedRev
 const SiteMapsPage = lazyPage(() => import("@/pages/site-maps"));
 const AdminMigrationsPage = lazyPage(() => import("@/pages/admin/migrations"));
 const AdminWcLaborBackfillPage = lazyPage(() => import("@/pages/admin-wc-labor-backfill"));
+const WetCheckReconciliationPage = lazyPage(() => import("@/pages/wet-check-reconciliation"));
 const CustomerSiteMapsPage = lazyPage(() => import("@/pages/customer-site-maps-page"));
 const FieldTechMaps = lazyPage(() => import("@/pages/field-tech-maps"));
 import { NotificationPermissionBanner } from "@/components/notifications/notification-permission-banner";
@@ -430,6 +431,7 @@ function Router() {
                   <Route path="/super-admin/loose-photos" component={SuperAdminLoosePhotosPage} />
                   <Route path="/admin/migrations" component={AdminMigrationsPage} />
                   <Route path="/admin/wc-labor-backfill" component={AdminWcLaborBackfillPage} />
+                  <Route path="/admin/wet-check-reconciliation" component={WetCheckReconciliationPage} />
                   <Route path="/quickbooks" component={QuickBooksPage} />
                   <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
                   <Route path="/financial-pulse" component={FinancialPulsePage} />

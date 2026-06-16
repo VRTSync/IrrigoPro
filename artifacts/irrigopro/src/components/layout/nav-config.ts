@@ -84,6 +84,12 @@ export const reportsGroup: NavGroup = {
       path: "/billing-sheets/labor-rate-audit",
       icon: ShieldCheck,
     },
+    {
+      type: "leaf",
+      label: "WC Reconciliation",
+      path: "/admin/wet-check-reconciliation",
+      icon: ShieldCheck,
+    },
   ],
 };
 

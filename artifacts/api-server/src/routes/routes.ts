@@ -376,6 +376,7 @@ import { registerFinancialPulseRoutes } from "./financial-pulse";
 import { registerAdminMigrationsRoutes } from "./admin-migrations-routes";
 import { registerWcLaborBackfillRoutes } from "./admin-wc-labor-backfill-routes";
 import { registerCleanupInvoice71256Routes } from "./cleanup-invoice-71256";
+import { registerWetCheckReconciliationRoutes } from "./wet-check-reconciliation-routes";
 import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
 import { scrubEvent, setScrubCustomerNames } from "../lib/scrubEvent";
 import { setTelemetrySink, withTelemetry, type TelemetryEvent } from "../lib/withTelemetry";
@@ -16706,6 +16707,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     },
   );
+
+  // Task #1293 — Wet Check Reconciliation + Reassign-with-Cascade.
+  registerWetCheckReconciliationRoutes(app, { requireAuthentication });
 
   return httpServer;
 }

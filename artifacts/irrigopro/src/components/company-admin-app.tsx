@@ -64,6 +64,7 @@ import PartsSettings from "@/pages/parts-settings";
 import LaborRates from "@/pages/labor-rates";
 import AdminCustomers from "@/pages/admin-customers";
 import AdminControllers from "@/pages/admin-controllers";
+import WetCheckReconciliationPage from "@/pages/wet-check-reconciliation";
 import PartsPendingApproval from "@/pages/parts-pending-approval";
 import EstimateCommandCenter from "@/pages/estimate-command-center";
 import RedirectPendingApprovalToCC from "@/components/estimates/redirect-to-command-center";
@@ -208,6 +209,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/wet-checks/admin" component={RedirectToWetChecks} />
           <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
           <Route path="/admin/client-errors" component={AdminClientErrorsPage} />
+          <Route path="/admin/wet-check-reconciliation" component={WetCheckReconciliationPage} />
           <Route path="/wet-checks/pending-review" component={RedirectToWetChecksNeedsReview} />
           <Route path="/wet-checks/:id/review" component={CombinedReviewPage} />
           <Route path="/wet-checks" component={WetCheckSystemPage} />
