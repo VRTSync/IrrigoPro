@@ -102,7 +102,7 @@ export async function recordAuditEvent(
 // route-level handlers can record lifecycle audit rows without
 // re-implementing actor extraction.
 export type LifecycleAuditOpts = {
-  resource: "estimate" | "wet_check" | "work_order";
+  resource: "estimate" | "wet_check" | "work_order" | "billing_sheet" | "wet_check_billing";
   action: string;
   targetId: number | string;
   before?: unknown;

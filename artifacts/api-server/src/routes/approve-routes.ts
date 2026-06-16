@@ -119,6 +119,15 @@ export function registerApproveRoutes(
         approvedLaborSnapshot: laborSnapshot,
       });
 
+      await recordLifecycleAudit(req, {
+        resource: "billing_sheet",
+        action: "billing_sheet.approved",
+        targetId: id,
+        before: { status: billingSheet.status },
+        after: { status: "approved_passed_to_billing" },
+        summary: `Billing sheet ${id} approved by ${approverName}`,
+      });
+
       res.json({ message: "Billing sheet approved and passed to billing", billingSheet: updated });
     } catch (error) {
       console.error("Error approving billing sheet:", error);
@@ -157,6 +166,16 @@ export function registerApproveRoutes(
         ...(notes
           ? { notes: `${billingSheet.notes ? billingSheet.notes + "\n" : ""}[Returned for correction: ${notes}]` }
           : {}),
+      });
+
+      await recordLifecycleAudit(req, {
+        resource: "billing_sheet",
+        action: "billing_sheet.returned_for_correction",
+        targetId: id,
+        before: { status: billingSheet.status },
+        after: { status: "draft" },
+        note: notes ?? null,
+        summary: `Billing sheet ${id} returned for correction`,
       });
 
       res.json({ message: "Billing sheet returned for correction", billingSheet: updated });
@@ -330,6 +349,15 @@ export function registerApproveRoutes(
         approvedTotal: wcb.totalAmount,
         approvedLaborSnapshot: laborSnapshot,
         approvedPartsSnapshot: partsSnapshot,
+      });
+
+      await recordLifecycleAudit(req, {
+        resource: "wet_check_billing",
+        action: "wet_check_billing.approved",
+        targetId: id,
+        before: { status: wcb.status },
+        after: { status: "approved_passed_to_billing" },
+        summary: `Wet check billing ${id} approved by ${approverName}`,
       });
 
       res.json({ message: "Wet check billing approved and passed to billing", wetCheckBilling: updated });

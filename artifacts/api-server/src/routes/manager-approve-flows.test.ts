@@ -12,13 +12,23 @@
 //   POST /api/billing-sheets/:id/return-for-correction  (submitted → draft)
 //   POST /api/work-orders/:id/approve           (work_completed → approved_passed_to_billing)
 //   POST /api/work-orders/:id/return-for-correction     (work_completed → in_progress)
-//   403 guard — billing_manager is rejected by all four endpoints
+//   POST /api/wet-check-billings/:id/approve    (submitted → approved_passed_to_billing)
+//   403 guard — billing_manager is rejected by billing-sheet endpoints
+//   Audit trail — Task #1255: each transition emits exactly one lifecycle audit row
+//     with the caller's actorRole and the expected action string.
+//
+// Static-source tests (Task #1255) also verify that:
+//   - POST /api/invoices/monthly is guarded by requireBillingAccess
+//   - Each "mark as billed" loop in the monthly route emits a *.billed audit row
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import express, { type Express, type RequestHandler } from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   registerApproveRoutes,
@@ -62,12 +72,32 @@ interface StoredWorkOrder {
 
 // ─── Harness ──────────────────────────────────────────────────────────────────
 
+interface StoredWetCheckBilling {
+  id: number;
+  status: string;
+  partsSubtotal: string;
+  totalHours: string;
+  laborRate: string;
+  appliedLaborRate?: string;
+  laborSubtotal: string;
+  totalAmount: string;
+  [key: string]: unknown;
+}
+
+interface AuditCall {
+  action: string;
+  before: unknown;
+  after: unknown;
+  actorRole: string | null;
+}
+
 interface Harness {
   baseUrl: string;
   close: () => Promise<void>;
   billingSheets: Map<number, StoredBillingSheet>;
   workOrders: Map<number, StoredWorkOrder>;
-  auditCalls: Array<{ action: string; before: unknown; after: unknown }>;
+  wetCheckBillings: Map<number, StoredWetCheckBilling>;
+  auditCalls: AuditCall[];
   setRole: (role: Role) => void;
 }
 
@@ -88,6 +118,12 @@ async function startHarness(initialRole: Role = "irrigation_manager"): Promise<H
     [10, { id: 10, workOrderNumber: "WO-0010", status: "work_completed",       partsSubtotal: "200.00", totalHours: "3.00", laborRate: "80.00", laborSubtotal: "240.00", totalAmount: "440.00", notes: null }],
     [11, { id: 11, workOrderNumber: "WO-0011", status: "pending_manager_review", partsSubtotal: "60.00", totalHours: "1.50", laborRate: "80.00", laborSubtotal: "120.00", totalAmount: "180.00", notes: null }],
     [12, { id: 12, workOrderNumber: "WO-0012", status: "in_progress",           partsSubtotal: "0.00",  totalHours: "0.00", laborRate: "80.00", laborSubtotal: "0.00",   totalAmount: "0.00",   notes: null }],
+  ]);
+
+  const wetCheckBillings = new Map<number, StoredWetCheckBilling>([
+    [20, { id: 20, status: "submitted",              partsSubtotal: "80.00",  totalHours: "1.00", laborRate: "75.00", laborSubtotal: "75.00",  totalAmount: "155.00" }],
+    [21, { id: 21, status: "pending_manager_review", partsSubtotal: "40.00",  totalHours: "0.50", laborRate: "75.00", laborSubtotal: "37.50",  totalAmount: "77.50"  }],
+    [22, { id: 22, status: "draft",                  partsSubtotal: "0.00",   totalHours: "0.00", laborRate: "75.00", laborSubtotal: "0.00",   totalAmount: "0.00"   }],
   ]);
 
   // ── Storage stub ─────────────────────────────────────────────────────────────
@@ -113,11 +149,15 @@ async function startHarness(initialRole: Role = "irrigation_manager"): Promise<H
       workOrders.set(id, updated);
       return updated;
     },
-    async getWetCheckBillingById(_id, _companyId) {
-      return undefined;
+    async getWetCheckBillingById(id, _companyId) {
+      return wetCheckBillings.get(id);
     },
-    async updateWetCheckBilling(_id, _data) {
-      return {};
+    async updateWetCheckBilling(id, data) {
+      const existing = wetCheckBillings.get(id);
+      if (!existing) return {};
+      const updated = { ...existing, ...data } as StoredWetCheckBilling;
+      wetCheckBillings.set(id, updated);
+      return updated;
     },
     async getUser(_id) {
       return { name: "Alice Manager" };
@@ -133,15 +173,17 @@ async function startHarness(initialRole: Role = "irrigation_manager"): Promise<H
   };
 
   // ── Audit spy ────────────────────────────────────────────────────────────────
-  const auditCalls: Array<{ action: string; before: unknown; after: unknown }> = [];
+  // Captures action, before/after state, and actorRole (read from req at emit time).
+  const auditCalls: AuditCall[] = [];
 
   // ── Mount REAL handlers ───────────────────────────────────────────────────────
   registerApproveRoutes(app, storage, stubAuth, {
-    recordLifecycleAudit: async (_req, opts) => {
+    recordLifecycleAudit: async (req, opts) => {
       auditCalls.push({
         action: opts.action,
         before: opts.before,
         after: opts.after,
+        actorRole: (req as any)?.authenticatedUserRole ?? null,
       });
     },
   });
@@ -155,6 +197,7 @@ async function startHarness(initialRole: Role = "irrigation_manager"): Promise<H
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
     billingSheets,
     workOrders,
+    wetCheckBillings,
     auditCalls,
     setRole: (role) => { currentRole = role; },
   };
@@ -494,3 +537,196 @@ describe("POST /api/work-orders/:id/return-for-correction — Task #768 (real ha
     assert.equal(res.status, 404);
   });
 });
+
+// ─── Task #1255 — Billing sheet audit trail ───────────────────────────────────
+
+describe("POST /api/billing-sheets/:id/approve — lifecycle audit (Task #1255)", () => {
+  let h: Harness;
+  beforeEach(async () => { h = await startHarness("irrigation_manager"); });
+  afterEach(async () => { await h.close(); });
+
+  it("emits exactly one billing_sheet.approved audit row", async () => {
+    await fetch(`${h.baseUrl}/api/billing-sheets/1/approve`, { method: "POST" });
+    assert.equal(h.auditCalls.length, 1, "expected exactly one audit call");
+    const call = h.auditCalls[0]!;
+    assert.equal(call.action, "billing_sheet.approved");
+    assert.deepEqual(call.before, { status: "submitted" });
+    assert.deepEqual(call.after, { status: "approved_passed_to_billing" });
+  });
+
+  it("audit row carries the caller's actorRole (irrigation_manager)", async () => {
+    await fetch(`${h.baseUrl}/api/billing-sheets/1/approve`, { method: "POST" });
+    assert.equal(h.auditCalls[0]!.actorRole, "irrigation_manager");
+  });
+
+  it("actorRole is company_admin when that role approves", async () => {
+    h.setRole("company_admin");
+    await fetch(`${h.baseUrl}/api/billing-sheets/1/approve`, { method: "POST" });
+    assert.equal(h.auditCalls[0]!.actorRole, "company_admin");
+  });
+
+  it("no audit row is emitted on 403 (billing_manager rejected)", async () => {
+    h.setRole("billing_manager");
+    await fetch(`${h.baseUrl}/api/billing-sheets/1/approve`, { method: "POST" });
+    assert.equal(h.auditCalls.length, 0, "no audit row must be written on rejected request");
+  });
+
+  it("no audit row is emitted on 400 (wrong starting status)", async () => {
+    await fetch(`${h.baseUrl}/api/billing-sheets/3/approve`, { method: "POST" });
+    assert.equal(h.auditCalls.length, 0, "no audit row must be written on status validation failure");
+  });
+});
+
+describe("POST /api/billing-sheets/:id/return-for-correction — lifecycle audit (Task #1255)", () => {
+  let h: Harness;
+  beforeEach(async () => { h = await startHarness("irrigation_manager"); });
+  afterEach(async () => { await h.close(); });
+
+  it("emits exactly one billing_sheet.returned_for_correction audit row", async () => {
+    await fetch(`${h.baseUrl}/api/billing-sheets/1/return-for-correction`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ notes: "Needs zone 4" }),
+    });
+    assert.equal(h.auditCalls.length, 1, "expected exactly one audit call");
+    const call = h.auditCalls[0]!;
+    assert.equal(call.action, "billing_sheet.returned_for_correction");
+    assert.deepEqual(call.before, { status: "submitted" });
+    assert.deepEqual(call.after, { status: "draft" });
+  });
+
+  it("audit row carries the caller's actorRole", async () => {
+    await fetch(`${h.baseUrl}/api/billing-sheets/1/return-for-correction`, { method: "POST" });
+    assert.equal(h.auditCalls[0]!.actorRole, "irrigation_manager");
+  });
+
+  it("no audit row on billing_manager rejection", async () => {
+    h.setRole("billing_manager");
+    await fetch(`${h.baseUrl}/api/billing-sheets/1/return-for-correction`, { method: "POST" });
+    assert.equal(h.auditCalls.length, 0);
+  });
+});
+
+// ─── Task #1255 — WCB audit trail ────────────────────────────────────────────
+
+describe("POST /api/wet-check-billings/:id/approve — basic (Task #1255)", () => {
+  let h: Harness;
+  beforeEach(async () => { h = await startHarness("irrigation_manager"); });
+  afterEach(async () => { await h.close(); });
+
+  it("irrigation_manager approving a submitted WCB → 200 + approved_passed_to_billing", async () => {
+    const res = await fetch(`${h.baseUrl}/api/wet-check-billings/20/approve`, { method: "POST" });
+    const body = await res.json() as any;
+    assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(body)}`);
+    assert.equal(body.wetCheckBilling.status, "approved_passed_to_billing");
+  });
+
+  it("in-memory store is updated after WCB approve", async () => {
+    await fetch(`${h.baseUrl}/api/wet-check-billings/20/approve`, { method: "POST" });
+    assert.equal(h.wetCheckBillings.get(20)?.status, "approved_passed_to_billing");
+  });
+
+  it("emits exactly one wet_check_billing.approved audit row", async () => {
+    await fetch(`${h.baseUrl}/api/wet-check-billings/20/approve`, { method: "POST" });
+    assert.equal(h.auditCalls.length, 1, "expected exactly one audit call");
+    const call = h.auditCalls[0]!;
+    assert.equal(call.action, "wet_check_billing.approved");
+    assert.deepEqual(call.before, { status: "submitted" });
+    assert.deepEqual(call.after, { status: "approved_passed_to_billing" });
+  });
+
+  it("audit row carries the caller's actorRole (irrigation_manager)", async () => {
+    await fetch(`${h.baseUrl}/api/wet-check-billings/20/approve`, { method: "POST" });
+    assert.equal(h.auditCalls[0]!.actorRole, "irrigation_manager");
+  });
+
+  it("billing_manager can also approve a WCB → 200 with billing_manager actorRole", async () => {
+    h.setRole("billing_manager");
+    const res = await fetch(`${h.baseUrl}/api/wet-check-billings/20/approve`, { method: "POST" });
+    assert.equal(res.status, 200);
+    assert.equal(h.auditCalls[0]!.actorRole, "billing_manager");
+  });
+
+  it("field_tech cannot approve a WCB → 403, no audit row", async () => {
+    h.setRole("field_tech");
+    const res = await fetch(`${h.baseUrl}/api/wet-check-billings/20/approve`, { method: "POST" });
+    assert.equal(res.status, 403);
+    assert.equal(h.auditCalls.length, 0);
+  });
+
+  it("wrong starting status (draft) → 400, no audit row", async () => {
+    const res = await fetch(`${h.baseUrl}/api/wet-check-billings/22/approve`, { method: "POST" });
+    assert.equal(res.status, 400);
+    assert.equal(h.auditCalls.length, 0);
+  });
+
+  it("pending_manager_review WCB → 200 + audit row", async () => {
+    const res = await fetch(`${h.baseUrl}/api/wet-check-billings/21/approve`, { method: "POST" });
+    assert.equal(res.status, 200);
+    assert.equal(h.auditCalls[0]!.action, "wet_check_billing.approved");
+  });
+
+  it("unknown WCB id → 404, no audit row", async () => {
+    const res = await fetch(`${h.baseUrl}/api/wet-check-billings/9999/approve`, { method: "POST" });
+    assert.equal(res.status, 404);
+    assert.equal(h.auditCalls.length, 0);
+  });
+});
+
+// ─── Task #1255 — Monthly invoice: role guard and billed audit (static-source) ─
+
+{
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const routesPath = path.join(__dirname, "routes.ts");
+  const src = fs.readFileSync(routesPath, "utf8");
+
+  const monthlyStart = src.indexOf('app.post("/api/invoices/monthly"');
+  const nextRoute = src.indexOf("\n  app.", monthlyStart + 1);
+  const monthlySrc = nextRoute === -1 ? src.slice(monthlyStart) : src.slice(monthlyStart, nextRoute);
+
+  describe("POST /api/invoices/monthly — role guard (Task #1255)", () => {
+    it("requireBillingAccess guard is wired between requireAuthentication and the async handler", () => {
+      assert.match(
+        monthlySrc,
+        /requireAuthentication,\s*requireBillingAccess,\s*async/,
+        "requireBillingAccess must appear between requireAuthentication and async in the monthly route",
+      );
+    });
+  });
+
+  describe("POST /api/invoices/monthly — billed audit emissions (Task #1255)", () => {
+    it("work_order.billed lifecycle audit is emitted inside the work-orders billed loop", () => {
+      // Locate the "mark as billed" section that starts after QuickBooks succeeds
+      const billedSection = monthlySrc.slice(monthlySrc.indexOf("QuickBooks succeeded"));
+      assert.match(
+        billedSection,
+        /work_order\.billed/,
+        "work_order.billed action must be referenced in the monthly billing loop",
+      );
+    });
+
+    it("billing_sheet.billed lifecycle audit is emitted inside the billing-sheets billed loop", () => {
+      const billedSection = monthlySrc.slice(monthlySrc.indexOf("QuickBooks succeeded"));
+      assert.match(
+        billedSection,
+        /billing_sheet\.billed/,
+        "billing_sheet.billed action must be referenced in the monthly billing loop",
+      );
+    });
+
+    it("wet_check_billing.billed lifecycle audit is emitted inside the WCB billed loop", () => {
+      const billedSection = monthlySrc.slice(monthlySrc.indexOf("QuickBooks succeeded"));
+      assert.match(
+        billedSection,
+        /wet_check_billing\.billed/,
+        "wet_check_billing.billed action must be referenced in the monthly billing loop",
+      );
+    });
+
+    it("all three billed audit calls include invoiceId and invoiceNumber in extra payload", () => {
+      const billedSection = monthlySrc.slice(monthlySrc.indexOf("QuickBooks succeeded"));
+      assert.match(billedSection, /invoiceId.*invoice\.id|invoice\.id.*invoiceId/, "invoiceId must be in the extra payload");
+      assert.match(billedSection, /invoiceNumber.*invoice\.invoiceNumber|invoice\.invoiceNumber.*invoiceNumber/, "invoiceNumber must be in the extra payload");
+    });
+  });
+}

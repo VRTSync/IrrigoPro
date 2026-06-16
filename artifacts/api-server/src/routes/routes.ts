@@ -1059,7 +1059,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // "customer" actor used for customer-token transitions on estimates.
   // Best-effort: never throws and never fails the originating request.
   type LifecycleAuditOpts = {
-    resource: "estimate" | "wet_check" | "work_order" | "wet_check_billing";
+    resource: "estimate" | "wet_check" | "work_order" | "wet_check_billing" | "billing_sheet";
     action: string;
     targetId: number | string;
     before?: unknown;
@@ -1140,7 +1140,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // rows with a null actor_company_id, which is how customer-token
   // transitions are attributed). super_admin sees everything.
   async function fetchActivityForTarget(
-    targetType: "estimate" | "wet_check" | "work_order" | "wet_check_billing",
+    targetType: "estimate" | "wet_check" | "work_order" | "wet_check_billing" | "billing_sheet",
     targetId: number,
     companyId: number | null,
     isSuperAdmin: boolean,
@@ -6557,7 +6557,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create monthly invoice for customer - consolidates selected or all unbilled work
-  app.post("/api/invoices/monthly", requireAuthentication, async (req, res) => {
+  app.post("/api/invoices/monthly", requireAuthentication, requireBillingAccess, async (req, res) => {
     try {
       const { customerId, workOrderIds = [], billingSheetIds = [], selectedWetCheckBillingIds = [], periodStart: periodStartInput, periodEnd: periodEndInput } = req.body;
 
@@ -7060,6 +7060,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           billedAt: currentDate,
           status: 'billed'
         });
+        void recordLifecycleAudit(req, {
+          resource: "work_order",
+          action: "work_order.billed",
+          targetId: workOrder.id,
+          before: { status: workOrder.status },
+          after: { status: 'billed' },
+          extra: { invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber },
+          summary: `Work order ${workOrder.workOrderNumber} billed on invoice ${invoice.invoiceNumber}`,
+        });
       }
 
       for (const billingSheet of selectedBillingSheets) {
@@ -7067,6 +7076,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           invoiceId: invoice.id,
           billedAt: currentDate,
           status: 'billed'
+        });
+        void recordLifecycleAudit(req, {
+          resource: "billing_sheet",
+          action: "billing_sheet.billed",
+          targetId: billingSheet.id,
+          before: { status: billingSheet.status },
+          after: { status: 'billed' },
+          extra: { invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber },
+          summary: `Billing sheet ${billingSheet.id} billed on invoice ${invoice.invoiceNumber}`,
         });
       }
 
@@ -7076,6 +7094,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           invoiceId: invoice.id,
           billedAt: currentDate,
           status: 'billed',
+        });
+        void recordLifecycleAudit(req, {
+          resource: "wet_check_billing",
+          action: "wet_check_billing.billed",
+          targetId: wcb.id,
+          before: { status: wcb.status },
+          after: { status: 'billed' },
+          extra: { invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber },
+          summary: `Wet check billing ${wcb.id} billed on invoice ${invoice.invoiceNumber}`,
         });
       }
 
