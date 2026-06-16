@@ -2,15 +2,14 @@
 //
 // Covers:
 //   1. Outer wrapper has data-testid="manager-workspace".
-//   2. Five stage tile testIds are present.
-//   3. Five stage section testIds are present.
+//   2. Four stage tile testIds are present (findings_to_route removed Task #1280).
+//   3. Four stage section testIds are present (findings_to_route removed Task #1280).
 //   4. Keyboard shortcut keys (J/K/A/B/F/Ctrl+S/Shift+A) are wired.
 //   5. Queue and status-strip URLs point to /api/manager-workspace/*.
 //   6. Approve / kickback / save action testIds are present.
 //   7. Stage filter chip testId is present.
 //   8. Shortcuts cheatsheet testId is present.
 //   9. Header uses bg-gradient-brand.
-//  10. billing_manager findings_to_route section is conditionally hidden.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -31,11 +30,10 @@ describe("manager-workspace.tsx — source-level assertions", () => {
     );
   });
 
-  it("has five stage tile testIds", () => {
+  it("has four stage tile testIds", () => {
     for (const stage of [
       "needs_review",
       "waiting_on_tech",
-      "findings_to_route",
       "passed_to_billing",
       "billed_7d",
     ]) {
@@ -47,11 +45,10 @@ describe("manager-workspace.tsx — source-level assertions", () => {
     }
   });
 
-  it("has five stage section testIds", () => {
+  it("has four stage section testIds", () => {
     for (const stage of [
       "needs_review",
       "waiting_on_tech",
-      "findings_to_route",
       "passed_to_billing",
       "billed_7d",
     ]) {
@@ -149,13 +146,6 @@ describe("manager-workspace.tsx — source-level assertions", () => {
     assert.ok(
       MW_SRC.includes("bg-gradient-brand"),
       "header should use bg-gradient-brand",
-    );
-  });
-
-  it("billing_manager findings_to_route section is conditionally hidden", () => {
-    assert.ok(
-      MW_SRC.includes("isBillingManager") && MW_SRC.includes("findings_to_route"),
-      "billing_manager guard for findings_to_route must be present",
     );
   });
 

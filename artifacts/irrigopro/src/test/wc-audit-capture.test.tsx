@@ -220,7 +220,6 @@ const FETCH_FIXTURE_MAP: Record<string, unknown> = {
     indicators: {
       wcsPendingReview: 2,
       wosAwaitingApproval: 0,
-      findingsNeedingRouting: 1,
       approvedThisWeek: 3,
     },
   },
@@ -325,7 +324,6 @@ function seedCache(qc: QueryClient, role: RoleName) {
     indicators: {
       wcsPendingReview: 2,
       wosAwaitingApproval: 0,
-      findingsNeedingRouting: 1,
       approvedThisWeek: 3,
     },
   });

@@ -19,13 +19,11 @@ interface StatusStrip {
   indicators: {
     wcsPendingReview: number;
     wosAwaitingApproval: number;
-    findingsNeedingRouting: number;
     approvedThisWeek: number;
   };
   oldestAgeHours: {
     wcsPendingReview: number | null;
     wosAwaitingApproval: number | null;
-    findingsNeedingRouting: number | null;
   };
 }
 
@@ -214,12 +212,6 @@ export function ManagerTodayScreen() {
             count={ind?.wosAwaitingApproval ?? 0}
             subtitle={subtitleForAge(ages?.wosAwaitingApproval ?? null)}
             onPress={() => router.push("/work-orders" as any)}
-          />
-          <ActionTile
-            label="Findings needing routing"
-            count={ind?.findingsNeedingRouting ?? 0}
-            subtitle={subtitleForAge(ages?.findingsNeedingRouting ?? null)}
-            onPress={() => router.push("/wet-checks" as any)}
           />
         </View>
       </ScrollView>

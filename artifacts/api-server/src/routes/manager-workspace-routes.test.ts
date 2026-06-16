@@ -14,7 +14,6 @@ import {
   registerManagerWorkspaceRoutes,
   _setWetChecksForTests,
   _setWorkOrdersForTests,
-  _setFindingsForTests,
   _setBilingSheetsForTests,
   _setWcbForTests,
   _setPartsForTests,
@@ -130,32 +129,6 @@ describe("manager-workspace routes", () => {
     _setPartsForTests(async () => []);
     _setReviewsForTests(async () => []);
 
-    // Findings: id=1 unrouted in co1 wc=50; id=2 routed (billingSheetId set);
-    // id=3 unrouted in co2 wc=52.
-    _setFindingsForTests(async () => [
-      {
-        id: 1, wetCheckId: 50, issueType: "leak", issueGroup: "zone",
-        resolution: "pending", billingSheetId: null, estimateId: null, workOrderId: null,
-        customerId: 10, customerName: "Acme", technicianId: 100, technicianName: "Tech A",
-        wcCompanyId: 1, wcStatus: "submitted", partPrice: "50.00", quantity: 2,
-        createdAt: iso(2 * 86400_000),
-      },
-      {
-        id: 2, wetCheckId: 50, issueType: "head", issueGroup: "zone",
-        resolution: "sent_to_estimate", billingSheetId: null, estimateId: 5, workOrderId: null,
-        customerId: 10, customerName: "Acme", technicianId: 100, technicianName: "Tech A",
-        wcCompanyId: 1, wcStatus: "submitted", partPrice: "20.00", quantity: 1,
-        createdAt: iso(1 * 86400_000),
-      },
-      {
-        id: 3, wetCheckId: 52, issueType: "pipe", issueGroup: "main",
-        resolution: "pending", billingSheetId: null, estimateId: null, workOrderId: null,
-        customerId: 20, customerName: "BetaCo", technicianId: 200, technicianName: "Tech B",
-        wcCompanyId: 2, wcStatus: "submitted", partPrice: "30.00", quantity: 1,
-        createdAt: iso(3 * 86400_000),
-      },
-    ]);
-
     const app: Express = express();
     app.use(express.json());
     const requireAuthentication: RequestHandler = (req: any, _res, next) => {
@@ -253,23 +226,16 @@ describe("manager-workspace routes", () => {
   });
 
   // -------------------------------------------------------------------
-  // Findings filter
+  // Findings filter (removed — findings_to_route stage deleted, Task #1280)
   // -------------------------------------------------------------------
 
-  it("type=finding: unrouted finding appears; routed finding does not", async () => {
+  it("type=finding returns 200 with zero items (findings lane removed)", async () => {
     role = "super_admin";
     companyId = null;
     const r = await fetch(`${base}/api/manager-workspace/queue?type=finding`);
     assert.equal(r.status, 200);
     const body = (await r.json()) as any;
-    const refIds = body.items.map((x: any) => x.refId);
-    assert.ok(refIds.includes(1), "finding 1 (unrouted) should appear");
-    assert.ok(!refIds.includes(2), "finding 2 (routed to estimate) should NOT appear");
-    assert.ok(refIds.includes(3), "finding 3 (unrouted, co2) should appear for super_admin");
-    const f1 = body.items.find((x: any) => x.refId === 1);
-    assert.ok(f1, "finding 1 row should be present");
-    assert.equal(f1.type, "finding");
-    assert.ok(f1.href.includes("/wet-checks/50"), "href should reference parent wet check");
+    assert.equal(body.items.length, 0, "type=finding must return no items after findings lane removal");
   });
 
   // -------------------------------------------------------------------
@@ -307,7 +273,7 @@ describe("manager-workspace routes", () => {
   // Status-strip indicator counts
   // -------------------------------------------------------------------
 
-  it("status-strip returns { indicators } with the four required keys", async () => {
+  it("status-strip returns { indicators } with the required keys", async () => {
     const r = await fetch(`${base}/api/manager-workspace/status-strip`);
     assert.equal(r.status, 200);
     const body = (await r.json()) as any;
@@ -315,7 +281,6 @@ describe("manager-workspace routes", () => {
     for (const k of [
       "wcsPendingReview",
       "wosAwaitingApproval",
-      "findingsNeedingRouting",
       "approvedThisWeek",
     ]) {
       assert.ok(k in body.indicators, `missing indicator: ${k}`);
@@ -341,9 +306,6 @@ describe("manager-workspace routes", () => {
     // For co1 manager, tech scoping gives 1.
     assert.equal(ind.wosAwaitingApproval, 1, "1 WO awaiting approval in co1");
 
-    // findingsNeedingRouting: override returns 3 findings; 2 are unrouted (id=1, id=3).
-    assert.equal(ind.findingsNeedingRouting, 2, "2 unrouted findings");
-
     // approvedThisWeek uses ISO-week boundaries (Monday 00:00 UTC).
     // Fixtures: WC-51 (approvedAt=inWeek ✓) + BS-1 (approvedAt=inWeek ✓)
     //           + BS-2 (approvedAt=prevWeek ✗) + WOs: none in APPROVED_WO.
@@ -365,7 +327,7 @@ describe("manager-workspace routes", () => {
     assert.equal(r.headers.get("x-total-count"), String(body.total));
   });
 
-  it("type=all includes wc, wo, and finding rows", async () => {
+  it("type=all includes wc and wo rows but no finding rows", async () => {
     role = "super_admin";
     companyId = null;
     const r = await fetch(`${base}/api/manager-workspace/queue?type=all`);
@@ -373,7 +335,7 @@ describe("manager-workspace routes", () => {
     const types = new Set(body.items.map((x: any) => x.type));
     assert.ok(types.has("wet_check"), "should include wet_check rows");
     assert.ok(types.has("work_order"), "should include work_order rows");
-    assert.ok(types.has("finding"), "should include finding rows");
+    assert.ok(!types.has("finding"), "must NOT include finding rows (findings lane removed, Task #1280)");
   });
 
   it("sort=age_desc orders oldest first (default)", async () => {
@@ -409,7 +371,7 @@ describe("manager-workspace routes", () => {
         },
       ]);
       _setWetChecksForTests(async () => []);
-      _setFindingsForTests(async () => []);
+
       _setBilingSheetsForTests(async () => []);
       _setWcbForTests(async () => []);
 
@@ -432,7 +394,7 @@ describe("manager-workspace routes", () => {
     it("billing sheet with submitted status + invoiceId is absent from needs_review", async () => {
       _setWorkOrdersForTests(async () => []);
       _setWetChecksForTests(async () => []);
-      _setFindingsForTests(async () => []);
+
       _setBilingSheetsForTests(async () => [
         {
           id: 200, billingNumber: "BS-BILLED", technicianId: 100,
@@ -464,7 +426,7 @@ describe("manager-workspace routes", () => {
     it("WCB with pending_manager_review status + invoiceId is absent from needs_review", async () => {
       _setWorkOrdersForTests(async () => []);
       _setWetChecksForTests(async () => []);
-      _setFindingsForTests(async () => []);
+
       _setBilingSheetsForTests(async () => []);
       _setWcbForTests(async () => [
         {
@@ -505,7 +467,7 @@ describe("manager-workspace routes", () => {
         },
       ]);
       _setWorkOrdersForTests(async () => []);
-      _setFindingsForTests(async () => []);
+
       _setBilingSheetsForTests(async () => []);
       _setInvoicedBsWcIdsForTests(async () => new Set());
       _setWcbForTests(async () => [
@@ -545,7 +507,7 @@ describe("manager-workspace routes", () => {
         },
       ]);
       _setWorkOrdersForTests(async () => []);
-      _setFindingsForTests(async () => []);
+
       _setBilingSheetsForTests(async () => []);
       _setWcbForTests(async () => []);
       // Inject the billing-sheet → wet-check link directly (bypasses real DB join)
@@ -582,7 +544,7 @@ describe("manager-workspace routes", () => {
         },
       ]);
       _setWetChecksForTests(async () => []);
-      _setFindingsForTests(async () => []);
+
       _setBilingSheetsForTests(async () => []);
       _setWcbForTests(async () => []);
 
@@ -606,7 +568,7 @@ describe("manager-workspace routes", () => {
         },
       ]);
       _setWetChecksForTests(async () => []);
-      _setFindingsForTests(async () => []);
+
       _setBilingSheetsForTests(async () => []);
       _setWcbForTests(async () => []);
 
@@ -636,7 +598,7 @@ describe("manager-workspace routes", () => {
         },
       ]);
       _setWetChecksForTests(async () => []);
-      _setFindingsForTests(async () => []);
+
       _setBilingSheetsForTests(async () => []);
       _setWcbForTests(async () => []);
 
@@ -662,7 +624,7 @@ describe("manager-workspace routes", () => {
         },
       ]);
       _setWetChecksForTests(async () => []);
-      _setFindingsForTests(async () => []);
+
       _setBilingSheetsForTests(async () => []);
       _setWcbForTests(async () => []);
 
@@ -672,60 +634,6 @@ describe("manager-workspace routes", () => {
       const item = body.items.find((x: any) => x.refId === 1002);
       assert.ok(item, "WO-FRESH should be in the queue");
       assert.ok(!item.flags.includes("aging_unbilled"), "2-day-old WO must NOT have aging_unbilled flag");
-      _resetManagerWorkspaceOverridesForTests();
-    });
-
-    it("pending finding, no routing target, 10 days old → orphaned_finding flag", async () => {
-      _setWorkOrdersForTests(async () => []);
-      _setWetChecksForTests(async () => []);
-      _setBilingSheetsForTests(async () => []);
-      _setWcbForTests(async () => []);
-      _setFindingsForTests(async () => [
-        {
-          id: 200, wetCheckId: 50, issueType: "leak", issueGroup: "zone",
-          resolution: "pending",
-          billingSheetId: null, estimateId: null, workOrderId: null, wetCheckBillingId: null,
-          customerId: 10, customerName: "Acme",
-          technicianId: 100, technicianName: "Tech A",
-          wcCompanyId: 1, wcStatus: "submitted",
-          partPrice: "30.00", quantity: 1,
-          createdAt: iso(10 * 86400_000),
-        },
-      ]);
-
-      role = "super_admin"; companyId = null;
-      const r = await fetch(`${base}/api/manager-workspace/queue?type=finding`);
-      const body = (await r.json()) as any;
-      const item = body.items.find((x: any) => x.refId === 200);
-      assert.ok(item, "orphaned finding should appear in the queue");
-      assert.ok(item.flags.includes("orphaned_finding"), "10-day-old unrouted pending finding must have orphaned_finding flag");
-      _resetManagerWorkspaceOverridesForTests();
-    });
-
-    it("pending finding, no routing target, 2 days old → no orphaned_finding flag", async () => {
-      _setWorkOrdersForTests(async () => []);
-      _setWetChecksForTests(async () => []);
-      _setBilingSheetsForTests(async () => []);
-      _setWcbForTests(async () => []);
-      _setFindingsForTests(async () => [
-        {
-          id: 201, wetCheckId: 50, issueType: "leak", issueGroup: "zone",
-          resolution: "pending",
-          billingSheetId: null, estimateId: null, workOrderId: null, wetCheckBillingId: null,
-          customerId: 10, customerName: "Acme",
-          technicianId: 100, technicianName: "Tech A",
-          wcCompanyId: 1, wcStatus: "submitted",
-          partPrice: "30.00", quantity: 1,
-          createdAt: iso(2 * 86400_000),
-        },
-      ]);
-
-      role = "super_admin"; companyId = null;
-      const r = await fetch(`${base}/api/manager-workspace/queue?type=finding`);
-      const body = (await r.json()) as any;
-      const item = body.items.find((x: any) => x.refId === 201);
-      assert.ok(item, "finding 201 should appear");
-      assert.ok(!item.flags.includes("orphaned_finding"), "2-day-old finding must NOT have orphaned_finding");
       _resetManagerWorkspaceOverridesForTests();
     });
 
@@ -741,7 +649,7 @@ describe("manager-workspace routes", () => {
         },
       ]);
       _setWetChecksForTests(async () => []);
-      _setFindingsForTests(async () => []);
+
       _setBilingSheetsForTests(async () => []);
       _setWcbForTests(async () => []);
 
@@ -766,7 +674,7 @@ describe("manager-workspace routes", () => {
         },
       ]);
       _setWorkOrdersForTests(async () => []);
-      _setFindingsForTests(async () => []);
+
       _setBilingSheetsForTests(async () => []);
       _setWcbForTests(async () => []);
       _setInvoicedBsWcIdsForTests(async () => new Set());
@@ -802,7 +710,7 @@ describe("manager-workspace routes", () => {
         },
       ]);
       _setWetChecksForTests(async () => []);
-      _setFindingsForTests(async () => []);
+
       _setBilingSheetsForTests(async () => []);
       _setWcbForTests(async () => []);
 
@@ -828,7 +736,7 @@ describe("manager-workspace routes", () => {
         },
       ]);
       _setWorkOrdersForTests(async () => []);
-      _setFindingsForTests(async () => []);
+
       _setBilingSheetsForTests(async () => []);
       _setInvoicedBsWcIdsForTests(async () => new Set());
       _setWcbForTests(async () => [

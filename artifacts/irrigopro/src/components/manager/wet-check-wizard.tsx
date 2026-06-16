@@ -1297,9 +1297,9 @@ export function WetCheckWizard({ id }: { id: number }) {
                   )}
                 </ul>
                 <p>
-                  The Manager Workspace findings queue lets you bulk-route them to a
-                  Wet Check Billing, Work Order, or Estimate before approving. You can
-                  still approve now — they will remain in the findings queue until routed.
+                  You can approve now and route each finding individually from the
+                  wet-check review screen, or go back and set a resolution for each
+                  finding before approving.
                 </p>
               </div>
             </AlertDialogDescription>

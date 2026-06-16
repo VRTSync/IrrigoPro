@@ -22,7 +22,6 @@ import {
   _setWorkOrdersForTests,
   _setBilingSheetsForTests,
   _setWetChecksForTests,
-  _setFindingsForTests,
   _setPartsForTests,
   _setReviewsForTests,
   _setInvoicedBsWcIdsForTests,
@@ -136,7 +135,7 @@ describe("Slice 2 — billed without manager review", () => {
       _setWorkOrdersForTests(noWorkOrders);
       _setBilingSheetsForTests(noBillingSheets);
       _setWetChecksForTests(noWetChecks);
-      _setFindingsForTests(noFindings);
+
       _setPartsForTests(noParts);
       _setReviewsForTests(noReviews);
       _setInvoicedBsWcIdsForTests(noInvoicedBsWcIds);
@@ -212,7 +211,7 @@ describe("Slice 2 — billed without manager review", () => {
     beforeEach(() => {
       _setWcbForTests(async () => []);
       _setWetChecksForTests(noWetChecks);
-      _setFindingsForTests(noFindings);
+
       _setBilingSheetsForTests(noBillingSheets);
       _setPartsForTests(noParts);
       _setReviewsForTests(noReviews);
@@ -260,7 +259,7 @@ describe("Slice 2 — billed without manager review", () => {
   describe("(c) Legacy row with approvedByRole = NULL → billedWithoutReview: false", () => {
     beforeEach(() => {
       _setWetChecksForTests(noWetChecks);
-      _setFindingsForTests(noFindings);
+
       _setPartsForTests(noParts);
       _setReviewsForTests(noReviews);
       _setInvoicedBsWcIdsForTests(noInvoicedBsWcIds);
@@ -361,7 +360,7 @@ describe("Slice 2 — billed without manager review", () => {
       _setWorkOrdersForTests(noWorkOrders);
       _setBilingSheetsForTests(noBillingSheets);
       _setWetChecksForTests(noWetChecks);
-      _setFindingsForTests(noFindings);
+
       _setPartsForTests(noParts);
       _setReviewsForTests(noReviews);
       _setInvoicedBsWcIdsForTests(noInvoicedBsWcIds);

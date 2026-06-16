@@ -6,16 +6,14 @@
 //
 // All endpoints are gated to irrigation_manager / company_admin /
 // super_admin / billing_manager; all four roles see the same page.
-// billing_manager gets 200 but never receives wet_check or finding items.
+// billing_manager gets 200 but never receives wet_check items.
 // Non-super_admin callers see only their own company's data.
 
 import type { Express, RequestHandler } from "express";
-import { and, eq, inArray, isNull, ne } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import {
   wetChecks,
   wetCheckFindings,
-  workOrders,
-  billingSheets,
 } from "@workspace/db/schema";
 import { db } from "../db";
 import { storage } from "../storage";
@@ -85,20 +83,6 @@ const ALL_WCB_STAGES = new Set([
 // Exported for use by the needs-review endpoint in routes.ts.
 export const APPROVED_WC = new Set(["approved", "partially_converted", "converted"]);
 
-// A finding is pending routing when it hasn't been sent to any target bucket
-// and isn't already resolved as documented-only.
-function isFindingPendingRouting(f: {
-  billingSheetId: number | null;
-  estimateId: number | null;
-  workOrderId: number | null;
-  wetCheckBillingId?: number | null;
-  resolution?: string | null;
-}): boolean {
-  if (f.resolution === "documented_only") return false;
-  if (f.wetCheckBillingId != null) return false;
-  return f.billingSheetId == null && f.estimateId == null && f.workOrderId == null;
-}
-
 function numOr0(v: unknown): number {
   if (v == null) return 0;
   const n = typeof v === "number" ? v : Number(v);
@@ -116,7 +100,6 @@ function parseIntOr(v: unknown, dflt: number): number {
 // -----------------------------------------------------------------------
 let _wetCheckOverride: (() => Promise<any[]>) | null = null;
 let _workOrderOverride: (() => Promise<any[]>) | null = null;
-let _findingOverride: (() => Promise<any[]>) | null = null;
 let _billingSheetOverride: (() => Promise<any[]>) | null = null;
 let _wcbOverride: (() => Promise<any[]>) | null = null;
 let _partsOverride: (() => Promise<any[]>) | null = null;
@@ -131,9 +114,6 @@ export function _setWetChecksForTests(fn: () => Promise<any[]>): void {
 }
 export function _setWorkOrdersForTests(fn: () => Promise<any[]>): void {
   _workOrderOverride = fn;
-}
-export function _setFindingsForTests(fn: () => Promise<any[]>): void {
-  _findingOverride = fn;
 }
 export function _setBilingSheetsForTests(fn: () => Promise<any[]>): void {
   _billingSheetOverride = fn;
@@ -153,7 +133,6 @@ export function _setInvoicedBsWcIdsForTests(fn: () => Promise<Set<number>>): voi
 export function _resetManagerWorkspaceOverridesForTests(): void {
   _wetCheckOverride = null;
   _workOrderOverride = null;
-  _findingOverride = null;
   _billingSheetOverride = null;
   _wcbOverride = null;
   _partsOverride = null;
@@ -202,51 +181,6 @@ async function scopedWorkOrdersForManager(req: any): Promise<any[]> {
     if (c === cid) out.push(w);
   }
   return out;
-}
-
-async function scopedFindingsNeedingRouting(req: any): Promise<any[]> {
-  if (_findingOverride) return _findingOverride();
-  const role = req.authenticatedUserRole;
-  const cid: number | null = req.authenticatedUserCompanyId ?? null;
-  if (role !== "super_admin" && cid == null) return [];
-  const rows = await db
-    .select({
-      id: wetCheckFindings.id,
-      wetCheckId: wetCheckFindings.wetCheckId,
-      issueType: wetCheckFindings.issueType,
-      issueGroup: wetCheckFindings.issueGroup,
-      severity: wetCheckFindings.severity,
-      partPrice: wetCheckFindings.partPrice,
-      quantity: wetCheckFindings.quantity,
-      resolution: wetCheckFindings.resolution,
-      billingSheetId: wetCheckFindings.billingSheetId,
-      estimateId: wetCheckFindings.estimateId,
-      workOrderId: wetCheckFindings.workOrderId,
-      wetCheckBillingId: wetCheckFindings.wetCheckBillingId,
-      techDisposition: wetCheckFindings.techDisposition,
-      createdAt: wetCheckFindings.createdAt,
-      wcCompanyId: wetChecks.companyId,
-      customerId: wetChecks.customerId,
-      customerName: wetChecks.customerName,
-      technicianId: wetChecks.technicianId,
-      technicianName: wetChecks.technicianName,
-      wcStatus: wetChecks.status,
-    })
-    .from(wetCheckFindings)
-    .innerJoin(wetChecks, eq(wetCheckFindings.wetCheckId, wetChecks.id))
-    .where(
-      and(
-        isNull(wetCheckFindings.billingSheetId),
-        isNull(wetCheckFindings.estimateId),
-        isNull(wetCheckFindings.workOrderId),
-        isNull(wetCheckFindings.wetCheckBillingId),
-        ne(wetCheckFindings.resolution, "documented_only"),
-        role !== "super_admin" && cid != null
-          ? eq(wetChecks.companyId, cid)
-          : undefined,
-      ),
-    );
-  return rows;
 }
 
 async function scopedBillingSheets(req: any): Promise<any[]> {
@@ -331,7 +265,6 @@ async function getWetCheckIdsInvoicedViaBillingSheets(
 export type Stage =
   | "needs_review"
   | "waiting_on_tech"
-  | "findings_to_route"
   | "passed_to_billing"
   | "billed_7d";
 
@@ -340,7 +273,6 @@ export interface ManagerQueueItem {
   type:
     | "wet_check"
     | "work_order"
-    | "finding"
     | "billing_sheet"
     | "wet_check_billing"
     | "part"
@@ -381,9 +313,6 @@ function assignStage(
   now: number,
   billedAt?: string | null,
 ): Stage {
-  // findings always go to their own stage
-  if (type === "finding") return "findings_to_route";
-
   // Any item that has been attached to an invoice is already billed,
   // regardless of what status string it carries.  Route to billed_7d
   // so it drops off naturally after the 7-day window.
@@ -415,9 +344,9 @@ export function registerManagerWorkspaceRoutes(
   // GET /api/manager-workspace/queue
   //
   // Query params:
-  //   type     : all | wc | wo | finding | bs | wcb | part | manual (default all)
-  //   stage    : all | needs_review | waiting_on_tech | findings_to_route
-  //              | passed_to_billing | billed_7d                    (default all)
+  //   type     : all | wc | wo | bs | wcb | part | manual (default all)
+  //   stage    : all | needs_review | waiting_on_tech | passed_to_billing
+  //              | billed_7d                                        (default all)
   //   q        : free-text (number / customer / tech)
   //   customer : numeric customer id
   //   tech     : numeric technician id
@@ -463,7 +392,6 @@ export function registerManagerWorkspaceRoutes(
 
         const wantWc = !isBillingManager && (type === "all" || type === "wc");
         const wantWo = type === "all" || type === "wo";
-        const wantFinding = !isBillingManager && (type === "all" || type === "finding");
         const wantBs = type === "all" || type === "bs";
         const wantWcb = type === "all" || type === "wcb";
         const wantPart = type === "all" || type === "part";
@@ -611,46 +539,6 @@ export function registerManagerWorkspaceRoutes(
               returnedForCorrectionAt: rfcAt,
               invoiceId: w.invoiceId ?? null,
               billedWithoutReview: billedWithoutReview || false,
-            });
-          }
-        }
-
-        // ── Findings (irrigation_manager / company_admin / super_admin only) ──
-        if (wantFinding) {
-          for (const f of await scopedFindingsNeedingRouting(req)) {
-            if (!isFindingPendingRouting(f)) continue;
-            const created = f.createdAt
-              ? new Date(f.createdAt).toISOString()
-              : null;
-            const age = ageDays(created);
-            const flags: string[] = [];
-            if (age != null && age > HANGING_THRESHOLD_DAYS) flags.push("stale");
-            if (
-              f.resolution === "pending" &&
-              age != null &&
-              age > HANGING_THRESHOLD_DAYS
-            ) {
-              flags.push("orphaned_finding");
-            }
-            const total = numOr0(f.partPrice) * numOr0(f.quantity);
-            items.push({
-              id: `finding-${f.id}`,
-              type: "finding",
-              stage: "findings_to_route",
-              refId: f.id,
-              number: null,
-              customerId: f.customerId ?? null,
-              customerName: f.customerName ?? null,
-              technicianId: f.technicianId ?? null,
-              technicianName: f.technicianName ?? null,
-              total,
-              status: f.resolution ?? "pending",
-              hasPhotos: null,
-              flags,
-              ageDays: age,
-              createdAt: created,
-              href: `/wet-checks/${f.wetCheckId}#finding-${f.id}`,
-              wetCheckId: f.wetCheckId ?? null,
             });
           }
         }
@@ -1061,12 +949,7 @@ export function registerManagerWorkspaceRoutes(
           scopedWcb(req),
         ]);
 
-        const [wcs, findings] = isBillingManager
-          ? [[], []]
-          : await Promise.all([
-              scopedWetChecks(req),
-              scopedFindingsNeedingRouting(req),
-            ]);
+        const wcs = isBillingManager ? [] : await scopedWetChecks(req);
 
         // Build the same invoicedWetCheckIds set the queue uses so that
         // attentionCount never counts a WC that is already suppressed.
@@ -1085,11 +968,9 @@ export function registerManagerWorkspaceRoutes(
         // ── Legacy indicators ──
         const activeWcs = wcs.filter((w) => ACTIVE_WC.has(w.status));
         const activeWos = wos.filter((w) => ACTIVE_WO_FOR_MANAGER.has(w.status));
-        const activeFindings = findings.filter((f) => isFindingPendingRouting(f));
 
         const wcsPendingReview = activeWcs.length;
         const wosAwaitingApproval = activeWos.length;
-        const findingsNeedingRouting = activeFindings.length;
 
         const approvedThisWeek =
           wcs.filter(
@@ -1111,7 +992,6 @@ export function registerManagerWorkspaceRoutes(
         // ── Stage counts ──
         let needsReview = 0;
         let waitingOnTech = 0;
-        let findingsToRoute = isBillingManager ? undefined : activeFindings.length;
         let passedToBilling = 0;
         let billed7d = 0;
 
@@ -1176,7 +1056,7 @@ export function registerManagerWorkspaceRoutes(
 
         // ── attentionCount — hanging / never-billed items ──
         // Counts every queue item that would carry an anti-leakage flag:
-        // aging_unbilled, cold_review, orphaned_finding, or partially_converted.
+        // aging_unbilled, cold_review, or partially_converted.
         const msPerDay = 86_400_000;
         const ageFromCreatedAt = (v: any): number => {
           const t = new Date(v).getTime();
@@ -1247,18 +1127,6 @@ export function registerManagerWorkspaceRoutes(
           }
         }
 
-        if (!isBillingManager) {
-          for (const f of findings) {
-            if (
-              isFindingPendingRouting(f) &&
-              f.resolution === "pending" &&
-              ageFromCreatedAt(f.createdAt) > HANGING_THRESHOLD_DAYS
-            ) {
-              attentionCount++; // orphaned_finding
-            }
-          }
-        }
-
         // Compute oldest createdAt for each active indicator bucket.
         const oldestHours = (rows: any[]): number | null => {
           let oldest: number | null = null;
@@ -1285,15 +1153,11 @@ export function registerManagerWorkspaceRoutes(
           passedToBilling,
           billed7d,
         };
-        if (!isBillingManager) {
-          stageCounts.findingsToRoute = findingsToRoute as number;
-        }
 
         res.json({
           indicators: {
             wcsPendingReview,
             wosAwaitingApproval,
-            findingsNeedingRouting,
             approvedThisWeek,
           },
           attentionCount,
@@ -1301,7 +1165,6 @@ export function registerManagerWorkspaceRoutes(
           oldestAgeHours: {
             wcsPendingReview: oldestHours(activeWcs),
             wosAwaitingApproval: oldestHours(activeWos),
-            findingsNeedingRouting: oldestHours(activeFindings),
           },
           quickbooks: qbStatus
             ? {

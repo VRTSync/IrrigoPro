@@ -41,7 +41,6 @@ interface StatusStripResponse {
   indicators: {
     wcsPendingReview: number;
     wosAwaitingApproval: number;
-    findingsNeedingRouting: number;
     approvedThisWeek: number;
   };
   quickbooks: {
