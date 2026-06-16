@@ -114,11 +114,28 @@ function AllWetChecksTab() {
 
 // ─── Needs Review tab ─────────────────────────────────────────────────────────
 
+type ReviewType = "triage" | "snapshot" | "inspection_estimate";
+
 type NeedsReviewItem = WetCheck & {
-  outstandingWork: { unroutedFindings: number; snapshotPending: boolean };
+  outstandingWork: {
+    unroutedFindings: number;
+    snapshotPending: boolean;
+    inspectionEstimatePending?: boolean;
+  };
+  // Computed by the API. May be absent on older cached responses; fall back
+  // to re-deriving from outstandingWork flags in that case.
+  reviewType?: ReviewType;
 };
 
 type NeedsReviewResponse = { count: number; items: NeedsReviewItem[] };
+
+function deriveReviewType(item: NeedsReviewItem): ReviewType {
+  if (item.reviewType) return item.reviewType;
+  // Fallback derivation from outstandingWork flags (same priority order as API).
+  if (item.outstandingWork.unroutedFindings > 0) return "triage";
+  if (item.outstandingWork.snapshotPending) return "snapshot";
+  return "inspection_estimate";
+}
 
 function timeAgoNR(iso: string | Date | null | undefined): string {
   if (!iso) return "—";
@@ -159,9 +176,17 @@ function NRCardSkeleton() {
   );
 }
 
+const REVIEW_TYPE_LABELS: Record<ReviewType, string> = {
+  triage: "Route findings",
+  snapshot: "Approve snapshot",
+  inspection_estimate: "Review estimate",
+};
+
 function NRCard({ item, onReview }: { item: NeedsReviewItem; onReview: () => void }) {
   const { unroutedFindings, snapshotPending } = item.outstandingWork;
   const hasWork = unroutedFindings > 0 || snapshotPending;
+  const reviewType = deriveReviewType(item);
+  const actionLabel = REVIEW_TYPE_LABELS[reviewType];
 
   return (
     <Card
@@ -235,7 +260,13 @@ function NRCard({ item, onReview }: { item: NeedsReviewItem; onReview: () => voi
         </div>
       </CardContent>
 
-      <CardFooter className="border-t border-slate-100 pt-2 pb-3 justify-end">
+      <CardFooter className="border-t border-slate-100 pt-2 pb-3 flex items-center justify-between">
+        <span
+          className="text-xs text-slate-500 font-medium"
+          data-testid={`nr-row-${item.id}-action-label`}
+        >
+          {actionLabel}
+        </span>
         <Button
           size="sm"
           className="bg-cyan-600 hover:bg-cyan-700 text-white"
@@ -250,6 +281,29 @@ function NRCard({ item, onReview }: { item: NeedsReviewItem; onReview: () => voi
         </Button>
       </CardFooter>
     </Card>
+  );
+}
+
+// Section metadata in display order (display order ≠ deduplication priority).
+const NR_SECTIONS: Array<{
+  type: ReviewType;
+  heading: string;
+  testId: string;
+}> = [
+  { type: "snapshot",            heading: "Snapshot Pending Approval", testId: "nr-section-snapshot" },
+  { type: "triage",              heading: "Findings to Triage",        testId: "nr-section-triage" },
+  { type: "inspection_estimate", heading: "Inspection Estimate Pending", testId: "nr-section-inspection" },
+];
+
+function NRSectionHeading({ heading, count, testId }: { heading: string; count: number; testId: string }) {
+  return (
+    <div className="flex items-center gap-2 mt-5 mb-2 first:mt-0" data-testid={testId}>
+      <h3 className="text-sm font-semibold text-slate-700">{heading}</h3>
+      <span className="inline-flex items-center justify-center rounded-full bg-slate-100 text-slate-600 text-xs font-medium px-2 py-0.5 min-w-[1.5rem]">
+        {count}
+      </span>
+      <div className="flex-1 h-px bg-slate-200" />
+    </div>
   );
 }
 
@@ -286,18 +340,42 @@ function NeedsReviewTab() {
     );
   }
 
+  // Partition items into sections by reviewType.
+  // Each item appears in exactly one section (API already deduplicates by priority).
+  const sectionItems: Record<ReviewType, NeedsReviewItem[]> = {
+    snapshot: [],
+    triage: [],
+    inspection_estimate: [],
+  };
+  for (const item of items) {
+    sectionItems[deriveReviewType(item)].push(item);
+  }
+
+  const handleReview = (item: NeedsReviewItem) => navigate(`/manager/wet-checks/${item.id}`);
+
   return (
-    <div className="space-y-3" data-testid="nr-list">
-      <p className="text-sm text-slate-500">
+    <div data-testid="nr-list">
+      <p className="text-sm text-slate-500 mb-4">
         {items.length} wet check{items.length !== 1 ? "s" : ""} awaiting review
       </p>
-      {items.map(item => (
-        <NRCard
-          key={item.id}
-          item={item}
-          onReview={() => navigate(`/manager/wet-checks/${item.id}`)}
-        />
-      ))}
+      {NR_SECTIONS.map(({ type, heading, testId }) => {
+        const group = sectionItems[type];
+        if (group.length === 0) return null;
+        return (
+          <div key={type}>
+            <NRSectionHeading heading={heading} count={group.length} testId={testId} />
+            <div className="space-y-3">
+              {group.map(item => (
+                <NRCard
+                  key={item.id}
+                  item={item}
+                  onReview={() => handleReview(item)}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

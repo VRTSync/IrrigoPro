@@ -15483,19 +15483,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // ── Step 2: fetch all candidate wet checks ──────────────────────────────
       // Candidates are wet checks where:
       //   (status ∈ ACTIVE_WC) OR (id ∈ wcbQualifiedIds)
-      // Wet checks with status ∈ {approved, converted} are always excluded —
+      // Wet checks with status ∈ {approved, converted} are normally excluded —
       // these are the APPROVED_WC members that do NOT overlap with ACTIVE_WC.
+      // EXCEPTION: a wet check with one of those statuses still passes the
+      // exclusion guard when it qualifies via rule 3 (id ∈ wcbQualifiedIds).
+      // Correct predicate: (status NOT IN excluded) OR (id ∈ wcbQualifiedIds).
       // (partially_converted overlaps both sets and is handled by in-memory rule 2.)
       const excludedStatuses = [...APPROVED_WC].filter(s => !ACTIVE_WC.has(s));
 
+      // Materialise wcbIds early so we can reference them in both the
+      // exclusion guard and the inclusion clause below.
+      const wcbIds = [...wcbQualifiedIdSet];
+
       // Build the WHERE conditions piece by piece to stay type-safe.
       const statusInActiveWc = inArray(wetChecks.status, [...ACTIVE_WC]);
+      // The exclusion clause must allow through any wet check that qualifies
+      // via rule 3 (WCB snapshot), even when its own status is converted/approved.
       const notExcluded = excludedStatuses.length > 0
-        ? sql`${wetChecks.status} NOT IN (${sql.join(excludedStatuses.map(s => sql`${s}`), sql`, `)})`
+        ? (wcbIds.length > 0
+          ? or(
+              sql`${wetChecks.status} NOT IN (${sql.join(excludedStatuses.map(s => sql`${s}`), sql`, `)})`,
+              inArray(wetChecks.id, wcbIds),
+            )
+          : sql`${wetChecks.status} NOT IN (${sql.join(excludedStatuses.map(s => sql`${s}`), sql`, `)})`)
         : undefined;
 
       // OR-combine the two inclusion paths.
-      const wcbIds = [...wcbQualifiedIdSet];
       const inclusionClause = wcbIds.length > 0
         ? or(statusInActiveWc, inArray(wetChecks.id, wcbIds))
         : statusInActiveWc;
@@ -15553,12 +15566,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // ── Step 4: apply membership rule in-memory and annotate ────────────────
+      type ReviewType = "triage" | "snapshot" | "inspection_estimate";
       type NeedsReviewItem = (typeof candidates)[number] & {
         outstandingWork: {
           unroutedFindings: number;
           snapshotPending: boolean;
           inspectionEstimatePending: boolean;
         };
+        // Primary action bucket for this item. Deduplication priority:
+        // triage > snapshot > inspection_estimate (display order is different).
+        reviewType: ReviewType;
       };
       const items: NeedsReviewItem[] = [];
 
@@ -15573,6 +15590,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // wet check that either has no estimate yet or has one that is not
         // yet in the 'approved' lifecycle. Once approved the wet check
         // transitions to 'converted' and leaves the queue naturally.
+        // Guard defensively: if the mode column is absent or not "inspection",
+        // treat as false so this never fires before the Inspection slices land.
         const inspEst = inspEstByWc.get(wc.id);
         const inspectionEstimatePending =
           (wc as any).mode === "inspection" &&
@@ -15601,7 +15620,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (inspectionEstimatePending) qualifies = true;
 
         if (qualifies) {
-          items.push({ ...wc, outstandingWork: { unroutedFindings, snapshotPending, inspectionEstimatePending } });
+          // Deduplication priority: triage wins over snapshot wins over inspection_estimate.
+          const reviewType: ReviewType =
+            unroutedFindings > 0 ? "triage" :
+            snapshotPending ? "snapshot" :
+            "inspection_estimate";
+          items.push({
+            ...wc,
+            outstandingWork: { unroutedFindings, snapshotPending, inspectionEstimatePending },
+            reviewType,
+          });
         }
       }
 
