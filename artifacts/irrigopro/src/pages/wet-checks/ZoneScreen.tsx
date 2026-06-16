@@ -54,6 +54,7 @@ function InlineFindingEditor({
   customerId,
   photos,
   readOnly,
+  wetCheckMode,
   onSaved,
   onCancel,
 }: {
@@ -66,6 +67,7 @@ function InlineFindingEditor({
   customerId: number;
   photos: WetCheckPhoto[];
   readOnly: boolean;
+  wetCheckMode?: "service" | "inspection";
   onSaved: () => void;
   onCancel: () => void;
 }) {
@@ -380,7 +382,7 @@ function InlineFindingEditor({
         </div>
         <div data-testid="inline-finding-labor">
           <LaborHoursStepper
-            label="Labor hrs"
+            label={wetCheckMode === "inspection" ? "Est. labor hrs" : "Labor hrs"}
             value={laborHours}
             onChange={setLaborHours}
             min="0.25"
@@ -402,25 +404,27 @@ function InlineFindingEditor({
         />
       </div>
 
-      {/* Mark complete */}
-      <label className="flex items-start gap-2 text-sm" data-testid="inline-finding-repaired-toggle">
-        <input
-          type="checkbox"
-          checked={repairedInField}
-          onChange={(e) => setRepairedInField(e.target.checked)}
-          className="h-4 w-4 mt-0.5"
-        />
-        <span>
-          <span className="font-medium">Mark complete</span>
-          <span className="block text-xs text-gray-500">
-            {autoBillEnabled
-              ? "Will auto-bill on submit."
-              : "Completed in the field."}
+      {/* Mark complete — hidden in inspection mode (assessment-only) */}
+      {wetCheckMode !== "inspection" && (
+        <label className="flex items-start gap-2 text-sm" data-testid="inline-finding-repaired-toggle">
+          <input
+            type="checkbox"
+            checked={repairedInField}
+            onChange={(e) => setRepairedInField(e.target.checked)}
+            className="h-4 w-4 mt-0.5"
+          />
+          <span>
+            <span className="font-medium">Mark complete</span>
+            <span className="block text-xs text-gray-500">
+              {autoBillEnabled
+                ? "Will auto-bill on submit."
+                : "Completed in the field."}
+            </span>
           </span>
-        </span>
-      </label>
+        </label>
+      )}
 
-      {repairedInField && !hasPartSelected && (
+      {wetCheckMode !== "inspection" && repairedInField && !hasPartSelected && (
         <label
           className="flex items-start gap-2 text-sm rounded border border-amber-200 bg-amber-50 p-2"
           data-testid="inline-finding-no-part-toggle"
@@ -490,6 +494,7 @@ export function ZoneScreen({
   zoneRecord,
   photos,
   readOnly,
+  wetCheckMode,
   onBack,
   onAdvance,
   currentZoneIndex,
@@ -510,6 +515,7 @@ export function ZoneScreen({
   zoneRecord: (WetCheckZoneRecord & { findings: WetCheckFinding[] }) | undefined;
   photos: WetCheckPhoto[];
   readOnly: boolean;
+  wetCheckMode?: "service" | "inspection";
   onBack: () => void;
   onAdvance: () => void;
   // Navigation props (optional — older callers like tests may not pass them)
@@ -1257,6 +1263,7 @@ export function ZoneScreen({
                       customerId={customerId}
                       photos={photos}
                       readOnly={readOnly}
+                      wetCheckMode={wetCheckMode}
                       onSaved={() => {
                         setInlineIssueType(null);
                         setShowChipSelector(false);
@@ -1277,6 +1284,7 @@ export function ZoneScreen({
                       customerId={customerId}
                       photos={photos}
                       readOnly={readOnly}
+                      wetCheckMode={wetCheckMode}
                       onSaved={() => setInlineEditing(null)}
                       onCancel={() => setInlineEditing(null)}
                     />
@@ -1336,7 +1344,7 @@ export function ZoneScreen({
                                       : "Completed in field"}
                                   </Badge>
                                 )}
-                                {!readOnly && (
+                                {!readOnly && wetCheckMode !== "inspection" && (
                                   <div
                                     className="mt-2 inline-flex rounded-md border overflow-hidden"
                                     role="group"

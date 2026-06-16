@@ -97,6 +97,24 @@ function HistoryRow({ wc, onClick }: { wc: WetCheckRow; onClick: () => void }) {
               {formatDate(wc.startedAt)}
             </span>
             <StatusBadge status={wc.status} />
+            {wc.mode === "inspection" && (
+              <Badge
+                className="text-[10px] border bg-violet-100 text-violet-800 border-violet-300"
+                variant="outline"
+                data-testid={`badge-wc-mode-inspection-${wc.id}`}
+              >
+                Inspection
+              </Badge>
+            )}
+            {wc.mode === "service" && (
+              <Badge
+                className="text-[10px] border bg-blue-100 text-blue-800 border-blue-300"
+                variant="outline"
+                data-testid={`badge-wc-mode-service-${wc.id}`}
+              >
+                Service
+              </Badge>
+            )}
           </div>
           <div className="mt-1 flex items-center gap-3 flex-wrap text-xs text-gray-500">
             <span>{wc.technicianName}</span>
@@ -305,7 +323,16 @@ export function CustomerHub({ customerId }: CustomerHubProps) {
         <Button
           className="w-full h-12 text-base font-semibold"
           disabled={!!inProgressCheck}
-          onClick={() => navigate(`/wet-checks/c/${customerId}/new`)}
+          onClick={() => {
+            try {
+              sessionStorage.setItem("wc_pending_customer_id", String(customerId));
+            } catch {
+              // sessionStorage unavailable — fall back to direct navigation
+              navigate(`/wet-checks/c/${customerId}/new`);
+              return;
+            }
+            navigate("/wet-checks/new");
+          }}
           data-testid="btn-start-new"
           title={inProgressCheck ? "Finish the current inspection before starting a new one" : undefined}
         >

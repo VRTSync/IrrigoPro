@@ -222,7 +222,21 @@ export default function CustomerPickerPage() {
   const isLoading = loadingCustomers || loadingWcs;
 
   function handleCardClick(customer: Customer) {
-    navigate(`/wet-checks/c/${customer.id}`);
+    // If a pending mode was set (user came through /wet-checks/new mode
+    // selector), skip the hub and go directly to the controller/start page
+    // so the mode choice is consumed in one smooth flow.
+    // Don't consume the key here — ControllerSelectionPage owns that.
+    let hasPendingMode = false;
+    try {
+      hasPendingMode = !!sessionStorage.getItem("wc_pending_mode");
+    } catch {
+      // sessionStorage unavailable
+    }
+    if (hasPendingMode) {
+      navigate(`/wet-checks/c/${customer.id}/new`);
+    } else {
+      navigate(`/wet-checks/c/${customer.id}`);
+    }
   }
 
   return (

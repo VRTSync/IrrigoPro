@@ -177,6 +177,24 @@ function NRCard({ item, onReview }: { item: NeedsReviewItem; onReview: () => voi
                 {item.customerName ?? "Unknown Customer"}
               </span>
               <NRStatusBadge status={item.status ?? "submitted"} />
+              {item.mode === "inspection" && (
+                <Badge
+                  className="text-xs border bg-violet-100 text-violet-800 border-violet-300"
+                  variant="outline"
+                  data-testid={`badge-nr-mode-inspection-${item.id}`}
+                >
+                  Inspection
+                </Badge>
+              )}
+              {item.mode === "service" && (
+                <Badge
+                  className="text-xs border bg-blue-100 text-blue-800 border-blue-300"
+                  variant="outline"
+                  data-testid={`badge-nr-mode-service-${item.id}`}
+                >
+                  Service
+                </Badge>
+              )}
             </div>
 
             <div className="flex items-center gap-3 text-xs text-slate-500 flex-wrap">
@@ -336,6 +354,24 @@ function ApprovedRow({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium truncate">{item.customerName}</span>
             <ApprovedSnapshotChip status={item.status ?? ""} />
+            {item.wetCheckMode === "inspection" && (
+              <Badge
+                className="text-xs border bg-violet-100 text-violet-800 border-violet-300"
+                variant="outline"
+                data-testid={`badge-approved-mode-inspection-${item.id}`}
+              >
+                Inspection
+              </Badge>
+            )}
+            {item.wetCheckMode === "service" && (
+              <Badge
+                className="text-xs border bg-blue-100 text-blue-800 border-blue-300"
+                variant="outline"
+                data-testid={`badge-approved-mode-service-${item.id}`}
+              >
+                Service
+              </Badge>
+            )}
             <span className="text-xs text-gray-500">WC-{item.wetCheckId}</span>
           </div>
           <div className="text-sm text-gray-600 truncate mt-0.5">

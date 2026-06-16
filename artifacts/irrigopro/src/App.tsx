@@ -64,6 +64,7 @@ const WetCheckSystemPage = lazyPage(() => import("@/pages/wet-checks/WetCheckSys
 const WetChecksRoutingPage = lazyPage(() => import("@/pages/wet-checks/WetChecksPage"));
 const WetCustomerPickerPage = lazyPage(() => import("@/pages/wet-checks/CustomerPickerPage"));
 const NewWetCheckPage = lazyPage(() => import("@/pages/wet-checks/NewWetCheckPage"));
+const WetCheckModeSelectorPage = lazyPage(() => import("@/pages/wet-checks/WetCheckModeSelectorPage"));
 const WetCheckBillingsPage = lazyPage(() => import("@/pages/wet-check-billings"));
 const WetCheckReviewPage = lazyPage(() => import("@/pages/wet-check-review"));
 const WetCheckConfirm = lazy(() => import("@/components/manager/wet-check-confirm").then((m) => ({ default: m.WetCheckConfirm })));
@@ -239,6 +240,7 @@ function Router() {
                   <Route path="/work-orders" component={WorkOrders} />
                   <Route path="/billing-sheets" component={BillingSheets} />
                   <Route path="/wet-check-billings" component={WetCheckBillingsPage} />
+                  <Route path="/wet-checks/new" component={WetCheckModeSelectorPage} />
                   <Route path="/wet-checks" component={WetCustomerPickerPage} />
                   <Route path="/wet-checks/c/:customerId/new" component={NewWetCheckPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksRoutingPage} />
@@ -312,6 +314,7 @@ function Router() {
                   <Route path="/billing/dashboard" component={RedirectToBillingWorkspace} />
                   <Route path="/billing-dashboard" component={RedirectToBillingWorkspace} />
                   <Route path="/wet-checks/pending-review" component={RedirectToWetChecksNeedsReview} />
+                  <Route path="/wet-checks/new" component={WetCheckModeSelectorPage} />
                   <Route path="/wet-checks" component={WetCheckSystemPage} />
                   <Route path="/wet-checks/c/:customerId/new" component={NewWetCheckPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksRoutingPage} />
@@ -365,6 +368,7 @@ function Router() {
                   <Route path="/manager/wet-checks/:id" component={CombinedReviewPage} />
                   <Route path="/wet-checks/admin" component={RedirectToWetChecks} />
                   <Route path="/wet-checks/pending-review" component={RedirectToWetChecksNeedsReview} />
+                  <Route path="/wet-checks/new" component={WetCheckModeSelectorPage} />
                   <Route path="/wet-checks/:id/review" component={CombinedReviewPage} />
                   <Route path="/wet-checks" component={WetCheckSystemPage} />
                   <Route path="/wet-checks/c/:customerId/new" component={NewWetCheckPage} />
@@ -417,6 +421,7 @@ function Router() {
                   <Route path="/manager/wet-checks/:id" component={CombinedReviewPage} />
                   <Route path="/wet-checks/admin" component={RedirectToWetChecks} />
                   <Route path="/wet-checks/pending-review" component={RedirectToWetChecksNeedsReview} />
+                  <Route path="/wet-checks/new" component={WetCheckModeSelectorPage} />
                   <Route path="/wet-checks/:id/review" component={CombinedReviewPage} />
                   <Route path="/wet-checks" component={WetCheckSystemPage} />
                   <Route path="/wet-checks/c/:customerId/new" component={NewWetCheckPage} />

@@ -192,14 +192,28 @@ export function ControllerSelectionPage({ customerId }: ControllerSelectionPageP
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
+  const SESSION_MODE_KEY = "wc_pending_mode";
+  function consumePendingMode(): "service" | "inspection" {
+    try {
+      const raw = sessionStorage.getItem(SESSION_MODE_KEY);
+      sessionStorage.removeItem(SESSION_MODE_KEY);
+      if (raw === "inspection") return "inspection";
+    } catch {
+      // sessionStorage unavailable
+    }
+    return "service";
+  }
+
   const startMutation = useMutation({
     mutationFn: async () => {
+      const mode = consumePendingMode();
       // 1. Create the wet check record. The server is authoritative for numControllers —
       //    it derives it from customer.totalControllers, so we do not pass it here.
       const wc = await apiRequest("/api/wet-checks", "POST", {
         customerId,
         weather: weather ?? null,
         notes: notes.trim() || null,
+        mode,
       }) as WetCheckWithDetails;
 
       const wetCheckId = wc.id;
@@ -255,11 +269,13 @@ export function ControllerSelectionPage({ customerId }: ControllerSelectionPageP
   // are pre-created; the tech adds them manually as they go.
   const blankStartMutation = useMutation({
     mutationFn: async () => {
+      const mode = consumePendingMode();
       const wc = await apiRequest("/api/wet-checks", "POST", {
         customerId,
         weather: weather ?? null,
         notes: notes.trim() || null,
         blankStart: true,
+        mode,
       }) as WetCheckWithDetails;
       return { wetCheckId: wc.id };
     },

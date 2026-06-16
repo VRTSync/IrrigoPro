@@ -15907,6 +15907,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     notes: z.string().nullish(),
     clientId: z.string().uuid().nullish(),
     blankStart: z.boolean().optional(),
+    mode: z.enum(["service", "inspection"]).optional(),
   }).strict();
 
   app.post("/api/wet-checks", requireAuthentication, async (req, res) => {
@@ -15953,6 +15954,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         weather: body.weather ?? null,
         notes: body.notes ?? null,
         clientId: body.clientId ?? null,
+        mode: body.mode ?? "service",
       });
       res.status(201).json(wc);
     } catch (e: any) {

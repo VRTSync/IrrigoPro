@@ -1310,6 +1310,9 @@ export const wetChecks = pgTable("wet_checks", {
   approvedByName: text("approved_by_name"),
   fullyConvertedAt: timestamp("fully_converted_at"),
   clientId: text("client_id"),
+  mode: text("mode").notNull().default("service"),
+  // 'service' (default) = active repair run; 'inspection' = assessment-only,
+  // no repair/disposition controls shown in the field capture flow.
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
@@ -1480,6 +1483,7 @@ export type WetCheckBillingListItem = WetCheckBilling & {
   issuesCount: number;
   zonesCount: number;
   wetCheckStatus: string | null;
+  wetCheckMode: string | null;
   daysInQueue: number;
   findingsRepaired: number;
   findingsToEstimate: number;

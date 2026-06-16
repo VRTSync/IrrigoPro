@@ -14,6 +14,7 @@ export interface WetCheckListRow {
   propertyAddress: string | null;
   technicianName: string;
   status: string;
+  mode?: string | null;
   startedAt: string | Date | null;
   submittedAt: string | Date | null;
   approvedAt: string | Date | null;
@@ -137,6 +138,24 @@ export function WetCheckRow({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium truncate">{row.customerName}</span>
             <WetCheckStatusBadge status={row.status} />
+            {row.mode === "inspection" && (
+              <Badge
+                className="text-xs border bg-violet-100 text-violet-800 border-violet-300"
+                variant="outline"
+                data-testid={`badge-wc-mode-inspection-${row.id}`}
+              >
+                Inspection
+              </Badge>
+            )}
+            {row.mode === "service" && (
+              <Badge
+                className="text-xs border bg-blue-100 text-blue-800 border-blue-300"
+                variant="outline"
+                data-testid={`badge-wc-mode-service-${row.id}`}
+              >
+                Service
+              </Badge>
+            )}
             {snapshotChip}
             <span className="text-xs text-gray-500">#{row.id}</span>
             {showCompanyCol && row.companyName && (

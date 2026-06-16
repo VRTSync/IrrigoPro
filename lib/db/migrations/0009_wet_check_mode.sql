@@ -1,0 +1,1 @@
+ALTER TABLE wet_checks ADD COLUMN IF NOT EXISTS mode text NOT NULL DEFAULT 'service';

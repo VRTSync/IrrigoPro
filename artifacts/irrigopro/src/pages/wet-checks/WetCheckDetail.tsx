@@ -382,6 +382,7 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
             (p.findingId != null && asArray(zoneRecord?.findings).some(f => f.id === p.findingId))
           )}
           readOnly={isReadOnly}
+          wetCheckMode={(wc.mode as "service" | "inspection") ?? "service"}
           onBack={() => setActiveZone(null)}
           // Auto-advance (Ran OK / N/A) jumps to the next unchecked zone,
           // skipping zones already marked, so the tech's flow stays fast.

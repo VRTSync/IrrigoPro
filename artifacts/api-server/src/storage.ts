@@ -3820,6 +3820,7 @@ export class DatabaseStorage implements IStorage {
         issuesCount: sql<number>`cast(count(${wetCheckFindings.id}) as int)`,
         zonesCount: sql<number>`cast(count(distinct ${wetCheckFindings.zoneRecordId}) as int)`,
         wetCheckStatus: wetChecks.status,
+        wetCheckMode: wetChecks.mode,
         daysInQueue: sql<number>`cast(extract(epoch from (now() - ${wetCheckBillings.createdAt})) / 86400 as int)`,
         findingsRepaired: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'repaired_in_field' then 1 end) as int)`,
         findingsToEstimate: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'sent_to_estimate' then 1 end) as int)`,
@@ -3828,13 +3829,14 @@ export class DatabaseStorage implements IStorage {
       .from(wetCheckBillings)
       .leftJoin(wetCheckFindings, eq(wetCheckFindings.wetCheckBillingId, wetCheckBillings.id))
       .leftJoin(wetChecks, eq(wetChecks.id, wetCheckBillings.wetCheckId))
-      .groupBy(wetCheckBillings.id, wetChecks.status)
+      .groupBy(wetCheckBillings.id, wetChecks.status, wetChecks.mode)
       .orderBy(desc(wetCheckBillings.workDate), desc(wetCheckBillings.id));
     return rows.map((r) => ({
       ...r.wcb,
       issuesCount: r.issuesCount ?? 0,
       zonesCount: r.zonesCount ?? 0,
       wetCheckStatus: r.wetCheckStatus ?? null,
+      wetCheckMode: r.wetCheckMode ?? null,
       daysInQueue: r.daysInQueue ?? 0,
       findingsRepaired: r.findingsRepaired ?? 0,
       findingsToEstimate: r.findingsToEstimate ?? 0,
@@ -3862,6 +3864,7 @@ export class DatabaseStorage implements IStorage {
       .select({
         wcb: wetCheckBillings,
         wetCheckStatus: wetChecks.status,
+        wetCheckMode: wetChecks.mode,
         issuesCount: sql<number>`cast(count(${wetCheckFindings.id}) as int)`,
         zonesCount: sql<number>`cast(count(distinct ${wetCheckFindings.zoneRecordId}) as int)`,
         daysInQueue: sql<number>`cast(extract(epoch from (now() - ${wetCheckBillings.createdAt})) / 86400 as int)`,
@@ -3873,13 +3876,14 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(wetCheckFindings, eq(wetCheckFindings.wetCheckBillingId, wetCheckBillings.id))
       .leftJoin(wetChecks, eq(wetChecks.id, wetCheckBillings.wetCheckId))
       .where(eq(wetCheckBillings.customerId, customerId))
-      .groupBy(wetCheckBillings.id, wetChecks.status)
+      .groupBy(wetCheckBillings.id, wetChecks.status, wetChecks.mode)
       .orderBy(desc(wetCheckBillings.createdAt));
     return rows.map((r) => ({
       ...r.wcb,
       issuesCount: r.issuesCount ?? 0,
       zonesCount: r.zonesCount ?? 0,
       wetCheckStatus: r.wetCheckStatus ?? null,
+      wetCheckMode: r.wetCheckMode ?? null,
       daysInQueue: r.daysInQueue ?? 0,
       findingsRepaired: r.findingsRepaired ?? 0,
       findingsToEstimate: r.findingsToEstimate ?? 0,
