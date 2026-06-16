@@ -1,0 +1,39 @@
+# Wet-Check Customer Picker — Filter to Billing-Visible ("Show in Billing") Customers
+
+**What & Why**
+When a field tech starts a new wet check, the customer picker shows **all** customers. It should show only the **active** ones — defined as customers whose **"Show in billing"** toggle is on (i.e. `hiddenFromBilling = false`), the Visible/Hidden flag on the customer list.
+
+The picker already *tries* to filter: it requests `/api/customers?active=true`. But the server's `active` filter runs `customers.filter(c => c.isActive !== false)`, and **the customers table has no `isActive` column** — so `c.isActive` is `undefined`, `undefined !== false` is always true, and every customer passes. The `active` filter is dead.
+
+The server **does** already support the right filter: `?billingVisible=true` → `customers.filter(c => !c.hiddenFromBilling)`. So the fix is to point the picker at that param. No schema change, no server change.
+
+Single small frontend slice.
+
+---
+
+## Done looks like
+- The new-wet-check customer picker lists **only** customers with "Show in billing" = Visible (`hiddenFromBilling = false`).
+- Hidden-from-billing customers do **not** appear in the picker.
+- No other customer list/screen changes behavior.
+
+## Steps
+1. In `artifacts/irrigopro/src/pages/wet-checks/CustomerPickerPage.tsx`, change the customers query from the dead `active` param to the working `billingVisible` param:
+   - `queryKey: ["/api/customers", { billingVisible: true }]`
+   - `queryFn: () => apiRequest("/api/customers?billingVisible=true")`
+   (Currently `["/api/customers", { active: true }]` / `apiRequest("/api/customers?active=true")`.)
+2. Leave the rest of the page (status chips, sorting, client-side search) unchanged.
+
+## Optional cleanup (nice-to-have, not required)
+- In `routes.ts` `GET /api/customers`, the `activeOnly` branch filters on a non-existent `c.isActive` column and is a permanent no-op. Either remove it, or leave a `// TODO: customers have no isActive column — this filter never excludes anyone` comment so the next reader isn't misled. (Do **not** change `billingVisible`.)
+
+## Tests
+- Picker request hits `/api/customers?billingVisible=true`.
+- A customer with `hiddenFromBilling = true` is absent from the picker; one with `hiddenFromBilling = false` is present.
+
+## Out of scope
+- Adding a real `isActive`/active-status concept to customers (not needed — "active" = billing-visible per product decision).
+- Any other customer list, billing screen, or the `/api/customers` shape.
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/wet-checks/CustomerPickerPage.tsx`
+- `artifacts/api-server/src/routes/routes.ts` (`GET /api/customers` — already supports `billingVisible`; optional no-op cleanup only)

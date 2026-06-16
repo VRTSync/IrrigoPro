@@ -1,0 +1,53 @@
+# Manager Workspace — Needs-Approval Filter Fix: Unassigned Tickets + `completed` Billing Sheets
+
+**What & Why**
+The Manager Workspace "Needs Approval" list (`GET /api/manager-workspace/needs-approval`) silently drops tickets it should show. Two distinct filter defects:
+
+1. **Lossy double-scoping (drops unassigned tickets).** `scopedWorkOrdersForManager` and `scopedBillingSheets` fetch rows that are **already company-scoped** by storage (`getWorkOrders(cid)` / `getAllBillingSheets(cid)` both apply `_companyScope`), then apply a **second** filter keeping a row only if its technician's user record resolves to the same company. That helper returns `null` for a missing technician, and `null === cid` is false — so **any work order or billing sheet with no assigned technician is dropped**, as is any whose technician is cross-company. For an approval queue, unassigned-but-pending tickets are exactly what the manager must see. This re-filter is redundant (already company-scoped) and lossy.
+2. **`completed` billing sheets excluded.** `NEEDS_APPROVAL_BS = {pending_manager_review, submitted}` omits `completed`, but the canonical `ACTIVE_BS` (exported from `billing-workspace-routes.ts`) is `{pending_manager_review, submitted, completed}`. Sheets in `completed` never appear.
+
+This is latent today (the production queue is legitimately empty — all WOs/BSs are already `approved_passed_to_billing`/`billed`), but both defects will hide real work the moment new tickets enter review states. The danger is that an empty-looking queue is indistinguishable from a correctly-empty one, so the bug is invisible until something is missing.
+
+Single slice. No schema change.
+
+---
+
+## Done looks like
+- A pending work order with **no assigned technician** appears in `needs-approval`.
+- A billing sheet in **`completed`** appears in `needs-approval`.
+- `scopedWorkOrdersForManager` / `scopedBillingSheets` no longer re-filter by the technician's company — they return the already-company-scoped list. (super_admin path unchanged: still all companies.)
+- `needs-approval` uses the **exported `ACTIVE_WO` / `ACTIVE_BS`** sets, not the local `NEEDS_APPROVAL_WO` / `NEEDS_APPROVAL_BS` constants.
+- `invoiceId`-set rows are still excluded (already-billed never shows).
+- Regression tests cover the null-technician WO and the `completed` BS.
+
+---
+
+## Steps
+
+1. **Drop the lossy re-filter — work orders.** In `manager-workspace-routes.ts`, `scopedWorkOrdersForManager` (~line 182): after `getWorkOrders(role === "super_admin" ? null : cid0)`, return the company-scoped list directly for non-super_admin instead of re-filtering each row by `techCid(w.assignedTechnicianId) === cid`. Remove the now-unused `techCid`/cache block. (Rows are already scoped by `_companyScope`; the tech re-derivation only drops valid rows.)
+2. **Drop the lossy re-filter — billing sheets.** Same change in `scopedBillingSheets` (~line, mirrors the WO helper): return `getAllBillingSheets(cid)` directly for non-super_admin; remove the `techCid(s.technicianId) === cid` filter and its cache block.
+   - *If* a deliberate per-technician restriction is later required, the correct form is to fall back to the row's own `companyId` when `technicianId` is null — **not** to drop null-tech rows. But for this fix, removing the redundant re-filter is correct because the storage query already enforces company scope.
+3. **Use the canonical status sets.** Replace the local `NEEDS_APPROVAL_WO` / `NEEDS_APPROVAL_BS` (~lines 960–961) with the exported `ACTIVE_WO` / `ACTIVE_BS` imported from `billing-workspace-routes.ts`. Keep the `&& !w.invoiceId` / `&& !s.invoiceId` exclusion. Delete the now-unused local constants.
+4. **Note the side effect.** These two scoped helpers also feed `GET /api/manager-workspace/status-strip` counts — those numbers will (correctly) change once unassigned/`completed` rows are included. Expected; no separate action.
+
+---
+
+## Tests
+- `GET /api/manager-workspace/needs-approval`:
+  - A work order in `pending_manager_review` with `assignedTechnicianId = null` → **present** in `workOrders`.
+  - A work order in `work_completed` with a valid same-company tech → present (no regression).
+  - A billing sheet in `completed` with `technicianId = null` → **present** in `billingSheets`.
+  - A billing sheet in `submitted` → present (no regression).
+  - Any WO/BS with `invoiceId` set → **absent** (still excluded).
+  - super_admin scope → still returns across companies.
+
+## Out of scope
+- The `bulk-route` 404 tombstone and the findings-lane cleanup (separate ticket).
+- Wet checks / WC snapshots (reviewed on the Wet Check page, not this list).
+- Any change to approve/return-for-correction behavior or the modals.
+- Any schema change.
+
+## Relevant files
+- `artifacts/api-server/src/routes/manager-workspace-routes.ts`
+- `artifacts/api-server/src/routes/billing-workspace-routes.ts` (import `ACTIVE_WO` / `ACTIVE_BS` — already exported)
+- `artifacts/api-server/src/routes/manager-workspace-slice1.test.ts` (extend with the cases above)
