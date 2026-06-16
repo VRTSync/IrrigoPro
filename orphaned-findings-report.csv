@@ -1,0 +1,560 @@
+findingId,wetCheckId,wcStatus,class,resolution,techDisposition,companyId,customerName,partPrice,quantity,ageDays
+1,1,in_progress,other,pending,,99,WC Admin Delete field-403 1777949145719-2007,,2,42
+2,2,in_progress,other,pending,,99,WC Admin Delete billing-403 1777949145933-4456,,2,42
+3,3,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1777949146016-9821,,2,42
+44,40,in_progress,other,pending,,99,Wet Check Immutability Customer 1777951889949,,3,42
+549,465,in_progress,other,pending,,99,WC Admin Delete field-403 1778019525436-4179,,2,41
+6,6,in_progress,other,pending,,99,Wet Check Immutability Customer 1777949156585,,3,42
+7,6,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1777949156585,,99,42
+8,7,in_progress,other,pending,,99,Wet Check Idempotency Customer 1777949156954,,1,42
+9,8,in_progress,other,pending,,99,WC Admin Delete field-403 1777950451321-2511,,2,42
+10,9,in_progress,other,pending,,99,WC Admin Delete billing-403 1777950451512-9372,,2,42
+11,10,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1777950451590-694,,2,42
+14,13,in_progress,other,pending,,99,Wet Check Immutability Customer 1777950462154,,3,42
+30,27,in_progress,other,pending,,99,Wet Check Immutability Customer 1777951499660,,3,42
+15,13,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1777950462154,,99,42
+16,14,in_progress,other,pending,,99,Wet Check Idempotency Customer 1777950462599,,1,42
+17,15,in_progress,other,pending,,99,WC Admin Delete field-403 1777950972121-6161,,2,42
+18,16,in_progress,other,pending,,99,WC Admin Delete billing-403 1777950972286-6929,,2,42
+19,17,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1777950972361-6825,,2,42
+22,20,in_progress,other,pending,,99,Wet Check Immutability Customer 1777950982914,,3,42
+40,36,in_progress,other,pending,,99,WC Admin Delete irr-bulk-ok 1777951879398-2239,,2,42
+31,27,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1777951499660,,99,42
+23,20,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1777950982914,,99,42
+24,21,in_progress,other,pending,,99,Wet Check Idempotency Customer 1777950983336,,1,42
+25,22,in_progress,other,pending,,99,WC Admin Delete field-403 1777951488704-6226,,2,42
+26,23,in_progress,other,pending,,99,WC Admin Delete billing-403 1777951489023-3375,,2,42
+27,24,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1777951489105-4552,,2,42
+32,28,in_progress,other,pending,,99,Wet Check Idempotency Customer 1777951500029,,1,42
+33,29,in_progress,other,pending,,99,WC Admin Delete field-403 1777951878523-5857,,2,42
+34,30,in_progress,other,pending,,99,WC Admin Delete billing-403 1777951878694-9069,,2,42
+35,31,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1777951878769-3462,,2,42
+38,34,in_progress,other,pending,,99,WC Admin Delete irr-happy 1777951879179-9849,,2,42
+42,38,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1777951879610-2462,,2,42
+43,39,in_progress,other,pending,,99,WC Admin Delete bulk-403 1777951879674-7879,,2,42
+46,41,in_progress,other,pending,,99,Wet Check Idempotency Customer 1777951890407,,1,42
+47,42,in_progress,other,pending,,99,WC Admin Delete field-403 1777953351880-6840,,2,42
+45,40,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1777951889949,,99,42
+48,43,in_progress,other,pending,,99,WC Admin Delete billing-403 1777953352074-3567,,2,42
+49,44,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1777953352160-522,,2,42
+550,466,in_progress,other,pending,,99,WC Admin Delete billing-403 1778019525614-2175,,2,41
+56,51,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1777953353037-2415,,2,42
+57,52,in_progress,other,pending,,99,WC Admin Delete bulk-403 1777953353105-6453,,2,42
+58,53,in_progress,other,pending,,99,Wet Check Immutability Customer 1777953363356,,3,42
+551,467,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778019525708-6757,,2,41
+59,53,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1777953363356,,99,42
+60,54,in_progress,other,pending,,99,Wet Check Idempotency Customer 1777953363722,,1,42
+61,55,in_progress,other,pending,,99,WC Admin Delete field-403 1777983467558-6714,,2,42
+62,56,in_progress,other,pending,,99,WC Admin Delete billing-403 1777983467760-2695,,2,42
+63,57,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1777983467836-8374,,2,42
+70,64,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1777983468832-9429,,2,42
+71,65,in_progress,other,pending,,99,WC Admin Delete bulk-403 1777983468906-6642,,2,42
+72,66,in_progress,other,pending,,99,Wet Check Immutability Customer 1777983479165,,3,42
+73,66,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1777983479165,,99,42
+74,67,in_progress,other,pending,,99,Wet Check Idempotency Customer 1777983479547,,1,42
+75,68,in_progress,other,pending,,99,WC Admin Delete field-403 1777984212008-2565,,2,42
+76,69,in_progress,other,pending,,99,WC Admin Delete billing-403 1777984212208-1776,,2,42
+77,70,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1777984212288-4543,,2,42
+84,77,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1777984213215-6459,,2,42
+85,78,in_progress,other,pending,,99,WC Admin Delete bulk-403 1777984213291-7923,,2,42
+86,79,in_progress,other,pending,,99,Wet Check Immutability Customer 1777984223549,,3,42
+87,79,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1777984223549,,99,42
+88,80,in_progress,other,pending,,99,Wet Check Idempotency Customer 1777984223939,,1,42
+89,81,in_progress,other,pending,,99,WC Admin Delete field-403 1777984346445-3498,,2,42
+90,82,in_progress,other,pending,,99,WC Admin Delete billing-403 1777984346619-2119,,2,42
+91,83,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1777984346694-314,,2,42
+98,90,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1777984347580-6138,,2,42
+101,92,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1777984357920,,99,42
+99,91,in_progress,other,pending,,99,WC Admin Delete bulk-403 1777984347653-5291,,2,42
+100,92,in_progress,other,pending,,99,Wet Check Immutability Customer 1777984357920,,3,42
+102,93,in_progress,other,pending,,99,Wet Check Idempotency Customer 1777984358354,,1,42
+103,94,in_progress,other,pending,,99,WC Admin Delete field-403 1777992077127-908,,2,42
+104,95,in_progress,other,pending,,99,WC Admin Delete billing-403 1777992077342-95,,2,42
+105,96,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1777992077430-7784,,2,42
+112,103,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1777992078402-818,,2,42
+113,104,in_progress,other,pending,,99,WC Admin Delete bulk-403 1777992078480-9201,,2,42
+114,105,in_progress,other,pending,,99,Wet Check Immutability Customer 1777992088752,,3,42
+131,121,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778002359434-4351,,2,41
+132,122,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778002359509-7580,,2,41
+115,105,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1777992088752,,99,42
+116,106,in_progress,other,pending,,99,Wet Check Idempotency Customer 1777992089329,,1,42
+117,107,in_progress,other,pending,,99,WC Admin Delete field-403 1778002357076-511,,2,41
+118,108,in_progress,other,pending,,99,WC Admin Delete billing-403 1778002357243-9549,,2,41
+119,109,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778002357331-7371,,2,41
+133,123,in_progress,other,pending,,99,Wet Check Immutability Customer 1778002369776,,3,41
+134,123,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778002369776,,99,41
+135,124,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778002370190,,1,41
+136,125,in_progress,other,pending,,99,WC Admin Delete field-403 1778005299438-787,,2,41
+137,126,in_progress,other,pending,,99,WC Admin Delete billing-403 1778005299617-5008,,2,41
+138,127,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778005299701-4309,,2,41
+156,143,submitted,A,pending,,99,WC AutoBill all-pending 1778005312648-na5z,25.00,2,41
+150,139,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778005301646-6905,,2,41
+151,140,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778005301721-5586,,2,41
+162,147,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778005313146-w4ju,25.00,2,41
+163,148,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778005313325-014d,99999999.99,100,41
+164,149,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778005313440-gy2b,25.00,2,41
+165,149,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778005313440-gy2b,,2,41
+166,150,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778005313583-30in,25.00,2,41
+167,151,in_progress,other,pending,,99,Wet Check Immutability Customer 1778005324100,,3,41
+168,151,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778005324100,,99,41
+169,152,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778005324501,,1,41
+170,153,in_progress,other,pending,,99,WC Admin Delete field-403 1778005609070-5982,,2,41
+171,154,in_progress,other,pending,,99,WC Admin Delete billing-403 1778005609244-941,,2,41
+172,155,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778005609345-3216,,2,41
+190,171,submitted,A,pending,,99,WC AutoBill all-pending 1778005622477-7i3w,25.00,2,41
+200,178,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778005623479-3eho,25.00,2,41
+184,167,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778005611346-1485,,2,41
+185,168,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778005611423-9402,,2,41
+196,175,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778005623045-gzly,25.00,2,41
+197,176,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778005623219-45f6,99999999.99,100,41
+198,177,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778005623339-yt41,25.00,2,41
+199,177,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778005623339-yt41,,2,41
+201,179,in_progress,other,pending,,99,Wet Check Immutability Customer 1778005633998,,3,41
+202,179,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778005633998,,99,41
+203,180,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778005634395,,1,41
+204,181,in_progress,other,pending,,99,WC Admin Delete field-403 1778006532428-5633,,2,41
+205,182,in_progress,other,pending,,99,WC Admin Delete billing-403 1778006532602-6574,,2,41
+206,183,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778006532679-3100,,2,41
+218,195,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778006534667-2000,,2,41
+219,196,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778006534747-2799,,2,41
+224,199,submitted,A,pending,,99,WC AutoBill all-pending 1778006545721-knaw,25.00,2,41
+230,203,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778006546242-oxxo,25.00,2,41
+231,204,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778006546431-bvlr,99999999.99,100,41
+232,205,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778006546552-jhdz,25.00,2,41
+233,205,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778006546552-jhdz,,2,41
+234,206,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778006546706-t2qe,25.00,2,41
+235,207,in_progress,other,pending,,99,Wet Check Immutability Customer 1778006557240,,3,41
+236,207,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778006557240,,99,41
+237,208,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778006557629,,1,41
+238,209,in_progress,other,pending,,99,WC Admin Delete field-403 1778007283080-5787,,2,41
+239,210,in_progress,other,pending,,99,WC Admin Delete billing-403 1778007283236-4353,,2,41
+240,211,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778007283312-5869,,2,41
+258,227,submitted,A,pending,,99,WC AutoBill all-pending 1778007296357-wfak,25.00,2,41
+252,223,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778007285284-9344,,2,41
+253,224,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778007285363-8125,,2,41
+264,231,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778007296866-y155,25.00,2,41
+265,232,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778007297056-y82q,99999999.99,100,41
+266,233,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778007297170-57zg,25.00,2,41
+268,234,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778007297310-j17m,25.00,2,41
+267,233,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778007297170-57zg,,2,41
+269,235,in_progress,other,pending,,99,Wet Check Immutability Customer 1778007307847,,3,41
+270,235,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778007307847,,99,41
+271,236,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778007308239,,1,41
+272,237,in_progress,other,pending,,99,WC Admin Delete field-403 1778007482148-1691,,2,41
+273,238,in_progress,other,pending,,99,WC Admin Delete billing-403 1778007482291-9269,,2,41
+274,239,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778007482367-1593,,2,41
+292,255,submitted,A,pending,,99,WC AutoBill all-pending 1778007495318-uooz,25.00,2,41
+286,251,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778007484218-7881,,2,41
+287,252,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778007484289-9466,,2,41
+301,261,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778007496137-qbk1,,2,41
+298,259,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778007495836-gshh,25.00,2,41
+299,260,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778007496023-5ikn,99999999.99,100,41
+300,261,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778007496137-qbk1,25.00,2,41
+302,262,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778007496274-g0p1,25.00,2,41
+303,263,in_progress,other,pending,,99,Wet Check Immutability Customer 1778007506777,,3,41
+304,263,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778007506777,,99,41
+305,264,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778007507176,,1,41
+306,265,in_progress,other,pending,,99,WC Admin Delete field-403 1778011179039-3772,,2,41
+307,266,in_progress,other,pending,,99,WC Admin Delete billing-403 1778011179208-4769,,2,41
+308,267,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778011179297-738,,2,41
+320,279,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778011181288-3066,,2,41
+321,280,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778011181365-2415,,2,41
+326,283,submitted,A,pending,,99,WC AutoBill all-pending 1778011192459-krwx,25.00,2,41
+332,287,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778011193010-nfkr,25.00,2,41
+333,288,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778011193293-q0l7,99999999.99,100,41
+334,289,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778011193427-0h2r,25.00,2,41
+335,289,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778011193427-0h2r,,2,41
+336,290,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778011193596-kz28,25.00,2,41
+337,291,in_progress,other,pending,,99,Wet Check Immutability Customer 1778011204136,,3,41
+338,291,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778011204136,,99,41
+339,292,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778011204528,,1,41
+340,293,in_progress,other,pending,,99,WC Admin Delete field-403 1778012045065-6638,,2,41
+341,294,in_progress,other,pending,,99,WC Admin Delete billing-403 1778012045225-1143,,2,41
+342,295,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778012045301-9878,,2,41
+580,491,in_progress,other,pending,,99,Wet Check Immutability Customer 1778019550483,,3,41
+354,307,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778012047379-6003,,2,41
+355,308,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778012047874-6958,,2,41
+360,311,submitted,A,pending,,99,WC AutoBill all-pending 1778012059327-cm8t,25.00,2,41
+366,315,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778012059920-bf9y,25.00,2,41
+367,316,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778012060099-tnqg,99999999.99,100,41
+368,317,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778012060213-hbnr,25.00,2,41
+369,317,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778012060213-hbnr,,2,41
+370,318,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778012060359-iykp,25.00,2,41
+371,319,in_progress,other,pending,,99,Wet Check Immutability Customer 1778012070889,,3,41
+400,343,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778012518230-jt3v,25.00,2,41
+372,319,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778012070889,,99,41
+373,320,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778012071339,,1,41
+374,321,in_progress,other,pending,,99,WC Admin Delete field-403 1778012504323-5733,,2,41
+375,322,in_progress,other,pending,,99,WC Admin Delete billing-403 1778012504486-6427,,2,41
+376,323,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778012504565-4051,,2,41
+388,335,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778012506725-8733,,2,41
+389,336,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778012506809-1468,,2,41
+394,339,submitted,A,pending,,99,WC AutoBill all-pending 1778012517735-9wis,25.00,2,41
+401,344,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778012518413-uyz0,99999999.99,100,41
+402,345,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778012518541-ycvo,25.00,2,41
+403,345,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778012518541-ycvo,,2,41
+404,346,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778012518676-g1bv,25.00,2,41
+405,347,in_progress,other,pending,,99,Wet Check Immutability Customer 1778012529191,,3,41
+406,347,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778012529191,,99,41
+407,348,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778012529647,,1,41
+412,351,submitted,A,pending,,99,WC AutoBill all-pending 1778013716700-7amu,25.00,2,41
+413,353,in_progress,other,pending,,99,WC Admin Delete field-403 1778013798310-6277,,2,41
+414,354,in_progress,other,pending,,99,WC Admin Delete billing-403 1778013798471-6388,,2,41
+415,355,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778013798555-9011,,2,41
+583,493,in_progress,other,pending,,99,WC Admin Delete field-403 1778021184793-7317,,2,41
+584,494,in_progress,other,pending,,99,WC Admin Delete billing-403 1778021184980-9325,,2,41
+439,375,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778013812258-40pv,25.00,2,41
+427,367,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778013800529-5591,,2,41
+428,368,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778013800603-3592,,2,41
+433,371,submitted,A,pending,,99,WC AutoBill all-pending 1778013811745-e99o,25.00,2,41
+440,376,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778013812442-11cm,99999999.99,100,41
+441,377,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778013812561-f73n,25.00,2,41
+442,377,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778013812561-f73n,,2,41
+443,378,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778013812713-tp5u,25.00,2,41
+444,379,in_progress,other,pending,,99,Wet Check Immutability Customer 1778013823222,,3,41
+445,379,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778013823222,,99,41
+446,380,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778013823638,,1,41
+447,381,in_progress,other,pending,,99,WC Admin Delete field-403 1778013948163-7478,,2,41
+448,382,in_progress,other,pending,,99,WC Admin Delete billing-403 1778013948336-443,,2,41
+449,383,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778013948420-6903,,2,41
+461,395,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778013950531-6604,,2,41
+462,396,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778013950610-9462,,2,41
+467,399,submitted,A,pending,,99,WC AutoBill all-pending 1778013961558-6tax,25.00,2,41
+473,403,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778013962065-udz6,25.00,2,41
+474,404,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778013962261-kpvl,99999999.99,100,41
+475,405,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778013962377-zsvw,25.00,2,41
+476,405,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778013962377-zsvw,,2,41
+477,406,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778013962516-70dk,25.00,2,41
+478,407,in_progress,other,pending,,99,Wet Check Immutability Customer 1778013973028,,3,41
+501,427,submitted,A,pending,,99,WC AutoBill all-pending 1778014338019-13cz,25.00,2,41
+479,407,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778013973028,,99,41
+480,408,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778013973471,,1,41
+481,409,in_progress,other,pending,,99,WC Admin Delete field-403 1778014324432-1024,,2,41
+482,410,in_progress,other,pending,,99,WC Admin Delete billing-403 1778014324595-8581,,2,41
+483,411,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778014324680-7338,,2,41
+495,423,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778014327034-5731,,2,41
+496,424,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778014327113-980,,2,41
+507,431,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778014338500-8fwq,25.00,2,41
+508,432,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778014338696-wj98,99999999.99,100,41
+509,433,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778014338814-fer3,25.00,2,41
+510,433,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778014338814-fer3,,2,41
+511,434,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778014338962-ni68,25.00,2,41
+512,435,in_progress,other,pending,,99,Wet Check Immutability Customer 1778014349533,,3,41
+513,435,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778014349533,,99,41
+515,437,in_progress,other,pending,,99,WC Admin Delete field-403 1778015220968-4968,,2,41
+514,436,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778014349989,,1,41
+516,438,in_progress,other,pending,,99,WC Admin Delete billing-403 1778015221171-3678,,2,41
+517,439,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778015221267-8572,,2,41
+541,459,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778015234934-9xmm,25.00,2,41
+529,451,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778015223444-9922,,2,41
+530,452,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778015223514-5960,,2,41
+535,455,submitted,A,pending,,99,WC AutoBill all-pending 1778015234420-2wvb,25.00,2,41
+542,460,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778015235125-wlg2,99999999.99,100,41
+543,461,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778015235235-8gez,25.00,2,41
+544,461,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778015235235-8gez,,2,41
+545,462,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778015235375-d73a,25.00,2,41
+546,463,in_progress,other,pending,,99,Wet Check Immutability Customer 1778015245906,,3,41
+563,479,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778019527882-2928,,2,41
+547,463,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778015245906,,99,41
+548,464,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778015246291,,1,41
+564,480,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778019527955-2486,,2,41
+569,483,submitted,A,pending,,99,WC AutoBill all-pending 1778019539016-a02s,25.00,2,41
+575,487,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778019539510-fbsz,25.00,2,41
+576,488,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778019539705-59iz,99999999.99,100,41
+577,489,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778019539823-0hc0,25.00,2,41
+578,489,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778019539823-0hc0,,2,41
+579,490,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778019539971-anz9,25.00,2,41
+581,491,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778019550483,,99,41
+582,492,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778019550878,,1,41
+585,495,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778021185066-6381,,2,41
+609,515,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778021198821-e7gi,25.00,2,41
+597,507,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778021187274-9309,,2,41
+598,508,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778021187350-7756,,2,41
+603,511,submitted,A,pending,,99,WC AutoBill all-pending 1778021198310-d7qq,25.00,2,41
+610,516,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778021199015-0hob,99999999.99,100,41
+611,517,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778021199134-t0o9,25.00,2,41
+612,517,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778021199134-t0o9,,2,41
+613,518,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778021199277-oji3,25.00,2,41
+614,519,in_progress,other,pending,,99,Wet Check Immutability Customer 1778021209808,,3,41
+615,519,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778021209808,,99,41
+616,520,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778021210294,,1,41
+617,521,in_progress,other,pending,,99,WC Admin Delete field-403 1778021428105-1354,,2,41
+618,522,in_progress,other,pending,,99,WC Admin Delete billing-403 1778021428277-7770,,2,41
+619,523,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778021428354-8212,,2,41
+631,535,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778021430353-3752,,2,41
+632,536,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778021430433-1815,,2,41
+637,539,submitted,A,pending,,99,WC AutoBill all-pending 1778021441537-s65o,25.00,2,41
+643,543,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778021442076-z7zj,25.00,2,41
+644,544,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778021442256-91il,99999999.99,100,41
+645,545,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778021442379-7av0,25.00,2,41
+646,545,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778021442379-7av0,,2,41
+647,546,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778021442516-qr8n,25.00,2,41
+648,547,in_progress,other,pending,,99,Wet Check Immutability Customer 1778021453039,,3,41
+649,547,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778021453039,,99,41
+650,548,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778021453444,,1,41
+651,549,in_progress,other,pending,,99,WC Admin Delete field-403 1778024240901-3165,,2,41
+652,550,in_progress,other,pending,,99,WC Admin Delete billing-403 1778024241101-8717,,2,41
+653,551,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778024241191-5668,,2,41
+671,567,submitted,A,pending,,99,WC AutoBill all-pending 1778024254873-65e5,25.00,2,41
+665,563,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778024243660-4441,,2,41
+666,564,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778024243745-886,,2,41
+677,571,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778024255403-tidw,25.00,2,41
+678,572,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778024255607-emyh,99999999.99,100,41
+679,573,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778024255729-gytg,25.00,2,41
+680,573,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778024255729-gytg,,2,41
+681,574,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778024255880-asez,25.00,2,41
+682,575,in_progress,other,pending,,99,Wet Check Immutability Customer 1778024266426,,3,41
+683,575,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778024266426,,99,41
+685,577,in_progress,other,pending,,99,WC Admin Delete field-403 1778026349521-4899,,2,41
+684,576,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778024266816,,1,41
+686,578,in_progress,other,pending,,99,WC Admin Delete billing-403 1778026349739-6257,,2,41
+687,579,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778026349836-5782,,2,41
+711,599,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778026363929-341y,25.00,2,41
+699,591,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778026352133-8325,,2,41
+700,592,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778026352221-4240,,2,41
+705,595,submitted,A,pending,,99,WC AutoBill all-pending 1778026363358-73q1,25.00,2,41
+712,600,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778026364145-2vd1,99999999.99,100,41
+713,601,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778026364284-ughw,25.00,2,41
+714,601,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778026364284-ughw,,2,41
+715,602,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778026364447-g1gu,25.00,2,41
+716,603,in_progress,other,pending,,99,Wet Check Immutability Customer 1778026375026,,3,41
+717,603,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778026375026,,99,41
+718,604,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778026375479,,1,41
+719,605,in_progress,other,pending,,99,WC Admin Delete field-403 1778060733032-5718,,2,41
+720,606,in_progress,other,pending,,99,WC Admin Delete billing-403 1778060733232-6469,,2,41
+721,607,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778060733319-9855,,2,41
+733,619,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778060735543-6583,,2,41
+734,620,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778060735613-1524,,2,41
+739,623,submitted,A,pending,,99,WC AutoBill all-pending 1778060746500-w1td,25.00,2,41
+745,627,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778060746970-kyyi,25.00,2,41
+746,628,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778060747149-znvn,99999999.99,100,41
+747,629,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778060747262-5vmm,25.00,2,41
+748,629,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778060747262-5vmm,,2,41
+749,630,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778060747398-dxa0,25.00,2,41
+750,631,in_progress,other,pending,,99,Wet Check Immutability Customer 1778060757884,,3,41
+773,651,submitted,A,pending,,99,WC AutoBill all-pending 1778074899626-p6qf,25.00,2,41
+751,631,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778060757884,,99,41
+752,632,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778060758258,,1,41
+753,633,in_progress,other,pending,,99,WC Admin Delete field-403 1778074886250-6358,,2,41
+754,634,in_progress,other,pending,,99,WC Admin Delete billing-403 1778074886407-7482,,2,41
+755,635,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778074886495-9450,,2,41
+767,647,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778074888532-516,,2,41
+768,648,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778074888610-148,,2,41
+779,655,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778074900122-uj6o,25.00,2,41
+780,656,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778074900309-i8gx,99999999.99,100,41
+781,657,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778074900426-x359,25.00,2,41
+782,657,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778074900426-x359,,2,41
+783,658,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778074900567-r23q,25.00,2,41
+784,659,in_progress,other,pending,,99,Wet Check Immutability Customer 1778074911078,,3,41
+785,659,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778074911078,,99,41
+787,661,in_progress,other,pending,,99,WC Admin Delete field-403 1778075165250-9551,,2,41
+786,660,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778074911470,,1,41
+788,662,in_progress,other,pending,,99,WC Admin Delete billing-403 1778075165400-5057,,2,41
+789,663,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778075165476-8449,,2,41
+813,683,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778075179168-aacb,25.00,2,41
+801,675,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778075167623-4104,,2,41
+802,676,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778075167696-4478,,2,41
+807,679,submitted,A,pending,,99,WC AutoBill all-pending 1778075178620-vvil,25.00,2,41
+814,684,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778075179347-ue46,99999999.99,100,41
+815,685,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778075179456-d0iv,25.00,2,41
+816,685,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778075179456-d0iv,,2,41
+817,686,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778075179590-dgrx,25.00,2,41
+818,687,in_progress,other,pending,,99,Wet Check Immutability Customer 1778075190100,,3,41
+819,687,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778075190100,,99,41
+820,688,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778075190511,,1,41
+821,689,in_progress,other,pending,,99,WC Admin Delete field-403 1778078006424-8962,,2,41
+822,690,in_progress,other,pending,,99,WC Admin Delete billing-403 1778078006617-258,,2,41
+823,691,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778078006700-7682,,2,41
+835,703,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778078008837-7641,,2,41
+836,704,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778078008928-8344,,2,41
+841,707,submitted,A,pending,,99,WC AutoBill all-pending 1778078020070-wjbw,25.00,2,41
+847,711,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778078020695-1k59,25.00,2,41
+848,712,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778078020910-btfg,99999999.99,100,41
+849,713,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778078021043-qdue,25.00,2,41
+850,713,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778078021043-qdue,,2,41
+851,714,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778078021216-2q7r,25.00,2,41
+852,715,in_progress,other,pending,,99,Wet Check Immutability Customer 1778078031882,,3,41
+875,735,submitted,A,pending,,99,WC AutoBill all-pending 1778080477324-3cku,25.00,2,41
+853,715,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778078031882,,99,41
+854,716,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778078032270,,1,41
+855,717,in_progress,other,pending,,99,WC Admin Delete field-403 1778080463978-2629,,2,41
+856,718,in_progress,other,pending,,99,WC Admin Delete billing-403 1778080464135-8925,,2,41
+857,719,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778080464210-3828,,2,41
+869,731,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778080466348-4431,,2,41
+870,732,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778080466417-6346,,2,41
+881,739,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778080477938-l0gf,25.00,2,41
+882,740,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778080478130-5jpq,99999999.99,100,41
+883,741,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778080478253-uf6d,25.00,2,41
+884,741,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778080478253-uf6d,,2,41
+885,742,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778080478393-6kbk,25.00,2,41
+886,743,in_progress,other,pending,,99,Wet Check Immutability Customer 1778080488900,,3,41
+887,743,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778080488900,,99,41
+889,745,in_progress,other,pending,,99,WC Admin Delete field-403 1778083162676-9265,,2,41
+888,744,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778080489278,,1,41
+890,746,in_progress,other,pending,,99,WC Admin Delete billing-403 1778083162896-4441,,2,41
+891,747,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778083163000-662,,2,41
+915,767,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778083177137-qm03,25.00,2,41
+903,759,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778083165488-3505,,2,41
+904,760,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778083165572-3150,,2,41
+909,763,submitted,A,pending,,99,WC AutoBill all-pending 1778083176542-zvhg,25.00,2,41
+916,768,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778083177321-rue2,99999999.99,100,41
+917,769,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778083177441-2ssx,25.00,2,41
+918,769,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778083177441-2ssx,,2,41
+919,770,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778083177587-7i2k,25.00,2,41
+920,771,in_progress,other,pending,,99,Wet Check Immutability Customer 1778083188131,,3,41
+921,771,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778083188131,,99,41
+922,772,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778083188560,,1,41
+923,773,in_progress,other,pending,,99,WC Admin Delete field-403 1778083379362-7289,,2,40
+924,774,in_progress,other,pending,,99,WC Admin Delete billing-403 1778083379514-1609,,2,40
+925,775,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778083379594-6326,,2,40
+937,787,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778083381645-7455,,2,40
+938,788,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778083381721-944,,2,40
+943,791,submitted,A,pending,,99,WC AutoBill all-pending 1778083392773-s09p,25.00,2,40
+949,795,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778083393253-e89t,25.00,2,40
+950,796,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778083393428-lcmm,99999999.99,100,40
+951,797,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778083393537-8mur,25.00,2,40
+952,797,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778083393537-8mur,,2,40
+953,798,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778083393672-64hh,25.00,2,40
+954,799,in_progress,other,pending,,99,Wet Check Immutability Customer 1778083404174,,3,40
+977,819,submitted,A,pending,,99,WC AutoBill all-pending 1778085118524-pmo1,25.00,2,40
+955,799,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778083404174,,99,40
+956,800,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778083404566,,1,40
+957,801,in_progress,other,pending,,99,WC Admin Delete field-403 1778085105274-8190,,2,40
+958,802,in_progress,other,pending,,99,WC Admin Delete billing-403 1778085105441-6596,,2,40
+959,803,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778085105520-2968,,2,40
+971,815,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778085107523-4920,,2,40
+972,816,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778085107595-5758,,2,40
+983,823,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778085119027-mlgi,25.00,2,40
+984,824,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778085119219-dnvb,99999999.99,100,40
+985,825,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778085119342-p0e3,25.00,2,40
+986,825,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778085119342-p0e3,,2,40
+987,826,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778085119495-0no3,25.00,2,40
+988,827,in_progress,other,pending,,99,Wet Check Immutability Customer 1778085130034,,3,40
+989,827,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778085130034,,99,40
+991,829,in_progress,other,pending,,99,WC Admin Delete field-403 1778085520184-2663,,2,40
+990,828,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778085130404,,1,40
+992,830,in_progress,other,pending,,99,WC Admin Delete billing-403 1778085520369-6937,,2,40
+993,831,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778085520460-516,,2,40
+1017,851,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778085534215-bow0,25.00,2,40
+1005,843,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778085522671-7835,,2,40
+1006,844,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778085522744-71,,2,40
+1011,847,submitted,A,pending,,99,WC AutoBill all-pending 1778085533736-p37x,25.00,2,40
+1018,852,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778085534394-tb9t,99999999.99,100,40
+1019,853,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778085534506-5ane,25.00,2,40
+1020,853,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778085534506-5ane,,2,40
+1021,854,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778085534642-d6hz,25.00,2,40
+1022,855,in_progress,other,pending,,99,Wet Check Immutability Customer 1778085545173,,3,40
+1023,855,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778085545173,,99,40
+1024,856,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778085545570,,1,40
+1025,857,in_progress,other,pending,,99,WC Admin Delete field-403 1778087139520-1798,,2,40
+1026,858,in_progress,other,pending,,99,WC Admin Delete billing-403 1778087139823-9020,,2,40
+1027,859,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778087139902-3214,,2,40
+1039,871,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778087141993-8718,,2,40
+1040,872,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778087142067-9325,,2,40
+1045,875,submitted,A,pending,,99,WC AutoBill all-pending 1778087153038-81ip,25.00,2,40
+1051,879,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778087153583-cgpn,25.00,2,40
+1052,880,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778087153760-k21d,99999999.99,100,40
+1053,881,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778087153870-gm4l,25.00,2,40
+1054,881,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778087153870-gm4l,,2,40
+1055,882,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778087154003-4i0u,25.00,2,40
+1056,883,in_progress,other,pending,,99,Wet Check Immutability Customer 1778087164505,,3,40
+1079,903,submitted,A,pending,,99,WC AutoBill all-pending 1778088516901-5h2a,25.00,2,40
+1057,883,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778087164505,,99,40
+1058,884,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778087164883,,1,40
+1059,885,in_progress,other,pending,,99,WC Admin Delete field-403 1778088502527-8766,,2,40
+1060,886,in_progress,other,pending,,99,WC Admin Delete billing-403 1778088502759-4823,,2,40
+1061,887,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778088502850-6109,,2,40
+1073,899,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778088505437-6692,,2,40
+1074,900,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778088505524-6322,,2,40
+1085,907,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778088517478-5kwr,25.00,2,40
+1086,908,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778088517689-v5xu,99999999.99,100,40
+1087,909,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778088517848-q6o1,25.00,2,40
+1088,909,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778088517848-q6o1,,2,40
+1089,910,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778088518019-49p1,25.00,2,40
+1090,911,in_progress,other,pending,,99,Wet Check Immutability Customer 1778088529009,,3,40
+1091,911,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778088529009,,99,40
+1093,913,in_progress,other,pending,,99,WC Admin Delete field-403 1778089509681-5659,,2,40
+1092,912,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778088530100,,1,40
+1094,914,in_progress,other,pending,,99,WC Admin Delete billing-403 1778089509852-2181,,2,40
+1095,915,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778089509939-3308,,2,40
+1119,935,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778089523567-ikft,25.00,2,40
+1107,927,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778089512049-6368,,2,40
+1108,928,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778089512118-7245,,2,40
+1113,931,submitted,A,pending,,99,WC AutoBill all-pending 1778089523055-g8bf,25.00,2,40
+1120,936,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778089523745-9wm3,99999999.99,100,40
+1121,937,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778089523869-wy5c,25.00,2,40
+1122,937,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778089523869-wy5c,,2,40
+1123,938,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778089524007-ycun,25.00,2,40
+1124,939,in_progress,other,pending,,99,Wet Check Immutability Customer 1778089534531,,3,40
+1125,939,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778089534531,,99,40
+1126,940,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778089534913,,1,40
+1159,946,in_progress,other,pending,,99,WC Admin Delete field-403 1778089727028-6304,,2,40
+1160,947,in_progress,other,pending,,99,WC Admin Delete billing-403 1778089727215-9466,,2,40
+1161,948,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778089727309-7919,,2,40
+1173,960,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778089729467-4231,,2,40
+1174,961,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778089729539-3996,,2,40
+1179,964,submitted,A,pending,,99,WC AutoBill all-pending 1778089740467-7d2d,25.00,2,40
+1185,968,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778089741032-ipkm,25.00,2,40
+1186,969,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778089741218-zybs,99999999.99,100,40
+1187,970,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778089741336-2sx8,25.00,2,40
+1188,970,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778089741336-2sx8,,2,40
+1189,971,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778089741480-w8mv,25.00,2,40
+1190,972,in_progress,other,pending,,99,Wet Check Immutability Customer 1778089751982,,3,40
+1213,992,submitted,A,pending,,99,WC AutoBill all-pending 1778100252483-alpk,25.00,2,40
+1191,972,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778089751982,,99,40
+1192,973,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778089752408,,1,40
+1193,974,in_progress,other,pending,,99,WC Admin Delete field-403 1778100238902-7948,,2,40
+1194,975,in_progress,other,pending,,99,WC Admin Delete billing-403 1778100239079-9633,,2,40
+1195,976,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778100239154-9414,,2,40
+1207,988,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778100241476-4033,,2,40
+1208,989,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778100241544-1567,,2,40
+1219,996,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778100252968-l7ls,25.00,2,40
+1220,997,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778100253141-25hd,99999999.99,100,40
+1221,998,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778100253247-vp18,25.00,2,40
+1222,998,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778100253247-vp18,,2,40
+1223,999,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778100253377-fd96,25.00,2,40
+1224,1000,in_progress,other,pending,,99,Wet Check Immutability Customer 1778100263875,,3,40
+1225,1000,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778100263875,,99,40
+1227,1002,in_progress,other,pending,,99,WC Admin Delete field-403 1778101206733-2000,,2,40
+1226,1001,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778100264247,,1,40
+1228,1003,in_progress,other,pending,,99,WC Admin Delete billing-403 1778101206921-2640,,2,40
+1229,1004,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778101207183-5672,,2,40
+1253,1024,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778101220827-dq2r,25.00,2,40
+1241,1016,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778101209395-652,,2,40
+1242,1017,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778101209463-541,,2,40
+1247,1020,submitted,A,pending,,99,WC AutoBill all-pending 1778101220361-6i88,25.00,2,40
+1254,1025,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778101220998-m13n,99999999.99,100,40
+1255,1026,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778101221107-0rqv,25.00,2,40
+1256,1026,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778101221107-0rqv,,2,40
+1257,1027,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778101221237-i9fp,25.00,2,40
+1258,1028,in_progress,other,pending,,99,Wet Check Immutability Customer 1778101231751,,3,40
+1259,1028,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778101231751,,99,40
+1260,1029,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778101232119,,1,40
+1261,1030,in_progress,other,pending,,99,WC Admin Delete field-403 1778113956793-6879,,2,40
+1262,1031,in_progress,other,pending,,99,WC Admin Delete billing-403 1778113957051-1809,,2,40
+1263,1032,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778113957127-7142,,2,40
+1275,1044,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778113959333-3071,,2,40
+1276,1045,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778113959400-1594,,2,40
+1281,1048,submitted,A,pending,,99,WC AutoBill all-pending 1778113970277-dklp,25.00,2,40
+1287,1052,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778113970754-ams3,25.00,2,40
+1288,1053,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778113970924-j7dt,99999999.99,100,40
+1289,1054,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778113971035-u28k,25.00,2,40
+1290,1054,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778113971035-u28k,,2,40
+1291,1055,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778113971174-cdl2,25.00,2,40
+1292,1056,in_progress,other,pending,,99,Wet Check Immutability Customer 1778113981674,,3,40
+1315,1076,submitted,A,pending,,99,WC AutoBill all-pending 1778175459848-p9qu,25.00,2,39
+1293,1056,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778113981674,,99,40
+1294,1057,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778113982121,,1,40
+1295,1058,in_progress,other,pending,,99,WC Admin Delete field-403 1778175446131-6471,,2,39
+1296,1059,in_progress,other,pending,,99,WC Admin Delete billing-403 1778175446358-1771,,2,39
+1297,1060,in_progress,other,pending,,99,WC Admin Delete xcompany-404 1778175446445-2683,,2,39
+1309,1072,in_progress,other,pending,,99,WC Admin Delete irr-bulk-xcompany 1778175448856-7233,,2,39
+1310,1073,in_progress,other,pending,,99,WC Admin Delete bulk-403 1778175448927-9588,,2,39
+1321,1080,partially_converted,B,pending,,99,WC AutoBill preview-parity 1778175460407-r7mk,25.00,2,39
+1322,1081,in_progress,other,repaired_in_field,,99,WC AutoBill rollback 1778175460595-csxa,99999999.99,100,39
+1323,1082,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778175460708-qggk,25.00,2,39
+1324,1082,in_progress,other,repaired_in_field,,99,WC AutoBill missing-part 1778175460708-qggk,,2,39
+1325,1083,submitted,A,repaired_in_field,,99,WC AutoBill flag-off 1778175460846-a8xo,25.00,2,39
+1326,1084,in_progress,other,pending,,99,Wet Check Immutability Customer 1778175471356,,3,39
+1327,1084,in_progress,other,repaired_in_field,,99,Wet Check Immutability Customer 1778175471356,,99,39
+1328,1085,in_progress,other,pending,,99,Wet Check Idempotency Customer 1778175471789,,1,39
