@@ -6066,8 +6066,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (billingVisible) {
         customers = customers.filter(c => !c.hiddenFromBilling);
       }
+      // TODO: `c.isActive` does not exist on the customers schema — this filter
+      // is always a no-op and never excludes any customer. The wet-check picker
+      // previously sent `?active=true` hitting this branch; it now sends
+      // `?billingVisible=true` (the working filter above). This dead branch is
+      // left for backwards compatibility but can be removed once any remaining
+      // callers are confirmed to have migrated.
       if (activeOnly) {
-        customers = customers.filter(c => c.isActive !== false);
+        customers = customers.filter(c => (c as any).isActive !== false);
       }
       // Task #532 — opt-in pagination via ?limit=&offset=. When omitted
       // the response is unchanged (full list) for backwards compatibility.

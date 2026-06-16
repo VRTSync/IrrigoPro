@@ -28,6 +28,10 @@ args = "company-id-backfill-migration"
 task = "workflow.run"
 args = "pdf-cover-header"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "wc-customer-picker-filter"
+
 [[workflows.workflow]]
 name = "auth-middleware-coverage"
 author = "agent"
@@ -57,6 +61,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/pdf-cover-header.test.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "wc-customer-picker-filter"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/irrigopro exec vitest run src/pages/wet-checks/CustomerPickerPage.test.tsx"
 
 [workflows.workflow.metadata]
 isValidation = true

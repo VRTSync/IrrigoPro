@@ -175,8 +175,8 @@ export default function CustomerPickerPage() {
 
   const { data: customers = [], isLoading: loadingCustomers } =
     useArrayQuery<Customer>({
-      queryKey: ["/api/customers", { active: true }],
-      queryFn: () => apiRequest("/api/customers?active=true"),
+      queryKey: ["/api/customers", { billingVisible: true }],
+      queryFn: () => apiRequest("/api/customers?billingVisible=true"),
     });
 
   const { data: wetChecks = [], isLoading: loadingWcs } =
