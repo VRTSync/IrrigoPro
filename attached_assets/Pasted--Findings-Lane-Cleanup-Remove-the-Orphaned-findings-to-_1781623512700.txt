@@ -1,0 +1,68 @@
+# Findings-Lane Cleanup — Remove the Orphaned `findings_to_route` Server Code + Stale Copy + Orphan Diagnostic
+
+**What & Why**
+Findings must never be standalone routable items in Manager Workspace — they're routed only via the wet-check review/triage engine. The Manager Workspace Simplification (#1258) removed the findings *UI* and **already tombstoned `POST /api/manager-workspace/findings/bulk-route` to a 404** (guarded by `manager-workspace-slice1.test.ts`). But the server-side `findings_to_route` **stage assembly and counts are still live and orphaned**, a dead type field remains in the page, and a wet-check dialog still tells users to use a "Manager Workspace findings queue" that no longer exists. This ticket deletes the orphaned code, fixes the stale copy, and adds a read-only diagnostic to classify the existing orphan-finding backlog.
+
+This is **two slices** (1 = removal/cleanup, 2 = read-only diagnostic). No schema changes. Keep the existing `bulk-route` 404 tombstone and its test as-is.
+
+---
+
+## Slice 1 — Remove the orphaned findings stage assembly + stale references
+
+### Done looks like
+- The status-strip / queue handler no longer builds `type:"finding"` items or the `findings_to_route` stage. Requests with `type=all` or `type=finding` return **no** finding items for any role.
+- `findingsNeedingRouting` / `findingsToRoute` are gone from the status-strip indicators and `stageCounts`.
+- `"finding"` is removed from the queue-item `type` union and `findings_to_route` from the `ManagerStage` union (and the route's stage doc/whitelist).
+- The now-unused helpers `scopedFindingsNeedingRouting` and `isFindingPendingRouting` are deleted (confirm no other caller — the Needs-Review endpoint in `routes.ts` has its own query and does **not** use them).
+- The dead `findingsNeedingRouting: number;` field is removed from `manager-workspace.tsx` (line ~44) and any now-empty status-strip type it left behind.
+- The stale dialog copy in `wet-check-wizard.tsx` (~line 1300) no longer references a "Manager Workspace findings queue." It is reworded to reflect reality: unrouted findings are routed in the **wet-check review/triage** screen; approving now leaves them to be routed there.
+- The `bulk-route` 404 tombstone and `manager-workspace-slice1.test.ts` stay unchanged.
+- No other client reads `findingsNeedingRouting` / `findings_to_route`; typecheck baseline unchanged.
+
+### Steps
+1. **Delete the stage loop** — in `manager-workspace-routes.ts`, remove the `if (wantFinding) { for (const f of await scopedFindingsNeedingRouting(req)) … push({ type:"finding", stage:"findings_to_route", … }) }` block (~lines 618–639) and the `wantFinding` computation (~line 466).
+2. **Delete the counts** — remove `findingsNeedingRouting` / `findingsToRoute` from the status-strip assembly (~lines 1088–1114, 1289–1304) and the `activeFindings` derivation that feeds them.
+3. **Delete the type members** — drop `"finding"` from the item `type` union (~line 343) and `findings_to_route` from the `ManagerStage` union (~line 334) and the `assignStage` branch (~line 385); update the stage whitelist/doc comment (~line 419).
+4. **Delete dead helpers** — remove `scopedFindingsNeedingRouting` (~line 207) and `isFindingPendingRouting` (~line 90) once their only callers (the blocks above) are gone. Grep to confirm zero remaining references before deleting.
+5. **Clean the client type** — remove `findingsNeedingRouting: number;` from `manager-workspace.tsx` (~line 44) and any field left dangling in the status-strip indicator type.
+6. **Fix the stale copy** — reword the `wet-check-wizard.tsx` dialog paragraph (~line 1300) from "The Manager Workspace findings queue lets you bulk-route them…" to point at the wet-check review/triage screen instead.
+7. **Verify** — `grep -rn "findings_to_route\|findingsNeedingRouting\|scopedFindingsNeedingRouting\|isFindingPendingRouting"` returns only the `bulk-route` tombstone/test; typecheck unchanged; `manager-workspace-slice1.test.ts` still green.
+
+### Relevant files
+- `artifacts/api-server/src/routes/manager-workspace-routes.ts`
+- `artifacts/irrigopro/src/pages/manager-workspace.tsx`
+- `artifacts/irrigopro/src/components/manager/wet-check-wizard.tsx`
+- `artifacts/api-server/src/routes/manager-workspace-slice1.test.ts` (leave as-is; just keep green)
+
+### Out of scope
+- The `bulk-route` 404 tombstone (already done — keep it).
+- The Needs-Review endpoint / wet-check pages (owned by the WC System spec).
+- Any `wet_check_findings` / `wet_check_billings` schema change.
+
+---
+
+## Slice 2 — Read-only orphan-findings diagnostic
+
+### Done looks like
+- A read-only script classifies every finding with all four routing FKs null and `resolution != 'documented_only'` by its parent `wet_checks.status`, so we can see which orphans are now invisible after the lane removal.
+- Mutates nothing. Prints class counts + writes a CSV.
+
+### Why it matters now
+With the lane gone, orphan findings on **active** (`submitted`/`pending_manager_review`) and **`partially_converted`-with-unrouted** wet checks still surface — via the wet-check Needs-Review queue. But orphans on **`approved`/`converted`** wet checks surface nowhere (Needs-Review excludes those by design). This diagnostic finds that hidden Class C so we can decide remediation.
+
+### Steps
+1. Add `artifacts/api-server/scripts/diagnose-orphaned-findings.ts` (read-only).
+2. Classify by parent wet-check status: **A active** (`submitted`/`pending_manager_review`), **B `partially_converted`**, **C `approved`/`converted`** (the hidden true orphans). Also bucket by age, by `resolution`, by `companyId`, and flag any with non-null `partPrice`/`quantity` (would have carried a dollar amount).
+3. Print a summary table; write `orphaned-findings-report.csv` (findingId, wetCheckId, wcStatus, resolution, techDisposition, companyId, customerName, partPrice, quantity, ageDays).
+
+### Remediation (do NOT implement — for Randy after he reviews counts)
+For **Class C** only: (a) sweep to `documented_only`, (b) reopen parent wet check to `partially_converted` so triage can route them, or (c) leave as DB-only. One-paragraph follow-up slice once counts are known.
+
+### Relevant files
+- `artifacts/api-server/scripts/diagnose-orphaned-findings.ts` (new)
+- `lib/db/src/schema/schema.ts` (read-only reference)
+
+### Acceptance (whole ticket)
+- No standalone findings served by Manager Workspace for any role; no `findings_to_route`/`findingsNeedingRouting` anywhere except the kept tombstone/test.
+- Stale wizard copy corrected.
+- Diagnostic runs read-only, prints A/B/C counts + dollar/age breakdowns, writes the CSV; no rows mutated.
