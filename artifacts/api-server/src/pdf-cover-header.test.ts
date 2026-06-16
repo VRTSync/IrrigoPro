@@ -325,3 +325,27 @@ describe('coverPage — logo binding (Part C)', () => {
     assert.ok(!html.includes('cover-logo-tile-empty'), 'Expected no empty fallback tile when logoDataUri is set');
   });
 });
+
+// ── Task #1302: transparent logo tile + page-1 fit ───────────────────────────
+
+describe('buildFullCSS — logo tile transparency (Task #1302)', () => {
+  it('.cover-logo-tile has no background:white (populated tile is fully transparent)', () => {
+    const css = buildFullCSS(DEFAULT_BRAND_COLORS);
+    const tileMatch = css.match(/\.cover-logo-tile\s*\{[^}]+\}/);
+    assert.ok(tileMatch, 'Expected .cover-logo-tile rule in CSS');
+    assert.ok(
+      !tileMatch[0].includes('background: white') && !tileMatch[0].includes('background:white'),
+      '.cover-logo-tile must not contain "background: white" — the populated tile should be transparent',
+    );
+  });
+
+  it('.cover-logo-tile-empty has a contrasting light-plate background (fallback still legible)', () => {
+    const css = buildFullCSS(DEFAULT_BRAND_COLORS);
+    const emptyMatch = css.match(/\.cover-logo-tile-empty\s*\{[^}]+\}/);
+    assert.ok(emptyMatch, 'Expected .cover-logo-tile-empty rule in CSS');
+    assert.ok(
+      emptyMatch[0].includes('rgba(255,255,255,0.15)'),
+      '.cover-logo-tile-empty must have rgba(255,255,255,0.15) background for legibility on the navy band',
+    );
+  });
+});

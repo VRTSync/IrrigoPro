@@ -1036,8 +1036,8 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: 28px;
-    padding: 32px 0 40px;
+    gap: 18px;
+    padding: 24px 0 24px;
     page-break-after: always;
     break-after: page;
     page-break-inside: avoid;
@@ -1056,19 +1056,19 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
   .cover-logo-tile {
     width: 96px;
     height: 96px;
-    background: white;
-    border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    overflow: hidden;
   }
 
   .cover-logo-tile-empty {
+    background: rgba(255,255,255,0.15);
+    border-radius: 8px;
+    overflow: hidden;
     font-size: 42px;
     font-weight: 800;
-    color: ${navy};
+    color: white;
   }
 
   .cover-logo {
@@ -1334,7 +1334,7 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     z-index: 1;
     background: ${navy};
     border-radius: 12px;
-    padding: 28px 32px;
+    padding: 20px 28px;
     color: white;
     border: 2px solid ${green};
   }
@@ -1349,12 +1349,12 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
   }
 
   .cover-total-card-amount {
-    font-size: 48px;
+    font-size: 40px;
     font-weight: 900;
     letter-spacing: -1px;
     line-height: 1;
     color: white;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
   }
 
   .cover-total-card-breakdown {
@@ -1362,7 +1362,7 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     align-items: center;
     gap: 0;
     border-top: 1px solid rgba(255,255,255,0.2);
-    padding-top: 14px;
+    padding-top: 10px;
     flex-wrap: wrap;
   }
 
@@ -1405,16 +1405,16 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     flex: 1;
     background: ${gray};
     border-radius: 8px;
-    padding: 18px 16px;
+    padding: 12px 12px;
     text-align: center;
     border-top: 3px solid transparent;
   }
 
   .cover-stat-count {
-    font-size: 36px;
+    font-size: 30px;
     font-weight: 900;
     line-height: 1;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
   }
 
   .cover-stat-label {
@@ -1430,7 +1430,7 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     z-index: 1;
     border: 1.5px solid #e5e7eb;
     border-radius: 8px;
-    padding: 18px 22px;
+    padding: 12px 18px;
     background: white;
   }
 
@@ -1440,7 +1440,7 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     text-transform: uppercase;
     letter-spacing: 1px;
     color: ${navy};
-    margin-bottom: 10px;
+    margin-bottom: 6px;
   }
 
   .cover-included-list {
@@ -1448,7 +1448,7 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     padding-left: 20px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     font-size: 13px;
     color: #374151;
   }
@@ -1462,7 +1462,7 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     z-index: 1;
     background: ${gray};
     border-radius: 8px;
-    padding: 18px 22px;
+    padding: 12px 18px;
     border-left: 4px solid ${green};
   }
 
@@ -1472,7 +1472,7 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     text-transform: uppercase;
     letter-spacing: 1px;
     color: ${navy};
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
 
   .cover-howto-body {
