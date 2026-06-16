@@ -70,6 +70,7 @@ const WetCheckConfirm = lazy(() => import("@/components/manager/wet-check-confir
 const WetCheckDone = lazy(() => import("@/components/manager/wet-check-done").then((m) => ({ default: m.WetCheckDone })));
 const WetCheckInspectionSummaryPage = lazyPage(() => import("@/pages/wet-checks/WetCheckInspectionSummaryPage"));
 const ManagerWetCheckDetailPage = lazyPage(() => import("@/pages/wet-checks/ManagerWetCheckDetailPage"));
+const CombinedReviewPage = lazyPage(() => import("@/pages/wet-checks/CombinedReviewPage"));
 
 const SiteMapsPage = lazyPage(() => import("@/pages/site-maps"));
 const AdminMigrationsPage = lazyPage(() => import("@/pages/admin/migrations"));
@@ -302,7 +303,7 @@ function Router() {
                   <Route path="/manager/wet-checks/:id/done">
                     {(params) => <WetCheckDone id={parseInt(params.id)} />}
                   </Route>
-                  <Route path="/manager/wet-checks/:id" component={RedirectToWetChecksNeedsReview} />
+                  <Route path="/manager/wet-checks/:id" component={CombinedReviewPage} />
                   <Route path="/wet-checks/admin" component={RedirectToWetChecks} />
                   <Route path="/financial-pulse" component={FinancialPulsePage} />
                   <Route path="/billing-workspace" component={RedirectToBillingWorkspace} />
@@ -313,7 +314,7 @@ function Router() {
                   <Route path="/wet-checks" component={WetCheckSystemPage} />
                   <Route path="/wet-checks/c/:customerId/new" component={NewWetCheckPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksRoutingPage} />
-                  <Route path="/wet-checks/:id/review" component={ManagerWetCheckDetailPage} />
+                  <Route path="/wet-checks/:id/review" component={CombinedReviewPage} />
                   <Route path="/wet-checks/:id/summary" component={WetCheckInspectionSummaryPage} />
                   <Route path="/wet-checks/:id" component={WetChecksRoutingPage} />
                   <Route path="/switch-user" component={SwitchUser} />
@@ -360,9 +361,10 @@ function Router() {
                   <Route path="/billing-sheets" component={BillingSheets} />
                   <Route path="/wet-check-billings" component={RedirectToWetChecksApproved} />
                   <Route path="/manager/wet-checks" component={RedirectToWetChecks} />
+                  <Route path="/manager/wet-checks/:id" component={CombinedReviewPage} />
                   <Route path="/wet-checks/admin" component={RedirectToWetChecks} />
                   <Route path="/wet-checks/pending-review" component={RedirectToWetChecksNeedsReview} />
-                  <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
+                  <Route path="/wet-checks/:id/review" component={CombinedReviewPage} />
                   <Route path="/wet-checks" component={WetCheckSystemPage} />
                   <Route path="/wet-checks/c/:customerId/new" component={NewWetCheckPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksRoutingPage} />
@@ -411,10 +413,10 @@ function Router() {
                   <Route path="/manager/wet-checks/:id/done">
                     {(params) => <WetCheckDone id={parseInt(params.id)} />}
                   </Route>
-                  <Route path="/manager/wet-checks/:id" component={RedirectToWetChecksNeedsReview} />
+                  <Route path="/manager/wet-checks/:id" component={CombinedReviewPage} />
                   <Route path="/wet-checks/admin" component={RedirectToWetChecks} />
                   <Route path="/wet-checks/pending-review" component={RedirectToWetChecksNeedsReview} />
-                  <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
+                  <Route path="/wet-checks/:id/review" component={CombinedReviewPage} />
                   <Route path="/wet-checks" component={WetCheckSystemPage} />
                   <Route path="/wet-checks/c/:customerId/new" component={NewWetCheckPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksRoutingPage} />

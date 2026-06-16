@@ -55,6 +55,7 @@ import AdminIssueTypesPage from "@/pages/admin-issue-types";
 import AdminClientErrorsPage from "@/pages/admin-client-errors";
 import WetCheckInspectionSummaryPage from "@/pages/wet-checks/WetCheckInspectionSummaryPage";
 import ManagerWetCheckDetailPage from "@/pages/wet-checks/ManagerWetCheckDetailPage";
+import CombinedReviewPage from "@/pages/wet-checks/CombinedReviewPage";
 import BillingZeroPriceAuditPage from "@/pages/billing-zero-price-audit";
 import LaborRateAuditPage from "@/pages/labor-rate-audit";
 import MissingPhotosReport from "@/pages/missing-photos-report";
@@ -203,12 +204,12 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/manager/wet-checks/:id/done">
             {(params) => <Suspense fallback={null}><WetCheckDone id={parseInt(params.id)} returnTo="/wet-checks/pending-review" /></Suspense>}
           </Route>
-          <Route path="/manager/wet-checks/:id" component={RedirectToWetChecksNeedsReview} />
+          <Route path="/manager/wet-checks/:id" component={CombinedReviewPage} />
           <Route path="/wet-checks/admin" component={RedirectToWetChecks} />
           <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
           <Route path="/admin/client-errors" component={AdminClientErrorsPage} />
           <Route path="/wet-checks/pending-review" component={RedirectToWetChecksNeedsReview} />
-          <Route path="/wet-checks/:id/review" component={ManagerWetCheckDetailPage} />
+          <Route path="/wet-checks/:id/review" component={CombinedReviewPage} />
           <Route path="/wet-checks" component={WetCheckSystemPage} />
           <Route path="/wet-checks/c/:customerId/new" component={NewWetCheckPage} />
           <Route path="/wet-checks/c/:clientId" component={WetChecksRoutingPage} />
