@@ -4637,8 +4637,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const updates = insertCompanySchema.partial().parse(req.body);
       
-      // If logo is being updated, normalize the path
-      if (updates.logo) {
+      // Server-side guard: a missing or blank logo in a profile update must
+      // never clobber the stored logo. Only PUT /api/company/:id/logo and
+      // PUT /api/company/:id/logo-reset are the authorised paths for logo
+      // changes. Strip it here so a stale form value can't blank the logo.
+      if (!updates.logo) {
+        delete updates.logo;
+      } else {
+        // Normalise the path when a non-empty value is present (shouldn't
+        // normally arrive via the profile form, but guard it anyway).
         const objectStorageService = new ObjectStorageService();
         updates.logo = objectStorageService.normalizeLogoPath(updates.logo);
       }

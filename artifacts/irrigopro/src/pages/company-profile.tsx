@@ -135,7 +135,12 @@ export default function CompanyProfile() {
   }
 
   const handleSubmit = (data: CompanyProfileFormData) => {
-    updateCompanyMutation.mutate(data);
+    // Never send `logo` through the profile form — logo changes go through
+    // PUT /api/company/:id/logo and PUT /api/company/:id/logo-reset only.
+    // Stripping it here prevents a stale form value from clobbering a freshly
+    // uploaded logo when the user hits Save.
+    const { logo: _logo, ...rest } = data;
+    updateCompanyMutation.mutate(rest as CompanyProfileFormData);
   };
 
   const handleCancel = () => {
@@ -406,6 +411,12 @@ export default function CompanyProfile() {
                               logoUrl: uploadUrl
                             });
                             console.log('Logo save result:', saveResult);
+
+                            // Sync the form so it never carries a stale "" value.
+                            // The profile Save handler strips `logo` before sending, but
+                            // keeping the form value current prevents any future code
+                            // from accidentally reading a blank logo out of form state.
+                            form.setValue('logo', uploadUrl);
                             
                             // Force refresh all company profile queries across the app
                             await queryClient.invalidateQueries({ 
