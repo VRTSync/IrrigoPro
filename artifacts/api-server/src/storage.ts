@@ -4277,6 +4277,64 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
+  async updateBillingSheetLaborHours(
+    id: number,
+    totalHours: number,
+    companyId: number | null,
+  ): Promise<BillingSheetWithItems> {
+    return db.transaction(async (tx) => {
+      const scope = this._companyScopeForBS(companyId);
+      const cond = scope ? and(eq(billingSheets.id, id), scope) : eq(billingSheets.id, id);
+      const [bs] = await tx.select().from(billingSheets).where(cond);
+      if (!bs) throw Object.assign(new Error(`Billing sheet ${id} not found`), { code: "BS_NOT_FOUND" });
+      if (bs.status === "billed" || bs.invoiceId != null) {
+        throw Object.assign(new Error(`Billing sheet ${id} is locked`), { code: "BS_LOCKED" });
+      }
+      const laborRate = parseFloat(String(bs.appliedLaborRate ?? bs.laborRate ?? "0")) || 0;
+      const laborSubtotal = totalHours * laborRate;
+      const partsSubtotal = parseFloat(String(bs.partsSubtotal ?? "0")) || 0;
+      const totalAmount = laborSubtotal + partsSubtotal;
+      const [updated] = await tx.update(billingSheets).set({
+        totalHours: totalHours.toFixed(2),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
+        updatedAt: new Date(),
+      }).where(eq(billingSheets.id, id)).returning();
+      if (!updated) throw new Error(`Billing sheet ${id} update failed`);
+      const items = await tx.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, id));
+      return { ...updated, items };
+    });
+  }
+
+  async updateWorkOrderLaborHours(
+    id: number,
+    totalHours: number,
+    companyId: number | null,
+  ): Promise<WorkOrder & { items: WorkOrderItem[] }> {
+    return db.transaction(async (tx) => {
+      const scope = this._companyScope(companyId);
+      const cond = scope ? and(eq(workOrders.id, id), scope) : eq(workOrders.id, id);
+      const [wo] = await tx.select().from(workOrders).where(cond);
+      if (!wo) throw Object.assign(new Error(`Work order ${id} not found`), { code: "WO_NOT_FOUND" });
+      if (wo.status === "billed" || wo.invoiceId != null) {
+        throw Object.assign(new Error(`Work order ${id} is locked`), { code: "WO_LOCKED" });
+      }
+      const laborRate = parseFloat(String(wo.appliedLaborRate ?? wo.laborRate ?? "0")) || 0;
+      const laborSubtotal = totalHours * laborRate;
+      const partsSubtotal = parseFloat(String(wo.partsSubtotal ?? "0")) || 0;
+      const totalAmount = laborSubtotal + partsSubtotal;
+      const [updated] = await tx.update(workOrders).set({
+        totalHours: totalHours.toFixed(2),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
+        updatedAt: new Date(),
+      }).where(eq(workOrders.id, id)).returning();
+      if (!updated) throw new Error(`Work order ${id} update failed`);
+      const items = await tx.select().from(workOrderItems).where(eq(workOrderItems.workOrderId, id));
+      return { ...updated, items };
+    });
+  }
+
   async deleteWetCheckBilling(id: number): Promise<void> {
     await db.delete(wetCheckBillings).where(eq(wetCheckBillings.id, id));
   }

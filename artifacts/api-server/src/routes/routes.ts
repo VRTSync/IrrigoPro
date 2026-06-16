@@ -10527,6 +10527,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Task #1315 — flat labor hours editor for billing sheets and work orders.
+  const laborHoursBody = z.object({ totalHours: z.number().min(0) });
+
+  app.patch("/api/billing-sheets/:id/labor-hours", requireAuthentication, requireSameCompanyAsBillingSheet, async (req: any, res) => {
+    const role = req.authenticatedUserRole;
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin" && role !== "irrigation_manager") {
+      res.status(403).json({ message: "Forbidden" }); return;
+    }
+    const parsed = laborHoursBody.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid id" }); return; }
+    const companyId: number | null = role === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
+    try {
+      const result = await storage.updateBillingSheetLaborHours(id, parsed.data.totalHours, companyId);
+      void recordAuditEvent(req, {
+        actionType: "data", action: "billing_sheet.labor_hours_updated",
+        targetType: "billing_sheet", targetId: String(id),
+        summary: `Total labor hours set to ${parsed.data.totalHours}`,
+      });
+      res.json(result);
+    } catch (e: any) {
+      if (e?.code === "BS_LOCKED") { res.status(409).json({ message: e.message }); return; }
+      if (e?.code === "BS_NOT_FOUND") { res.status(404).json({ message: e.message }); return; }
+      const { status, message } = classifyAndLog(req, e, {
+        op: "updateBillingSheetLaborHours",
+        ctx: { id, totalHours: parsed.data.totalHours },
+        fallbackStatus: 500, fallbackMessage: "Couldn't update labor hours",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
   // Task #1093 — item replacement for billing sheets.
   const itemsBody = z.object({
     items: z.array(z.object({
@@ -11976,6 +12009,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         op: "recomputeWorkOrderTotalsForRateMode",
         ctx: { id, mode: parsed.data.mode },
         fallbackStatus: 500, fallbackMessage: "Couldn't update rate mode",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Task #1315 — flat labor hours editor for work orders.
+  app.patch("/api/work-orders/:id/labor-hours", requireAuthentication, requireSameCompanyAsWorkOrder, async (req: any, res) => {
+    const role = req.authenticatedUserRole;
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin" && role !== "irrigation_manager") {
+      res.status(403).json({ message: "Forbidden" }); return;
+    }
+    const parsed = laborHoursBody.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid id" }); return; }
+    const companyId: number | null = role === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
+    try {
+      const result = await storage.updateWorkOrderLaborHours(id, parsed.data.totalHours, companyId);
+      void recordAuditEvent(req, {
+        actionType: "data", action: "work_order.labor_hours_updated",
+        targetType: "work_order", targetId: String(id),
+        summary: `Total labor hours set to ${parsed.data.totalHours}`,
+      });
+      res.json(result);
+    } catch (e: any) {
+      if (e?.code === "WO_LOCKED") { res.status(409).json({ message: e.message }); return; }
+      if (e?.code === "WO_NOT_FOUND") { res.status(404).json({ message: e.message }); return; }
+      const { status, message } = classifyAndLog(req, e, {
+        op: "updateWorkOrderLaborHours",
+        ctx: { id, totalHours: parsed.data.totalHours },
+        fallbackStatus: 500, fallbackMessage: "Couldn't update labor hours",
       });
       res.status(status).json({ message });
     }

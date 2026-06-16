@@ -8,6 +8,7 @@
  * Fires PATCH /api/{entityPath}/{id}/rate-mode { mode }.
  * Optimistically flips locally; reverts on error.
  * Invalidates the detail query key on success.
+ * Task #1315 — also invalidates the list query key so queue row totals refresh.
  */
 
 import { useState, useEffect } from "react";
@@ -33,8 +34,8 @@ export function RateModeToggle({
   entityPath,
   entityId,
   currentMode,
-  normalRate,
   emergencyRate,
+  normalRate,
   detailQueryKey,
   disabled = false,
 }: RateModeToggleProps) {
@@ -58,6 +59,8 @@ export function RateModeToggle({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: detailQueryKey });
+      // Invalidate the list query so queue row totals update immediately.
+      queryClient.invalidateQueries({ queryKey: [`/api/${entityPath}`], exact: false });
       // Task #1097 — refresh the activity feed for WCBs so the new
       // rate_mode_changed row appears immediately without reopening.
       if (entityPath === "wet-check-billings") {

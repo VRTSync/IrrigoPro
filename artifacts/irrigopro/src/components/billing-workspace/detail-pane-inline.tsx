@@ -3,7 +3,8 @@
  *
  * Extends the existing billing-workspace DetailPane with:
  *  - RateModeToggle (billing_manager+ on unlocked BS / WO / WCB)
- *  - LineItemsEditor (billing_manager+ on unlocked BS / WO)
+ *  - TotalHoursEditor (billing_manager+ on unlocked flat-mode BS / WO) — Task #1315
+ *  - LineItemsEditor (billing_manager+ on unlocked BS / WO) with summary strip
  *
  * The component owns a secondary detail fetch so it can read the full
  * record (rateMode, customer rates, items) without coupling the queue
@@ -14,12 +15,16 @@
  * original DetailPane rendering at the bottom of the panel.
  */
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { RateModeToggle } from "./rate-mode-toggle";
 import { LineItemsEditor, type InlineItem } from "./line-items-editor";
 import { ActivityFeed } from "./activity-feed";
-import { Lock } from "lucide-react";
+import { Lock, Save } from "lucide-react";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { ReactNode } from "react";
 
 type QueueItemType = "billing_sheet" | "work_order" | "wet_check_billing" | "part" | "manual_review";
@@ -47,6 +52,11 @@ interface CustomerRates {
 
 interface DetailRecord {
   rateMode?: RateMode | string;
+  laborMode?: string | null;
+  totalHours?: string | number | null;
+  laborSubtotal?: string | number | null;
+  partsSubtotal?: string | number | null;
+  totalAmount?: string | number | null;
   status?: string;
   invoiceId?: number | null;
   items?: InlineItem[];
@@ -59,6 +69,85 @@ interface DetailRecord {
     invoiceId?: number | null;
   };
 }
+
+// ── TotalHoursEditor ────────────────────────────────────────────────────────
+// Flat-mode inline editor for the billing sheet / work order total labor hours.
+function TotalHoursEditor({
+  entityPath,
+  entityId,
+  currentHours,
+  detailQueryKey,
+  disabled,
+}: {
+  entityPath: "billing-sheets" | "work-orders";
+  entityId: number;
+  currentHours: string | number | null | undefined;
+  detailQueryKey: unknown[];
+  disabled: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const parsed0 = parseFloat(String(currentHours ?? "0")) || 0;
+  const [value, setValue] = useState(String(parsed0));
+
+  // Sync when the parent record updates (e.g. after a rate-mode save refetches detail)
+  useEffect(() => {
+    setValue(String(parseFloat(String(currentHours ?? "0")) || 0));
+  }, [currentHours, entityId]);
+
+  const mutation = useMutation({
+    mutationFn: (totalHours: number) =>
+      apiRequest(`/api/${entityPath}/${entityId}/labor-hours`, "PATCH", { totalHours }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: detailQueryKey });
+      queryClient.invalidateQueries({ queryKey: [`/api/${entityPath}`], exact: false });
+      toast({ title: "Labor hours saved" });
+    },
+    onError: (e: any) => {
+      toast({
+        title: "Couldn't save labor hours",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const parsedVal = parseFloat(value) || 0;
+  const currentVal = parseFloat(String(currentHours ?? "0")) || 0;
+  const isDirty = parsedVal !== currentVal;
+
+  return (
+    <div className="flex items-center gap-2" data-testid="total-hours-editor">
+      <span className="text-xs font-medium text-gray-600 shrink-0">Total labor hours</span>
+      <input
+        type="number"
+        min="0"
+        step="0.25"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        disabled={disabled || mutation.isPending}
+        className="w-24 px-1.5 py-1 border border-gray-200 rounded text-xs text-right focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
+        data-testid="total-hours-input"
+      />
+      <Button
+        size="sm"
+        onClick={() => mutation.mutate(parsedVal)}
+        disabled={disabled || mutation.isPending || !isDirty}
+        data-testid="total-hours-save"
+      >
+        {mutation.isPending ? (
+          "Saving…"
+        ) : (
+          <>
+            <Save className="w-3 h-3 mr-1" /> Save
+          </>
+        )}
+      </Button>
+    </div>
+  );
+}
+// ────────────────────────────────────────────────────────────────────────────
 
 const EDITABLE_ROLES = ["billing_manager", "company_admin", "super_admin", "irrigation_manager"];
 
@@ -115,6 +204,15 @@ export function DetailPaneInline({ item, userRole, children }: DetailPaneInlineP
     (item.type === "billing_sheet" || item.type === "work_order") &&
     !!entityPath;
 
+  // Show TotalHoursEditor for flat-mode billing sheets and work orders.
+  // laborMode null/undefined defaults to flat (Task #657).
+  const isFlatMode = detail?.laborMode !== "per_part";
+  const hasTotalHoursEditor =
+    canEdit &&
+    (item.type === "billing_sheet" || item.type === "work_order") &&
+    !!entityPath &&
+    isFlatMode;
+
   const itemsForEditor: InlineItem[] = Array.isArray(detail?.items) ? detail!.items : [];
 
   return (
@@ -159,12 +257,24 @@ export function DetailPaneInline({ item, userRole, children }: DetailPaneInlineP
                 />
               )}
 
+              {hasTotalHoursEditor && entityPath && (
+                <TotalHoursEditor
+                  entityPath={entityPath as "billing-sheets" | "work-orders"}
+                  entityId={item.refId}
+                  currentHours={detail?.totalHours}
+                  detailQueryKey={detailQueryKey}
+                  disabled={locked}
+                />
+              )}
+
               {hasItemsEditor && entityPath && (
                 <LineItemsEditor
                   entityPath={entityPath as "billing-sheets" | "work-orders"}
                   entityId={item.refId}
                   initialItems={itemsForEditor}
                   detailQueryKey={detailQueryKey}
+                  laborSubtotal={detail?.laborSubtotal}
+                  totalAmount={detail?.totalAmount}
                   disabled={locked}
                 />
               )}

@@ -6,12 +6,18 @@
  * "Save" fires PATCH /api/{entityPath}/{id}/items with the full new item array.
  * On success the parent invalidates the detail query key.
  *
+ * Task #1315 — also invalidates the list query key so queue row totals refresh.
+ * Task #1315 — shows Parts / Labor / Total summary strip below the table,
+ *              driven by live partsTotal + last-saved laborSubtotal/totalAmount.
+ *
  * Props:
- *   entityPath   — "billing-sheets" | "work-orders"
- *   entityId     — row ID
- *   initialItems — current items from the detail fetch
+ *   entityPath     — "billing-sheets" | "work-orders"
+ *   entityId       — row ID
+ *   initialItems   — current items from the detail fetch
  *   detailQueryKey — react-query key to invalidate on success
- *   disabled     — lock the editor (e.g. when sheet is billed)
+ *   laborSubtotal  — last-saved labor subtotal from the detail record
+ *   totalAmount    — last-saved grand total from the detail record
+ *   disabled       — lock the editor (e.g. when sheet is billed)
  */
 
 import { useEffect, useState } from "react";
@@ -47,6 +53,8 @@ interface LineItemsEditorProps {
   entityId: number;
   initialItems: InlineItem[];
   detailQueryKey: unknown[];
+  laborSubtotal?: string | number | null;
+  totalAmount?: string | number | null;
   disabled?: boolean;
 }
 
@@ -73,6 +81,8 @@ export function LineItemsEditor({
   entityId,
   initialItems,
   detailQueryKey,
+  laborSubtotal,
+  totalAmount,
   disabled = false,
 }: LineItemsEditorProps) {
   const queryClient = useQueryClient();
@@ -93,6 +103,8 @@ export function LineItemsEditor({
       apiRequest(`/api/${entityPath}/${entityId}/items`, "PATCH", { items }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: detailQueryKey });
+      // Invalidate the list query so queue row totals update immediately.
+      queryClient.invalidateQueries({ queryKey: [`/api/${entityPath}`], exact: false });
       setIsDirty(false);
       toast({ title: "Items saved", description: "Line items updated successfully." });
     },
@@ -143,13 +155,13 @@ export function LineItemsEditor({
   const fmtCurrency = (n: number) =>
     new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
 
+  const savedLabor = parseFloat(String(laborSubtotal ?? "0")) || 0;
+  const grandTotal = partsTotal + savedLabor;
+
   return (
     <div className="space-y-2" data-testid="line-items-editor">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-gray-600">Parts / Items</span>
-        <span className="text-xs text-gray-500 tabular-nums">
-          Parts total: <strong>{fmtCurrency(partsTotal)}</strong>
-        </span>
       </div>
 
       <div className="overflow-x-auto rounded border border-gray-200">
@@ -277,6 +289,27 @@ export function LineItemsEditor({
             )}
           </Button>
         </div>
+      </div>
+
+      {/* Summary strip — Parts live, Labor/Total from last-saved detail record */}
+      <div
+        className="flex items-center gap-3 px-2 py-1.5 rounded bg-gray-50 border border-gray-100 text-xs tabular-nums"
+        data-testid="billing-summary-strip"
+      >
+        <span className="text-gray-500">
+          Parts: <strong className="text-gray-800">{fmtCurrency(partsTotal)}</strong>
+        </span>
+        <span className="text-gray-300">·</span>
+        <span className="text-gray-500">
+          Labor: <strong className="text-gray-800">{fmtCurrency(savedLabor)}</strong>
+        </span>
+        <span className="text-gray-300">·</span>
+        <span className="text-gray-500">
+          Total: <strong className="text-gray-900">{fmtCurrency(grandTotal)}</strong>
+        </span>
+        {isDirty && (
+          <span className="ml-auto text-amber-600 font-medium">unsaved changes</span>
+        )}
       </div>
     </div>
   );
