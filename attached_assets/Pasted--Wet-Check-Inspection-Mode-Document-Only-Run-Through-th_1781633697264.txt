@@ -1,0 +1,118 @@
+# Wet Check — Inspection Mode: Document-Only Run-Through that Outputs an Estimate
+
+**What & Why**
+Add a second **mode** to wet checks alongside today's repair-focused flow. A **Service** wet check (today's) repairs in field → produces a **WC Snapshot** (bill for work done). An **Inspection** wet check is a pure document-only run-through — the tech walks the zones and records what *needs* to be done (no repairs) → produces an **Estimate** (quote for work proposed). Same inspection engine, same findings, same per-finding capture; only the field prompts, the review step, and the output differ.
+
+**Core principle — lineage, not duplication.** Do **NOT** build "wet check estimate" or "wet check work order" entities. The Inspection's outputs are **real records in the existing estimate and work-order systems**, stamped with an `originWetCheckId` so they stay tagged to and surfaced inside the wet check system. Single source of truth, dual-surfaced — the exact "link + surface" pattern the WC Snapshot uses. (Findings already carry `estimateId` / `workOrderId` FKs, so the link mostly exists.)
+
+**Prerequisite:** the WC System redesign (tabbed page + `CombinedReviewSurface` + snapshot review) — shipped (Slices 1–4). This builds on it.
+**Hard boundary:** Command Center untouched. Do not rebuild the estimate or work-order subsystems — reuse them.
+
+Three slices. Service remains the default; nothing about today's Service flow changes.
+
+---
+
+## Design Context (locked decisions)
+
+1. **Mode lives on the wet check.** New `mode` column on `wet_checks`: `'service'` (default) | `'inspection'`. Set at creation; immutable after (a visit is one kind of visit).
+2. **Entry point = the existing "New Wet Check" flow.** First step of creation is the **mode choice** (Service / Inspection), then the unchanged customer → controller → zones flow. Mode is persisted via `POST /api/wet-checks`. Service is pre-selected so the current flow is unchanged.
+3. **Inspection is strictly document-only.** In the field, an inspection finding records *needed* work — part(s), quantity, **estimated** labor hours — and offers **no** "repaired in field" / on-site-repair disposition. Every inspection finding is, in effect, "to estimate." (No hybrid; a Service wet check still handles mixed dispositions as it does today.)
+4. **Output = one Estimate per inspection**, a real record in the existing estimate system, built from the findings as line items, reusing `createEstimate`. Mirrors "one snapshot per Service wet check."
+5. **Review reuses `CombinedReviewSurface` + the estimate editor.** For an inspection, the review surface **skips the snapshot step** and instead shows the **estimate editor** (`estimate-detail-modal` inner form) to review/adjust line items, then approve. The approval rides the **estimate's native lifecycle** (draft → pending approval → approved → sent → convert-to-WO), not the snapshot lifecycle.
+6. **Lineage tag, not a new type.** Add nullable `originWetCheckId` (FK → `wet_checks`) to `estimates` and `work_orders`. A wet-check-born estimate/WO shows a "From Wet Check #X" banner and is surfaced in the wet check system. Carry `originWetCheckId` through estimate→WO conversion so the lineage survives the whole way to billing.
+7. **Same tabbed system.** Inspection wet checks appear in the same All / Needs Review / Approved tabs, with a **mode badge** ("Inspection" / "Service"). Needs-Review membership for an inspection keys off its *estimate* state (pending approval) instead of snapshot state.
+
+---
+
+## Slice 1 — Mode foundation, entry point, and inspection field capture
+
+### Files
+- `lib/db/src/schema/schema.ts` + migration — add `mode` to `wet_checks`.
+- `artifacts/api-server/src/routes/routes.ts` (`POST /api/wet-checks` ~15834) + `storage.createWetCheck` — accept/persist `mode`.
+- Field creation + capture: the New-Wet-Check kickoff (customer picker / `NewWetCheckPage` / `ControllerSelectionPage`) and the zone/finding capture screens (`pages/wet-checks/ZoneScreen.tsx` and finding entry).
+- The WC System list (`WetCheckSystemPage` tabs) — mode badge.
+
+### Concrete changes
+- **Schema:** `mode: text("mode").notNull().default("service")` on `wet_checks`. Migration `ADD COLUMN IF NOT EXISTS mode text NOT NULL DEFAULT 'service'`. No backfill needed (existing rows = service).
+- **Entry point:** at "New Wet Check," present a **Service / Inspection** choice (two buttons or a small segmented control), Service preselected. Pass the chosen mode through creation; `POST /api/wet-checks` stores it. The rest of the kickoff (customer → controller → zones) is unchanged.
+- **Field capture branches on mode:** for `inspection`, the zone/finding entry records needed work — part(s) + quantity + **estimated labor hours** + notes — and **hides the repair / "repaired in field" disposition controls**. For `service`, behavior is exactly as today. Reuse the existing zone/finding screens with a mode branch; do not fork them into new files.
+- **Badge:** every wet-check row/card shows a mode chip ("Inspection" / "Service").
+
+### Acceptance
+- A new wet check can be created as Service (default, unchanged) or Inspection; the mode persists on the record.
+- An Inspection wet check's field capture records needed work + estimated labor per finding and never offers a repair disposition.
+- Mode badge shows everywhere wet checks are listed; Service flow is byte-for-byte unchanged.
+
+---
+
+## Slice 2 — Inspection review surface → produces one Estimate (with lineage)
+
+### Files
+- `artifacts/irrigopro/src/components/wet-check-review/CombinedReviewSurface.tsx` (mode-aware branch).
+- `artifacts/irrigopro/src/components/estimates/estimate-detail-modal.tsx` (reuse its inner editor embedded).
+- `artifacts/api-server/src/routes/routes.ts` + `storage.ts` (`createEstimate`) — build the estimate from findings, stamp `originWetCheckId`.
+- Needs-Review membership (`/api/wet-checks/needs-review`) — inspection keyed off estimate state.
+
+### Concrete changes
+- On submit, an Inspection wet check enters **Needs Review** like any other, badged Inspection.
+- Its **review surface** detects `mode === 'inspection'` and, instead of the snapshot step, **generates/loads one Estimate** for the wet check (line items from the documented findings: part, qty, estimated labor → estimate items) and embeds the **existing estimate editor** to review/adjust. One estimate per inspection (reuse the prior-estimate lookup pattern so re-entry doesn't create duplicates — mirror the snapshot's `priorWcb` reuse).
+- The estimate is created via `createEstimate`, stamped `originWetCheckId = wc.id`, and each contributing finding gets its `estimateId` set (existing FK).
+- **Approve** = move the estimate into its native approved/sent state (estimate lifecycle), and the wet check recomputes to `converted` (mirrors current convert logic). Triage of mixed dispositions is **not** needed here (pure inspection → all findings to the one estimate).
+- Needs-Review membership for an inspection wet check is driven by its estimate being unapproved (pre-approval), parallel to the snapshot rule for Service.
+
+### Tests
+- Submitting an Inspection wet check creates exactly **one** estimate with line items matching the findings, stamped `originWetCheckId`.
+- Re-opening the review surface does **not** create a second estimate.
+- Approving moves the estimate into its approved/sent state and the wet check to `converted`; it leaves Needs Review.
+- A Service wet check still routes to the snapshot step (no regression).
+
+### Acceptance
+- An Inspection wet check is reviewed via the estimate editor inside the wet-check review surface and produces one approved estimate; no snapshot is created.
+
+---
+
+## Slice 3 — Lineage tag + wet-check-side surfacing (no divorce)
+
+### Files
+- `lib/db/src/schema/schema.ts` + migration — `originWetCheckId` on `estimates` and `work_orders`.
+- Estimate detail + work-order detail components — "From Wet Check #X" banner/link.
+- Estimate→WO conversion path (`storage.ts`) — carry `originWetCheckId` through.
+- WC System page — a surfacing view of wet-check-born outputs.
+
+### Concrete changes
+- **Schema:** `originWetCheckId: integer("origin_wet_check_id").references(() => wetChecks.id)` (nullable) on `estimates` and `work_orders`. Migration adds both, nullable, no backfill.
+- **Banner:** estimate detail and work-order detail show "From Wet Check #X" linking back to the wet check when `originWetCheckId` is set. (This is the *useful* inverse of the snapshot's removed link — here the estimate/WO genuinely lives in two worlds and benefits from pointing home.)
+- **Carry through conversion:** when a wet-check-origin estimate converts to a work order, copy `originWetCheckId` onto the WO so the lineage reaches all the way to billing.
+- **Surfacing:** in the wet check system, surface wet-check-originated estimates/WOs (e.g., on the wet-check record, "This inspection's estimate →", and/or a filter on the Approved tab) so they're always reachable without leaving the wet check world — while still living in the estimate command center / WO system.
+
+### Tests
+- An estimate created from an inspection has `originWetCheckId`; its detail shows the "From Wet Check #X" link.
+- Converting that estimate to a WO copies `originWetCheckId`; the WO shows the link.
+- The wet-check record surfaces its originated estimate/WO; the estimate command center still lists it normally (dual-surfaced, single record).
+
+### Acceptance
+- Wet-check-born estimates and work orders are tagged, surfaced inside the wet check system, and reachable from both worlds — nothing divorces, and no parallel entity was built.
+
+---
+
+## Out of scope
+- Any parallel "wet check estimate" / "wet check work order" entity (explicitly rejected — lineage instead).
+- Changes to the Service/snapshot flow beyond the mode branch.
+- Rebuilding the estimate or work-order subsystems, or the estimate→WO billing pipeline (reused as-is).
+- Command Center.
+
+## Verification (whole family)
+- New Wet Check offers Service/Inspection at kickoff; Service unchanged and default.
+- Inspection field capture is document-only with estimated labor; no repair disposition.
+- Inspection review produces exactly one Estimate via the reused editor; approval rides the estimate lifecycle; no snapshot.
+- `originWetCheckId` tags the estimate and any converted WO; "From Wet Check #X" links both ways; wet-check system surfaces them.
+- No new estimate/WO subsystem; one source of truth per output.
+
+## Relevant files
+- `lib/db/src/schema/schema.ts` (`wet_checks.mode`, `estimates.originWetCheckId`, `work_orders.originWetCheckId`)
+- `artifacts/api-server/src/routes/routes.ts` (`POST /api/wet-checks`, needs-review, estimate creation)
+- `artifacts/api-server/src/storage.ts` (`createWetCheck`, `createEstimate`, estimate→WO conversion)
+- `artifacts/irrigopro/src/pages/wet-checks/` (kickoff, `ControllerSelectionPage`, `ZoneScreen`, `WetCheckSystemPage`)
+- `artifacts/irrigopro/src/components/wet-check-review/CombinedReviewSurface.tsx`
+- `artifacts/irrigopro/src/components/estimates/estimate-detail-modal.tsx`
+- `artifacts/irrigopro/src/components/work-orders/work-order-details.tsx`

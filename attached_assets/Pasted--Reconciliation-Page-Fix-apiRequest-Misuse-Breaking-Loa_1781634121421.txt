@@ -1,0 +1,68 @@
+# Reconciliation Page — Fix `apiRequest` Misuse Breaking Load (and Reassign)
+
+**What & Why**
+The WC Reconciliation page (`artifacts/irrigopro/src/pages/wet-check-reconciliation.tsx`) was written against the wrong `apiRequest` convention, so it **fails to load for every allowed role** (company_admin and super_admin alike). The role / nav / route investigation is a red herring for the load failure — this is a client-side call-signature bug.
+
+**The real `apiRequest` (`lib/queryClient.ts:87`):** signature is `apiRequest(url, method = "GET", data?)`, it **returns parsed JSON** (`return await res.json()`), and it **throws on a non-OK status** (`throwIfResNotOk`). It does **not** return a `fetch` Response.
+
+**What the page does wrong (two call sites):**
+1. **Data query (~line 405):**
+   ```js
+   const res = await apiRequest("GET", `/api/admin/wet-check-reconciliation?${params}`);
+   if (!res.ok) throw new Error("Failed to load reconciliation data");
+   return res.json();
+   ```
+   - **Swapped args:** `url = "GET"`, `method = "/api/admin/..."` → it fetches a URL of literally `"GET"` with the real URL as the HTTP method.
+   - **Wrong return handling:** even with correct args, `apiRequest` returns an array, so `res.ok` is `undefined` → `!res.ok` is `true` → it throws **every time**; `res.json()` would also fail.
+   - Net: the query always throws → the page shows the red **"Failed to load reconciliation data"** alert for all roles.
+2. **Reassign mutation (~line 208):**
+   ```js
+   const res = await apiRequest("POST", `/api/wet-checks/${row.wetCheckId}/reassign-customer`, body);
+   if (!res.ok) throw new Error(...);
+   ```
+   - Same swapped args (`method`/`url`) and same Response-vs-JSON mistake. Reassign would fail whenever invoked.
+
+Single small frontend slice. No backend change (the endpoint is fine).
+
+---
+
+## Done looks like
+- The reconciliation page **loads** for company_admin and super_admin and renders rows grouped by customer.
+- The reassign action works (correct URL, method, body).
+- No code treats `apiRequest`'s return as a `fetch` Response.
+
+## Steps
+1. **Fix the data query** (`useQuery` `queryFn`, ~line 405): call with the real signature and return the parsed result directly (it already throws on error):
+   ```js
+   queryFn: async () => {
+     const params = new URLSearchParams({ from, to });
+     return await apiRequest(`/api/admin/wet-check-reconciliation?${params}`, "GET");
+   },
+   ```
+   Remove the `res.ok` / `res.json()` handling.
+2. **Fix the reassign mutation** (~line 208): correct arg order, treat the return as parsed JSON:
+   ```js
+   const result = await apiRequest(
+     `/api/wet-checks/${row.wetCheckId}/reassign-customer`,
+     "POST",
+     body,
+   );
+   // apiRequest throws on non-OK; `result` is the parsed response
+   ```
+   Update any downstream use of the old `res` (e.g. reading `result.warnings` directly instead of `await res.json()`).
+3. **Sweep the file** for any other `apiRequest("GET"|"POST"|"PUT", …)` or `res.ok` / `res.json()` usage and correct them to the real convention.
+4. Confirm `from` / `to` passed to `URLSearchParams` are ISO date strings (the server parses with `new Date()`); if they're `Date` objects, `.toISOString().slice(0,10)` them first.
+
+## Tests
+- Page loads as company_admin and super_admin and shows grouped rows (no "Failed to load" alert).
+- Reassign posts to `/api/wet-checks/:id/reassign-customer` with `{ customerId, branchName }` and applies; warnings (derived WO/estimate) render from the parsed result.
+- No remaining `apiRequest(method, url)` call order or `.ok`/`.json()` on an `apiRequest` return anywhere in the file.
+
+## Out of scope
+- The reconciliation API endpoint (`wet-check-reconciliation-routes.ts`) — it's correct.
+- The nav-link / billing_manager NotFound fix already applied (separate, fine to keep).
+- Role/route registration — not the cause of the load failure.
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/wet-check-reconciliation.tsx` (both call sites)
+- `artifacts/irrigopro/src/lib/queryClient.ts` (reference: `apiRequest(url, method, data)` → parsed JSON, throws on error)
