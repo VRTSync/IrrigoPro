@@ -283,6 +283,10 @@ export const billingSheets = pgTable("billing_sheets", {
   approvedTotal: decimal("approved_total", { precision: 10, scale: 2 }), // Total at time of approval
   approvedPartsSnapshot: text("approved_parts_snapshot"), // JSON snapshot of parts at approval
   approvedLaborSnapshot: text("approved_labor_snapshot"), // JSON snapshot of labor details at approval
+  // Slice 2 — role of the actor who approved. NULL on legacy rows (treated as
+  // "unknown", not flagged). Used by the manager queue to detect billing-side
+  // approvals (billing_manager / company_admin) that bypassed irrigation_manager review.
+  approvedByRole: text("approved_by_role"),
   // Task #197 — admin/manager-flagged "no photos needed" so legitimately
   // photo-less billing sheets can be cleared off the missing-photos report.
   noPhotosNeeded: boolean("no_photos_needed").notNull().default(false),
@@ -728,6 +732,10 @@ export const workOrders = pgTable("work_orders", {
   approvedTotal: decimal("approved_total", { precision: 10, scale: 2 }), // Total at time of approval
   approvedPartsSnapshot: text("approved_parts_snapshot"), // JSON snapshot of parts at approval
   approvedLaborSnapshot: text("approved_labor_snapshot"), // JSON snapshot of labor details at approval
+  // Slice 2 — role of the actor who approved. NULL on legacy rows (treated as
+  // "unknown", not flagged). Used by the manager queue to detect billing-side
+  // approvals (billing_manager / company_admin) that bypassed irrigation_manager review.
+  approvedByRole: text("approved_by_role"),
   // Task #185 — admin/manager-flagged "no photos needed" so legitimately
   // photo-less work orders can be cleared off the missing-photos report.
   noPhotosNeeded: boolean("no_photos_needed").notNull().default(false),
@@ -1436,6 +1444,10 @@ export const wetCheckBillings = pgTable("wet_check_billings", {
   approvedTotal: decimal("approved_total", { precision: 10, scale: 2 }),
   approvedPartsSnapshot: text("approved_parts_snapshot"), // JSON snapshot of parts at approval
   approvedLaborSnapshot: text("approved_labor_snapshot"), // JSON snapshot of labor details at approval
+  // Slice 2 — role of the actor who approved. NULL on legacy rows (treated as
+  // "unknown", not flagged). Used by the manager queue to detect billing-side
+  // approvals (billing_manager / company_admin) that bypassed irrigation_manager review.
+  approvedByRole: text("approved_by_role"),
   // "No photos needed" audit flag — mirrors billing_sheets.no_photos_needed.
   noPhotosNeeded: boolean("no_photos_needed").notNull().default(false),
   noPhotosNeededBy: integer("no_photos_needed_by").references(() => users.id),

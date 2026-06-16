@@ -353,6 +353,10 @@ export interface ManagerQueueItem {
   wetCheckId?: number | null;
   returnedForCorrectionAt?: string | null;
   invoiceId?: number | null;
+  // Slice 2: true when the item was billed after a billing-side actor
+  // (billing_manager / company_admin) approved it without irrigation_manager
+  // review. NULL approvedByRole (legacy rows) yields false ("unknown").
+  billedWithoutReview?: boolean;
 }
 
 // -----------------------------------------------------------------------
@@ -546,17 +550,29 @@ export function registerManagerWorkspaceRoutes(
               w.billedAt ? new Date(w.billedAt).toISOString() : null,
             );
 
-            // billed_7d: only include if within 7 days
+            // Slice 2: detect billing-side approval bypassing irrigation_manager.
+            // NULL approvedByRole (legacy rows) → false ("unknown", not flagged).
+            const billedWithoutReview =
+              stage === "billed_7d" &&
+              (w.invoiceId != null) &&
+              (w.approvedByRole != null) &&
+              (w.approvedByRole !== "irrigation_manager");
+
+            // billed_7d: include if within 7 days, OR billed-without-review
+            // for irrigation_manager / company_admin / super_admin callers.
             if (stage === "billed_7d") {
               const billedTs = w.billedAt
                 ? new Date(w.billedAt).getTime()
                 : w.updatedAt
                 ? new Date(w.updatedAt).getTime()
                 : NaN;
-              if (!Number.isFinite(billedTs) || now - billedTs > SEVEN_DAYS_MS) continue;
+              if (!billedWithoutReview || isBillingManager) {
+                if (!Number.isFinite(billedTs) || now - billedTs > SEVEN_DAYS_MS) continue;
+              }
             }
 
             if (rfcAt) flags.push("kicked_back");
+            if (billedWithoutReview && !isBillingManager) flags.push("no_manager_review");
 
             items.push({
               id: `wo-${w.id}`,
@@ -577,6 +593,7 @@ export function registerManagerWorkspaceRoutes(
               href: `/work-orders?id=${w.id}`,
               returnedForCorrectionAt: rfcAt,
               invoiceId: w.invoiceId ?? null,
+              billedWithoutReview: billedWithoutReview || false,
             });
           }
         }
@@ -639,20 +656,32 @@ export function registerManagerWorkspaceRoutes(
               s.billedAt ? new Date(s.billedAt).toISOString() : null,
             );
 
-            // billed_7d: only include if within 7 days
+            // Slice 2: detect billing-side approval bypassing irrigation_manager.
+            // NULL approvedByRole (legacy rows) → false ("unknown", not flagged).
+            const billedWithoutReview =
+              stage === "billed_7d" &&
+              (s.invoiceId != null) &&
+              (s.approvedByRole != null) &&
+              (s.approvedByRole !== "irrigation_manager");
+
+            // billed_7d: include if within 7 days, OR billed-without-review
+            // for irrigation_manager / company_admin / super_admin callers.
             if (stage === "billed_7d") {
               const billedTs = s.billedAt
                 ? new Date(s.billedAt).getTime()
                 : s.updatedAt
                 ? new Date(s.updatedAt).getTime()
                 : NaN;
-              if (!Number.isFinite(billedTs) || now - billedTs > SEVEN_DAYS_MS) continue;
+              if (!billedWithoutReview || isBillingManager) {
+                if (!Number.isFinite(billedTs) || now - billedTs > SEVEN_DAYS_MS) continue;
+              }
             }
 
             // draft without returnedForCorrectionAt → skip (not a stage we show)
             if (s.status === "draft" && !rfcAt) continue;
 
             if (rfcAt) flags.push("kicked_back");
+            if (billedWithoutReview && !isBillingManager) flags.push("no_manager_review");
 
             items.push({
               id: `bs-${s.id}`,
@@ -673,6 +702,7 @@ export function registerManagerWorkspaceRoutes(
               href: `/billing-sheets?id=${s.id}`,
               returnedForCorrectionAt: rfcAt,
               invoiceId: s.invoiceId ?? null,
+              billedWithoutReview: billedWithoutReview || false,
             });
           }
         }
@@ -696,13 +726,28 @@ export function registerManagerWorkspaceRoutes(
               w.updatedAt ? new Date(w.updatedAt).toISOString() : null,
             );
 
-            // billed_7d: only include if within 7 days
+            // Slice 2: detect billing-side approval bypassing irrigation_manager.
+            // NULL approvedByRole (legacy rows) → false ("unknown", not flagged).
+            const billedWithoutReview =
+              stage === "billed_7d" &&
+              (w.invoiceId != null) &&
+              (w.approvedByRole != null) &&
+              (w.approvedByRole !== "irrigation_manager");
+
+            // billed_7d: include if within 7 days, OR billed-without-review
+            // for irrigation_manager / company_admin / super_admin callers.
             if (stage === "billed_7d") {
-              const billedTs = w.updatedAt
+              const billedTs = w.billedAt
+                ? new Date(w.billedAt).getTime()
+                : w.updatedAt
                 ? new Date(w.updatedAt).getTime()
                 : NaN;
-              if (!Number.isFinite(billedTs) || now - billedTs > SEVEN_DAYS_MS) continue;
+              if (!billedWithoutReview || isBillingManager) {
+                if (!Number.isFinite(billedTs) || now - billedTs > SEVEN_DAYS_MS) continue;
+              }
             }
+
+            if (billedWithoutReview && !isBillingManager) flags.push("no_manager_review");
 
             items.push({
               id: `wcb-${w.id}`,
@@ -723,6 +768,7 @@ export function registerManagerWorkspaceRoutes(
               href: `/wet-check-billings/${w.id}`,
               wetCheckId: w.wetCheckId ?? null,
               invoiceId: w.invoiceId ?? null,
+              billedWithoutReview: billedWithoutReview || false,
             });
           }
         }
@@ -774,6 +820,23 @@ export function registerManagerWorkspaceRoutes(
               createdAt: created,
               href: `/parts-pending-approval`,
             });
+          }
+        }
+
+        // ---- Billed-without-review 50-item cap ---------------------------
+        // For non-billing_manager callers, billed-without-review items bypass
+        // the normal 7-day cutoff and accumulate indefinitely. Cap them at the
+        // 50 newest (smallest ageDays) so the payload stays bounded.
+        if (!isBillingManager) {
+          const bwrItems = items.filter((it) => it.billedWithoutReview);
+          if (bwrItems.length > 50) {
+            bwrItems.sort((a, b) => (a.ageDays ?? 999999) - (b.ageDays ?? 999999));
+            const keepIds = new Set(bwrItems.slice(0, 50).map((it) => it.id));
+            for (let i = items.length - 1; i >= 0; i--) {
+              if (items[i].billedWithoutReview && !keepIds.has(items[i].id)) {
+                items.splice(i, 1);
+              }
+            }
           }
         }
 

@@ -117,6 +117,7 @@ export function registerApproveRoutes(
         approvedTotal: billingSheet.totalAmount,
         approvedPartsSnapshot: partsSnapshot,
         approvedLaborSnapshot: laborSnapshot,
+        approvedByRole: userRole,
       });
 
       await recordLifecycleAudit(req, {
@@ -229,6 +230,7 @@ export function registerApproveRoutes(
         approvedTotal: workOrder.totalAmount,
         approvedPartsSnapshot: partsSnapshot,
         approvedLaborSnapshot: laborSnapshot,
+        approvedByRole: userRole,
       });
 
       await recordLifecycleAudit(req, {
@@ -349,6 +351,7 @@ export function registerApproveRoutes(
         approvedTotal: wcb.totalAmount,
         approvedLaborSnapshot: laborSnapshot,
         approvedPartsSnapshot: partsSnapshot,
+        approvedByRole: userRole,
       });
 
       await recordLifecycleAudit(req, {
