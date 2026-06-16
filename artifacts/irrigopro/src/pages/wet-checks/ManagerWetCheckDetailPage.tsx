@@ -818,6 +818,42 @@ function ManagerWetCheckDetailView({ id }: { id: number }) {
         </CardContent>
       </Card>
 
+      {/* ── Slice 3: Lineage panel — originated estimate / work order ── */}
+      {(wc.originatedEstimateId != null || wc.originatedWorkOrderId != null) && (
+        <Card data-testid="wc-lineage-panel">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-1.5">
+              <FileCheck className="w-4 h-4 text-blue-500" />
+              This Inspection&apos;s Estimate
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {wc.originatedEstimateId != null && (
+              <OutcomeRow
+                testId="lineage-estimate-row"
+                accent="blue"
+                icon={FileCheck}
+                primary={`Estimate #${wc.originatedEstimateId}`}
+                secondary="Created from this inspection's findings"
+                linkHref={`/estimates`}
+                linkLabel={`View Estimate #${wc.originatedEstimateId}`}
+              />
+            )}
+            {wc.originatedWorkOrderId != null && (
+              <OutcomeRow
+                testId="lineage-work-order-row"
+                accent="purple"
+                icon={Wrench}
+                primary={`Work Order #${wc.originatedWorkOrderId}`}
+                secondary="Converted from the inspection estimate"
+                linkHref={`/work-orders`}
+                linkLabel={`View Work Order #${wc.originatedWorkOrderId}`}
+              />
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* ── Triage outcomes (for converted / approved / partially_converted) ── */}
       {showOutcome && (
         <OutcomeSummary

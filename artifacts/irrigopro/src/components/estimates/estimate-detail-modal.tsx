@@ -496,6 +496,29 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
           </div>
         ) : estimate ? (
           <>
+            {/* Slice 3 — "From Wet Check #X" lineage banner.
+                Rendered above the status banner so the wet-check origin
+                is immediately visible when opening an inspection-sourced
+                estimate. Only shown when originWetCheckId is set. */}
+            {estimate.originWetCheckId != null && (
+              <div
+                className="bg-teal-50 border-b border-teal-200 px-4 py-2.5 flex items-center gap-2 text-sm text-teal-800 flex-shrink-0"
+                data-testid="from-wet-check-banner"
+              >
+                <LinkIcon className="w-4 h-4 text-teal-600 flex-shrink-0" />
+                <span>
+                  From Wet Check{" "}
+                  <a
+                    href={`/wet-checks/${estimate.originWetCheckId}/review`}
+                    className="font-semibold underline hover:text-teal-600"
+                    data-testid="from-wet-check-link"
+                  >
+                    #{estimate.originWetCheckId}
+                  </a>
+                </span>
+              </div>
+            )}
+
             {/* Prominent Status Banner for Approved Estimates.
                 Task #638 — distinguish "approved but not yet
                 converted" from "converted to work order" via the

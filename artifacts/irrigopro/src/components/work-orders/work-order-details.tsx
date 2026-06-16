@@ -51,6 +51,7 @@ import {
   ExternalLink,
   Loader2,
   Save,
+  Link as LinkIcon,
 } from "lucide-react";
 import { PricingAuditHistory } from "@/components/billing/pricing-audit-history";
 import { EditableField, InlineEditProvider, InlineEditContext } from "@/components/ui/editable-field";
@@ -612,6 +613,16 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                   <Badge className="bg-green-100 text-green-800 border-green-200">
                     From estimate #{workOrder.estimateId}
                   </Badge>
+                )}
+                {(workOrder as any).originWetCheckId != null && (
+                  <a
+                    href={`/wet-checks/${(workOrder as any).originWetCheckId}/review`}
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-teal-100 text-teal-800 border border-teal-200 hover:bg-teal-200 transition-colors"
+                    data-testid="wo-from-wet-check-banner"
+                  >
+                    <LinkIcon className="w-3 h-3" />
+                    From Wet Check #{(workOrder as any).originWetCheckId}
+                  </a>
                 )}
                 {workOrder.noPhotosNeeded && (
                   <div className="flex items-center gap-2" data-testid="no-photos-needed-banner">

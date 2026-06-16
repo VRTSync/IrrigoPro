@@ -3410,6 +3410,9 @@ export class DatabaseStorage implements IStorage {
       // labor breakdown the customer approved.
       laborMode: (estimate as unknown as { laborMode?: string }).laborMode ?? 'flat',
       totalHours: (estimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? null,
+      // Slice 3 — carry lineage tag from the source estimate so the WO
+      // detail view can surface a "From Wet Check #X" banner.
+      originWetCheckId: (estimate as unknown as { originWetCheckId?: number | null }).originWetCheckId ?? null,
     };
 
     const [newWorkOrder] = await db.insert(workOrders).values(toDrizzleInsert<DrizzleWorkOrderInsert>(workOrderData)).returning();
@@ -3545,6 +3548,8 @@ export class DatabaseStorage implements IStorage {
         totalItems: items.length,
         laborMode: (approvedEstimate as unknown as { laborMode?: string }).laborMode ?? "flat",
         totalHours: (approvedEstimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? null,
+        // Slice 3 — carry lineage tag from the source estimate.
+        originWetCheckId: (approvedEstimate as unknown as { originWetCheckId?: number | null }).originWetCheckId ?? null,
       };
 
       const [newWorkOrder] = await tx.insert(workOrders)
@@ -7458,10 +7463,22 @@ export class DatabaseStorage implements IStorage {
       list.push({ ...f, pendingReason: computeFindingPendingReason(f, wc.submittedAt) });
       findingsByZone.set(f.zoneRecordId, list);
     }
+    // Slice 3 — look up the estimate (if any) that originated from this
+    // wet check so the manager UI can surface a "This inspection's estimate"
+    // lineage link without a separate client-side request.
+    const [originatedEstimate] = await db.select({
+      id: estimates.id,
+      workOrderId: estimates.workOrderId,
+    }).from(estimates)
+      .where(eq(estimates.originWetCheckId, id))
+      .limit(1);
+
     return {
       ...wc,
       zoneRecords: zoneRecords.map(zr => ({ ...zr, findings: findingsByZone.get(zr.id) ?? [] })),
       photos,
+      originatedEstimateId: originatedEstimate?.id ?? null,
+      originatedWorkOrderId: originatedEstimate?.workOrderId ?? null,
     };
   }
 

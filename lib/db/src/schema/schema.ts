@@ -750,6 +750,11 @@ export const workOrders = pgTable("work_orders", {
   // (status → pending_manager_review/work_completed). Drives the
   // "Waiting on tech" stage section in the merged Manager Workspace.
   returnedForCorrectionAt: timestamp("returned_for_correction_at"),
+  // Slice 3 — lineage tag: the wet check inspection this work order
+  // originated from (via estimate→WO conversion). Nullable; only set when
+  // the WO was created from an estimate that itself has originWetCheckId.
+  // No backfill on existing rows.
+  originWetCheckId: integer("origin_wet_check_id").references(() => wetChecks.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
@@ -1548,6 +1553,11 @@ export type WetCheckFindingWithReason = WetCheckFinding & {
 export type WetCheckWithDetails = WetCheck & {
   zoneRecords: (WetCheckZoneRecord & { findings: WetCheckFindingWithReason[] })[];
   photos: WetCheckPhoto[];
+  // Slice 3 — lineage surfacing: set when an estimate was created from
+  // this inspection's findings (estimates.originWetCheckId = this.id).
+  // originatedWorkOrderId is also set when that estimate has been converted.
+  originatedEstimateId?: number | null;
+  originatedWorkOrderId?: number | null;
 };
 
 // Stable seed for issue_type_configs — applied per company on startup.
