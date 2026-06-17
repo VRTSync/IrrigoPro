@@ -2878,9 +2878,11 @@ export class DatabaseStorage implements IStorage {
       ).length,
     };
 
-    // Calculate top parts usage
+    // Calculate top parts usage (skip items with no catalog part — inspection
+    // findings without a part assignment have partId = null).
     const partUsage = new Map<number, number>();
     allEstimateItems.forEach(item => {
+      if (item.partId == null) return;
       const current = partUsage.get(item.partId) || 0;
       partUsage.set(item.partId, current + item.quantity);
     });

@@ -526,7 +526,7 @@ export const estimateItems = pgTable("estimate_items", {
   id: serial("id").primaryKey(),
   estimateId: integer("estimate_id").references(() => estimates.id).notNull(),
   description: text("description").notNull().default(""),
-  partId: integer("part_id").references(() => parts.id).notNull(),
+  partId: integer("part_id").references(() => parts.id),
   partName: text("part_name").notNull(),
   partPrice: decimal("part_price", { precision: 10, scale: 2 }).notNull(),
   quantity: integer("quantity").notNull(),
