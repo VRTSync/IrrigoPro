@@ -28,6 +28,19 @@ interface RateModeToggleProps {
   emergencyRate: string | null;
   detailQueryKey: unknown[];
   disabled?: boolean;
+  /**
+   * Called with the server-recomputed entity after a successful flip so the
+   * caller can update the open detail view immediately (rate / labor total /
+   * grand total) without waiting for a parent refetch. All three rate-mode
+   * endpoints return an entity carrying appliedLaborRate / laborSubtotal /
+   * totalAmount.
+   */
+  onApplied?: (updated: {
+    appliedLaborRate?: string | null;
+    laborRate?: string | null;
+    laborSubtotal?: string | null;
+    totalAmount?: string | null;
+  }) => void;
 }
 
 export function RateModeToggle({
@@ -38,6 +51,7 @@ export function RateModeToggle({
   normalRate,
   detailQueryKey,
   disabled = false,
+  onApplied,
 }: RateModeToggleProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -57,7 +71,9 @@ export function RateModeToggle({
     onMutate: (mode: Mode) => {
       setLocalMode(mode);
     },
-    onSuccess: () => {
+    onSuccess: (updated: any) => {
+      // Surface the recomputed entity so the open detail view updates instantly.
+      if (updated && typeof updated === "object") onApplied?.(updated);
       queryClient.invalidateQueries({ queryKey: detailQueryKey });
       // Invalidate the list query so queue row totals update immediately.
       queryClient.invalidateQueries({ queryKey: [`/api/${entityPath}`], exact: false });
@@ -85,6 +101,11 @@ export function RateModeToggle({
 
   const isLoading = mutation.isPending;
 
+  // Emergency can only be chosen when the customer actually has an emergency
+  // rate configured on the Labor Rates page — otherwise flipping would apply $0.
+  const emergencyAvailable =
+    emergencyRate != null && (parseFloat(emergencyRate) || 0) > 0;
+
   return (
     <div className="flex items-center gap-2" data-testid="rate-mode-toggle">
       <span className="text-xs font-medium text-gray-600 shrink-0">Rate mode</span>
@@ -105,12 +126,15 @@ export function RateModeToggle({
         </button>
         <button
           type="button"
-          onClick={() => !isLoading && localMode !== "emergency" && mutation.mutate("emergency")}
-          disabled={disabled || isLoading || localMode === "emergency"}
-          className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded transition-colors ${
+          onClick={() => !isLoading && emergencyAvailable && localMode !== "emergency" && mutation.mutate("emergency")}
+          disabled={disabled || isLoading || localMode === "emergency" || !emergencyAvailable}
+          title={emergencyAvailable ? undefined : "No emergency rate set for this customer"}
+          className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded transition-colors disabled:cursor-not-allowed ${
             localMode === "emergency"
               ? "bg-amber-500 text-white shadow-sm border border-amber-600"
-              : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+              : !emergencyAvailable
+                ? "text-gray-300"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
           }`}
           data-testid="rate-mode-emergency"
           aria-pressed={localMode === "emergency"}

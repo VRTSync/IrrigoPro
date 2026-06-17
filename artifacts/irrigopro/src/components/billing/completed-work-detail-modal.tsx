@@ -837,14 +837,16 @@ export function CompletedWorkDetailModal({
   // For WOs, prefer localWoTotals (immediately set from dedicated-endpoint responses)
   // over the prop value so totals reflect edits before the parent query refetches.
   const laborRate = canSeePricing
-    ? (isWorkOrder ? (localWoTotals?.laborRate ?? wo?.appliedLaborRate ?? wo?.laborRate) : bs?.laborRate)
+    ? (isWorkOrder
+        ? (localWoTotals?.laborRate ?? wo?.appliedLaborRate ?? wo?.laborRate)
+        : (localWoTotals?.laborRate ?? bs?.laborRate))
     : null;
   const laborSubtotal = canSeePricing
-    ? (isWorkOrder ? (localWoTotals?.laborSubtotal ?? wo?.laborSubtotal) : bs?.laborSubtotal)
+    ? (localWoTotals?.laborSubtotal ?? (isWorkOrder ? wo?.laborSubtotal : bs?.laborSubtotal))
     : null;
   const partsSubtotal = canSeePricing ? (isWorkOrder ? wo?.partsSubtotal : bs?.partsSubtotal) : null;
   const totalAmount = canSeePricing
-    ? (isWorkOrder ? (localWoTotals?.totalAmount ?? wo?.totalAmount) : bs?.totalAmount)
+    ? (localWoTotals?.totalAmount ?? (isWorkOrder ? wo?.totalAmount : bs?.totalAmount))
     : null;
   const sourcePhotos: string[] = (isWorkOrder ? wo?.photos : bs?.photos) ?? [];
 
@@ -1442,7 +1444,7 @@ export function CompletedWorkDetailModal({
                       </div>
                       <span className="text-xl font-semibold text-gray-400">×</span>
                       <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
-                        <p className="text-2xl font-bold text-gray-900">{currency(wetCheckView.laborRate)}</p>
+                        <p className="text-2xl font-bold text-gray-900">{currency(localWoTotals?.laborRate ?? wetCheckView.laborRate)}</p>
                         <p className="text-xs text-gray-500 mt-0.5">Rate / hr</p>
                       </div>
                       <span className="text-xl font-semibold text-gray-400">=</span>
@@ -1464,6 +1466,13 @@ export function CompletedWorkDetailModal({
                             : ["/api/billing-sheets"]
                         }
                         disabled={isBilledOrInvoiced}
+                        onApplied={(u) =>
+                          setLocalWoTotals({
+                            laborRate: String(u.appliedLaborRate ?? u.laborRate ?? ""),
+                            laborSubtotal: String(u.laborSubtotal ?? ""),
+                            totalAmount: String(u.totalAmount ?? ""),
+                          })
+                        }
                       />
                     )}
                   </div>
@@ -1526,43 +1535,9 @@ export function CompletedWorkDetailModal({
                     </div>
                     <span className="text-xl font-semibold text-gray-400">×</span>
                     <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
-                      {canInlineEdit && isWorkOrder ? (
-                        <EditableField
-                          fieldId="laborRate"
-                          value={String(parseFloat(String(laborRate ?? "0")) || 0)}
-                          onSave={async (v) => {
-                            const rate = parseFloat(v) || 0;
-                            // Dedicated WO endpoint — sets appliedLaborRate + recomputes totals
-                            const result = await apiRequest(`/api/work-orders/${id}/labor-rate`, "PATCH", { laborRate: rate });
-                            queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
-                            // Immediately reflect updated rate and recomputed totals
-                            if (result && typeof result === "object") {
-                              setLocalWoTotals({
-                                laborRate: String((result as any).appliedLaborRate ?? v),
-                                laborSubtotal: String((result as any).laborSubtotal ?? ""),
-                                totalAmount: String((result as any).totalAmount ?? ""),
-                              });
-                            }
-                          }}
-                          canEdit={true}
-                          type="number"
-                          min={0}
-                          step={0.01}
-                          validate={(v) => {
-                            const n = parseFloat(v);
-                            if (isNaN(n) || n < 0) return "Rate must be 0 or greater";
-                            return null;
-                          }}
-                          className="justify-center"
-                          inputClassName="text-center w-24"
-                        >
-                          <p className="text-2xl font-bold text-gray-900">
-                            {currency(parseFloat(String(laborRate ?? "0")) || 0)}
-                          </p>
-                        </EditableField>
-                      ) : (
-                        <p className="text-2xl font-bold text-gray-900">{currency(parseFloat(String(laborRate ?? "0")) || 0)}</p>
-                      )}
+                      {/* Rate is chosen via the Normal/Emergency rate-mode
+                          control below — never free-text. Read-only display. */}
+                      <p className="text-2xl font-bold text-gray-900">{currency(parseFloat(String(laborRate ?? "0")) || 0)}</p>
                       <p className="text-xs text-gray-500 mt-0.5">Rate / hr</p>
                     </div>
                     <span className="text-xl font-semibold text-gray-400">=</span>
@@ -1580,6 +1555,13 @@ export function CompletedWorkDetailModal({
                       emergencyRate={customerForRateCheck.emergencyLaborRate ?? null}
                       detailQueryKey={[isWorkOrder ? "/api/work-orders" : "/api/billing-sheets"]}
                       disabled={isBilledOrInvoiced}
+                      onApplied={(u) =>
+                        setLocalWoTotals({
+                          laborRate: String(u.appliedLaborRate ?? u.laborRate ?? ""),
+                          laborSubtotal: String(u.laborSubtotal ?? ""),
+                          totalAmount: String(u.totalAmount ?? ""),
+                        })
+                      }
                     />
                   )}
                 </div>
