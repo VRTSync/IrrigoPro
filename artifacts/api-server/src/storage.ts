@@ -1145,6 +1145,8 @@ export interface IStorage {
   updateBillingSheetLaborHours(id: number, totalHours: number, companyId: number | null): Promise<BillingSheetWithItems>;
   /** Task #1395 — flat labor hours editor for work orders (recomputes labor totals). */
   updateWorkOrderLaborHours(id: number, totalHours: number, companyId: number | null): Promise<WorkOrder & { items: WorkOrderItem[] }>;
+  /** Task #1415 — direct labor rate override for work orders (sets appliedLaborRate, recomputes totals). */
+  updateWorkOrderLaborRate(id: number, laborRate: number, companyId: number | null): Promise<WorkOrder & { items: WorkOrderItem[] }>;
   deleteWetCheckBilling(id: number): Promise<void>;
   /** Returns the URL strings of all photos attached to a wet check (both zone-level and finding-level). */
   getWetCheckPhotoUrls(wetCheckId: number): Promise<string[]>;
@@ -4466,6 +4468,35 @@ export class DatabaseStorage implements IStorage {
       const totalAmount = laborSubtotal + partsSubtotal;
       const [updated] = await tx.update(workOrders).set({
         totalHours: totalHours.toFixed(2),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
+        updatedAt: new Date(),
+      }).where(eq(workOrders.id, id)).returning();
+      if (!updated) throw new Error(`Work order ${id} update failed`);
+      const items = await tx.select().from(workOrderItems).where(eq(workOrderItems.workOrderId, id));
+      return { ...updated, items };
+    });
+  }
+
+  async updateWorkOrderLaborRate(
+    id: number,
+    laborRate: number,
+    companyId: number | null,
+  ): Promise<WorkOrder & { items: WorkOrderItem[] }> {
+    return db.transaction(async (tx) => {
+      const scope = this._companyScope(companyId);
+      const cond = scope ? and(eq(workOrders.id, id), scope) : eq(workOrders.id, id);
+      const [wo] = await tx.select().from(workOrders).where(cond);
+      if (!wo) throw Object.assign(new Error(`Work order ${id} not found`), { code: "WO_NOT_FOUND" });
+      if (wo.status === "billed" || wo.invoiceId != null) {
+        throw Object.assign(new Error(`Work order ${id} is locked`), { code: "WO_LOCKED" });
+      }
+      const totalHours = parseFloat(String(wo.totalHours ?? "0")) || 0;
+      const laborSubtotal = totalHours * laborRate;
+      const partsSubtotal = parseFloat(String(wo.partsSubtotal ?? "0")) || 0;
+      const totalAmount = laborSubtotal + partsSubtotal;
+      const [updated] = await tx.update(workOrders).set({
+        appliedLaborRate: laborRate.toFixed(2),
         laborSubtotal: laborSubtotal.toFixed(2),
         totalAmount: totalAmount.toFixed(2),
         updatedAt: new Date(),

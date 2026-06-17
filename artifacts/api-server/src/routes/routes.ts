@@ -12061,6 +12061,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Task #1415 — direct labor rate override for work orders.
+  const laborRateBody = z.object({ laborRate: z.number().min(0) });
+  app.patch("/api/work-orders/:id/labor-rate", requireAuthentication, requireSameCompanyAsWorkOrder, async (req: any, res) => {
+    const role = req.authenticatedUserRole;
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin" && role !== "irrigation_manager") {
+      res.status(403).json({ message: "Forbidden" }); return;
+    }
+    const parsed = laborRateBody.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid id" }); return; }
+    const companyId: number | null = role === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
+    try {
+      const result = await storage.updateWorkOrderLaborRate(id, parsed.data.laborRate, companyId);
+      void recordAuditEvent(req, {
+        actionType: "data", action: "work_order.labor_rate_updated",
+        targetType: "work_order", targetId: String(id),
+        summary: `Labor rate set to ${parsed.data.laborRate}`,
+      });
+      res.json(result);
+    } catch (e: any) {
+      if (e?.code === "WO_LOCKED") { res.status(409).json({ message: e.message }); return; }
+      if (e?.code === "WO_NOT_FOUND") { res.status(404).json({ message: e.message }); return; }
+      const { status, message } = classifyAndLog(req, e, {
+        op: "updateWorkOrderLaborRate",
+        ctx: { id, laborRate: parsed.data.laborRate },
+        fallbackStatus: 500, fallbackMessage: "Couldn't update labor rate",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
   // Task #1093 — item replacement for work orders.
   app.patch("/api/work-orders/:id/items", requireAuthentication, requireSameCompanyAsWorkOrder, async (req: any, res) => {
     const role = req.authenticatedUserRole;

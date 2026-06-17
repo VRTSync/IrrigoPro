@@ -27,6 +27,7 @@ import {
   Info,
   Save,
   Loader2,
+  BookOpen,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -52,6 +53,8 @@ import { buildMapsUrl } from "@/lib/maps-url";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { RateModeToggle } from "@/components/billing-workspace/rate-mode-toggle";
+import { PartPicker } from "@/components/parts/part-picker";
+import type { Part } from "@workspace/db/schema";
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -202,6 +205,7 @@ function PartsListEditorDialog({
 
   const [rows, setRows] = useState<PartsEditorRow[]>([]);
   const [catalog, setCatalog] = useState<{ id: number; name: string; unitPrice?: string }[]>([]);
+  const [showPicker, setShowPicker] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -211,6 +215,30 @@ function PartsListEditorDialog({
       .then((data: unknown) => setCatalog(Array.isArray(data) ? data : []))
       .catch(() => setCatalog([]));
   }, [open]);
+
+  const handleSelectFromLibrary = (part: Part, qty?: number) => {
+    setRows((prev) => {
+      const existingIdx = prev.findIndex((r) => r.partId === part.id);
+      if (existingIdx >= 0) {
+        return prev.map((r, i) =>
+          i === existingIdx
+            ? { ...r, quantity: String((parseFloat(r.quantity) || 0) + (qty || 1)) }
+            : r,
+        );
+      }
+      return [
+        ...prev,
+        {
+          partId: part.id,
+          partName: part.name,
+          quantity: String(qty || 1),
+          unitPrice: String(parseFloat(part.price ?? "0") || 0),
+          laborHours: "0",
+          notes: "",
+        },
+      ];
+    });
+  };
 
   const updateRow = (idx: number, updates: Partial<PartsEditorRow>) => {
     setRows((prev) => {
@@ -310,14 +338,19 @@ function PartsListEditorDialog({
               key={idx}
               className={`grid gap-2 items-center px-1 ${canSeePricing ? "grid-cols-[1fr_60px_80px_32px]" : "grid-cols-[1fr_60px_32px]"}`}
             >
-              <div className="relative">
+              <div className="relative flex items-center gap-1">
+                {row.partId != null && (
+                  <span title="From parts catalog" className="shrink-0">
+                    <BookOpen className="w-3 h-3 text-blue-400" />
+                  </span>
+                )}
                 <input
                   type="text"
                   list="parts-catalog-datalist"
                   value={row.partName}
                   onChange={(e) => handlePartNameChange(idx, e.target.value)}
                   placeholder="Part name"
-                  className={`${inputCls} w-full`}
+                  className={`${inputCls} flex-1 min-w-0`}
                 />
               </div>
               <input
@@ -360,6 +393,14 @@ function PartsListEditorDialog({
         )}
 
         <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+          <button
+            type="button"
+            onClick={() => setShowPicker(true)}
+            className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            Add from Library
+          </button>
           <Button type="button" variant="outline" size="sm" onClick={addRow}>
             <Plus className="w-4 h-4 mr-1.5" />
             Add Part
@@ -383,6 +424,13 @@ function PartsListEditorDialog({
           </Button>
         </div>
       </DialogContent>
+
+      <PartPicker
+        open={showPicker}
+        onOpenChange={setShowPicker}
+        onSelectPart={handleSelectFromLibrary}
+        title="Add from Library"
+      />
     </Dialog>
   );
 }
@@ -778,10 +826,18 @@ export function CompletedWorkDetailModal({
   const completedBy = isWorkOrder ? wo?.completedByUserName : null;
   const workDescription = isWorkOrder ? wo?.description : bs?.workDescription;
   const totalHours = isWorkOrder ? wo?.totalHours : bs?.totalHours;
-  const laborRate = canSeePricing ? (isWorkOrder ? wo?.laborRate : bs?.laborRate) : null;
-  const laborSubtotal = canSeePricing ? (isWorkOrder ? wo?.laborSubtotal : bs?.laborSubtotal) : null;
+  // For WOs, prefer localWoTotals (immediately set from dedicated-endpoint responses)
+  // over the prop value so totals reflect edits before the parent query refetches.
+  const laborRate = canSeePricing
+    ? (isWorkOrder ? (localWoTotals?.laborRate ?? wo?.appliedLaborRate ?? wo?.laborRate) : bs?.laborRate)
+    : null;
+  const laborSubtotal = canSeePricing
+    ? (isWorkOrder ? (localWoTotals?.laborSubtotal ?? wo?.laborSubtotal) : bs?.laborSubtotal)
+    : null;
   const partsSubtotal = canSeePricing ? (isWorkOrder ? wo?.partsSubtotal : bs?.partsSubtotal) : null;
-  const totalAmount = canSeePricing ? (isWorkOrder ? wo?.totalAmount : bs?.totalAmount) : null;
+  const totalAmount = canSeePricing
+    ? (isWorkOrder ? (localWoTotals?.totalAmount ?? wo?.totalAmount) : bs?.totalAmount)
+    : null;
   const sourcePhotos: string[] = (isWorkOrder ? wo?.photos : bs?.photos) ?? [];
 
   // Local photos state mirrors the source but allows optimistic updates so the
@@ -962,11 +1018,29 @@ export function CompletedWorkDetailModal({
     !isBilledOrInvoiced;
 
   const [fieldOverrides, setFieldOverrides] = useState<Record<string, string>>({});
+
+  // Immediately reflect computed totals returned by dedicated WO save endpoints
+  // (labor-hours, labor-rate) so the open modal doesn't wait for parent refetch.
+  const [localWoTotals, setLocalWoTotals] = useState<{
+    laborRate?: string | null;
+    laborSubtotal?: string | null;
+    totalAmount?: string | null;
+  } | null>(null);
+  // Reset local totals whenever the modal opens with a different record
+  useEffect(() => {
+    setLocalWoTotals(null);
+  }, [id, open]);
   useEffect(() => { setFieldOverrides({}); }, [id, open]);
   // After a successful save the server refetches and updatedAt changes.
   // Clear all overrides at that point so server-normalized values show through.
   const updatedAtStamp = (wo ?? bs)?.updatedAt as string | undefined;
-  useEffect(() => { setFieldOverrides({}); }, [updatedAtStamp]);
+  useEffect(() => {
+    setFieldOverrides({});
+    // Clear local WO total overrides so fresh server-recomputed values win.
+    // This fires whenever any mutation (rate-mode toggle, items editor, etc.)
+    // invalidates the query and the refetched wo.updatedAt advances.
+    setLocalWoTotals(null);
+  }, [updatedAtStamp]);
 
   const patchRecordMutation = useMutation({
     mutationFn: async (patch: Record<string, unknown>) => {
@@ -1401,11 +1475,30 @@ export function CompletedWorkDetailModal({
                 <div className="space-y-3">
                   <div className="flex items-center flex-wrap gap-3">
                     <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
-                      {canInlineEdit && !isWorkOrder ? (
+                      {canInlineEdit ? (
                         <EditableField
                           fieldId="totalHours"
-                          value={fv("totalHours", String(bs?.totalHours ?? "0"))}
-                          onSave={async (v) => patchField("totalHours", v, { totalHours: v })}
+                          value={fv("totalHours", String(totalHours ?? "0"))}
+                          onSave={async (v) => {
+                            const hrs = parseFloat(v) || 0;
+                            if (isWorkOrder) {
+                              // Use the dedicated WO labor-hours endpoint so the server
+                              // calls updateWorkOrderLaborHours + recalculates totals.
+                              const result = await apiRequest(`/api/work-orders/${id}/labor-hours`, "PATCH", { totalHours: hrs });
+                              queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+                              setFieldOverrides((prev) => ({ ...prev, totalHours: v }));
+                              // Immediately reflect recomputed totals without waiting for refetch
+                              if (result && typeof result === "object") {
+                                setLocalWoTotals((prev) => ({
+                                  ...prev,
+                                  laborSubtotal: String((result as any).laborSubtotal ?? ""),
+                                  totalAmount: String((result as any).totalAmount ?? ""),
+                                }));
+                              }
+                            } else {
+                              await patchField("totalHours", v, { totalHours: v });
+                            }
+                          }}
                           canEdit={true}
                           type="number"
                           min={0}
@@ -1421,7 +1514,7 @@ export function CompletedWorkDetailModal({
                           inputClassName="text-center w-20"
                         >
                           <p className="text-2xl font-bold text-gray-900">
-                            {fv("totalHours", String(bs?.totalHours ?? "0"))}
+                            {fv("totalHours", String(totalHours ?? "0"))}
                           </p>
                         </EditableField>
                       ) : (
@@ -1431,7 +1524,43 @@ export function CompletedWorkDetailModal({
                     </div>
                     <span className="text-xl font-semibold text-gray-400">×</span>
                     <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
-                      <p className="text-2xl font-bold text-gray-900">{currency(laborRate ?? 0)}</p>
+                      {canInlineEdit && isWorkOrder ? (
+                        <EditableField
+                          fieldId="laborRate"
+                          value={String(parseFloat(String(laborRate ?? "0")) || 0)}
+                          onSave={async (v) => {
+                            const rate = parseFloat(v) || 0;
+                            // Dedicated WO endpoint — sets appliedLaborRate + recomputes totals
+                            const result = await apiRequest(`/api/work-orders/${id}/labor-rate`, "PATCH", { laborRate: rate });
+                            queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+                            // Immediately reflect updated rate and recomputed totals
+                            if (result && typeof result === "object") {
+                              setLocalWoTotals({
+                                laborRate: String((result as any).appliedLaborRate ?? v),
+                                laborSubtotal: String((result as any).laborSubtotal ?? ""),
+                                totalAmount: String((result as any).totalAmount ?? ""),
+                              });
+                            }
+                          }}
+                          canEdit={true}
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          validate={(v) => {
+                            const n = parseFloat(v);
+                            if (isNaN(n) || n < 0) return "Rate must be 0 or greater";
+                            return null;
+                          }}
+                          className="justify-center"
+                          inputClassName="text-center w-24"
+                        >
+                          <p className="text-2xl font-bold text-gray-900">
+                            {currency(parseFloat(String(laborRate ?? "0")) || 0)}
+                          </p>
+                        </EditableField>
+                      ) : (
+                        <p className="text-2xl font-bold text-gray-900">{currency(parseFloat(String(laborRate ?? "0")) || 0)}</p>
+                      )}
                       <p className="text-xs text-gray-500 mt-0.5">Rate / hr</p>
                     </div>
                     <span className="text-xl font-semibold text-gray-400">=</span>
