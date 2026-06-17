@@ -13,7 +13,7 @@ import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-hea
 import { FAB } from "@/components/ui/fab";
 import { BillingSheetWizard } from "@/components/billing/billing-sheet-wizard";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
-import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2, ChevronRight, ChevronDown, MapPin, Camera, AlertTriangle, ClipboardList } from "lucide-react";
+import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2, ChevronRight, ChevronDown, MapPin, Camera, AlertTriangle, ClipboardList, Building2 } from "lucide-react";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, useArrayQuery } from "@/lib/queryClient";
@@ -559,6 +559,12 @@ export default function BillingSheets() {
                               <div className="min-w-0 flex-1">
                                 <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
                                 <p className="text-sm text-gray-600 truncate">{sheet.customerName}</p>
+                                {(sheet as any).branchName && (
+                                  <p className="flex items-center gap-1 text-xs text-gray-500 truncate mt-0.5">
+                                    <Building2 className="w-3 h-3 flex-shrink-0" />
+                                    {(sheet as any).branchName}
+                                  </p>
+                                )}
                               </div>
                               <div className="flex-shrink-0 flex flex-wrap items-center gap-2">
                                 {getStatusBadge(sheet.status)}
@@ -714,6 +720,12 @@ export default function BillingSheets() {
                               <div className="min-w-0 flex-1">
                                 <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
                                 <p className="text-sm text-gray-600 truncate">{sheet.customerName}</p>
+                                {(sheet as any).branchName && (
+                                  <p className="flex items-center gap-1 text-xs text-gray-500 truncate mt-0.5">
+                                    <Building2 className="w-3 h-3 flex-shrink-0" />
+                                    {(sheet as any).branchName}
+                                  </p>
+                                )}
                               </div>
                               <div className="flex-shrink-0 flex flex-wrap items-center gap-2">
                                 {getStatusBadge(sheet.status)}
@@ -829,6 +841,12 @@ export default function BillingSheets() {
                               <div className="min-w-0 flex-1">
                                 <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
                                 <p className="text-sm text-gray-600 truncate">{sheet.customerName}</p>
+                                {(sheet as any).branchName && (
+                                  <p className="flex items-center gap-1 text-xs text-gray-500 truncate mt-0.5">
+                                    <Building2 className="w-3 h-3 flex-shrink-0" />
+                                    {(sheet as any).branchName}
+                                  </p>
+                                )}
                               </div>
                               <div className="flex-shrink-0"><BilledBadge /></div>
                             </div>

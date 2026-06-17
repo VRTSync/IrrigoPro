@@ -9,6 +9,7 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Building2,
   CheckCircle2,
   ClipboardList,
   Clock,
@@ -96,6 +97,7 @@ interface ApprovalRow {
   id: number;
   number: string;
   customerName: string | null;
+  branchName?: string | null;
   status: string;
   total: number | string | null;
   age: number | null;
@@ -164,6 +166,12 @@ function NeedsApprovalSection({
                   <div className="flex items-center gap-3 mt-0.5">
                     {row.customerName && (
                       <span className="text-xs text-gray-500 truncate">{row.customerName}</span>
+                    )}
+                    {row.branchName && (
+                      <span className="text-xs text-gray-400 flex items-center gap-0.5 shrink-0">
+                        <Building2 className="w-3 h-3" />
+                        {row.branchName}
+                      </span>
                     )}
                     {row.age !== null && (
                       <span className="text-xs text-gray-400 flex items-center gap-0.5 shrink-0">
@@ -371,6 +379,7 @@ export default function ManagerWorkspacePage() {
               id: w.id,
               number: (w as any).workOrderNumber ?? `#${w.id}`,
               customerName: (w as any).customerName ?? null,
+              branchName: (w as any).branchName ?? null,
               status: w.status,
               total: (w as any).totalAmount,
               age: ageDays((w as any).createdAt),
@@ -397,6 +406,7 @@ export default function ManagerWorkspacePage() {
                 (s as any).billingSheetNumber ??
                 `#${s.id}`,
               customerName: (s as any).customerName ?? null,
+              branchName: (s as any).branchName ?? null,
               status: s.status,
               total: (s as any).totalAmount ?? (s as any).grandTotal,
               age: ageDays((s as any).createdAt),

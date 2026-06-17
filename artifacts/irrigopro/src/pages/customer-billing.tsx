@@ -35,7 +35,8 @@ import {
   Trash2,
   ArrowRight,
   Droplets,
-  Loader2
+  Loader2,
+  Building2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
@@ -1389,6 +1390,12 @@ export default function CustomerBilling() {
                                     </div>
                                   </div>
                                   <div className="text-xs text-gray-600 mb-2">{billingSheet.description}</div>
+                                  {(billingSheet as any).branchName && (
+                                    <div className="flex items-center gap-1 text-xs text-gray-500 mb-2">
+                                      <Building2 className="w-3 h-3" />
+                                      {(billingSheet as any).branchName}
+                                    </div>
+                                  )}
                                   <div className="flex justify-between text-sm">
                                     <span>Total:</span>
                                     <span className="font-medium">{formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}</span>
@@ -1408,6 +1415,12 @@ export default function CustomerBilling() {
                                     </div>
                                   </div>
                                   <div className="text-xs text-gray-600 mb-2">{billingSheet.description}</div>
+                                  {(billingSheet as any).branchName && (
+                                    <div className="flex items-center gap-1 text-xs text-gray-500 mb-2">
+                                      <Building2 className="w-3 h-3" />
+                                      {(billingSheet as any).branchName}
+                                    </div>
+                                  )}
                                   <div className="flex justify-between text-sm">
                                     <span>Total:</span>
                                     <span className="font-medium">{formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}</span>
@@ -1593,6 +1606,12 @@ export default function CustomerBilling() {
                                 </div>
                               </div>
                               <div className="text-xs text-gray-600 mb-2">{billingSheet.description}</div>
+                              {(billingSheet as any).branchName && (
+                                <div className="flex items-center gap-1 text-xs text-gray-500 mb-2">
+                                  <Building2 className="w-3 h-3" />
+                                  {(billingSheet as any).branchName}
+                                </div>
+                              )}
                               <div className="flex justify-between text-sm">
                                 <span>Total:</span>
                                 <span className="font-medium">{formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}</span>
@@ -1612,6 +1631,12 @@ export default function CustomerBilling() {
                                 </div>
                               </div>
                               <div className="text-xs text-gray-600 mb-2">{billingSheet.description}</div>
+                              {(billingSheet as any).branchName && (
+                                <div className="flex items-center gap-1 text-xs text-gray-500 mb-2">
+                                  <Building2 className="w-3 h-3" />
+                                  {(billingSheet as any).branchName}
+                                </div>
+                              )}
                               <div className="flex justify-between text-sm">
                                 <span>Total:</span>
                                 <span className="font-medium">{formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}</span>
@@ -1638,6 +1663,12 @@ export default function CustomerBilling() {
                                       {getStatusBadge(billingSheet.status)}
                                     </div>
                                     <div className="text-xs text-gray-600 mb-1">{billingSheet.description}</div>
+                                    {(billingSheet as any).branchName && (
+                                      <div className="flex items-center gap-1 text-xs text-gray-500 mb-1">
+                                        <Building2 className="w-3 h-3" />
+                                        {(billingSheet as any).branchName}
+                                      </div>
+                                    )}
                                     <div className="flex justify-between text-sm">
                                       <span>Total:</span>
                                       <span className="font-medium">{formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}</span>
