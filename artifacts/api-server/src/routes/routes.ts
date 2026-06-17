@@ -11974,10 +11974,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let customerRatesWo: { laborRate: string | null; emergencyLaborRate: string | null } | null = null;
       const cust = workOrder.customerId != null ? await storage.getCustomer(workOrder.customerId as number) : null;
       if (cust) customerRatesWo = { laborRate: cust.laborRate, emergencyLaborRate: cust.emergencyLaborRate };
+      // Task #1395 — embed items so LineItemsEditor and TotalHoursEditor work
+      // for work orders in the command center inline pane. Map partPrice →
+      // unitPrice to match the InlineItem shape the frontend expects.
+      const woItemRows = await storage.getWorkOrderItems(id);
+      const woItems = woItemRows.map((item) => ({
+        id: item.id,
+        partId: item.partId,
+        partName: item.partName,
+        quantity: item.quantity,
+        unitPrice: item.partPrice,
+        laborHours: item.laborHours,
+        notes: item.notes ?? null,
+        totalPrice: item.totalPrice,
+      }));
       // Strip pricing fields for field technicians
-      res.json(applyPricingVisibility(req, { ...workOrder, customer: customerRatesWo }));
+      res.json(applyPricingVisibility(req, { ...workOrder, customer: customerRatesWo, items: woItems }));
     } catch (error) {
-      console.error(error);
+      req.log ? req.log.error(error) : console.error(error);
       res.status(500).json({ message: "Failed to fetch work order" });
     }
   });

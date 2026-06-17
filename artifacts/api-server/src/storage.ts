@@ -1099,6 +1099,10 @@ export interface IStorage {
   replaceBillingSheetItemsWithResync(id: number, items: InsertBillingSheetItem[], companyId: number | null): Promise<BillingSheetWithItems>;
   /** Task #1093 — inline item replace for work orders (atomic with total resync). */
   replaceWorkOrderItemsWithResync(id: number, items: InsertWorkOrderItem[], companyId: number | null): Promise<WorkOrder & { items: WorkOrderItem[] }>;
+  /** Task #1315 — flat labor hours editor for billing sheets (recomputes labor totals). */
+  updateBillingSheetLaborHours(id: number, totalHours: number, companyId: number | null): Promise<BillingSheetWithItems>;
+  /** Task #1395 — flat labor hours editor for work orders (recomputes labor totals). */
+  updateWorkOrderLaborHours(id: number, totalHours: number, companyId: number | null): Promise<WorkOrder & { items: WorkOrderItem[] }>;
   deleteWetCheckBilling(id: number): Promise<void>;
   /** Returns the URL strings of all photos attached to a wet check (both zone-level and finding-level). */
   getWetCheckPhotoUrls(wetCheckId: number): Promise<string[]>;
