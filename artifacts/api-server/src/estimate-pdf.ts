@@ -335,6 +335,12 @@ export function buildEstimateHtml(
       <h2>Project / Work Site</h2>
       <div class="part-name">${escapeHtml(estimate.projectName)}</div>
       ${estimate.projectAddress ? `<div class="muted">${escapeHtml(estimate.projectAddress)}</div>` : ''}
+      ${(() => {
+        const parts: string[] = [];
+        if (controllerLetter) parts.push(`Clock ${escapeHtml(String(controllerLetter))}`);
+        if (zoneNumber != null) parts.push(`Zone ${escapeHtml(String(zoneNumber))}`);
+        return parts.length > 0 ? `<div class="muted">${parts.join(' \u00b7 ')}</div>` : '';
+      })()}
     </section>
   </div>
 
