@@ -46,6 +46,7 @@ type WorkOrder = {
   workLocationAddress: string | null;
   controllerLetter: string | null;
   zoneNumber: number | null;
+  originWetCheckId: number | null;
 };
 
 type WetCheck = {
@@ -354,6 +355,13 @@ export default function WorkOrderDetailScreen() {
           >
             <Header wo={wo} colors={colors} />
 
+            {wo.originWetCheckId != null ? (
+              <WetCheckLineageBanner
+                wetCheckId={wo.originWetCheckId}
+                colors={colors}
+              />
+            ) : null}
+
             <Section title="Details" colors={colors}>
               <DetailRow
                 label="Scheduled"
@@ -629,6 +637,38 @@ function DetailRow({
         {value}
       </Text>
     </View>
+  );
+}
+
+function WetCheckLineageBanner({
+  wetCheckId,
+  colors,
+}: {
+  wetCheckId: number;
+  colors: ReturnType<typeof useColors>;
+}) {
+  const router = useRouter();
+  return (
+    <Pressable
+      testID="wo-from-wet-check-banner"
+      onPress={() => {
+        Haptics.selectionAsync().catch(() => undefined);
+        router.push({
+          pathname: "/wet-check/[id]",
+          params: { id: String(wetCheckId) },
+        });
+      }}
+      style={({ pressed }) => [
+        styles.lineageBanner,
+        { borderRadius: colors.radius, opacity: pressed ? 0.75 : 1 },
+      ]}
+    >
+      <Feather name="link" size={14} color="#0f766e" />
+      <Text style={styles.lineageBannerText}>
+        From Wet Check #{wetCheckId}
+      </Text>
+      <Feather name="chevron-right" size={14} color="#0f766e" />
+    </Pressable>
   );
 }
 
@@ -961,4 +1001,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   actionButtonText: { fontSize: 15, fontWeight: "600" },
+
+  lineageBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: "#ccfbf1",
+    borderWidth: 1,
+    borderColor: "#99f6e4",
+  },
+  lineageBannerText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#0f766e",
+  },
 });
