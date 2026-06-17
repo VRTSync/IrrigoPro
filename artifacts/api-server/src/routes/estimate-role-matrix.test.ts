@@ -51,11 +51,11 @@ import {
   registerEstimateRoutes,
   type EstimateRoutesStorage,
 } from "./estimate-routes";
+import type { EstimateLineInput } from "../estimate-payload";
 import type {
   Customer,
   EstimateWithItems,
   InsertEstimate,
-  InsertEstimateItem,
 } from "@workspace/db";
 
 // ─── Roles under test ─────────────────────────────────────────────────────────
@@ -115,7 +115,7 @@ function makeStorageStub(): EstimateRoutesStorage {
         id: 1,
         estimateNumber: "EST-1",
         items: (payload.items ?? []).map(
-          (it: InsertEstimateItem, i: number) =>
+          (it: EstimateLineInput, i: number) =>
             ({ ...it, id: i + 1, estimateId: 1 }) as unknown as never,
         ),
       } as unknown as EstimateWithItems;

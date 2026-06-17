@@ -73,7 +73,9 @@ interface EstimateApiPayloadEstimate {
 }
 
 interface EstimateApiPayloadItem {
-  partId: number;
+  // Null when the line item has no catalog part assigned (inspection
+  // finding without a part). The server accepts and persists null partId.
+  partId: number | null;
   partName: string;
   partPrice: string;
   quantity: number;
@@ -481,7 +483,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       const qty = Math.max(Number(it.quantity ?? 1), 1);
       return {
         rowId: makeRowId(),
-        partId: it.partId ?? 0,
+        partId: it.partId ?? null,
         partName: it.partName,
         partPrice: parseFloat(String(it.partPrice ?? "0")) || 0,
         quantity: qty,

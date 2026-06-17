@@ -33,7 +33,11 @@ export type LaborRateSource = "customer" | "default" | "stored";
 
 export interface WizardLineItem {
   rowId: string;
-  partId: number;
+  // Null when the line item came from an inspection finding that had no
+  // catalog part assigned yet (e.g. a $0 documentation-only finding).
+  // The wizard allows saving and approving these as-is, or the manager
+  // can click the part name cell to assign a catalog part before approval.
+  partId: number | null;
   partName: string;
   partPrice: number;
   quantity: number;
@@ -409,10 +413,16 @@ export function EstimateWizardLineItemsStep({
                           <button
                             type="button"
                             onClick={() => openChange(it.rowId)}
-                            className="font-medium text-gray-900 hover:text-blue-700 inline-flex items-center gap-1 group focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded"
+                            className="font-medium hover:text-blue-700 inline-flex items-center gap-1 group focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded"
                             data-testid={`wizard-row-change-${it.rowId}`}
                           >
-                            {it.partName}
+                            {it.partName ? (
+                              <span className="text-gray-900">{it.partName}</span>
+                            ) : (
+                              <span className="text-amber-600 italic text-sm">
+                                No part — click to assign
+                              </span>
+                            )}
                             <Pencil className="w-3 h-3 opacity-0 group-hover:opacity-100 text-gray-400" />
                           </button>
                           <Input
@@ -493,9 +503,15 @@ export function EstimateWizardLineItemsStep({
                     <button
                       type="button"
                       onClick={() => openChange(it.rowId)}
-                      className="text-left font-semibold text-gray-900 hover:text-blue-700 inline-flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded"
+                      className="text-left font-semibold hover:text-blue-700 inline-flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded"
                     >
-                      {it.partName}
+                      {it.partName ? (
+                        <span className="text-gray-900">{it.partName}</span>
+                      ) : (
+                        <span className="text-amber-600 italic text-sm font-medium">
+                          No part — tap to assign
+                        </span>
+                      )}
                       <Pencil className="w-3 h-3 text-gray-400" />
                     </button>
                     <div className="flex items-center gap-1">

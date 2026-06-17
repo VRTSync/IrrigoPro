@@ -5,7 +5,9 @@ import type { InsertEstimate, InsertEstimateItem } from "@workspace/db";
 // both flows compute pricing identically.
 export interface EstimateLineInput {
   description?: string | null;
-  partId: number;
+  // Null for inspection findings that have no catalog part assigned yet.
+  // The server persists null and the DB column is a nullable FK.
+  partId: number | null;
   partName?: string | null;
   partPrice?: string | number | null;
   laborHours?: string | number | null;

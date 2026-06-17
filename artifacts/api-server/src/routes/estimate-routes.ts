@@ -175,7 +175,7 @@ export const createEstimateWithItemsSchema = z.object({
     .array(
       z.object({
         description: z.string().optional().default(""),
-        partId: z.number(),
+        partId: z.number().nullable(),
         partName: z.string(),
         partPrice: z.union([z.string(), z.number()]),
         quantity: z.number(),
