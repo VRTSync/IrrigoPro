@@ -34,10 +34,10 @@ function makeAuth(role: string, companyId: number | null = 1): RequestHandler {
   };
 }
 
-function buildApp(role: string) {
+function buildApp(role: string, companyId: number | null = 1) {
   const app = express();
   app.use(express.json());
-  const auth = makeAuth(role);
+  const auth = makeAuth(role, companyId);
   registerBillingWorkspaceRoutes(app, { requireAuthentication: auth });
   registerBillingWorkspaceBulkApproveRoutes(app, { requireAuthentication: auth });
   return app;

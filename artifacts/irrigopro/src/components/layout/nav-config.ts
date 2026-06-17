@@ -27,6 +27,7 @@ import {
 
 export type NavBadgeKey =
   | "partsPendingApproval"
+  | "wetCheckReviews"
   | "estimatesPendingApproval"
   | "awaitingApproval";
 

@@ -31,7 +31,10 @@ const FIXTURE: WetCheckBillingView = {
       controllerLetter: 'A',
       zoneNumber: 1,
       zoneLabel: 'A-1',
+      zoneRecordId: 101,
       repairLaborHours: '1.50',
+      repairLaborManuallySet: false,
+      zonePhotoUrls: [],
       lineItems: [
         {
           findingId: 1,
@@ -46,6 +49,7 @@ const FIXTURE: WetCheckBillingView = {
           lineTotal: '86.25',
           noPartNeeded: false,
           notes: null,
+          findingPhotoUrls: [],
         },
         {
           // labor-only: noPartNeeded=true, partsTotal=$0 — must appear
@@ -61,6 +65,7 @@ const FIXTURE: WetCheckBillingView = {
           lineTotal: '18.75',
           noPartNeeded: true,
           notes: 'Adjusted spray arc',
+          findingPhotoUrls: [],
         },
         {
           // $0.00 non-labor-only: must be ABSENT
@@ -76,6 +81,7 @@ const FIXTURE: WetCheckBillingView = {
           lineTotal: '37.50',
           noPartNeeded: false,
           notes: null,
+          findingPhotoUrls: [],
         },
       ],
       zonePartsSubtotal: '30.00',
@@ -86,7 +92,10 @@ const FIXTURE: WetCheckBillingView = {
       controllerLetter: 'B',
       zoneNumber: 2,
       zoneLabel: 'B-2',
+      zoneRecordId: 102,
       repairLaborHours: '0.50',
+      repairLaborManuallySet: false,
+      zonePhotoUrls: [],
       lineItems: [
         {
           findingId: 4,
@@ -101,6 +110,7 @@ const FIXTURE: WetCheckBillingView = {
           lineTotal: '52.50',
           noPartNeeded: false,
           notes: null,
+          findingPhotoUrls: [],
         },
       ],
       zonePartsSubtotal: '15.00',
@@ -112,6 +122,8 @@ const FIXTURE: WetCheckBillingView = {
   partsSubtotal: '45.00',
   laborSubtotal: '150.00',
   grandTotal: '195.00',
+  totalsSource: 'live_derive',
+  zonesHaveStaleLaborData: false,
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

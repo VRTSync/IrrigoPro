@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import { ticketPageWCB, ticketPageBS, ticketPageWO, partsBlockForWetCheckBS, FAILED_PHOTO_SENTINEL, buildFullCSS, JOB_TYPE_COLORS } from "./pdf-helpers";
 import type { WcbZonePhotoGroupResolved } from "./pdf-helpers";
 import { DEFAULT_BRAND_COLORS } from "./pdf-view-model";
+import type { PdfWorkOrderRow, PdfBillingSheetRow } from "./pdf-view-model";
 import type { PdfWetCheckBillingRow } from "./pdf-view-model";
 import type { WetCheckBillingView } from "./wet-check-billing-view";
 
@@ -195,7 +196,10 @@ function makeWetCheckView(): WetCheckBillingView {
         controllerLetter: "A",
         zoneNumber: 1,
         zoneLabel: "A-1",
+        zoneRecordId: 101,
         repairLaborHours: "1.00",
+        repairLaborManuallySet: false,
+        zonePhotoUrls: [],
         lineItems: [
           {
             findingId: 1,
@@ -210,6 +214,7 @@ function makeWetCheckView(): WetCheckBillingView {
             lineTotal: "55.00",
             noPartNeeded: false,
             notes: null,
+            findingPhotoUrls: [],
           },
         ],
         zonePartsSubtotal: "15.00",
@@ -220,7 +225,10 @@ function makeWetCheckView(): WetCheckBillingView {
         controllerLetter: "B",
         zoneNumber: 2,
         zoneLabel: "B-2",
+        zoneRecordId: 102,
         repairLaborHours: "0.50",
+        repairLaborManuallySet: false,
+        zonePhotoUrls: [],
         lineItems: [
           {
             findingId: 2,
@@ -235,6 +243,7 @@ function makeWetCheckView(): WetCheckBillingView {
             lineTotal: "60.00",
             noPartNeeded: false,
             notes: null,
+            findingPhotoUrls: [],
           },
         ],
         zonePartsSubtotal: "20.00",
@@ -246,6 +255,8 @@ function makeWetCheckView(): WetCheckBillingView {
     partsSubtotal: "35.00",
     laborSubtotal: "80.00",
     grandTotal: "115.00",
+    totalsSource: "live_derive",
+    zonesHaveStaleLaborData: false,
   };
 }
 
@@ -415,6 +426,8 @@ const minimalWO: PdfWorkOrderRow = {
   projectName: "Test Project",
   projectAddress: "1 Main St",
   branchName: null,
+  controllerLetter: null,
+  zoneNumber: null,
   locationNotes: "",
   technicianName: "Tech A",
   completedAt: null,
@@ -437,6 +450,8 @@ const minimalBS: PdfBillingSheetRow = {
   workDescription: "",
   propertyAddress: "1 Main St",
   branchName: null,
+  controllerLetter: null,
+  zoneNumber: null,
   technicianName: "Tech B",
   workDate: new Date("2026-05-15"),
   totalHours: 1,

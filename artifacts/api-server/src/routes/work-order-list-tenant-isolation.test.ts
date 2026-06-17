@@ -86,7 +86,7 @@ function startHarness(): Promise<Harness> {
       resolve({
         baseUrl: `http://127.0.0.1:${port}`,
         storage,
-        close: () => new Promise((r) => server.close(r)),
+        close: () => new Promise<void>((resolve) => server.close(() => resolve())),
       });
     });
   });

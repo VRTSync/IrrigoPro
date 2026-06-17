@@ -100,7 +100,7 @@ function buildApp(opts: ServerOpts): Express {
       res.status(403).json({ message: "Forbidden" }); return;
     }
     try {
-      const updated = await storage.resetZoneRepairLabor(parseInt(req.params.id, 10), cid);
+      const updated = await storage.resetZoneRepairLabor(parseInt(String(req.params.id), 10), cid);
       if (!updated) { res.status(404).json({ message: "Not found" }); return; }
       res.json(updated);
     } catch (e: any) {
@@ -120,7 +120,7 @@ function buildApp(opts: ServerOpts): Express {
     }
     try {
       const updated = await storage.setZoneRepairLaborManagerTier(
-        parseInt(req.params.id, 10),
+        parseInt(String(req.params.id), 10),
         cid,
         parsed.data.repairLaborHours,
       );
@@ -142,7 +142,7 @@ function buildApp(opts: ServerOpts): Express {
     if (!parsed.success) {
       res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return;
     }
-    const wcbId = parseInt(req.params.id, 10);
+    const wcbId = parseInt(String(req.params.id), 10);
     if (!Number.isFinite(wcbId)) {
       res.status(400).json({ message: "Invalid id" }); return;
     }

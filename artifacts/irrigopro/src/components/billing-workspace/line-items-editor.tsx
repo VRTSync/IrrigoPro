@@ -229,11 +229,9 @@ export function LineItemsEditor({
                     <td className="px-1 py-1">
                       <div className="flex items-center gap-1">
                         {row.partId != null && (
-                          <BookOpen
-                            className="w-3 h-3 text-blue-400 shrink-0"
-                            aria-label="From catalog"
-                            title="From parts catalog"
-                          />
+                          <span title="From parts catalog" className="shrink-0 flex items-center">
+                            <BookOpen className="w-3 h-3 text-blue-400" />
+                          </span>
                         )}
                         <input
                           type="text"

@@ -1,16 +1,16 @@
 export {};
 
+declare module "express-session" {
+  interface SessionData {
+    userId?: number;
+    companyId?: number;
+    role?: string;
+  }
+}
+
 declare global {
   namespace Express {
     interface Request {
-      session: Record<string, unknown> & {
-        userId?: number;
-        companyId?: number;
-        role?: string;
-        destroy(callback: (err?: Error) => void): void;
-        save(callback?: (err?: Error) => void): void;
-        regenerate(callback: (err?: Error) => void): void;
-      };
       authenticatedUserId?: number;
       authenticatedUserRole?: string;
       authenticatedUserCompanyId?: number | null;

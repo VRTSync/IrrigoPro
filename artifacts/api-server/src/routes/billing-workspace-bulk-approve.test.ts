@@ -87,7 +87,7 @@ async function post(app: Express, body: unknown) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    return { status: r.status, body: await r.json() };
+    return { status: r.status, body: await r.json() as Record<string, any> };
   } finally {
     server.close();
   }

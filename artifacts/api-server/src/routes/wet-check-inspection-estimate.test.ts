@@ -35,7 +35,7 @@ const STUB_WC = {
   id: 7,
   mode: "inspection",
   status: "converted",
-  fullyConvertedAt: new Date().toISOString(),
+  fullyConvertedAt: new Date().toISOString() as string | null,
 };
 
 // ─── Harness ──────────────────────────────────────────────────────────────────
