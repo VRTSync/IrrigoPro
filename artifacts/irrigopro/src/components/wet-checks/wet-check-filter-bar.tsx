@@ -43,12 +43,15 @@ export type WcCounts = {
   readyToBill: number;
   billed: number;
   all: number;
+  perStatus?: Record<string, number>;
 };
+
+type WcCountBucketKey = "needsReview" | "inProgress" | "readyToBill" | "billed" | "all";
 
 type TabDef = {
   value: string;
   label: string;
-  countKey: keyof WcCounts;
+  countKey: WcCountBucketKey;
   activeClass: string;
   inactiveClass: string;
   badgeClass: string;
@@ -182,10 +185,12 @@ function MoreFiltersPanel({
   granularStatuses,
   onToggle,
   onClear,
+  perStatus,
 }: {
   granularStatuses: Set<string>;
   onToggle: (value: string) => void;
   onClear: () => void;
+  perStatus?: Record<string, number>;
 }) {
   const activeCount = granularStatuses.size;
 
@@ -223,6 +228,7 @@ function MoreFiltersPanel({
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
         {GRANULAR_STATUS_OPTIONS.map((opt) => {
           const checked = granularStatuses.has(opt.value);
+          const count = perStatus?.[opt.value] ?? 0;
           return (
             <label
               key={opt.value}
@@ -240,7 +246,18 @@ function MoreFiltersPanel({
                 data-testid={`checkbox-wc-granular-${opt.value}`}
                 className="data-[state=checked]:bg-violet-600 data-[state=checked]:border-violet-600"
               />
-              <span className="leading-tight">{opt.label}</span>
+              <span className="flex-1 leading-tight">{opt.label}</span>
+              <span
+                data-testid={`badge-wc-granular-count-${opt.value}`}
+                className={[
+                  "inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-xs font-semibold tabular-nums",
+                  checked
+                    ? "bg-violet-600 text-white"
+                    : "bg-gray-100 text-gray-500 ring-1 ring-gray-200",
+                ].join(" ")}
+              >
+                {count}
+              </span>
             </label>
           );
         })}
@@ -343,6 +360,7 @@ export function WetCheckFilterBar({
             granularStatuses={granularStatuses}
             onToggle={handleGranularToggle}
             onClear={handleGranularClear}
+            perStatus={counts?.perStatus}
           />
         )}
 

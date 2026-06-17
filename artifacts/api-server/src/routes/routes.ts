@@ -15720,18 +15720,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
           readyToBill: sql<number>`cast(count(*) filter (where ${wetChecks.status} in ('approved','approved_passed_to_billing','partially_converted','converted')) as int)`,
           billed: sql<number>`cast(count(*) filter (where ${wetChecks.status} = 'billed') as int)`,
           all: sql<number>`cast(count(*) as int)`,
+          // Granular per-status counts for the More Filters panel checkboxes.
+          s_in_progress: sql<number>`cast(count(*) filter (where ${wetChecks.status} = 'in_progress') as int)`,
+          s_submitted: sql<number>`cast(count(*) filter (where ${wetChecks.status} = 'submitted') as int)`,
+          s_pending_manager_review: sql<number>`cast(count(*) filter (where ${wetChecks.status} = 'pending_manager_review') as int)`,
+          s_approved: sql<number>`cast(count(*) filter (where ${wetChecks.status} = 'approved') as int)`,
+          s_approved_passed_to_billing: sql<number>`cast(count(*) filter (where ${wetChecks.status} = 'approved_passed_to_billing') as int)`,
+          s_partially_converted: sql<number>`cast(count(*) filter (where ${wetChecks.status} = 'partially_converted') as int)`,
+          s_converted: sql<number>`cast(count(*) filter (where ${wetChecks.status} = 'converted') as int)`,
+          s_billed: sql<number>`cast(count(*) filter (where ${wetChecks.status} = 'billed') as int)`,
         })
         .from(wetChecks);
       const rows = companyCondition
         ? await query.where(companyCondition)
         : await query;
-      const row = rows[0] ?? { needsReview: 0, inProgress: 0, readyToBill: 0, billed: 0, all: 0 };
+      const row = rows[0] ?? {
+        needsReview: 0, inProgress: 0, readyToBill: 0, billed: 0, all: 0,
+        s_in_progress: 0, s_submitted: 0, s_pending_manager_review: 0,
+        s_approved: 0, s_approved_passed_to_billing: 0,
+        s_partially_converted: 0, s_converted: 0, s_billed: 0,
+      };
       res.json({
         needsReview: Number(row.needsReview),
         inProgress: Number(row.inProgress),
         readyToBill: Number(row.readyToBill),
         billed: Number(row.billed),
         all: Number(row.all),
+        perStatus: {
+          in_progress: Number(row.s_in_progress),
+          submitted: Number(row.s_submitted),
+          pending_manager_review: Number(row.s_pending_manager_review),
+          approved: Number(row.s_approved),
+          approved_passed_to_billing: Number(row.s_approved_passed_to_billing),
+          partially_converted: Number(row.s_partially_converted),
+          converted: Number(row.s_converted),
+          billed: Number(row.s_billed),
+        },
       });
     } catch (e: any) {
       const { status, message } = classifyAndLog(req, e, {
