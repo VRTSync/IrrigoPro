@@ -3,6 +3,7 @@ import { FAILED_PHOTO_SENTINEL } from './pdf-helpers';
 import { formatEstimateNumber } from '@workspace/shared';
 import { VRT_LOGO_DATA_URI } from './assets/vrt-logo.js';
 import { IRRIGOPRO_LOGO_DATA_URI } from './assets/irrigopro-logo.js';
+import { humanizeIssueType } from './inspection-issue-labels.js';
 
 export const DEFAULT_BRAND_COLOR = '#1E5A99';
 export const DEFAULT_BRAND_DARK = '#143F6B';
@@ -89,6 +90,271 @@ export function attachmentDisplayName(url: string): string {
   return last ? decodeURIComponent(last) : url;
 }
 
+// ── Inspection-origin detection ──────────────────────────────────────────────
+
+/**
+ * Returns true when any item carries zone context — which only happens for
+ * estimates generated from an Inspection wet check (Slice 1).
+ */
+export function isInspectionOriginEstimate(items: EstimateItem[]): boolean {
+  return items.some(
+    (it) => it.controllerLetter != null || it.zoneNumber != null,
+  );
+}
+
+// ── Zone-grouped data structures ─────────────────────────────────────────────
+
+interface ZoneGroup {
+  controllerLetter: string;
+  zoneNumber: number;
+  zoneKey: string;
+  zoneLabel: string;
+  items: EstimateItem[];
+  partsTotal: number;
+  laborHrs: number;
+  zoneTotal: number;
+}
+
+function buildZoneGroups(items: EstimateItem[], laborRate: number): ZoneGroup[] {
+  const groupMap = new Map<string, ZoneGroup>();
+
+  for (const item of items) {
+    const cl = item.controllerLetter ?? '';
+    const zn = item.zoneNumber ?? 0;
+    const key = `${cl}|${zn}`;
+
+    let group = groupMap.get(key);
+    if (!group) {
+      const zoneLabel = cl && zn != null
+        ? `Controller ${cl} \u00b7 Zone ${zn}`
+        : cl ? `Controller ${cl}` : `Zone ${zn}`;
+      group = {
+        controllerLetter: cl,
+        zoneNumber: zn,
+        zoneKey: key,
+        zoneLabel,
+        items: [],
+        partsTotal: 0,
+        laborHrs: 0,
+        zoneTotal: 0,
+      };
+      groupMap.set(key, group);
+    }
+    group.items.push(item);
+    group.partsTotal += parseFloat(item.totalPrice) || 0;
+    group.laborHrs += parseFloat(item.laborHours) || 0;
+  }
+
+  for (const g of groupMap.values()) {
+    g.zoneTotal = g.partsTotal + g.laborHrs * laborRate;
+  }
+
+  return [...groupMap.values()].sort((a, b) => {
+    const cl = a.controllerLetter.localeCompare(b.controllerLetter);
+    if (cl !== 0) return cl;
+    return a.zoneNumber - b.zoneNumber;
+  });
+}
+
+function isLaborOnlyItem(item: EstimateItem): boolean {
+  return (parseFloat(item.partPrice) || 0) === 0;
+}
+
+// ── Zone-grouped HTML sections ───────────────────────────────────────────────
+
+function renderRepairsSummaryTable(
+  groups: ZoneGroup[],
+  accent: string,
+  accentDark: string,
+): string {
+  const totalParts = groups.reduce((s, g) => s + g.partsTotal, 0);
+  const totalLaborHrs = groups.reduce((s, g) => s + g.laborHrs, 0);
+  const grandTotal = groups.reduce((s, g) => s + g.zoneTotal, 0);
+
+  const rows = groups.map((g, idx) => `
+      <tr class="${idx % 2 === 1 ? 'zebra' : ''}">
+        <td class="summary-zone">${escapeHtml(g.zoneLabel)}</td>
+        <td class="r">${g.items.length}</td>
+        <td class="r">${fmtMoney(g.partsTotal)}</td>
+        <td class="r">${g.laborHrs.toFixed(2)}&thinsp;hrs</td>
+        <td class="r b">${fmtMoney(g.zoneTotal)}</td>
+      </tr>`).join('');
+
+  const totalsRow = `
+      <tr class="summary-totals-row">
+        <td><strong>Totals</strong></td>
+        <td class="r"><strong>${groups.reduce((s, g) => s + g.items.length, 0)}</strong></td>
+        <td class="r"><strong>${fmtMoney(totalParts)}</strong></td>
+        <td class="r"><strong>${totalLaborHrs.toFixed(2)}&thinsp;hrs</strong></td>
+        <td class="r b"><strong>${fmtMoney(grandTotal)}</strong></td>
+      </tr>`;
+
+  return `
+  <section class="zone-summary-section">
+    <h2>Repairs Summary by Zone</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Zone</th>
+          <th class="r">Repairs</th>
+          <th class="r">Parts</th>
+          <th class="r">Labor&thinsp;hrs</th>
+          <th class="r">Zone Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows}
+        ${totalsRow}
+      </tbody>
+    </table>
+  </section>`;
+}
+
+function renderZoneDetailBlocks(
+  groups: ZoneGroup[],
+  laborRate: number,
+  accent: string,
+  accentDark: string,
+): string {
+  return groups.map((group) => {
+    const workRows = group.items.map((item, idx) => {
+      const laborOnly = isLaborOnlyItem(item);
+      const issueLabel = humanizeIssueType(item.issueType);
+      const partPrice = parseFloat(item.partPrice) || 0;
+      const qty = item.quantity || 0;
+      const partsTotal = parseFloat(item.totalPrice) || 0;
+
+      if (laborOnly) {
+        return `
+      <tr class="${idx % 2 === 1 ? 'zebra' : ''}">
+        <td>
+          <div class="part-name">${escapeHtml(issueLabel)}</div>
+          <div class="labor-only-tag">labor only</div>
+        </td>
+        <td class="r muted">&mdash;</td>
+        <td class="r muted">&mdash;</td>
+        <td class="r muted">&mdash;</td>
+        <td class="r muted">&mdash;</td>
+      </tr>`;
+      }
+
+      return `
+      <tr class="${idx % 2 === 1 ? 'zebra' : ''}">
+        <td>
+          <div class="part-name">${escapeHtml(issueLabel)}</div>
+          ${item.partName && item.partName !== issueLabel ? `<div class="muted part-subline">${escapeHtml(item.partName)}</div>` : ''}
+        </td>
+        <td class="r">${escapeHtml(qty)}</td>
+        <td class="r">${fmtMoney(partPrice)}</td>
+        <td class="r">${fmtMoney(partsTotal)}</td>
+        <td class="r b">${fmtMoney(partsTotal)}</td>
+      </tr>`;
+    }).join('');
+
+    const zoneLaborAmt = group.laborHrs * laborRate;
+    const laborRow = `
+      <tr class="zone-labor-row">
+        <td colspan="4">Zone labor &thinsp;&middot;&thinsp; ${group.laborHrs.toFixed(2)}&thinsp;hrs &times; ${fmtMoney(laborRate)}/hr</td>
+        <td class="r">${fmtMoney(zoneLaborAmt)}</td>
+      </tr>`;
+
+    const subtotalRow = `
+      <tr class="zone-subtotal-row">
+        <td colspan="4"><strong>${escapeHtml(group.zoneLabel)} Subtotal</strong></td>
+        <td class="r b zone-subtotal-amt">${fmtMoney(group.zoneTotal)}</td>
+      </tr>`;
+
+    return `
+  <div class="zone-detail-block">
+    <div class="zone-block-header">
+      <span class="zone-block-label">${escapeHtml(group.zoneLabel)}</span>
+      <span class="zone-block-total">${fmtMoney(group.zoneTotal)}</span>
+    </div>
+    <table class="zone-detail-table">
+      <thead>
+        <tr>
+          <th>Work / Finding</th>
+          <th class="r">Qty</th>
+          <th class="r">Unit Price</th>
+          <th class="r">Parts Total</th>
+          <th class="r">Zone Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${workRows || `<tr><td colspan="5" class="muted">No items</td></tr>`}
+        ${laborRow}
+        ${subtotalRow}
+      </tbody>
+    </table>
+  </div>`;
+  }).join('');
+}
+
+function inspectionEstimateCss(accent: string, accentDark: string): string {
+  return `
+  /* ── Inspection estimate — zone-grouped styles ── */
+  .lineage-banner {
+    background: #f0f6ff;
+    border-left: 3px solid ${accent};
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 10.5px;
+    color: ${accentDark};
+    margin-bottom: 14px;
+  }
+  .zone-summary-section {
+    margin-bottom: 18px;
+  }
+  .zone-summary-section thead th {
+    background: ${accent};
+    color: white;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+  }
+  .summary-zone { font-weight: 600; }
+  .summary-totals-row td { background: #f0f6ff; border-top: 2px solid ${accent}; }
+  .zone-detail-block {
+    margin-bottom: 18px;
+    border: 1px solid #dce8f7;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .zone-block-header {
+    background: ${accent};
+    color: white;
+    padding: 8px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .zone-block-label { font-weight: 700; font-size: 12px; letter-spacing: 0.02em; }
+  .zone-block-total { font-weight: 700; font-size: 13px; }
+  .zone-detail-table { width: 100%; border-collapse: collapse; }
+  .zone-detail-table th, .zone-detail-table td { padding: 7px 9px; text-align: left; vertical-align: top; }
+  .zone-detail-table thead th { background: ${accentDark}; color: white; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+  .zone-detail-table tbody td { border-bottom: 1px solid #eef0f3; }
+  .zone-detail-table tbody tr.zebra td { background: #f8fafc; }
+  .labor-only-tag {
+    display: inline-block;
+    background: #e0f2fe;
+    color: #0369a1;
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 1px 6px;
+    border-radius: 999px;
+    margin-top: 2px;
+    text-transform: uppercase;
+  }
+  .part-subline { font-size: 10.5px; margin-top: 1px; }
+  .zone-labor-row td { background: #f8fafc; color: #374151; font-size: 10.5px; font-style: italic; border-top: 1px dashed #d1d5db; }
+  .zone-subtotal-row td { background: #f0f6ff; border-top: 2px solid ${accent}; }
+  .zone-subtotal-amt { color: ${accentDark}; }
+  `;
+}
+
 export function buildEstimateHtml(
   estimate: EstimateWithItems,
   opts: RenderEstimatePdfOptions = {},
@@ -97,18 +363,12 @@ export function buildEstimateHtml(
   const laborRate = parseFloat(estimate.laborRate) || 0;
   const accent = opts.accentColor || DEFAULT_BRAND_COLOR;
   const accentDark = opts.accentDark || DEFAULT_BRAND_DARK;
-  const itemsRows = items
-    .map((it, idx) => renderItemRow(it, laborRate, idx))
-    .join('');
 
   const partsSubtotal = parseFloat(estimate.partsSubtotal) || 0;
   const laborSubtotal = parseFloat(estimate.laborSubtotal) || 0;
   const grandTotal = parseFloat(estimate.totalAmount) || (partsSubtotal + laborSubtotal);
-  // Task #691 — Surface the labor math on the PDF so customers can see
-  // how the labor charge was derived (totalLaborHours × laborRate).
-  // Labor is flat-only post-Task #657, so these fields are authoritative.
   const totalLaborHours = parseFloat(estimate.totalLaborHours) || 0;
-  const laborRateLabel = `Labor (${totalLaborHours.toFixed(2)}h × ${fmtMoney(laborRate)}/hr)`;
+  const laborRateLabel = `Labor (${totalLaborHours.toFixed(2)}h \u00d7 ${fmtMoney(laborRate)}/hr)`;
 
   const lat = estimate.workLocationLat;
   const lng = estimate.workLocationLng;
@@ -129,7 +389,7 @@ export function buildEstimateHtml(
       ${workAddr ? `<div><span class="lbl">Address:</span> ${escapeHtml(workAddr)}</div>` : ''}
       <div><span class="lbl">Coordinates:</span> <span class="mono">${escapeHtml(coordsText)}</span></div>
       <div><span class="lbl">Map link:</span> <a href="${escapeHtml(mapLink)}">${escapeHtml(mapLink)}</a></div>
-      ${(controllerLetter || zoneNumber != null) ? `<div><span class="lbl">Controller / Zone:</span> ${controllerLetter ? `Controller ${escapeHtml(controllerLetter)}` : ''}${controllerLetter && zoneNumber != null ? ' · ' : ''}${zoneNumber != null ? `Zone ${escapeHtml(zoneNumber)}` : ''}</div>` : ''}
+      ${(controllerLetter || zoneNumber != null) ? `<div><span class="lbl">Controller / Zone:</span> ${controllerLetter ? `Controller ${escapeHtml(String(controllerLetter))}` : ''}${controllerLetter && zoneNumber != null ? ' \u00b7 ' : ''}${zoneNumber != null ? `Zone ${escapeHtml(String(zoneNumber))}` : ''}</div>` : ''}
     </section>` : '';
 
   const company = opts.company;
@@ -164,6 +424,71 @@ export function buildEstimateHtml(
         site may adjust the final invoice.
       </div>
     </section>`;
+
+  // ── Branch: inspection-origin vs. flat ──────────────────────────────────
+  const isInspection = isInspectionOriginEstimate(items);
+
+  let lineItemsSection: string;
+
+  if (isInspection) {
+    const zoneGroups = buildZoneGroups(items, laborRate);
+
+    const originId = (estimate as unknown as Record<string, unknown>).originWetCheckId;
+    const lineageBanner = originId != null
+      ? `<div class="lineage-banner">From wet check: Inspection #${escapeHtml(String(originId))}</div>`
+      : '';
+
+    const summaryTable = renderRepairsSummaryTable(zoneGroups, accent, accentDark);
+    const detailBlocks = renderZoneDetailBlocks(zoneGroups, laborRate, accent, accentDark);
+
+    const totalsBlock = `
+    <div class="totals-wrap">
+      <div class="totals">
+        <div class="row"><span>Parts Subtotal</span><span>${fmtMoney(partsSubtotal)}</span></div>
+        <div class="row"><span>${escapeHtml(laborRateLabel)}</span><span>${fmtMoney(laborSubtotal)}</span></div>
+        <div class="grand row"><span class="label">Grand Total</span><span>${fmtMoney(grandTotal)}</span></div>
+      </div>
+    </div>`;
+
+    lineItemsSection = `
+  ${lineageBanner}
+  ${summaryTable}
+  <section>
+    <h2>Zone Detail</h2>
+    ${detailBlocks}
+    ${totalsBlock}
+  </section>`;
+  } else {
+    const itemsRows = items
+      .map((it, idx) => renderItemRow(it, laborRate, idx))
+      .join('');
+
+    lineItemsSection = `
+  <section>
+    <h2>Line Items</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Part / Description</th>
+          <th class="r">Qty</th>
+          <th class="r">Unit Price</th>
+          <th class="r">Labor</th>
+          <th class="r">Line Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemsRows || `<tr><td colspan="5" class="muted">No line items</td></tr>`}
+      </tbody>
+    </table>
+    <div class="totals-wrap">
+      <div class="totals">
+        <div class="row"><span>Parts Subtotal</span><span>${fmtMoney(partsSubtotal)}</span></div>
+        <div class="row"><span>${escapeHtml(laborRateLabel)}</span><span>${fmtMoney(laborSubtotal)}</span></div>
+        <div class="grand row"><span class="label">Grand Total</span><span>${fmtMoney(grandTotal)}</span></div>
+      </div>
+    </div>
+  </section>`;
+  }
 
   return `<!DOCTYPE html>
 <html>
@@ -239,6 +564,8 @@ export function buildEstimateHtml(
   .sig .block { border-top: 1px solid #9ca3af; padding-top: 4px; }
   .sig .lbl-sm { font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.06em; }
   .sig .name { font-size: 11.5px; color: #111827; margin-top: 2px; }
+
+  ${inspectionEstimateCss(accent, accentDark)}
 </style>
 </head>
 <body>
@@ -247,7 +574,7 @@ export function buildEstimateHtml(
       ${logoBlock}
       <div>
         <div class="co-name">${escapeHtml(companyName)}</div>
-        ${companyLines.length ? `<div class="co-meta">${companyLines.map(escapeHtml).join(' · ')}</div>` : ''}
+        ${companyLines.length ? `<div class="co-meta">${companyLines.map(escapeHtml).join(' \u00b7 ')}</div>` : ''}
       </div>
     </div>
     <div class="doc-meta">
@@ -292,30 +619,7 @@ export function buildEstimateHtml(
 
   ${pinSection}
 
-  <section>
-    <h2>Line Items</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Part / Description</th>
-          <th class="r">Qty</th>
-          <th class="r">Unit Price</th>
-          <th class="r">Labor</th>
-          <th class="r">Line Total</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${itemsRows || `<tr><td colspan="5" class="muted">No line items</td></tr>`}
-      </tbody>
-    </table>
-    <div class="totals-wrap">
-      <div class="totals">
-        <div class="row"><span>Parts Subtotal</span><span>${fmtMoney(partsSubtotal)}</span></div>
-        <div class="row"><span>${escapeHtml(laborRateLabel)}</span><span>${fmtMoney(laborSubtotal)}</span></div>
-        <div class="grand row"><span class="label">Grand Total</span><span>${fmtMoney(grandTotal)}</span></div>
-      </div>
-    </div>
-  </section>
+  ${lineItemsSection}
 
   ${(() => {
     const photoUris = (opts.photoDataUris ?? []).filter(
