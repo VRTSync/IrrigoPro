@@ -1288,8 +1288,8 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
               </Card>
             )}
 
-            {/* Completion Details — only shown when WO is completed */}
-            {workOrder.status === 'work_completed' && (() => {
+            {/* Completion Details — shown for all post-completion statuses */}
+            {(['work_completed', 'pending_manager_review', 'approved_passed_to_billing'] as string[]).includes(workOrder.status) && (() => {
               const showPricing = currentUser?.role !== 'field_tech';
               const items = (workOrderItems as any[]) || [];
               const completedItems = items.filter((item: any) => item.actualQuantityUsed != null || item.partPrice != null);
