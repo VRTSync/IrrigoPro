@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ActivityTab } from "@/components/activity/ActivityTab";
 import { useLocation, Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Loader2, ChevronLeft, CheckCircle2, Wrench, AlertTriangle, Camera, Download } from "lucide-react";
+import { Loader2, ChevronLeft, CheckCircle2, Wrench, AlertTriangle, Camera, Download, Droplets } from "lucide-react";
 import { countZonePhotos } from "@/lib/wet-check-photos";
 import { apiRequest, asArray, queryClient, useArrayQuery, authedPdfUrl } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -427,7 +427,14 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
         <Button variant="ghost" onClick={() => setActiveLetter(null)} data-testid="btn-back">
           <ChevronLeft className="w-4 h-4 mr-1" /> Back to Controllers
         </Button>
-        <ControllerHeader controller={ctrl} customerId={wc.customerId} readOnly={isReadOnly} />
+        <ControllerHeader
+          controller={ctrl}
+          customerId={wc.customerId}
+          readOnly={isReadOnly}
+          zoneRecords={records}
+          customerName={wc.customerName}
+          propertyAddress={wc.propertyAddress ?? undefined}
+        />
         <div className="grid grid-cols-5 sm:grid-cols-8 md:grid-cols-10 gap-1.5 sm:gap-1">
           {Array.from({ length: ctrl?.zoneCount ?? 100 }, (_, i) => i + 1).map(n => {
             const r = recordsByZone.get(n);
@@ -445,6 +452,7 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
             const isMarkedComplete =
               r?.status === "checked_with_issues" && r?.markedCompleteAt != null;
             const zonePhotoCount = countZonePhotos(wc, r);
+            const findingCountForZone = asArray(r?.findings).length;
             const aria = [
               isMarkedComplete ? `Zone ${n} — Needs Work, marked complete` : `Zone ${n}`,
               zonePhotoCount > 0
@@ -469,6 +477,17 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
                     <CheckCircle2 className="w-3 h-3" strokeWidth={3} />
                   </span>
                 )}
+                {/* Finding-count badge on needs-work tiles — bottom-left so it never
+                    conflicts with the photo-count badge at bottom-right */}
+                {r?.status === "checked_with_issues" && findingCountForZone > 0 && (
+                  <span
+                    className="absolute -bottom-1 -left-1 inline-flex items-center justify-center min-w-[14px] h-3.5 px-0.5 rounded-full bg-white text-[9px] font-bold text-red-700 shadow ring-1 ring-red-400"
+                    data-testid={`zone-${activeLetter}-${n}-finding-count`}
+                    aria-label={`${findingCountForZone} finding${findingCountForZone !== 1 ? "s" : ""}`}
+                  >
+                    {findingCountForZone}
+                  </span>
+                )}
                 {zonePhotoCount > 0 && (
                   <span
                     className="absolute -bottom-1 -right-1 inline-flex items-center justify-center min-w-[14px] h-3.5 px-0.5 rounded-full bg-white text-[9px] font-bold text-gray-800 shadow ring-1 ring-gray-400"
@@ -481,6 +500,22 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
               </button>
             );
           })}
+        </div>
+
+        {/* Zone grid legend */}
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 pt-1">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-green-500 flex-shrink-0" />
+            Ran OK
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-red-500 flex-shrink-0" />
+            Needs work
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-gray-400 flex-shrink-0" />
+            N/A
+          </span>
         </div>
       </div>
     );
@@ -703,163 +738,281 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
           </div>
         </div>
       )}
-      <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <CardTitle>{wc.customerName}</CardTitle>
-            {!isReadOnly && (
-              <PhotoCaptureButton
-                wetCheckId={wc.id ?? id ?? 0}
-                wetCheckClientId={wc.clientId ?? null}
-              />
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <div>{wc.propertyAddress ?? "—"}</div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span>Status: <Badge>{wc.status}</Badge></span>
-            <span
-              className="inline-flex items-center gap-1 text-xs text-gray-700"
-              data-testid="wc-photo-total"
-              aria-label={`${wcPhotos.length} photo${wcPhotos.length === 1 ? "" : "s"} attached to this wet check`}
-            >
-              <Camera className="w-3.5 h-3.5" aria-hidden />
-              {wcPhotos.length} photo{wcPhotos.length === 1 ? "" : "s"}
-            </span>
-          </div>
-          {wetCheckLevelPhotos.length > 0 && (
-            <div className="pt-2" data-testid="wc-photos">
-              {(() => {
-                // Task #246 / #597 — Wet-check-level photos with no zone or
-                // finding link are surfaced as a single "loose" amber
-                // banner regardless of whether findings exist yet. Without
-                // findings the picker collapses to "Add a work item first"
-                // (LoosePhotosSection handles that branch). With findings
-                // the labels include the controller/zone so the picker is
-                // unambiguous when multiple zones have findings of the
-                // same issue type.
-                const options = wcZoneRecords.flatMap(zr =>
-                  asArray(zr.findings).map(f => ({
-                    id: f.id,
-                    label: `${zr.controllerLetter}${zr.zoneNumber} · ${f.issueType.replace(/_/g, " ")} · ${f.partName ?? "no part"}`,
-                  })),
-                );
-                return (
-                  <LoosePhotosSection
-                    photos={wetCheckLevelPhotos}
-                    findingOptions={options}
-                    wetCheckId={wc.id ?? id ?? 0}
-                    readOnly={isReadOnly}
-                  />
-                );
-              })()}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
+      {/* ── Head view ─────────────────────────────────────────────────────── */}
       {(() => {
-        // Task #612 facelift — summary header above the controllers grid
-        // so techs can see the state of the whole wet check at a glance
-        // instead of mentally summing tile colors. Counts mirror the
-        // mobile ChipRow.
-        let ok = 0, issues = 0, na = 0, notChecked = 0, markedComplete = 0;
-        for (const zr of wcZoneRecords) {
-          if (zr.status === "checked_ok") ok++;
-          else if (zr.status === "checked_with_issues") {
-            issues++;
-            if (zr.markedCompleteAt) markedComplete++;
-          } else if (zr.status === "not_applicable") na++;
-          else notChecked++;
-        }
+        const statusPill = (() => {
+          const s = wc.status;
+          if (s === "converted")
+            return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 border border-emerald-300">Converted</span>;
+          if (s === "submitted")
+            return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 border border-blue-300">Submitted</span>;
+          if (s === "pending_manager_review")
+            return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-300">Pending Review</span>;
+          if (s === "in_progress")
+            return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">In Progress</span>;
+          return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600 border border-gray-300">{s?.replace(/_/g, " ") ?? "—"}</span>;
+        })();
+        const totalZones = controllers.reduce((n, c) => n + c.zoneCount, 0);
+        const workDate = wc.startedAt
+          ? new Date(wc.startedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+          : null;
         return (
-          <div
-            className="flex flex-wrap items-center gap-1.5 sm:gap-2"
-            data-testid="wet-check-summary-counts"
-            aria-label={`Wet check summary: ${ok} ran OK, ${issues} need work, ${na} N/A, ${notChecked} not checked`}
-          >
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-600 text-white" data-testid="summary-ok">
-              ✓ Ran OK · {ok}
-            </span>
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-600 text-white" data-testid="summary-issues">
-              ! Needs work · {issues}
-            </span>
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-400 text-white" data-testid="summary-na">
-              N/A · {na}
-            </span>
-            {notChecked > 0 && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-900 border border-amber-300" data-testid="summary-not-checked">
-                Not checked · {notChecked}
-              </span>
-            )}
-            {markedComplete > 0 && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-900 border border-blue-300" data-testid="summary-marked-complete">
-                ✓ Marked complete · {markedComplete}
-              </span>
+          <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden" data-testid="wc-head-view">
+            <div className="px-4 pt-4 pb-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <div className="flex-shrink-0 mt-0.5 w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+                    <Droplets className="w-4.5 h-4.5 text-blue-600" aria-hidden />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-bold text-gray-900 leading-tight">{wc.customerName}</h2>
+                    {wc.propertyAddress && (
+                      <div className="text-sm text-gray-500 truncate">{wc.propertyAddress}</div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {statusPill}
+                  {!isReadOnly && (
+                    <PhotoCaptureButton
+                      wetCheckId={wc.id ?? id ?? 0}
+                      wetCheckClientId={wc.clientId ?? null}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Meta row */}
+              <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                <span>{controllers.length} controller{controllers.length !== 1 ? "s" : ""}</span>
+                <span className="text-gray-300">·</span>
+                <span>{totalZones} zone{totalZones !== 1 ? "s" : ""}</span>
+                <span className="text-gray-300">·</span>
+                <span
+                  className="inline-flex items-center gap-0.5"
+                  data-testid="wc-photo-total"
+                  aria-label={`${wcPhotos.length} photo${wcPhotos.length === 1 ? "" : "s"} attached`}
+                >
+                  <Camera className="w-3 h-3" aria-hidden />
+                  {wcPhotos.length} photo{wcPhotos.length === 1 ? "" : "s"}
+                </span>
+                {wc.technicianName && (
+                  <>
+                    <span className="text-gray-300">·</span>
+                    <span>{wc.technicianName}</span>
+                  </>
+                )}
+                {workDate && (
+                  <>
+                    <span className="text-gray-300">·</span>
+                    <span>{workDate}</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {wetCheckLevelPhotos.length > 0 && (
+              <div className="px-4 pb-3 border-t border-gray-100 pt-3" data-testid="wc-photos">
+                {(() => {
+                  const options = wcZoneRecords.flatMap(zr =>
+                    asArray(zr.findings).map(f => ({
+                      id: f.id,
+                      label: `${zr.controllerLetter}${zr.zoneNumber} · ${f.issueType.replace(/_/g, " ")} · ${f.partName ?? "no part"}`,
+                    })),
+                  );
+                  return (
+                    <LoosePhotosSection
+                      photos={wetCheckLevelPhotos}
+                      findingOptions={options}
+                      wetCheckId={wc.id ?? id ?? 0}
+                      readOnly={isReadOnly}
+                    />
+                  );
+                })()}
+              </div>
             )}
           </div>
         );
       })()}
 
-      <h2 className="text-lg font-semibold">Controllers</h2>
-      <div className="grid grid-cols-2 gap-2 sm:gap-3">
+      {/* ── Inspection health hero ─────────────────────────────────────────── */}
+      {(() => {
+        let ok = 0, issues = 0, markedComplete = 0;
+        for (const zr of wcZoneRecords) {
+          if (zr.status === "checked_ok") ok++;
+          else if (zr.status === "checked_with_issues") {
+            issues++;
+            if (zr.markedCompleteAt) markedComplete++;
+          }
+        }
+        const totalZones = controllers.reduce((n, c) => n + c.zoneCount, 0);
+        const gray = Math.max(0, totalZones - ok - issues);
+        const total = ok + issues + gray;
+        const pct = (n: number) => (total > 0 ? Math.round((n / total) * 100) : 0);
+        const okPct = pct(ok), issuesPct = pct(issues), grayPct = pct(gray);
+
+        return (
+          <div
+            className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 space-y-3"
+            data-testid="wet-check-summary-counts"
+            aria-label={`Wet check summary: ${ok} ran OK, ${issues} need work, ${gray} N/A`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-gray-700">Inspection Health</span>
+              {issues > 0 && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200" data-testid="summary-needs-work-flag">
+                  <AlertTriangle className="w-3 h-3" aria-hidden />
+                  Needs work
+                </span>
+              )}
+            </div>
+
+            {/* Stacked health bar */}
+            {total > 0 ? (
+              <div className="flex h-7 rounded-lg overflow-hidden w-full gap-px" role="img" aria-label={`${okPct}% ran OK, ${issuesPct}% needs work, ${grayPct}% N/A`}>
+                {ok > 0 && (
+                  <div
+                    className="flex items-center justify-center text-xs font-bold text-white bg-green-500 transition-all"
+                    style={{ width: `${okPct}%` }}
+                    data-testid="summary-ok"
+                  >
+                    {ok}
+                  </div>
+                )}
+                {issues > 0 && (
+                  <div
+                    className="flex items-center justify-center text-xs font-bold text-white bg-red-500 transition-all"
+                    style={{ width: `${issuesPct}%` }}
+                    data-testid="summary-issues"
+                  >
+                    {issues}
+                  </div>
+                )}
+                {gray > 0 && (
+                  <div
+                    className="flex items-center justify-center text-xs font-bold text-gray-500 bg-gray-100 transition-all"
+                    style={{ width: `${grayPct}%` }}
+                    data-testid="summary-na"
+                  >
+                    {gray}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="h-7 rounded-lg bg-gray-100 w-full" data-testid="summary-empty" />
+            )}
+
+            {/* Legend */}
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-2.5 h-2.5 rounded-sm bg-green-500 flex-shrink-0" />
+                Ran OK {ok} · {okPct}%
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-500 flex-shrink-0" />
+                Needs work {issues} · {issuesPct}%
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-2.5 h-2.5 rounded-sm bg-gray-200 flex-shrink-0" />
+                N/A {gray} · {grayPct}%
+              </span>
+              {markedComplete > 0 && (
+                <span className="flex items-center gap-1.5" data-testid="summary-marked-complete">
+                  <span className="inline-block w-2.5 h-2.5 rounded-sm bg-blue-200 flex-shrink-0" />
+                  Marked complete {markedComplete}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Controller cards ──────────────────────────────────────────────── */}
+      <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Controllers</h2>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {controllers.map(c => {
           const recs = zonesByLetter(c.controllerLetter);
           const ok = recs.filter(r => r.status === "checked_ok").length;
           const issues = recs.filter(r => r.status === "checked_with_issues").length;
-          const na = recs.filter(r => r.status === "not_applicable").length;
-          const photoCount = recs.reduce(
-            (n, r) => n + countZonePhotos(wc, r),
-            0,
-          );
-          // Task #612 — surface the total work items on the controller
-          // tile so a tech scanning the grid sees which controllers
-          // have findings attached before drilling in.
-          const findingCount = recs.reduce(
-            (n, r) => n + asArray(r.findings).length,
-            0,
-          );
+          const gray = Math.max(0, c.zoneCount - ok - issues);
+          const total = ok + issues + gray;
+          const photoCount = recs.reduce((n, r) => n + countZonePhotos(wc, r), 0);
+          const findingCount = recs.reduce((n, r) => n + asArray(r.findings).length, 0);
+
+          // Left-edge accent: red if has needs-work, gray if no zones actively checked, green otherwise.
+          // "Not inspected" means no zone has been checked_ok or checked_with_issues;
+          // not_applicable / not_checked both map to gray and do not count as inspected.
+          const hasAnyCheckedZone = recs.some(r => r.status === "checked_ok" || r.status === "checked_with_issues");
+          const accentClass = issues > 0
+            ? "border-l-red-500"
+            : !hasAnyCheckedZone
+            ? "border-l-gray-300"
+            : "border-l-green-500";
+
+          // Status pill
+          const ctrlStatusPill = issues > 0
+            ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200">{issues} need work</span>
+            : !hasAnyCheckedZone
+            ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 border border-gray-200">Not inspected</span>
+            : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">All OK</span>;
+
+          // Mini health bar percentages
+          const okPct = total > 0 ? Math.round((ok / total) * 100) : 0;
+          const issPct = total > 0 ? Math.round((issues / total) * 100) : 0;
+          const grayPct = total > 0 ? Math.max(0, 100 - okPct - issPct) : 100;
+
           return (
-            <Card
+            <div
               key={c.controllerLetter}
-              className="cursor-pointer hover:bg-blue-50 active:bg-blue-100 transition-colors"
+              className={`rounded-xl border-l-4 border border-gray-200 bg-white shadow-sm cursor-pointer hover:shadow-md active:scale-[0.99] transition-all overflow-hidden ${accentClass}`}
               onClick={() => setActiveLetter(c.controllerLetter)}
               data-testid={`controller-${c.controllerLetter}`}
             >
-              <CardContent className="py-3 px-3 sm:py-4 sm:px-6">
-                <div className="text-xl sm:text-2xl font-bold">
-                  <span className="sm:hidden">Ctrl {c.controllerLetter}</span>
-                  <span className="hidden sm:inline">Controller {c.controllerLetter}</span>
+              <div className="px-4 pt-3 pb-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="font-semibold text-gray-900">Controller {c.controllerLetter}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">{c.zoneCount} zones</div>
+                  </div>
+                  {ctrlStatusPill}
                 </div>
-                <div className="text-xs text-gray-600">{c.zoneCount} zones</div>
-                <div className="mt-2 text-xs flex gap-2 sm:gap-3 flex-wrap items-center">
-                  <span className="text-green-700">✓ {ok}</span>
-                  <span className="text-red-700">! {issues}</span>
-                  <span className="text-gray-500">N/A {na}</span>
-                  {findingCount > 0 && (
-                    <span
-                      className="inline-flex items-center gap-0.5 text-red-700 font-medium"
-                      data-testid={`controller-${c.controllerLetter}-finding-count`}
-                      aria-label={`${findingCount} work item${findingCount === 1 ? "" : "s"} on this controller`}
-                    >
-                      <Wrench className="w-3 h-3" aria-hidden />
-                      {findingCount}
-                    </span>
-                  )}
+
+                {/* Mini stacked health bar */}
+                <div className="mt-3 flex h-2 rounded-full overflow-hidden w-full gap-px bg-gray-100">
+                  {ok > 0 && <div className="bg-green-500" style={{ width: `${okPct}%` }} />}
+                  {issues > 0 && <div className="bg-red-500" style={{ width: `${issPct}%` }} />}
+                  {grayPct > 0 && <div className="bg-gray-200" style={{ width: `${grayPct}%` }} />}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="px-4 py-2 border-t border-gray-100 flex items-center justify-between gap-2 text-xs text-gray-500">
+                <div className="flex items-center gap-3">
+                  <span className="flex items-center gap-0.5 text-green-700" data-testid={`controller-${c.controllerLetter}-ok`}>
+                    <CheckCircle2 className="w-3 h-3" aria-hidden /> {ok}
+                  </span>
+                  <span
+                    className="flex items-center gap-0.5 text-red-700"
+                    data-testid={`controller-${c.controllerLetter}-finding-count`}
+                    aria-label={`${findingCount} work item${findingCount !== 1 ? "s" : ""} on this controller`}
+                  >
+                    <Wrench className="w-3 h-3" aria-hidden /> {findingCount}
+                  </span>
                   {photoCount > 0 && (
                     <span
-                      className="inline-flex items-center gap-0.5 text-gray-700"
+                      className="flex items-center gap-0.5"
                       data-testid={`controller-${c.controllerLetter}-photo-count`}
-                      aria-label={`${photoCount} photo${photoCount === 1 ? "" : "s"} on this controller`}
+                      aria-label={`${photoCount} photo${photoCount !== 1 ? "s" : ""} on this controller`}
                     >
-                      <Camera className="w-3 h-3" aria-hidden />
-                      {photoCount}
+                      <Camera className="w-3 h-3" aria-hidden /> {photoCount}
                     </span>
                   )}
                 </div>
-              </CardContent>
-            </Card>
+                <span className="text-blue-600 font-medium flex items-center gap-0.5">
+                  View zones →
+                </span>
+              </div>
+            </div>
           );
         })}
       </div>
