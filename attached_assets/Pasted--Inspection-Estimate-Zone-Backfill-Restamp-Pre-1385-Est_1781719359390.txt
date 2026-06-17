@@ -1,0 +1,47 @@
+# Inspection Estimate — Zone Backfill (Restamp Pre-#1385 Estimate Items)
+
+**What & Why**
+The zone-grouped estimate PDF only renders for estimates whose line items carry `controllerLetter` / `zoneNumber` (`isInspectionOriginEstimate` in `estimate-pdf-html.ts`). Inspection estimates generated **before** Task #1385 (e.g. EST-50009 / Tanglewood) have those columns null, so they correctly fall back to the flat layout. This backfill re-stamps those existing estimates' items with controller / zone / issue + per-line labor from their **source wet-check findings**, so the back catalog gets the zone-grouped treatment too.
+
+**Invariant: totals must not change.** The backfill only adds zone context and redistributes labor *per line*; the estimate's parts subtotal, total labor hours, and grand total must stay identical to what's stored. Any estimate where regeneration would change the totals is **skipped and reported**, not silently mutated.
+
+Single slice, read-then-write script. No schema change (#1385 added the columns).
+
+---
+
+## Done looks like
+- Each inspection-origin estimate (`originWetCheckId IS NOT NULL`) whose items lack zone data has its items re-stamped with `controllerLetter`, `zoneNumber`, `issueType`, and per-line `laborHours`, **merged by zone** the same way new generation does — and its PDF now renders zone-grouped.
+- Parts subtotal, total labor hours, and grand total are **unchanged** for every backfilled estimate.
+- Estimates that already have zone data (post-#1385) are skipped.
+- Any estimate whose regenerated totals would differ from stored is skipped and listed for manual review (e.g. source findings changed after the estimate was made).
+- A dry-run report runs first; nothing mutates without `--apply`.
+
+## Steps
+1. **Share the item-build logic.** Extract the zone-stamping + merge-by-`(controllerLetter, zoneNumber, partId/partName, issueType)` logic from the live inspection-estimate generator (storage.ts ~9325–9360) into a shared helper (if not already), so the backfill and live generation produce byte-identical items and can never drift.
+2. **Add script** `artifacts/api-server/scripts/backfill-inspection-estimate-zones.ts`:
+   - Select estimates where `originWetCheckId IS NOT NULL` and **no** item has `controllerLetter`/`zoneNumber`.
+   - For each: load the source wet check's findings, build the zone-stamped, merged item set via the shared helper.
+   - **Verify** the regenerated parts subtotal and total labor hours equal the estimate's stored values (within rounding). 
+     - Match → in a transaction, replace the estimate's items with the zone-stamped set (preserving `partName`/`partPrice`/`quantity`/`totalPrice`; adding `controllerLetter`/`zoneNumber`/`issueType`/per-line `laborHours`). Do **not** touch the estimate header totals.
+     - Mismatch → skip; record `{estimateId, storedTotals, regenTotals}` for the report.
+   - `--dry-run` (default): print per-estimate report (id, # items old→new, parts/labor old vs new, MATCH/SKIP) and a summary; mutate nothing.
+   - `--apply`: commit matches; still print the report. Batched + resumable (`--batch`, a `backfill.done`/`failed` settings key like the earlier finding backfill).
+3. **Guard rails:** never alter an estimate's financial totals; skip (don't fail) on any per-estimate error; log every skip with the reason.
+
+## Tests
+- A pre-#1385 inspection estimate with matching regen totals → items gain zone/issue/labor; totals identical; PDF now groups by zone.
+- An estimate whose source findings changed (totals would differ) → skipped, reported, untouched.
+- A post-#1385 estimate (already zoned) → skipped.
+- A non-inspection estimate (`originWetCheckId` null) → never selected.
+- Dry-run mutates nothing.
+
+## Out of scope
+- The PDF rendering and the live generation (already shipped, #1385/#1386).
+- Changing any estimate's pricing/totals.
+- Non-inspection estimates.
+
+## Relevant files
+- `artifacts/api-server/scripts/backfill-inspection-estimate-zones.ts` (new)
+- `artifacts/api-server/src/storage.ts` (inspection estimate generator ~9325 — extract/reuse the item-build helper)
+- `artifacts/api-server/src/estimate-pdf-html.ts` (`isInspectionOriginEstimate` — the gate the backfill satisfies)
+- `lib/db/src/schema/schema.ts` (reference: `estimate_items.controllerLetter/zoneNumber/issueType`, `wet_check_findings`)
