@@ -1,5 +1,7 @@
-import { Search } from "lucide-react";
+import { useState } from "react";
+import { Search, SlidersHorizontal, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -8,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 
 export const WC_STATUS_OPTIONS = [
   { value: "all", label: "All statuses" },
@@ -22,6 +25,17 @@ export const WC_STATUS_OPTIONS = [
   { value: "converted", label: "Converted" },
   { value: "billed", label: "Billed" },
 ] as const;
+
+const GRANULAR_STATUS_OPTIONS: { value: string; label: string }[] = [
+  { value: "in_progress", label: "In Progress" },
+  { value: "submitted", label: "Submitted" },
+  { value: "pending_manager_review", label: "Pending Manager Review" },
+  { value: "approved", label: "Approved" },
+  { value: "approved_passed_to_billing", label: "Approved — Passed to Billing" },
+  { value: "partially_converted", label: "Partially Converted" },
+  { value: "converted", label: "Converted" },
+  { value: "billed", label: "Billed" },
+];
 
 export type WcCounts = {
   needsReview: number;
@@ -89,14 +103,23 @@ function WcStatusTabs({
   status,
   onStatusChange,
   counts,
+  granularActive,
+  moreFiltersOpen,
+  onToggleMoreFilters,
 }: {
   status: string;
   onStatusChange: (v: string) => void;
   counts?: WcCounts;
+  granularActive: boolean;
+  moreFiltersOpen: boolean;
+  onToggleMoreFilters: () => void;
 }) {
   return (
-    <div className="relative">
-      <div className="overflow-x-auto scrollbar-none" style={{ maskImage: "linear-gradient(to right, transparent 0%, black 3%, black 94%, transparent 100%)" }}>
+    <div className="relative flex items-center gap-2">
+      <div
+        className="overflow-x-auto scrollbar-none flex-1 min-w-0"
+        style={{ maskImage: "linear-gradient(to right, transparent 0%, black 3%, black 94%, transparent 100%)" }}
+      >
         <div className="flex items-center gap-2 whitespace-nowrap pb-0.5 px-1">
           {TABS.map((tab) => {
             const isActive = status === tab.value;
@@ -135,6 +158,100 @@ function WcStatusTabs({
           })}
         </div>
       </div>
+
+      <button
+        type="button"
+        onClick={onToggleMoreFilters}
+        data-testid="button-wc-more-filters-toggle"
+        title={moreFiltersOpen ? "Hide granular filters" : "More filters"}
+        className={[
+          "flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
+          moreFiltersOpen || granularActive
+            ? "bg-violet-600 text-white border-violet-600 shadow-sm"
+            : "bg-white text-gray-600 border-gray-300 hover:bg-gray-100",
+        ].join(" ")}
+      >
+        <SlidersHorizontal className="h-3.5 w-3.5" />
+        <span className="hidden sm:inline">More filters</span>
+      </button>
+    </div>
+  );
+}
+
+function MoreFiltersPanel({
+  granularStatuses,
+  onToggle,
+  onClear,
+}: {
+  granularStatuses: Set<string>;
+  onToggle: (value: string) => void;
+  onClear: () => void;
+}) {
+  const activeCount = granularStatuses.size;
+
+  return (
+    <div
+      className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 space-y-3"
+      data-testid="wc-more-filters-panel"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-violet-800">Filter by specific status</span>
+          {activeCount > 0 && (
+            <Badge
+              variant="secondary"
+              className="bg-violet-100 text-violet-700 border border-violet-300 text-xs"
+              data-testid="badge-wc-granular-active-count"
+            >
+              {activeCount} active
+            </Badge>
+          )}
+        </div>
+        {activeCount > 0 && (
+          <button
+            type="button"
+            onClick={onClear}
+            data-testid="button-wc-granular-clear"
+            className="inline-flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 font-medium"
+          >
+            <X className="h-3 w-3" />
+            Clear
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+        {GRANULAR_STATUS_OPTIONS.map((opt) => {
+          const checked = granularStatuses.has(opt.value);
+          return (
+            <label
+              key={opt.value}
+              data-testid={`label-wc-granular-${opt.value}`}
+              className={[
+                "flex items-center gap-2 rounded-md border px-3 py-2 text-sm cursor-pointer transition-colors select-none",
+                checked
+                  ? "border-violet-400 bg-violet-100 text-violet-800 font-medium"
+                  : "border-gray-200 bg-white text-gray-700 hover:border-violet-300 hover:bg-violet-50",
+              ].join(" ")}
+            >
+              <Checkbox
+                checked={checked}
+                onCheckedChange={() => onToggle(opt.value)}
+                data-testid={`checkbox-wc-granular-${opt.value}`}
+                className="data-[state=checked]:bg-violet-600 data-[state=checked]:border-violet-600"
+              />
+              <span className="leading-tight">{opt.label}</span>
+            </label>
+          );
+        })}
+      </div>
+
+      {activeCount === 0 && (
+        <p className="text-xs text-violet-600/70">
+          Select one or more statuses to narrow the list. The tab strip filters by
+          broad bucket; these let you target individual sub-statuses.
+        </p>
+      )}
     </div>
   );
 }
@@ -164,10 +281,70 @@ export function WetCheckFilterBar({
   companies = [],
   counts,
 }: WetCheckFilterBarProps) {
+  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
+  const [granularStatuses, setGranularStatuses] = useState<Set<string>>(new Set());
+  const [lastTabValue, setLastTabValue] = useState(status);
+
+  const granularActive = granularStatuses.size > 0;
+
+  function handleTabChange(v: string) {
+    setGranularStatuses(new Set());
+    setLastTabValue(v);
+    onStatusChange(v);
+  }
+
+  function handleToggleMoreFilters() {
+    const willOpen = !moreFiltersOpen;
+    setMoreFiltersOpen(willOpen);
+    if (!willOpen && granularActive) {
+      setGranularStatuses(new Set());
+      onStatusChange(lastTabValue);
+    }
+  }
+
+  function handleGranularToggle(value: string) {
+    setGranularStatuses((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) {
+        next.delete(value);
+      } else {
+        next.add(value);
+      }
+      if (next.size === 0) {
+        onStatusChange(lastTabValue);
+      } else {
+        onStatusChange([...next].join(","));
+      }
+      return next;
+    });
+  }
+
+  function handleGranularClear() {
+    setGranularStatuses(new Set());
+    onStatusChange(lastTabValue);
+  }
+
+  const effectiveTabStatus = granularActive ? "all" : status;
+
   return (
     <Card data-testid="wc-filter-bar">
       <CardContent className="pt-4 flex flex-col gap-3">
-        <WcStatusTabs status={status} onStatusChange={onStatusChange} counts={counts} />
+        <WcStatusTabs
+          status={effectiveTabStatus}
+          onStatusChange={handleTabChange}
+          counts={counts}
+          granularActive={granularActive}
+          moreFiltersOpen={moreFiltersOpen}
+          onToggleMoreFilters={handleToggleMoreFilters}
+        />
+
+        {moreFiltersOpen && (
+          <MoreFiltersPanel
+            granularStatuses={granularStatuses}
+            onToggle={handleGranularToggle}
+            onClear={handleGranularClear}
+          />
+        )}
 
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           <div className="relative flex-1 min-w-[180px]">
