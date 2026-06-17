@@ -532,9 +532,19 @@ export const estimateItems = pgTable("estimate_items", {
   quantity: integer("quantity").notNull(),
   // Task #396 — per-line labor hours are 0 in flat mode. Default 0 so
   // flat-mode payloads can omit them.
+  // Exception: inspection-origin estimate items carry the finding's real
+  // laborHours so Slice 2 PDF can render a per-zone labor breakdown. The
+  // financial math (totalLaborHours × laborRate) is still driven by the
+  // estimate-level header aggregate — per-line hours here are display-only.
   laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull().default("0.00"),
   totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
   sortOrder: integer("sort_order").notNull().default(0),
+  // Task #1385 — zone context for inspection-origin estimate items.
+  // Null on all manually-created estimate items; populated only when the
+  // item was generated from an inspection wet check finding.
+  controllerLetter: text("controller_letter"),
+  zoneNumber: integer("zone_number"),
+  issueType: text("issue_type"),
 });
 
 

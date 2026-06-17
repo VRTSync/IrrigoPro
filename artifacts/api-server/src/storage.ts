@@ -146,6 +146,7 @@ import { sql, eq, like, ilike, desc, and, gte, lte, or, isNull, inArray, gt } fr
 import bcrypt from "bcrypt";
 import { processEstimatePayload, type EstimatePayloadInput } from "./estimate-payload";
 import { applyNoPartNeededInvariant } from "./storage/wet-check-finding-invariants";
+import { humanizeIssueType } from "./inspection-issue-labels";
 import {
   computeLifecycleStatus,
   deriveLifecycleForWrite,
@@ -9206,37 +9207,101 @@ export class DatabaseStorage implements IStorage {
       if (!cust) throw new Error(`Customer ${wc.customerId} not found for wet check #${wcId}`);
       const laborRate = parseFloat(String(cust.laborRate ?? "45.00")) || 45;
 
-      // 4. Load findings.
+      // 4. Load findings with zone context.
       const allFindings = await tx.select().from(wetCheckFindings)
         .where(eq(wetCheckFindings.wetCheckId, wcId));
 
-      // 5. Build estimate line items from ALL findings.
+      // Load the zone records so each finding can be stamped with
+      // controllerLetter / zoneNumber (findings reference zone records via FK).
+      const zoneRecordIds = [...new Set(allFindings.map((f) => f.zoneRecordId))];
+      const zoneRecords = zoneRecordIds.length > 0
+        ? await tx.select().from(wetCheckZoneRecords)
+          .where(inArray(wetCheckZoneRecords.id, zoneRecordIds))
+        : [];
+      const zoneByRecordId = new Map(zoneRecords.map((z) => [z.id, z]));
+
+      // 5. Build merged estimate line items from ALL findings.
       // Inspection mode is documentation-first: every finding becomes a line
       // item regardless of whether a part was assigned. Part price is included
-      // when available; labor is captured at the flat header level only (flat
-      // mode per Task #657). Zero-price / no-part findings still appear so the
-      // manager can see everything that was documented and edit before approval.
+      // when available; laborHours is carried from the finding so Slice 2 PDF
+      // can render a per-zone labor breakdown (financial math is still driven
+      // by the flat estimate-level totalLaborHours header).
+      //
+      // Within a zone, findings with the same
+      //   (controllerLetter, zoneNumber, partId/partName, issueType)
+      // are merged into one row (quantity + laborHours summed).
       const now = new Date();
       const totalLaborHours = allFindings.reduce(
         (s, f) => s + (parseFloat(String(f.laborHours ?? "0")) || 0),
         0,
       );
-      const lineItems: (typeof estimateItems.$inferInsert)[] = allFindings
-        .map((f, idx) => {
-          const partPrice = parseFloat(String(f.partPrice ?? "0")) || 0;
-          const qty = f.quantity ?? 1;
-          return {
-            description: f.notes ?? f.issueType ?? "Finding",
+
+      type MergedItem = {
+        controllerLetter: string | null;
+        zoneNumber: number | null;
+        issueType: string | null;
+        partId: number | null;
+        partName: string;
+        partPrice: number;
+        quantity: number;
+        laborHours: number;
+        description: string;
+      };
+      // Merge key: pipe-separated (controllerLetter|zoneNumber|partId|partName|issueType)
+      const mergeMap = new Map<string, MergedItem>();
+
+      for (const f of allFindings) {
+        const zone = zoneByRecordId.get(f.zoneRecordId);
+        const controllerLetter = zone?.controllerLetter ?? null;
+        const zoneNumber = zone?.zoneNumber ?? null;
+        // Use catalog part name when present; humanize the issue type for
+        // labor-only / no-part findings so raw enum strings never reach the UI.
+        const resolvedPartName = f.partName ?? humanizeIssueType(f.issueType);
+        const partPrice = parseFloat(String(f.partPrice ?? "0")) || 0;
+        const qty = f.quantity ?? 1;
+        const labor = parseFloat(String(f.laborHours ?? "0")) || 0;
+
+        const key = `${controllerLetter ?? ""}|${zoneNumber ?? ""}|${f.partId ?? ""}|${resolvedPartName}|${f.issueType}`;
+        const existing = mergeMap.get(key);
+        if (existing) {
+          existing.quantity += qty;
+          existing.laborHours += labor;
+        } else {
+          mergeMap.set(key, {
+            controllerLetter,
+            zoneNumber,
+            issueType: f.issueType,
             partId: f.partId ?? null,
-            partName: f.partName ?? f.issueType ?? null,
-            partPrice: partPrice.toFixed(2),
-            // Flat mode — individual labor hours appear on the header only.
-            laborHours: "0.00",
+            partName: resolvedPartName,
+            partPrice,
             quantity: qty,
-            totalPrice: (partPrice * qty).toFixed(2),
-            sortOrder: idx,
-          } as typeof estimateItems.$inferInsert;
-        });
+            laborHours: labor,
+            description: f.notes ?? resolvedPartName,
+          });
+        }
+      }
+
+      // Sort by controller → zone → partName for stable display order.
+      const sortedItems = [...mergeMap.values()].sort((a, b) => {
+        const cl = (a.controllerLetter ?? "").localeCompare(b.controllerLetter ?? "");
+        if (cl !== 0) return cl;
+        return (a.zoneNumber ?? 0) - (b.zoneNumber ?? 0);
+      });
+
+      const lineItems: (typeof estimateItems.$inferInsert)[] = sortedItems
+        .map((item, idx) => ({
+          description: item.description,
+          partId: item.partId,
+          partName: item.partName,
+          partPrice: item.partPrice.toFixed(2),
+          laborHours: item.laborHours.toFixed(2),
+          quantity: item.quantity,
+          totalPrice: (item.partPrice * item.quantity).toFixed(2),
+          sortOrder: idx,
+          controllerLetter: item.controllerLetter,
+          zoneNumber: item.zoneNumber,
+          issueType: item.issueType,
+        } as typeof estimateItems.$inferInsert));
 
       const partsSubtotal = lineItems.reduce(
         (s, it) => s + parseFloat(String(it.totalPrice ?? "0")), 0,
