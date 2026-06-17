@@ -76,11 +76,12 @@ function makeEdits(f: WetCheckFindingWithReason, configs: IssueTypeConfig[]): Fi
 
 // ─── Resolution badge ─────────────────────────────────────────────────────────
 const RESOLUTION_BADGE: Record<string, { label: string; className: string }> = {
-  pending:                { label: "Pending",     className: "bg-amber-50 text-amber-700 border-amber-200" },
-  sent_to_estimate:       { label: "Estimate",    className: "bg-blue-50 text-blue-700 border-blue-200" },
-  deferred_to_work_order: { label: "Work Order",  className: "bg-purple-50 text-purple-700 border-purple-200" },
-  documented_only:        { label: "Documented",  className: "bg-gray-100 text-gray-700 border-gray-300" },
-  repaired_in_field:      { label: "Auto-billed", className: "bg-green-50 text-green-700 border-green-200" },
+  pending:                { label: "Pending",                className: "bg-amber-50 text-amber-700 border-amber-200" },
+  sent_to_estimate:       { label: "Estimate",               className: "bg-blue-50 text-blue-700 border-blue-200" },
+  deferred_to_work_order: { label: "Work Order",             className: "bg-purple-50 text-purple-700 border-purple-200" },
+  documented_only:        { label: "Documented",             className: "bg-gray-100 text-gray-700 border-gray-300" },
+  repaired_in_field:      { label: "Auto-billed",            className: "bg-green-50 text-green-700 border-green-200" },
+  completed_in_field:     { label: "Auto-billed → snapshot", className: "bg-green-50 text-green-700 border-green-200" },
 };
 
 // ─── Sidebar finding card ─────────────────────────────────────────────────────
@@ -88,12 +89,14 @@ function SidebarFindingCard({
   item,
   isActive,
   isAutoBilled,
+  isCompletedInField,
   issueConfigs,
   onClick,
 }: {
   item: FindingItem;
   isActive: boolean;
   isAutoBilled: boolean;
+  isCompletedInField: boolean;
   issueConfigs: IssueTypeConfig[];
   onClick: () => void;
 }) {
@@ -102,7 +105,8 @@ function SidebarFindingCard({
   const issueLabel = cfg?.displayLabel ?? f.issueType.replace(/_/g, " ");
   const zoneLabel = `${zr.controllerLetter ?? ""}${zr.zoneNumber ?? ""}`;
   const resolution = f.resolution ?? "pending";
-  const badge = RESOLUTION_BADGE[isAutoBilled ? "repaired_in_field" : resolution] ?? RESOLUTION_BADGE.pending;
+  const badgeKey = isAutoBilled ? "repaired_in_field" : isCompletedInField ? "completed_in_field" : resolution;
+  const badge = RESOLUTION_BADGE[badgeKey] ?? RESOLUTION_BADGE.pending;
 
   return (
     <button
@@ -163,7 +167,7 @@ function SidebarFindingCard({
           className={`text-[10px] shrink-0 ${badge.className}`}
           data-testid={`sidebar-finding-${f.id}-badge`}
         >
-          {isAutoBilled ? "Auto-billed" : badge.label}
+          {badge.label}
         </Badge>
       </div>
     </button>
@@ -171,17 +175,31 @@ function SidebarFindingCard({
 }
 
 // ─── Read-only auto-billed panel ───────────────────────────────────────────────
-function AutoBilledPanel({ item, customerLaborRate }: { item: FindingItem; customerLaborRate: number }) {
+function AutoBilledPanel({
+  item,
+  customerLaborRate,
+  isPendingConvert = false,
+}: {
+  item: FindingItem;
+  customerLaborRate: number;
+  isPendingConvert?: boolean;
+}) {
   const { f, zr } = item;
   const total = lineTotalFinding(f, customerLaborRate);
-  const reason = f.pendingReason ?? "Auto-billed when tech submitted";
+  const reason = isPendingConvert
+    ? "Will land in WCB snapshot on Approve & Convert"
+    : (f.pendingReason ?? "Auto-billed when tech submitted");
+  const title = isPendingConvert ? "Auto-billed → snapshot" : "Auto-billed in field";
+  const body = isPendingConvert
+    ? "The tech completed this in the field. It will be routed into the billing sheet snapshot automatically when you Approve & Convert. No manager decision is required."
+    : "The tech repaired this issue and billed it on-site. No manager decision is required.";
   return (
     <div className="flex flex-col items-center justify-center h-full py-12 text-center space-y-3 px-4">
       <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
         <CheckCircle2 className="w-6 h-6 text-green-600" />
       </div>
       <div>
-        <div className="font-semibold text-gray-900">Auto-billed in field</div>
+        <div className="font-semibold text-gray-900">{title}</div>
         <div className="text-sm text-gray-500 mt-0.5">
           Controller {zr.controllerLetter} · Zone {zr.zoneNumber}
         </div>
@@ -197,7 +215,7 @@ function AutoBilledPanel({ item, customerLaborRate }: { item: FindingItem; custo
         {reason}
       </div>
       <p className="text-xs text-gray-500 max-w-xs">
-        The tech repaired this issue and billed it on-site. No manager decision is required.
+        {body}
       </p>
     </div>
   );
@@ -501,7 +519,12 @@ export function WetCheckWizard({ id }: { id: number }) {
         : (pendingFindings[0] ?? null));
 
   const isActiveFindingAutoBilled = active
-    ? autoBilled.some(({ f }) => f.id === active.f.id)
+    ? autoBilled.some(({ f }) => f.id === active.f.id) ||
+      unroutedCompletedInField.some(({ f }) => f.id === active.f.id)
+    : false;
+
+  const isActivePendingConvert = active
+    ? unroutedCompletedInField.some(({ f }) => f.id === active.f.id)
     : false;
 
   const isActiveFindingConverted = active
@@ -1021,12 +1044,14 @@ export function WetCheckWizard({ id }: { id: number }) {
           )}
           {sortedFindings.map(item => {
             const isAutoBilled = autoBilled.some(({ f }) => f.id === item.f.id);
+            const isCompletedInField = unroutedCompletedInField.some(({ f }) => f.id === item.f.id);
             return (
               <SidebarFindingCard
                 key={item.f.id}
                 item={item}
                 isActive={active?.f.id === item.f.id}
                 isAutoBilled={isAutoBilled}
+                isCompletedInField={isCompletedInField}
                 issueConfigs={issueConfigs}
                 onClick={() => {
                   setActiveId(item.f.id);
@@ -1049,7 +1074,7 @@ export function WetCheckWizard({ id }: { id: number }) {
               Select a finding from the left panel to begin.
             </div>
           ) : isActiveFindingAutoBilled ? (
-            <AutoBilledPanel item={active} customerLaborRate={customerLaborRate} />
+            <AutoBilledPanel item={active} customerLaborRate={customerLaborRate} isPendingConvert={isActivePendingConvert} />
           ) : isActiveFindingConverted ? (
             <ConvertedFindingPanel item={active} />
           ) : (
