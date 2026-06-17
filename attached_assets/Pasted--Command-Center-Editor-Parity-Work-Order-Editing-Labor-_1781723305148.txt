@@ -1,0 +1,77 @@
+# Command Center Editor Parity — Work Order Editing + Labor Recalc
+
+**What & Why**
+The goal was to make **work order** inline editing in the billing-manager **Command Center** match **billing sheet** editing — full parts editing (incl. the parts library), editable labor, and live recalculation when labor changes. That work was built, but it landed on the **wrong, orphaned component**, so none of it shows in the Command Center.
+
+**Root cause:** the Command Center renders `components/billing/completed-work-detail-modal.tsx` (its `PartsListEditorDialog` + "Time & Labor" section). But the rich editing was built into `components/billing-workspace/line-items-editor.tsx` and `detail-pane-inline.tsx` — the old Manager Workspace inline cockpit, which was **removed** in the Manager Workspace Simplification and now has **zero importers**. So:
+- `#1391` (Add-from-Library `PartPicker` + catalog indicators) → built in the orphaned `line-items-editor`; the live `PartsListEditorDialog` only has a basic `<datalist>` autocomplete.
+- `#1315` (editable labor + recalc on rate/hours change) → built in the orphaned editor; the live modal's Time & Labor section is **display-only** (`<p>` values), and its `RateModeToggle` is gated to `bs?.rateMode` so it doesn't work for work orders.
+
+**Fix:** port the already-built capabilities into the *live* `completed-work-detail-modal.tsx` so they work for **both** work orders and billing sheets (the modal already serves both), then delete the orphaned components. The backend recompute endpoints (#1315/#1395: `replaceWorkOrderItemsWithResync`, `recomputeWorkOrderTotalsForRateMode`, and BS equivalents) are live and shared — reuse them; don't rebuild.
+
+Three slices. No schema change. Command Center page file (`customer-billing.tsx`) is **not** modified — only the modal it renders.
+
+---
+
+## Slice 1 — Parts editing parity (Add-from-Library picker)
+
+### Files
+- `artifacts/irrigopro/src/components/billing/completed-work-detail-modal.tsx` (`PartsListEditorDialog`)
+- Reference (source to port from): `components/billing-workspace/line-items-editor.tsx`
+- `components/parts/part-picker.tsx` (`PartPicker`)
+
+### Concrete changes
+- Add the **"Add from Library"** button + `PartPicker` modal to `PartsListEditorDialog`, porting `handleSelectFromLibrary` (insert a row with the selected `partId`/`partName`/`unitPrice`) and the "from catalog" row indicator from the orphaned `line-items-editor`. Keep the existing datalist autocomplete or replace it with the picker.
+- Works for both work orders and billing sheets (the dialog already PATCHes `/api/work-orders/:id/items` or `/api/billing-sheets/:id/items`).
+
+### Acceptance
+- The Command Center parts editor (WO and BS) has the Add-from-Library picker and catalog indicators; selecting a library part adds it as an editable line.
+
+---
+
+## Slice 2 — Labor editing + live recalc, for work orders too
+
+### Files
+- `completed-work-detail-modal.tsx` (Time & Labor section ~1357; rate/labor wiring ~714–784)
+- `components/billing-workspace/rate-mode-toggle.tsx` (reference)
+- Backend (reuse, no change unless a WO endpoint is missing): `storage.ts` `replaceWorkOrderItemsWithResync` / `recomputeWorkOrderTotalsForRateMode` and BS equivalents.
+
+### Concrete changes
+- **Make labor editable for both types.** The Time & Labor section currently renders `totalHours` / `laborRate` / `laborSubtotal` as static text. Make labor hours (and rate where the role allows) **editable** for work orders the same as billing sheets — using the existing `EditableField` pattern already in the modal.
+- **Un-gate the `RateModeToggle` from billing sheets.** It's currently shaped with `bs?.rateMode` (line ~1382), so it no-ops for work orders. Drive it from the entity's own rate mode for both types (`isWorkOrder ? wo?.rateMode : bs?.rateMode`) and call the WO recompute path (`recomputeWorkOrderTotalsForRateMode`) for work orders.
+- **Recalculate on every labor edit.** Whenever labor hours, labor rate, rate mode, or line items change, recompute the labor subtotal and grand total — via the existing server resync endpoints (which already recompute `laborSubtotal`/`totalAmount`) — and reflect the new totals in the modal without a manual refresh. Mirror exactly what the billing-sheet path does today.
+- Respect existing locks: no edits on `billed` / `invoiceId`-set records.
+
+### Acceptance
+- A work order in the Command Center can edit labor hours, labor rate, and rate mode exactly like a billing sheet.
+- Changing labor (hours / rate / mode) or items immediately recomputes labor subtotal and grand total.
+- Locked (billed/invoiced) records remain read-only.
+
+---
+
+## Slice 3 — Delete the orphaned editor
+
+### Files
+- Delete `components/billing-workspace/detail-pane-inline.tsx` and `components/billing-workspace/line-items-editor.tsx` (zero importers — confirm with a repo-wide grep first).
+- Remove any imports/tests that referenced only these.
+
+### Concrete changes
+- After Slices 1–2 port the useful logic, delete both orphaned components so future "parity" work can't land on dead code again.
+- **Keep** the backend additions from #1315/#1395 (the items-resync / recompute endpoints and `routes.ts`/`storage.ts` changes) — those are live and used by the Command Center modal.
+
+### Acceptance
+- `detail-pane-inline.tsx` and `line-items-editor.tsx` are gone; build/typecheck clean; no broken imports.
+
+---
+
+## Out of scope
+- `customer-billing.tsx` (the Command Center page) — unchanged; only the modal it renders.
+- The backend recompute/resync endpoints (reused as-is).
+- Wet check snapshot / estimate editors.
+
+## Relevant files
+- `artifacts/irrigopro/src/components/billing/completed-work-detail-modal.tsx` (the LIVE editor — all the work goes here)
+- `artifacts/irrigopro/src/components/billing-workspace/line-items-editor.tsx` + `detail-pane-inline.tsx` (orphaned — port from, then delete)
+- `artifacts/irrigopro/src/components/parts/part-picker.tsx`
+- `artifacts/irrigopro/src/components/billing-workspace/rate-mode-toggle.tsx`
+- `artifacts/api-server/src/storage.ts` (`replaceWorkOrderItemsWithResync`, `recomputeWorkOrderTotalsForRateMode`, BS equivalents)
