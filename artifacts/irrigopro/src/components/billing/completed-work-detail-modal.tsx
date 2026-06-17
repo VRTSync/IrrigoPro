@@ -826,6 +826,14 @@ export function CompletedWorkDetailModal({
   const completedBy = isWorkOrder ? wo?.completedByUserName : null;
   const workDescription = isWorkOrder ? wo?.description : bs?.workDescription;
   const totalHours = isWorkOrder ? wo?.totalHours : bs?.totalHours;
+  // Immediately reflect computed totals returned by dedicated WO save endpoints
+  // (labor-hours, labor-rate) so the open modal doesn't wait for parent refetch.
+  // Declared here (before first use below) to avoid a temporal-dead-zone crash.
+  const [localWoTotals, setLocalWoTotals] = useState<{
+    laborRate?: string | null;
+    laborSubtotal?: string | null;
+    totalAmount?: string | null;
+  } | null>(null);
   // For WOs, prefer localWoTotals (immediately set from dedicated-endpoint responses)
   // over the prop value so totals reflect edits before the parent query refetches.
   const laborRate = canSeePricing
@@ -1019,14 +1027,8 @@ export function CompletedWorkDetailModal({
 
   const [fieldOverrides, setFieldOverrides] = useState<Record<string, string>>({});
 
-  // Immediately reflect computed totals returned by dedicated WO save endpoints
-  // (labor-hours, labor-rate) so the open modal doesn't wait for parent refetch.
-  const [localWoTotals, setLocalWoTotals] = useState<{
-    laborRate?: string | null;
-    laborSubtotal?: string | null;
-    totalAmount?: string | null;
-  } | null>(null);
   // Reset local totals whenever the modal opens with a different record
+  // (localWoTotals is declared earlier, before its first use).
   useEffect(() => {
     setLocalWoTotals(null);
   }, [id, open]);

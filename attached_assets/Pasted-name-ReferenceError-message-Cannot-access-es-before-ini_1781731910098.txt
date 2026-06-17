@@ -1,0 +1,46 @@
+name: ReferenceError
+message: Cannot access 'es' before initialization
+url: https://irrigopro.com/billing/command-center?month=2026-05
+ua: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36
+time: 2026-06-17T21:31:47.014Z
+
+stack:
+ReferenceError: Cannot access 'es' before initialization
+    at Od (https://irrigopro.com/assets/index-Df1G8eU-.js:162:93193)
+    at $S (https://irrigopro.com/assets/index-Df1G8eU-.js:8:34335)
+    at XS (https://irrigopro.com/assets/index-Df1G8eU-.js:8:63197)
+    at pR (https://irrigopro.com/assets/index-Df1G8eU-.js:8:73904)
+    at UR (https://irrigopro.com/assets/index-Df1G8eU-.js:8:108242)
+    at sce (https://irrigopro.com/assets/index-Df1G8eU-.js:8:107288)
+    at wk (https://irrigopro.com/assets/index-Df1G8eU-.js:8:107114)
+    at RR (https://irrigopro.com/assets/index-Df1G8eU-.js:8:104173)
+    at nL (https://irrigopro.com/assets/index-Df1G8eU-.js:8:115947)
+    at Ng (https://irrigopro.com/assets/index-Df1G8eU-.js:8:114504)
+
+componentStack:
+
+    at Od (https://irrigopro.com/assets/index-Df1G8eU-.js:162:89618)
+    at div (<anonymous>)
+    at div (<anonymous>)
+    at Hre (https://irrigopro.com/assets/index-Df1G8eU-.js:189:116855)
+    at Ne (https://irrigopro.com/assets/index-Df1G8eU-.js:9:39134)
+    at Gm (https://irrigopro.com/assets/index-Df1G8eU-.js:9:39946)
+    at div (<anonymous>)
+    at div (<anonymous>)
+    at main (<anonymous>)
+    at https://irrigopro.com/assets/index-Df1G8eU-.js:170:52129
+    at div (<anonymous>)
+    at u (https://irrigopro.com/assets/index-Df1G8eU-.js:9:84065)
+    at RK (https://irrigopro.com/assets/index-Df1G8eU-.js:9:194758)
+    at https://irrigopro.com/assets/index-Df1G8eU-.js:170:47616
+    at div (<anonymous>)
+    at qj (https://irrigopro.com/assets/index-Df1G8eU-.js:170:73723)
+    at bZe (https://irrigopro.com/assets/index-Df1G8eU-.js:256:112443)
+    at Iu (https://irrigopro.com/assets/index-Df1G8eU-.js:9:74216)
+    at u (https://irrigopro.com/assets/index-Df1G8eU-.js:9:84065)
+    at RK (https://irrigopro.com/assets/index-Df1G8eU-.js:9:194758)
+    at VZe (https://irrigopro.com/assets/index-Df1G8eU-.js:256:125852)
+    at UH (https://irrigopro.com/assets/index-Df1G8eU-.js:9:38440)
+    at KZe (<anonymous>)
+    at mue (https://irrigopro.com/assets/index-Df1G8eU-.js:9:81281)
+    at GZe (https://irrigopro.com/assets/index-Df1G8eU-.js:256:138097)
