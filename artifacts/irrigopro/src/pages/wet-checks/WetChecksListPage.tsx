@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { DismissibleHelp } from "@/components/shared/dismissible-help";
 import { getCurrentUser } from "./helpers";
-import { WetCheckFilterBar } from "@/components/wet-checks/wet-check-filter-bar";
+import { WetCheckFilterBar, type WcCounts } from "@/components/wet-checks/wet-check-filter-bar";
 import {
   WetCheckRow,
   type WetCheckListRow,
@@ -40,7 +40,7 @@ type UserRole =
 
 function getDefaultStatus(role: UserRole): string {
   if (role === "irrigation_manager") return "submitted,pending_manager_review";
-  if (role === "billing_manager") return "approved_passed_to_billing,billed";
+  if (role === "billing_manager") return "approved,approved_passed_to_billing,partially_converted,converted";
   return "all";
 }
 
@@ -343,6 +343,18 @@ export default function WetChecksListPage({ asTab, wcbStatusMap, onViewSnapshot 
     },
   });
 
+  const { data: counts } = useQuery<WcCounts>({
+    queryKey: ["/api/wet-checks/admin/counts"],
+    queryFn: async () => {
+      try {
+        return (await apiRequest("/api/wet-checks/admin/counts", "GET")) as WcCounts;
+      } catch {
+        return { needsReview: 0, inProgress: 0, readyToBill: 0, billed: 0, all: 0 };
+      }
+    },
+    staleTime: 30_000,
+  });
+
   const reloginNotifiedRef = useRef(false);
   useEffect(() => {
     if (rawData === null && !reloginNotifiedRef.current) {
@@ -431,6 +443,7 @@ export default function WetChecksListPage({ asTab, wcbStatusMap, onViewSnapshot 
 
   function invalidateAll() {
     queryClient.invalidateQueries({ queryKey: ["/api/wet-checks/admin"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/wet-checks/admin/counts"] });
     queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
     queryClient.invalidateQueries({ queryKey: ["/api/wet-checks/pending-review"] });
   }
@@ -551,6 +564,7 @@ export default function WetChecksListPage({ asTab, wcbStatusMap, onViewSnapshot 
         company={companyFilter}
         onCompanyChange={companyColVisible ? setCompanyFilter : undefined}
         companies={companies}
+        counts={counts}
       />
 
       {selectedIds.size > 0 && bulkEnabled && (

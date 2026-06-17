@@ -15689,6 +15689,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Counts endpoint for the wet-check status tab strip. Runs a single
+  // grouped query and buckets results into the five display groups:
+  // needsReview, inProgress, readyToBill, billed, all.
+  // super_admin: global aggregate across all companies.
+  // Other allowed roles: scoped to their own company.
+  app.get("/api/wet-checks/admin/counts", requireAuthentication, async (req, res) => {
+    const role = req.authenticatedUserRole;
+    if (
+      role !== "company_admin" &&
+      role !== "super_admin" &&
+      role !== "irrigation_manager" &&
+      role !== "billing_manager"
+    ) {
+      res.status(403).json({ message: "Forbidden" });
+      return;
+    }
+    // super_admin sees all companies; everyone else must be scoped to their company.
+    let companyCondition: SQL | undefined;
+    if (role !== "super_admin") {
+      const cid = requireCompanyId(req, res);
+      if (!cid) return;
+      companyCondition = eq(wetChecks.companyId, cid);
+    }
+    try {
+      const query = db
+        .select({
+          needsReview: sql<number>`cast(count(*) filter (where ${wetChecks.status} in ('submitted','pending_manager_review')) as int)`,
+          inProgress: sql<number>`cast(count(*) filter (where ${wetChecks.status} = 'in_progress') as int)`,
+          readyToBill: sql<number>`cast(count(*) filter (where ${wetChecks.status} in ('approved','approved_passed_to_billing','partially_converted','converted')) as int)`,
+          billed: sql<number>`cast(count(*) filter (where ${wetChecks.status} = 'billed') as int)`,
+          all: sql<number>`cast(count(*) as int)`,
+        })
+        .from(wetChecks);
+      const rows = companyCondition
+        ? await query.where(companyCondition)
+        : await query;
+      const row = rows[0] ?? { needsReview: 0, inProgress: 0, readyToBill: 0, billed: 0, all: 0 };
+      res.json({
+        needsReview: Number(row.needsReview),
+        inProgress: Number(row.inProgress),
+        readyToBill: Number(row.readyToBill),
+        billed: Number(row.billed),
+        all: Number(row.all),
+      });
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "wetCheckAdminCounts",
+        ctx: { role },
+        fallbackMessage: "Couldn't load wet check counts — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
   // Company-admin-only company-wide management list. Returns every wet
   // check for the company with aggregate child counts so the admin page
   // can render delete affordances without fanning out per-row fetches.
