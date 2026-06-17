@@ -795,6 +795,17 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                       );
                     })()}
                   </div>
+                  {(workOrder.controllerLetter || workOrder.zoneNumber != null) && (
+                    <div data-testid="text-clock-zone-customer-info">
+                      <span className="font-medium text-gray-700">Clock / Zone:</span>
+                      <p className="text-gray-900">
+                        {[
+                          workOrder.controllerLetter ? `Clock ${workOrder.controllerLetter}` : null,
+                          workOrder.zoneNumber != null ? `Zone ${workOrder.zoneNumber}` : null,
+                        ].filter(Boolean).join(' · ')}
+                      </p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -868,23 +879,12 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                         data-testid="text-controller-zone"
                       >
                         <Cpu className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                        <div className="text-gray-900">
-                          {workOrder.controllerLetter && (
-                            <>
-                              <span className="text-gray-500">Controller: </span>
-                              <span className="font-medium">{workOrder.controllerLetter}</span>
-                            </>
-                          )}
-                          {workOrder.controllerLetter && workOrder.zoneNumber != null && (
-                            <span className="mx-2 text-gray-300">•</span>
-                          )}
-                          {workOrder.zoneNumber != null && (
-                            <>
-                              <span className="text-gray-500">Zone: </span>
-                              <span className="font-medium">{workOrder.zoneNumber}</span>
-                            </>
-                          )}
-                        </div>
+                        <span className="text-gray-900 font-medium">
+                          {[
+                            workOrder.controllerLetter ? `Clock ${workOrder.controllerLetter}` : null,
+                            workOrder.zoneNumber != null ? `Zone ${workOrder.zoneNumber}` : null,
+                          ].filter(Boolean).join(' · ')}
+                        </span>
                       </div>
                     )}
                     {hasPin && (

@@ -1262,18 +1262,18 @@ export function CompletedWorkDetailModal({
                     const ctrl = isWorkOrder ? wo?.controllerLetter : bs?.controllerLetter;
                     const zone = isWorkOrder ? wo?.zoneNumber : bs?.zoneNumber;
                     if (!ctrl && zone == null) return null;
+                    const parts: string[] = [];
+                    if (ctrl) parts.push(`Clock ${ctrl}`);
+                    if (zone != null) parts.push(`Zone ${zone}`);
                     return (
-                      <div className="flex flex-wrap gap-2">
-                        {ctrl && (
-                          <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
-                            <Cpu className="w-3 h-3" /> Controller {ctrl}
-                          </span>
-                        )}
-                        {zone != null && (
-                          <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            <Droplets className="w-3 h-3" /> Zone {zone}
-                          </span>
-                        )}
+                      <div>
+                        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-0.5">
+                          Clock / Zone
+                        </p>
+                        <span className="inline-flex items-center gap-1.5 text-sm text-gray-900">
+                          <Cpu className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                          {parts.join(' · ')}
+                        </span>
                       </div>
                     );
                   })()}
