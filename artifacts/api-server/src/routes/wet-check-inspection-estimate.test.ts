@@ -42,15 +42,27 @@ const STUB_WC = {
 
 type BuildFn = (wcId: number, cid: number, mgr: { id: number; name: string }) => Promise<typeof STUB_ESTIMATE>;
 type ApproveFn = (wcId: number, cid: number) => Promise<{ estimate: typeof STUB_ESTIMATE; wetCheck: typeof STUB_WC }>;
+type RevertFn = (wcId: number, cid: number) => Promise<{ estimate: typeof STUB_ESTIMATE; wetCheck: typeof STUB_WC }>;
+
+const STUB_REVERTED_ESTIMATE = {
+  ...STUB_ESTIMATE,
+  lifecycle: "pending_review",
+  status: "pending",
+  internalStatus: "pending_approval",
+  approvedAt: null,
+};
+const STUB_REVERTED_WC = { ...STUB_WC, status: "submitted", fullyConvertedAt: null };
 
 interface Harness {
   baseUrl: string;
   close: () => Promise<void>;
   setBuild: (fn: BuildFn) => void;
   setApprove: (fn: ApproveFn) => void;
+  setRevert: (fn: RevertFn) => void;
 }
 
 const MANAGER_ROLES = new Set(["super_admin", "company_admin", "irrigation_manager", "billing_manager"]);
+const REVERT_ALLOWED_ROLES = new Set(["super_admin", "company_admin"]);
 
 async function startServer(role = "irrigation_manager"): Promise<Harness> {
   const app: Express = express();
@@ -58,6 +70,7 @@ async function startServer(role = "irrigation_manager"): Promise<Harness> {
 
   let build: BuildFn = async () => STUB_ESTIMATE;
   let approve: ApproveFn = async () => ({ estimate: STUB_ESTIMATE, wetCheck: STUB_WC });
+  let revert: RevertFn = async () => ({ estimate: STUB_REVERTED_ESTIMATE, wetCheck: STUB_REVERTED_WC });
 
   const auth: RequestHandler = (req, _res, next) => {
     (req as any).authenticatedUserId = 1;
@@ -97,6 +110,29 @@ async function startServer(role = "irrigation_manager"): Promise<Harness> {
     }
   });
 
+  // Mirrors the production revert-inspection route handler (without audit-log deps).
+  app.post("/api/wet-checks/:id/revert-inspection", auth, async (req: any, res) => {
+    if (!REVERT_ALLOWED_ROLES.has(req.authenticatedUserRole)) {
+      res.status(403).json({ message: "Forbidden. Reverting an inspection approval requires company_admin or super_admin." });
+      return;
+    }
+    const wcId = parseInt(req.params.id);
+    if (isNaN(wcId)) { res.status(400).json({ message: "Invalid wet check id" }); return; }
+    try {
+      const result = await revert(wcId, req.authenticatedUserCompanyId);
+      res.json(result);
+    } catch (e: any) {
+      const msg: string = e.message ?? "Internal error";
+      const is409 =
+        msg.includes("not in a converted state") ||
+        msg.includes("already been included in invoice") ||
+        msg.includes("not approved and cannot be reverted") ||
+        msg.includes("not an inspection wet check");
+      const status = is409 ? 409 : msg.includes("not found") ? 404 : 500;
+      res.status(status).json({ message: msg });
+    }
+  });
+
   const server: Server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const { port } = server.address() as AddressInfo;
@@ -105,6 +141,7 @@ async function startServer(role = "irrigation_manager"): Promise<Harness> {
     close: () => new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve())),
     setBuild: (fn) => { build = fn; },
     setApprove: (fn) => { approve = fn; },
+    setRevert: (fn) => { revert = fn; },
   };
 }
 
@@ -429,6 +466,86 @@ describe("buildEstimateFromInspectionWetCheck — findings with no catalog part 
 
     assert.equal(result.partsSubtotal, "25.00", "null-part $0 lines contribute nothing to partsSubtotal");
     assert.equal(result.totalAmount, "25.00", "totalAmount equals partsSubtotal when no labor hours");
+  });
+});
+
+// ─── revert-inspection ────────────────────────────────────────────────────────
+
+describe("POST /api/wet-checks/:id/revert-inspection", () => {
+  let h: Harness;
+  before(async () => { h = await startServer("company_admin"); });
+  after(async () => { await h.close(); });
+
+  it("(k) 200 — reverts estimate to pending_review and wet check to submitted", async () => {
+    let storageCalled = false;
+    h.setRevert(async (wcId, cid) => {
+      storageCalled = true;
+      assert.equal(wcId, 7);
+      assert.equal(cid, 10);
+      return { estimate: STUB_REVERTED_ESTIMATE, wetCheck: STUB_REVERTED_WC };
+    });
+
+    const r = await post(`${h.baseUrl}/api/wet-checks/7/revert-inspection`);
+    const body = await r.json() as any;
+
+    assert.equal(r.status, 200);
+    assert.equal(body.estimate.lifecycle, "pending_review");
+    assert.equal(body.estimate.status, "pending");
+    assert.equal(body.wetCheck.status, "submitted");
+    assert.equal(body.wetCheck.fullyConvertedAt, null);
+    assert.ok(storageCalled, "storage.unapproveInspectionEstimate must be called");
+  });
+
+  it("(l) 409 when WCB is already invoiced", async () => {
+    h.setRevert(async () => {
+      throw new Error("Cannot revert: the wet check billing has already been included in invoice #99. Void the invoice first.");
+    });
+    const r = await post(`${h.baseUrl}/api/wet-checks/7/revert-inspection`);
+    assert.equal(r.status, 409);
+    const body = await r.json() as any;
+    assert.match(body.message, /already been included in invoice/);
+  });
+
+  it("(m) 403 for irrigation_manager role", async () => {
+    const h2 = await startServer("irrigation_manager");
+    try {
+      const r = await post(`${h2.baseUrl}/api/wet-checks/7/revert-inspection`);
+      assert.equal(r.status, 403);
+    } finally {
+      await h2.close();
+    }
+  });
+
+  it("(n) 409 when wet check is not in converted state (already reverted)", async () => {
+    h.setRevert(async () => {
+      throw new Error("Wet check #7 is not in a converted state and cannot be reverted");
+    });
+    const r = await post(`${h.baseUrl}/api/wet-checks/7/revert-inspection`);
+    assert.equal(r.status, 409);
+    const body = await r.json() as any;
+    assert.match(body.message, /not in a converted state/);
+  });
+
+  it("(o) super_admin is also allowed", async () => {
+    const h2 = await startServer("super_admin");
+    try {
+      const r = await post(`${h2.baseUrl}/api/wet-checks/7/revert-inspection`);
+      assert.equal(r.status, 200);
+      const body = await r.json() as any;
+      assert.equal(body.estimate.lifecycle, "pending_review");
+    } finally {
+      await h2.close();
+    }
+  });
+
+  it("(o2) billing_manager is forbidden", async () => {
+    const h2 = await startServer("billing_manager");
+    try {
+      const r = await post(`${h2.baseUrl}/api/wet-checks/7/revert-inspection`);
+      assert.equal(r.status, 403);
+    } finally {
+      await h2.close();
+    }
   });
 });
 

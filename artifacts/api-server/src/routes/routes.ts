@@ -16775,6 +16775,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/wet-checks/:id/revert-inspection
+  //   Reverts an accidentally-approved Inspection wet check. Atomically:
+  //     - estimate → lifecycle='pending_review', status='pending', internalStatus='pending_approval', approvedAt=null
+  //     - wet check → status='submitted', fullyConvertedAt=null
+  //   Blocked with 409 if any WCB row for this wet check has already been invoiced.
+  //   Role: company_admin and super_admin only (narrower than approve).
+  //
+  app.post("/api/wet-checks/:id/revert-inspection", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    const role = req.authenticatedUserRole;
+    if (role !== "company_admin" && role !== "super_admin") {
+      res.status(403).json({ message: "Forbidden. Reverting an inspection approval requires company_admin or super_admin." });
+      return;
+    }
+    const wcId = parseInt(req.params.id);
+    if (isNaN(wcId)) { res.status(400).json({ message: "Invalid wet check id" }); return; }
+    try {
+      const result = await storage.unapproveInspectionEstimate(wcId, cid);
+      await recordLifecycleAudit(req, {
+        resource: "wet_check",
+        action: "estimate.inspection_unapproved",
+        targetId: wcId,
+        companyId: cid,
+        before: { wetCheckStatus: "converted", estimateLifecycle: "approved" },
+        after: { estimateId: result.estimate.id, wetCheckStatus: result.wetCheck.status, estimateLifecycle: result.estimate.lifecycle },
+        summary: `Inspection wet check ${wcId} approval reverted → estimate #${result.estimate.id} back to pending_review, WC back to submitted`,
+        extra: { estimateId: result.estimate.id },
+      });
+      res.json(result);
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "unapproveInspectionEstimate",
+        ctx: { cid, wcId },
+        recognized: [
+          {
+            test: (_e, raw) =>
+              raw.includes("not in a converted state") ||
+              raw.includes("already been included in invoice") ||
+              raw.includes("not approved and cannot be reverted") ||
+              raw.includes("not an inspection wet check"),
+            status: 409,
+            message: (_e, raw) => raw,
+          },
+          {
+            test: (_e, raw) => raw.includes("not found"),
+            status: 404,
+            message: (_e, raw) => raw,
+          },
+        ],
+        fallbackMessage: "Could not revert inspection approval — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
   const findingRouteBody = z.object({
     resolution: z.enum(["pending", "repaired_in_field", "sent_to_estimate", "deferred_to_work_order", "documented_only"]),
   }).strict();

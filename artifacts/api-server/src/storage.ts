@@ -142,7 +142,7 @@ import {
   WET_CHECK_ISSUE_TYPE_SEED,
 } from "@workspace/db";
 import { db } from "./db";
-import { sql, eq, like, ilike, desc, and, gte, lte, or, isNull, inArray, gt } from "drizzle-orm";
+import { sql, eq, like, ilike, desc, and, gte, lte, or, isNull, isNotNull, inArray, gt } from "drizzle-orm";
 import bcrypt from "bcrypt";
 import { processEstimatePayload, type EstimatePayloadInput } from "./estimate-payload";
 import { applyNoPartNeededInvariant } from "./storage/wet-check-finding-invariants";
@@ -9434,6 +9434,91 @@ export class DatabaseStorage implements IStorage {
 
       return {
         estimate: { ...approvedEst, lifecycleStatus: computeLifecycleStatus(approvedEst), items } as EstimateWithItems,
+        wetCheck: updatedWc,
+      };
+    });
+  }
+
+  // unapproveInspectionEstimate
+  // ----------------------------
+  // Reverts an accidentally-approved Inspection wet check. Steps both rows back:
+  //   - estimate: lifecycle='pending_review', status='pending', internalStatus='pending_approval', approvedAt=null
+  //   - wet check: status='submitted', fullyConvertedAt=null
+  // Blocked if any wet_check_billings row for this wet check is already invoiced
+  // (invoiceId IS NOT NULL) — the invoice must be voided first.
+  async unapproveInspectionEstimate(
+    wcId: number,
+    companyId: number,
+  ): Promise<{ estimate: EstimateWithItems; wetCheck: WetCheck }> {
+    return db.transaction(async (tx) => {
+      // 1. Load and row-lock the wet check.
+      const [wc] = await tx.select().from(wetChecks)
+        .where(and(eq(wetChecks.id, wcId), eq(wetChecks.companyId, companyId)))
+        .for("update");
+      if (!wc) throw new Error(`Wet check #${wcId} not found`);
+      if (wc.mode !== "inspection") {
+        throw new Error(`Wet check #${wcId} is not an inspection wet check`);
+      }
+      if (wc.status !== "converted") {
+        throw new Error(`Wet check #${wcId} is not in a converted state and cannot be reverted`);
+      }
+
+      // 2. Block if any WCB row for this wet check has already been invoiced.
+      const [invoicedWcb] = await tx.select({ id: wetCheckBillings.id, invoiceId: wetCheckBillings.invoiceId })
+        .from(wetCheckBillings)
+        .where(and(eq(wetCheckBillings.wetCheckId, wcId), isNotNull(wetCheckBillings.invoiceId)));
+      if (invoicedWcb) {
+        throw new Error(
+          `Cannot revert: the wet check billing has already been included in invoice #${invoicedWcb.invoiceId}. Void the invoice first.`,
+        );
+      }
+
+      // 3. Find and row-lock the linked estimate.
+      const [existingEst] = await tx.select().from(estimates)
+        .where(eq(estimates.originWetCheckId, wcId));
+      if (!existingEst) {
+        throw new Error(`No estimate found for inspection wet check #${wcId}`);
+      }
+      const [lockedEst] = await tx.select().from(estimates)
+        .where(eq(estimates.id, existingEst.id))
+        .for("update");
+      if (!lockedEst) throw new Error(`Estimate for wet check #${wcId} not found`);
+      if (lockedEst.lifecycle !== "approved") {
+        throw new Error(`Estimate for wet check #${wcId} is not approved and cannot be reverted`);
+      }
+
+      const now = new Date();
+
+      // 4. Revert the estimate to pending_review using a lifecycle-gated WHERE.
+      const [revertedEst] = await tx.update(estimates)
+        .set({
+          status: "pending",
+          internalStatus: "pending_approval",
+          lifecycle: "pending_review",
+          approvedAt: null,
+          updatedAt: now,
+        } as Partial<typeof estimates.$inferInsert>)
+        .where(and(eq(estimates.id, lockedEst.id), eq(estimates.lifecycle, "approved")))
+        .returning();
+      if (!revertedEst) {
+        throw new Error(`Estimate for wet check #${wcId} could not be reverted — concurrent modification detected`);
+      }
+
+      const items = await tx.select().from(estimateItems)
+        .where(eq(estimateItems.estimateId, revertedEst.id));
+
+      // 5. Revert the wet check to submitted.
+      const [updatedWc] = await tx.update(wetChecks)
+        .set({
+          status: "submitted",
+          fullyConvertedAt: null,
+          updatedAt: now,
+        })
+        .where(eq(wetChecks.id, wcId))
+        .returning();
+
+      return {
+        estimate: { ...revertedEst, lifecycleStatus: computeLifecycleStatus(revertedEst), items } as EstimateWithItems,
         wetCheck: updatedWc,
       };
     });

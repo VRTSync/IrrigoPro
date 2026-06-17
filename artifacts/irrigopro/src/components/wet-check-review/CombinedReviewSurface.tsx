@@ -44,6 +44,7 @@ import {
   ThumbsUp,
   FileText,
   Clock,
+  RotateCcw,
 } from "lucide-react";
 import { WetCheckWizard } from "@/components/manager/wet-check-wizard";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
@@ -74,6 +75,11 @@ function getUserRole(): string | null {
 
 function canSeePricing(): boolean {
   return getUserRole() !== "field_tech";
+}
+
+function canRevertInspectionApproval(): boolean {
+  const role = getUserRole();
+  return role === "company_admin" || role === "super_admin";
 }
 
 function canEditZoneLabor(): boolean {
@@ -390,6 +396,7 @@ function InspectionEstimateSection({ wetCheckId, onApproveSuccess }: InspectionE
   const { toast } = useToast();
   const qc = useQueryClient();
   const [editorOpen, setEditorOpen] = useState(false);
+  const [revertDialogOpen, setRevertDialogOpen] = useState(false);
 
   // Build (or fetch) the estimate on mount. This is an idempotent POST.
   const {
@@ -405,6 +412,28 @@ function InspectionEstimateSection({ wetCheckId, onApproveSuccess }: InspectionE
   });
 
   const [approveErr, setApproveErr] = useState<string | null>(null);
+
+  const revertMut = useMutation({
+    mutationFn: () =>
+      apiRequest(`/api/wet-checks/${wetCheckId}/revert-inspection`, "POST", {}),
+    onSuccess: () => {
+      setRevertDialogOpen(false);
+      qc.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId] });
+      qc.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId, "inspection-estimate"] });
+      qc.invalidateQueries({ queryKey: ["/api/wet-checks/needs-review"] });
+      qc.invalidateQueries({ queryKey: ["/api/estimates"] });
+      toast({
+        title: "Approval reverted",
+        description: "Estimate returned to pending review. Wet check returned to submitted.",
+      });
+      void refetchEstimate();
+    },
+    onError: (e: any) => {
+      setRevertDialogOpen(false);
+      const msg = e?.message ?? "Could not revert the approval. Please try again.";
+      toast({ title: "Revert failed", description: msg, variant: "destructive" });
+    },
+  });
 
   const approveMut = useMutation({
     mutationFn: () =>
@@ -625,14 +654,61 @@ function InspectionEstimateSection({ wetCheckId, onApproveSuccess }: InspectionE
       )}
 
       {isAlreadyApproved && (
-        <div
-          className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
-          data-testid="crs-inspection-approved-notice"
-        >
-          <CheckCircle2 className="w-4 h-4 shrink-0" />
-          Inspection estimate approved. Wet check converted.
+        <div className="space-y-3" data-testid="crs-inspection-approved-notice">
+          <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            Inspection estimate approved. Wet check converted.
+          </div>
+
+          {canRevertInspectionApproval() && (
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-amber-300 text-amber-800 hover:bg-amber-50"
+                onClick={() => setRevertDialogOpen(true)}
+                data-testid="crs-inspection-revert-button"
+              >
+                <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+                Revert Approval
+              </Button>
+            </div>
+          )}
         </div>
       )}
+
+      <AlertDialog open={revertDialogOpen} onOpenChange={setRevertDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revert inspection approval?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will undo the approval:
+              <ul className="mt-2 space-y-1 list-disc pl-4 text-sm">
+                <li>The estimate returns to <strong>Pending Review</strong> so it can be corrected and re-approved.</li>
+                <li>The wet check returns to <strong>Submitted</strong>.</li>
+              </ul>
+              <span className="block mt-2">
+                This is blocked if the wet check billing has already been included in an invoice. In that case, void the invoice first.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={revertMut.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => revertMut.mutate()}
+              disabled={revertMut.isPending}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              data-testid="crs-inspection-revert-confirm"
+            >
+              {revertMut.isPending ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Reverting…</>
+              ) : (
+                "Revert Approval"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
