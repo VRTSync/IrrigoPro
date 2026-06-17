@@ -16980,6 +16980,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
     },
   );
 
+  // Task #1376 — Admin force-submit for in_progress wet checks stuck due to
+  // offline-sync failures. Transitions in_progress → submitted without
+  // running the field-tech auto-billing pipeline. Company admin / super admin
+  // only — field techs and managers use the normal submit flow.
+  app.post("/api/wet-checks/:id/force-submit", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    const role = req.authenticatedUserRole;
+    if (role !== "company_admin" && role !== "super_admin") {
+      res.status(403).json({ message: "Only company admins can force-submit a wet check" });
+      return;
+    }
+    const userId = req.authenticatedUserId;
+    if (!userId) { res.status(401).json({ message: "Authentication required" }); return; }
+    const wcId = parseInt(req.params.id);
+    if (Number.isNaN(wcId)) { res.status(400).json({ message: "Invalid wet check ID" }); return; }
+    try {
+      const wc = await storage.getWetCheck(wcId, cid);
+      if (!wc) { res.status(404).json({ message: "Wet check not found" }); return; }
+      if (wc.status !== "in_progress") {
+        res.status(409).json({
+          message: `Wet check ${wcId} is already ${wc.status} — force-submit only applies to in_progress wet checks`,
+        });
+        return;
+      }
+      const updated = await storage.updateWetCheck(wcId, cid, {
+        status: "submitted",
+        submittedAt: new Date(),
+      });
+      if (!updated) { res.status(404).json({ message: "Wet check not found" }); return; }
+      await recordLifecycleAudit(req, {
+        resource: "wet_check",
+        action: "wet_check.force_submitted",
+        targetId: wcId,
+        companyId: cid,
+        before: { status: "in_progress" },
+        after: { status: "submitted" },
+        summary: `Wet check ${wcId} force-submitted by admin (user ${userId}) to unblock triage`,
+        extra: { adminUserId: userId },
+      });
+      res.json(updated);
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "forceSubmitWetCheck",
+        ctx: { cid, wcId },
+        fallbackMessage: "Couldn't force-submit wet check — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
   // Task #1293 — Wet Check Reconciliation + Reassign-with-Cascade.
   registerWetCheckReconciliationRoutes(app, { requireAuthentication });
 

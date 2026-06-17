@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, asArray, queryClient, useArrayQuery } from "@/lib/queryClient";
+import { apiRequest, asArray, queryClient, useArrayQuery, parseApiError } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -658,7 +658,11 @@ export function WetCheckWizard({ id }: { id: number }) {
         setEdits(null);
       }
     } catch (e: any) {
-      toast({ title: "Failed to save", description: e?.message, variant: "destructive" });
+      toast({
+        title: "Failed to save",
+        description: parseApiError(e, e?.message ?? "Could not route finding — please retry"),
+        variant: "destructive",
+      });
     }
   }, [active, edits, customerLaborRate, editMut, routeMut, pendingFindings, id, editMode, navigate, toast, issueConfigs]);
 

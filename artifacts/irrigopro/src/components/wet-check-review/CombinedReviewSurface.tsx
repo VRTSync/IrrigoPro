@@ -23,6 +23,16 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   ChevronLeft,
   ChevronDown,
   ChevronUp,
@@ -33,6 +43,7 @@ import {
   Pencil,
   ThumbsUp,
   FileText,
+  Clock,
 } from "lucide-react";
 import { WetCheckWizard } from "@/components/manager/wet-check-wizard";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
@@ -685,6 +696,105 @@ function SectionCard({
   );
 }
 
+// ── In-progress banner (shown when the tech hasn't submitted yet) ─────────────
+
+function InProgressBanner({ wetCheckId }: { wetCheckId: number }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const role = getUserRole();
+  const isAdmin = role === "company_admin" || role === "super_admin";
+
+  const forceSubmitMut = useMutation({
+    mutationFn: () =>
+      apiRequest(`/api/wet-checks/${wetCheckId}/force-submit`, "POST", {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId] });
+      qc.invalidateQueries({ queryKey: ["/api/wet-checks/needs-review"] });
+      toast({
+        title: "Wet check marked as submitted",
+        description: "Routing and triage are now available.",
+      });
+      setConfirmOpen(false);
+    },
+    onError: (e: any) => {
+      toast({
+        title: "Could not mark as submitted",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+      setConfirmOpen(false);
+    },
+  });
+
+  return (
+    <>
+      <div
+        className="rounded-xl border border-amber-200 bg-amber-50 p-5 space-y-3"
+        data-testid="crs-in-progress-banner"
+      >
+        <div className="flex items-start gap-3">
+          <Clock className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-amber-900">
+              Inspection still in progress
+            </p>
+            <p className="text-sm text-amber-800">
+              The field tech hasn't submitted this wet check yet. Routing and triage will be available once they submit.
+            </p>
+            {isAdmin && (
+              <p className="text-xs text-amber-700 mt-1">
+                If the tech's submit failed due to an offline or network issue, you can manually mark it as submitted below.
+              </p>
+            )}
+          </div>
+        </div>
+        {isAdmin && (
+          <div className="pl-8">
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-amber-400 text-amber-800 hover:bg-amber-100"
+              onClick={() => setConfirmOpen(true)}
+              data-testid="crs-force-submit-button"
+            >
+              Mark as Submitted
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Mark wet check as submitted?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will transition the wet check from "In Progress" to "Submitted" and unlock routing and triage. Use this only if the field tech's submit failed due to a connectivity issue and the inspection is actually complete.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={forceSubmitMut.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => forceSubmitMut.mutate()}
+              disabled={forceSubmitMut.isPending}
+              data-testid="crs-force-submit-confirm"
+            >
+              {forceSubmitMut.isPending ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Marking…</>
+              ) : (
+                "Mark as Submitted"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
 // ── Main surface ──────────────────────────────────────────────────────────────
 
 interface CombinedReviewSurfaceProps {
@@ -790,8 +900,13 @@ export function CombinedReviewSurface({ wetCheckId }: CombinedReviewSurfaceProps
         )}
       </div>
 
+      {/* ── In-progress guard: hide routing UI until the tech submits ───── */}
+      {wc.status === "in_progress" && (
+        <InProgressBanner wetCheckId={wetCheckId} />
+      )}
+
       {/* ── Inspection mode: single estimate review ─────────────────────── */}
-      {isInspection && (
+      {isInspection && wc.status !== "in_progress" && (
         <SectionCard
           title="Inspection Report — Estimate Review"
           badge="Inspection"
@@ -811,7 +926,7 @@ export function CombinedReviewSurface({ wetCheckId }: CombinedReviewSurfaceProps
       )}
 
       {/* ── Service mode: triage + snapshot flow ────────────────────────── */}
-      {!isInspection && (
+      {!isInspection && wc.status !== "in_progress" && (
         <>
           {/* Triage section (conditional) */}
           {needsTriage && (

@@ -13,8 +13,18 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, useLocation, Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useArrayQuery } from "@/lib/queryClient";
-import { apiRequest, asArray } from "@/lib/queryClient";
+import { apiRequest, asArray, parseApiError } from "@/lib/queryClient";
 import { cachedApiRequest } from "@/lib/offline/api";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,6 +54,18 @@ import type {
   Customer,
 } from "@workspace/db/schema";
 import { ZoneStatusGrid, type ZoneRecordWithFindings } from "./ZoneStatusGrid";
+import { safeGet } from "@/utils/safeStorage";
+
+function getAdminRole(): boolean {
+  try {
+    const raw = safeGet("user");
+    if (!raw) return false;
+    const role = JSON.parse(raw)?.role;
+    return role === "company_admin" || role === "super_admin";
+  } catch {
+    return false;
+  }
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -551,22 +573,93 @@ function OutcomeSummary({
 
 function ManagerCTA({ wc }: { wc: WetCheckWithDetails }) {
   const [, navigate] = useLocation();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const triageUrl = `/manager/wet-checks/${wc.id}`;
+  const [forceSubmitOpen, setForceSubmitOpen] = useState(false);
+  const isAdmin = getAdminRole();
+
+  const forceSubmitMut = useMutation({
+    mutationFn: () =>
+      apiRequest(`/api/wet-checks/${wc.id}/force-submit`, "POST", {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", wc.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks/needs-review"] });
+      toast({
+        title: "Wet check marked as submitted",
+        description: "Routing and triage are now available.",
+      });
+      setForceSubmitOpen(false);
+    },
+    onError: (e: any) => {
+      toast({
+        title: "Could not mark as submitted",
+        description: parseApiError(e, e?.message ?? "Please try again."),
+        variant: "destructive",
+      });
+      setForceSubmitOpen(false);
+    },
+  });
 
   if (wc.status === "in_progress") {
     return (
-      <div
-        className="flex items-start gap-3 p-4 rounded-lg bg-gray-50 border border-gray-200"
-        data-testid="mgr-cta-in-progress"
-      >
-        <Info className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" />
-        <div>
-          <p className="text-sm font-medium text-gray-700">Inspection in progress</p>
-          <p className="text-xs text-gray-500 mt-0.5">
-            The field tech has not submitted this inspection yet. This view is read-only.
-          </p>
+      <>
+        <div
+          className="flex items-start gap-3 p-4 rounded-lg bg-gray-50 border border-gray-200"
+          data-testid="mgr-cta-in-progress"
+        >
+          <Info className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-gray-700">Inspection in progress</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              The field tech has not submitted this inspection yet. This view is read-only.
+            </p>
+            {isAdmin && (
+              <p className="text-xs text-gray-400 mt-1">
+                If the tech's submit failed due to an offline issue, you can force-submit below.
+              </p>
+            )}
+          </div>
+          {isAdmin && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0 text-xs"
+              onClick={() => setForceSubmitOpen(true)}
+              data-testid="mgr-cta-force-submit-button"
+            >
+              Mark as Submitted
+            </Button>
+          )}
         </div>
-      </div>
+
+        <AlertDialog open={forceSubmitOpen} onOpenChange={setForceSubmitOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Mark wet check as submitted?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will transition the wet check from "In Progress" to "Submitted" and unlock routing and triage. Use this only if the field tech's submit failed due to a connectivity issue and the inspection is actually complete.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={forceSubmitMut.isPending}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => forceSubmitMut.mutate()}
+                disabled={forceSubmitMut.isPending}
+                data-testid="mgr-cta-force-submit-confirm"
+              >
+                {forceSubmitMut.isPending ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Marking…</>
+                ) : (
+                  "Mark as Submitted"
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </>
     );
   }
 
