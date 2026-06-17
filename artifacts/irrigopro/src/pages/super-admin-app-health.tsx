@@ -29,6 +29,7 @@ import {
   ShieldOff,
   Sparkles,
   Users,
+  Wrench,
   Volume2,
   VolumeX,
   X,
@@ -47,6 +48,10 @@ import { ActiveIncidents, AcknowledgeAllButton } from "@/components/app-health/a
 // hydrated on demand.
 const IntegrationsTab = lazy(() =>
   import("@/components/app-health/integrations-tab").then((m) => ({ default: m.IntegrationsTab })),
+);
+
+const MaintenanceTab = lazy(() =>
+  import("@/components/app-health/maintenance-tab").then((m) => ({ default: m.MaintenanceTab })),
 );
 
 // Task #550 — Super Admin App Health page (Phase 1).
@@ -126,7 +131,8 @@ type TabKey =
   | "users"
   | "sync"
   | "integrations"
-  | "audit";
+  | "audit"
+  | "maintenance";
 
 function readUserRole(): string | undefined {
   try {
@@ -188,6 +194,7 @@ const TABS: Array<{ key: TabKey; label: string; icon: LucideIconLike; phase: num
   { key: "sync", label: "Sync & Uploads", icon: Zap, phase: 3 },
   { key: "integrations", label: "Integrations", icon: Plug, phase: 5 },
   { key: "audit", label: "Audit Log", icon: ShieldOff, phase: 2 },
+  { key: "maintenance", label: "Maintenance", icon: Wrench, phase: 5 },
 ];
 
 export default function SuperAdminAppHealthPage() {
@@ -318,6 +325,14 @@ export default function SuperAdminAppHealthPage() {
           </div>
         }>
           <IntegrationsTab />
+        </Suspense>
+      ) : activeTab === "maintenance" ? (
+        <Suspense fallback={
+          <div className="py-16 flex items-center justify-center text-gray-400">
+            <Loader2 className="h-5 w-5 animate-spin" />
+          </div>
+        }>
+          <MaintenanceTab />
         </Suspense>
       ) : (
         <ComingSoonTab tabKey={activeTab} />

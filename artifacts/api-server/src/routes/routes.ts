@@ -375,6 +375,7 @@ import { registerBudgetRoutes } from "./budget-routes";
 import { registerFinancialPulseRoutes } from "./financial-pulse";
 import { registerAdminMigrationsRoutes } from "./admin-migrations-routes";
 import { registerWcLaborBackfillRoutes } from "./admin-wc-labor-backfill-routes";
+import { registerInspectionZoneBackfillRoutes } from "./admin-inspection-zone-backfill-routes";
 import { registerCleanupInvoice71256Routes } from "./cleanup-invoice-71256";
 import { registerWetCheckReconciliationRoutes } from "./wet-check-reconciliation-routes";
 import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
@@ -7358,6 +7359,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // WC Labor Slice 3 — WC labor backfill (start / status / cancel / reset).
   registerWcLaborBackfillRoutes(app, requireAuthentication);
+  registerInspectionZoneBackfillRoutes(app, requireAuthentication);
   // Task #760 — Temporary one-time cleanup: delete test invoice #71256.
   // Remove this registration (and cleanup-invoice-71256.ts) after successful run.
   registerCleanupInvoice71256Routes(app, { requireAuthentication });
