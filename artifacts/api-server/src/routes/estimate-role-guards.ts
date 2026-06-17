@@ -66,6 +66,16 @@ export const ESTIMATE_SEND_TO_CUSTOMER_ROLES = new Set<string>([
   "billing_manager",
 ]);
 
+// Roles that may revert an approved estimate back to `sent` via
+// POST /api/estimates/:id/unapprove. Only the two admin tiers — the
+// same roles that can approve a customer estimate — so that billing
+// managers cannot accidentally undo a customer approval they didn't
+// make.
+export const ESTIMATE_UNAPPROVE_ROLES = new Set<string>([
+  "super_admin",
+  "company_admin",
+]);
+
 // ─── Middlewares ──────────────────────────────────────────────────────────────
 
 // Middleware gating estimate approval / customer-delivery routes.

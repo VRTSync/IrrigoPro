@@ -45,6 +45,7 @@ import {
   ESTIMATE_PDF_READ_ROLES,
   ESTIMATE_SUBMIT_FOR_REVIEW_ROLES,
   ESTIMATE_SEND_TO_CUSTOMER_ROLES,
+  ESTIMATE_UNAPPROVE_ROLES,
   type TransitionAction,
 } from "./estimate-role-guards";
 import {
@@ -556,6 +557,75 @@ describe("Estimate role × screen matrix (Task #632)", () => {
       } finally {
         await new Promise<void>((r) => server.close(() => r()));
       }
+    }
+  });
+
+  // ─── Unapprove — role gate ───────────────────────────────────────────
+  // POST /api/estimates/:id/unapprove is restricted to super_admin and
+  // company_admin. Billing managers, irrigation managers, and field techs
+  // must all see 403. The handler-level lifecycle check (must be
+  // lifecycle='approved') fires after the role check so any non-admin
+  // role hits 403 before the business logic runs.
+  it("POST /api/estimates/:id/unapprove: 200 for {super_admin, company_admin}, 403 for all other roles", async () => {
+    const approvedEstimate = {
+      id: 1,
+      companyId: 1,
+      customerId: 1,
+      estimateNumber: "EST-00001",
+      status: "approved",
+      internalStatus: "sent_to_customer",
+      lifecycle: "approved",
+      estimateDate: new Date(),
+      items: [],
+    } as unknown as import("@workspace/db").EstimateWithItems;
+    const sentEstimate = {
+      ...approvedEstimate,
+      status: "pending",
+      internalStatus: "sent_to_customer",
+      lifecycle: "sent",
+      approvedAt: null,
+    } as unknown as import("@workspace/db").EstimateWithItems;
+
+    function makeApprovedStub(): EstimateRoutesStorage {
+      return {
+        async getCustomer() { return undefined; },
+        async getEstimate() { return approvedEstimate; },
+        async createEstimateFromPayload() { throw new Error("not used"); },
+        async updateEstimateWithItems() { throw new Error("not used"); },
+        // Stub returns a successful unapprove result so admin roles get 200.
+        async unapproveEstimate() {
+          return { estimate: sentEstimate as any, deletedWorkOrderId: null };
+        },
+      };
+    }
+
+    const app2: import("express").Express = express();
+    app2.use(express.json());
+    registerEstimateRoutes(app2, makeApprovedStub(), stubAuth);
+    const server2: Server = createServer(app2);
+    await new Promise<void>((r) => server2.listen(0, r));
+    const port2 = (server2.address() as AddressInfo).port;
+    const url2 = `http://127.0.0.1:${port2}`;
+    try {
+      for (const role of ROLES) {
+        // Admin roles (super_admin, company_admin) pass the gate → 200.
+        // All other roles are rejected → 403.
+        const expected = ESTIMATE_UNAPPROVE_ROLES.has(role) ? 200 : 403;
+        const got = await callAs(url2, "POST", "/api/estimates/1/unapprove", role, {});
+        assert.equal(
+          got,
+          expected,
+          `unapprove as ${role}: expected HTTP ${expected}, got ${got}`,
+        );
+      }
+      // Unauthenticated → 401.
+      assert.equal(
+        await callAs(url2, "POST", "/api/estimates/1/unapprove", null, {}),
+        401,
+        "unapprove unauthenticated",
+      );
+    } finally {
+      await new Promise<void>((r) => server2.close(() => r()));
     }
   });
 

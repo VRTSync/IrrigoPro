@@ -338,6 +338,38 @@ export class ControllerHasZonesError extends Error {
   }
 }
 
+// Thrown by unapproveEstimate when the preconditions for reverting an
+// approved estimate back to 'sent' are not met. The `code` field
+// identifies the reason so the route layer can map to the right HTTP
+// status and message without inspecting raw error strings.
+export class UnapproveEstimateConflictError extends Error {
+  readonly code: "not_approved" | "wo_progressed";
+  readonly details: {
+    workOrderId?: number;
+    workOrderNumber?: string | null;
+    workOrderStatus?: string;
+    lifecycle?: string;
+  };
+  constructor(
+    code: "not_approved" | "wo_progressed",
+    details: {
+      workOrderId?: number;
+      workOrderNumber?: string | null;
+      workOrderStatus?: string;
+      lifecycle?: string;
+    } = {},
+  ) {
+    const message =
+      code === "not_approved"
+        ? "Only approved estimates can be reverted to sent."
+        : `The linked work order (${details.workOrderNumber ?? `#${details.workOrderId}`}) is in "${details.workOrderStatus}" status and must be cancelled before the estimate can be reverted.`;
+    super(message);
+    this.name = "UnapproveEstimateConflictError";
+    this.code = code;
+    this.details = details;
+  }
+}
+
 type DrizzlePartInsert = typeof parts.$inferInsert;
 type DrizzleWorkOrderInsert = typeof workOrders.$inferInsert;
 type DrizzleInvoiceInsert = typeof invoices.$inferInsert;
@@ -580,6 +612,15 @@ export interface IStorage {
     estimate: Estimate;
     workOrder: WorkOrder | null;
     assignedTechnician: User | null;
+  }>;
+  // Reverts a customer-approved estimate back to `sent`. Atomically
+  // deletes the linked work order if it is still `pending`. Throws
+  // `UnapproveEstimateConflictError` on precondition failure:
+  //   code='not_approved'  — estimate lifecycle is not 'approved'
+  //   code='wo_progressed' — linked WO has advanced past 'pending'
+  unapproveEstimate(id: number): Promise<{
+    estimate: Estimate;
+    deletedWorkOrderId: number | null;
   }>;
   updateWorkOrder(id: number, workOrder: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined>;
   deleteWorkOrder(id: number): Promise<boolean>;
@@ -3622,6 +3663,71 @@ export class DatabaseStorage implements IStorage {
         lifecycleStatus: computeLifecycleStatus(linkedEstimate),
       } as Estimate;
       return { estimate: estimateOut, workOrder: assignedWorkOrder, assignedTechnician };
+    });
+  }
+
+  async unapproveEstimate(id: number): Promise<{
+    estimate: Estimate;
+    deletedWorkOrderId: number | null;
+  }> {
+    return await db.transaction(async (tx) => {
+      // Row-lock the estimate so concurrent approve/unapprove requests
+      // serialize rather than racing into conflicting state.
+      const [lockedEstimate] = await tx
+        .select()
+        .from(estimates)
+        .where(eq(estimates.id, id))
+        .for("update");
+      if (!lockedEstimate || lockedEstimate.lifecycle !== "approved") {
+        throw new UnapproveEstimateConflictError("not_approved", {
+          lifecycle: lockedEstimate?.lifecycle ?? "unknown",
+        });
+      }
+
+      // Row-lock the linked work order (if any) inside the same
+      // transaction so its status cannot change between our check and
+      // the delete.
+      const [linkedWo] = await tx
+        .select()
+        .from(workOrders)
+        .where(eq(workOrders.estimateId, id))
+        .for("update")
+        .limit(1);
+
+      let deletedWorkOrderId: number | null = null;
+      if (linkedWo) {
+        if (linkedWo.status !== "pending") {
+          throw new UnapproveEstimateConflictError("wo_progressed", {
+            workOrderId: linkedWo.id,
+            workOrderNumber: linkedWo.workOrderNumber,
+            workOrderStatus: linkedWo.status,
+          });
+        }
+        await tx.delete(workOrders).where(eq(workOrders.id, linkedWo.id));
+        deletedWorkOrderId = linkedWo.id;
+      }
+
+      // Flip the estimate back to sent state. The AND on lifecycle in
+      // the WHERE clause is belt-and-suspenders in addition to the
+      // row lock above.
+      const [updated] = await tx
+        .update(estimates)
+        .set({
+          status: "pending",
+          internalStatus: "sent_to_customer",
+          lifecycle: "sent",
+          approvedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(estimates.id, id), eq(estimates.lifecycle, "approved")))
+        .returning();
+      if (!updated) {
+        throw new UnapproveEstimateConflictError("not_approved", {
+          lifecycle: "unknown",
+        });
+      }
+
+      return { estimate: updated, deletedWorkOrderId };
     });
   }
 

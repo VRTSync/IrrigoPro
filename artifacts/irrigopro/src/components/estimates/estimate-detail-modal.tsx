@@ -90,6 +90,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   const [isViewingPdf, setIsViewingPdf] = useState(false);
   const [showSendDialog, setShowSendDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showUnapproveDialog, setShowUnapproveDialog] = useState(false);
   // Task #680 — Mark as Sent dialog state. `markSentResult` holds the
   // freshly minted customer approval URL after a successful mark so
   // the same dialog can flip to "Done — copy this link".
@@ -367,6 +368,31 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     },
   });
 
+  const unapproveEstimateMutation = useMutation({
+    mutationFn: async () => {
+      if (!estimateId) throw new Error("Missing estimate id");
+      return apiRequest(`/api/estimates/${estimateId}/unapprove`, "POST");
+    },
+    onSuccess: () => {
+      toast({
+        title: "Estimate reverted to sent",
+        description: "The approval has been undone. The linked work order (if pending) was deleted.",
+      });
+      setShowUnapproveDialog(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Couldn't revert estimate",
+        description: err?.message || "Please try again.",
+        variant: "destructive",
+      });
+      setShowUnapproveDialog(false);
+    },
+  });
+
   const deleteEstimateMutation = useMutation({
     mutationFn: async () => {
       if (!estimateId) throw new Error("Missing estimate id");
@@ -402,6 +428,17 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       });
     },
   });
+
+  // Unapprove is restricted to company_admin and super_admin — mirrors
+  // the server-side ESTIMATE_UNAPPROVE_ROLES guard. The button is shown
+  // for any approved estimate regardless of WO conversion status; if the
+  // linked WO has progressed past pending the API returns 409 with a
+  // human-readable message so the admin knows to cancel it first.
+  const UNAPPROVE_ROLES = new Set<string>(["super_admin", "company_admin"]);
+  const canUnapproveEstimate =
+    currentRole != null &&
+    UNAPPROVE_ROLES.has(currentRole) &&
+    isApproved(estimate ?? null);
 
   // Task #634 — show the Delete control only on still-draft rows. The
   // server enforces the same precondition; this just avoids surfacing
@@ -1021,6 +1058,21 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                       {isConverting ? 'Converting...' : 'Convert to Work Order'}
                     </Button>
                   )}
+
+                  {/* Unapprove — visible only to company_admin and super_admin
+                      when the estimate is approved but not yet converted. */}
+                  {canUnapproveEstimate && !isEstimateDeleted && (
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowUnapproveDialog(true)}
+                      disabled={unapproveEstimateMutation.isPending}
+                      className="border-amber-300 text-amber-700 hover:bg-amber-50 w-full sm:w-auto"
+                      data-testid="detail-modal-unapprove"
+                    >
+                      <XCircle className="w-4 h-4 mr-2" />
+                      {unapproveEstimateMutation.isPending ? "Reverting…" : "Unapprove"}
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1134,6 +1186,40 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
               </AlertDialogFooter>
             </>
           )}
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={showUnapproveDialog} onOpenChange={setShowUnapproveDialog}>
+        <AlertDialogContent data-testid="unapprove-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revert this estimate to Sent?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will undo the customer approval and step the estimate back to{" "}
+              <span className="font-semibold">Sent</span>. If a work order was
+              created from this approval and is still in{" "}
+              <span className="font-semibold">pending</span> status, it will be
+              permanently deleted.
+              <br />
+              <br />
+              If the work order has already been assigned or started, you must
+              cancel it first.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={unapproveEstimateMutation.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={unapproveEstimateMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                unapproveEstimateMutation.mutate();
+              }}
+              className="bg-amber-600 hover:bg-amber-700"
+              data-testid="unapprove-confirm"
+            >
+              {unapproveEstimateMutation.isPending ? "Reverting…" : "Revert to Sent"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>

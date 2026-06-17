@@ -57,6 +57,7 @@ import {
 } from "./audit-log";
 import { paginate } from "./pagination";
 import { ESTIMATE_PENDING_DELETE_ROLES } from "./estimate-role-guards";
+import { UnapproveEstimateConflictError } from "../storage";
 import { deriveLifecycleForWrite } from "@workspace/shared";
 
 // Storage surface used by every estimate route. Methods used only by
@@ -97,6 +98,12 @@ export interface EstimateRoutesStorage {
   approveEstimateAndCreateWorkOrder?(id: number): Promise<{
     estimate: Estimate | EstimateWithItems;
     workOrder?: WorkOrder | null;
+  }>;
+  // Optional — required only by POST /api/estimates/:id/unapprove.
+  // Throws UnapproveEstimateConflictError on precondition failures.
+  unapproveEstimate?(id: number): Promise<{
+    estimate: Estimate;
+    deletedWorkOrderId: number | null;
   }>;
   internallyApproveEstimateIfPending?(
     id: number,
@@ -1083,6 +1090,102 @@ export function registerEstimateRoutes(
       } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Failed to reject estimate" });
+      }
+    },
+  );
+
+  // ── POST /api/estimates/:id/unapprove ────────────────────────────────
+  // Reverts a customer-approved estimate back to `sent` and atomically
+  // deletes the auto-created work order when it is still in `pending`
+  // status. Restricted to company_admin and super_admin because they
+  // are the only roles that can approve (and therefore need an escape
+  // hatch when an approval was made in error). If the work order has
+  // progressed past `pending` the route returns 409 with an
+  // actionable message so the caller can cancel the WO first.
+  app.post(
+    "/api/estimates/:id/unapprove",
+    requireAuthentication,
+    async (req: any, res) => {
+      try {
+        const id = parseInt(String(req.params.id));
+        if (isNaN(id) || id <= 0) {
+          res.status(400).json({ message: "Invalid estimate ID" });
+          return;
+        }
+        const role = req.authenticatedUserRole as string | undefined;
+        if (role !== "company_admin" && role !== "super_admin") {
+          res.status(403).json({
+            message:
+              "Access denied. Reverting an approval is restricted to company administrators.",
+          });
+          return;
+        }
+
+        const existing = await storage.getEstimate(id);
+        if (!existing) {
+          res.status(404).json({ message: "Estimate not found" });
+          return;
+        }
+        if (!estimateOwnershipMatches(req, existing.companyId)) {
+          res.status(404).json({ message: "Estimate not found" });
+          return;
+        }
+        if (existing.lifecycle !== "approved") {
+          res.status(409).json({
+            message: "Only approved estimates can be reverted to sent.",
+            lifecycle: existing.lifecycle,
+          });
+          return;
+        }
+
+        const userId = (req.authenticatedUserId as number | undefined) ?? null;
+
+        // Delegate atomic WO-delete + estimate-flip to storage so the
+        // transaction is testable independently of this route handler.
+        const result = await storage.unapproveEstimate!(id);
+
+        try {
+          await recordAuditEvent(req, {
+            actorUserId: userId,
+            actorRole: role ?? null,
+            actorCompanyId: req.authenticatedUserCompanyId ?? null,
+            actionType: "estimate",
+            action: "estimate.unapproved",
+            targetType: "estimate",
+            targetId: String(id),
+            summary: `Estimate ${existing.estimateNumber ? formatEstimateNumber(existing.estimateNumber) : id} reverted from approved to sent`,
+            details: {
+              estimateId: id,
+              estimateNumber: existing.estimateNumber ?? null,
+              deletedWorkOrderId: result.deletedWorkOrderId,
+              before: { lifecycle: "approved", status: existing.status, internalStatus: existing.internalStatus },
+              after: { lifecycle: "sent", status: "pending", internalStatus: "sent_to_customer" },
+            },
+          });
+        } catch {
+          // best-effort audit; transition already committed
+        }
+
+        res.json({
+          message: "Estimate reverted to sent successfully.",
+          estimate: result.estimate,
+          deletedWorkOrderId: result.deletedWorkOrderId,
+        });
+      } catch (error: any) {
+        if (error instanceof UnapproveEstimateConflictError) {
+          if (error.code === "wo_progressed") {
+            res.status(409).json({
+              message: error.message,
+              workOrderStatus: error.details.workOrderStatus,
+              workOrderId: error.details.workOrderId,
+            });
+          } else {
+            res.status(409).json({ message: error.message });
+          }
+          return;
+        }
+        console.error("Error unapproving estimate:", error);
+        res.status(500).json({ message: "Failed to revert estimate approval." });
       }
     },
   );
