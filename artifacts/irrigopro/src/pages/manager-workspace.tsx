@@ -21,7 +21,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { adaptiveRefetchInterval } from "@/lib/queryClient";
+import { adaptiveRefetchInterval, apiRequest } from "@/lib/queryClient";
 import { FinancialPulseWidget } from "@/components/financial-pulse/financial-pulse-widget";
 import { useAuth } from "@/lib/auth-context";
 import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
@@ -50,6 +50,14 @@ interface StatusStripResponse {
     connectionStatus: string | null;
     recentErrorCount: number;
   } | null;
+}
+
+interface WetCheckCounts {
+  needsReview: number;
+  inProgress: number;
+  readyToBill: number;
+  billed: number;
+  all: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -231,6 +239,20 @@ export default function ManagerWorkspacePage() {
     refetchInterval: adaptiveRefetchInterval(60_000),
   });
 
+  const { data: wcCounts } = useQuery<WetCheckCounts>({
+    queryKey: ["/api/wet-checks/admin/counts"],
+    queryFn: async () => {
+      try {
+        return (await apiRequest("/api/wet-checks/admin/counts", "GET")) as WetCheckCounts;
+      } catch {
+        return { needsReview: 0, inProgress: 0, readyToBill: 0, billed: 0, all: 0 };
+      }
+    },
+    staleTime: 30_000,
+    refetchInterval: adaptiveRefetchInterval(30_000),
+    enabled: user?.role !== "billing_manager",
+  });
+
   const invalidateQueue = () => {
     qc.invalidateQueries({
       predicate: (q) =>
@@ -397,7 +419,7 @@ export default function ManagerWorkspacePage() {
             label="Wet Checks"
             icon={<Droplets className="w-6 h-6 text-cyan-600" />}
             href="/wet-checks/pending-review"
-            count={strip?.indicators?.wcsPendingReview}
+            count={wcCounts?.needsReview}
             colorClass="border-l-cyan-500"
           />
         )}
