@@ -1,6 +1,6 @@
 import { pool } from "./db";
 import { WET_CHECK_ISSUE_TYPE_SEED } from "@workspace/db";
-import { seedIssueTypeConfigsForCompany, patchLaborOnlyColumn } from "./seeds/issue-type-configs";
+import { seedIssueTypeConfigsForCompany, patchLaborOnlyColumn, patchPartOptionalColumn } from "./seeds/issue-type-configs";
 
 // Re-export per-company seeder so callers (createCompany, admin endpoint,
 // scripts) all share the same implementation.
@@ -15,9 +15,11 @@ export async function seedIssueTypeConfigsForActiveCompanies(): Promise<number> 
     for (const seed of WET_CHECK_ISSUE_TYPE_SEED) {
       await pool.query(
         `INSERT INTO issue_type_configs
-           (company_id, issue_type, issue_group, display_label, default_labor_hours, part_category_filter, sort_order, labor_only)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         ON CONFLICT (company_id, issue_type) DO NOTHING`,
+           (company_id, issue_type, issue_group, display_label, default_labor_hours, part_category_filter, sort_order, labor_only, part_optional)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (company_id, issue_type) DO UPDATE
+           SET part_optional = EXCLUDED.part_optional,
+               labor_only    = EXCLUDED.labor_only`,
         [
           row.id,
           seed.issueType,
@@ -27,12 +29,15 @@ export async function seedIssueTypeConfigsForActiveCompanies(): Promise<number> 
           seed.partCategoryFilter,
           seed.sortOrder,
           seed.laborOnly ?? false,
+          seed.partOptional ?? false,
         ]
       );
     }
   }
-  // One-time migration: patch existing head_adjustment rows to labor_only=true.
-  // Safe to call on every startup — no-op when already patched.
+  // One-time migrations — order matters: patchLaborOnlyColumn must run before
+  // patchPartOptionalColumn so the labor_only guard in patchLaborOnlyColumn
+  // does not re-flag rows that patchPartOptionalColumn converts.
   await patchLaborOnlyColumn();
+  await patchPartOptionalColumn();
   return allCompaniesRows.rowCount ?? 0;
 }

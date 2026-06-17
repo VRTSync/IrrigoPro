@@ -629,7 +629,9 @@ export function WetCheckWizard({ id }: { id: number }) {
       const activeCfg = issueConfigs.find(c => c.issueType === active.f.issueType);
       const patchPayload: FindingEdits & { noPartNeeded?: boolean } = activeCfg?.laborOnly
         ? { ...edits, partId: null, partName: null, partPrice: null, noPartNeeded: true }
-        : edits;
+        : (activeCfg?.partOptional && edits.partId == null)
+          ? { ...edits, noPartNeeded: true }
+          : edits;
       await editMut.mutateAsync({ fid: active.f.id, patch: patchPayload });
       await routeMut.mutateAsync({ fid: active.f.id, resolution });
       if (resolution === "sent_to_estimate") {

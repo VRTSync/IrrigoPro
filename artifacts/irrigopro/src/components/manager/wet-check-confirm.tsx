@@ -128,6 +128,7 @@ export function WetCheckConfirm({ id }: { id: number }) {
         if (f.noPartNeeded) return false;
         const cfg = issueConfigs.find(c => c.issueType === f.issueType);
         if (cfg?.laborOnly) return false;
+        if (cfg?.partOptional) return false;
         return true;
       }),
     [allFindings, issueConfigs],

@@ -64,9 +64,11 @@ export async function seedIssueTypeConfigsForCompany(companyId: number): Promise
   for (const seed of WET_CHECK_ISSUE_TYPE_SEED) {
     const res = await pool.query(
       `INSERT INTO issue_type_configs
-         (company_id, issue_type, issue_group, display_label, default_labor_hours, part_category_filter, sort_order, labor_only)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (company_id, issue_type) DO NOTHING
+         (company_id, issue_type, issue_group, display_label, default_labor_hours, part_category_filter, sort_order, labor_only, part_optional)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (company_id, issue_type) DO UPDATE
+         SET part_optional = EXCLUDED.part_optional,
+             labor_only    = EXCLUDED.labor_only
        RETURNING id`,
       [
         companyId,
@@ -77,6 +79,7 @@ export async function seedIssueTypeConfigsForCompany(companyId: number): Promise
         seed.partCategoryFilter,
         seed.sortOrder,
         seed.laborOnly ?? false,
+        seed.partOptional ?? false,
       ],
     );
     inserted += res.rowCount ?? 0;
@@ -86,14 +89,36 @@ export async function seedIssueTypeConfigsForCompany(companyId: number): Promise
 
 /**
  * One-time migration: set labor_only = true for all existing head_adjustment
- * rows. Safe to call repeatedly — it is a no-op when already set.
+ * rows that have not yet been converted to the part_optional model.
+ * The AND part_optional = false guard ensures this does not re-flag rows
+ * that patchPartOptionalColumn has already converted to the new model
+ * (where head_adjustment is labor_only=false, part_optional=true).
+ * Safe to call repeatedly — it is a no-op once patchPartOptionalColumn has run.
  * Called automatically by seedIssueTypeConfigsForActiveCompanies on startup.
  */
 export async function patchLaborOnlyColumn(): Promise<number> {
   const res = await pool.query(
     `UPDATE issue_type_configs
      SET labor_only = true
-     WHERE issue_type = 'head_adjustment' AND labor_only = false`,
+     WHERE issue_type = 'head_adjustment' AND labor_only = false AND part_optional = false`,
+  );
+  return res.rowCount ?? 0;
+}
+
+/**
+ * One-time migration: set part_optional = true and labor_only = false for all
+ * existing head_adjustment rows. Converts the old "labor only" model for Adjust
+ * findings to the new "part optional" model where the part picker is shown but
+ * not required. Safe to call repeatedly — it is a no-op when already set.
+ * Must be called AFTER patchLaborOnlyColumn in seedIssueTypeConfigsForActiveCompanies.
+ * Called automatically by seedIssueTypeConfigsForActiveCompanies on startup.
+ */
+export async function patchPartOptionalColumn(): Promise<number> {
+  const res = await pool.query(
+    `UPDATE issue_type_configs
+     SET part_optional = true, labor_only = false
+     WHERE issue_type = 'head_adjustment'
+       AND (part_optional = false OR labor_only = true)`,
   );
   return res.rowCount ?? 0;
 }
