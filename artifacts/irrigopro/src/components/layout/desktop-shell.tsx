@@ -131,18 +131,20 @@ function useNavBadges(enabled: boolean): NavBadgeMap {
     enabled,
     refetchInterval: 60000,
   });
-  const { data: needsApprovalRaw } = useQuery<{
-    workOrders?: unknown[];
-    billingSheets?: unknown[];
+  const { data: needsApprovalCountRaw } = useQuery<{
+    workOrderCount?: number;
+    billingSheetCount?: number;
+    total?: number;
   } | null>({
-    queryKey: ["/api/manager-workspace/needs-approval"],
+    queryKey: ["/api/manager-workspace/needs-approval/count"],
     queryFn: async () => {
       try {
-        const res = await fetch("/api/manager-workspace/needs-approval");
+        const res = await fetch("/api/manager-workspace/needs-approval/count");
         if (!res.ok) return null;
         return (await res.json()) as {
-          workOrders?: unknown[];
-          billingSheets?: unknown[];
+          workOrderCount?: number;
+          billingSheetCount?: number;
+          total?: number;
         };
       } catch {
         return null;
@@ -156,8 +158,7 @@ function useNavBadges(enabled: boolean): NavBadgeMap {
   const wetCheckPending = Array.isArray(wetCheckPendingRaw) ? wetCheckPendingRaw : [];
   const pendingEstimates = Array.isArray(pendingEstimatesRaw) ? pendingEstimatesRaw : [];
   const awaitingApprovalCount =
-    (Array.isArray(needsApprovalRaw?.workOrders) ? needsApprovalRaw.workOrders.length : 0) +
-    (Array.isArray(needsApprovalRaw?.billingSheets) ? needsApprovalRaw.billingSheets.length : 0);
+    typeof needsApprovalCountRaw?.total === "number" ? needsApprovalCountRaw.total : 0;
   return {
     partsPendingApproval: pendingParts.length + pendingReviews.length,
     wetCheckReviews: wetCheckPending.length,

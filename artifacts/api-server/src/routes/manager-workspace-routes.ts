@@ -870,6 +870,49 @@ export function registerManagerWorkspaceRoutes(
   );
 
   // -------------------------------------------------------------------
+  // GET /api/manager-workspace/needs-approval/count
+  //
+  // Lightweight badge-count variant — returns only three numbers so
+  // the nav badge doesn't pull down full record payloads every 60 s.
+  // Uses the same auth guard and the same filtering logic as the
+  // parent needs-approval endpoint.
+  // -------------------------------------------------------------------
+
+  app.get(
+    "/api/manager-workspace/needs-approval/count",
+    requireAuthentication,
+    async (req: any, res) => {
+      try {
+        if (!isManagerAllowed(req)) {
+          res.status(403).json({ message: "Access denied." });
+          return;
+        }
+
+        const [wos, bss] = await Promise.all([
+          scopedWorkOrdersForManager(req),
+          scopedBillingSheets(req),
+        ]);
+
+        const workOrderCount = wos.filter(
+          (w: any) => ACTIVE_WO.has(w.status) && !w.invoiceId,
+        ).length;
+        const billingSheetCount = bss.filter(
+          (s: any) => ACTIVE_BS.has(s.status) && !s.invoiceId,
+        ).length;
+
+        res.json({
+          workOrderCount,
+          billingSheetCount,
+          total: workOrderCount + billingSheetCount,
+        });
+      } catch (error) {
+        req.log?.error?.({ err: error }, "manager-workspace needs-approval/count failed");
+        res.status(500).json({ message: "Failed to load needs-approval count" });
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------
   // POST /api/manager-workspace/findings/bulk-route
   //
   // REMOVED in Slice 1 (Manager Workspace Simplification).
