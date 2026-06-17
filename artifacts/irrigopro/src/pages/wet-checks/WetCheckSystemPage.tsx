@@ -31,17 +31,19 @@ function TabButton({
   active,
   onClick,
   testId,
+  count,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
   testId: string;
+  count?: number;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+      className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap inline-flex items-center gap-1.5 ${
         active
           ? "border-blue-600 text-blue-600"
           : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
@@ -49,6 +51,18 @@ function TabButton({
       data-testid={testId}
     >
       {label}
+      {count != null && count > 0 && (
+        <span
+          className={`inline-flex items-center justify-center rounded-full text-xs font-semibold px-1.5 py-0.5 min-w-[1.25rem] leading-none ${
+            active
+              ? "bg-blue-100 text-blue-700"
+              : "bg-gray-100 text-gray-600"
+          }`}
+          data-testid={`${testId}-count`}
+        >
+          {count}
+        </span>
+      )}
     </button>
   );
 }
@@ -307,14 +321,8 @@ function NRSectionHeading({ heading, count, testId }: { heading: string; count: 
   );
 }
 
-function NeedsReviewTab() {
+function NeedsReviewTab({ data, isLoading }: { data: NeedsReviewResponse | undefined; isLoading: boolean }) {
   const [, navigate] = useLocation();
-
-  const { data, isLoading } = useQuery<NeedsReviewResponse>({
-    queryKey: ["/api/wet-checks/needs-review"],
-    queryFn: () => apiRequest("/api/wet-checks/needs-review"),
-    refetchInterval: 30_000,
-  });
 
   const items = data?.items ?? [];
 
@@ -560,6 +568,14 @@ export default function WetCheckSystemPage() {
   const params = new URLSearchParams(search);
   const tab = parseTab(params.get("tab"));
 
+  const { data: needsReviewData, isLoading: needsReviewLoading } = useQuery<NeedsReviewResponse>({
+    queryKey: ["/api/wet-checks/needs-review"],
+    queryFn: () => apiRequest("/api/wet-checks/needs-review"),
+    refetchInterval: 30_000,
+  });
+
+  const needsReviewCount = needsReviewData?.count ?? needsReviewData?.items?.length ?? 0;
+
   function setTab(t: Tab) {
     navigate(`/wet-checks?tab=${t}`, { replace: true });
   }
@@ -584,6 +600,7 @@ export default function WetCheckSystemPage() {
             active={tab === "needs-review"}
             onClick={() => setTab("needs-review")}
             testId="tab-needs-review"
+            count={needsReviewCount}
           />
           <TabButton
             label="Approved"
@@ -595,7 +612,7 @@ export default function WetCheckSystemPage() {
       </div>
 
       {tab === "all" && <AllWetChecksTab />}
-      {tab === "needs-review" && <NeedsReviewTab />}
+      {tab === "needs-review" && <NeedsReviewTab data={needsReviewData} isLoading={needsReviewLoading} />}
       {tab === "approved" && <ApprovedTab />}
     </div>
   );
