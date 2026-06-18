@@ -6,6 +6,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Search,
   Calendar,
@@ -18,6 +28,8 @@ import {
   DollarSign,
   ClipboardList,
   Download,
+  GitMerge,
+  X,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -28,6 +40,13 @@ import { exportSingleInvoiceCsv } from "@/lib/invoice-csv";
 import { safeGet } from "@/utils/safeStorage";
 
 const CSV_EXPORT_ROLES = new Set([
+  "company_admin",
+  "billing_manager",
+]);
+
+// Task #1425 — merging duplicate monthly invoices is restricted to the same
+// billing-capable roles as monthly invoice creation (requireBillingAccess).
+const MERGE_ROLES = new Set([
   "company_admin",
   "billing_manager",
 ]);
@@ -267,6 +286,14 @@ export default function InvoicesPage() {
   const [exportingInvoiceId, setExportingInvoiceId] = useState<number | null>(null);
   const userRole = getCurrentUserRole();
   const canExportSingleCsv = !!userRole && CSV_EXPORT_ROLES.has(userRole);
+  const canMerge = !!userRole && MERGE_ROLES.has(userRole);
+
+  // Task #1425 — invoice merge selection. `selectedIds` holds the invoices
+  // ticked for merging; `survivingId` is the chosen survivor in the confirm
+  // dialog; `mergeConfirmOpen` toggles that dialog.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [mergeConfirmOpen, setMergeConfirmOpen] = useState(false);
+  const [survivingId, setSurvivingId] = useState<number | null>(null);
 
   const handleExportSingleCsv = async (invoice: Invoice) => {
     if (!canExportSingleCsv) return;
@@ -326,6 +353,31 @@ export default function InvoicesPage() {
     },
   });
 
+  // Task #1425 — merge mutation. Body is the surviving id plus the rest of
+  // the selected ids as the merged set. On success the merged invoices are
+  // cancelled (kept for audit) and the survivor carries the combined total.
+  const mergeMutation = useMutation({
+    mutationFn: (vars: { survivingInvoiceId: number; mergedInvoiceIds: number[] }) =>
+      apiRequest(`/api/invoices/merge`, "POST", vars),
+    onSuccess: (data: any) => {
+      const count = data?.cancelledInvoiceNumbers?.length ?? 0;
+      toast({
+        title: "Invoices merged",
+        description:
+          data?.survivingInvoiceNumber
+            ? `${count} invoice${count !== 1 ? "s" : ""} merged into ${data.survivingInvoiceNumber}.`
+            : "Selected invoices were merged.",
+      });
+      setMergeConfirmOpen(false);
+      setSelectedIds(new Set());
+      setSurvivingId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Merge failed", description: err.message, variant: "destructive" });
+    },
+  });
+
   const filteredInvoices = useMemo(() => {
     let result = [...invoices];
 
@@ -358,6 +410,70 @@ export default function InvoicesPage() {
   const totalBilled = filteredInvoices.reduce((sum, inv) => sum + parseFloat(inv.totalAmount), 0);
 
   const monthOptions = generateMonthOptions();
+
+  // Task #1425 — an invoice is mergeable only when it isn't already cancelled.
+  const isMergeable = (inv: Invoice) => inv.status !== "cancelled";
+
+  const selectedInvoices = useMemo(
+    () => filteredInvoices.filter((inv) => selectedIds.has(inv.id)),
+    [filteredInvoices, selectedIds],
+  );
+
+  // A selection is valid for merge when 2+ invoices share the SAME customer
+  // and the SAME billing period (month + year). This mirrors the server's
+  // validateMerge guard so the UI never offers an action the API will reject.
+  const mergeValidation = useMemo(() => {
+    if (selectedInvoices.length < 2) {
+      return { ok: false as const, reason: "Select at least two invoices to merge." };
+    }
+    const first = selectedInvoices[0];
+    const sameCustomer = selectedInvoices.every((inv) => inv.customerId === first.customerId);
+    if (!sameCustomer) {
+      return { ok: false as const, reason: "All selected invoices must belong to the same customer." };
+    }
+    const samePeriod = selectedInvoices.every(
+      (inv) => inv.invoiceMonth === first.invoiceMonth && inv.invoiceYear === first.invoiceYear,
+    );
+    if (!samePeriod) {
+      return { ok: false as const, reason: "All selected invoices must be from the same billing period." };
+    }
+    return { ok: true as const, reason: "" };
+  }, [selectedInvoices]);
+
+  const selectedTotal = selectedInvoices.reduce(
+    (sum, inv) => sum + (parseFloat(inv.totalAmount) || 0),
+    0,
+  );
+
+  const toggleSelected = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const openMergeConfirm = () => {
+    if (!mergeValidation.ok) return;
+    // Default survivor: the lowest invoice id (earliest created) in the set.
+    const defaultSurvivor = selectedInvoices.reduce(
+      (min, inv) => (inv.id < min ? inv.id : min),
+      selectedInvoices[0].id,
+    );
+    setSurvivingId(defaultSurvivor);
+    setMergeConfirmOpen(true);
+  };
+
+  const confirmMerge = () => {
+    if (!mergeValidation.ok || survivingId == null) return;
+    const mergedInvoiceIds = selectedInvoices
+      .map((inv) => inv.id)
+      .filter((id) => id !== survivingId);
+    mergeMutation.mutate({ survivingInvoiceId: survivingId, mergedInvoiceIds });
+  };
 
   const handleExportCsv = () => {
     if (filteredInvoices.length === 0) return;
@@ -554,9 +670,24 @@ export default function InvoicesPage() {
                       <CardContent className="p-5">
                         {/* Card Header */}
                         <div className="flex items-start justify-between mb-3">
-                          <div className="min-w-0 flex-1">
-                            <p className="font-semibold text-gray-900 truncate">{invoice.customerName}</p>
-                            <p className="text-xs text-gray-500 mt-0.5">#{invoice.invoiceNumber}</p>
+                          <div className="min-w-0 flex-1 flex items-start gap-2">
+                            {canMerge && isMergeable(invoice) && (
+                              <span
+                                className="pt-0.5 flex-shrink-0"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <Checkbox
+                                  checked={selectedIds.has(invoice.id)}
+                                  onCheckedChange={() => toggleSelected(invoice.id)}
+                                  aria-label={`Select invoice ${invoice.invoiceNumber} for merge`}
+                                  data-testid={`checkbox-merge-invoice-${invoice.id}`}
+                                />
+                              </span>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="font-semibold text-gray-900 truncate">{invoice.customerName}</p>
+                              <p className="text-xs text-gray-500 mt-0.5">#{invoice.invoiceNumber}</p>
+                            </div>
                           </div>
                           <div className="flex flex-col items-end gap-1 ml-2 flex-shrink-0">
                             {getStatusBadge(invoice.status)}
@@ -728,6 +859,124 @@ export default function InvoicesPage() {
           invoiceTotal={auditInvoice.total}
         />
       )}
+
+      {/* Task #1425 — merge selection action bar */}
+      {canMerge && selectedIds.size > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white shadow-lg">
+          <div className="max-w-6xl mx-auto px-4 lg:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-gray-500"
+                onClick={clearSelection}
+                data-testid="button-clear-merge-selection"
+              >
+                <X className="w-4 h-4 mr-1" />
+                Clear
+              </Button>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-gray-900">
+                  {selectedIds.size} selected · {formatCurrency(selectedTotal)}
+                </p>
+                {!mergeValidation.ok && (
+                  <p className="text-xs text-amber-600 truncate">{mergeValidation.reason}</p>
+                )}
+              </div>
+            </div>
+            <Button
+              onClick={openMergeConfirm}
+              disabled={!mergeValidation.ok}
+              data-testid="button-merge-invoices"
+            >
+              <GitMerge className="w-4 h-4 mr-2" />
+              Merge invoices
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Task #1425 — merge confirmation dialog */}
+      <Dialog open={mergeConfirmOpen} onOpenChange={(open) => { if (!open) setMergeConfirmOpen(false); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Merge invoices</DialogTitle>
+            <DialogDescription>
+              Choose the invoice to keep. The others will be combined into it and
+              marked cancelled (kept for audit). This does not touch QuickBooks.
+            </DialogDescription>
+          </DialogHeader>
+
+          {mergeValidation.ok && (
+            <div className="space-y-4">
+              <RadioGroup
+                value={survivingId != null ? String(survivingId) : undefined}
+                onValueChange={(v) => setSurvivingId(Number(v))}
+              >
+                <p className="text-sm font-medium text-gray-700">Keep this invoice</p>
+                {selectedInvoices.map((inv) => (
+                  <label
+                    key={inv.id}
+                    htmlFor={`survivor-${inv.id}`}
+                    className="flex items-center justify-between gap-3 rounded-md border border-gray-200 p-3 cursor-pointer hover:bg-gray-50"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <RadioGroupItem
+                        value={String(inv.id)}
+                        id={`survivor-${inv.id}`}
+                        data-testid={`radio-survivor-${inv.id}`}
+                      />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          #{inv.invoiceNumber}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate">{inv.customerName}</p>
+                      </div>
+                    </div>
+                    <span className="text-sm font-semibold text-gray-700 flex-shrink-0">
+                      {formatCurrency(inv.totalAmount)}
+                    </span>
+                  </label>
+                ))}
+              </RadioGroup>
+
+              <div className="flex items-center justify-between rounded-md bg-blue-50 border border-blue-200 px-4 py-2">
+                <span className="text-sm text-blue-700">Combined total</span>
+                <span className="text-base font-bold text-blue-800">
+                  {formatCurrency(selectedTotal)}
+                </span>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setMergeConfirmOpen(false)}
+              disabled={mergeMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmMerge}
+              disabled={!mergeValidation.ok || survivingId == null || mergeMutation.isPending}
+              data-testid="button-confirm-merge"
+            >
+              {mergeMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Merging…
+                </>
+              ) : (
+                <>
+                  <GitMerge className="w-4 h-4 mr-2" />
+                  Merge {selectedInvoices.length} invoices
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

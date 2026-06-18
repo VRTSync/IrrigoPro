@@ -373,6 +373,7 @@ import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
 import { registerBudgetRoutes } from "./budget-routes";
 import { registerFinancialPulseRoutes } from "./financial-pulse";
+import { registerInvoiceMergeRoutes } from "./invoice-merge-routes";
 import { registerAdminMigrationsRoutes } from "./admin-migrations-routes";
 import { registerWcLaborBackfillRoutes } from "./admin-wc-labor-backfill-routes";
 import { registerInspectionZoneBackfillRoutes } from "./admin-inspection-zone-backfill-routes";
@@ -7206,6 +7207,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Task #687 — Financial Pulse Slice 1: per-customer budget usage.
   registerBudgetRoutes(app, { requireAuthentication });
   registerFinancialPulseRoutes(app, { requireAuthentication });
+  // Task #1425 — merge duplicate monthly invoices for the same customer.
+  registerInvoiceMergeRoutes(app, { requireAuthentication, requireBillingAccess });
   // Slice 4a — Super-admin DB migration management page.
   registerAdminMigrationsRoutes(app, requireAuthentication);
 

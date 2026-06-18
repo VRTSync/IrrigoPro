@@ -158,6 +158,12 @@ import { computeEstimateSummary } from "./estimate-summary";
 import type { EstimateSummary, WetCheckBillingListItem } from "@workspace/db";
 import { ObjectStorageService } from "./objectStorage";
 import { resolveIssueTypeKey, seedIssueTypeConfigsForCompany } from "./seeds/issue-type-configs";
+import {
+  validateMerge,
+  computeMergedTotals,
+  type MergeCandidate,
+} from "./invoice-merge";
+import { recordAuditEvent } from "./routes/audit-log";
 
 // Set of issue types that never require a part (labor-only). Built once from
 // the canonical seed so the convert guard stays in sync with the schema.
@@ -703,6 +709,25 @@ export interface IStorage {
   createInvoicePdf(pdf: InsertInvoicePdf): Promise<InvoicePdf>;
   getInvoicePdfByInvoiceId(invoiceId: number): Promise<InvoicePdf | undefined>;
   updateInvoicePdf(id: number, pdf: Partial<InsertInvoicePdf>): Promise<InvoicePdf | undefined>;
+  mergeInvoices(params: {
+    survivingId: number;
+    mergedIds: number[];
+    companyId: number | null;
+    audit?: {
+      actorUserId?: number | null;
+      actorLabel?: string | null;
+      actorRole?: string | null;
+      actorCompanyId?: number | null;
+    };
+  }): Promise<{
+    survivingInvoice: Invoice;
+    survivingNumber: string;
+    cancelledInvoiceIds: number[];
+    cancelledNumbers: string[];
+    partsSubtotal: string;
+    laborSubtotal: string;
+    totalAmount: string;
+  }>;
 
 
   // Site Maps for customers
@@ -6198,6 +6223,132 @@ export class DatabaseStorage implements IStorage {
       .where(eq(invoicePdfs.id, id))
       .returning();
     return updated;
+  }
+
+  // Task #1425 — atomically merge duplicate monthly invoices for the same
+  // customer + billing period into one surviving invoice. Local-only: no
+  // QuickBooks calls. Re-points line items + source records (work orders,
+  // billing sheets, wet check billings) onto the survivor, sums totals,
+  // marks the merged invoices `cancelled` (kept for audit), and drops the
+  // survivor's stale cached PDF row so it regenerates. All in one
+  // transaction; validation is re-checked inside the txn so a concurrent
+  // change can't slip a bad merge through.
+  async mergeInvoices(params: {
+    survivingId: number;
+    mergedIds: number[];
+    companyId: number | null;
+    audit?: {
+      actorUserId?: number | null;
+      actorLabel?: string | null;
+      actorRole?: string | null;
+      actorCompanyId?: number | null;
+    };
+  }): Promise<{
+    survivingInvoice: Invoice;
+    survivingNumber: string;
+    cancelledInvoiceIds: number[];
+    cancelledNumbers: string[];
+    partsSubtotal: string;
+    laborSubtotal: string;
+    totalAmount: string;
+  }> {
+    const { survivingId, mergedIds, companyId, audit } = params;
+    const distinctIds = Array.from(new Set([survivingId, ...mergedIds]));
+
+    return await db.transaction(async (tx) => {
+      const rows = await tx
+        .select()
+        .from(invoices)
+        .where(inArray(invoices.id, distinctIds))
+        .for("update");
+
+      const { surviving, merged, mergedIds: mergedOnlyIds } = validateMerge(
+        rows as unknown as MergeCandidate[],
+        survivingId,
+        mergedIds,
+        companyId,
+      );
+
+      // Re-point line items + every source record that referenced a merged
+      // invoice onto the survivor.
+      await tx
+        .update(invoiceItems)
+        .set({ invoiceId: survivingId })
+        .where(inArray(invoiceItems.invoiceId, mergedOnlyIds));
+      await tx
+        .update(workOrders)
+        .set({ invoiceId: survivingId })
+        .where(inArray(workOrders.invoiceId, mergedOnlyIds));
+      await tx
+        .update(billingSheets)
+        .set({ invoiceId: survivingId })
+        .where(inArray(billingSheets.invoiceId, mergedOnlyIds));
+      await tx
+        .update(wetCheckBillings)
+        .set({ invoiceId: survivingId })
+        .where(inArray(wetCheckBillings.invoiceId, mergedOnlyIds));
+
+      const totals = computeMergedTotals([surviving, ...merged]);
+
+      const [survivingInvoice] = await tx
+        .update(invoices)
+        .set({
+          partsSubtotal: totals.partsSubtotal,
+          laborSubtotal: totals.laborSubtotal,
+          totalAmount: totals.totalAmount,
+          updatedAt: new Date(),
+        })
+        .where(eq(invoices.id, survivingId))
+        .returning();
+
+      await tx
+        .update(invoices)
+        .set({ status: "cancelled", updatedAt: new Date() })
+        .where(inArray(invoices.id, mergedOnlyIds));
+
+      // Drop the survivor's stale cached PDF metadata so the next view
+      // regenerates against the merged line items.
+      await tx.delete(invoicePdfs).where(eq(invoicePdfs.invoiceId, survivingId));
+
+      await recordAuditEvent(
+        null,
+        {
+          actionType: "invoice",
+          action: "invoice.merged",
+          severity: "info",
+          actorUserId: audit?.actorUserId ?? null,
+          actorLabel: audit?.actorLabel ?? null,
+          actorRole: audit?.actorRole ?? null,
+          actorCompanyId: audit?.actorCompanyId ?? null,
+          targetType: "invoice",
+          targetId: String(survivingId),
+          summary: `Merged invoice(s) ${merged
+            .map((m) => m.invoiceNumber)
+            .join(", ")} into ${surviving.invoiceNumber}`,
+          details: {
+            survivingInvoiceId: survivingId,
+            survivingInvoiceNumber: surviving.invoiceNumber,
+            cancelledInvoiceIds: mergedOnlyIds,
+            cancelledInvoiceNumbers: merged.map((m) => m.invoiceNumber),
+            customerId: surviving.customerId,
+            invoiceMonth: surviving.invoiceMonth,
+            invoiceYear: surviving.invoiceYear,
+            partsSubtotal: totals.partsSubtotal,
+            laborSubtotal: totals.laborSubtotal,
+            totalAmount: totals.totalAmount,
+          },
+        },
+        { tx, strict: true },
+      );
+
+      return {
+        survivingInvoice,
+        survivingNumber: surviving.invoiceNumber,
+        cancelledInvoiceIds: mergedOnlyIds,
+        cancelledNumbers: merged.map((m) => m.invoiceNumber),
+        ...totals,
+      };
+    });
   }
 
   // Notification methods
