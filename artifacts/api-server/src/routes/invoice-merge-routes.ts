@@ -107,6 +107,10 @@ export function registerInvoiceMergeRoutes(
           survivingInvoiceNumber: result.survivingNumber,
           cancelledInvoiceIds: result.cancelledInvoiceIds,
           cancelledInvoiceNumbers: result.cancelledNumbers,
+          // Task #1443 — the orphaned QuickBooks invoice ids from the merged
+          // sources, so the billing manager knows which QB invoices to delete
+          // by hand before re-syncing the survivor.
+          mergedFromQuickbooksIds: result.mergedFromQuickbooksIds,
           totals: {
             partsSubtotal: result.partsSubtotal,
             laborSubtotal: result.laborSubtotal,

@@ -6491,6 +6491,10 @@ export class DatabaseStorage implements IStorage {
     partsSubtotal: string;
     laborSubtotal: string;
     totalAmount: string;
+    // Task #1443 — the source invoices' (now-orphaned) QuickBooks invoice
+    // ids, so the UI can tell the billing manager exactly which QB invoices
+    // to delete by hand before re-syncing the survivor.
+    mergedFromQuickbooksIds: string[];
   }> {
     const { survivingId, mergedIds, companyId, audit } = params;
     const distinctIds = Array.from(new Set([survivingId, ...mergedIds]));
@@ -6508,6 +6512,13 @@ export class DatabaseStorage implements IStorage {
         mergedIds,
         companyId,
       );
+
+      // Task #1443 — collect the merged (non-survivor) invoices' QuickBooks
+      // ids before we cancel them. These QB invoices stay in QuickBooks and
+      // must be deleted manually (kept manual by design).
+      const mergedFromQuickbooksIds = rows
+        .filter((r) => mergedOnlyIds.includes(r.id) && r.quickbooksInvoiceId)
+        .map((r) => r.quickbooksInvoiceId as string);
 
       // Re-point line items + every source record that referenced a merged
       // invoice onto the survivor.
@@ -6536,6 +6547,12 @@ export class DatabaseStorage implements IStorage {
           partsSubtotal: totals.partsSubtotal,
           laborSubtotal: totals.laborSubtotal,
           totalAmount: totals.totalAmount,
+          // Task #1443 — clear the survivor's QuickBooks link. This is a DB
+          // field change only (no QB API call) so the merge's "no QB call"
+          // contract holds. The merged totals no longer match whatever QB
+          // invoice this id used to point at, so the row must show "Not
+          // synced" and be re-syncable as a clean create.
+          quickbooksInvoiceId: null,
           updatedAt: new Date(),
         })
         .where(eq(invoices.id, survivingId))
@@ -6586,6 +6603,7 @@ export class DatabaseStorage implements IStorage {
         survivingNumber: surviving.invoiceNumber,
         cancelledInvoiceIds: mergedOnlyIds,
         cancelledNumbers: merged.map((m) => m.invoiceNumber),
+        mergedFromQuickbooksIds,
         ...totals,
       };
     });

@@ -287,7 +287,13 @@ describe("POST /api/invoices/merge", () => {
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .split("\n")
       .map((l) => l.replace(/\/\/.*$/, ""))
-      .join("\n");
+      .join("\n")
+      // The route forwards storage's `mergedFromQuickbooksIds` (the orphaned
+      // QB ids from the merged sources) straight through in the JSON response.
+      // That is a data passthrough, NOT a QuickBooks API call — it doesn't
+      // violate the no-QB-call contract, so exclude the identifier before the
+      // broad guard below.
+      .replace(/mergedFromQuickbooksIds/g, "");
     assert.ok(
       !/quickbooks/i.test(code),
       "invoice-merge-routes.ts must not reference QuickBooks in code",

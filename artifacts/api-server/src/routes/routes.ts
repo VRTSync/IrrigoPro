@@ -375,6 +375,10 @@ import { registerCustomerRoutes } from "./customer-routes";
 import { registerBudgetRoutes } from "./budget-routes";
 import { registerFinancialPulseRoutes } from "./financial-pulse";
 import { registerInvoiceMergeRoutes } from "./invoice-merge-routes";
+import {
+  registerInvoiceSyncQuickbooksRoutes,
+  InvoiceSyncError,
+} from "./invoice-sync-quickbooks-route";
 import { registerInvoiceMarkSentRoutes } from "./invoice-mark-sent-routes";
 import { registerAdminMigrationsRoutes } from "./admin-migrations-routes";
 import { registerWcLaborBackfillRoutes } from "./admin-wc-labor-backfill-routes";
@@ -6903,44 +6907,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       try {
         console.log("Creating invoice in QuickBooks...");
-        
-        const apiBase = process.env.NODE_ENV === 'production' 
-          ? 'https://quickbooks.api.intuit.com' 
-          : 'https://sandbox-quickbooks.api.intuit.com';
-        
-        // Look up the QB Service item ID dynamically (shared helper)
-        const qbServiceItem = await lookupQBServiceItem(apiBase, integration.realmId, integration.accessToken);
-        if (!qbServiceItem) {
-          throw new Error(
-            `Could not find the QuickBooks item "${QB_SERVICE_ITEM_NAME}". ` +
-            `Please create an active Service-type item with that exact name in QuickBooks and try again.`
-          );
-        }
-        const resolvedItemId = qbServiceItem.id;
-        const resolvedItemName = qbServiceItem.name;
-        console.log(`[QB] Resolved service item: ${resolvedItemId} (${resolvedItemName})`);
 
-        const qbLineItems = [];
-        
+        // Task #1443 — build the generic { amount, description } lines, then
+        // hand off to the shared buildAndPostQbInvoice core (same core the
+        // per-invoice resync path uses). Line-description builders stay here
+        // because they're specific to the monthly source-document mix.
+        const qbLines: { amount: number; description: string }[] = [];
+
         for (const workOrder of selectedWorkOrders) {
           // Use the stored totalAmount as the authoritative QB line amount
           const totalLineAmount = parseFloat(workOrder.totalAmount || '0');
           const appliedLaborRate = parseFloat(workOrder.appliedLaborRate || workOrder.laborRate || '0');
           const partsAmount = parseFloat(workOrder.partsSubtotal || workOrder.totalPartsCost || '0');
-          
+
           if (totalLineAmount > 0) {
-            qbLineItems.push({
-              Amount: totalLineAmount,
-              DetailType: "SalesItemLineDetail",
-              SalesItemLineDetail: {
-                ItemRef: {
-                  value: resolvedItemId,
-                  name: resolvedItemName
-                },
-                UnitPrice: totalLineAmount,
-                Qty: 1
-              },
-              Description: buildWoLineDescription({ workOrderNumber: workOrder.workOrderNumber, projectName: workOrder.projectName, totalHours: workOrder.totalHours, appliedLaborRate, partsAmount })
+            qbLines.push({
+              amount: totalLineAmount,
+              description: buildWoLineDescription({ workOrderNumber: workOrder.workOrderNumber, projectName: workOrder.projectName, totalHours: workOrder.totalHours, appliedLaborRate, partsAmount }),
             });
           }
         }
@@ -6948,18 +6931,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         for (const billingSheet of selectedBillingSheets) {
           const lineTotal = parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0');
           if (lineTotal > 0) {
-            qbLineItems.push({
-              Amount: lineTotal,
-              DetailType: "SalesItemLineDetail", 
-              SalesItemLineDetail: {
-                ItemRef: {
-                  value: resolvedItemId,
-                  name: resolvedItemName
-                },
-                UnitPrice: lineTotal,
-                Qty: 1
-              },
-              Description: buildBsLineDescription({ billingNumber: billingSheet.billingNumber, totalHours: billingSheet.totalHours, laborRate: billingSheet.laborRate, partsSubtotal: billingSheet.partsSubtotal })
+            qbLines.push({
+              amount: lineTotal,
+              description: buildBsLineDescription({ billingNumber: billingSheet.billingNumber, totalHours: billingSheet.totalHours, laborRate: billingSheet.laborRate, partsSubtotal: billingSheet.partsSubtotal }),
             });
           }
         }
@@ -6967,64 +6941,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         for (const wcb of selectedWcbs) {
           const lineTotal = parseFloat(wcb.totalAmount || '0');
           if (lineTotal > 0) {
-            qbLineItems.push({
-              Amount: lineTotal,
-              DetailType: "SalesItemLineDetail",
-              SalesItemLineDetail: {
-                ItemRef: {
-                  value: resolvedItemId,
-                  name: resolvedItemName
-                },
-                UnitPrice: lineTotal,
-                Qty: 1
-              },
-              Description: buildWcbLineDescription({ billingNumber: wcb.billingNumber, totalHours: wcb.totalHours, appliedLaborRate: wcb.appliedLaborRate, laborRate: wcb.laborRate, partsSubtotal: wcb.partsSubtotal }),
+            qbLines.push({
+              amount: lineTotal,
+              description: buildWcbLineDescription({ billingNumber: wcb.billingNumber, totalHours: wcb.totalHours, appliedLaborRate: wcb.appliedLaborRate, laborRate: wcb.laborRate, partsSubtotal: wcb.partsSubtotal }),
             });
           }
         }
 
-        if (!customer.quickbooksId) {
-          throw new Error(
-            `Customer "${customer.name}" has not been synced to QuickBooks. ` +
-            'Please sync this customer in the Customers section and try again.'
-          );
-        }
+        const qbResult = await buildAndPostQbInvoice({
+          integration,
+          customer,
+          docNumber: invoiceNumber,
+          qbLines,
+          operation: 'Monthly Invoice Creation',
+        });
 
-        const invoiceData = {
-          Line: qbLineItems,
-          CustomerRef: {
-            value: customer.quickbooksId
-          },
-          DocNumber: invoiceNumber,
-          TxnDate: currentDate.toISOString().split('T')[0],
-          DueDate: new Date(currentDate.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-        };
-
-        console.log("Sending invoice to QuickBooks:", JSON.stringify(invoiceData, null, 2));
-
-        const invoiceResponse = await withTelemetry(
-          {
-            source: "integration",
-            component: "qb.invoice.create",
-            context: { method: "POST", path: "/v3/company/:realmId/invoice" },
-          },
-          () => makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/invoice`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${integration.accessToken}`,
-              'Accept': 'application/json',
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(invoiceData)
-          }, 'Monthly Invoice Creation', integration.realmId),
-        );
-
-        if (invoiceResponse.ok) {
-          const invoiceResult = (await invoiceResponse.json()) as QbInvoiceCreateResponse;
-          quickbooksId = invoiceResult?.QueryResponse?.Invoice?.[0]?.Id || invoiceResult?.Invoice?.Id;
+        if (qbResult.quickbooksError) {
+          quickbooksError = qbResult.quickbooksError;
+        } else {
+          quickbooksId = qbResult.quickbooksId ?? null;
           console.log("Successfully created invoice in QuickBooks with ID:", quickbooksId);
 
-          const qbDocNumber: string | undefined = invoiceResult?.Invoice?.DocNumber;
+          const qbDocNumber = qbResult.qbDocNumber;
           const qbUpdateFields: Partial<InsertInvoice> & { invoiceNumber?: string } = {};
           if (quickbooksId) qbUpdateFields.quickbooksInvoiceId = quickbooksId.toString();
           if (qbDocNumber) {
@@ -7036,18 +6974,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (updated) {
               invoice = updated;
             }
-          }
-        } else {
-          const errorText = await invoiceResponse.text();
-          const intuitTid = invoiceResponse.headers.get('intuit_tid');
-          console.error('[QB] Monthly invoice creation failed:', invoiceResponse.status, invoiceResponse.statusText);
-          console.error('[QB] Full error body:', errorText);
-          if (intuitTid) console.error('[QB] TID:', intuitTid);
-
-          if (errorText.includes('InvalidRef') || errorText.includes('Customer')) {
-            quickbooksError = `Customer not found in QuickBooks. Please sync this customer first.${intuitTid ? ` [TID: ${intuitTid}]` : ''}`;
-          } else {
-            quickbooksError = `QuickBooks API Error: ${invoiceResponse.status} ${invoiceResponse.statusText}${intuitTid ? ` [TID: ${intuitTid}]` : ''}`;
           }
         }
       } catch (qbError: any) {
@@ -7211,6 +7137,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerFinancialPulseRoutes(app, { requireAuthentication });
   // Task #1425 — merge duplicate monthly invoices for the same customer.
   registerInvoiceMergeRoutes(app, { requireAuthentication, requireBillingAccess });
+  // Task #1443 — per-invoice QuickBooks sync/resync (post-merge).
+  registerInvoiceSyncQuickbooksRoutes(app, {
+    requireAuthentication,
+    requireBillingAccess,
+    createQuickBooksInvoice: createQuickBooksInvoiceForInvoice,
+  });
   // Task #1438 — mark an invoice sent / unsent (records delivery, no email).
   registerInvoiceMarkSentRoutes(app, { requireAuthentication, requireBillingAccess });
   // Slice 4a — Super-admin DB migration management page.
@@ -8301,6 +8233,179 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.warn('[QB] Service item lookup threw:', err.message);
     }
     return null;
+  }
+
+  // Task #1443 — shared QB-invoice CREATE core. Builds the QuickBooks invoice
+  // payload from a generic list of { amount, description } lines and POSTs it.
+  // Used by the monthly-invoice route (line content built from the selected
+  // source records) AND by the per-invoice resync path (line content built
+  // from the persisted invoice items). Throws for missing service item /
+  // customer-not-synced (the precondition errors). Returns
+  // `{ quickbooksError }` for a QB API failure so callers keep their own
+  // error/rollback handling.
+  async function buildAndPostQbInvoice(params: {
+    integration: any;
+    customer: any;
+    docNumber: string;
+    qbLines: { amount: number; description: string }[];
+    operation: string;
+  }): Promise<{ quickbooksId?: string; qbDocNumber?: string; quickbooksError?: string }> {
+    const { integration, customer, docNumber, qbLines, operation } = params;
+
+    const apiBase = process.env.NODE_ENV === 'production'
+      ? 'https://quickbooks.api.intuit.com'
+      : 'https://sandbox-quickbooks.api.intuit.com';
+
+    // Look up the QB Service item ID dynamically (shared helper).
+    const qbServiceItem = await lookupQBServiceItem(apiBase, integration.realmId, integration.accessToken);
+    if (!qbServiceItem) {
+      throw new Error(
+        `Could not find the QuickBooks item "${QB_SERVICE_ITEM_NAME}". ` +
+        `Please create an active Service-type item with that exact name in QuickBooks and try again.`
+      );
+    }
+    const resolvedItemId = qbServiceItem.id;
+    const resolvedItemName = qbServiceItem.name;
+
+    if (!customer.quickbooksId) {
+      throw new Error(
+        `Customer "${customer.name}" has not been synced to QuickBooks. ` +
+        'Please sync this customer in the Customers section and try again.'
+      );
+    }
+
+    const qbLineItems = qbLines.map((line) => ({
+      Amount: line.amount,
+      DetailType: "SalesItemLineDetail",
+      SalesItemLineDetail: {
+        ItemRef: { value: resolvedItemId, name: resolvedItemName },
+        UnitPrice: line.amount,
+        Qty: 1,
+      },
+      Description: line.description,
+    }));
+
+    const currentDate = new Date();
+    const invoiceData = {
+      Line: qbLineItems,
+      CustomerRef: { value: customer.quickbooksId },
+      DocNumber: docNumber,
+      TxnDate: currentDate.toISOString().split('T')[0],
+      DueDate: new Date(currentDate.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    };
+
+    const invoiceResponse = await withTelemetry(
+      {
+        source: "integration",
+        component: "qb.invoice.create",
+        context: { method: "POST", path: "/v3/company/:realmId/invoice" },
+      },
+      () => makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/invoice`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${integration.accessToken}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(invoiceData)
+      }, operation, integration.realmId),
+    );
+
+    if (invoiceResponse.ok) {
+      const invoiceResult = (await invoiceResponse.json()) as QbInvoiceCreateResponse;
+      const quickbooksId = invoiceResult?.QueryResponse?.Invoice?.[0]?.Id || invoiceResult?.Invoice?.Id;
+      const qbDocNumber: string | undefined = invoiceResult?.Invoice?.DocNumber;
+      return { quickbooksId: quickbooksId ? quickbooksId.toString() : undefined, qbDocNumber };
+    }
+
+    const errorText = await invoiceResponse.text();
+    const intuitTid = invoiceResponse.headers.get('intuit_tid');
+    console.error('[QB] Invoice creation failed:', invoiceResponse.status, invoiceResponse.statusText);
+    console.error('[QB] Full error body:', errorText);
+    if (intuitTid) console.error('[QB] TID:', intuitTid);
+    if (errorText.includes('InvalidRef') || errorText.includes('Customer')) {
+      return { quickbooksError: `Customer not found in QuickBooks. Please sync this customer first.${intuitTid ? ` [TID: ${intuitTid}]` : ''}` };
+    }
+    return { quickbooksError: `QuickBooks API Error: ${invoiceResponse.status} ${invoiceResponse.statusText}${intuitTid ? ` [TID: ${intuitTid}]` : ''}` };
+  }
+
+  // Task #1443 — resync a single existing app invoice to QuickBooks as a
+  // clean CREATE. Builds the QB lines from the invoice's persisted items (so
+  // a merged invoice's current totals/line items are what gets pushed),
+  // reuses buildAndPostQbInvoice for the mapping, then overwrites the stored
+  // quickbooksInvoiceId. Throws InvoiceSyncError so the route maps it to a
+  // clear HTTP status. The customer-not-synced precondition surfaces the same
+  // message the monthly path uses.
+  async function createQuickBooksInvoiceForInvoice(
+    invoiceId: number,
+    opts: { callerCompanyId: number | null },
+  ): Promise<{ quickbooksId?: string }> {
+    const invoice = await storage.getInvoiceById(invoiceId, opts.callerCompanyId);
+    if (!invoice) {
+      throw new InvoiceSyncError("Invoice not found.", 404);
+    }
+
+    const customer = await storage.getCustomerById(invoice.customerId);
+    if (!customer) {
+      throw new InvoiceSyncError("Customer not found.", 404);
+    }
+
+    const companyId = invoice.companyId ?? customer.companyId ?? null;
+    const qbLookup = companyId
+      ? await storage.getQuickBooksIntegrationByCompanyId(companyId.toString())
+      : null;
+    const integration = qbLookup?.realmId
+      ? await storage.getQuickBooksIntegration(qbLookup.realmId)
+      : null;
+    if (!integration || !integration.accessToken) {
+      throw new InvoiceSyncError(
+        "QuickBooks is not connected. Please connect QuickBooks before syncing invoices.",
+        400,
+      );
+    }
+
+    const items = await storage.getInvoiceItems(invoiceId);
+    const qbLines = items
+      .filter((it) => parseFloat(it.totalPrice || '0') > 0)
+      .map((it) => ({
+        amount: parseFloat(it.totalPrice || '0'),
+        description: it.description || `Invoice ${invoice.invoiceNumber}`,
+      }));
+    if (qbLines.length === 0) {
+      throw new InvoiceSyncError(
+        "This invoice has no billable line items to sync to QuickBooks.",
+        400,
+      );
+    }
+
+    let result: { quickbooksId?: string; qbDocNumber?: string; quickbooksError?: string };
+    try {
+      result = await buildAndPostQbInvoice({
+        integration,
+        customer,
+        docNumber: invoice.invoiceNumber,
+        qbLines,
+        operation: 'Invoice Resync Creation',
+      });
+    } catch (err: any) {
+      // Precondition / connection errors thrown by the create core (missing
+      // service item, customer not synced). Surface the clear message as a
+      // 400 so the billing manager knows the corrective action.
+      throw new InvoiceSyncError(err?.message || "Failed to create invoice in QuickBooks.", 400);
+    }
+
+    if (result.quickbooksError) {
+      throw new InvoiceSyncError(result.quickbooksError, 502);
+    }
+
+    const qbUpdateFields: Partial<InsertInvoice> & { invoiceNumber?: string } = {};
+    if (result.quickbooksId) qbUpdateFields.quickbooksInvoiceId = result.quickbooksId;
+    if (result.qbDocNumber) qbUpdateFields.invoiceNumber = result.qbDocNumber;
+    if (Object.keys(qbUpdateFields).length > 0) {
+      await storage.updateInvoice(invoiceId, qbUpdateFields);
+    }
+
+    return { quickbooksId: result.quickbooksId };
   }
 
   // Function to exchange authorization code for access tokens
@@ -11573,21 +11678,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/invoices/:id/sync-quickbooks", requireAuthentication, requireBillingAccess, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const quickbooksId = `QB-INV-${id}`;
-      await storage.updateInvoice(id, { quickbooksInvoiceId: quickbooksId });
-      res.json({ 
-        success: true,
-        quickbooksId,
-        message: "Invoice synced to QuickBooks successfully" 
-      });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to sync invoice to QuickBooks" });
-    }
-  });
+  // Task #1443 — real per-invoice QuickBooks sync/resync lives in
+  // ./invoice-sync-quickbooks-route.ts, wired up at the merge-route register
+  // site below with createQuickBooksInvoiceForInvoice injected.
 
   app.get("/api/invoices/:invoiceId/pdf", requireAuthentication, requireBillingAccess, async (req, res) => {
     try {
