@@ -797,6 +797,15 @@ export const workOrderItems = pgTable("work_order_items", {
   actualQuantityUsed: integer("actual_quantity_used"),
   actualLaborHours: decimal("actual_labor_hours", { precision: 5, scale: 2 }),
   notes: text("notes"),
+  // Task #1437 — zone detail carried through estimate→work-order conversion
+  // so an inspection-origin work order's items group by controller/zone and
+  // surface the originating issue type to the field tech. Nullable because
+  // non-inspection work orders never populate them.
+  controllerLetter: text("controller_letter"),
+  zoneNumber: integer("zone_number"),
+  issueType: text("issue_type"),
+  // Per-item check-off state for the tech zone checklist. Null = not done.
+  completedAt: timestamp("completed_at"),
 });
 
 // Invoices - created from completed work orders
@@ -1531,6 +1540,32 @@ export const wetCheckPhotos = pgTable("wet_check_photos", {
     .where(sql`${table.clientId} IS NOT NULL`),
 }));
 
+// Task #1437 — structured, zone-linked completed-work photos for work
+// orders. This is the canonical store for "what the tech fixed in this
+// zone", deliberately separate from the flat work_orders.photos array.
+// Mirrors wet_check_photos: optional FK to the work-order item the photo
+// documents, plus a controller/zone tag so the checklist can group photos
+// by zone even when no item FK is supplied. clientId provides offline
+// idempotency exactly like the wet-check photo pipeline.
+export const workOrderZonePhotos = pgTable("work_order_zone_photos", {
+  id: serial("id").primaryKey(),
+  workOrderId: integer("work_order_id").references(() => workOrders.id, { onDelete: "cascade" }).notNull(),
+  workOrderItemId: integer("work_order_item_id").references(() => workOrderItems.id, { onDelete: "set null" }),
+  controllerLetter: text("controller_letter"),
+  zoneNumber: integer("zone_number"),
+  url: text("url").notNull(),
+  caption: text("caption"),
+  takenAt: timestamp("taken_at").defaultNow().notNull(),
+  takenBy: integer("taken_by").references(() => users.id).notNull(),
+  clientId: text("client_id"),
+}, (table) => ({
+  workOrderIdx: index("idx_wo_zone_photos_work_order").on(table.workOrderId),
+  workOrderItemIdx: index("idx_wo_zone_photos_item").on(table.workOrderItemId),
+  clientIdUniq: uniqueIndex("uniq_wo_zone_photo_client_id")
+    .on(table.clientId)
+    .where(sql`${table.clientId} IS NOT NULL`),
+}));
+
 export const insertPropertyControllerSchema = createInsertSchema(propertyControllers).omit({
   id: true, createdAt: true, updatedAt: true,
 });
@@ -1545,6 +1580,7 @@ export const insertWetCheckFindingSchema = createInsertSchema(wetCheckFindings).
   id: true, createdAt: true, updatedAt: true,
 });
 export const insertWetCheckPhotoSchema = createInsertSchema(wetCheckPhotos).omit({ id: true });
+export const insertWorkOrderZonePhotoSchema = createInsertSchema(workOrderZonePhotos).omit({ id: true });
 
 export type PropertyController = typeof propertyControllers.$inferSelect;
 export type IssueTypeConfig = typeof issueTypeConfigs.$inferSelect;
@@ -1552,6 +1588,7 @@ export type WetCheck = typeof wetChecks.$inferSelect;
 export type WetCheckZoneRecord = typeof wetCheckZoneRecords.$inferSelect;
 export type WetCheckFinding = typeof wetCheckFindings.$inferSelect;
 export type WetCheckPhoto = typeof wetCheckPhotos.$inferSelect;
+export type WorkOrderZonePhoto = typeof workOrderZonePhotos.$inferSelect;
 
 export type InsertPropertyController = z.infer<typeof insertPropertyControllerSchema>;
 export type InsertIssueTypeConfig = z.infer<typeof insertIssueTypeConfigSchema>;
@@ -1559,6 +1596,7 @@ export type InsertWetCheck = z.infer<typeof insertWetCheckSchema>;
 export type InsertWetCheckZoneRecord = z.infer<typeof insertWetCheckZoneRecordSchema>;
 export type InsertWetCheckFinding = z.infer<typeof insertWetCheckFindingSchema>;
 export type InsertWetCheckPhoto = z.infer<typeof insertWetCheckPhotoSchema>;
+export type InsertWorkOrderZonePhoto = z.infer<typeof insertWorkOrderZonePhotoSchema>;
 
 export type WetCheckFindingWithReason = WetCheckFinding & {
   pendingReason?: string | null;

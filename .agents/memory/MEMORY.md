@@ -3,3 +3,4 @@
 - [express session typing](session-typing.md) — custom session fields go on express-session's SessionData augmentation, never a manual session prop on Express.Request.
 - [billing-sheet/invoice total sync](billing-sheet-invoice-total-sync.md) — every BS item write must resync sheet total AND propagate delta to parent invoice or the PDF guard blocks render.
 - [api-server test suite shared dev DB](api-server-test-shared-db.md) — full suite is slow (>110s) and integration tests share one dev DB; exact-count assertions fail on leftover data, not your change.
+- [Migration registry count test](migration-registry-count-test.md) — registering a new Super Admin DB migration breaks an exact-count assertion in registry.test.ts; prefer membership checks.

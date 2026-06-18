@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { FileUpload } from "@/components/ui/file-upload";
 
 import { WorkOrderCompletion } from "./work-order-completion";
+import { InspectionZoneChecklist, isInspectionOriginWorkOrder } from "./inspection-zone-checklist";
 import { AssignmentConfirmationModal } from "./assignment-confirmation-modal";
 import { WorkOrderWizard } from "./work-order-wizard";
 import { BilledIndicator } from "@/components/ui/billed-indicator";
@@ -962,7 +963,17 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                   </CardHeader>
                 </Card>
 
-                {Array.isArray(workOrderItems) && workOrderItems.length > 0 ? (
+                {isInspectionOriginWorkOrder(workOrder, workOrderItems as any[]) ? (
+                  <InspectionZoneChecklist
+                    workOrder={workOrder}
+                    readOnly={isBilledWorkOrder || workOrder.status === 'completed'}
+                    onComplete={
+                      !isBilledWorkOrder && workOrder.status === 'in_progress'
+                        ? () => setShowCompletionForm(true)
+                        : undefined
+                    }
+                  />
+                ) : Array.isArray(workOrderItems) && workOrderItems.length > 0 ? (
                   <Card className="border-l-4 border-l-blue-500">
                     <CardHeader className="pb-3">
                       <div className="flex items-center justify-between">

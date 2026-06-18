@@ -14,6 +14,7 @@ import {
 } from "../storage";
 import { classifyAndLog as _classifyAndLog } from "./route-error-helpers";
 import { registerWetCheckPhotoAttachRoutes } from "./wet-check-photo-attach-route";
+import { registerWorkOrderZoneRoutes } from "./work-order-zone-route";
 import type { InsertInvoice, InsertCustomer } from "@workspace/db";
 import { PRICING_FIELDS_TO_STRIP } from "@workspace/db";
 import bcrypt from 'bcrypt';
@@ -16750,6 +16751,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // See artifacts/api-server/src/routes/wet-check-photo-attach-route.ts
   // and wet-check-photo-attach-regression.test.ts.
   registerWetCheckPhotoAttachRoutes(app, { requireAuthentication, requireCompanyId, isFieldRole, isWetCheckManagerRole });
+
+  // Task #1437 — inspection work-order tech zone checklist: per-item check-off
+  // toggle + structured zone-linked completed-work photos. Extracted module so
+  // the zone-tag write path and field-tech assignment guard are test-locked.
+  registerWorkOrderZoneRoutes(app, { requireAuthentication, requireSameCompanyAsWorkOrder });
 
   // ─── Manager review / routing / convert ──────────────────────────────────
   // NOTE: /api/wet-checks/:id/approve was removed (Task #1090). The approve

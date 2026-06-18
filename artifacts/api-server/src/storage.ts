@@ -122,6 +122,7 @@ import {
   wetCheckZoneRecords,
   wetCheckFindings,
   wetCheckPhotos,
+  workOrderZonePhotos,
   wetCheckBillings,
   type PropertyController,
   type InsertPropertyController,
@@ -135,6 +136,8 @@ import {
   type InsertWetCheckFinding,
   type WetCheckPhoto,
   type InsertWetCheckPhoto,
+  type WorkOrderZonePhoto,
+  type InsertWorkOrderZonePhoto,
   type WetCheckBilling,
   type InsertWetCheckBilling,
   type WetCheckWithDetails,
@@ -647,6 +650,11 @@ export interface IStorage {
   deleteWorkOrderItem(id: number): Promise<boolean>;
   deleteWorkOrderItems(workOrderId: number): Promise<boolean>;
   replaceWorkOrderItemsInTransaction(workOrderId: number, items: InsertWorkOrderItem[]): Promise<WorkOrderItem[]>;
+  // Task #1437 — tech zone checklist: per-item check-off + zone-linked photos
+  setWorkOrderItemCompletion(workOrderId: number, itemId: number, completed: boolean): Promise<WorkOrderItem | undefined>;
+  getWorkOrderZonePhotos(workOrderId: number): Promise<WorkOrderZonePhoto[]>;
+  attachWorkOrderZonePhoto(workOrderId: number, insert: Omit<InsertWorkOrderZonePhoto, "workOrderId">): Promise<WorkOrderZonePhoto>;
+  deleteWorkOrderZonePhoto(id: number, workOrderId: number): Promise<boolean>;
   
   // Billing Sheets - for work done without work orders
   getAllBillingSheets(companyId: number | null): Promise<BillingSheetWithItems[]>;
@@ -3503,6 +3511,12 @@ export class DatabaseStorage implements IStorage {
           quantity: item.quantity,
           laborHours: item.laborHours,
           totalPrice: item.totalPrice,
+          // Task #1437 — carry zone detail forward so the field tech's
+          // checklist can group items by controller/zone and show the
+          // originating issue. Null on non-inspection estimates.
+          controllerLetter: (item as { controllerLetter?: string | null }).controllerLetter ?? null,
+          zoneNumber: (item as { zoneNumber?: number | null }).zoneNumber ?? null,
+          issueType: (item as { issueType?: string | null }).issueType ?? null,
         });
       }
     }
@@ -3642,6 +3656,11 @@ export class DatabaseStorage implements IStorage {
           quantity: item.quantity,
           laborHours: item.laborHours,
           totalPrice: item.totalPrice,
+          // Task #1437 — carry zone detail forward (see
+          // createWorkOrderFromEstimate; the two paths must stay equivalent).
+          controllerLetter: item.controllerLetter ?? null,
+          zoneNumber: item.zoneNumber ?? null,
+          issueType: item.issueType ?? null,
         });
       }
 
@@ -3856,6 +3875,106 @@ export class DatabaseStorage implements IStorage {
       const inserted = await tx.insert(workOrderItems).values(items).returning();
       return inserted;
     });
+  }
+
+  // Task #1437 — tech zone checklist check-off. Toggles a single item's
+  // completedAt. Scoped to the work order so a tech can't flip an item that
+  // belongs to a different ticket. Returns undefined when no row matched.
+  async setWorkOrderItemCompletion(
+    workOrderId: number,
+    itemId: number,
+    completed: boolean,
+  ): Promise<WorkOrderItem | undefined> {
+    const [updated] = await db
+      .update(workOrderItems)
+      .set({ completedAt: completed ? new Date() : null })
+      .where(and(eq(workOrderItems.id, itemId), eq(workOrderItems.workOrderId, workOrderId)))
+      .returning();
+    return updated || undefined;
+  }
+
+  // Task #1437 — zone-linked completed-work photos for a work order. This is
+  // the structured store (work_order_zone_photos), NOT the flat
+  // work_orders.photos array.
+  async getWorkOrderZonePhotos(workOrderId: number): Promise<WorkOrderZonePhoto[]> {
+    return await db
+      .select()
+      .from(workOrderZonePhotos)
+      .where(eq(workOrderZonePhotos.workOrderId, workOrderId))
+      .orderBy(workOrderZonePhotos.takenAt);
+  }
+
+  async attachWorkOrderZonePhoto(
+    workOrderId: number,
+    insert: Omit<InsertWorkOrderZonePhoto, "workOrderId">,
+  ): Promise<WorkOrderZonePhoto> {
+    // Cross-record linkage validation: a photo's optional workOrderItemId
+    // must belong to the SAME work order (the work order itself is verified
+    // to belong to the caller's company by the route's tenant guard).
+    if (insert.workOrderItemId != null) {
+      const [woi] = await db
+        .select()
+        .from(workOrderItems)
+        .where(eq(workOrderItems.id, insert.workOrderItemId));
+      if (!woi || woi.workOrderId !== workOrderId) {
+        throw new Error(
+          `Work order item ${insert.workOrderItemId} does not belong to work order ${workOrderId}`,
+        );
+      }
+    }
+    // Idempotent dedupe on clientId (matches the partial unique index
+    // uniq_wo_zone_photo_client_id) so an offline retry of the same metadata
+    // POST returns the already-written row instead of dying on the constraint.
+    if (insert.clientId) {
+      const [existing] = await db
+        .select()
+        .from(workOrderZonePhotos)
+        .where(eq(workOrderZonePhotos.clientId, insert.clientId));
+      if (existing) {
+        if (existing.workOrderId !== workOrderId) {
+          const err = new Error(
+            "Photo client id already used on another work order",
+          ) as Error & { code?: string };
+          err.code = "WORK_ORDER_ZONE_PHOTO_CLIENT_ID_COLLISION";
+          throw err;
+        }
+        return existing;
+      }
+    }
+    try {
+      const [created] = await db
+        .insert(workOrderZonePhotos)
+        .values({ ...insert, workOrderId })
+        .returning();
+      return created;
+    } catch (e: any) {
+      // Belt-and-suspenders: a concurrent retry (same clientId) that raced
+      // past the SELECT above fails on the partial unique index; re-read and
+      // return the winner so the attach stays idempotent.
+      const pgCode = e?.cause?.code ?? e?.code;
+      if (insert.clientId && pgCode === "23505") {
+        const [winner] = await db
+          .select()
+          .from(workOrderZonePhotos)
+          .where(eq(workOrderZonePhotos.clientId, insert.clientId));
+        if (winner) {
+          if (winner.workOrderId === workOrderId) return winner;
+          const err = new Error(
+            "Photo client id already used on another work order",
+          ) as Error & { code?: string };
+          err.code = "WORK_ORDER_ZONE_PHOTO_CLIENT_ID_COLLISION";
+          throw err;
+        }
+      }
+      throw e;
+    }
+  }
+
+  async deleteWorkOrderZonePhoto(id: number, workOrderId: number): Promise<boolean> {
+    const result = await db
+      .delete(workOrderZonePhotos)
+      .where(and(eq(workOrderZonePhotos.id, id), eq(workOrderZonePhotos.workOrderId, workOrderId)));
+    return (result.rowCount || 0) > 0;
   }
 
   // Standalone Billing Sheets - for work done without work orders
