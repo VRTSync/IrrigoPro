@@ -25,6 +25,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Search,
   Calendar,
   FileText,
@@ -41,6 +47,7 @@ import {
   ArrowUp,
   ArrowDown,
   ChevronsUpDown,
+  MoreHorizontal,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -625,6 +632,134 @@ export default function InvoicesPage() {
     }
   };
 
+  // Task #1439 — compact presentation helpers shared by the desktop
+  // table and the mobile card fallback.
+  const periodLabelOf = (inv: Invoice) =>
+    `${MONTH_NAMES[inv.invoiceMonth - 1]} ${inv.invoiceYear}`;
+  const periodRangeOf = (inv: Invoice) =>
+    `${formatDate(inv.periodStart)} – ${formatDate(inv.periodEnd)}`;
+
+  const renderQbIcon = (inv: Invoice) => (
+    <span
+      className="inline-flex"
+      title={inv.quickbooksInvoiceId ? "Synced to QuickBooks" : "Not synced to QuickBooks"}
+    >
+      <CheckCircle2
+        className={`w-3.5 h-3.5 ${inv.quickbooksInvoiceId ? "text-emerald-600" : "text-gray-300"}`}
+        aria-label={inv.quickbooksInvoiceId ? "Synced to QuickBooks" : "Not synced to QuickBooks"}
+      />
+    </span>
+  );
+
+  const renderActionsMenu = (invoice: Invoice) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0"
+          data-testid={`button-invoice-actions-${invoice.id}`}
+        >
+          <span className="sr-only">Open actions for invoice {invoice.invoiceNumber}</span>
+          <MoreHorizontal className="w-4 h-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuItem
+          onSelect={() =>
+            setAuditInvoice({
+              id: invoice.id,
+              label: `${periodLabelOf(invoice)} · #${invoice.invoiceNumber}`,
+              total: formatCurrency(invoice.totalAmount),
+            })
+          }
+        >
+          <ClipboardList className="w-3.5 h-3.5 mr-2" />
+          Audit
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() =>
+            setPdfModal({
+              id: invoice.id,
+              number: invoice.invoiceNumber,
+              email: invoice.customerEmail,
+            })
+          }
+        >
+          <FileText className="w-3.5 h-3.5 mr-2" />
+          View PDF
+        </DropdownMenuItem>
+        {canMarkSent && invoice.status === "draft" && (
+          <DropdownMenuItem
+            disabled={markSentMutation.isPending && markSentMutation.variables === invoice.id}
+            onSelect={(e) => {
+              e.preventDefault();
+              markSentMutation.mutate(invoice.id);
+            }}
+            data-testid={`button-mark-sent-invoice-${invoice.id}`}
+          >
+            {markSentMutation.isPending && markSentMutation.variables === invoice.id ? (
+              <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
+            ) : (
+              <CheckCircle2 className="w-3.5 h-3.5 mr-2" />
+            )}
+            Mark sent
+          </DropdownMenuItem>
+        )}
+        {canMarkSent && invoice.status === "sent" && (
+          <DropdownMenuItem
+            disabled={markUnsentMutation.isPending && markUnsentMutation.variables === invoice.id}
+            onSelect={(e) => {
+              e.preventDefault();
+              markUnsentMutation.mutate(invoice.id);
+            }}
+            data-testid={`button-mark-unsent-invoice-${invoice.id}`}
+          >
+            {markUnsentMutation.isPending && markUnsentMutation.variables === invoice.id ? (
+              <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
+            ) : (
+              <X className="w-3.5 h-3.5 mr-2" />
+            )}
+            Mark unsent
+          </DropdownMenuItem>
+        )}
+        {canExportSingleCsv && (
+          <DropdownMenuItem
+            disabled={exportingInvoiceId === invoice.id}
+            onSelect={(e) => {
+              e.preventDefault();
+              handleExportSingleCsv(invoice);
+            }}
+            data-testid={`button-export-invoice-csv-${invoice.id}`}
+          >
+            {exportingInvoiceId === invoice.id ? (
+              <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
+            ) : (
+              <Download className="w-3.5 h-3.5 mr-2" />
+            )}
+            Export CSV
+          </DropdownMenuItem>
+        )}
+        {!invoice.quickbooksInvoiceId && (
+          <DropdownMenuItem
+            disabled={syncMutation.isPending}
+            onSelect={(e) => {
+              e.preventDefault();
+              syncMutation.mutate(invoice.id);
+            }}
+          >
+            {syncMutation.isPending && syncMutation.variables === invoice.id ? (
+              <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-3.5 h-3.5 mr-2" />
+            )}
+            Sync to QB
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-64 p-8">
@@ -776,8 +911,10 @@ export default function InvoicesPage() {
                   <span className="text-sm font-semibold text-gray-700">{formatCurrency(groupTotal)}</span>
                 </div>
 
-                {/* Invoice Table */}
-                <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+                {/* Invoice Table — desktop (Task #1439: compacted to
+                    fit one view; QuickBooks folded into a status icon,
+                    period shortened, row actions in a ⋯ menu). */}
+                <div className="hidden md:block rounded-lg border border-gray-200 bg-white overflow-hidden">
                   <Table>
                     <TableHeader>
                       <TableRow className="bg-gray-50 hover:bg-gray-50">
@@ -785,10 +922,9 @@ export default function InvoicesPage() {
                         <SortableHeader sortKey="customer" label="Customer" sort={sort} onSort={toggleSort} />
                         <SortableHeader sortKey="invoiceNumber" label="Invoice #" sort={sort} onSort={toggleSort} />
                         <SortableHeader sortKey="status" label="Status" sort={sort} onSort={toggleSort} />
-                        <SortableHeader sortKey="quickbooks" label="QuickBooks" sort={sort} onSort={toggleSort} />
                         <SortableHeader sortKey="amount" label="Amount" sort={sort} onSort={toggleSort} align="right" />
-                        <SortableHeader sortKey="period" label="Billing Period" sort={sort} onSort={toggleSort} />
-                        <TableHead className="text-right whitespace-nowrap">Actions</TableHead>
+                        <SortableHeader sortKey="period" label="Period" sort={sort} onSort={toggleSort} />
+                        <TableHead className="w-10" />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -812,138 +948,73 @@ export default function InvoicesPage() {
                           <TableCell className="text-gray-600 whitespace-nowrap">
                             #{invoice.invoiceNumber}
                           </TableCell>
-                          <TableCell className="whitespace-nowrap">{getStatusBadge(invoice.status)}</TableCell>
                           <TableCell className="whitespace-nowrap">
-                            {invoice.quickbooksInvoiceId ? (
-                              <span className="flex items-center gap-1 text-xs text-emerald-600">
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                Synced
-                              </span>
-                            ) : (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-auto py-0.5 px-2 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50"
-                                disabled={syncMutation.isPending}
-                                onClick={() => syncMutation.mutate(invoice.id)}
-                              >
-                                {syncMutation.isPending && syncMutation.variables === invoice.id ? (
-                                  <>
-                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                                    Syncing...
-                                  </>
-                                ) : (
-                                  <>
-                                    <RefreshCw className="w-3 h-3 mr-1" />
-                                    Sync to QB
-                                  </>
-                                )}
-                              </Button>
-                            )}
+                            <div className="flex items-center gap-1.5">
+                              {getStatusBadge(invoice.status)}
+                              {renderQbIcon(invoice)}
+                            </div>
                           </TableCell>
                           <TableCell className="text-right font-bold text-gray-900 whitespace-nowrap">
                             {formatCurrency(invoice.totalAmount)}
                           </TableCell>
-                          <TableCell className="text-xs text-gray-600 whitespace-nowrap">
-                            {formatDate(invoice.periodStart)} – {formatDate(invoice.periodEnd)}
+                          <TableCell
+                            className="text-xs text-gray-600 whitespace-nowrap"
+                            title={periodRangeOf(invoice)}
+                          >
+                            {periodLabelOf(invoice)}
                           </TableCell>
-                          <TableCell>
-                            <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="text-xs"
-                                onClick={() =>
-                                  setAuditInvoice({
-                                    id: invoice.id,
-                                    label: `${group.label} · #${invoice.invoiceNumber}`,
-                                    total: formatCurrency(invoice.totalAmount),
-                                  })
-                                }
-                              >
-                                <ClipboardList className="w-3.5 h-3.5 mr-1" />
-                                Audit
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="text-xs"
-                                onClick={() =>
-                                  setPdfModal({
-                                    id: invoice.id,
-                                    number: invoice.invoiceNumber,
-                                    email: invoice.customerEmail,
-                                  })
-                                }
-                              >
-                                <FileText className="w-3.5 h-3.5 mr-1" />
-                                View PDF
-                              </Button>
-                              {canMarkSent && invoice.status === "draft" && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="text-xs text-green-700 hover:text-green-800 hover:bg-green-50"
-                                  disabled={
-                                    markSentMutation.isPending &&
-                                    markSentMutation.variables === invoice.id
-                                  }
-                                  onClick={() => markSentMutation.mutate(invoice.id)}
-                                  data-testid={`button-mark-sent-invoice-${invoice.id}`}
-                                >
-                                  {markSentMutation.isPending &&
-                                  markSentMutation.variables === invoice.id ? (
-                                    <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
-                                  ) : (
-                                    <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
-                                  )}
-                                  Mark sent
-                                </Button>
-                              )}
-                              {canMarkSent && invoice.status === "sent" && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-xs text-gray-500 hover:text-gray-700"
-                                  disabled={
-                                    markUnsentMutation.isPending &&
-                                    markUnsentMutation.variables === invoice.id
-                                  }
-                                  onClick={() => markUnsentMutation.mutate(invoice.id)}
-                                  data-testid={`button-mark-unsent-invoice-${invoice.id}`}
-                                >
-                                  {markUnsentMutation.isPending &&
-                                  markUnsentMutation.variables === invoice.id ? (
-                                    <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
-                                  ) : (
-                                    <X className="w-3.5 h-3.5 mr-1" />
-                                  )}
-                                  Mark unsent
-                                </Button>
-                              )}
-                              {canExportSingleCsv && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="text-xs"
-                                  disabled={exportingInvoiceId === invoice.id}
-                                  onClick={() => handleExportSingleCsv(invoice)}
-                                  data-testid={`button-export-invoice-csv-${invoice.id}`}
-                                >
-                                  {exportingInvoiceId === invoice.id ? (
-                                    <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
-                                  ) : (
-                                    <Download className="w-3.5 h-3.5 mr-1" />
-                                  )}
-                                  Export CSV
-                                </Button>
-                              )}
-                            </div>
+                          <TableCell className="text-right">
+                            {renderActionsMenu(invoice)}
                           </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
+                </div>
+
+                {/* Invoice cards — mobile fallback (Task #1439) so the
+                    list never overflows on narrow screens. */}
+                <div className="md:hidden space-y-3">
+                  {sortedInvoices(group.invoices).map((invoice) => (
+                    <Card key={invoice.id} className="border-gray-200">
+                      <CardContent className="p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {canMerge && isMergeable(invoice) && (
+                              <Checkbox
+                                checked={selectedIds.has(invoice.id)}
+                                onCheckedChange={() => toggleSelected(invoice.id)}
+                                aria-label={`Select invoice ${invoice.invoiceNumber} for merge`}
+                                data-testid={`checkbox-merge-invoice-mobile-${invoice.id}`}
+                              />
+                            )}
+                            <div className="min-w-0">
+                              <p className="font-medium text-gray-900 truncate">
+                                {invoice.customerName}
+                              </p>
+                              <p className="text-xs text-gray-500">#{invoice.invoiceNumber}</p>
+                            </div>
+                          </div>
+                          {renderActionsMenu(invoice)}
+                        </div>
+                        <div className="mt-3 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5">
+                            {getStatusBadge(invoice.status)}
+                            {renderQbIcon(invoice)}
+                          </div>
+                          <span className="font-bold text-gray-900">
+                            {formatCurrency(invoice.totalAmount)}
+                          </span>
+                        </div>
+                        <div
+                          className="mt-2 text-xs text-gray-500"
+                          title={periodRangeOf(invoice)}
+                        >
+                          {periodLabelOf(invoice)}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
                 </div>
               </div>
             );
