@@ -379,6 +379,8 @@ export default function InvoicesPage() {
   const userRole = getCurrentUserRole();
   const canExportSingleCsv = !!userRole && CSV_EXPORT_ROLES.has(userRole);
   const canMerge = !!userRole && MERGE_ROLES.has(userRole);
+  // Task #1438 — same billing-capable role set as merge/export.
+  const canMarkSent = !!userRole && MERGE_ROLES.has(userRole);
 
   // Task #1425 — invoice merge selection. `selectedIds` holds the invoices
   // ticked for merging; `survivingId` is the chosen survivor in the confirm
@@ -442,6 +444,31 @@ export default function InvoicesPage() {
     },
     onError: (err: Error) => {
       toast({ title: "QuickBooks sync failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  // Task #1438 — record/undo manual delivery of an invoice. mark-sent flips
+  // a draft → sent (stamping sentAt); mark-unsent reverts a sent → draft.
+  // No email is sent; this only records delivery state.
+  const markSentMutation = useMutation({
+    mutationFn: (invoiceId: number) => apiRequest(`/api/invoices/${invoiceId}/mark-sent`, "POST"),
+    onSuccess: () => {
+      toast({ title: "Invoice marked as sent" });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Couldn't mark invoice as sent", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const markUnsentMutation = useMutation({
+    mutationFn: (invoiceId: number) => apiRequest(`/api/invoices/${invoiceId}/mark-unsent`, "POST"),
+    onSuccess: () => {
+      toast({ title: "Invoice marked unsent" });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Couldn't mark invoice unsent", description: err.message, variant: "destructive" });
     },
   });
 
@@ -852,6 +879,48 @@ export default function InvoicesPage() {
                                 <FileText className="w-3.5 h-3.5 mr-1" />
                                 View PDF
                               </Button>
+                              {canMarkSent && invoice.status === "draft" && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-xs text-green-700 hover:text-green-800 hover:bg-green-50"
+                                  disabled={
+                                    markSentMutation.isPending &&
+                                    markSentMutation.variables === invoice.id
+                                  }
+                                  onClick={() => markSentMutation.mutate(invoice.id)}
+                                  data-testid={`button-mark-sent-invoice-${invoice.id}`}
+                                >
+                                  {markSentMutation.isPending &&
+                                  markSentMutation.variables === invoice.id ? (
+                                    <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+                                  )}
+                                  Mark sent
+                                </Button>
+                              )}
+                              {canMarkSent && invoice.status === "sent" && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-xs text-gray-500 hover:text-gray-700"
+                                  disabled={
+                                    markUnsentMutation.isPending &&
+                                    markUnsentMutation.variables === invoice.id
+                                  }
+                                  onClick={() => markUnsentMutation.mutate(invoice.id)}
+                                  data-testid={`button-mark-unsent-invoice-${invoice.id}`}
+                                >
+                                  {markUnsentMutation.isPending &&
+                                  markUnsentMutation.variables === invoice.id ? (
+                                    <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                                  ) : (
+                                    <X className="w-3.5 h-3.5 mr-1" />
+                                  )}
+                                  Mark unsent
+                                </Button>
+                              )}
                               {canExportSingleCsv && (
                                 <Button
                                   variant="outline"
