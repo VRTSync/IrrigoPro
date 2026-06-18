@@ -17,6 +17,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   Search,
   Calendar,
   FileText,
@@ -30,6 +38,9 @@ import {
   Download,
   GitMerge,
   X,
+  ArrowUp,
+  ArrowDown,
+  ChevronsUpDown,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -201,6 +212,79 @@ function groupByBillingPeriod(invoices: Invoice[]) {
   });
 }
 
+type SortKey = "customer" | "invoiceNumber" | "status" | "quickbooks" | "amount" | "period";
+type SortDir = "asc" | "desc";
+interface SortState {
+  key: SortKey;
+  dir: SortDir;
+}
+
+function compareInvoices(a: Invoice, b: Invoice, key: SortKey): number {
+  switch (key) {
+    case "customer":
+      return a.customerName.localeCompare(b.customerName, undefined, { sensitivity: "base" });
+    case "invoiceNumber":
+      return a.invoiceNumber.localeCompare(b.invoiceNumber, undefined, { numeric: true, sensitivity: "base" });
+    case "status":
+      return a.status.localeCompare(b.status, undefined, { sensitivity: "base" });
+    case "quickbooks":
+      return Number(!!a.quickbooksInvoiceId) - Number(!!b.quickbooksInvoiceId);
+    case "amount":
+      return (parseFloat(a.totalAmount) || 0) - (parseFloat(b.totalAmount) || 0);
+    case "period":
+      return new Date(a.periodStart).getTime() - new Date(b.periodStart).getTime();
+  }
+}
+
+function sortInvoices(invoices: Invoice[], sort: SortState | null): Invoice[] {
+  if (!sort) return invoices;
+  const sorted = [...invoices].sort((a, b) => {
+    const cmp = compareInvoices(a, b, sort.key);
+    return sort.dir === "asc" ? cmp : -cmp;
+  });
+  return sorted;
+}
+
+function SortableHeader({
+  sortKey,
+  label,
+  sort,
+  onSort,
+  align = "left",
+}: {
+  sortKey: SortKey;
+  label: string;
+  sort: SortState | null;
+  onSort: (key: SortKey) => void;
+  align?: "left" | "right";
+}) {
+  const active = sort?.key === sortKey;
+  return (
+    <TableHead className={align === "right" ? "text-right" : undefined}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-1 whitespace-nowrap font-medium hover:text-gray-900 ${
+          active ? "text-gray-900" : "text-muted-foreground"
+        } ${align === "right" ? "flex-row-reverse" : ""}`}
+        data-testid={`sort-${sortKey}`}
+        aria-sort={active ? (sort?.dir === "asc" ? "ascending" : "descending") : "none"}
+      >
+        {label}
+        {active ? (
+          sort?.dir === "asc" ? (
+            <ArrowUp className="w-3.5 h-3.5" />
+          ) : (
+            <ArrowDown className="w-3.5 h-3.5" />
+          )
+        ) : (
+          <ChevronsUpDown className="w-3.5 h-3.5 opacity-40" />
+        )}
+      </button>
+    </TableHead>
+  );
+}
+
 // Task #708 — A/R aging filter values mirror the
 // `/api/financial-pulse/ar-aging` bucket keys (with `days90Plus`
 // matching the inclusive 90+ bucket). The mapping lives here so the
@@ -281,6 +365,14 @@ export default function InvoicesPage() {
     const next = parseAging(search ?? "");
     setAgingFilter((prev) => (prev === next ? prev : next));
   }, [search]);
+  const [sort, setSort] = useState<SortState | null>(null);
+  const toggleSort = (key: SortKey) => {
+    setSort((prev) => {
+      if (!prev || prev.key !== key) return { key, dir: "asc" };
+      if (prev.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+  };
   const [pdfModal, setPdfModal] = useState<{ id: number; number: string; email: string } | null>(null);
   const [auditInvoice, setAuditInvoice] = useState<{ id: number; label: string; total: string } | null>(null);
   const [exportingInvoiceId, setExportingInvoiceId] = useState<number | null>(null);
@@ -406,6 +498,10 @@ export default function InvoicesPage() {
   }, [invoices, searchTerm, monthFilter, agingFilter]);
 
   const groups = useMemo(() => groupByBillingPeriod(filteredInvoices), [filteredInvoices]);
+
+  // Sorting is applied within each month group so the outer
+  // most-recent-first month structure stays intact (Task #1423).
+  const sortedInvoices = (items: Invoice[]) => sortInvoices(items, sort);
 
   const totalBilled = filteredInvoices.reduce((sum, inv) => sum + parseFloat(inv.totalAmount), 0);
 
@@ -653,69 +749,44 @@ export default function InvoicesPage() {
                   <span className="text-sm font-semibold text-gray-700">{formatCurrency(groupTotal)}</span>
                 </div>
 
-                {/* Invoice Cards Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {group.invoices.map((invoice) => (
-                    <Card
-                      key={invoice.id}
-                      className="border border-gray-200 hover:shadow-md transition-shadow cursor-pointer"
-                      onClick={() =>
-                        setPdfModal({
-                          id: invoice.id,
-                          number: invoice.invoiceNumber,
-                          email: invoice.customerEmail,
-                        })
-                      }
-                    >
-                      <CardContent className="p-5">
-                        {/* Card Header */}
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="min-w-0 flex-1 flex items-start gap-2">
-                            {canMerge && isMergeable(invoice) && (
-                              <span
-                                className="pt-0.5 flex-shrink-0"
-                                onClick={(e) => e.stopPropagation()}
-                              >
+                {/* Invoice Table */}
+                <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-gray-50 hover:bg-gray-50">
+                        {canMerge && <TableHead className="w-8" />}
+                        <SortableHeader sortKey="customer" label="Customer" sort={sort} onSort={toggleSort} />
+                        <SortableHeader sortKey="invoiceNumber" label="Invoice #" sort={sort} onSort={toggleSort} />
+                        <SortableHeader sortKey="status" label="Status" sort={sort} onSort={toggleSort} />
+                        <SortableHeader sortKey="quickbooks" label="QuickBooks" sort={sort} onSort={toggleSort} />
+                        <SortableHeader sortKey="amount" label="Amount" sort={sort} onSort={toggleSort} align="right" />
+                        <SortableHeader sortKey="period" label="Billing Period" sort={sort} onSort={toggleSort} />
+                        <TableHead className="text-right whitespace-nowrap">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {sortedInvoices(group.invoices).map((invoice) => (
+                        <TableRow key={invoice.id} className="hover:bg-gray-50">
+                          {canMerge && (
+                            <TableCell className="w-8">
+                              {isMergeable(invoice) && (
                                 <Checkbox
                                   checked={selectedIds.has(invoice.id)}
                                   onCheckedChange={() => toggleSelected(invoice.id)}
                                   aria-label={`Select invoice ${invoice.invoiceNumber} for merge`}
                                   data-testid={`checkbox-merge-invoice-${invoice.id}`}
                                 />
-                              </span>
-                            )}
-                            <div className="min-w-0 flex-1">
-                              <p className="font-semibold text-gray-900 truncate">{invoice.customerName}</p>
-                              <p className="text-xs text-gray-500 mt-0.5">#{invoice.invoiceNumber}</p>
-                            </div>
-                          </div>
-                          <div className="flex flex-col items-end gap-1 ml-2 flex-shrink-0">
-                            {getStatusBadge(invoice.status)}
-                            {invoice.quickbooksInvoiceId && (
-                              <Badge className="bg-purple-100 text-purple-800 text-xs">
-                                <CheckCircle2 className="w-3 h-3 mr-1" />
-                                QB Synced
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Details */}
-                        <div className="space-y-1.5 text-sm mb-4">
-                          <div className="flex justify-between items-center">
-                            <span className="text-gray-500">Amount</span>
-                            <span className="font-bold text-gray-900 text-base">
-                              {formatCurrency(invoice.totalAmount)}
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-gray-500">Period</span>
-                            <span className="text-xs text-gray-600">
-                              {formatDate(invoice.periodStart)} – {formatDate(invoice.periodEnd)}
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-gray-500">QuickBooks</span>
+                              )}
+                            </TableCell>
+                          )}
+                          <TableCell className="font-medium text-gray-900 whitespace-nowrap max-w-[200px] truncate">
+                            {invoice.customerName}
+                          </TableCell>
+                          <TableCell className="text-gray-600 whitespace-nowrap">
+                            #{invoice.invoiceNumber}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">{getStatusBadge(invoice.status)}</TableCell>
+                          <TableCell className="whitespace-nowrap">
                             {invoice.quickbooksInvoiceId ? (
                               <span className="flex items-center gap-1 text-xs text-emerald-600">
                                 <CheckCircle2 className="w-3.5 h-3.5" />
@@ -727,10 +798,7 @@ export default function InvoicesPage() {
                                 size="sm"
                                 className="h-auto py-0.5 px-2 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50"
                                 disabled={syncMutation.isPending}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  syncMutation.mutate(invoice.id);
-                                }}
+                                onClick={() => syncMutation.mutate(invoice.id)}
                               >
                                 {syncMutation.isPending && syncMutation.variables === invoice.id ? (
                                   <>
@@ -745,62 +813,68 @@ export default function InvoicesPage() {
                                 )}
                               </Button>
                             )}
-                          </div>
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="flex-1 text-xs"
-                            onClick={() =>
-                              setAuditInvoice({
-                                id: invoice.id,
-                                label: `${group.label} · #${invoice.invoiceNumber}`,
-                                total: formatCurrency(invoice.totalAmount),
-                              })
-                            }
-                          >
-                            <ClipboardList className="w-3.5 h-3.5 mr-1" />
-                            Audit
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="flex-1 text-xs"
-                            onClick={() =>
-                              setPdfModal({
-                                id: invoice.id,
-                                number: invoice.invoiceNumber,
-                                email: invoice.customerEmail,
-                              })
-                            }
-                          >
-                            <FileText className="w-3.5 h-3.5 mr-1" />
-                            View PDF
-                          </Button>
-                          {canExportSingleCsv && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex-1 text-xs"
-                              disabled={exportingInvoiceId === invoice.id}
-                              onClick={() => handleExportSingleCsv(invoice)}
-                              data-testid={`button-export-invoice-csv-${invoice.id}`}
-                            >
-                              {exportingInvoiceId === invoice.id ? (
-                                <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
-                              ) : (
-                                <Download className="w-3.5 h-3.5 mr-1" />
+                          </TableCell>
+                          <TableCell className="text-right font-bold text-gray-900 whitespace-nowrap">
+                            {formatCurrency(invoice.totalAmount)}
+                          </TableCell>
+                          <TableCell className="text-xs text-gray-600 whitespace-nowrap">
+                            {formatDate(invoice.periodStart)} – {formatDate(invoice.periodEnd)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-xs"
+                                onClick={() =>
+                                  setAuditInvoice({
+                                    id: invoice.id,
+                                    label: `${group.label} · #${invoice.invoiceNumber}`,
+                                    total: formatCurrency(invoice.totalAmount),
+                                  })
+                                }
+                              >
+                                <ClipboardList className="w-3.5 h-3.5 mr-1" />
+                                Audit
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-xs"
+                                onClick={() =>
+                                  setPdfModal({
+                                    id: invoice.id,
+                                    number: invoice.invoiceNumber,
+                                    email: invoice.customerEmail,
+                                  })
+                                }
+                              >
+                                <FileText className="w-3.5 h-3.5 mr-1" />
+                                View PDF
+                              </Button>
+                              {canExportSingleCsv && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-xs"
+                                  disabled={exportingInvoiceId === invoice.id}
+                                  onClick={() => handleExportSingleCsv(invoice)}
+                                  data-testid={`button-export-invoice-csv-${invoice.id}`}
+                                >
+                                  {exportingInvoiceId === invoice.id ? (
+                                    <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                                  ) : (
+                                    <Download className="w-3.5 h-3.5 mr-1" />
+                                  )}
+                                  Export CSV
+                                </Button>
                               )}
-                              Export CSV
-                            </Button>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               </div>
             );
