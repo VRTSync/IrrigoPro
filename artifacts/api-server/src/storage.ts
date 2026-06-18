@@ -4941,45 +4941,146 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
+  // Task #1422 — single invoice-propagation seam. When a billing sheet that
+  // is already attached to an invoice has its line items changed, fold the
+  // parts/total delta into the parent invoice so the sheet and its invoice can
+  // never silently drift — that drift is what trips the PDF reconciliation
+  // guard. Mirrors the reprice propagation pattern (repriceBillingSheetItems,
+  // invoice branch).
+  private async _propagateBillingSheetDeltaToInvoiceTx(
+    tx: DbExecutor,
+    invoiceId: number,
+    partsDelta: number,
+    totalDelta: number,
+  ): Promise<void> {
+    if (Math.abs(partsDelta) < 0.005 && Math.abs(totalDelta) < 0.005) return;
+    const [inv] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId));
+    if (!inv) return;
+    const newParts = (parseFloat(String(inv.partsSubtotal ?? 0)) || 0) + partsDelta;
+    const newTotal = (parseFloat(String(inv.totalAmount ?? 0)) || 0) + totalDelta;
+    await tx.update(invoices).set({
+      partsSubtotal: newParts.toFixed(2),
+      totalAmount: newTotal.toFixed(2),
+      updatedAt: new Date(),
+    }).where(eq(invoices.id, invoiceId));
+    console.log(
+      `[AUDIT] invoice_total_propagated invoiceId=${invoiceId} ` +
+      `partsDelta=${partsDelta.toFixed(2)} totalDelta=${totalDelta.toFixed(2)} ` +
+      `newPartsSubtotal=${newParts.toFixed(2)} newTotalAmount=${newTotal.toFixed(2)}`,
+    );
+  }
+
+  // Task #1422 — recompute a billing sheet's parts/labor/total from its
+  // persisted line items inside an existing transaction, persist the sheet,
+  // and propagate the delta to the parent invoice when the sheet is invoiced.
+  // The raw item mutators all route through here so an edit can never leave
+  // the sheet (or its invoice) out of sync.
+  private async _resyncBillingSheetTotalsTx(
+    tx: DbExecutor,
+    billingSheetId: number,
+  ): Promise<{ partsSubtotal: string; laborSubtotal: string; totalAmount: string }> {
+    const [bs] = await tx.select().from(billingSheets).where(eq(billingSheets.id, billingSheetId));
+    if (!bs) {
+      throw Object.assign(new Error(`Billing sheet ${billingSheetId} not found`), { code: "BS_NOT_FOUND" });
+    }
+    const rows = await tx.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, billingSheetId));
+    const newParts = rows.reduce((s, r) => s + parseFloat(String(r.totalPrice || 0)), 0);
+
+    const laborRate = parseFloat(String(bs.appliedLaborRate ?? bs.laborRate ?? "0")) || 0;
+    let newLabor: number;
+    let newTotalHours: number | undefined;
+    if (bs.laborMode === "per_part") {
+      newTotalHours = rows.reduce((s, r) => s + parseFloat(String(r.laborHours || 0)), 0);
+      newLabor = newTotalHours * laborRate;
+    } else {
+      const totalHours = parseFloat(String(bs.totalHours ?? "0")) || 0;
+      newLabor = totalHours * laborRate;
+    }
+    const newTotal = newParts + newLabor;
+
+    const oldParts = parseFloat(String(bs.partsSubtotal ?? 0)) || 0;
+    const oldTotal = parseFloat(String(bs.totalAmount ?? 0)) || 0;
+
+    await tx.update(billingSheets).set({
+      partsSubtotal: newParts.toFixed(2),
+      laborSubtotal: newLabor.toFixed(2),
+      totalAmount: newTotal.toFixed(2),
+      ...(newTotalHours !== undefined ? { totalHours: newTotalHours.toFixed(2) } : {}),
+      updatedAt: new Date(),
+    }).where(eq(billingSheets.id, billingSheetId));
+
+    if (bs.invoiceId != null) {
+      await this._propagateBillingSheetDeltaToInvoiceTx(tx, bs.invoiceId, newParts - oldParts, newTotal - oldTotal);
+    }
+
+    return {
+      partsSubtotal: newParts.toFixed(2),
+      laborSubtotal: newLabor.toFixed(2),
+      totalAmount: newTotal.toFixed(2),
+    };
+  }
+
   async addBillingSheetItem(billingSheetId: number, item: InsertBillingSheetItem): Promise<BillingSheetItem> {
-    const [newItem] = await db.insert(billingSheetItems).values({
-      ...item,
-      billingSheetId,
-      totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString()
-    }).returning();
-    return newItem;
+    return db.transaction(async (tx) => {
+      const [newItem] = await tx.insert(billingSheetItems).values({
+        ...item,
+        billingSheetId,
+        totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString()
+      }).returning();
+      await this._resyncBillingSheetTotalsTx(tx, billingSheetId);
+      return newItem;
+    });
   }
 
   async updateBillingSheetItem(itemId: number, item: Partial<InsertBillingSheetItem>): Promise<BillingSheetItem | undefined> {
-    const updateData = { ...item };
-    if (item.quantity && item.unitPrice) {
-      updateData.totalPrice = (Number(item.quantity) * Number(item.unitPrice)).toString();
-    }
-    
-    const [updatedItem] = await db.update(billingSheetItems).set(updateData).where(eq(billingSheetItems.id, itemId)).returning();
-    return updatedItem || undefined;
+    return db.transaction(async (tx) => {
+      const updateData = { ...item };
+      if (item.quantity && item.unitPrice) {
+        updateData.totalPrice = (Number(item.quantity) * Number(item.unitPrice)).toString();
+      }
+
+      const [updatedItem] = await tx.update(billingSheetItems).set(updateData).where(eq(billingSheetItems.id, itemId)).returning();
+      if (!updatedItem) return undefined;
+      if (updatedItem.billingSheetId != null) {
+        await this._resyncBillingSheetTotalsTx(tx, updatedItem.billingSheetId);
+      }
+      return updatedItem;
+    });
   }
 
   async deleteBillingSheetItem(itemId: number): Promise<boolean> {
-    const result = await db.delete(billingSheetItems).where(eq(billingSheetItems.id, itemId));
-    return (result.rowCount || 0) > 0;
+    return db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(billingSheetItems).where(eq(billingSheetItems.id, itemId));
+      if (!existing) return false;
+      const result = await tx.delete(billingSheetItems).where(eq(billingSheetItems.id, itemId));
+      if (existing.billingSheetId != null) {
+        await this._resyncBillingSheetTotalsTx(tx, existing.billingSheetId);
+      }
+      return (result.rowCount || 0) > 0;
+    });
   }
 
   async deleteBillingSheetItems(billingSheetId: number): Promise<boolean> {
-    const result = await db.delete(billingSheetItems).where(eq(billingSheetItems.billingSheetId, billingSheetId));
-    return result.rowCount !== null;
+    return db.transaction(async (tx) => {
+      const result = await tx.delete(billingSheetItems).where(eq(billingSheetItems.billingSheetId, billingSheetId));
+      await this._resyncBillingSheetTotalsTx(tx, billingSheetId);
+      return result.rowCount !== null;
+    });
   }
 
   async replaceBillingSheetItemsInTransaction(billingSheetId: number, items: InsertBillingSheetItem[]): Promise<BillingSheetItem[]> {
     return await db.transaction(async (tx) => {
       await tx.delete(billingSheetItems).where(eq(billingSheetItems.billingSheetId, billingSheetId));
-      if (items.length === 0) return [];
-      const values = items.map(item => ({
-        ...item,
-        billingSheetId,
-        totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
-      }));
-      const inserted = await tx.insert(billingSheetItems).values(values).returning();
+      let inserted: typeof billingSheetItems.$inferSelect[] = [];
+      if (items.length > 0) {
+        const values = items.map(item => ({
+          ...item,
+          billingSheetId,
+          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
+        }));
+        inserted = await tx.insert(billingSheetItems).values(values).returning();
+      }
+      await this._resyncBillingSheetTotalsTx(tx, billingSheetId);
       return inserted;
     });
   }
@@ -5009,12 +5110,21 @@ export class DatabaseStorage implements IStorage {
         0
       );
 
-      // Read the current laborSubtotal from the sheet inside the same transaction
+      // Read the current sheet inside the same transaction. laborSubtotal is
+      // preserved (the surrounding PATCH stamps it before items are replaced);
+      // the old parts/total + invoiceId drive Task #1422 invoice propagation.
       const [currentSheet] = await tx
-        .select({ laborSubtotal: billingSheets.laborSubtotal })
+        .select({
+          laborSubtotal: billingSheets.laborSubtotal,
+          partsSubtotal: billingSheets.partsSubtotal,
+          totalAmount: billingSheets.totalAmount,
+          invoiceId: billingSheets.invoiceId,
+        })
         .from(billingSheets)
         .where(eq(billingSheets.id, billingSheetId));
       const laborSubtotal = parseFloat(String(currentSheet?.laborSubtotal || 0));
+      const oldParts = parseFloat(String(currentSheet?.partsSubtotal || 0));
+      const oldTotal = parseFloat(String(currentSheet?.totalAmount || 0));
       const trueTotalAmount = laborSubtotal + truePartsSubtotal;
 
       await tx
@@ -5024,6 +5134,17 @@ export class DatabaseStorage implements IStorage {
           totalAmount: trueTotalAmount.toFixed(2),
         })
         .where(eq(billingSheets.id, billingSheetId));
+
+      // Task #1422 — keep an attached invoice in lockstep with the sheet so a
+      // line-item edit on an invoiced sheet can't silently desync the invoice.
+      if (currentSheet?.invoiceId != null) {
+        await this._propagateBillingSheetDeltaToInvoiceTx(
+          tx,
+          currentSheet.invoiceId,
+          truePartsSubtotal - oldParts,
+          trueTotalAmount - oldTotal,
+        );
+      }
 
       return {
         items: inserted,

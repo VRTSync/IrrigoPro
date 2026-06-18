@@ -11610,6 +11610,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const result = await pdfService.generatePdfBuffer(invoiceId);
 
         if (!result.success) {
+          if (result.validationFailure) {
+            res.status(422).json({
+              message: result.error || "Invoice totals validation failed",
+              validationFailure: result.validationFailure,
+            });
+            return;
+          }
           res.status(500).json({ message: "PDF generation failed", error: result.error });
           return;
         }

@@ -61,6 +61,73 @@ interface ValidationFailure {
   };
 }
 
+interface PdfErrorDetail {
+  message: string;
+  validationFailure?: ValidationFailure;
+}
+
+// The default query/apiRequest layer throws `new Error("<status>: <body>")`.
+// Parse that back into a structured detail so a 422 reconciliation failure
+// surfaces the specific drift instead of the generic "PDF Not Available".
+function parsePdfFetchError(err: unknown): PdfErrorDetail | null {
+  if (!err) return null;
+  const raw = err instanceof Error ? err.message : String(err);
+  const match = raw.match(/^(\d+):\s*([\s\S]*)$/);
+  if (match) {
+    const [, status, body] = match;
+    try {
+      const parsed = JSON.parse(body);
+      return {
+        message: parsed.message || `Request failed (${status})`,
+        validationFailure: parsed.validationFailure,
+      };
+    } catch {
+      return { message: body || `Request failed (${status})` };
+    }
+  }
+  return { message: raw };
+}
+
+function PdfValidationErrorPanel({ detail }: { detail: PdfErrorDetail }) {
+  const vf = detail.validationFailure;
+  return (
+    <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+      <div className="flex items-start gap-3">
+        <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+        <div className="flex-1">
+          <h4 className="font-medium text-red-900 mb-1">PDF Cannot Be Generated</h4>
+          <p className="text-sm text-red-700 mb-2">{detail.message}</p>
+          {vf && vf.rowErrors.length > 0 && (
+            <div className="mt-2">
+              <p className="text-sm font-medium text-red-800 mb-1">Data integrity issues found:</p>
+              <ul className="text-sm text-red-700 space-y-1 list-disc list-inside">
+                {vf.rowErrors.map((err, i) => (
+                  <li key={i}>
+                    {err.recordType === 'work_order' ? 'Work Order' : 'Billing Sheet'} #{err.recordId}: parts ${err.partsSubtotal.toFixed(2)} + labor ${err.laborSubtotal.toFixed(2)} = ${err.computedTotal.toFixed(2)}, but the stored total is ${err.storedTotal.toFixed(2)} (off by ${err.delta.toFixed(2)})
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {vf?.totalsError && (
+            <div className="mt-2">
+              <p className="text-sm font-medium text-red-800 mb-1">Invoice total mismatch:</p>
+              <p className="text-sm text-red-700">
+                Line items sum to ${vf.totalsError.computedGrandTotal.toFixed(2)}, but the invoice stored total is ${vf.totalsError.storedTotal.toFixed(2)} (off by ${vf.totalsError.delta.toFixed(2)}).
+              </p>
+            </div>
+          )}
+          {vf && (
+            <p className="text-xs text-red-600 mt-2">
+              Please contact support to repair these records before generating the PDF.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function InvoicePdfPreviewModal({
   invoiceId,
   invoiceNumber,
@@ -80,6 +147,10 @@ export function InvoicePdfPreviewModal({
     queryKey: ["/api/invoices", invoiceId, "pdf"],
     enabled: open,
   });
+
+  // A 422 from the fetch route carries the reconciliation drift details —
+  // surface them instead of the generic "PDF Not Available" message.
+  const queryError = parsePdfFetchError(error);
 
   const getAuthParams = () => {
     const user = JSON.parse(safeGet("user") || "{}");
@@ -227,44 +298,23 @@ export function InvoicePdfPreviewModal({
             )}
 
             {error && (
-              <div className="text-center max-w-md mx-auto">
-                <AlertCircle className="w-12 h-12 mx-auto mb-4 text-red-600" />
-                <h3 className="text-lg font-semibold mb-2">PDF Not Available</h3>
-                <p className="text-sm text-gray-600 mb-4">
-                  The PDF for this invoice hasn't been generated yet or there was an error loading it.
-                </p>
-                <p className="text-xs text-gray-500">
-                  PDFs are automatically generated when invoices are created. If this invoice was just created, please wait a moment and try again.
-                </p>
-              </div>
+              queryError?.validationFailure ? (
+                <PdfValidationErrorPanel detail={queryError} />
+              ) : (
+                <div className="text-center max-w-md mx-auto">
+                  <AlertCircle className="w-12 h-12 mx-auto mb-4 text-red-600" />
+                  <h3 className="text-lg font-semibold mb-2">PDF Not Available</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    The PDF for this invoice hasn't been generated yet or there was an error loading it.
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    PDFs are automatically generated when invoices are created. If this invoice was just created, please wait a moment and try again.
+                  </p>
+                </div>
+              )
             )}
 
-            {pdfError && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
-                  <div className="flex-1">
-                    <h4 className="font-medium text-red-900 mb-1">PDF Cannot Be Generated</h4>
-                    <p className="text-sm text-red-700 mb-2">{pdfError.message}</p>
-                    {pdfError.validationFailure && pdfError.validationFailure.rowErrors.length > 0 && (
-                      <div className="mt-2">
-                        <p className="text-sm font-medium text-red-800 mb-1">Data integrity issues found:</p>
-                        <ul className="text-sm text-red-700 space-y-1 list-disc list-inside">
-                          {pdfError.validationFailure.rowErrors.map((err, i) => (
-                            <li key={i}>
-                              {err.recordType === 'work_order' ? 'Work Order' : 'Billing Sheet'} #{err.recordId}: {err.reason}
-                            </li>
-                          ))}
-                        </ul>
-                        <p className="text-xs text-red-600 mt-2">
-                          Please contact support to repair these records before generating the PDF.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
+            {pdfError && <PdfValidationErrorPanel detail={pdfError} />}
 
             {pdf && !isLoading && !error && (
               <div className="space-y-4">
