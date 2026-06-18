@@ -2191,6 +2191,16 @@ export function registerEstimateRoutes(
     async (req, res) => {
       try {
         const id = parseInt(String(req.params.id));
+        // Express 5 delivers an empty request body as `undefined` (not
+        // `{}`), so the optional convert-time fields must be read off a
+        // safe fallback — reading `.assignedTechnicianId` straight off
+        // `req.body` would throw a TypeError and 500 *after* the work
+        // order was already created. Coerce to an empty object first.
+        const body = (req.body ?? {}) as {
+          assignedTechnicianId?: number | string;
+          scheduledDate?: string;
+          notes?: string;
+        };
         const estBefore = await storage.getEstimate(id).catch(() => null);
 
         // Use the new storage function that handles all validation and conversion
@@ -2223,24 +2233,26 @@ export function registerEstimateRoutes(
         });
 
         // Optionally assign to a technician if provided in request
-        if (req.body.assignedTechnicianId) {
-          const assignedUser = await storage.getUser!(req.body.assignedTechnicianId);
+        if (body.assignedTechnicianId) {
+          const assignedUser = await storage.getUser!(
+            Number(body.assignedTechnicianId),
+          );
           if (assignedUser) {
             await storage.assignWorkOrder!(workOrder.id, assignedUser.id, assignedUser.name);
           }
         }
 
         // Update scheduled date if provided
-        if (req.body.scheduledDate) {
+        if (body.scheduledDate) {
           await storage.updateWorkOrder!(workOrder.id, {
-            scheduledDate: new Date(req.body.scheduledDate),
+            scheduledDate: new Date(body.scheduledDate),
           });
         }
 
         // Add notes if provided
-        if (req.body.notes) {
+        if (body.notes) {
           await storage.updateWorkOrder!(workOrder.id, {
-            notes: req.body.notes,
+            notes: body.notes,
           });
         }
 

@@ -35,6 +35,7 @@ import {
 } from "@/components/estimates/command-center/estimate-table";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
+import { ConvertToWorkOrderModal } from "@/components/estimates/convert-to-work-order-modal";
 import { LIFECYCLE_STATUSES, type LifecycleStatus } from "@workspace/shared";
 import type { Estimate } from "@workspace/db/schema";
 import type { EstimateSummary } from "@workspace/db";
@@ -237,14 +238,29 @@ export default function EstimateCommandCenter() {
   );
 
   // --- Convert to work order mutation ---
+  // The estimate to convert is held in state so the assign-tech modal
+  // can collect the technician before the request fires; conversion +
+  // assignment happen in a single POST.
+  const [convertingEstimateId, setConvertingEstimateId] = useState<number | null>(
+    null,
+  );
   const convertMutation = useMutation({
-    mutationFn: (id: number) =>
-      apiRequest(`/api/estimates/${id}/convert-to-work-order`, "POST"),
+    mutationFn: ({
+      id,
+      assignedTechnicianId,
+    }: {
+      id: number;
+      assignedTechnicianId: number;
+    }) =>
+      apiRequest(`/api/estimates/${id}/convert-to-work-order`, "POST", {
+        assignedTechnicianId,
+      }),
     onSuccess: () => {
       toast({
         title: "Converted",
         description: "Estimate converted to work order.",
       });
+      setConvertingEstimateId(null);
       qc.invalidateQueries({ queryKey: ["/api/estimates?limit=500"] });
       qc.invalidateQueries({ queryKey: ["/api/estimates"] });
       qc.invalidateQueries({ queryKey: ["/api/work-orders"] });
@@ -259,8 +275,8 @@ export default function EstimateCommandCenter() {
     },
   });
   const onConvertToWorkOrder = useCallback(
-    (id: number) => convertMutation.mutate(id),
-    [convertMutation],
+    (id: number) => setConvertingEstimateId(id),
+    [],
   );
 
   const attentionIds: number[] | null = useMemo(() => {
@@ -436,6 +452,16 @@ export default function EstimateCommandCenter() {
           if (!open) setEditingEstimateId(null);
         }}
         estimateId={editingEstimateId}
+      />
+
+      <ConvertToWorkOrderModal
+        isOpen={convertingEstimateId !== null}
+        onClose={() => setConvertingEstimateId(null)}
+        isLoading={convertMutation.isPending}
+        onConfirm={(assignedTechnicianId) => {
+          if (convertingEstimateId === null) return;
+          convertMutation.mutate({ id: convertingEstimateId, assignedTechnicianId });
+        }}
       />
     </div>
   );

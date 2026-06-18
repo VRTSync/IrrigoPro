@@ -29,6 +29,8 @@ import type {
   EstimateWithItems,
   InsertEstimate,
   InsertEstimateItem,
+  User,
+  WorkOrder,
 } from "@workspace/db";
 
 // Task #658 — typed shape of a seeded row in the DELETE/list stubs.
@@ -801,4 +803,139 @@ describe("DELETE /api/estimates/:id — role × lifecycle matrix (Task #658)", (
     assert.equal(list.length, 0, "company_admin must not see soft-deleted rows");
   });
 
+});
+
+// ─── Task #1424 — POST /api/estimates/:id/convert-to-work-order ───────────────
+// (a) a no-body request must not 500 (Express 5 delivers an empty body as
+//     `undefined`, so the optional `assignedTechnicianId` reads have to be
+//     null-safe), and (b) a request carrying `assignedTechnicianId` must
+//     create *and* assign the work order in one call.
+describe("POST /api/estimates/:id/convert-to-work-order — assign-tech + empty-body safety", () => {
+  type ConvertStub = EstimateRoutesStorage & {
+    estimates: Map<number, EstimateWithItems>;
+    users: Map<number, User>;
+    workOrders: Map<number, WorkOrder>;
+    assignCalls: Array<{ workOrderId: number; userId: number; userName: string }>;
+    nextWorkOrderId: number;
+  };
+
+  function makeConvertStub(): ConvertStub {
+    const stub: ConvertStub = {
+      estimates: new Map(),
+      users: new Map(),
+      workOrders: new Map(),
+      assignCalls: [],
+      nextWorkOrderId: 5000,
+      async getCustomer() {
+        return undefined;
+      },
+      async getEstimate(id) {
+        return stub.estimates.get(id);
+      },
+      async createEstimateFromPayload() {
+        throw new Error("not used");
+      },
+      async updateEstimateWithItems() {
+        throw new Error("not used");
+      },
+      async createWorkOrderFromEstimate(id) {
+        const wo = {
+          id: stub.nextWorkOrderId++,
+          workOrderNumber: `WO-${id}`,
+          estimateId: id,
+          assignedTechnicianId: null,
+          assignedTechnicianName: null,
+        } as unknown as WorkOrder;
+        stub.workOrders.set(wo.id, wo);
+        return wo;
+      },
+      async getUser(id) {
+        return stub.users.get(id);
+      },
+      async assignWorkOrder(workOrderId, userId, userName) {
+        stub.assignCalls.push({ workOrderId, userId, userName });
+        const wo = stub.workOrders.get(workOrderId);
+        if (wo) {
+          (wo as { assignedTechnicianId: number }).assignedTechnicianId = userId;
+          (wo as { assignedTechnicianName: string }).assignedTechnicianName =
+            userName;
+        }
+        return wo ?? null;
+      },
+      async updateWorkOrder(id, updates) {
+        const wo = stub.workOrders.get(id);
+        if (wo) Object.assign(wo, updates);
+        return wo ?? null;
+      },
+    };
+    return stub;
+  }
+
+  function seedConvertEstimate(stub: ConvertStub, id: number): void {
+    stub.estimates.set(id, {
+      id,
+      companyId: 1,
+      customerId: 1,
+      estimateNumber: `EST-${id}`,
+      status: "approved",
+      internalStatus: "approved_internal",
+      workOrderId: null,
+      items: [],
+    } as unknown as EstimateWithItems);
+  }
+
+  function seedTech(stub: ConvertStub, id: number, name: string): void {
+    stub.users.set(id, {
+      id,
+      name,
+      role: "field_tech",
+      isActive: true,
+    } as unknown as User);
+  }
+
+  let stub: ConvertStub;
+  let baseUrl: string;
+  let close: () => Promise<void>;
+
+  beforeEach(async () => {
+    stub = makeConvertStub();
+    ({ baseUrl, close } = await startServer(stub));
+  });
+  afterEach(async () => {
+    await close();
+  });
+
+  it("does not 500 on an empty/missing request body", async () => {
+    seedConvertEstimate(stub, 29);
+    // No Content-Type, no body — mirrors the legacy fire-and-convert call
+    // that triggered the production TypeError under Express 5.
+    const res = await fetch(`${baseUrl}/api/estimates/29/convert-to-work-order`, {
+      method: "POST",
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { workOrder: { id: number } };
+    assert.ok(body.workOrder?.id, "a work order was created");
+    // No technician supplied → no assignment side-effect.
+    assert.equal(stub.assignCalls.length, 0);
+  });
+
+  it("creates and assigns the work order when assignedTechnicianId is sent", async () => {
+    seedConvertEstimate(stub, 30);
+    seedTech(stub, 7, "Pat Tech");
+    const res = await fetch(`${baseUrl}/api/estimates/30/convert-to-work-order`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ assignedTechnicianId: 7 }),
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as {
+      workOrder: { id: number; assignedTechnicianId: number | null };
+    };
+    assert.ok(body.workOrder?.id, "a work order was created");
+    // Exactly one assignment, to the chosen technician.
+    assert.equal(stub.assignCalls.length, 1);
+    assert.equal(stub.assignCalls[0]!.userId, 7);
+    assert.equal(stub.assignCalls[0]!.userName, "Pat Tech");
+    assert.equal(stub.assignCalls[0]!.workOrderId, body.workOrder.id);
+  });
 });

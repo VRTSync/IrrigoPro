@@ -7,6 +7,7 @@ import { ArrowLeft, Plus, Eye, ArrowRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
+import { ConvertToWorkOrderModal } from "@/components/estimates/convert-to-work-order-modal";
 import type { Estimate } from "@workspace/db/schema";
 import {
   LIFECYCLE_TINTS,
@@ -23,6 +24,9 @@ interface EstimatesManagerProps {
 export function EstimatesManager({ onBack }: EstimatesManagerProps) {
   const [showEstimateWizard, setShowEstimateWizard] = useState(false);
   const [editEstimateId, setEditEstimateId] = useState<number | null>(null);
+  const [convertingEstimateId, setConvertingEstimateId] = useState<number | null>(
+    null,
+  );
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -31,14 +35,23 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
   });
 
   const convertToWorkOrder = useMutation({
-    mutationFn: async (estimateId: number) => {
-      return await apiRequest(`/api/estimates/${estimateId}/convert-to-work-order`, "POST");
+    mutationFn: async ({
+      estimateId,
+      assignedTechnicianId,
+    }: {
+      estimateId: number;
+      assignedTechnicianId: number;
+    }) => {
+      return await apiRequest(`/api/estimates/${estimateId}/convert-to-work-order`, "POST", {
+        assignedTechnicianId,
+      });
     },
     onSuccess: () => {
       toast({
         title: "Success",
         description: "Estimate converted to work order successfully",
       });
+      setConvertingEstimateId(null);
       queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
       queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
     },
@@ -139,7 +152,7 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
                       {isApproved(lc) && !isConvertedToWorkOrder(estimate) && (
                         <Button 
                           size="sm"
-                          onClick={() => convertToWorkOrder.mutate(estimate.id)}
+                          onClick={() => setConvertingEstimateId(estimate.id)}
                           disabled={convertToWorkOrder.isPending}
                           className="bg-green-600 hover:bg-green-700"
                         >
@@ -168,6 +181,19 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
           if (!open) setEditEstimateId(null);
         }}
         estimateId={editEstimateId}
+      />
+
+      <ConvertToWorkOrderModal
+        isOpen={convertingEstimateId !== null}
+        onClose={() => setConvertingEstimateId(null)}
+        isLoading={convertToWorkOrder.isPending}
+        onConfirm={(assignedTechnicianId) => {
+          if (convertingEstimateId === null) return;
+          convertToWorkOrder.mutate({
+            estimateId: convertingEstimateId,
+            assignedTechnicianId,
+          });
+        }}
       />
     </div>
   );

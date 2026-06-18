@@ -21,6 +21,7 @@ import { EstimateMediaBlock } from "@/components/estimates/estimate-media-block"
 import { buildMapsUrl } from "@/lib/maps-url";
 import type { Estimate } from "@workspace/db/schema";
 import { ResendConfirmDialog } from "@/components/estimates/resend-confirm-dialog";
+import { ConvertToWorkOrderModal } from "@/components/estimates/convert-to-work-order-modal";
 import { useEstimateResend } from "@/hooks/use-estimate-resend";
 import {
   SendEstimateDialog,
@@ -84,6 +85,7 @@ function readCurrentUserRole(): string | null {
 export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: EstimateDetailModalProps) {
   const { toast } = useToast();
   const [isConverting, setIsConverting] = useState(false);
+  const [showConvertDialog, setShowConvertDialog] = useState(false);
   const [showResendDialog, setShowResendDialog] = useState(false);
   const { resendEstimate, isResending } = useEstimateResend();
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
@@ -347,8 +349,10 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   });
 
   const convertToWorkOrderMutation = useMutation({
-    mutationFn: async () => {
-      return apiRequest(`/api/estimates/${estimateId}/convert-to-work-order`, 'POST');
+    mutationFn: async (assignedTechnicianId: number) => {
+      return apiRequest(`/api/estimates/${estimateId}/convert-to-work-order`, 'POST', {
+        assignedTechnicianId,
+      });
     },
     onSuccess: () => {
       toast({
@@ -465,11 +469,12 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   const isPendingDelete =
     canDeleteEstimate && isPendingReview(estimate ?? null);
 
-  const handleConvertToWorkOrder = async () => {
+  const handleConvertToWorkOrder = async (assignedTechnicianId: number) => {
     if (!estimateId) return;
     setIsConverting(true);
     try {
-      await convertToWorkOrderMutation.mutateAsync();
+      await convertToWorkOrderMutation.mutateAsync(assignedTechnicianId);
+      setShowConvertDialog(false);
     } finally {
       setIsConverting(false);
     }
@@ -1049,7 +1054,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                       estimate doesn't re-offer the conversion. */}
                   {isApproved(estimate) && !isConvertedToWorkOrder(estimate) && !isEstimateDeleted && (
                     <Button
-                      onClick={handleConvertToWorkOrder}
+                      onClick={() => setShowConvertDialog(true)}
                       disabled={isConverting}
                       className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
                       data-testid="detail-modal-convert"
@@ -1097,6 +1102,14 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
         onOpenChange={setShowResendDialog}
         onConfirm={handleConfirmResend}
         isResending={isResending}
+      />
+      <ConvertToWorkOrderModal
+        isOpen={showConvertDialog}
+        onClose={() => setShowConvertDialog(false)}
+        isLoading={isConverting}
+        onConfirm={(assignedTechnicianId) => {
+          void handleConvertToWorkOrder(assignedTechnicianId);
+        }}
       />
       <SendEstimateDialog
         open={showSendDialog}
