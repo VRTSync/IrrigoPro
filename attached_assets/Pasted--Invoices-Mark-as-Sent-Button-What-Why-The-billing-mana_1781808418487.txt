@@ -1,0 +1,39 @@
+# Invoices — "Mark as Sent" Button
+
+**What & Why**
+The billing manager currently emails invoices by hand (first full billing month on the system) and has no way to record that an invoice went out. Add a small **"Mark sent"** button on the invoices page that flips an invoice to `sent` and stamps `sentAt`, so the team can see at a glance which invoices have been delivered.
+
+**Almost all of this already exists** — `invoices.status` includes `sent`, there's a `sentAt` timestamp, and the invoices page already renders a green **"Sent"** badge and shows `sentAt`. The only gaps are the **action endpoint** and the **button**.
+
+Single small slice. No schema change.
+
+---
+
+## Done looks like
+- On the invoices list (`pages/invoices.tsx`), each invoice in `draft` status shows a small **"Mark sent"** button (row action or row menu), visible to billing-capable roles (billing_manager / company_admin / super_admin — same set the page already uses for merge/export).
+- Clicking it sets the invoice `status = 'sent'` and `sentAt = now()`, the badge flips to **"Sent"**, and `sentAt` populates — no page reload.
+- Invoices already `sent` / `paid` / `cancelled` don't show the button (they show their badge).
+- The action is company-scoped and role-guarded server-side.
+- (Optional, nice-to-have) an "Undo" / "Mark unsent" on a `sent` invoice that reverts to `draft` and clears `sentAt`, for mistakes. Default: include it as a small menu item; skip if it complicates the row.
+
+## Steps
+1. **Endpoint.** Add `POST /api/invoices/:id/mark-sent` (billing-capable guard — reuse `requireBillingAccess` as the monthly-invoice route does). Set `status = 'sent'`, `sentAt = new Date()` on the company-scoped invoice; return the updated invoice. Reject if the invoice is `paid`/`cancelled` (only `draft` → `sent`). If including undo, add `POST /api/invoices/:id/mark-unsent` (or a `{ status }` body) that reverts `draft` + clears `sentAt`, only from `sent`.
+2. **Button.** In `invoices.tsx`, add the "Mark sent" action for `status === 'draft'` rows (role-gated client-side to match the server). On success, invalidate the invoices query so the badge + `sentAt` update.
+3. Keep it consistent with the page's existing row-action styling (small, unobtrusive).
+
+## Tests
+- A draft invoice → "Mark sent" → status `sent`, `sentAt` set, badge shows Sent.
+- The button is hidden for `sent`/`paid`/`cancelled` invoices.
+- A non-billing role can't call the endpoint (403) and doesn't see the button.
+- (If undo built) sent → unsent reverts to draft and clears `sentAt`.
+
+## Out of scope
+- Actually emailing the invoice (manual for now — this only records that it was sent).
+- Payment status / "mark paid" (separate).
+- QuickBooks sync behavior (unchanged).
+
+## Relevant files
+- `artifacts/api-server/src/routes/routes.ts` (new `mark-sent` endpoint; `requireBillingAccess` guard, as on `/api/invoices/monthly`)
+- `artifacts/api-server/src/storage.ts` (`updateInvoice` — already exists)
+- `artifacts/irrigopro/src/pages/invoices.tsx` (row action + role gate; badge/`sentAt` already render)
+- `lib/db/src/schema/schema.ts` (reference: `invoices.status` includes `sent`; `sentAt` exists)

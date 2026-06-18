@@ -1,0 +1,53 @@
+# Admin Migration — Run the Billing-Sheet / Invoice Reconcile from Super Admin
+
+**What & Why**
+The billing-sheet ↔ invoice total reconciliation (Task #1422) exists only as a CLI script, so a super admin can't run it from the app. When an invoiced billing sheet's stored total disagrees with `parts + labor` (e.g. BS #201: off by $3.50), the **Invoice Detail Report PDF refuses to generate** until the record is repaired. The startup auto-repair only fixes *uninvoiced* sheets, so invoiced ones need this manual run.
+
+This wires the existing reconcile logic into the app's **admin migrations framework** so the super admin can **preview** (see exactly which invoiced sheets drift, the per-sheet delta, and which invoices change) and then **run** it from `/admin/migrations` — with the framework's acknowledgement gate as the review/consent step.
+
+**Reuse, don't rebuild.** The repair math + orchestration already live in `reconcile-billing-sheet-invoice-totals-core.ts` (built CLI-agnostic for exactly this). The migration framework (`lib/migrations/`), the runner UI (`MigrationRunner`), and the endpoints (`GET /api/admin/migrations`, `/:id/preview`, `POST /:id/run`, `/:id/status`) all already exist and are super-admin guarded.
+
+Single slice. No schema change. No new endpoint or UI (the framework renders registered migrations automatically).
+
+---
+
+## Important — this changes money
+The reconcile uses **add-parts semantics**: when a sheet's stored total is too low, it recomputes the sheet and **folds the missing-parts delta into the parent invoice's total** — i.e. the customer is billed more. The preview must make this unmistakable, and the run must be gated behind the framework's acknowledgement.
+
+---
+
+## Done looks like
+- A new migration appears on `/admin/migrations` (super-admin only), e.g. **"Reconcile billing-sheet / invoice totals."**
+- **Preview** (read-only, no mutation) returns a `MigrationPreview` that lists every invoiced billing sheet whose `parts + labor ≠ stored total`: sheet id/number, parts+labor, stored total, **delta**, the parent invoice id/number, and the invoice's **new total** after repair. Includes a clear summary line ("N sheets · K invoices · total +$X to customers").
+- The preview populates the framework's **acknowledgement gate** (`orphanRows` / `hasOrphans` mechanism the page already uses to require `acknowledged` before Run) — repurposed here as "these invoices will change total; acknowledge to proceed." Run stays disabled until acknowledged.
+- **Run** executes the reconcile core (apply mode), emitting per-sheet progress via the `ProgressEmitter`, and returns `MigrationStepResult[]`. Idempotent + resumable (the core already persists `reconcileBillingSheetInvoiceTotals.done` / `.failed` in `app_settings`); a clean re-run reports 0 repaired.
+- After running, the affected Invoice Detail Report PDFs generate (validation passes).
+
+## Steps
+1. **Add a `MigrationDefinition`** at `artifacts/api-server/src/lib/migrations/reconcile-billing-sheet-invoice-totals.ts`:
+   - `id: "reconcile-billing-sheet-invoice-totals-v1"`, `title`, `description` (state the add-parts / bills-more behavior).
+   - `preview()`: call the core in **read-only** mode to compute the drift set; map it into `MigrationPreview` (summary + the per-sheet/per-invoice detail; set the orphan/ack count to the number of invoices that will change so the UI forces acknowledgement). No writes.
+   - `run(emit)`: call the core's `runReconciliation` (apply), translating its per-sheet results into `emit(...)` progress events and the returned `MigrationStepResult[]`. Reuse the core's `app_settings` done/failed keys for resumability.
+2. **Register it** in `lib/migrations/registry.ts` so `listMigrations()` includes it (alongside `companyIdColumnsMigration`).
+3. Confirm the existing runner UI renders it with preview → acknowledge → run, progress, and last-run state — **no UI or endpoint changes needed**. If the core's preview/apply split needs a small read-only entry point, add it to `-core.ts` (keep the CLI working).
+4. Leave the CLI script in place (still valid for ops); both call the same core.
+
+## Tests
+- `preview()` returns the correct drift list + deltas + new invoice totals and mutates nothing.
+- A non-drifting dataset → preview shows 0, run reports 0 repaired.
+- `run()` applies via the core, totals reconcile, and the previously-failing Invoice Detail PDF validation now passes.
+- Re-running is idempotent (0 repaired second time).
+- Endpoints reject non-super-admins (framework already enforces; assert it still holds for the new id).
+
+## Out of scope
+- The reconcile math/semantics (already shipped in `-core.ts`).
+- The migrations framework, runner UI, and endpoints (reused as-is).
+- The startup `repairDivergedBillingSheets` (uninvoiced path — unchanged).
+- Changing how deltas are resolved (add-parts semantics stay as built).
+
+## Relevant files
+- `artifacts/api-server/src/lib/migrations/reconcile-billing-sheet-invoice-totals.ts` (new definition)
+- `artifacts/api-server/src/lib/migrations/registry.ts` (register it)
+- `artifacts/api-server/src/lib/migrations/types.ts` (`MigrationDefinition` / `MigrationPreview` shapes)
+- `artifacts/api-server/src/scripts/reconcile-billing-sheet-invoice-totals-core.ts` (the reused core)
+- `artifacts/irrigopro/src/pages/admin/migrations.tsx` + `components/admin/MigrationRunner` (existing UI — no change)
