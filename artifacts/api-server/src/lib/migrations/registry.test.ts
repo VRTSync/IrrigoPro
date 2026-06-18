@@ -13,16 +13,31 @@ import { sql } from "drizzle-orm";
 // ── Static registry assertions ─────────────────────────────────────────────────
 
 describe("migration registry — static shape", () => {
-  it("contains exactly one entry (company-id-columns-v1)", () => {
+  it("contains the company-id and reconcile-totals migrations", () => {
     const all = listMigrations();
-    assert.equal(all.length, 1);
-    assert.equal(all[0].id, "company-id-columns-v1");
+    const ids = all.map((m) => m.id);
+    assert.ok(ids.includes("company-id-columns-v1"), "missing company-id-columns-v1");
+    assert.ok(
+      ids.includes("reconcile-billing-sheet-invoice-totals-v1"),
+      "missing reconcile-billing-sheet-invoice-totals-v1",
+    );
   });
 
   it("getMigration returns the definition for the known id", () => {
     const m = getMigration("company-id-columns-v1");
     assert.ok(m, "getMigration should return a definition");
     assert.equal(m.id, "company-id-columns-v1");
+    assert.ok(m.title.length > 0, "title should be non-empty");
+    assert.ok(m.description.length > 0, "description should be non-empty");
+    assert.equal(typeof m.check, "function");
+    assert.equal(typeof m.preview, "function");
+    assert.equal(typeof m.run, "function");
+  });
+
+  it("getMigration returns the reconcile-totals definition with the required shape", () => {
+    const m = getMigration("reconcile-billing-sheet-invoice-totals-v1");
+    assert.ok(m, "getMigration should return a definition");
+    assert.equal(m.id, "reconcile-billing-sheet-invoice-totals-v1");
     assert.ok(m.title.length > 0, "title should be non-empty");
     assert.ok(m.description.length > 0, "description should be non-empty");
     assert.equal(typeof m.check, "function");

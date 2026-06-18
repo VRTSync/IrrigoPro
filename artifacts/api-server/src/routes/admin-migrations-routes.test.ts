@@ -124,6 +124,16 @@ describe("admin-migrations-routes — authorization guard (403)", () => {
       const r = await hit(harness.baseUrl, 'POST', '/api/admin/migrations/company-id-columns-v1/run', { role });
       assert.equal(r.status, 403);
     });
+
+    it(`POST /api/admin/migrations/reconcile-...totals/run returns 403 for ${role}`, async () => {
+      const r = await hit(
+        harness.baseUrl,
+        'POST',
+        '/api/admin/migrations/reconcile-billing-sheet-invoice-totals-v1/run',
+        { role },
+      );
+      assert.equal(r.status, 403);
+    });
   }
 });
 
