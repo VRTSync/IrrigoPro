@@ -173,13 +173,14 @@ interface PartsEditorRow {
   notes: string;
 }
 
-function PartsListEditorDialog({
+export function PartsListEditorDialog({
   open,
   onOpenChange,
   type,
   id,
   initialItems,
   canSeePricing,
+  readOnly = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -187,6 +188,7 @@ function PartsListEditorDialog({
   id: number;
   initialItems: (WorkOrderItem | BillingSheetItem)[];
   canSeePricing: boolean;
+  readOnly?: boolean;
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -204,18 +206,16 @@ function PartsListEditorDialog({
     }));
 
   const [rows, setRows] = useState<PartsEditorRow[]>([]);
-  const [catalog, setCatalog] = useState<{ id: number; name: string; unitPrice?: string }[]>([]);
   const [showPicker, setShowPicker] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setRows(toEditorRows(initialItems));
-    fetch("/api/parts", { headers: getAuthHeaders(), credentials: "include" })
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: unknown) => setCatalog(Array.isArray(data) ? data : []))
-      .catch(() => setCatalog([]));
   }, [open]);
 
+  // Add from library — reads the part's real `price` (the price-fill bug fix:
+  // the catalog row's price field is `price`, not `unitPrice`). Merges quantity
+  // when the same catalog part is added again.
   const handleSelectFromLibrary = (part: Part, qty?: number) => {
     setRows((prev) => {
       const existingIdx = prev.findIndex((r) => r.partId === part.id);
@@ -248,17 +248,7 @@ function PartsListEditorDialog({
     });
   };
 
-  const handlePartNameChange = (idx: number, val: string) => {
-    const match = catalog.find((c) => c.name.toLowerCase() === val.toLowerCase());
-    updateRow(idx, {
-      partName: val,
-      ...(match && rows[idx]?.unitPrice === "0"
-        ? { partId: match.id, unitPrice: match.unitPrice ?? "0" }
-        : {}),
-    });
-  };
-
-  const addRow = () =>
+  const addCustomLine = () =>
     setRows((prev) => [
       ...prev,
       { partId: null, partName: "", quantity: "1", unitPrice: "0", laborHours: "0", notes: "" },
@@ -266,6 +256,13 @@ function PartsListEditorDialog({
 
   const removeRow = (idx: number) =>
     setRows((prev) => prev.filter((_, i) => i !== idx));
+
+  // ── Live totals (display-only — server recomputes authoritatively on save) ──
+  const partsSubtotal = rows.reduce(
+    (sum, r) => sum + (parseFloat(r.quantity) || 0) * (parseFloat(r.unitPrice) || 0),
+    0,
+  );
+  const laborTotal = rows.reduce((sum, r) => sum + (parseFloat(r.laborHours) || 0), 0);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -304,11 +301,17 @@ function PartsListEditorDialog({
   });
 
   const inputCls =
-    "flex h-8 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400";
+    "flex h-8 w-full rounded-md border border-gray-200 bg-white px-2.5 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:bg-gray-50 disabled:text-gray-500";
+
+  // Column template: Part · Qty · [Unit $] · Labor h · [Line total] · remove.
+  // Pricing columns (Unit $, Line total) are hidden when the caller can't see pricing.
+  const gridCols = canSeePricing
+    ? "grid-cols-[1fr_56px_84px_64px_84px_32px]"
+    : "grid-cols-[1fr_56px_64px_32px]";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Package className="w-5 h-5 text-gray-500" />
@@ -316,112 +319,181 @@ function PartsListEditorDialog({
           </DialogTitle>
         </DialogHeader>
 
+        {readOnly && (
+          <div className="flex items-start gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            <span>This record has been billed or invoiced — the parts list is read-only.</span>
+          </div>
+        )}
+
         <div className="space-y-2 max-h-[50vh] overflow-y-auto py-1 pr-0.5">
           {rows.length === 0 && (
             <p className="text-sm text-gray-500 text-center py-6">
-              No parts yet. Click <strong>Add Part</strong> below.
+              No parts yet. Use <strong>Add from library</strong> or <strong>Add custom line</strong> below.
             </p>
           )}
 
           {/* Header row */}
           {rows.length > 0 && (
-            <div className={`grid gap-2 text-xs font-medium text-gray-500 px-1 pb-1 ${canSeePricing ? "grid-cols-[1fr_60px_80px_32px]" : "grid-cols-[1fr_60px_32px]"}`}>
-              <span>Part Name</span>
-              <span className="text-center">Qty</span>
+            <div className={`grid gap-2 text-xs font-medium text-gray-500 px-1 pb-1 ${gridCols}`}>
+              <span>Part</span>
+              <span className="text-right">Qty</span>
               {canSeePricing && <span className="text-right">Unit $</span>}
+              <span className="text-right">Labor h</span>
+              {canSeePricing && <span className="text-right">Line total</span>}
               <span />
             </div>
           )}
 
-          {rows.map((row, idx) => (
-            <div
-              key={idx}
-              className={`grid gap-2 items-center px-1 ${canSeePricing ? "grid-cols-[1fr_60px_80px_32px]" : "grid-cols-[1fr_60px_32px]"}`}
-            >
-              <div className="relative flex items-center gap-1">
-                {row.partId != null && (
-                  <span title="From parts catalog" className="shrink-0">
-                    <BookOpen className="w-3 h-3 text-blue-400" />
+          {rows.map((row, idx) => {
+            const isCatalog = row.partId != null;
+            const lineTotal = (parseFloat(row.quantity) || 0) * (parseFloat(row.unitPrice) || 0);
+            return (
+              <div key={idx} className={`grid gap-2 items-center px-1 ${gridCols}`}>
+                {/* Part name + source badge */}
+                <div className="min-w-0 flex flex-col gap-1">
+                  <span
+                    className={`inline-flex w-fit items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                      isCatalog
+                        ? "bg-green-100 text-green-700"
+                        : "bg-gray-100 text-gray-600"
+                    }`}
+                  >
+                    {isCatalog ? <BookOpen className="w-2.5 h-2.5" /> : null}
+                    {isCatalog ? "Catalog" : "Custom"}
                   </span>
-                )}
-                <input
-                  type="text"
-                  list="parts-catalog-datalist"
-                  value={row.partName}
-                  onChange={(e) => handlePartNameChange(idx, e.target.value)}
-                  placeholder="Part name"
-                  className={`${inputCls} flex-1 min-w-0`}
-                />
-              </div>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                value={row.quantity}
-                onChange={(e) => updateRow(idx, { quantity: e.target.value })}
-                className={`${inputCls} text-center`}
-              />
-              {canSeePricing && (
+                  {isCatalog ? (
+                    <span className="truncate text-sm font-medium text-gray-900" title={row.partName}>
+                      {row.partName}
+                    </span>
+                  ) : (
+                    <input
+                      type="text"
+                      value={row.partName}
+                      onChange={(e) => updateRow(idx, { partName: e.target.value })}
+                      placeholder="Part name"
+                      disabled={readOnly}
+                      className={`${inputCls} min-w-0`}
+                    />
+                  )}
+                </div>
+
+                {/* Qty */}
                 <input
                   type="number"
                   min={0}
-                  step={0.01}
-                  value={row.unitPrice}
-                  onChange={(e) => updateRow(idx, { unitPrice: e.target.value })}
+                  step={1}
+                  value={row.quantity}
+                  onChange={(e) => updateRow(idx, { quantity: e.target.value })}
+                  disabled={readOnly}
                   className={`${inputCls} text-right`}
                 />
-              )}
-              <button
-                type="button"
-                onClick={() => removeRow(idx)}
-                className="flex items-center justify-center w-8 h-8 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                title="Remove row"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-          ))}
+
+                {/* Unit $ */}
+                {canSeePricing && (
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-sm text-gray-400">
+                      $
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={row.unitPrice}
+                      onChange={(e) => updateRow(idx, { unitPrice: e.target.value })}
+                      disabled={readOnly}
+                      className={`${inputCls} pl-5 text-right`}
+                    />
+                  </div>
+                )}
+
+                {/* Labor hours */}
+                <input
+                  type="number"
+                  min={0}
+                  step={0.25}
+                  value={row.laborHours}
+                  onChange={(e) => updateRow(idx, { laborHours: e.target.value })}
+                  disabled={readOnly}
+                  className={`${inputCls} text-right`}
+                />
+
+                {/* Line total */}
+                {canSeePricing && (
+                  <span className="text-right text-sm font-medium text-gray-900 tabular-nums">
+                    {currency(lineTotal)}
+                  </span>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => removeRow(idx)}
+                  disabled={readOnly}
+                  className="flex items-center justify-center w-8 h-8 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
+                  title="Remove row"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            );
+          })}
         </div>
 
-        {/* Datalist for autocomplete */}
-        {catalog.length > 0 && (
-          <datalist id="parts-catalog-datalist">
-            {catalog.map((c) => (
-              <option key={c.id} value={c.name} />
-            ))}
-          </datalist>
+        {/* Live totals footer */}
+        {rows.length > 0 && (
+          <div className="flex items-center justify-end gap-6 pt-2 text-sm border-t border-gray-100">
+            <span className="text-gray-500">
+              Labor hours:{" "}
+              <span className="font-semibold text-gray-900 tabular-nums">{laborTotal.toFixed(2)}</span>
+            </span>
+            {canSeePricing && (
+              <span className="text-gray-500">
+                Parts subtotal:{" "}
+                <span className="font-semibold text-gray-900 tabular-nums">
+                  {currency(partsSubtotal)}
+                </span>
+              </span>
+            )}
+          </div>
         )}
 
         <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
-          <button
-            type="button"
-            onClick={() => setShowPicker(true)}
-            className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
-          >
-            <BookOpen className="w-3.5 h-3.5" />
-            Add from Library
-          </button>
-          <Button type="button" variant="outline" size="sm" onClick={addRow}>
-            <Plus className="w-4 h-4 mr-1.5" />
-            Add Part
-          </Button>
+          {!readOnly && (
+            <>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => setShowPicker(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <BookOpen className="w-4 h-4 mr-1.5" />
+                Add from library
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={addCustomLine}>
+                <Plus className="w-4 h-4 mr-1.5" />
+                Add custom line
+              </Button>
+            </>
+          )}
           <div className="flex-1" />
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button
-            size="sm"
-            onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending || rows.every((r) => !r.partName.trim())}
-            className="bg-blue-600 hover:bg-blue-700 text-white"
-          >
-            {saveMutation.isPending ? (
-              <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-            ) : (
-              <Save className="w-4 h-4 mr-1.5" />
-            )}
-            Save Changes
-          </Button>
+          {!readOnly && (
+            <Button
+              size="sm"
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending || rows.every((r) => !r.partName.trim())}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {saveMutation.isPending ? (
+                <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4 mr-1.5" />
+              )}
+              Save Changes
+            </Button>
+          )}
         </div>
       </DialogContent>
 
@@ -429,6 +501,7 @@ function PartsListEditorDialog({
         open={showPicker}
         onOpenChange={setShowPicker}
         onSelectPart={handleSelectFromLibrary}
+        selectMode="multi"
         title="Add from Library"
       />
     </Dialog>
@@ -1920,6 +1993,7 @@ export function CompletedWorkDetailModal({
         id={id}
         initialItems={items}
         canSeePricing={canSeePricing}
+        readOnly={isBilledOrInvoiced}
       />
 
       {/* Lightbox */}
