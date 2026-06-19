@@ -13,7 +13,7 @@
 		"filepath": "src/pages/slides/Problem.tsx",
 		"title": "The problem",
 		"description": "Paper, texts, and spreadsheets across disconnected tools. Stats: 4+ tools, Days to invoice, Limited visibility.",
-		"speakerNotes": "Ask the lead how many of these tools do the use? How many are used for an average work order? How much time do you spend culminating these into one document? \n\nHighlights this is a pain point or shows it may not be super important for them (if not important, more on)."
+		"speakerNotes": "Ask the lead how many of these tools do the use? How many are used for an average work order? How much time do you spend culminating these into one document? \n\nHighlights this is a pain point or shows it may not be super important for them (if not important, more on).\n\nFuture feature, is take pictures of all things, AI parses and builds, extracts info with confidence score, human accepts (they should avoid this with the main functionality, but hold habits die hard, ppl are stubborn, backlog may be wanted - this gives no excusses."
 	},
 	{
 		"id": "1d4f5b6a-0001-4a00-8a00-000000000003",
@@ -21,7 +21,7 @@
 		"filepath": "src/pages/slides/Solution.tsx",
 		"title": "The solution",
 		"description": "One app that connects the entire irrigation operation. Stats: 1 platform, 1-click QB/Aspire sync, Offline.",
-		"speakerNotes": ""
+		"speakerNotes": "Remove this slide (slide 3, take the title and replace slide 4's title). Slide 4 could then be followed up with a demo/walk through/Brady screengrab -  real life demo)."
 	},
 	{
 		"id": "1d4f5b6a-0001-4a00-8a00-000000000004",
@@ -37,7 +37,7 @@
 		"filepath": "src/pages/slides/Field.tsx",
 		"title": "Mobile built for the truck, not the desk",
 		"description": "Photo capture, right workflow for every job, offline-first field app.",
-		"speakerNotes": ""
+		"speakerNotes": "I would highlight that its made NOT JUST for the desk, but the truck and the field! user first - adoption, intuitive, simple, elegant powerful/informative, businesses start on the grounf, grassroots. BLAH BLAH BLAH Product marketing bullshit here"
 	},
 	{
 		"id": "1d4f5b6a-0001-4a00-8a00-000000000006",
@@ -61,7 +61,7 @@
 		"filepath": "src/pages/slides/QuickBooks.tsx",
 		"title": "QuickBooks/Aspire integration",
 		"description": "Push approved billing directly into QuickBooks/Aspire. Mock UI with three sample jobs.",
-		"speakerNotes": ""
+		"speakerNotes": "Add something about 20+ other integrations available too\n\nGoogle Workspace Suite (6+), Microsoft Office (6+), AI (OpenAI, Anthropic, Google), VRTSync, etc"
 	},
 	{
 		"id": "1d4f5b6a-0001-4a00-8a00-000000000009",
@@ -77,7 +77,7 @@
 		"filepath": "src/pages/slides/Pricing.tsx",
 		"title": "See IrrigoPro on one of your properties",
 		"description": "Three-step evaluation path: one property, four ticket types, plan the larger rollout.",
-		"speakerNotes": ""
+		"speakerNotes": "Is this an onboarding/training where you actually capture data? Should build this into the app (org/account settings - \"onboarding\" where they can only do limit actions and certain number of entries). gated, "
 	},
 	{
 		"id": "1d4f5b6a-0001-4a00-8a00-000000000012",

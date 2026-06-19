@@ -10,20 +10,20 @@ export default function Workflow() {
               04 · How it works
             </div>
             <h2 className="mt-[1.5vh] text-[4.6vw] font-extrabold leading-[1.0] tracking-tight text-text text-balance">
-              Four workflows. One connected operation.
+              Four ticket types. One connected platform.
             </h2>
           </div>
           <p className="hidden lg:block max-w-[28vw] text-[1.6vw] font-normal text-muted text-pretty">
-            Estimates, work orders, wet checks, and billing sheets keep
-            information connected from the office to the field and into
-            QuickBooks/Aspire.
+            Estimates, work orders, wet checks, and billing sheets each serve a
+            distinct purpose — and all share the same property, customer, and
+            job history.
           </p>
         </div>
 
         <div className="mt-[6vh] grid flex-1 grid-cols-4 gap-[2vw]">
           <div className="relative flex flex-col rounded-[1.2vw] border border-border bg-surface p-[2vw] shadow-sm">
             <div className="absolute -top-[1.6vh] left-[1.6vw] rounded-full bg-primary px-[1vw] py-[0.4vh] text-[1.1vw] font-extrabold uppercase tracking-wider text-white">
-              Step 01
+              Ticket 01
             </div>
             <div className="mt-[1.5vh] text-[2.4vw] font-extrabold tracking-tight text-text">
               Estimate
@@ -39,7 +39,7 @@ export default function Workflow() {
 
           <div className="relative flex flex-col rounded-[1.2vw] border border-border bg-surface p-[2vw] shadow-sm">
             <div className="absolute -top-[1.6vh] left-[1.6vw] rounded-full bg-primary px-[1vw] py-[0.4vh] text-[1.1vw] font-extrabold uppercase tracking-wider text-white">
-              Step 02
+              Ticket 02
             </div>
             <div className="mt-[1.5vh] text-[2.4vw] font-extrabold tracking-tight text-text">
               Work Order
@@ -56,7 +56,7 @@ export default function Workflow() {
 
           <div className="relative flex flex-col rounded-[1.2vw] border border-border bg-surface p-[2vw] shadow-sm">
             <div className="absolute -top-[1.6vh] left-[1.6vw] rounded-full bg-primary px-[1vw] py-[0.4vh] text-[1.1vw] font-extrabold uppercase tracking-wider text-white">
-              Step 03
+              Ticket 03
             </div>
             <div className="mt-[1.5vh] text-[2.4vw] font-extrabold tracking-tight text-text">
               Wet Check
@@ -70,9 +70,9 @@ export default function Workflow() {
             </div>
           </div>
 
-          <div className="relative flex flex-col rounded-[1.2vw] border-2 border-accent bg-surface p-[2vw] shadow-md">
-            <div className="absolute -top-[1.6vh] left-[1.6vw] rounded-full bg-accent px-[1vw] py-[0.4vh] text-[1.1vw] font-extrabold uppercase tracking-wider text-white">
-              Step 04
+          <div className="relative flex flex-col rounded-[1.2vw] border border-border bg-surface p-[2vw] shadow-sm">
+            <div className="absolute -top-[1.6vh] left-[1.6vw] rounded-full bg-primary px-[1vw] py-[0.4vh] text-[1.1vw] font-extrabold uppercase tracking-wider text-white">
+              Ticket 04
             </div>
             <div className="mt-[1.5vh] text-[2.4vw] font-extrabold tracking-tight text-text">
               Billing Sheet
@@ -81,7 +81,7 @@ export default function Workflow() {
               Review completed work, apply office-controlled pricing, markup,
               and tax, then send approved billing into QuickBooks/Aspire.
             </p>
-            <div className="mt-auto pt-[2vh] text-[1.3vw] font-semibold uppercase tracking-wider text-accent">
+            <div className="mt-auto pt-[2vh] text-[1.3vw] font-semibold uppercase tracking-wider text-primary">
               Review → Approve → Sync
             </div>
           </div>
