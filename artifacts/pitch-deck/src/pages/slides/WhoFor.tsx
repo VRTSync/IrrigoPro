@@ -33,7 +33,7 @@ export default function WhoFor() {
               Owners &amp; Admins
             </div>
             <div className="mt-[1.5vh] text-[1.75vw] font-extrabold text-text">
-              The whole company
+              Full visibility
             </div>
             <p className="mt-[1.2vh] text-[1.4vw] leading-snug text-muted">
               Manage users, customers, service locations, pricing, and
