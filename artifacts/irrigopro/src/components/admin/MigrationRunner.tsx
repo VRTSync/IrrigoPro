@@ -36,17 +36,15 @@ export function MigrationRunner({ migrationId, onComplete }: MigrationRunnerProp
     stopPolling();
 
     try {
-      const resp = await apiRequest("POST", `/api/admin/migrations/${migrationId}/run`);
-      const data = await resp.json() as { jobId: string };
+      const data = await apiRequest(`/api/admin/migrations/${migrationId}/run`, "POST") as { jobId: string };
       jobIdRef.current = data.jobId;
 
       pollingRef.current = setInterval(async () => {
         try {
-          const poll = await apiRequest(
-            "GET",
+          const prog = await apiRequest(
             `/api/admin/migrations/${migrationId}/status?jobId=${data.jobId}`,
-          );
-          const prog = await poll.json() as MigrationProgress;
+            "GET",
+          ) as MigrationProgress;
           setProgress(prog);
           if (prog.state === "succeeded" || prog.state === "failed" || prog.state === "aborted") {
             stopPolling();

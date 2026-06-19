@@ -31,8 +31,7 @@ function PreviewModal({
   const { data: preview, isLoading, error } = useQuery<MigrationPreview>({
     queryKey: ["/api/admin/migrations", migrationId, "preview"],
     queryFn: async () => {
-      const resp = await apiRequest("GET", `/api/admin/migrations/${migrationId}/preview`);
-      return resp.json();
+      return await apiRequest(`/api/admin/migrations/${migrationId}/preview`, "GET");
     },
   });
 
@@ -154,8 +153,7 @@ export default function AdminMigrationsPage() {
   const { data: migrations = [], isLoading, error, refetch } = useQuery<MigrationListItem[]>({
     queryKey: ["/api/admin/migrations"],
     queryFn: async () => {
-      const resp = await apiRequest("GET", "/api/admin/migrations");
-      return resp.json();
+      return await apiRequest("/api/admin/migrations", "GET");
     },
     refetchInterval: 30_000,
   });
