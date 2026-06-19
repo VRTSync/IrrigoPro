@@ -11,12 +11,21 @@ export default function Cover() {
       />
       <div className="absolute inset-0 bg-gradient-to-r from-[hsl(212_77%_14%/0.85)] via-[hsl(212_77%_14%/0.55)] to-[hsl(212_77%_14%/0.15)]" />
 
+      <div
+        className="absolute right-[-8vw] top-[-4vh] w-[52vw] h-[52vw] pointer-events-none select-none"
+        style={{ opacity: 0.13 }}
+      >
+        <img src={`${base}logo-geometric.png`} alt="" className="h-full w-full object-contain" />
+      </div>
+
       <div className="relative z-10 flex h-full w-full flex-col justify-between px-[7vw] py-[7vh]">
-        <div className="flex items-center gap-[1.2vw]">
-          <span className="inline-block h-[2.4vw] w-[2.4vw] rounded-[0.6vw] bg-accent" />
-          <span className="text-[1.8vw] font-extrabold uppercase tracking-[0.25em] text-white">
-            IrrigoPro
-          </span>
+        <div>
+          <img
+            src={`${base}logo-horizontal.png`}
+            alt="IrrigoPro"
+            className="h-[4.5vh] w-auto"
+            style={{ filter: "brightness(0) invert(1)" }}
+          />
         </div>
 
         <div className="max-w-[60vw]">

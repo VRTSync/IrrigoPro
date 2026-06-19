@@ -1,7 +1,16 @@
+const base = import.meta.env.BASE_URL;
+
 export default function WhoFor() {
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-bg font-body text-text">
       <div className="absolute inset-0 bg-gradient-to-b from-bg to-[hsl(210_40%_95%)]" />
+
+      <div
+        className="absolute right-[2vw] top-[4vh] w-[22vw] h-[22vw] pointer-events-none select-none"
+        style={{ opacity: 0.06 }}
+      >
+        <img src={`${base}logo-drop.png`} alt="" className="h-full w-full object-contain" />
+      </div>
 
       <div className="relative z-10 flex h-full w-full flex-col px-[7vw] py-[8vh]">
         <div>

@@ -1,8 +1,17 @@
+const base = import.meta.env.BASE_URL;
+
 export default function Roadmap() {
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-bg font-body text-text">
       <div className="absolute inset-0 bg-gradient-to-b from-bg to-[hsl(210_40%_95%)]" />
       <div className="absolute -left-[8vw] bottom-[5vh] h-[35vw] w-[35vw] rounded-full bg-primary/5 blur-3xl" />
+
+      <div
+        className="absolute right-[2vw] bottom-[2vh] w-[26vw] h-[26vw] pointer-events-none select-none"
+        style={{ opacity: 0.07 }}
+      >
+        <img src={`${base}logo-drop.png`} alt="" className="h-full w-full object-contain" />
+      </div>
 
       <div className="relative z-10 flex h-full w-full flex-col px-[7vw] py-[7vh]">
         <div className="flex items-end justify-between">
