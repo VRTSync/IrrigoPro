@@ -34,12 +34,12 @@ export default function Field() {
             </span>
             <div>
               <div className="text-[1.75vw] font-extrabold text-text">
-                Simple enough for day one
+                Intuitive from the first job
               </div>
               <div className="mt-[0.5vh] text-[1.45vw] text-muted">
-                No training sessions required. Techs open the app, see their
-                assigned jobs, and know exactly what to do. The right workflow
-                surfaces at the right time.
+                Techs open the app, see their assigned jobs, and know exactly
+                what to do. The interface is built around how the work already
+                flows — not the other way around.
               </div>
             </div>
           </div>
