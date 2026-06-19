@@ -18,7 +18,7 @@ export default function WhoFor() {
             09 · Who it&apos;s for
           </div>
           <h2 className="mt-[1.5vh] max-w-[60vw] text-[4.6vw] font-extrabold leading-[1.0] tracking-tight text-text text-balance">
-            Built for the people who run the work.
+            Built for everyone on the team.
           </h2>
           <p className="mt-[2.5vh] max-w-[50vw] text-[1.8vw] font-normal leading-snug text-muted text-pretty">
             IrrigoPro gives every role the right tools for their part of the
