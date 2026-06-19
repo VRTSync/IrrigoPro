@@ -7,20 +7,24 @@ export default function Field() {
         <div className="col-span-6 flex flex-col justify-center">
           <div className="inline-flex items-center gap-[0.8vw]">
             <span className="rounded-full bg-primary/10 px-[1vw] py-[0.5vh] text-[1.2vw] font-extrabold uppercase tracking-[0.25em] text-primary">
-              Field
+              Field-first
             </span>
             <span className="text-[1.4vw] font-semibold uppercase tracking-[0.3em] text-muted">
               05
             </span>
           </div>
-          <h2 className="mt-[2.5vh] text-[4.6vw] font-extrabold leading-[1.0] tracking-tight text-text text-balance">
-            Mobile built for the truck, not the desk.
+          <h2 className="mt-[2.5vh] text-[4.4vw] font-extrabold leading-[1.0] tracking-tight text-text text-balance">
+            Built for the truck and the field — not just the desk.
           </h2>
           <p className="mt-[3vh] max-w-[40vw] text-[1.9vw] font-normal leading-snug text-muted text-pretty">
-            Your crew gets a fast, mobile-first app with the customer&apos;s
-            site map, controller history, and the correct workflow for each
-            job — whether they are completing a work order or performing a wet
-            check.
+            Software only works when people actually use it. IrrigoPro is
+            intuitive enough for a tech to pick up on day one — clean, fast,
+            and designed around the job, not around the software.
+          </p>
+          <p className="mt-[1.8vh] max-w-[40vw] text-[1.7vw] font-normal leading-snug text-muted/80 text-pretty">
+            Great irrigation businesses are built from the ground up. That
+            means getting adoption from the crew first — then the office
+            follows.
           </p>
         </div>
 
@@ -31,11 +35,12 @@ export default function Field() {
             </span>
             <div>
               <div className="text-[1.9vw] font-extrabold text-text">
-                Photo capture at every controller
+                Simple enough for day one
               </div>
               <div className="mt-[0.6vh] text-[1.55vw] text-muted">
-                Notes and photos stay attached to the specific work order, wet
-                check, controller, or zone where they were recorded.
+                No training sessions required. Techs open the app, see their
+                assigned jobs, and know exactly what to do. The right workflow
+                surfaces at the right time.
               </div>
             </div>
           </div>
@@ -45,11 +50,12 @@ export default function Field() {
             </span>
             <div>
               <div className="text-[1.9vw] font-extrabold text-text">
-                The right workflow for every job
+                Capture everything, right where the work happens
               </div>
               <div className="mt-[0.6vh] text-[1.55vw] text-muted">
-                Technicians receive the scope, property details, and forms
-                needed to complete and capture the work accurately.
+                Photos, findings, parts, and notes attach to the specific
+                controller, zone, or job — not lost in a camera roll or a text
+                thread.
               </div>
             </div>
           </div>
@@ -62,8 +68,8 @@ export default function Field() {
                 Works offline, syncs on reconnect
               </div>
               <div className="mt-[0.6vh] text-[1.55vw] text-muted">
-                Cell-service gaps do not stop the job or the documentation.
-                Completed information syncs when the device reconnects.
+                Dead zones and basement mechanical rooms do not stop the job.
+                Everything queues and syncs the moment coverage returns.
               </div>
             </div>
           </div>
