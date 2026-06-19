@@ -11,10 +11,11 @@ export default function Office() {
             </span>
             <div>
               <div className="text-[1.9vw] font-extrabold text-text">
-                Server-authoritative pricing
+                Office-controlled pricing
               </div>
               <div className="mt-[0.6vh] text-[1.55vw] text-muted">
-                Markup, tax, and labor rates live on the server — not in a spreadsheet.
+                Labor rates, markup, tax, and pricing rules are managed in one
+                place for consistent billing.
               </div>
             </div>
           </div>
@@ -24,10 +25,11 @@ export default function Office() {
             </span>
             <div>
               <div className="text-[1.9vw] font-extrabold text-text">
-                Reprice with full audit history
+                Full revision history
               </div>
               <div className="mt-[0.6vh] text-[1.55vw] text-muted">
-                Every change to a billing sheet is signed, dated, and recoverable.
+                Every change to a billing sheet is recorded with the user,
+                date, and prior value.
               </div>
             </div>
           </div>
@@ -37,10 +39,11 @@ export default function Office() {
             </span>
             <div>
               <div className="text-[1.9vw] font-extrabold text-text">
-                Photos attached to every line
+                Supporting documentation attached
               </div>
               <div className="mt-[0.6vh] text-[1.55vw] text-muted">
-                When a customer disputes a charge, the answer is one click away.
+                Photos, notes, parts, and labor remain connected to related
+                billing items for faster review and easier customer communication.
               </div>
             </div>
           </div>
@@ -56,12 +59,12 @@ export default function Office() {
             </span>
           </div>
           <h2 className="mt-[2.5vh] text-[4.6vw] font-extrabold leading-[1.0] tracking-tight text-text text-balance">
-            Billing managers in control.
+            Billing managers stay in control.
           </h2>
           <p className="mt-[3vh] max-w-[40vw] text-[1.9vw] font-normal leading-snug text-muted text-pretty">
-            Authoritative pricing on the server, full reprice history, photo
-            audit trails, and one-click QuickBooks export — without re-keying a
-            single line item.
+            Office teams can review completed work, confirm pricing, track
+            revisions, and send approved billing into QuickBooks/Aspire without
+            rebuilding the job from field notes.
           </p>
         </div>
       </div>

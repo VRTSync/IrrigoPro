@@ -7,15 +7,16 @@ export default function QuickBooks() {
       <div className="relative z-10 grid h-full w-full grid-cols-12 gap-[3vw] px-[7vw] py-[8vh]">
         <div className="col-span-6 flex flex-col justify-center">
           <div className="text-[1.4vw] font-semibold uppercase tracking-[0.3em] text-primary">
-            08 · QuickBooks integration
+            08 · QuickBooks/Aspire integration
           </div>
           <h2 className="mt-[2.5vh] text-[4.8vw] font-extrabold leading-[1.0] tracking-tight text-text text-balance">
-            Push approved jobs straight to QuickBooks Online.
+            Push approved billing directly into QuickBooks/Aspire.
           </h2>
           <p className="mt-[3vh] max-w-[40vw] text-[1.9vw] font-normal leading-snug text-muted text-pretty">
-            One OAuth connection. Customer auto-mapping. Polished invoices in
-            your QuickBooks Online account, with PDFs delivered to the
-            customer&apos;s inbox — no double entry.
+            Once a billing sheet is reviewed and approved, IrrigoPro sends the
+            completed billing details into QuickBooks/Aspire — reducing manual
+            entry and keeping field documentation connected to the final
+            invoice.
           </p>
         </div>
 
@@ -28,7 +29,7 @@ export default function QuickBooks() {
                 <span className="h-[1vw] w-[1vw] rounded-full bg-[hsl(0_0%_82%)]" />
               </div>
               <div className="text-[1.2vw] font-semibold text-muted">
-                Billing sheet → QuickBooks
+                Billing sheet → QuickBooks/Aspire
               </div>
             </div>
 
@@ -52,7 +53,7 @@ export default function QuickBooks() {
                   Oakmont Office Park
                 </div>
                 <div className="text-[1.3vw] text-muted">
-                  Mainline repair · 2 hrs
+                  Mainline repair · 2 hours
                 </div>
               </div>
               <div className="text-[1.8vw] font-extrabold text-primary">
@@ -76,7 +77,7 @@ export default function QuickBooks() {
 
             <div className="mt-[2.4vh] flex items-center justify-between rounded-[0.8vw] bg-accent/15 px-[1.4vw] py-[1.6vh]">
               <div className="text-[1.5vw] font-extrabold text-text">
-                Send to QuickBooks Online
+                Send approved billing
               </div>
               <div className="rounded-[0.6vw] bg-accent px-[1.2vw] py-[1vh] text-[1.4vw] font-extrabold text-white">
                 Invoice 3 jobs

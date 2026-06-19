@@ -9,32 +9,31 @@ export default function Solution() {
           03 · The Solution
         </div>
         <h2 className="mt-[2.5vh] max-w-[78vw] text-[6vw] font-extrabold leading-[0.98] tracking-tight text-white text-balance">
-          One app that turns estimates into invoices.
+          One app that connects the entire irrigation operation.
         </h2>
         <p className="mt-[3.5vh] max-w-[68vw] text-[2.2vw] font-normal leading-snug text-white/85 text-pretty">
-          IrrigoPro turns estimates into scheduled work, scheduled work into
-          wet-checked jobs, and finished jobs into QuickBooks invoices —
-          without spreadsheets, paper tickets, or chasing your crew for the
-          details.
+          IrrigoPro connects estimates, work orders, wet checks, billing sheets,
+          and QuickBooks/Aspire invoicing — without spreadsheets, paper tickets,
+          or chasing crews for missing details.
         </p>
 
         <div className="mt-[6vh] grid grid-cols-3 gap-[2.4vw] max-w-[68vw]">
           <div>
-            <div className="text-[3vw] font-extrabold text-accent leading-none">1 app</div>
+            <div className="text-[3vw] font-extrabold text-accent leading-none">1 platform</div>
             <div className="mt-[1vh] text-[1.5vw] font-semibold text-white/80">
-              Estimates → invoices
+              Four connected workflows
             </div>
           </div>
           <div>
             <div className="text-[3vw] font-extrabold text-accent leading-none">1-click</div>
             <div className="mt-[1vh] text-[1.5vw] font-semibold text-white/80">
-              QuickBooks sync
+              QuickBooks/Aspire sync
             </div>
           </div>
           <div>
             <div className="text-[3vw] font-extrabold text-accent leading-none">Offline</div>
             <div className="mt-[1vh] text-[1.5vw] font-semibold text-white/80">
-              Works in the truck
+              Built for the field
             </div>
           </div>
         </div>

@@ -13,9 +13,10 @@ export default function Problem() {
             Irrigation companies still run on paper, texts, and spreadsheets.
           </h2>
           <p className="mt-[3vh] max-w-[42vw] text-[2.1vw] font-normal leading-snug text-muted text-pretty">
-            Estimates live in a Google Doc. Work orders are a group text.
-            Wet-check findings come back on a napkin. Billing managers chase
-            crews for the details, then re-key everything into QuickBooks.
+            Estimates live in separate documents. Work orders are managed
+            through texts and phone calls. Wet-check findings come back through
+            notes and photos. Billing teams then chase down the missing details
+            and rebuild the job in QuickBooks.
           </p>
         </div>
 
@@ -28,7 +29,7 @@ export default function Problem() {
               Disconnected tools per job
             </div>
             <div className="text-[1.5vw] text-muted">
-              Docs, texts, photos, paper tickets, accounting.
+              Documents, texts, photos, paper tickets, and accounting software.
             </div>
           </div>
           <div className="rounded-[1.2vw] border border-border bg-surface p-[2.2vw] shadow-sm">
@@ -36,21 +37,21 @@ export default function Problem() {
               Days
             </div>
             <div className="mt-[1vh] text-[1.6vw] font-semibold text-text">
-              From job complete to invoice sent
+              From completed work to a sent invoice
             </div>
             <div className="text-[1.5vw] text-muted">
-              Re-keying line items costs real cash flow.
+              Manual review and re-entry slow down cash flow.
             </div>
           </div>
           <div className="rounded-[1.2vw] border border-border bg-surface p-[2.2vw] shadow-sm">
             <div className="text-[3.6vw] font-extrabold leading-none text-primary">
-              0
+              Limited
             </div>
             <div className="mt-[1vh] text-[1.6vw] font-semibold text-text">
-              Audit trail when pricing is disputed
+              Visibility when pricing is questioned
             </div>
             <div className="text-[1.5vw] text-muted">
-              Who changed the price? Nobody can say.
+              It is often difficult to see what changed, who changed it, and why.
             </div>
           </div>
         </div>

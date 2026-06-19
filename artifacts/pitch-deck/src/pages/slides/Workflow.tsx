@@ -10,12 +10,13 @@ export default function Workflow() {
               04 · How it works
             </div>
             <h2 className="mt-[1.5vh] text-[4.6vw] font-extrabold leading-[1.0] tracking-tight text-text text-balance">
-              Estimate. Schedule. Service. Invoice.
+              Four workflows. One connected operation.
             </h2>
           </div>
           <p className="hidden lg:block max-w-[28vw] text-[1.6vw] font-normal text-muted text-pretty">
-            One thread that ties the office to the field — and the field back
-            to your accountant.
+            Estimates, work orders, wet checks, and billing sheets keep
+            information connected from the office to the field and into
+            QuickBooks/Aspire.
           </p>
         </div>
 
@@ -28,8 +29,8 @@ export default function Workflow() {
               Estimate
             </div>
             <p className="mt-[1.5vh] text-[1.55vw] font-normal leading-snug text-muted">
-              Build it from your parts catalog and customer labor rates. Send
-              for review. Capture customer approval from a phone.
+              Build proposed work from your parts catalog and customer labor
+              rates. Send for review and capture approval from a phone.
             </p>
             <div className="mt-auto pt-[2vh] text-[1.3vw] font-semibold uppercase tracking-wider text-primary">
               Draft → Sent → Approved
@@ -41,14 +42,15 @@ export default function Workflow() {
               Step 02
             </div>
             <div className="mt-[1.5vh] text-[2.4vw] font-extrabold tracking-tight text-text">
-              Schedule
+              Work Order
             </div>
             <p className="mt-[1.5vh] text-[1.55vw] font-normal leading-snug text-muted">
-              Convert approved estimates into work orders, assign technicians,
-              and share the site map and zone history.
+              Schedule and assign field work, attach the site map and system
+              history, and give the technician the exact scope needed to
+              complete the job.
             </p>
             <div className="mt-auto pt-[2vh] text-[1.3vw] font-semibold uppercase tracking-wider text-primary">
-              Dispatch &amp; site maps
+              Scheduled → In Progress → Complete
             </div>
           </div>
 
@@ -57,14 +59,14 @@ export default function Workflow() {
               Step 03
             </div>
             <div className="mt-[1.5vh] text-[2.4vw] font-extrabold tracking-tight text-text">
-              Field
+              Wet Check
             </div>
             <p className="mt-[1.5vh] text-[1.55vw] font-normal leading-snug text-muted">
-              Crew captures parts used, labor, and zone-by-zone wet-check
-              findings — with photos, even when offline.
+              Inspect controllers and zones with a structured field workflow.
+              Capture findings, parts, notes, and photos — even when offline.
             </p>
             <div className="mt-auto pt-[2vh] text-[1.3vw] font-semibold uppercase tracking-wider text-primary">
-              Wet checks &amp; photos
+              Controller &amp; Zone Findings
             </div>
           </div>
 
@@ -73,14 +75,14 @@ export default function Workflow() {
               Step 04
             </div>
             <div className="mt-[1.5vh] text-[2.4vw] font-extrabold tracking-tight text-text">
-              Invoice
+              Billing Sheet
             </div>
             <p className="mt-[1.5vh] text-[1.55vw] font-normal leading-snug text-muted">
-              Completed jobs flow into a billing sheet, then push straight to
-              QuickBooks Online as a polished invoice.
+              Review completed work, apply office-controlled pricing, markup,
+              and tax, then send approved billing into QuickBooks/Aspire.
             </p>
             <div className="mt-auto pt-[2vh] text-[1.3vw] font-semibold uppercase tracking-wider text-accent">
-              One click to QuickBooks
+              Review → Approve → Sync
             </div>
           </div>
         </div>

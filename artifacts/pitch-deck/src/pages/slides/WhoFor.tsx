@@ -12,8 +12,9 @@ export default function WhoFor() {
             Built for the people who run the work.
           </h2>
           <p className="mt-[2.5vh] max-w-[50vw] text-[1.8vw] font-normal leading-snug text-muted text-pretty">
-            Multi-company by design, role-based by default — IrrigoPro fits
-            crews of three trucks and operations of thirty.
+            IrrigoPro gives every role the right tools for their part of the
+            operation — from company oversight and scheduling to field
+            execution, billing, and accounting integration.
           </p>
         </div>
 
@@ -26,18 +27,20 @@ export default function WhoFor() {
               The whole company
             </div>
             <p className="mt-[1.2vh] text-[1.4vw] leading-snug text-muted">
-              Multi-company isolation, user roles, and full operational visibility.
+              Manage users, customers, service locations, pricing, and
+              company-wide operational visibility.
             </p>
           </div>
           <div className="flex flex-col rounded-[1vw] border border-border bg-surface p-[1.8vw] shadow-sm">
             <div className="text-[1.3vw] font-extrabold uppercase tracking-[0.2em] text-primary">
-              Managers
+              Irrigation Managers
             </div>
             <div className="mt-[1.5vh] text-[1.75vw] font-extrabold text-text">
-              Schedule &amp; dispatch
+              Schedule &amp; coordinate
             </div>
             <p className="mt-[1.2vh] text-[1.4vw] leading-snug text-muted">
-              Convert estimates, assign technicians, share site maps, monitor jobs.
+              Create estimates, schedule work orders, assign technicians, launch
+              wet checks, and monitor field progress.
             </p>
           </div>
           <div className="flex flex-col rounded-[1vw] border border-border bg-surface p-[1.8vw] shadow-sm">
@@ -48,7 +51,9 @@ export default function WhoFor() {
               On the truck
             </div>
             <p className="mt-[1.2vh] text-[1.4vw] leading-snug text-muted">
-              Mobile-first work orders, photo capture, wet checks, offline sync.
+              Complete mobile work orders and wet checks, capture labor,
+              materials, notes, and photos, and sync completed work from the
+              field.
             </p>
           </div>
           <div className="flex flex-col rounded-[1vw] border border-border bg-surface p-[1.8vw] shadow-sm">
@@ -56,10 +61,11 @@ export default function WhoFor() {
               Billing Managers
             </div>
             <div className="mt-[1.5vh] text-[1.75vw] font-extrabold text-text">
-              Pricing &amp; invoicing
+              Review &amp; invoice
             </div>
             <p className="mt-[1.2vh] text-[1.4vw] leading-snug text-muted">
-              Authoritative pricing, reprice history, and the QuickBooks push button.
+              Review digital billing sheets, confirm pricing and revisions, and
+              send approved billing into QuickBooks/Aspire.
             </p>
           </div>
         </div>

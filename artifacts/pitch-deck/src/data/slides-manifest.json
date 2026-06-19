@@ -4,7 +4,7 @@
     "position": 1,
     "filepath": "src/pages/slides/Cover.tsx",
     "title": "Run your irrigation business end-to-end",
-    "description": "Cover slide with hero image and IrrigoPro positioning.",
+    "description": "Cover slide — Built for Irrigation Companies. Tailored for Valor Landscape.",
     "speakerNotes": ""
   },
   {
@@ -12,7 +12,7 @@
     "position": 2,
     "filepath": "src/pages/slides/Problem.tsx",
     "title": "The problem",
-    "description": "Paper, texts, and spreadsheets across disconnected tools.",
+    "description": "Paper, texts, and spreadsheets across disconnected tools. Stats: 4+ tools, Days to invoice, Limited visibility.",
     "speakerNotes": ""
   },
   {
@@ -20,31 +20,31 @@
     "position": 3,
     "filepath": "src/pages/slides/Solution.tsx",
     "title": "The solution",
-    "description": "One app from estimates to invoices.",
+    "description": "One app that connects the entire irrigation operation. Stats: 1 platform, 1-click QB/Aspire sync, Offline.",
     "speakerNotes": ""
   },
   {
     "id": "1d4f5b6a-0001-4a00-8a00-000000000004",
     "position": 4,
     "filepath": "src/pages/slides/Workflow.tsx",
-    "title": "Estimate. Schedule. Service. Invoice.",
-    "description": "The four-step workflow.",
+    "title": "Four workflows. One connected operation.",
+    "description": "Step 01 Estimate → Step 02 Work Order → Step 03 Wet Check → Step 04 Billing Sheet.",
     "speakerNotes": ""
   },
   {
     "id": "1d4f5b6a-0001-4a00-8a00-000000000005",
     "position": 5,
     "filepath": "src/pages/slides/Field.tsx",
-    "title": "Built for the truck, not the desk",
-    "description": "Mobile-first field app, photos, offline sync.",
+    "title": "Mobile built for the truck, not the desk",
+    "description": "Photo capture, right workflow for every job, offline-first field app.",
     "speakerNotes": ""
   },
   {
     "id": "1d4f5b6a-0001-4a00-8a00-000000000006",
     "position": 6,
     "filepath": "src/pages/slides/Office.tsx",
-    "title": "Billing managers in control",
-    "description": "Server-authoritative pricing, reprice history, photo audit.",
+    "title": "Billing managers stay in control",
+    "description": "Office-controlled pricing, full revision history, supporting documentation attached.",
     "speakerNotes": ""
   },
   {
@@ -52,15 +52,15 @@
     "position": 7,
     "filepath": "src/pages/slides/Features.tsx",
     "title": "Everything an irrigation company runs on",
-    "description": "Six-tile feature highlights grid.",
+    "description": "Six feature highlights: estimates, work orders, wet checks, billing sheets, site maps, roles.",
     "speakerNotes": ""
   },
   {
     "id": "1d4f5b6a-0001-4a00-8a00-000000000008",
     "position": 8,
     "filepath": "src/pages/slides/QuickBooks.tsx",
-    "title": "QuickBooks integration",
-    "description": "One-click push to QuickBooks Online.",
+    "title": "QuickBooks/Aspire integration",
+    "description": "Push approved billing directly into QuickBooks/Aspire. Mock UI with three sample jobs.",
     "speakerNotes": ""
   },
   {
@@ -68,7 +68,7 @@
     "position": 9,
     "filepath": "src/pages/slides/WhoFor.tsx",
     "title": "Who it's for",
-    "description": "Owners, managers, field techs, billing managers.",
+    "description": "Owners & Admins, Irrigation Managers, Field Techs, Billing Managers.",
     "speakerNotes": ""
   },
   {

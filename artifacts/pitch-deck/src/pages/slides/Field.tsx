@@ -14,12 +14,13 @@ export default function Field() {
             </span>
           </div>
           <h2 className="mt-[2.5vh] text-[4.6vw] font-extrabold leading-[1.0] tracking-tight text-text text-balance">
-            Built for the truck, not the desk.
+            Mobile built for the truck, not the desk.
           </h2>
           <p className="mt-[3vh] max-w-[40vw] text-[1.9vw] font-normal leading-snug text-muted text-pretty">
             Your crew gets a fast, mobile-first app with the customer&apos;s
-            site map, controller history, and the right form for the job — no
-            pricing exposed to field techs.
+            site map, controller history, and the correct workflow for each
+            job — whether they are completing a work order or performing a wet
+            check.
           </p>
         </div>
 
@@ -33,7 +34,8 @@ export default function Field() {
                 Photo capture at every controller
               </div>
               <div className="mt-[0.6vh] text-[1.55vw] text-muted">
-                Per-zone notes and photos attach to the work order automatically.
+                Notes and photos stay attached to the specific work order, wet
+                check, controller, or zone where they were recorded.
               </div>
             </div>
           </div>
@@ -43,10 +45,11 @@ export default function Field() {
             </span>
             <div>
               <div className="text-[1.9vw] font-extrabold text-text">
-                Pricing hidden from field roles
+                The right workflow for every job
               </div>
               <div className="mt-[0.6vh] text-[1.55vw] text-muted">
-                Techs see what they need. Margin stays in the office.
+                Technicians receive the scope, property details, and forms
+                needed to complete and capture the work accurately.
               </div>
             </div>
           </div>
@@ -59,7 +62,8 @@ export default function Field() {
                 Works offline, syncs on reconnect
               </div>
               <div className="mt-[0.6vh] text-[1.55vw] text-muted">
-                Cell dead zones don&apos;t stop the job — or the paperwork.
+                Cell-service gaps do not stop the job or the documentation.
+                Completed information syncs when the device reconnects.
               </div>
             </div>
           </div>

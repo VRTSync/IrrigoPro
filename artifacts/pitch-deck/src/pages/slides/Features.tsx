@@ -14,7 +14,9 @@ export default function Features() {
             </h2>
           </div>
           <p className="hidden lg:block max-w-[26vw] text-[1.55vw] font-normal text-muted text-pretty">
-            One app replaces the patchwork of spreadsheets, text threads, and paper tickets.
+            Four purpose-built workflows keep estimates, field work,
+            inspections, and billing connected — without rebuilding information
+            at every handoff.
           </p>
         </div>
 
@@ -24,10 +26,12 @@ export default function Features() {
               01
             </div>
             <div className="mt-[1.4vh] text-[1.85vw] font-extrabold text-text">
-              Estimates that close faster
+              Estimates that move work forward
             </div>
             <div className="mt-[1vh] text-[1.45vw] leading-snug text-muted">
-              Parts catalog, customer-specific labor rates, PDF + email built in.
+              Build accurate proposals from your parts catalog and
+              customer-specific labor rates. Send, review, approve, and convert
+              accepted work into execution.
             </div>
           </div>
           <div className="rounded-[1vw] border border-border bg-surface p-[1.8vw] shadow-sm">
@@ -38,7 +42,9 @@ export default function Features() {
               Work orders crews actually use
             </div>
             <div className="mt-[1vh] text-[1.45vw] leading-snug text-muted">
-              Per-zone notes, technician scheduling, offline-safe field app.
+              Schedule and assign technicians, provide property and system
+              context, and capture labor, materials, notes, and photos in the
+              field.
             </div>
           </div>
           <div className="rounded-[1vw] border border-border bg-surface p-[1.8vw] shadow-sm">
@@ -46,10 +52,12 @@ export default function Features() {
               03
             </div>
             <div className="mt-[1.4vh] text-[1.85vw] font-extrabold text-text">
-              Wet checks, by the zone
+              Wet checks, built zone by zone
             </div>
             <div className="mt-[1vh] text-[1.45vw] leading-snug text-muted">
-              Standardized inspections with immutable findings and auto-billing.
+              Run standardized controller and zone inspections with structured
+              findings, photos, repair recommendations, and a protected
+              inspection history.
             </div>
           </div>
           <div className="rounded-[1vw] border border-border bg-surface p-[1.8vw] shadow-sm">
@@ -57,10 +65,11 @@ export default function Features() {
               04
             </div>
             <div className="mt-[1.4vh] text-[1.85vw] font-extrabold text-text">
-              Billing sheets, not spreadsheets
+              Digital billing sheets, not paper
             </div>
             <div className="mt-[1vh] text-[1.45vw] leading-snug text-muted">
-              Authoritative pricing, markup, tax, and reprice history.
+              Review completed field work, confirm pricing, apply markup and
+              tax, and prepare approved charges for QuickBooks/Aspire.
             </div>
           </div>
           <div className="rounded-[1vw] border border-border bg-surface p-[1.8vw] shadow-sm">
@@ -71,7 +80,8 @@ export default function Features() {
               Site maps &amp; controllers
             </div>
             <div className="mt-[1vh] text-[1.45vw] leading-snug text-muted">
-              Interactive maps with controller and zone management on every job.
+              Interactive maps connect properties, controllers, zones, and field
+              activity in one operational view.
             </div>
           </div>
           <div className="rounded-[1vw] border border-border bg-surface p-[1.8vw] shadow-sm">
@@ -82,7 +92,8 @@ export default function Features() {
               Roles for every seat
             </div>
             <div className="mt-[1vh] text-[1.45vw] leading-snug text-muted">
-              Field tech, manager, billing manager, admin — with audit trails.
+              Give owners, managers, technicians, and billing teams the tools
+              and visibility needed for their part of the workflow.
             </div>
           </div>
         </div>

@@ -28,8 +28,8 @@ export default function Cover() {
             Run your irrigation business end-to-end.
           </h1>
           <p className="mt-[3vh] max-w-[48vw] text-[2.1vw] font-normal leading-snug text-white/85 text-pretty">
-            From the first estimate to the QuickBooks invoice — one app that
-            ties the office to the truck and the field back to your accountant.
+            From the first estimate to the final invoice, IrrigoPro connects
+            the office, the field, and QuickBooks/Aspire in one platform.
           </p>
         </div>
 
@@ -38,7 +38,7 @@ export default function Cover() {
             irrigopro.com
           </div>
           <div className="text-[1.5vw] font-normal">
-            Investor &amp; Partner Pitch · 2026
+            Valor Landscape · 2026
           </div>
         </div>
       </div>

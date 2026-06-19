@@ -29,3 +29,9 @@ id = "wEiBN-k6Ki79nC7ndiFtN"
 uri = "file://.local/outputs/IrrigoPro.pdf"
 type = "pdf"
 title = "IrrigoPro.pdf"
+
+[[outputs]]
+id = "-Tt7veEcwDpcnJnXlcsve"
+uri = "file://.local/outputs/IrrigoPro.pptx"
+type = "slides"
+title = "IrrigoPro.pptx"
