@@ -1,0 +1,42 @@
+# DB Migrations Page — "Failed to load migrations" Fix
+
+**What & Why**
+The super-admin **DB Migrations** page (`/admin/migrations`) shows **"Failed to load migrations."** This blocks the reconcile migration the billing team needs to run (the one that unblocks Invoice Detail PDF generation).
+
+**Root cause — two faults compounding:**
+1. The **work-order-zones** migration (#1437) `check()` calls `getBackfillStatus()`, which queries `work_order_items.controller_letter` / `zone_number`. Those columns are in the **code** (schema.ts) but were **never applied to the production database** — the #1437 `drizzle-kit push` wasn't run on prod. So the query throws `column "controller_letter" does not exist`.
+2. The list endpoint `GET /api/admin/migrations` (`admin-migrations-routes.ts:23–28`) runs **every** migration's `check()` in one `Promise.all` with **no per-migration error handling**. So one throwing `check()` rejects the whole promise → the endpoint 500s → the entire page fails, taking the (healthy) reconcile migration down with it.
+
+**Fix both:** apply the missing #1437 schema to prod, and isolate per-migration check failures so one bad migration can't blank the page.
+
+Single slice + one ops step. No new feature.
+
+---
+
+## Step A (ops, immediate unblock) — apply the #1437 schema to production
+- Run `pnpm --filter @workspace/db run push` against production so `work_order_items` gains `controller_letter`, `zone_number`, `issue_type`, `completed_at` (all nullable, no backfill). Replit runs this (no prod terminal for the admin).
+- This alone makes the work-order-zones `check()` query valid and the page loads.
+
+## Step B (code, resilience) — isolate per-migration check failures
+- In `GET /api/admin/migrations` (`admin-migrations-routes.ts:20–30`), wrap each migration's `await d.check()` in its own try/catch. On error, return that migration's row with a safe status (e.g. `{ state: 'error', details: <message> }`) instead of letting the rejection bubble up and 500 the whole list.
+- The other migrations (e.g. the reconcile) must still load and be runnable even when one migration's check throws.
+- Consider the same guard on `/:id/preview` and `/:id/run` so a single broken migration returns a clean error for *itself* rather than an opaque 500.
+
+## Done looks like
+- `/admin/migrations` loads for the super admin; the reconcile migration is visible and runnable.
+- After Step A, the work-order-zones migration's check succeeds (it queries real columns).
+- If any migration's `check()` ever throws again, that single migration shows an error state — the page and the other migrations still load.
+
+## Tests
+- `GET /api/admin/migrations` returns 200 with all migration rows even when one migration's `check()` throws (mock a throwing check → that row has an error state, others are fine).
+- With the WO zone columns present, the work-order-zones check returns a real status (not_started / partially_applied / completed), no throw.
+- The reconcile migration loads and its preview/run work regardless of the work-order-zones migration's state.
+
+## Out of scope
+- The reconcile and work-order-zones migration logic themselves (correct — just unreachable).
+- Any schema change beyond applying the already-defined #1437 columns.
+
+## Relevant files
+- `artifacts/api-server/src/routes/admin-migrations-routes.ts` (list/preview/run handlers — add per-migration try/catch)
+- `artifacts/api-server/src/lib/migrations/work-order-zones.ts` + `scripts/backfill-work-order-zones-core.ts` (`check()` / `getBackfillStatus` — query that throws when columns absent)
+- `lib/db/src/schema/schema.ts` (`work_order_items` zone columns, #1437 — apply via push)
