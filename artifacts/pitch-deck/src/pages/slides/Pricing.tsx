@@ -9,51 +9,56 @@ export default function Pricing() {
           10 · Get started
         </div>
         <h2 className="mt-[2.5vh] max-w-[70vw] text-[5.6vw] font-extrabold leading-[1.0] tracking-tight text-white text-balance">
-          See IrrigoPro on your jobs.
+          See IrrigoPro on one of your properties.
         </h2>
         <p className="mt-[3vh] max-w-[60vw] text-[2vw] font-normal leading-snug text-white/85 text-pretty">
-          A 30-minute live walkthrough on real irrigation work like yours — no
-          canned demo, no credit card, no slides.
+          The best way to evaluate the platform is to load one of your
+          properties and walk through each ticket type using real site
+          information.
         </p>
 
-        <div className="mt-[5vh] grid grid-cols-3 gap-[2vw] max-w-[70vw]">
+        <div className="mt-[5vh] grid grid-cols-3 gap-[2vw] max-w-[72vw]">
           <div className="rounded-[1vw] border border-white/15 bg-white/5 p-[1.8vw]">
             <div className="text-[1.3vw] font-extrabold uppercase tracking-[0.2em] text-accent">
-              30 minutes
+              One property
             </div>
             <div className="mt-[1.2vh] text-[1.7vw] font-extrabold text-white">
-              Live walkthrough
+              Built in the platform
             </div>
-            <div className="mt-[0.8vh] text-[1.4vw] text-white/70">
-              On your data, not a canned demo.
+            <div className="mt-[0.8vh] text-[1.4vw] leading-snug text-white/70">
+              Add the property, service locations, controllers, zones, and other
+              key site details.
             </div>
           </div>
           <div className="rounded-[1vw] border border-white/15 bg-white/5 p-[1.8vw]">
             <div className="text-[1.3vw] font-extrabold uppercase tracking-[0.2em] text-accent">
-              No card
+              Four ticket types
             </div>
             <div className="mt-[1.2vh] text-[1.7vw] font-extrabold text-white">
-              Try before you buy
+              Walk the full workflow
             </div>
-            <div className="mt-[0.8vh] text-[1.4vw] text-white/70">
-              Onboarding plan tailored to your crew size.
+            <div className="mt-[0.8vh] text-[1.4vw] leading-snug text-white/70">
+              Create an estimate, schedule a work order, complete a wet check,
+              and review the finished digital billing sheet.
             </div>
           </div>
           <div className="rounded-[1vw] border border-white/15 bg-white/5 p-[1.8vw]">
             <div className="text-[1.3vw] font-extrabold uppercase tracking-[0.2em] text-accent">
-              QuickBooks
+              Next step
             </div>
             <div className="mt-[1.2vh] text-[1.7vw] font-extrabold text-white">
-              Integration walkthrough
+              Plan the larger rollout
             </div>
-            <div className="mt-[0.8vh] text-[1.4vw] text-white/70">
-              Connected to QuickBooks Online during the demo.
+            <div className="mt-[0.8vh] text-[1.4vw] leading-snug text-white/70">
+              Review the workflow with your team, identify any adjustments, and
+              outline the path toward broader implementation and a future Aspire
+              connection.
             </div>
           </div>
         </div>
 
         <div className="mt-[6vh] inline-flex items-center gap-[1.4vw] rounded-full bg-accent px-[2.4vw] py-[1.6vh] text-[1.8vw] font-extrabold text-white w-fit">
-          Request a demo at irrigopro.com
+          Choose a property to get started
           <span className="text-[2vw]">→</span>
         </div>
       </div>
