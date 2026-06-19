@@ -1,7 +1,17 @@
 import type { Express, Response } from 'express';
-import { listMigrations, getMigration } from '../lib/migrations/registry';
+import {
+  listMigrations as defaultListMigrations,
+  getMigration as defaultGetMigration,
+} from '../lib/migrations/registry';
 import type { MigrationProgress } from '../lib/migrations/types';
 import { randomUUID } from 'crypto';
+
+// Injectable registry seam so tests can supply a fake migration whose
+// check()/preview()/run() throws, without needing a database.
+export interface AdminMigrationsDeps {
+  listMigrations?: typeof defaultListMigrations;
+  getMigration?: typeof defaultGetMigration;
+}
 
 // In-process job store. Migrations are short (< 30s) so persistence
 // across server restarts is not required.
@@ -15,17 +25,38 @@ function requireSuperAdmin(req: any, res: Response): boolean {
   return true;
 }
 
-export function registerAdminMigrationsRoutes(app: Express, requireAuthentication: any) {
+export function registerAdminMigrationsRoutes(
+  app: Express,
+  requireAuthentication: any,
+  deps: AdminMigrationsDeps = {},
+) {
+  const listMigrations = deps.listMigrations ?? defaultListMigrations;
+  const getMigration = deps.getMigration ?? defaultGetMigration;
+
   // GET /api/admin/migrations
   app.get('/api/admin/migrations', requireAuthentication, async (req: any, res) => {
     if (!requireSuperAdmin(req, res)) return;
     const defs = listMigrations();
-    const rows = await Promise.all(defs.map(async (d) => ({
-      id: d.id,
-      title: d.title,
-      description: d.description,
-      status: await d.check(),
-    })));
+    // Per-migration isolation: one migration's check() throwing (e.g. it
+    // queries a column not yet applied in this environment) must not reject
+    // the whole list and 500 the page. Each failure becomes an `error` row.
+    const rows = await Promise.all(defs.map(async (d) => {
+      try {
+        return {
+          id: d.id,
+          title: d.title,
+          description: d.description,
+          status: await d.check(),
+        };
+      } catch (err: any) {
+        return {
+          id: d.id,
+          title: d.title,
+          description: d.description,
+          status: { state: 'error' as const, details: err?.message ?? String(err) },
+        };
+      }
+    }));
     res.json(rows);
   });
 
@@ -34,8 +65,18 @@ export function registerAdminMigrationsRoutes(app: Express, requireAuthenticatio
     if (!requireSuperAdmin(req, res)) return;
     const d = getMigration(req.params.id);
     if (!d) { res.status(404).json({ message: 'Migration not found' }); return; }
-    const preview = await d.preview();
-    res.json(preview);
+    // Isolate this migration's preview() failure into a clean 500 for itself
+    // instead of an opaque unhandled rejection.
+    try {
+      const preview = await d.preview();
+      res.json(preview);
+    } catch (err: any) {
+      res.status(500).json({
+        message: 'Migration preview failed',
+        migrationId: d.id,
+        details: err?.message ?? String(err),
+      });
+    }
   });
 
   // POST /api/admin/migrations/:id/run

@@ -10,7 +10,8 @@ import assert from "node:assert/strict";
 import express, { type Express } from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { registerAdminMigrationsRoutes } from "./admin-migrations-routes";
+import { registerAdminMigrationsRoutes, type AdminMigrationsDeps } from "./admin-migrations-routes";
+import type { MigrationDefinition } from "../lib/migrations/types";
 
 // ── Stub requireAuthentication middleware ─────────────────────────────────────
 //
@@ -258,5 +259,134 @@ describe("admin-migrations-routes — POST run → polling lifecycle", () => {
     assert.ok(['running', 'succeeded', 'failed', 'aborted'].includes(prog.state), `Unexpected state: ${prog.state}`);
     assert.ok(Array.isArray(prog.steps), 'steps should be an array');
     assert.equal(prog.jobId, jobId, 'response jobId should match the requested jobId');
+  });
+});
+
+// ── Per-migration check() isolation (Task #1448) ───────────────────────────────
+//
+// One migration's check()/preview() throwing (e.g. it queries a column that
+// hasn't been applied in this environment) must not blank the whole page.
+// These tests inject a fake registry — no database required — so we can
+// deterministically simulate a throwing migration alongside healthy ones.
+
+const THROW_MESSAGE = 'column "controller_letter" does not exist';
+
+function makeHealthyMigration(id: string): MigrationDefinition {
+  return {
+    id,
+    title: `Healthy ${id}`,
+    description: `A migration whose check/preview/run all succeed (${id})`,
+    appSettingsKey: id,
+    check: async () => ({ state: 'not_started' }),
+    preview: async () => ({
+      steps: [{ id: 'step1', description: 'Do the thing' }],
+      orphanRows: { some_table: 0 },
+      warnings: [],
+    }),
+    run: async (emit) => {
+      emit({ step: 'step1', status: 'success' });
+      return [{ id: 'step1', status: 'success', durationMs: 1 }];
+    },
+  };
+}
+
+function makeThrowingCheckMigration(id: string): MigrationDefinition {
+  return {
+    id,
+    title: `Throwing ${id}`,
+    description: `A migration whose check()/preview() throw (${id})`,
+    appSettingsKey: id,
+    check: async () => { throw new Error(THROW_MESSAGE); },
+    preview: async () => { throw new Error(THROW_MESSAGE); },
+    run: async (emit) => {
+      emit({ step: 'step1', status: 'failed', error: THROW_MESSAGE });
+      throw new Error(THROW_MESSAGE);
+    },
+  };
+}
+
+async function startServerWith(deps: AdminMigrationsDeps): Promise<Harness> {
+  const app: Express = express();
+  app.use(express.json());
+  registerAdminMigrationsRoutes(app, makeRequireAuth(), deps);
+  const server: Server = createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const port = (server.address() as AddressInfo).port;
+  return {
+    baseUrl: `http://127.0.0.1:${port}`,
+    close: () => new Promise((resolve) => server.close(() => resolve())),
+  };
+}
+
+describe("admin-migrations-routes — per-migration check() isolation", () => {
+  // Fake registry: one throwing migration sandwiched between two healthy ones.
+  const healthyA = makeHealthyMigration('healthy-a');
+  const broken = makeThrowingCheckMigration('broken-check');
+  const healthyB = makeHealthyMigration('healthy-b');
+  const all = [healthyA, broken, healthyB];
+  const deps: AdminMigrationsDeps = {
+    listMigrations: () => all,
+    getMigration: (id: string) => all.find((m) => m.id === id),
+  };
+
+  let harness: Harness;
+  before(async () => { harness = await startServerWith(deps); });
+  after(async () => { await harness.close(); });
+
+  it("GET /api/admin/migrations returns 200 with ALL rows even when one check() throws", async () => {
+    const r = await hit(harness.baseUrl, 'GET', '/api/admin/migrations', { role: 'super_admin' });
+    assert.equal(r.status, 200, 'list must not 500 when a single check() throws');
+    assert.ok(Array.isArray(r.body), 'response should be an array');
+    assert.equal(r.body.length, 3, 'all three migrations should be present');
+
+    const byId = Object.fromEntries(r.body.map((row: any) => [row.id, row]));
+
+    // The broken one shows an error state carrying the underlying message.
+    assert.equal(byId['broken-check'].status.state, 'error');
+    assert.match(byId['broken-check'].status.details, /controller_letter/);
+
+    // The healthy ones still report their real (non-error) status.
+    assert.equal(byId['healthy-a'].status.state, 'not_started');
+    assert.equal(byId['healthy-b'].status.state, 'not_started');
+  });
+
+  it("GET /:id/preview returns a clean error (not an opaque crash) for the broken migration", async () => {
+    const r = await hit(harness.baseUrl, 'GET', '/api/admin/migrations/broken-check/preview', { role: 'super_admin' });
+    assert.equal(r.status, 500, 'preview failure should be a controlled 500');
+    assert.equal(r.body.migrationId, 'broken-check');
+    assert.match(r.body.details, /controller_letter/);
+  });
+
+  it("the healthy migrations' preview/run work regardless of the broken one", async () => {
+    const prev = await hit(harness.baseUrl, 'GET', '/api/admin/migrations/healthy-a/preview', { role: 'super_admin' });
+    assert.equal(prev.status, 200);
+    assert.ok(Array.isArray(prev.body.steps));
+
+    const run = await hit(harness.baseUrl, 'POST', '/api/admin/migrations/healthy-b/run', { role: 'super_admin' });
+    assert.equal(run.status, 200);
+    const { jobId } = run.body as { jobId: string };
+    assert.ok(typeof jobId === 'string' && jobId.length > 0);
+  });
+
+  it("POST /:id/run on a migration whose run() throws still returns a jobId and ends 'failed'", async () => {
+    const run = await hit(harness.baseUrl, 'POST', '/api/admin/migrations/broken-check/run', { role: 'super_admin' });
+    assert.equal(run.status, 200, 'run kickoff should return 200 even if the runner will throw');
+    const { jobId } = run.body as { jobId: string };
+    assert.ok(typeof jobId === 'string' && jobId.length > 0);
+
+    // Poll until the fire-and-forget job settles into a terminal state.
+    let state = 'running';
+    for (let i = 0; i < 50 && state === 'running'; i++) {
+      const poll = await hit(
+        harness.baseUrl,
+        'GET',
+        `/api/admin/migrations/broken-check/status?jobId=${jobId}`,
+        { role: 'super_admin' },
+      );
+      assert.equal(poll.status, 200);
+      state = (poll.body as { state: string }).state;
+      if (state === 'running') await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.equal(state, 'failed', 'a throwing run() must surface as a failed job, not crash the server');
   });
 });

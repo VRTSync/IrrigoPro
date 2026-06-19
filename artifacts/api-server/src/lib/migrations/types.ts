@@ -3,7 +3,11 @@
 export type MigrationStatus =
   | { state: 'not_started' }
   | { state: 'partially_applied'; details: string }
-  | { state: 'completed'; completedAt: string };
+  | { state: 'completed'; completedAt: string }
+  // The migration's own check() threw (e.g. it queries a column that does
+  // not exist yet in this environment). Surfaced per-migration so one bad
+  // check can't blank the whole admin page.
+  | { state: 'error'; details: string };
 
 export type MigrationStep = {
   id: string;

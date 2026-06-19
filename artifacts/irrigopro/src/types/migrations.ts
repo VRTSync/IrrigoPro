@@ -4,7 +4,11 @@
 export type MigrationStatus =
   | { state: 'not_started' }
   | { state: 'partially_applied'; details: string }
-  | { state: 'completed'; completedAt: string };
+  | { state: 'completed'; completedAt: string }
+  // The migration's own check() threw on the server (e.g. it queries a
+  // column not yet applied in this environment). Surfaced per-migration so
+  // one bad check can't blank the whole page.
+  | { state: 'error'; details: string };
 
 export type MigrationStep = {
   id: string;
