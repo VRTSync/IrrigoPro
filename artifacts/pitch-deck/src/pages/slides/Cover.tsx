@@ -19,12 +19,11 @@ export default function Cover() {
       </div>
 
       <div className="relative z-10 flex h-full w-full flex-col justify-between px-[7vw] py-[7vh]">
-        <div>
+        <div className="inline-flex w-fit items-center rounded-[0.8vw] bg-white/92 px-[1.4vw] py-[1vh] shadow-md">
           <img
             src={`${base}logo-horizontal.png`}
             alt="IrrigoPro"
-            className="h-[4.5vh] w-auto"
-            style={{ filter: "brightness(0) invert(1)" }}
+            className="h-[6vh] w-auto"
           />
         </div>
 
