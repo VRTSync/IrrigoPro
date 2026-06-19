@@ -7,17 +7,22 @@ export default function QuickBooks() {
       <div className="relative z-10 grid h-full w-full grid-cols-12 gap-[3vw] px-[7vw] py-[8vh]">
         <div className="col-span-6 flex flex-col justify-center">
           <div className="text-[1.4vw] font-semibold uppercase tracking-[0.3em] text-primary">
-            08 · QuickBooks/Aspire integration
+            08 · Integrations
           </div>
-          <h2 className="mt-[2.5vh] text-[4.8vw] font-extrabold leading-[1.0] tracking-tight text-text text-balance">
-            Push approved billing directly into QuickBooks/Aspire.
+          <h2 className="mt-[2vh] text-[3.8vw] font-extrabold leading-[1.05] tracking-tight text-text text-balance">
+            Push approved billing directly into QuickBooks or Aspire.
           </h2>
-          <p className="mt-[3vh] max-w-[40vw] text-[1.9vw] font-normal leading-snug text-muted text-pretty">
+          <p className="mt-[2.5vh] max-w-[40vw] text-[1.9vw] font-normal leading-snug text-muted text-pretty">
             Once a billing sheet is reviewed and approved, IrrigoPro sends the
             completed billing details into QuickBooks/Aspire — reducing manual
             entry and keeping field documentation connected to the final
             invoice.
           </p>
+          <div className="mt-[2.5vh] inline-flex items-center gap-[0.8vw]">
+            <span className="rounded-full border border-primary/25 bg-primary/8 px-[1.2vw] py-[0.6vh] text-[1.25vw] font-semibold text-primary">
+              20+ additional integrations available
+            </span>
+          </div>
         </div>
 
         <div className="col-span-6 flex flex-col justify-center">
