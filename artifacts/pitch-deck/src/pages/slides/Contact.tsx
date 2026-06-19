@@ -13,7 +13,7 @@ export default function Contact() {
 
       <div className="relative z-10 flex h-full w-full flex-col items-center justify-center gap-[4vh] px-[7vw] py-[7vh]">
         <div className="text-[1.4vw] font-semibold uppercase tracking-[0.3em] text-accent">
-          11 · Next step
+          12 · Next step
         </div>
 
         <h2 className="text-center text-[6vw] font-extrabold leading-[0.98] tracking-tight text-white text-balance max-w-[75vw]">

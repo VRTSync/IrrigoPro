@@ -75,16 +75,24 @@
     "id": "1d4f5b6a-0001-4a00-8a00-000000000010",
     "position": 10,
     "filepath": "src/pages/slides/Pricing.tsx",
-    "title": "See IrrigoPro on your jobs",
-    "description": "30-minute live demo CTA.",
+    "title": "See IrrigoPro on one of your properties",
+    "description": "Three-step evaluation path: one property, four ticket types, plan the larger rollout.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "1d4f5b6a-0001-4a00-8a00-000000000012",
+    "position": 11,
+    "filepath": "src/pages/slides/Roadmap.tsx",
+    "title": "Expanding the IrrigoPro operating system",
+    "description": "Coming Soon: Inventory Management, Controller Settings & Runtime Storage, Customer-Ready Runtime Reporting.",
     "speakerNotes": ""
   },
   {
     "id": "1d4f5b6a-0001-4a00-8a00-000000000011",
-    "position": 11,
+    "position": 12,
     "filepath": "src/pages/slides/Contact.tsx",
-    "title": "Talk to us",
-    "description": "Closing slide with contact details.",
+    "title": "Let's put IrrigoPro to work",
+    "description": "Closing slide — IrrigoPro logo, irrigopro.com.",
     "speakerNotes": ""
   }
 ]
