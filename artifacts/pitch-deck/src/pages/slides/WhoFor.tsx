@@ -29,10 +29,10 @@ export default function WhoFor() {
 
         <div className="mt-[6vh] grid flex-1 grid-cols-4 gap-[1.6vw]">
           <div className="flex flex-col rounded-[1vw] border border-border bg-surface p-[1.8vw] shadow-sm">
-            <div className="text-[1.3vw] font-extrabold uppercase tracking-[0.2em] text-primary">
+            <div className="flex min-h-[3.2vw] items-start text-[1.3vw] font-extrabold uppercase tracking-[0.2em] text-primary">
               Owners &amp; Admins
             </div>
-            <div className="mt-[1.5vh] text-[1.75vw] font-extrabold text-text">
+            <div className="text-[1.75vw] font-extrabold text-text">
               Full visibility
             </div>
             <p className="mt-[1.2vh] text-[1.4vw] leading-snug text-muted">
@@ -41,10 +41,10 @@ export default function WhoFor() {
             </p>
           </div>
           <div className="flex flex-col rounded-[1vw] border border-border bg-surface p-[1.8vw] shadow-sm">
-            <div className="text-[1.3vw] font-extrabold uppercase tracking-[0.2em] text-primary">
+            <div className="flex min-h-[3.2vw] items-start text-[1.3vw] font-extrabold uppercase tracking-[0.2em] text-primary">
               Irrigation Managers
             </div>
-            <div className="mt-[1.5vh] text-[1.75vw] font-extrabold text-text">
+            <div className="text-[1.75vw] font-extrabold text-text">
               Schedule &amp; coordinate
             </div>
             <p className="mt-[1.2vh] text-[1.4vw] leading-snug text-muted">
@@ -53,10 +53,10 @@ export default function WhoFor() {
             </p>
           </div>
           <div className="flex flex-col rounded-[1vw] border border-border bg-surface p-[1.8vw] shadow-sm">
-            <div className="text-[1.3vw] font-extrabold uppercase tracking-[0.2em] text-accent">
+            <div className="flex min-h-[3.2vw] items-start text-[1.3vw] font-extrabold uppercase tracking-[0.2em] text-accent">
               Field Techs
             </div>
-            <div className="mt-[1.5vh] text-[1.75vw] font-extrabold text-text">
+            <div className="text-[1.75vw] font-extrabold text-text">
               On the truck
             </div>
             <p className="mt-[1.2vh] text-[1.4vw] leading-snug text-muted">
@@ -66,10 +66,10 @@ export default function WhoFor() {
             </p>
           </div>
           <div className="flex flex-col rounded-[1vw] border border-border bg-surface p-[1.8vw] shadow-sm">
-            <div className="text-[1.3vw] font-extrabold uppercase tracking-[0.2em] text-accent">
+            <div className="flex min-h-[3.2vw] items-start text-[1.3vw] font-extrabold uppercase tracking-[0.2em] text-accent">
               Billing Managers
             </div>
-            <div className="mt-[1.5vh] text-[1.75vw] font-extrabold text-text">
+            <div className="text-[1.75vw] font-extrabold text-text">
               Review &amp; invoice
             </div>
             <p className="mt-[1.2vh] text-[1.4vw] leading-snug text-muted">
