@@ -634,6 +634,94 @@ export default function ZoneDetailScreen() {
     ]);
   }, [isLocked, wetCheckId, zoneRecordId, addPhotoMutation]);
 
+  const onAddFindingPhoto = useCallback(
+    (findingId: number) => {
+      if (isLocked || wetCheckId == null || zoneRecordId == null) return;
+      setPhotoError(null);
+
+      const captureFromCamera = async () => {
+        const perm = await ensureCameraPermission();
+        if (perm !== "granted") {
+          Alert.alert(
+            "Camera Access Required",
+            perm === "blocked"
+              ? "Camera access is blocked. Enable it in Settings to take photos."
+              : "Camera permission is required to take photos.",
+            perm === "blocked"
+              ? [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Open Settings",
+                    onPress: () => Linking.openSettings(),
+                  },
+                ]
+              : [{ text: "OK" }],
+          );
+          return;
+        }
+        let photo: LocalPhoto | null = null;
+        try {
+          photo = await captureZonePhoto({
+            wetCheckId,
+            zoneRecordId,
+            findingId,
+          });
+        } catch (err) {
+          setPhotoError(friendlyErrorMessage(err, "Couldn't open the camera"));
+          return;
+        }
+        if (!photo) return;
+        setLocalPhotos((prev) => [...prev, photo!]);
+        addPhotoMutation.mutate(photo);
+      };
+
+      const pickFromLibrary = async () => {
+        const perm = await ensureMediaLibraryPermission();
+        if (perm !== "granted") {
+          Alert.alert(
+            "Library Access Required",
+            perm === "blocked"
+              ? "Photo library access is blocked. Enable it in Settings."
+              : "Photo library permission is required to pick photos.",
+            perm === "blocked"
+              ? [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Open Settings",
+                    onPress: () => Linking.openSettings(),
+                  },
+                ]
+              : [{ text: "OK" }],
+          );
+          return;
+        }
+        let photo: LocalPhoto | null = null;
+        try {
+          photo = await pickZonePhotoFromLibrary({
+            wetCheckId,
+            zoneRecordId,
+            findingId,
+          });
+        } catch (err) {
+          setPhotoError(
+            friendlyErrorMessage(err, "Couldn't open the photo library"),
+          );
+          return;
+        }
+        if (!photo) return;
+        setLocalPhotos((prev) => [...prev, photo!]);
+        addPhotoMutation.mutate(photo);
+      };
+
+      Alert.alert("Add Finding Photo", undefined, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Take Photo", onPress: captureFromCamera },
+        { text: "Choose from Library", onPress: pickFromLibrary },
+      ]);
+    },
+    [isLocked, wetCheckId, zoneRecordId, addPhotoMutation],
+  );
+
   const onRemoveFinding = useCallback(
     (finding: WetCheckFinding) => {
       Alert.alert(
@@ -889,29 +977,45 @@ export default function ZoneDetailScreen() {
                       </Text>
                     ) : null}
                     {!isLocked ? (
-                      <Pressable
-                        onPress={() => onRemoveFinding(f)}
-                        disabled={
-                          deleteFindingMutation.isPending &&
-                          deleteFindingMutation.variables === f.id
-                        }
-                        accessibilityRole="button"
-                        accessibilityLabel={`Remove finding ${prettyIssueType(f.issueType)}`}
-                        style={({ pressed }) => [
-                          styles.removeButton,
-                          { opacity: pressed ? 0.7 : 1 },
-                        ]}
-                      >
-                        {deleteFindingMutation.isPending &&
-                        deleteFindingMutation.variables === f.id ? (
-                          <ActivityIndicator size="small" color={colors.destructive} />
-                        ) : (
-                          <Feather name="trash-2" size={14} color={colors.destructive} />
-                        )}
-                        <Text style={[styles.removeButtonText, { color: colors.destructive }]}>
-                          Remove
-                        </Text>
-                      </Pressable>
+                      <View style={styles.findingActions}>
+                        <Pressable
+                          onPress={() => onAddFindingPhoto(f.id)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Add photo to finding ${prettyIssueType(f.issueType)}`}
+                          style={({ pressed }) => [
+                            styles.findingPhotoButton,
+                            { borderColor: colors.primary, borderRadius: colors.radius - 4, opacity: pressed ? 0.7 : 1 },
+                          ]}
+                        >
+                          <Feather name="camera" size={14} color={colors.primary} />
+                          <Text style={[styles.findingPhotoButtonText, { color: colors.primary }]}>
+                            Add Photo
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => onRemoveFinding(f)}
+                          disabled={
+                            deleteFindingMutation.isPending &&
+                            deleteFindingMutation.variables === f.id
+                          }
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remove finding ${prettyIssueType(f.issueType)}`}
+                          style={({ pressed }) => [
+                            styles.removeButton,
+                            { opacity: pressed ? 0.7 : 1 },
+                          ]}
+                        >
+                          {deleteFindingMutation.isPending &&
+                          deleteFindingMutation.variables === f.id ? (
+                            <ActivityIndicator size="small" color={colors.destructive} />
+                          ) : (
+                            <Feather name="trash-2" size={14} color={colors.destructive} />
+                          )}
+                          <Text style={[styles.removeButtonText, { color: colors.destructive }]}>
+                            Remove
+                          </Text>
+                        </Pressable>
+                      </View>
                     ) : null}
                   </View>
                 ))
@@ -1837,12 +1941,26 @@ const styles = StyleSheet.create({
   findingNotes: { fontSize: 13, lineHeight: 18, marginTop: 2 },
   detailLine: { flexDirection: "row", alignItems: "center", gap: 6 },
   detailLineText: { fontSize: 13 },
+  findingActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 4,
+  },
+  findingPhotoButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  findingPhotoButtonText: { fontSize: 12, fontWeight: "600" },
   removeButton: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     alignSelf: "flex-start",
-    paddingTop: 4,
   },
   removeButtonText: { fontSize: 12, fontWeight: "600" },
   addFindingButton: {
