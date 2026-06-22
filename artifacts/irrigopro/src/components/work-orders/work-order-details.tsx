@@ -1064,8 +1064,13 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
               </CardContent>
             </Card>
 
-            {/* Reassignment Section - Show for managers only, not field technicians, not completed, and not billed */}
-            {!isBilledWorkOrder && fieldTechs && fieldTechs.length > 0 && currentUser?.role !== 'field_tech' && workOrder.status !== 'work_completed' && (() => {
+            {/* Reassignment Section - Show for managers/admins, not field technicians, not billed, not cancelled.
+                Admin roles (company_admin, super_admin) can reassign up to the point of billing, including
+                work_completed and pending_manager_review states. Non-admin roles retain the original
+                restriction of not being able to reassign once work_completed. */}
+            {!isBilledWorkOrder && fieldTechs && fieldTechs.length > 0 && currentUser?.role !== 'field_tech' && workOrder.status !== 'cancelled' && (() => {
+              const isAdminRole = currentUser?.role === 'company_admin' || currentUser?.role === 'super_admin';
+              if (!isAdminRole && workOrder.status === 'work_completed') return null;
               const managers = fieldTechs.filter(u => u.role === 'irrigation_manager');
               const techs = fieldTechs.filter(u => u.role === 'field_tech');
               return (
