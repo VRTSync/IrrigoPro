@@ -34,6 +34,7 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -65,6 +66,8 @@ import {
   captureBillingSheetPhoto,
   deleteLocalPhoto,
   ensureCameraPermission,
+  ensureMediaLibraryPermission,
+  pickBillingSheetPhotoFromLibrary,
 } from "@/lib/photo-upload";
 import { friendlyErrorMessage, showToast } from "@/lib/toast";
 import { workOrderBillingSheetQueryKey } from "../[id]";
@@ -390,72 +393,132 @@ export default function BillingSheetScreen() {
     });
   }, [queueEntries, photoScopeKey, billingSheetId, workOrderId]);
 
-  const onAddPhoto = useCallback(async () => {
+  const enqueueCapturedBillingPhoto = useCallback(
+    async (
+      captured: NonNullable<
+        Awaited<ReturnType<typeof captureBillingSheetPhoto>>
+      >,
+    ) => {
+      await enqueue({
+        id: captured.clientId,
+        kind: "billing-sheet-photo",
+        scopeKey: photoScopeKey ?? `bs-wo-${workOrderId!}`,
+        path: "/api/billing-sheets/__photo__",
+        method: "PATCH",
+        body: null,
+        photo: null,
+        billingPhoto: {
+          localUri: captured.localUri,
+          takenAt: captured.takenAt,
+          billingSheetId: billingSheetId,
+          workOrderId: workOrderId!,
+        },
+        label: isEdit ? "Add billing photo" : "Add billing photo (pending sheet)",
+      });
+      setPendingPhotos((prev) => {
+        if (prev.some((p) => p.clientId === captured.clientId)) return prev;
+        return [
+          ...prev,
+          {
+            clientId: captured.clientId,
+            localUri: captured.localUri,
+            takenAt: captured.takenAt,
+            status: "queued" as const,
+          },
+        ];
+      });
+      Haptics.selectionAsync().catch(() => undefined);
+      drainQueue().catch(() => undefined);
+    },
+    [workOrderId, billingSheetId, isEdit, photoScopeKey],
+  );
+
+  const onAddPhoto = useCallback(() => {
     setPhotoError(null);
     if (workOrderId == null) {
       setPhotoError("Work order is missing — cannot add photos.");
       return;
     }
-    const perm = await ensureCameraPermission();
-    if (perm !== "granted") {
-      setPhotoError(
-        perm === "blocked"
-          ? "Camera access is blocked. Enable it in Settings to add photos."
-          : "Camera permission is required to add photos.",
-      );
-      return;
-    }
-    let captured: Awaited<ReturnType<typeof captureBillingSheetPhoto>> = null;
-    try {
-      captured = await captureBillingSheetPhoto({
-        scopeKey: String(mutationScope),
-      });
-    } catch (err) {
-      setPhotoError(friendlyErrorMessage(err, "Couldn't open the camera"));
-      return;
-    }
-    if (!captured) return;
-    // Use the captured clientId as the queue entry id so the on-disk
-    // queue row and the local thumbnail share a stable key — the
-    // rehydration effect above keys off of `entry.id === pending.clientId`.
-    await enqueue({
-      id: captured.clientId,
-      kind: "billing-sheet-photo",
-      scopeKey: photoScopeKey ?? `bs-wo-${workOrderId}`,
-      path: "/api/billing-sheets/__photo__",
-      method: "PATCH",
-      body: null,
-      photo: null,
-      billingPhoto: {
-        localUri: captured.localUri,
-        takenAt: captured.takenAt,
-        billingSheetId: billingSheetId,
-        workOrderId,
-      },
-      label: isEdit ? "Add billing photo" : "Add billing photo (pending sheet)",
-    });
-    // Optimistically show the thumbnail immediately; the queue
-    // subscriber above will reconcile on its next tick.
-    setPendingPhotos((prev) => {
-      if (prev.some((p) => p.clientId === captured!.clientId)) return prev;
-      return [
-        ...prev,
-        {
-          clientId: captured!.clientId,
-          localUri: captured!.localUri,
-          takenAt: captured!.takenAt,
-          status: "queued",
-        },
-      ];
-    });
-    Haptics.selectionAsync().catch(() => undefined);
-    drainQueue().catch(() => undefined);
+
+    const captureFromCamera = async () => {
+      const perm = await ensureCameraPermission();
+      if (perm !== "granted") {
+        Alert.alert(
+          "Camera Access Required",
+          perm === "blocked"
+            ? "Camera access is blocked. Enable it in Settings to add photos."
+            : "Camera permission is required to add photos.",
+          perm === "blocked"
+            ? [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Open Settings",
+                  onPress: () => Linking.openSettings(),
+                },
+              ]
+            : [{ text: "OK" }],
+        );
+        return;
+      }
+      let captured: Awaited<ReturnType<typeof captureBillingSheetPhoto>> = null;
+      try {
+        captured = await captureBillingSheetPhoto({
+          scopeKey: String(mutationScope),
+        });
+      } catch (err) {
+        setPhotoError(friendlyErrorMessage(err, "Couldn't open the camera"));
+        return;
+      }
+      if (!captured) return;
+      await enqueueCapturedBillingPhoto(captured);
+    };
+
+    const pickFromLibrary = async () => {
+      const perm = await ensureMediaLibraryPermission();
+      if (perm !== "granted") {
+        Alert.alert(
+          "Library Access Required",
+          perm === "blocked"
+            ? "Photo library access is blocked. Enable it in Settings."
+            : "Photo library permission is required to pick photos.",
+          perm === "blocked"
+            ? [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Open Settings",
+                  onPress: () => Linking.openSettings(),
+                },
+              ]
+            : [{ text: "OK" }],
+        );
+        return;
+      }
+      let captured: Awaited<
+        ReturnType<typeof pickBillingSheetPhotoFromLibrary>
+      > = null;
+      try {
+        captured = await pickBillingSheetPhotoFromLibrary({
+          scopeKey: String(mutationScope),
+        });
+      } catch (err) {
+        setPhotoError(
+          friendlyErrorMessage(err, "Couldn't open the photo library"),
+        );
+        return;
+      }
+      if (!captured) return;
+      await enqueueCapturedBillingPhoto(captured);
+    };
+
+    Alert.alert("Add Photo", undefined, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Take Photo", onPress: captureFromCamera },
+      { text: "Choose from Library", onPress: pickFromLibrary },
+    ]);
   }, [
     workOrderId,
-    billingSheetId,
-    isEdit,
     mutationScope,
-    photoScopeKey,
+    enqueueCapturedBillingPhoto,
   ]);
 
   const onRetryPendingPhoto = useCallback((_clientId: string) => {

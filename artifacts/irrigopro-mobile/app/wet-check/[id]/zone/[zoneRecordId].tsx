@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -23,6 +24,14 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { LoadingScreen } from "@/components/Loading";
 import { useColors } from "@/hooks/useColors";
 import { ApiError, apiRequest } from "@/lib/api";
+import {
+  captureZonePhoto,
+  deleteLocalPhoto,
+  ensureCameraPermission,
+  ensureMediaLibraryPermission,
+  LocalPhoto,
+  pickZonePhotoFromLibrary,
+} from "@/lib/photo-upload";
 import { friendlyErrorMessage } from "@/lib/toast";
 import { useScopeConflictTick } from "@/lib/sync/use-sync-status";
 import {
@@ -176,6 +185,7 @@ export default function ZoneDetailScreen() {
   const [statusError, setStatusError] = useState<string | null>(null);
   const [findingError, setFindingError] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [localPhotos, setLocalPhotos] = useState<LocalPhoto[]>([]);
 
   // Surface 409s discovered by background queue drains in the same
   // conflict banner as inline-mutation conflicts.
@@ -493,6 +503,137 @@ export default function ZoneDetailScreen() {
     [deletePhotoMutation],
   );
 
+  // ── Add photo (wet-check-photo queue entry) ──
+  const addPhotoMutation = useMutation({
+    mutationKey:
+      wetCheckId != null && zoneRecordId != null
+        ? wetCheckMutationKey(wetCheckId, "photo-add", zoneRecordId)
+        : ["wet-check", "mutation", -1, "photo-add"],
+    mutationFn: async (photo: LocalPhoto) => {
+      if (wetCheckId == null || zoneRecordId == null)
+        throw new Error("Missing ids");
+      return wetCheckMutate({
+        path: `/api/wet-checks/${wetCheckId}/photos`,
+        method: "POST",
+        isPhoto: true,
+        id: photo.clientId,
+        wetCheckId,
+        label: "Add zone photo",
+        photo: {
+          localUri: photo.localUri,
+          takenAt: photo.takenAt,
+          zoneRecordId: photo.zoneRecordId,
+          findingId: photo.findingId,
+        },
+      });
+    },
+    onSuccess: (_result, photo) => {
+      setPhotoError(null);
+      Haptics.selectionAsync().catch(() => undefined);
+      setLocalPhotos((prev) =>
+        prev.filter((p) => p.clientId !== photo.clientId),
+      );
+      if (wetCheckId != null) {
+        queryClient.invalidateQueries({
+          queryKey: wetCheckDetailQueryKey(wetCheckId),
+        });
+      }
+    },
+    onError: (err, photo) => {
+      setLocalPhotos((prev) =>
+        prev.filter((p) => p.clientId !== photo.clientId),
+      );
+      deleteLocalPhoto(photo.localUri);
+      const m = errorMessage(err);
+      if (m != null) setPhotoError(m);
+    },
+  });
+
+  const onAddZonePhoto = useCallback(() => {
+    if (isLocked || wetCheckId == null || zoneRecordId == null) return;
+    setPhotoError(null);
+
+    const captureFromCamera = async () => {
+      const perm = await ensureCameraPermission();
+      if (perm !== "granted") {
+        Alert.alert(
+          "Camera Access Required",
+          perm === "blocked"
+            ? "Camera access is blocked. Enable it in Settings to take photos."
+            : "Camera permission is required to take photos.",
+          perm === "blocked"
+            ? [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Open Settings",
+                  onPress: () => Linking.openSettings(),
+                },
+              ]
+            : [{ text: "OK" }],
+        );
+        return;
+      }
+      let photo: LocalPhoto | null = null;
+      try {
+        photo = await captureZonePhoto({
+          wetCheckId,
+          zoneRecordId,
+          findingId: null,
+        });
+      } catch (err) {
+        setPhotoError(friendlyErrorMessage(err, "Couldn't open the camera"));
+        return;
+      }
+      if (!photo) return;
+      setLocalPhotos((prev) => [...prev, photo!]);
+      addPhotoMutation.mutate(photo);
+    };
+
+    const pickFromLibrary = async () => {
+      const perm = await ensureMediaLibraryPermission();
+      if (perm !== "granted") {
+        Alert.alert(
+          "Library Access Required",
+          perm === "blocked"
+            ? "Photo library access is blocked. Enable it in Settings."
+            : "Photo library permission is required to pick photos.",
+          perm === "blocked"
+            ? [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Open Settings",
+                  onPress: () => Linking.openSettings(),
+                },
+              ]
+            : [{ text: "OK" }],
+        );
+        return;
+      }
+      let photo: LocalPhoto | null = null;
+      try {
+        photo = await pickZonePhotoFromLibrary({
+          wetCheckId,
+          zoneRecordId,
+          findingId: null,
+        });
+      } catch (err) {
+        setPhotoError(
+          friendlyErrorMessage(err, "Couldn't open the photo library"),
+        );
+        return;
+      }
+      if (!photo) return;
+      setLocalPhotos((prev) => [...prev, photo!]);
+      addPhotoMutation.mutate(photo);
+    };
+
+    Alert.alert("Add Photo", undefined, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Take Photo", onPress: captureFromCamera },
+      { text: "Choose from Library", onPress: pickFromLibrary },
+    ]);
+  }, [isLocked, wetCheckId, zoneRecordId, addPhotoMutation]);
+
   const onRemoveFinding = useCallback(
     (finding: WetCheckFinding) => {
       Alert.alert(
@@ -799,7 +940,7 @@ export default function ZoneDetailScreen() {
             </Section>
 
             <Section
-              title={`Photos (${zonePhotos.length})`}
+              title={`Photos (${zonePhotos.length + localPhotos.length})`}
               colors={colors}
             >
               {photoError ? (
@@ -809,7 +950,7 @@ export default function ZoneDetailScreen() {
                   onDismiss={() => setPhotoError(null)}
                 />
               ) : null}
-              {zonePhotos.length === 0 ? (
+              {zonePhotos.length === 0 && localPhotos.length === 0 ? (
                 <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
                   No photos for this zone.
                 </Text>
@@ -819,6 +960,33 @@ export default function ZoneDetailScreen() {
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.photoStrip}
                 >
+                  {localPhotos.map((p) => (
+                    <View
+                      key={`local-${p.clientId}`}
+                      style={[
+                        styles.photoFrame,
+                        {
+                          borderColor: colors.border,
+                          borderRadius: colors.radius - 4,
+                          backgroundColor: colors.secondary,
+                        },
+                      ]}
+                    >
+                      <Image
+                        source={{ uri: p.localUri }}
+                        style={styles.photoImage}
+                        contentFit="cover"
+                        transition={120}
+                        cachePolicy="memory"
+                        accessibilityLabel="Uploading zone photo"
+                      />
+                      <View style={styles.photoOverlay} pointerEvents="none">
+                        <View style={styles.photoOverlayCenter}>
+                          <ActivityIndicator color="#ffffff" />
+                        </View>
+                      </View>
+                    </View>
+                  ))}
                   {zonePhotos.map((p) => (
                     <View
                       key={p.id}
@@ -866,6 +1034,26 @@ export default function ZoneDetailScreen() {
                   ))}
                 </ScrollView>
               )}
+              {!isLocked ? (
+                <Pressable
+                  onPress={onAddZonePhoto}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add Photo"
+                  style={({ pressed }) => [
+                    styles.addPhotoButton,
+                    {
+                      backgroundColor: colors.primary,
+                      borderRadius: colors.radius,
+                      opacity: pressed ? 0.85 : 1,
+                    },
+                  ]}
+                >
+                  <Feather name="camera" size={20} color={colors.primaryForeground} />
+                  <Text style={[styles.addPhotoText, { color: colors.primaryForeground }]}>
+                    Add Photo
+                  </Text>
+                </Pressable>
+              ) : null}
             </Section>
 
             <View style={{ height: 24 }} />

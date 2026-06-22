@@ -49,12 +49,76 @@ export async function ensureCameraPermission(): Promise<CameraPermissionStatus> 
   return next.canAskAgain ? "denied" : "blocked";
 }
 
+export async function ensureMediaLibraryPermission(): Promise<CameraPermissionStatus> {
+  const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+  if (current.granted) return "granted";
+  if (!current.canAskAgain) return "blocked";
+  const next = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (next.granted) return "granted";
+  return next.canAskAgain ? "denied" : "blocked";
+}
+
 function wetCheckPhotoDirectory(wetCheckId: number): Directory {
   return new Directory(Paths.document, "wet-check", String(wetCheckId));
 }
 
 function billingSheetPhotoDirectory(scopeKey: string): Directory {
   return new Directory(Paths.document, "billing-sheet", scopeKey);
+}
+
+// Pick a photo from the device library for a wet-check zone or finding.
+// Runs the identical resize/compress pipeline as captureZonePhoto so the
+// server-side variants stay in the same neighbourhood. Returns the same
+// LocalPhoto shape so callers are interchangeable with captureZonePhoto.
+export async function pickZonePhotoFromLibrary(opts: {
+  wetCheckId: number;
+  zoneRecordId: number | null;
+  findingId: number | null;
+}): Promise<LocalPhoto | null> {
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: "images",
+    quality: 1,
+    allowsEditing: false,
+  });
+  if (result.canceled || !result.assets || result.assets.length === 0) {
+    return null;
+  }
+  const asset = result.assets[0];
+  const w = asset.width ?? 0;
+  const h = asset.height ?? 0;
+  const needsResize = w > MAX_EDGE || h > MAX_EDGE;
+  const manipulated = await manipulateAsync(
+    asset.uri,
+    needsResize
+      ? [{ resize: w >= h ? { width: MAX_EDGE } : { height: MAX_EDGE } }]
+      : [],
+    { compress: JPEG_QUALITY, format: SaveFormat.JPEG },
+  );
+  const clientId = generateClientId();
+  const dir = wetCheckPhotoDirectory(opts.wetCheckId);
+  if (!dir.exists) {
+    dir.create({ intermediates: true });
+  }
+  const dest = new File(dir, `${clientId}.jpg`);
+  if (dest.exists) dest.delete();
+  const src = new File(manipulated.uri);
+  try {
+    src.move(dest);
+  } catch {
+    src.copy(dest);
+    try {
+      src.delete();
+    } catch {
+      /* best-effort */
+    }
+  }
+  return {
+    clientId,
+    localUri: dest.uri,
+    takenAt: new Date().toISOString(),
+    zoneRecordId: opts.zoneRecordId,
+    findingId: opts.findingId,
+  };
 }
 
 // Capture a photo for a billing sheet (Task #492 / M7). Same compress +
@@ -87,6 +151,54 @@ export async function captureBillingSheetPhoto(opts: {
             resize: w >= h ? { width: MAX_EDGE } : { height: MAX_EDGE },
           },
         ]
+      : [],
+    { compress: JPEG_QUALITY, format: SaveFormat.JPEG },
+  );
+  const clientId = generateClientId();
+  const dir = billingSheetPhotoDirectory(opts.scopeKey);
+  if (!dir.exists) dir.create({ intermediates: true });
+  const dest = new File(dir, `${clientId}.jpg`);
+  if (dest.exists) dest.delete();
+  const src = new File(manipulated.uri);
+  try {
+    src.move(dest);
+  } catch {
+    src.copy(dest);
+    try {
+      src.delete();
+    } catch {
+      /* best-effort */
+    }
+  }
+  return {
+    clientId,
+    localUri: dest.uri,
+    takenAt: new Date().toISOString(),
+  };
+}
+
+// Pick a photo from the device library for a billing sheet. Mirrors
+// captureBillingSheetPhoto exactly (same resize/compress pipeline, same
+// return shape) so callers are interchangeable.
+export async function pickBillingSheetPhotoFromLibrary(opts: {
+  scopeKey: string;
+}): Promise<{ clientId: string; localUri: string; takenAt: string } | null> {
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: "images",
+    quality: 1,
+    allowsEditing: false,
+  });
+  if (result.canceled || !result.assets || result.assets.length === 0) {
+    return null;
+  }
+  const asset = result.assets[0];
+  const w = asset.width ?? 0;
+  const h = asset.height ?? 0;
+  const needsResize = w > MAX_EDGE || h > MAX_EDGE;
+  const manipulated = await manipulateAsync(
+    asset.uri,
+    needsResize
+      ? [{ resize: w >= h ? { width: MAX_EDGE } : { height: MAX_EDGE } }]
       : [],
     { compress: JPEG_QUALITY, format: SaveFormat.JPEG },
   );
