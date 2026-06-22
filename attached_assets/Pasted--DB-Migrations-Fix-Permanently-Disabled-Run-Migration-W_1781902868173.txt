@@ -1,0 +1,39 @@
+# DB Migrations — Fix Permanently-Disabled "Run Migration"
+
+**What & Why**
+On `/admin/migrations`, the work-order-zones backfill preview shows `candidate_work_orders: 1` (and `skipped: 0`, `failed: 0`) but **"Run Migration" is disabled with no way to enable it.** A clean, ready-to-run migration can't be run.
+
+**Root cause — a semantic mismatch + a UI gate mismatch:**
+1. The page computes `hasOrphans = Object.values(preview.orphanRows).some(n => n > 0)` and sets `canRun = !hasOrphans || acknowledged` (migrations.tsx:39–43). The acknowledgement **checkbox only renders when `preview.warnings.length > 0`** (line 93).
+2. The work-order-zones migration reports `candidate_work_orders: 1` (and `already_stamped`) **inside `orphanRows`**, with **no `warnings`**. So `hasOrphans` is true (→ Run needs acknowledgement) but the checkbox never appears (→ can't acknowledge) → **Run is permanently disabled.**
+3. The deeper mistake: `candidate_work_orders` is the *count of records to process* (normal, expected), **not an orphan**. Orphans are records that *can't* be handled (the `skipped` / `failed` counts, both 0 here). Treating the work queue as a blocking orphan is wrong.
+
+**Fix both:** correct what the migration calls an "orphan," and make the UI gate self-consistent so no migration can ever be un-runnable.
+
+Single slice. No schema change.
+
+---
+
+## Done looks like
+- The work-order-zones migration preview shows the candidate count as informational, and (with `skipped`/`failed` = 0) **"Run Migration" is enabled** with no acknowledgement required.
+- `orphanRows` contains only genuinely problematic counts (skipped / failed / unmappable) — never the candidate or already-done counts.
+- Any migration that *does* surface real orphans/warnings always presents a way to acknowledge — Run is never disabled with no path to enable it.
+
+## Steps
+1. **Migration side — fix the counts (`lib/migrations/work-order-zones.ts` + `backfill-work-order-zones-core` preview).** Stop putting `candidate_work_orders` and `already_stamped` in `orphanRows`. Put the candidate/processing counts in the **step descriptions** (or a non-blocking summary field). Reserve `orphanRows` for `skipped` / `failed` / unmappable-only. Audit the **reconcile** migration the same way so it isn't accidentally blocked (it legitimately wants acknowledgement — it should drive that via `warnings`, not by stuffing a normal count into `orphanRows`).
+2. **Frontend — make the gate self-consistent (`pages/admin/migrations.tsx`).** Decouple the acknowledgement checkbox from `warnings`: render it whenever **acknowledgement is required** — i.e. when `hasOrphans` is true **or** `warnings.length > 0`. Keep `canRun = (!hasOrphans && warnings.length === 0) || acknowledged`. Net effect: a migration that surfaces orphans/warnings always shows the checkbox so it can be acknowledged and run; a clean migration (no orphans, no warnings) is runnable immediately.
+
+## Tests
+- A preview with only `candidate_work_orders > 0` (skipped/failed = 0, no warnings) → Run is **enabled**, no checkbox required.
+- A preview with `skipped > 0` or `failed > 0`, or with warnings → the acknowledgement checkbox renders; Run is disabled until checked, then enabled.
+- No preview state leaves Run disabled with no acknowledgement path.
+- The reconcile migration still requires acknowledgement (its money-change warning) and is runnable after acknowledging.
+
+## Out of scope
+- The migration logic / backfill behavior itself (correct — just the count classification).
+- Backend per-migration `check()` isolation (#1448) and the frontend `apiRequest` fix (separate, already addressed).
+
+## Relevant files
+- `artifacts/api-server/src/lib/migrations/work-order-zones.ts` + `artifacts/api-server/src/scripts/backfill-work-order-zones-core.ts` (preview: candidate/already-stamped out of `orphanRows`)
+- `artifacts/api-server/src/lib/migrations/reconcile-billing-sheet-invoice-totals.ts` (audit: acknowledgement via `warnings`, not count-as-orphan)
+- `artifacts/irrigopro/src/pages/admin/migrations.tsx` (`hasOrphans` / `canRun` / acknowledgement checkbox render condition, ~39–101)
