@@ -826,7 +826,7 @@ export default function WorkOrders() {
                                         }
                                       }}
                                     >
-                                      <SelectTrigger className="w-32 h-8 text-xs bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 focus:bg-blue-100">
+                                      <SelectTrigger data-testid={`assign-tech-select-${workOrder.id}`} className="w-32 h-8 text-xs bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 focus:bg-blue-100">
                                         <SelectValue placeholder="Assign" />
                                       </SelectTrigger>
                                       <SelectContent>
@@ -1177,7 +1177,7 @@ export default function WorkOrders() {
                                 }
                               }}
                             >
-                              <SelectTrigger className="flex-1 sm:flex-none sm:w-32 h-8 text-xs bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 focus:bg-blue-100">
+                              <SelectTrigger data-testid={`assign-tech-select-mobile-${workOrder.id}`} className="flex-1 sm:flex-none sm:w-32 h-8 text-xs bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 focus:bg-blue-100">
                                 <SelectValue placeholder="Assign" />
                               </SelectTrigger>
                               <SelectContent>
