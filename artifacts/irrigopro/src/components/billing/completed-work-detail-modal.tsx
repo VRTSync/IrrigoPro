@@ -42,6 +42,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem, Customer } from "@workspace/db/schema";
 import { WetCheckBillingViewComponent, type WetCheckBillingView } from "@/components/billing/wet-check-billing-view";
+import {
+  InspectionZoneChecklist,
+  isInspectionOriginWorkOrder,
+} from "@/components/work-orders/inspection-zone-checklist";
 import { EditableField, InlineEditProvider, InlineEditContext } from "@/components/ui/editable-field";
 import { format } from "date-fns";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
@@ -1715,6 +1719,8 @@ export function CompletedWorkDetailModal({
                   });
                 }}
               />
+            ) : isWorkOrder && wo != null && isInspectionOriginWorkOrder(wo, items as WorkOrderItem[]) ? (
+              <InspectionZoneChecklist workOrder={wo} readOnly />
             ) : (items.length > 0 || canInlineEdit) && (
               <SectionCard
                 title={`Parts & Materials${items.length > 0 ? ` (${items.length} item${items.length !== 1 ? "s" : ""})` : ""}`}
