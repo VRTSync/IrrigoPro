@@ -1,0 +1,70 @@
+# Wet Check — Branch Selection for Multi-Branch Customers
+
+**What & Why**
+When starting a wet check on a customer that has multiple branches (e.g. PNC), the field flow only lets the tech pick the **parent** and start a wet check on the parent — there's no way to select a branch. Work orders and billing sheets already force a branch when the customer has branches; wet checks must do the same. **Rule: if a customer has branches, a branch must be selected before a wet check can start** — otherwise there's nowhere to assign the billing detail, and the wrong controllers/zones get loaded.
+
+**This is not just a billing tag.** Controllers and zones are **branch-scoped** in the schema — `property_controllers` / `property_zones` are keyed by `(customerId, controllerLetter, branchName)`. The current flow loads controllers by `customerId` only, so without a branch the tech can see the wrong branch's controllers. Branch selection must drive controller/zone loading too.
+
+**Mirror the existing pattern:** the work-order wizard already gates proceeding on `(customerBranches.length === 0 || branchName selected)`. Reuse that behavior.
+
+Slices: schema + API, the field flow + branch-scoped controllers, and carrying the branch downstream to billing.
+
+---
+
+## Slice 1 — Schema + API
+
+### Files
+- `lib/db/src/schema/schema.ts` + migration — `wet_checks`.
+- `artifacts/api-server/src/routes/routes.ts` (`POST /api/wet-checks`; `GET /api/properties/:customerId/controllers`) + `storage.ts` (`createWetCheck`, controllers query).
+
+### Concrete changes
+- **Schema:** add `branchName text` to `wet_checks` (nullable; `""`/null = no branch / single-location customer, consistent with the `property_zones` convention). Apply with `pnpm --filter @workspace/db run push`.
+- **Create:** `POST /api/wet-checks` accepts and persists `branchName`; `storage.createWetCheck` stores it.
+- **Controllers scoped by branch — use the branch-scoped source, NOT the parent-only endpoint.** Important: `GET /api/properties/:customerId/controllers` is **intentionally parent-only** — it returns only the `branch_name = ''`/null bucket and feeds several customer-scoped surfaces (routes.ts:15501; "Branch data is served exclusively via `/api/admin/customer-controllers`"). Do **not** bolt a branch filter onto it. Instead, when a branch is selected, the wet-check flow loads **that branch's** controllers from the branch-scoped source (`/api/admin/customer-controllers` / `listPropertyControllers` filtered to the selected `branchName`). Leave the parent-only endpoint as-is for the surfaces that rely on it.
+
+### Acceptance
+- A wet check can store a `branchName`; the controllers endpoint returns only the selected branch's controllers when a branch is passed.
+
+---
+
+## Slice 2 — Field flow: force branch selection + branch-scoped controllers
+
+### Files
+- `artifacts/irrigopro/src/pages/wet-checks/CustomerPickerPage.tsx`, `NewWetCheckPage.tsx`, `ControllerSelectionPage.tsx`.
+- Reference: `components/work-orders/work-order-wizard.tsx` (branch gate ~432–438).
+
+### Concrete changes
+- After the tech picks a customer, **if `customer.branches` is non-empty, require a branch selection before proceeding** to controllers — same gate as the WO wizard (`branches.length === 0 || branchName`). A single-location customer (no branches) skips straight through as today.
+- Present a branch picker (select of `customer.branches`); carry the chosen `branchName` into creation (`POST /api/wet-checks`) and into the route/flow state (e.g. `/wet-checks/c/:customerId/new?branch=...` or equivalent).
+- **`ControllerSelectionPage` loads the selected branch's controllers from the branch-scoped source** (not the parent-only `/api/properties/:id/controllers`). Show the branch in the header so the tech knows which location they're inspecting.
+- **Bootstrap a branch with no controllers yet.** If the selected branch has no controller rows, **lazily create them** via `ensurePropertyControllers(companyId, customerId, count, branchName)` and let the tech set zone counts through the existing controller-setup flow — never show an empty list with no way forward. (This matters because multi-branch customers may currently have their controllers only at the parent level; selecting a branch for the first time must let the tech set it up fresh.)
+
+### Acceptance
+- Selecting a multi-branch customer forces a branch choice before the wet check starts; controllers shown are that branch's; the wet check records the branch. Single-location customers are unaffected.
+
+---
+
+## Slice 3 — Carry the branch downstream to billing
+
+### Files
+- `storage.ts` snapshot/WCB creation (`_writeRepairedInFieldBilling`), inspection-estimate generation, estimate→WO conversion.
+
+### Concrete changes
+- Stamp the wet check's `branchName` onto its **WC Snapshot** (`wet_check_billings.branchName` already exists — populate it from the wet check instead of leaving null), and onto the **inspection estimate** / resulting **work order** (`work_orders.branchName` exists) so the billing lands on the correct branch.
+- Ensure the reconciliation page / billing views that group by branch see the right branch for wet-check-origin billing.
+
+### Acceptance
+- A branch wet check's snapshot, estimate, and any converted work order all carry the selected branch; billing is attributable to the branch, not the parent.
+
+---
+
+## Out of scope
+- The work-order / billing-sheet branch flow (already works — only referenced as the pattern).
+- Creating/editing the branch list on a customer (existing).
+- Back-mapping existing branch-less wet checks (separate cleanup if needed).
+
+## Relevant files
+- `lib/db/src/schema/schema.ts` (`wet_checks` + branch; `property_controllers`/`property_zones` branch keying ~1265–1287)
+- `artifacts/api-server/src/routes/routes.ts` (`POST /api/wet-checks`, `/api/properties/:id/controllers`), `storage.ts` (`createWetCheck`, controllers, snapshot/estimate/WO branch carry)
+- `artifacts/irrigopro/src/pages/wet-checks/CustomerPickerPage.tsx`, `NewWetCheckPage.tsx`, `ControllerSelectionPage.tsx`
+- Pattern: `artifacts/irrigopro/src/components/work-orders/work-order-wizard.tsx` (branch gate)
