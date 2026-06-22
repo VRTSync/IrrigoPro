@@ -10,11 +10,7 @@
 
 import type { QueryClient } from "@tanstack/react-query";
 
-import { ApiError, apiRequest } from "../api";
-import {
-  deleteLocalPhoto,
-  uploadLocalPhotoToStorage,
-} from "../photo-upload";
+import { ApiError, apiRequest as _apiRequest } from "../api";
 import {
   type QueueEntry,
   ensureLoaded,
@@ -23,7 +19,74 @@ import {
   snapshotEntries,
   updateEntry,
 } from "./queue";
-import { isNetworkError, setOnline } from "./network";
+import { isNetworkError } from "./network-error";
+
+// setOnline is lazy-loaded to avoid pulling @react-native-community/netinfo
+// into the tsx/esbuild test runner through the static import chain.
+// Tests override this via __setEngineSetOnlineForTests before any drain call.
+type SetOnlineFn = (online: boolean) => void;
+let _setOnline: SetOnlineFn | null = null;
+
+async function getSetOnline(): Promise<SetOnlineFn> {
+  if (_setOnline) return _setOnline;
+  const { setOnline } = await import("./network");
+  _setOnline = setOnline;
+  return _setOnline;
+}
+
+export function __setEngineSetOnlineForTests(fn: SetOnlineFn): void {
+  _setOnline = fn;
+}
+
+// ── Photo-upload module (lazy) ────────────────────────────────────────
+// photo-upload.ts has a deep import chain into expo-image-picker →
+// react-native that breaks the tsx/esbuild test runner. We lazy-load
+// it via a dynamic import the first time a wet-check-photo entry is
+// actually sent (only ever reached on a real device). Tests set the
+// seam variables below BEFORE calling drainQueue/attemptEntry so the
+// lazy import is never triggered during test runs.
+
+type UploadFn = (localUri: string) => Promise<string>;
+type DeleteFn = (uri: string) => void;
+type RequestFn = (
+  path: string,
+  opts?: { method?: string; body?: unknown },
+) => Promise<unknown>;
+
+let _upload: UploadFn | null = null;
+let _delete: DeleteFn | null = null;
+let _request: RequestFn = _apiRequest as RequestFn;
+
+async function getUploadFns(): Promise<{ upload: UploadFn; del: DeleteFn }> {
+  if (_upload && _delete) return { upload: _upload, del: _delete };
+  const mod = await import("../photo-upload");
+  if (!_upload) _upload = mod.uploadLocalPhotoToStorage;
+  if (!_delete) _delete = mod.deleteLocalPhoto;
+  return { upload: _upload!, del: _delete! };
+}
+
+// ── Test seams ───────────────────────────────────────────────────────
+// Swappable adapters (same pattern as `__setQueueStorageForTests` in
+// queue.ts) so unit tests can exercise the engine without a live
+// network or the React Native photo pipeline. Set these BEFORE calling
+// drainQueue/attemptEntry so the lazy getUploadFns() import is never
+// triggered during test runs.
+export function __setEngineUploaderForTests(fn: UploadFn): void {
+  _upload = fn;
+}
+export function __setEngineDeleterForTests(fn: DeleteFn): void {
+  _delete = fn;
+}
+export function __setEngineApiRequestForTests(fn: RequestFn): void {
+  _request = fn;
+}
+/** Reset all seams (call in afterEach). Lazy loaders will re-fetch on next use. */
+export function __resetEngineSeamsForTests(): void {
+  _upload = null;
+  _delete = null;
+  _request = _apiRequest as RequestFn;
+  _setOnline = null;
+}
 
 let queryClientRef: QueryClient | null = null;
 
@@ -112,7 +175,8 @@ async function sendEntry(entry: QueueEntry): Promise<unknown> {
   if (entry.kind === "wet-check-photo") {
     if (!entry.photo) throw new Error("wet-check-photo entry missing payload");
     // Sign + PUT the local file to storage, then POST the metadata row.
-    const url = await uploadLocalPhotoToStorage(entry.photo.localUri);
+    const { upload, del } = await getUploadFns();
+    const url = await upload(entry.photo.localUri);
     const body = {
       ...(entry.body ?? {}),
       url,
@@ -121,17 +185,18 @@ async function sendEntry(entry: QueueEntry): Promise<unknown> {
       findingId: entry.photo.findingId,
       clientId: entry.id,
     };
-    const result = await apiRequest(entry.path, {
+    const result = await _request(entry.path, {
       method: "POST",
       body,
     });
-    deleteLocalPhoto(entry.photo.localUri);
+    del(entry.photo.localUri);
     return result;
   }
   if (entry.kind === "billing-sheet-photo") {
     if (!entry.billingPhoto) {
       throw new Error("billing-sheet-photo entry missing payload");
     }
+    const { upload: bsUpload, del: bsDel } = await getUploadFns();
     const { localUri, billingSheetId, workOrderId } = entry.billingPhoto;
     // Resolve the target sheet. In create mode the sheet doesn't exist
     // until the create POST drains; we look it up via the work-order
@@ -150,9 +215,9 @@ async function sendEntry(entry: QueueEntry): Promise<unknown> {
       // array or a 404 (work order not visible to this user yet); both
       // are treated as `defer and retry on the next drain pass`.
       try {
-        const rows = await apiRequest<Array<{ id: number; workDate: string | null }>>(
+        const rows = await _request(
           `/api/work-orders/${workOrderId}/billing-sheets`,
-        );
+        ) as Array<{ id: number; workDate: string | null }>;
         const list = Array.isArray(rows) ? rows : [];
         if (list.length === 0) {
           throw new DeferredEntryError(
@@ -186,7 +251,7 @@ async function sendEntry(entry: QueueEntry): Promise<unknown> {
     // key and append a duplicate to the sheet's photos[].
     let url = entry.billingPhoto.uploadedUrl ?? null;
     if (!url) {
-      url = await uploadLocalPhotoToStorage(localUri);
+      url = await bsUpload(localUri);
       await updateEntry(entry.id, {
         billingPhoto: { ...entry.billingPhoto, uploadedUrl: url },
       });
@@ -200,21 +265,21 @@ async function sendEntry(entry: QueueEntry): Promise<unknown> {
     // keys flow straight into the DB update and would also defeat the
     // photos-only bypass (`keys.length === 1 && key === 'photos'`) used
     // to backfill photos onto already-billed sheets.
-    const sheet = await apiRequest<{ photos: string[] | null }>(
+    const sheet = await _request(
       `/api/billing-sheets/${sheetId}`,
-    );
+    ) as { photos: string[] | null };
     const current = Array.isArray(sheet.photos) ? sheet.photos : [];
     let result: unknown = sheet;
     if (!current.includes(url)) {
-      result = await apiRequest(`/api/billing-sheets/${sheetId}`, {
+      result = await _request(`/api/billing-sheets/${sheetId}`, {
         method: "PATCH",
         body: { photos: [...current, url] },
       });
     }
-    deleteLocalPhoto(localUri);
+    bsDel(localUri);
     return result;
   }
-  return apiRequest(entry.path, {
+  return _request(entry.path, {
     method: entry.method,
     body: entry.body ?? undefined,
   });
@@ -236,7 +301,7 @@ export async function attemptEntry(entry: QueueEntry): Promise<AttemptResult> {
   try {
     const data = await sendEntry(entry);
     await removeEntry(entry.id);
-    setOnline(true);
+    (await getSetOnline())(true);
     invalidateForEntry(entry);
     return { kind: "sent", data };
   } catch (err) {
@@ -252,7 +317,7 @@ export async function attemptEntry(entry: QueueEntry): Promise<AttemptResult> {
       return { kind: "deferred", reason: err.message };
     }
     if (isNetworkError(err)) {
-      setOnline(false);
+      (await getSetOnline())(false);
       await updateEntry(entry.id, {
         status: "pending",
         attempts: entry.attempts + 1,
@@ -260,7 +325,7 @@ export async function attemptEntry(entry: QueueEntry): Promise<AttemptResult> {
       });
       return { kind: "queued" };
     }
-    setOnline(true);
+    (await getSetOnline())(true);
     if (err instanceof ApiError && err.status === 409) {
       await updateEntry(entry.id, {
         status: "conflict",
@@ -335,11 +400,16 @@ export async function drainQueue(): Promise<void> {
  */
 export async function discardEntry(id: string): Promise<void> {
   const entry = snapshotEntries().find((e) => e.id === id);
-  if (entry?.kind === "wet-check-photo" && entry.photo) {
-    deleteLocalPhoto(entry.photo.localUri);
-  }
-  if (entry?.kind === "billing-sheet-photo" && entry.billingPhoto) {
-    deleteLocalPhoto(entry.billingPhoto.localUri);
+  if (
+    (entry?.kind === "wet-check-photo" && entry.photo) ||
+    (entry?.kind === "billing-sheet-photo" && entry.billingPhoto)
+  ) {
+    const localUri =
+      entry.kind === "wet-check-photo"
+        ? entry.photo!.localUri
+        : entry.billingPhoto!.localUri;
+    const { del } = await getUploadFns();
+    del(localUri);
   }
   await removeEntry(id);
   if (entry) invalidateForEntry(entry);
