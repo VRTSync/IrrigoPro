@@ -13,6 +13,7 @@ import {
   CloudRain,
   Droplets,
   Map,
+  GitBranch,
 } from "lucide-react";
 import { apiRequest, asArray, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -112,9 +113,12 @@ function ControllerCard({ controller, selected, lastCheckedAt, hadIssues, onTogg
 
 interface ControllerSelectionPageProps {
   customerId: number;
+  // Task #315 — selected branch for multi-location customers. null / undefined
+  // for single-location customers (customer-level bucket).
+  branchName?: string | null;
 }
 
-export function ControllerSelectionPage({ customerId }: ControllerSelectionPageProps) {
+export function ControllerSelectionPage({ customerId, branchName }: ControllerSelectionPageProps) {
   const [, navigate] = useLocation();
   const { toast } = useToast();
 
@@ -129,16 +133,29 @@ export function ControllerSelectionPage({ customerId }: ControllerSelectionPageP
     queryFn: () => apiRequest(`/api/customers/${customerId}`),
   });
 
+  // Task #315 — when a branch is selected, scope the controllers fetch to
+  // that branch via ?branch=<name>. The server lazily bootstraps the branch
+  // controller bucket on first visit (idempotent ensurePropertyControllers).
+  const controllersUrl = branchName
+    ? `/api/properties/${customerId}/controllers?branch=${encodeURIComponent(branchName)}`
+    : `/api/properties/${customerId}/controllers`;
+
   const { data: controllers = [], isLoading: loadingControllers } = useArrayQuery<PropertyController>({
-    queryKey: ["/api/properties", customerId, "controllers"],
-    queryFn: () => apiRequest(`/api/properties/${customerId}/controllers`),
+    queryKey: ["/api/properties", customerId, "controllers", branchName ?? null],
+    queryFn: () => apiRequest(controllersUrl),
   });
 
   // Fetch up to 5 recent wet checks (summaries) for per-controller last-inspected data.
+  // When a branch is selected, filter to that branch so we only surface history from
+  // this specific location.
   type WetCheckSummary = WetCheck & { zoneCount: number; processedCount: number; failedCount: number };
+  const recentChecksUrl = branchName
+    ? `/api/wet-checks?customerId=${customerId}&branchName=${encodeURIComponent(branchName)}&limit=5`
+    : `/api/wet-checks?customerId=${customerId}&limit=5`;
+
   const { data: recentChecks = [] } = useArrayQuery<WetCheckSummary>({
-    queryKey: ["/api/wet-checks", { customerId, limit: 5 }],
-    queryFn: () => apiRequest(`/api/wet-checks?customerId=${customerId}&limit=5`),
+    queryKey: ["/api/wet-checks", { customerId, branchName: branchName ?? null, limit: 5 }],
+    queryFn: () => apiRequest(recentChecksUrl),
   });
 
   // Most recent non-in_progress check (first candidate for "last checked" context)
@@ -165,10 +182,6 @@ export function ControllerSelectionPage({ customerId }: ControllerSelectionPageP
 
     for (const ctrl of controllers) {
       const letter = ctrl.controllerLetter;
-      // Only include the date if this controller actually had zone records in the check.
-      // If the controller was not visited in the last completed check it shows "Never
-      // checked" — this is conservative (an earlier check may have covered it) but
-      // avoids surfacing a date from an unrelated inspection run.
       const zonesForCtrl = zoneRecords.filter((z) => z.controllerLetter === letter);
       const hadIssues = zonesForCtrl.some(
         (z) => z.status === "checked_with_issues" || asArray(z.findings).length > 0,
@@ -209,22 +222,19 @@ export function ControllerSelectionPage({ customerId }: ControllerSelectionPageP
       const mode = consumePendingMode();
       // 1. Create the wet check record. The server is authoritative for numControllers —
       //    it derives it from customer.totalControllers, so we do not pass it here.
+      //    branchName is included so the server scopes the check and bootstraps the
+      //    correct controller bucket (Task #315).
       const wc = await apiRequest("/api/wet-checks", "POST", {
         customerId,
         weather: weather ?? null,
         notes: notes.trim() || null,
         mode,
+        ...(branchName ? { branchName } : {}),
       }) as WetCheckWithDetails;
 
       const wetCheckId = wc.id;
 
       // 2. Pre-create zone records for all zones across the selected controllers.
-      //    Controllers are iterated in alphabetical order so the sequence is deterministic.
-      //    Within each controller every zone (1..zoneCount) is created in parallel for
-      //    speed, and we await the batch before advancing to the next controller.
-      //    Each record is identified by (controllerLetter, zoneNumber) via server-side
-      //    upsert semantics, so the result is fully deterministic regardless of request
-      //    arrival order within the batch.
       const selectedCtrlList = controllers
         .filter((c) => selectedLetters.has(c.controllerLetter))
         .sort((a, b) => a.controllerLetter.localeCompare(b.controllerLetter));
@@ -242,16 +252,10 @@ export function ControllerSelectionPage({ customerId }: ControllerSelectionPageP
         );
       }
 
-      // Determine the first controller/zone to land on (alphabetical order,
-      // zone 1) so WetCheckDetail can open it immediately via query params.
       const firstLetter = selectedCtrlList[0]?.controllerLetter ?? null;
       return { wetCheckId, firstLetter };
     },
     onSuccess: ({ wetCheckId, firstLetter }) => {
-      // Navigate to the wet check detail page. When we know the first
-      // controller/zone we pass them as query params so WetCheckDetail
-      // initialises its state from them and drops the tech directly into
-      // Zone 1 of the first selected controller (Slice 3 handoff contract).
       const query = firstLetter ? `?controller=${firstLetter}&zone=1` : "";
       navigate(`/wet-checks/${wetCheckId}${query}`);
     },
@@ -265,8 +269,7 @@ export function ControllerSelectionPage({ customerId }: ControllerSelectionPageP
   });
 
   // Blank-start mutation: sends blankStart=true so the server skips
-  // ensurePropertyControllers and records numControllers=0. No zone records
-  // are pre-created; the tech adds them manually as they go.
+  // ensurePropertyControllers and records numControllers=0.
   const blankStartMutation = useMutation({
     mutationFn: async () => {
       const mode = consumePendingMode();
@@ -276,6 +279,7 @@ export function ControllerSelectionPage({ customerId }: ControllerSelectionPageP
         notes: notes.trim() || null,
         blankStart: true,
         mode,
+        ...(branchName ? { branchName } : {}),
       }) as WetCheckWithDetails;
       return { wetCheckId: wc.id };
     },
@@ -329,8 +333,20 @@ export function ControllerSelectionPage({ customerId }: ControllerSelectionPageP
         data-testid="property-context-header"
       >
         <div className="max-w-3xl mx-auto">
-          <div className="text-sm font-semibold text-gray-900 truncate" data-testid="property-context-customer">
-            {customer?.name ?? "…"}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-gray-900 truncate" data-testid="property-context-customer">
+              {customer?.name ?? "…"}
+            </span>
+            {/* Task #315 — show branch badge when a branch is selected */}
+            {branchName && (
+              <Badge
+                className="bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs shrink-0 flex items-center gap-1"
+                data-testid="branch-context-badge"
+              >
+                <GitBranch className="h-3 w-3" />
+                {branchName}
+              </Badge>
+            )}
           </div>
           <div className="text-xs text-gray-600 truncate" data-testid="property-context-address">
             {customer?.address ?? "—"}
@@ -351,10 +367,18 @@ export function ControllerSelectionPage({ customerId }: ControllerSelectionPageP
       {/* ── Page title ── */}
       <div className="mb-5">
         <h1 className="text-xl font-bold text-gray-900">Start Inspection</h1>
-        <p className="text-sm text-gray-500 mt-0.5 flex items-start gap-1.5">
-          <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0 text-gray-400" />
-          <span>{customer?.address ?? "No address on file"}</span>
-        </p>
+        {/* Task #315 — surface the branch name clearly in the page title area */}
+        {branchName ? (
+          <p className="text-sm text-indigo-700 mt-0.5 flex items-center gap-1.5 font-medium">
+            <GitBranch className="h-3.5 w-3.5 shrink-0" />
+            {branchName}
+          </p>
+        ) : (
+          <p className="text-sm text-gray-500 mt-0.5 flex items-start gap-1.5">
+            <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0 text-gray-400" />
+            <span>{customer?.address ?? "No address on file"}</span>
+          </p>
+        )}
       </div>
 
       {/* ── Controller grid ── */}
@@ -497,8 +521,6 @@ export function ControllerSelectionPage({ customerId }: ControllerSelectionPageP
           </Button>
         </div>
       ) : (
-        /* Blank start: no zone records are pre-created; tech adds zones manually.
-           Server still sets numControllers from customer.totalControllers. */
         <Button
           variant="outline"
           className="w-full h-12 text-base font-medium"

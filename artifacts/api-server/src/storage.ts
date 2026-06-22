@@ -975,7 +975,7 @@ export interface IStorage {
     explicitEstimateNumber?: string,
   ): Promise<EstimateWithItems>;
   getWetCheck(id: number, companyId: number): Promise<WetCheckWithDetails | undefined>;
-  findActiveWetCheck(companyId: number, customerId: number, technicianId: number): Promise<WetCheck | undefined>;
+  findActiveWetCheck(companyId: number, customerId: number, technicianId: number, branchName?: string | null): Promise<WetCheck | undefined>;
   createWetCheck(insert: InsertWetCheck): Promise<WetCheck>;
   updateWetCheck(id: number, companyId: number, patch: Partial<InsertWetCheck>): Promise<WetCheck | undefined>;
   submitWetCheck(id: number, companyId: number): Promise<{
@@ -3497,6 +3497,9 @@ export class DatabaseStorage implements IStorage {
       // Slice 3 — carry lineage tag from the source estimate so the WO
       // detail view can surface a "From Wet Check #X" banner.
       originWetCheckId: (estimate as unknown as { originWetCheckId?: number | null }).originWetCheckId ?? null,
+      // Task #315 — carry branchName from the estimate (which got it from
+      // the originating wet check) so the work order lands on the right branch.
+      branchName: (estimate as unknown as { branchName?: string | null }).branchName ?? null,
     };
 
     const [newWorkOrder] = await db.insert(workOrders).values(toDrizzleInsert<DrizzleWorkOrderInsert>(workOrderData)).returning();
@@ -3640,6 +3643,11 @@ export class DatabaseStorage implements IStorage {
         totalHours: (approvedEstimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? null,
         // Slice 3 — carry lineage tag from the source estimate.
         originWetCheckId: (approvedEstimate as unknown as { originWetCheckId?: number | null }).originWetCheckId ?? null,
+        // Task #315 — carry branchName so the work order lands on the correct
+        // branch for billing and reconciliation views. Must stay in sync with
+        // the same field in createWorkOrderFromEstimate (the two paths are
+        // equivalent and both must propagate branchName).
+        branchName: (approvedEstimate as unknown as { branchName?: string | null }).branchName ?? null,
       };
 
       const [newWorkOrder] = await tx.insert(workOrders)
@@ -8036,13 +8044,24 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async findActiveWetCheck(companyId: number, customerId: number, technicianId: number): Promise<WetCheck | undefined> {
-    const [wc] = await db.select().from(wetChecks).where(and(
+  async findActiveWetCheck(companyId: number, customerId: number, technicianId: number, branchName?: string | null): Promise<WetCheck | undefined> {
+    // When branchName is provided (non-null/undefined), scope the resume
+    // search to that branch so a tech can have one in-progress check per
+    // branch at the same customer. When absent, fall back to the legacy
+    // branch-agnostic search (single-location customers).
+    const conditions = [
       eq(wetChecks.companyId, companyId),
       eq(wetChecks.customerId, customerId),
       eq(wetChecks.technicianId, technicianId),
       eq(wetChecks.status, "in_progress"),
-    )).orderBy(desc(wetChecks.startedAt)).limit(1);
+    ];
+    if (branchName != null && branchName !== "") {
+      conditions.push(eq(wetChecks.branchName, branchName));
+    } else if (branchName === null) {
+      conditions.push(isNull(wetChecks.branchName));
+    }
+    const [wc] = await db.select().from(wetChecks).where(and(...conditions))
+      .orderBy(desc(wetChecks.startedAt)).limit(1);
     return wc;
   }
 
@@ -8529,6 +8548,9 @@ export class DatabaseStorage implements IStorage {
         technicianName: wc.technicianName,
         technicianId: wc.technicianId,
         wetCheckId: wc.id,
+        // Task #315 — carry branchName from the originating wet check so
+        // the WCB lands on the correct branch for reconciliation views.
+        branchName: wc.branchName ?? null,
         status: "approved_passed_to_billing",
         totalHours: newLaborHours.toFixed(2),
         laborRate: customerLaborRate.toFixed(2),
@@ -9820,6 +9842,9 @@ export class DatabaseStorage implements IStorage {
         laborSubtotal: laborSubtotal.toFixed(2),
         totalAmount: totalAmount.toFixed(2),
         originWetCheckId: wcId,
+        // Task #315 — carry branchName from the originating wet check so
+        // the estimate and any resulting work order land on the correct branch.
+        branchName: wc.branchName ?? null,
       };
 
       const est = await this._writeEstimateWithItems(

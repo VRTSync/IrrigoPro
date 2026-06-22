@@ -507,6 +507,10 @@ export const estimates = pgTable("estimates", {
   // origin wet check). Used by the Needs Review membership rule and the review
   // surface to branch on mode === 'inspection'.
   originWetCheckId: integer("origin_wet_check_id").references(() => wetChecks.id),
+  // Task #315 — selected branch for multi-location customers. NULL for
+  // single-location customers or legacy rows. Carried from the originating
+  // wet check when an estimate is generated from an Inspection wet check.
+  branchName: text("branch_name"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
@@ -1352,6 +1356,10 @@ export const wetChecks = pgTable("wet_checks", {
   mode: text("mode").notNull().default("service"),
   // 'service' (default) = active repair run; 'inspection' = assessment-only,
   // no repair/disposition controls shown in the field capture flow.
+  // Task #315 — selected branch for multi-location customers. NULL for
+  // single-location customers or legacy rows without branch selection.
+  // Mirrors the convention used by work_orders and wet_check_billings.
+  branchName: text("branch_name"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({

@@ -15497,7 +15497,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/properties/:customerId/controllers", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     const customerId = parseInt(req.params.customerId);
+    // Task #315 — optional ?branch= query param for multi-branch customers.
+    // When provided, return only that branch's controllers (and lazily
+    // bootstrap them if the branch has no rows yet). When absent, preserve
+    // the pre-Task-#315 behaviour: return the customer-level (empty-string)
+    // bucket only, exposing branchName: null on the wire.
+    const branchParam = typeof req.query.branch === "string" ? req.query.branch.trim() : null;
     try {
+      if (branchParam !== null) {
+        // Branch-scoped fetch: return the named branch's controllers.
+        // Lazily bootstrap if the branch is empty (new branch, first tech visit).
+        const customer = await storage.getCustomer(customerId);
+        if (!customer || customer.companyId !== cid) {
+          res.status(404).json({ message: "Customer not found" });
+          return;
+        }
+        const numControllers = Math.max(1, Math.min(26, Number(customer.totalControllers ?? 1)));
+        // ensurePropertyControllers is idempotent — it only inserts rows for
+        // missing letters. This guarantees the tech sees at least A..N even
+        // on first visit to a previously untouched branch.
+        const rows = await storage.ensurePropertyControllers(cid, customerId, numControllers, branchParam);
+        // Expose the branch name on each row on the wire.
+        res.json(rows.map(r => ({ ...r, branchName: branchParam || null })));
+        return;
+      }
       // Customer-level endpoint: only return the NULL-branch bucket.
       // Per task #312, this endpoint feeds the customer-facing irrigation
       // system card and the wet-check capture flow — both of which are
@@ -16199,6 +16222,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     clientId: z.string().uuid().nullish(),
     blankStart: z.boolean().optional(),
     mode: z.enum(["service", "inspection"]).optional(),
+    // Task #315 — selected branch for multi-location customers. Optional;
+    // single-location customers do not send this field. Empty-string is
+    // normalised to null at the storage boundary.
+    branchName: z.string().nullish(),
   }).strict();
 
   app.post("/api/wet-checks", requireAuthentication, async (req, res) => {
@@ -16215,9 +16242,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tech = await storage.getUser(techId);
       if (!tech) { res.status(401).json({ message: "User not found" }); return; }
 
-      // Resume an existing in-progress wet check at this property for this tech
-      // before creating a new one. Idempotent for the common "tap New again" case.
-      const existing = await storage.findActiveWetCheck(cid, body.customerId, tech.id);
+      // Normalise branchName: empty string → null (consistent with
+      // wet_check_billings / work_orders convention).
+      const branchName = body.branchName?.trim() || null;
+
+      // Gate: if the customer has branches, a branch must be selected.
+      const customerBranches = Array.isArray(customer.branches) ? customer.branches as string[] : [];
+      if (customerBranches.length > 0 && !branchName) {
+        res.status(400).json({ message: "Branch selection required for this customer — select a branch before starting a wet check." });
+        return;
+      }
+
+      // Resume an existing in-progress wet check at this property/branch for this
+      // tech before creating a new one. Idempotent for the common "tap New again" case.
+      // Branch-scoped so a tech can have one in-progress check per branch.
+      const existing = await storage.findActiveWetCheck(cid, body.customerId, tech.id, branchName);
       if (existing) {
         res.status(200).json(existing);
         return;
@@ -16230,7 +16269,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? 0
         : Math.max(1, Math.min(26, Number(customer.totalControllers ?? 1)));
       if (!body.blankStart) {
-        await storage.ensurePropertyControllers(cid, body.customerId, numControllers);
+        // Pass branchName so ensurePropertyControllers seeds the right branch bucket.
+        await storage.ensurePropertyControllers(cid, body.customerId, numControllers, branchName);
       }
 
       const wc = await storage.createWetCheck({
@@ -16246,6 +16286,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         notes: body.notes ?? null,
         clientId: body.clientId ?? null,
         mode: body.mode ?? "service",
+        branchName,
       });
       res.status(201).json(wc);
     } catch (e: any) {

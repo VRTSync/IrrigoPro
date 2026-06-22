@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { Search, Droplets, AlertCircle } from "lucide-react";
+import { Search, Droplets, AlertCircle, GitBranch, ArrowLeft } from "lucide-react";
 import { apiRequest, useArrayQuery, useUnauthenticatedReads } from "@/lib/queryClient";
 import { SessionExpiredEmptyState } from "@/components/auth/session-expired-banner";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { OfflineStrip } from "@/components/offline/sync-ui";
 import type { Customer, WetCheck } from "@workspace/db/schema";
 
@@ -136,6 +137,12 @@ function CustomerCard({ customer, status, onClick }: CustomerCardProps) {
           <p className="text-sm text-gray-500 mt-0.5 truncate">
             {customer.address ?? "No address on file"}
           </p>
+          {(customer.branches?.length ?? 0) > 0 && (
+            <p className="text-xs text-indigo-600 mt-0.5 flex items-center gap-1">
+              <GitBranch className="h-3 w-3" />
+              {customer.branches!.length} branch{customer.branches!.length !== 1 ? "es" : ""}
+            </p>
+          )}
         </div>
         <StatusChip status={status} />
       </div>
@@ -166,11 +173,97 @@ function CustomerCard({ customer, status, onClick }: CustomerCardProps) {
   );
 }
 
+// ─── Branch picker overlay ────────────────────────────────────────────────────
+
+interface BranchPickerProps {
+  customer: Customer;
+  // Per-branch in-progress check status so we can surface resume indicators.
+  inProgressByBranch: Map<string, boolean>;
+  onSelect: (branchName: string) => void;
+  onBack: () => void;
+}
+
+function BranchPicker({ customer, inProgressByBranch, onSelect, onBack }: BranchPickerProps) {
+  const branches = (customer.branches ?? []) as string[];
+  return (
+    <div className="max-w-4xl mx-auto py-4 space-y-4 px-4 sm:px-4 pb-safe overflow-x-hidden w-full">
+      <div className="flex items-center gap-3">
+        <Droplets className="h-6 w-6 text-blue-600 shrink-0" />
+        <h1 className="text-2xl font-bold text-gray-900">Select Branch</h1>
+      </div>
+
+      <button
+        className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800"
+        onClick={onBack}
+        data-testid="branch-picker-back"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back to Customers
+      </button>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <p className="text-sm font-semibold text-gray-900">{customer.name}</p>
+        <p className="text-xs text-gray-500 mt-0.5">{customer.address ?? "No address"}</p>
+      </div>
+
+      <p className="text-sm text-gray-600">
+        This customer has multiple locations. Select the branch you are inspecting today:
+      </p>
+
+      <div className="space-y-2" data-testid="branch-list">
+        {branches.map((branch) => {
+          const hasInProgress = inProgressByBranch.get(branch) === true;
+          return (
+            <button
+              key={branch}
+              onClick={() => onSelect(branch)}
+              className={[
+                "w-full text-left rounded-xl border-2 bg-white p-4 shadow-sm transition-all",
+                "hover:border-blue-400 hover:bg-blue-50",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
+                hasInProgress ? "border-blue-400 ring-2 ring-blue-200" : "border-gray-200",
+              ].join(" ")}
+              data-testid={`branch-option-${branch}`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex-shrink-0 w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center">
+                    <GitBranch className="h-4 w-4 text-indigo-600" />
+                  </div>
+                  <span className="font-semibold text-gray-900 truncate">{branch}</span>
+                </div>
+                {hasInProgress && (
+                  <Badge className="bg-blue-600 text-white text-xs shrink-0">
+                    Resume
+                  </Badge>
+                )}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Session storage helpers ──────────────────────────────────────────────────
+
+const SESSION_BRANCH_KEY = "wc_pending_branch";
+
+function storePendingBranch(branchName: string): void {
+  try { sessionStorage.setItem(SESSION_BRANCH_KEY, branchName); } catch { /* ok */ }
+}
+
+function clearPendingBranch(): void {
+  try { sessionStorage.removeItem(SESSION_BRANCH_KEY); } catch { /* ok */ }
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function CustomerPickerPage() {
   const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
+  const [branchPickerCustomer, setBranchPickerCustomer] = useState<Customer | null>(null);
   const unauthenticated = useUnauthenticatedReads();
 
   const { data: customers = [], isLoading: loadingCustomers } =
@@ -221,11 +314,14 @@ export default function CustomerPickerPage() {
 
   const isLoading = loadingCustomers || loadingWcs;
 
-  function handleCardClick(customer: Customer) {
-    // If a pending mode was set (user came through /wet-checks/new mode
-    // selector), skip the hub and go directly to the controller/start page
-    // so the mode choice is consumed in one smooth flow.
-    // Don't consume the key here — ControllerSelectionPage owns that.
+  function navigateWithBranch(customer: Customer, branchName?: string) {
+    // Store branch in sessionStorage so ControllerSelectionPage/NewWetCheckPage can pick it up.
+    if (branchName) {
+      storePendingBranch(branchName);
+    } else {
+      clearPendingBranch();
+    }
+
     let hasPendingMode = false;
     try {
       hasPendingMode = !!sessionStorage.getItem("wc_pending_mode");
@@ -237,6 +333,54 @@ export default function CustomerPickerPage() {
     } else {
       navigate(`/wet-checks/c/${customer.id}`);
     }
+  }
+
+  function handleCardClick(customer: Customer) {
+    const branches = (customer.branches ?? []) as string[];
+
+    // Task #315 — for any customer with branches, ALWAYS force branch
+    // selection before proceeding. This includes customers that already have
+    // an in-progress check: we must know which branch's check to resume
+    // (or start a new one on) before POSTing to /api/wet-checks, which now
+    // enforces branch selection server-side for multi-branch customers.
+    if (branches.length > 0) {
+      setBranchPickerCustomer(customer);
+      return;
+    }
+
+    // Single-location customer — proceed directly.
+    navigateWithBranch(customer);
+  }
+
+  // ── Per-branch in-progress map for the branch picker ──────────────────────
+  // Build a map of branchName → hasInProgress from the wet checks we have.
+  // This lets the BranchPicker show "Resume" badges on the right branches.
+  const inProgressByBranch = useMemo(() => {
+    if (!branchPickerCustomer) return new Map<string, boolean>();
+    const checks = checksByCustomer.get(branchPickerCustomer.id) ?? [];
+    const map = new Map<string, boolean>();
+    for (const wc of checks) {
+      if (wc.status === "in_progress" && wc.branchName) {
+        map.set(wc.branchName, true);
+      }
+    }
+    return map;
+  }, [branchPickerCustomer, checksByCustomer]);
+
+  // ── Branch picker screen ───────────────────────────────────────────────────
+  if (branchPickerCustomer) {
+    return (
+      <BranchPicker
+        customer={branchPickerCustomer}
+        inProgressByBranch={inProgressByBranch}
+        onSelect={(branchName) => {
+          const c = branchPickerCustomer;
+          setBranchPickerCustomer(null);
+          navigateWithBranch(c, branchName);
+        }}
+        onBack={() => setBranchPickerCustomer(null)}
+      />
+    );
   }
 
   return (
