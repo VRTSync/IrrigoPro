@@ -1,0 +1,38 @@
+# Work Order List — Allow Company Admin (and Super Admin) to Reassign Techs
+
+**What & Why**
+A company admin can't reassign work orders to a different tech from the **work order list**. This was *not* fixed by Task #1456 — that one only relaxed a gate in the **detail view** so the Assign panel shows for `work_completed` work orders. The list-level reassignment is a separate, still-gated path.
+
+**Root cause (frontend only):** on the work-order list (`pages/work-orders.tsx`), the reassign UI is gated to **irrigation managers**:
+- The `fieldTechs` query that populates the assignment dropdown is `enabled: currentUser?.role === 'irrigation_manager'` (line ~162) — so a company admin never even loads the options.
+- The assignment dropdown is rendered under the same manager-only branch.
+
+**The backend already allows it** — `/api/users/field-techs` is `requireAuthentication` only (no role gate), and `POST /api/work-orders/:id/assign` is company-scoped, not manager-restricted. So this is purely a frontend gate to widen.
+
+Single small frontend slice. No backend change.
+
+## Done looks like
+- A **company admin** (and **super admin**) sees the tech-assignment dropdown on each work-order row in the list and can reassign to any field tech / irrigation manager, the same way an irrigation manager can today.
+- Field techs are unaffected (still no reassign control).
+- Reassignment goes through the existing `POST /api/work-orders/:id/assign` and updates the row.
+
+## Steps
+1. **Widen the `fieldTechs` query** (`work-orders.tsx` ~159–163): `enabled` for `company_admin`, `super_admin`, and `irrigation_manager` — e.g. `enabled: ['irrigation_manager','company_admin','super_admin'].includes(currentUser?.role ?? '')`.
+2. **Widen the assignment-dropdown render** (the "Assignment dropdown for irrigation managers" branch): show it for the same role set, not `irrigation_manager` only. Keep field techs excluded.
+3. Leave the `reassignWorkOrder` mutation and the assign endpoint as-is (they already work).
+4. Sanity: make sure the dropdown's empty/disabled states are fine for all three roles, and the selected-tech label renders.
+
+## Tests
+- As company_admin (and super_admin): the assignment dropdown appears on list rows and reassigning persists (`assignedTechnicianId` updates, row reflects the new tech).
+- As irrigation_manager: unchanged (still works).
+- As field_tech: no reassign control.
+- Reassigning a `work_completed` work order from the list also works (parity with the #1456 detail-view relaxation).
+
+## Out of scope
+- The detail-view Assign panel (already handled by #1456).
+- Backend role/permission changes (none needed).
+- The branch / zone work (separate).
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/work-orders.tsx` (`fieldTechs` query ~159–163; assignment dropdown render condition; `reassignWorkOrder` mutation)
+- Reference (no change): `GET /api/users/field-techs` (~routes.ts:4916, auth-only), `POST /api/work-orders/:id/assign` (company-scoped)
