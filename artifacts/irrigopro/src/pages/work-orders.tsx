@@ -155,11 +155,12 @@ export default function WorkOrders() {
     return workOrder.updatedAt;
   };
 
-  // Fetch field technicians for assignment (managers only)
+  // Fetch field technicians for assignment (managers and admins)
+  const canReassign = ['irrigation_manager', 'company_admin', 'super_admin'].includes(currentUser?.role ?? '');
   const { data: fieldTechs } = useQuery({
     queryKey: ['/api/users/field-techs'],
     staleTime: 300000, // 5 minutes
-    enabled: currentUser?.role === 'irrigation_manager',
+    enabled: canReassign,
   });
 
   // "Missing photos" detection — drives the amber banner + per-work-order badge
@@ -804,8 +805,8 @@ export default function WorkOrders() {
                                     View / Edit
                                   </Button>
                                   
-                                  {/* Assignment dropdown for irrigation managers — hidden for billed */}
-                                  {currentUser?.role === 'irrigation_manager' && !isBilled(workOrder) && workOrder.status !== 'work_completed' && (
+                                  {/* Assignment dropdown for managers and admins — hidden for billed */}
+                                  {canReassign && !isBilled(workOrder) && (
                                     <Select
                                       onValueChange={(techId: string) => {
                                         const selectedTech = Array.isArray(fieldTechs) ? fieldTechs.find((tech: any) => tech.id.toString() === techId) : undefined;
@@ -1154,8 +1155,8 @@ export default function WorkOrders() {
                             View / Edit
                           </Button>
                           
-                          {/* Assignment dropdown for irrigation managers */}
-                          {!isBilled(workOrder) && currentUser?.role === 'irrigation_manager' && workOrder.status !== 'work_completed' && (
+                          {/* Assignment dropdown for managers and admins */}
+                          {!isBilled(workOrder) && canReassign && (
                             <Select
                               onValueChange={(techId: string) => {
                                 const selectedTech = Array.isArray(fieldTechs) ? fieldTechs.find((tech: any) => tech.id.toString() === techId) : undefined;
