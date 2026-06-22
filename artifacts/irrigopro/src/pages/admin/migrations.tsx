@@ -17,7 +17,7 @@ function useCurrentUser() {
   try { return JSON.parse(raw); } catch { return null; }
 }
 
-function PreviewModal({
+export function PreviewModal({
   migrationId,
   onClose,
 }: {
@@ -38,8 +38,9 @@ function PreviewModal({
   const hasOrphans = preview
     ? Object.values(preview.orphanRows).some((n) => n > 0)
     : false;
+  const hasWarnings = (preview?.warnings?.length ?? 0) > 0;
 
-  const canRun = !hasOrphans || acknowledged;
+  const canRun = (!hasOrphans && !hasWarnings) || acknowledged;
 
   function handleRunComplete(prog: MigrationProgress) {
     setLastProgress(prog);
@@ -89,7 +90,7 @@ function PreviewModal({
               </div>
             </div>
 
-            {preview.warnings.length > 0 && (
+            {(hasOrphans || preview.warnings.length > 0) && (
               <div className="p-3 bg-red-50 border border-red-200 rounded-lg space-y-1.5">
                 {preview.warnings.map((w, i) => (
                   <p key={i} className="text-sm text-red-700">{w}</p>
@@ -101,8 +102,7 @@ function PreviewModal({
                     className="mt-0.5"
                   />
                   <span className="text-sm text-red-700">
-                    I understand — orphan rows will be excluded from the backfill and
-                    must be resolved before NOT NULL constraints can be applied.
+                    I understand the risks described above and wish to proceed.
                   </span>
                 </label>
               </div>

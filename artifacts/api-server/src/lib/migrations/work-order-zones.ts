@@ -71,13 +71,13 @@ async function preview(): Promise<MigrationPreview> {
         description:
           'Re-derive controller/zone/issue for each zone-less item on inspection-origin ' +
           'work orders (from the parent estimate, falling back to the source wet check) ' +
-          'and stamp them. Resumable; skips work orders that cannot be confidently mapped.',
+          'and stamp them. Resumable; skips work orders that cannot be confidently mapped. ' +
+          `${status.candidateCount} candidate work order(s) to process; ` +
+          `${status.doneCount} already stamped.`,
       },
       { id: 'step2_mark_completed', description: 'Mark migration completed in app_settings' },
     ],
     orphanRows: {
-      candidate_work_orders: status.candidateCount,
-      already_stamped: status.doneCount,
       skipped: status.seenCount,
       failed: status.failedCount,
     },
