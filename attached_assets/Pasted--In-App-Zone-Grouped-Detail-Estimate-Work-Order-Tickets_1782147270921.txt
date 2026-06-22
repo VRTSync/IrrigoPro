@@ -1,0 +1,57 @@
+# In-App Zone-Grouped Detail — Estimate & Work Order Tickets Match the PDF
+
+**What & Why**
+The inspection **estimate PDF** renders zone-grouped (Repairs Summary by zone → per-zone line items) and looks great (#1385/#1386). But the **on-screen tickets** never got the same treatment: open the estimate in the app and it's a **flat parts list** (`estimate-detail-modal.tsx:849` — `estimate.items.map(...)`), and the work-order ticket reads as a flat list too (for the manager-facing modal). The in-app views should read the **same way the PDF reads**.
+
+The data is already there — estimate items and work-order items both carry `controllerLetter` / `zoneNumber` / `issueType` (#1385 / #1437). This is purely an **in-app rendering** change: group by zone to match the PDF, for inspection-origin records only.
+
+**Visual source of truth:** the estimate PDF / the approved `inspection-estimate-zone-detail-redesign.html` mockup. Match that structure on screen.
+
+Two slices. No schema change.
+
+---
+
+## Slice 1 — Estimate detail view (in-app) zone-grouped
+
+### Files
+- `artifacts/irrigopro/src/components/estimates/estimate-detail-modal.tsx` (flat `items.map` ~849; single header zone ~740–746).
+- Reuse the PDF's grouping logic where practical (`estimate-pdf-html.ts` already groups items by `(controllerLetter, zoneNumber, issueType)`) — extract a shared client helper or mirror it so screen and PDF can't drift.
+
+### Concrete changes
+- For an **inspection-origin** estimate (items carry `controllerLetter`/`zoneNumber`, i.e. `isInspectionOriginEstimate`), replace the flat `items.map` with the **zone-grouped layout**: a Repairs-Summary-by-zone block, then per Controller→Zone sections with the work (clean issue-type label + part + qty + unit + line total) and a per-zone subtotal — matching the PDF. Drop the raw single-header Controller/Zone line in favor of the grouped sections.
+- Non-inspection estimates keep the existing flat list (no zone data → unchanged).
+- Keep all existing behavior (editing, approval, totals) intact — this is layout/grouping, not a math change.
+
+### Acceptance
+- Opening an inspection estimate in the app shows the same zone-grouped structure as its PDF; non-inspection estimates render flat as before; totals unchanged.
+
+---
+
+## Slice 2 — Work order ticket zone-grouped for every viewer
+
+### Files
+- `artifacts/irrigopro/src/components/work-orders/inspection-zone-checklist.tsx` (already zone-grouped — the tech view).
+- `artifacts/irrigopro/src/components/billing/completed-work-detail-modal.tsx` (manager/admin/billing view — currently flat).
+
+### Concrete changes
+- The tech's `WorkOrderDetails` already renders `InspectionZoneChecklist` (zone-grouped) for inspection-origin WOs — good, leave it.
+- The manager/admin/billing path opens `CompletedWorkDetailModal`, which renders a **flat** list. For an inspection-origin WO (`isInspectionOriginWorkOrder`), render the **same zone-grouped layout** there — read-only (`InspectionZoneChecklist` already takes a `readOnly` prop, or reuse the shared zone-grouped detail component). So the WO ticket reads the same zone-grouped way no matter who opens it.
+- Non-inspection WOs keep the current flat modal.
+
+### Acceptance
+- Opening an inspection-origin work order — as tech *or* as manager/admin — shows the recognizable zone-grouped layout (matching the estimate/PDF), not a flat parts list.
+
+---
+
+## Out of scope
+- The PDF (already zone-grouped — it's the reference).
+- Pricing / totals / approval logic (unchanged).
+- Non-inspection estimates and work orders (flat retained).
+- The branch-selection work (separate ticket).
+
+## Relevant files
+- `artifacts/irrigopro/src/components/estimates/estimate-detail-modal.tsx`
+- `artifacts/irrigopro/src/components/billing/completed-work-detail-modal.tsx`
+- `artifacts/irrigopro/src/components/work-orders/inspection-zone-checklist.tsx` (zone-grouped component to reuse)
+- `artifacts/api-server/src/estimate-pdf-html.ts` (PDF grouping logic — mirror/extract a shared helper)
+- Look reference: `inspection-estimate-zone-detail-redesign.html`
