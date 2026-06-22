@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import {
   ArrowLeft,
@@ -156,10 +156,18 @@ interface CustomerHubProps {
 export function CustomerHub({ customerId }: CustomerHubProps) {
   const [, navigate] = useLocation();
 
+  // null = "All branches" (no filter); a string value = that branch only
+  const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
+
   const { data: customer, isLoading: loadingCustomer } = useQuery<Customer>({
     queryKey: ["/api/customers", customerId],
     queryFn: () => apiRequest(`/api/customers/${customerId}`),
   });
+
+  const branches = useMemo<string[]>(
+    () => (Array.isArray(customer?.branches) ? (customer!.branches as string[]).filter(Boolean) : []),
+    [customer],
+  );
 
   // ── Infinite-scrolling history — API-backed offset pagination ──────────────
   const {
@@ -169,14 +177,13 @@ export function CustomerHub({ customerId }: CustomerHubProps) {
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery<WetCheckPage>({
-    queryKey: ["/api/wet-checks", { customerId, paginated: true }],
+    queryKey: ["/api/wet-checks", { customerId, paginated: true, branchName: selectedBranch }],
     initialPageParam: 0,
     queryFn: async ({ pageParam = 0 }) => {
       const offset = Number(pageParam) || 0;
-      const res = await fetch(
-        `/api/wet-checks?customerId=${customerId}&limit=${PAGE_SIZE}&offset=${offset}`,
-        { credentials: "include" },
-      );
+      let url = `/api/wet-checks?customerId=${customerId}&limit=${PAGE_SIZE}&offset=${offset}`;
+      if (selectedBranch !== null) url += `&branchName=${encodeURIComponent(selectedBranch)}`;
+      const res = await fetch(url, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch wet checks");
       const rows = (await res.json()) as WetCheckRow[];
       const total = Number(res.headers.get("X-Total-Count") ?? rows.length);
@@ -292,6 +299,37 @@ export function CustomerHub({ customerId }: CustomerHubProps) {
         </div>
       </div>
 
+      {/* ── Branch filter chips ── */}
+      {branches.length > 0 && (
+        <div className="flex flex-wrap gap-2" data-testid="branch-filter-chips">
+          <button
+            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+              selectedBranch === null
+                ? "bg-blue-600 text-white border-blue-600"
+                : "bg-white text-gray-700 border-gray-300 hover:border-gray-400 hover:bg-gray-50"
+            }`}
+            onClick={() => setSelectedBranch(null)}
+            data-testid="branch-chip-all"
+          >
+            All branches
+          </button>
+          {branches.map((b) => (
+            <button
+              key={b}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                selectedBranch === b
+                  ? "bg-blue-600 text-white border-blue-600"
+                  : "bg-white text-gray-700 border-gray-300 hover:border-gray-400 hover:bg-gray-50"
+              }`}
+              onClick={() => setSelectedBranch(b)}
+              data-testid={`branch-chip-${b}`}
+            >
+              {b}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* ── Resume banner ── */}
       {inProgressCheck && (
         <div
@@ -349,7 +387,7 @@ export function CustomerHub({ customerId }: CustomerHubProps) {
       {/* ── History ── */}
       <div>
         <h2 className="text-sm font-semibold text-gray-600 mb-2">
-          Inspection History
+          {selectedBranch !== null ? `${selectedBranch} History` : "Inspection History"}
           {totalCount > 0 && (
             <span className="ml-1.5 font-normal text-gray-400">({totalCount})</span>
           )}

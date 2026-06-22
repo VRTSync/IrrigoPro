@@ -15848,10 +15848,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/wet-checks", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     try {
-      const opts: { status?: string; technicianId?: number; customerId?: number } = {};
+      const opts: { status?: string; technicianId?: number; customerId?: number; branchName?: string } = {};
       if (req.query.status) opts.status = String(req.query.status);
       if (req.query.mine === "1" && req.authenticatedUserId) opts.technicianId = req.authenticatedUserId;
       if (req.query.customerId) opts.customerId = parseInt(String(req.query.customerId));
+      if (req.query.branchName != null) opts.branchName = String(req.query.branchName);
       const rows = await storage.listWetChecks(cid, opts);
       // When customerId is provided, support offset-based loading so the
       // Customer Hub can page through long histories without loading all

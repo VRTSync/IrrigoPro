@@ -937,7 +937,7 @@ export interface IStorage {
     opts?: { confirmDeleteWithZones?: boolean; branchName?: string | null },
   ): Promise<{ customer: Customer; controllers: PropertyController[]; removedLetters: string[] }>;
 
-  listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number; customerId?: number }): Promise<Array<WetCheck & { zoneCount: number; processedCount: number; failedCount: number; workOrderIds: number[] }>>;
+  listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number; customerId?: number; branchName?: string }): Promise<Array<WetCheck & { zoneCount: number; processedCount: number; failedCount: number; workOrderIds: number[] }>>;
   // Admin-only company-wide list with per-row aggregate counts (zone
   // records, findings, photos). Used by the company-admin Wet Checks
   // management page.
@@ -7478,11 +7478,12 @@ export class DatabaseStorage implements IStorage {
     return { customer: updatedCustomer ?? customer, controllers, removedLetters };
   }
 
-  async listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number; customerId?: number }): Promise<Array<WetCheck & { zoneCount: number; processedCount: number; failedCount: number; workOrderIds: number[] }>> {
+  async listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number; customerId?: number; branchName?: string }): Promise<Array<WetCheck & { zoneCount: number; processedCount: number; failedCount: number; workOrderIds: number[] }>> {
     const conds = [eq(wetChecks.companyId, companyId)];
     if (opts?.status) conds.push(eq(wetChecks.status, opts.status));
     if (opts?.technicianId) conds.push(eq(wetChecks.technicianId, opts.technicianId));
     if (opts?.customerId) conds.push(eq(wetChecks.customerId, opts.customerId));
+    if (opts?.branchName != null) conds.push(eq(wetChecks.branchName, opts.branchName));
     // When scoped to a single customer the route applies paginate() for
     // offset-based loading; don't cap here so the helper sees the full
     // result set and can set an accurate X-Total-Count. For the generic
