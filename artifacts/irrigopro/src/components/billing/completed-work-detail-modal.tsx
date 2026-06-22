@@ -28,6 +28,7 @@ import {
   Save,
   Loader2,
   BookOpen,
+  MessageSquare,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -568,11 +569,13 @@ function ApprovalActionRow({
   id,
   isLocked,
   onSuccess,
+  beforeAction,
 }: {
   type: "work_order" | "billing_sheet";
   id: number;
   isLocked: boolean;
   onSuccess: () => void;
+  beforeAction?: () => Promise<void>;
 }) {
   const { toast } = useToast();
   const { triggerSave } = useContext(InlineEditContext);
@@ -586,6 +589,7 @@ function ApprovalActionRow({
   const doApprove = async () => {
     setApproving(true);
     try {
+      if (beforeAction) await beforeAction();
       await apiRequest(`${prefix}/${id}/approve`, "POST", {});
       toast({ title: "Approved", description: "Item approved and passed to billing." });
       onSuccess();
@@ -601,6 +605,7 @@ function ApprovalActionRow({
     try {
       const saved = await triggerSave();
       if (!saved) { setApproving(false); return; }
+      if (beforeAction) await beforeAction();
       await apiRequest(`${prefix}/${id}/approve`, "POST", {});
       toast({ title: "Saved & Approved", description: "Item saved and passed to billing." });
       onSuccess();
@@ -658,7 +663,10 @@ function ApprovalActionRow({
           <Button
             size="sm"
             variant="outline"
-            onClick={async () => { await triggerSave(); }}
+            onClick={async () => {
+              if (beforeAction) await beforeAction();
+              await triggerSave();
+            }}
             disabled={isLocked || approving}
             data-testid="save-button"
           >
@@ -1095,6 +1103,29 @@ export function CompletedWorkDetailModal({
   const customerNotes = isWorkOrder ? wo?.customerNotes : null;
   const locationNotes = isWorkOrder ? wo?.locationNotes : null;
 
+  // ── Manager billing notes (irrigation_manager side, Task #1459) ─────────
+  // Irrigation managers (and admins) leave billing-specific instructions for
+  // the billing manager before or during approval. Billing managers see them
+  // as a highlighted callout ("Notes from Irrigation Manager") that catches
+  // their eye. The field is never cleared by billing-manager saves.
+  const canEditManagerBillingNotes =
+    type === "billing_sheet" &&
+    ["irrigation_manager", "company_admin", "super_admin"].includes(userRole) &&
+    !isBilledOrInvoiced;
+
+  const [managerBillingNotesLocal, setManagerBillingNotesLocal] = useState<string>("");
+  useEffect(() => {
+    setManagerBillingNotesLocal(bs?.managerBillingNotes ?? "");
+  }, [id, open]);
+
+  const saveManagerBillingNotes = async (): Promise<void> => {
+    if (!canEditManagerBillingNotes) return;
+    const next = managerBillingNotesLocal.trim();
+    const prev = (bs?.managerBillingNotes ?? "").trim();
+    if (next === prev) return;
+    await patchRecordMutation.mutateAsync({ managerBillingNotes: next || null });
+  };
+
   // ── Inline editing (billing_manager / admin, unlocked records only) ──────
   const canInlineEdit =
     ["billing_manager", "company_admin", "super_admin"].includes(userRole) &&
@@ -1337,6 +1368,24 @@ export function CompletedWorkDetailModal({
                     <div>Approved total: <strong>{currency(approvedTotal)}</strong></div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Notes from Irrigation Manager — billing manager callout (Task #1459).
+                Visible whenever the field is non-empty to any role that can see this
+                modal. Styled as a distinct amber callout so it isn't missed. */}
+            {type === "billing_sheet" && bs?.managerBillingNotes && !canEditManagerBillingNotes && (
+              <div
+                className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm"
+                data-testid="manager-billing-notes-callout"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <MessageSquare className="w-4 h-4 flex-shrink-0 text-amber-600" />
+                  <span className="font-semibold text-amber-900">Notes from Irrigation Manager</span>
+                </div>
+                <p className="text-amber-800 pl-6 leading-relaxed whitespace-pre-wrap">
+                  {bs.managerBillingNotes}
+                </p>
               </div>
             )}
 
@@ -1928,6 +1977,37 @@ export function CompletedWorkDetailModal({
               </SectionCard>
             )}
 
+            {/* Billing Notes for Billing Manager — editable by irrigation_manager / admin (Task #1459).
+                Saved on blur so the note is persisted before the manager hits Approve.
+                Also flushed by the Save and Save & Approve buttons in ApprovalActionRow
+                via the beforeAction callback. Hidden once the sheet is billed. */}
+            {canEditManagerBillingNotes && (
+              <SectionCard
+                title="Billing Notes for Billing Manager"
+                icon={<MessageSquare className="w-4 h-4" />}
+              >
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-500">
+                    Leave instructions or context for the billing manager (e.g. "only charge 2 hours", "confirm with customer before billing"). Saved when you approve or click Save.
+                  </p>
+                  <textarea
+                    className="w-full rounded-md border border-gray-200 bg-white text-sm px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400 placeholder-gray-400"
+                    rows={3}
+                    value={managerBillingNotesLocal}
+                    onChange={(e) => setManagerBillingNotesLocal(e.target.value)}
+                    onBlur={saveManagerBillingNotes}
+                    placeholder="Add billing instructions for the billing manager…"
+                    data-testid="manager-billing-notes-input"
+                  />
+                  {patchRecordMutation.isPending && (
+                    <p className="text-xs text-gray-400 flex items-center gap-1">
+                      <Loader2 className="w-3 h-3 animate-spin" /> Saving…
+                    </p>
+                  )}
+                </div>
+              </SectionCard>
+            )}
+
             {/* Financial Summary */}
             {canSeePricing && totalAmount && parseFloat(String(totalAmount)) > 0 && (
               <SectionCard title="Financial Summary" icon={<DollarSign className="w-4 h-4" />}>
@@ -1976,6 +2056,7 @@ export function CompletedWorkDetailModal({
               id={id}
               isLocked={isBilledOrInvoiced}
               onSuccess={() => { onOpenChange(false); onApproveSuccess!(); }}
+              beforeAction={canEditManagerBillingNotes ? saveManagerBillingNotes : undefined}
             />
           )}
 

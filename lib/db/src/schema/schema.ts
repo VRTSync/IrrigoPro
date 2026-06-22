@@ -296,6 +296,12 @@ export const billingSheets = pgTable("billing_sheets", {
   // (status → submitted/pending_manager_review/completed). Drives the
   // "Waiting on tech" stage section in the merged Manager Workspace.
   returnedForCorrectionAt: timestamp("returned_for_correction_at"),
+  // Task #1459 — billing-specific notes left by the irrigation manager during
+  // the approval flow. Visible to billing managers as a highlighted callout
+  // ("Notes from Irrigation Manager") so instructions aren't missed. Editable
+  // by irrigation_manager / company_admin / super_admin while the sheet is
+  // not yet billed. Never cleared by the billing manager's subsequent saves.
+  managerBillingNotes: text("manager_billing_notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
