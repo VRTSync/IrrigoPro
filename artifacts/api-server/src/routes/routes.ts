@@ -14,6 +14,7 @@ import {
 } from "../storage";
 import { classifyAndLog as _classifyAndLog } from "./route-error-helpers";
 import { registerWetCheckPhotoAttachRoutes } from "./wet-check-photo-attach-route";
+import { wetCheckCreateBody, normalizeBranchName, checkBranchGate } from "./wet-check-create-gate";
 import { registerWorkOrderZoneRoutes } from "./work-order-zone-route";
 import type { InsertInvoice, InsertCustomer } from "@workspace/db";
 import { PRICING_FIELDS_TO_STRIP } from "@workspace/db";
@@ -16216,18 +16217,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // selection UI when the customer has no site-map controllers on file. In
   // that case the server skips ensurePropertyControllers and records
   // numControllers=0 so the tech can add zones manually as they go.
-  const wetCheckCreateBody = z.object({
-    customerId: z.coerce.number().int().positive(),
-    weather: z.string().nullish(),
-    notes: z.string().nullish(),
-    clientId: z.string().uuid().nullish(),
-    blankStart: z.boolean().optional(),
-    mode: z.enum(["service", "inspection"]).optional(),
-    // Task #315 — selected branch for multi-location customers. Optional;
-    // single-location customers do not send this field. Empty-string is
-    // normalised to null at the storage boundary.
-    branchName: z.string().nullish(),
-  }).strict();
+  // Schema, branchName normalisation, and branch gate are extracted to
+  // wet-check-create-gate.ts so they can be unit-tested without standing
+  // up the full registerRoutes() side effects (Task #1463).
 
   app.post("/api/wet-checks", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
@@ -16245,12 +16237,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Normalise branchName: empty string → null (consistent with
       // wet_check_billings / work_orders convention).
-      const branchName = body.branchName?.trim() || null;
+      const branchName = normalizeBranchName(body.branchName);
 
       // Gate: if the customer has branches, a branch must be selected.
       const customerBranches = Array.isArray(customer.branches) ? customer.branches as string[] : [];
-      if (customerBranches.length > 0 && !branchName) {
-        res.status(400).json({ message: "Branch selection required for this customer — select a branch before starting a wet check." });
+      const branchGateError = checkBranchGate(customerBranches, branchName);
+      if (branchGateError) {
+        res.status(400).json({ message: branchGateError });
         return;
       }
 

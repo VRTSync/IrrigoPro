@@ -10,20 +10,28 @@
  *  4. The React Query cache key uses `{ billingVisible: true }`, not
  *     `{ active: true }` — so the correct cache slot is used and the
  *     stale `active=true` slot is ignored.
+ *
+ * Also covers the branch picker guard (Task #1463):
+ *  5. Multi-branch customer with no in-progress check → clicking the card
+ *     shows the BranchPicker overlay instead of navigating.
+ *  6. Single-location customer → clicking the card navigates directly.
+ *  7. Multi-branch customer with an active in-progress check still goes
+ *     through the BranchPicker (Resume badge on the active branch).
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // vi.hoisted ensures the spy is created before vi.mock factories run (which
 // are hoisted to the top of the module at compile time).
-const { apiRequestSpy } = vi.hoisted(() => ({
+const { apiRequestSpy, mockNavigate } = vi.hoisted(() => ({
   apiRequestSpy: vi.fn(async (url: string) => {
     if ((url as string).includes("/api/customers")) return [];
     if ((url as string).includes("/api/wet-checks")) return [];
     return [];
   }),
+  mockNavigate: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
@@ -35,7 +43,7 @@ vi.mock("wouter", async () => {
   const actual = await vi.importActual<typeof import("wouter")>("wouter");
   return {
     ...actual,
-    useLocation: () => ["/wet-checks/new", vi.fn()],
+    useLocation: () => ["/wet-checks/new", mockNavigate],
   };
 });
 
@@ -159,5 +167,133 @@ describe("CustomerPickerPage — billing-visible filter", () => {
       expect(screen.getByTestId("customer-card-3")).toBeTruthy();
     });
     expect(screen.queryByTestId("customer-card-99")).toBeNull();
+  });
+});
+
+// ─── Branch picker guard (Task #1463) ────────────────────────────────────────
+// Proves: multi-branch customers ALWAYS go through the BranchPicker overlay
+// before navigation, so POST /api/wet-checks is never hit without a branchName.
+
+function buildQcBranch(
+  customers: ReturnType<typeof makeCustomer>[],
+  wetChecks: Array<{ id: number; companyId: number; customerId: number; technicianId: number; status: string; branchName: string | null; startedAt: string }> = [],
+) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+  qc.setQueryData(["/api/customers", { billingVisible: true }], customers);
+  qc.setQueryData(["/api/wet-checks"], wetChecks);
+  return qc;
+}
+
+describe("CustomerPickerPage — branch picker guard (Task #1463)", () => {
+  beforeEach(() => {
+    mockNavigate.mockReset();
+  });
+
+  describe("(a) multi-branch customer with no in-progress check", () => {
+    const multiBranch = makeCustomer({
+      id: 50,
+      name: "Riverside Campus",
+    }) as ReturnType<typeof makeCustomer> & { branches: string[] };
+    (multiBranch as Record<string, unknown>).branches = ["North Wing", "South Wing"];
+
+    it("shows the BranchPicker overlay when the customer card is clicked", () => {
+      const qc = buildQcBranch([multiBranch]);
+      render(<CustomerPickerPage />, { wrapper: wrapper(qc) });
+
+      fireEvent.click(screen.getByTestId("customer-card-50"));
+
+      expect(screen.getByText("Select Branch")).toBeTruthy();
+      expect(screen.getByTestId("branch-list")).toBeTruthy();
+    });
+
+    it("shows a button for each configured branch", () => {
+      const qc = buildQcBranch([multiBranch]);
+      render(<CustomerPickerPage />, { wrapper: wrapper(qc) });
+
+      fireEvent.click(screen.getByTestId("customer-card-50"));
+
+      expect(screen.getByTestId("branch-option-North Wing")).toBeTruthy();
+      expect(screen.getByTestId("branch-option-South Wing")).toBeTruthy();
+    });
+
+    it("does NOT call navigate() when the card is clicked — branch picker intercepts", () => {
+      const qc = buildQcBranch([multiBranch]);
+      render(<CustomerPickerPage />, { wrapper: wrapper(qc) });
+
+      fireEvent.click(screen.getByTestId("customer-card-50"));
+
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    it("back button dismisses the branch picker and returns to the customer list", () => {
+      const qc = buildQcBranch([multiBranch]);
+      render(<CustomerPickerPage />, { wrapper: wrapper(qc) });
+
+      fireEvent.click(screen.getByTestId("customer-card-50"));
+      expect(screen.queryByTestId("branch-list")).toBeTruthy();
+
+      fireEvent.click(screen.getByTestId("branch-picker-back"));
+      expect(screen.queryByTestId("branch-list")).toBeNull();
+      expect(screen.getByTestId("customer-card-50")).toBeTruthy();
+    });
+  });
+
+  describe("(b) single-location customer — bypasses branch picker", () => {
+    const singleLoc = makeCustomer({ id: 60, name: "Greenfield Estates" });
+    // branches is null / absent on a single-location customer
+
+    it("calls navigate() immediately without showing the BranchPicker", () => {
+      const qc = buildQcBranch([singleLoc]);
+      render(<CustomerPickerPage />, { wrapper: wrapper(qc) });
+
+      fireEvent.click(screen.getByTestId("customer-card-60"));
+
+      expect(mockNavigate).toHaveBeenCalledOnce();
+      expect(mockNavigate).toHaveBeenCalledWith("/wet-checks/c/60");
+    });
+
+    it("does NOT render the Select Branch heading", () => {
+      const qc = buildQcBranch([singleLoc]);
+      render(<CustomerPickerPage />, { wrapper: wrapper(qc) });
+
+      fireEvent.click(screen.getByTestId("customer-card-60"));
+
+      expect(screen.queryByText("Select Branch")).toBeNull();
+      expect(screen.queryByTestId("branch-list")).toBeNull();
+    });
+  });
+
+  describe("(c) multi-branch customer WITH an active in-progress check", () => {
+    it("still shows the BranchPicker with a Resume badge on the active branch", () => {
+      const multiBranch = makeCustomer({ id: 70, name: "Campus North" }) as ReturnType<typeof makeCustomer>;
+      (multiBranch as Record<string, unknown>).branches = ["East Wing", "West Wing"];
+
+      const activeCheck = {
+        id: 99,
+        companyId: 1,
+        customerId: 70,
+        technicianId: 7,
+        status: "in_progress",
+        branchName: "East Wing",
+        startedAt: new Date("2024-06-01").toISOString(),
+      };
+
+      const qc = buildQcBranch([multiBranch], [activeCheck]);
+      render(<CustomerPickerPage />, { wrapper: wrapper(qc) });
+
+      fireEvent.click(screen.getByTestId("customer-card-70"));
+
+      // BranchPicker should be showing
+      expect(screen.getByTestId("branch-list")).toBeTruthy();
+
+      // East Wing button should carry the Resume badge
+      const eastBtn = screen.getByTestId("branch-option-East Wing");
+      expect(eastBtn.textContent).toContain("Resume");
+
+      // navigate() must NOT have been called yet
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
   });
 });
