@@ -493,11 +493,11 @@ export default function BillingSheetScreen() {
         );
         return;
       }
-      let captured: Awaited<
+      let capturedPhotos: Awaited<
         ReturnType<typeof pickBillingSheetPhotoFromLibrary>
-      > = null;
+      > = [];
       try {
-        captured = await pickBillingSheetPhotoFromLibrary({
+        capturedPhotos = await pickBillingSheetPhotoFromLibrary({
           scopeKey: String(mutationScope),
         });
       } catch (err) {
@@ -506,14 +506,19 @@ export default function BillingSheetScreen() {
         );
         return;
       }
-      if (!captured) return;
-      await enqueueCapturedBillingPhoto(captured);
+      if (capturedPhotos.length === 0) return;
+      for (const captured of capturedPhotos) {
+        await enqueueCapturedBillingPhoto(captured);
+      }
     };
 
     Alert.alert("Add Photo", undefined, [
       { text: "Cancel", style: "cancel" },
       { text: "Take Photo", onPress: captureFromCamera },
-      { text: "Choose from Library", onPress: pickFromLibrary },
+      {
+        text: "Choose from Library (tap to select multiple)",
+        onPress: pickFromLibrary,
+      },
     ]);
   }, [
     workOrderId,

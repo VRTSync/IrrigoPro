@@ -66,59 +66,64 @@ function billingSheetPhotoDirectory(scopeKey: string): Directory {
   return new Directory(Paths.document, "billing-sheet", scopeKey);
 }
 
-// Pick a photo from the device library for a wet-check zone or finding.
-// Runs the identical resize/compress pipeline as captureZonePhoto so the
-// server-side variants stay in the same neighbourhood. Returns the same
-// LocalPhoto shape so callers are interchangeable with captureZonePhoto.
+// Pick one or more photos from the device library for a wet-check zone or
+// finding. Runs the identical resize/compress pipeline as captureZonePhoto so
+// the server-side variants stay in the same neighbourhood. Returns a
+// LocalPhoto[] (empty array when the user cancels) so each selected asset
+// becomes its own upload queue entry, preserving the existing retry/cancel UI.
 export async function pickZonePhotoFromLibrary(opts: {
   wetCheckId: number;
   zoneRecordId: number | null;
   findingId: number | null;
-}): Promise<LocalPhoto | null> {
+}): Promise<LocalPhoto[]> {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: "images",
     quality: 1,
     allowsEditing: false,
+    allowsMultipleSelection: true,
   });
   if (result.canceled || !result.assets || result.assets.length === 0) {
-    return null;
+    return [];
   }
-  const asset = result.assets[0];
-  const w = asset.width ?? 0;
-  const h = asset.height ?? 0;
-  const needsResize = w > MAX_EDGE || h > MAX_EDGE;
-  const manipulated = await manipulateAsync(
-    asset.uri,
-    needsResize
-      ? [{ resize: w >= h ? { width: MAX_EDGE } : { height: MAX_EDGE } }]
-      : [],
-    { compress: JPEG_QUALITY, format: SaveFormat.JPEG },
-  );
-  const clientId = generateClientId();
   const dir = wetCheckPhotoDirectory(opts.wetCheckId);
   if (!dir.exists) {
     dir.create({ intermediates: true });
   }
-  const dest = new File(dir, `${clientId}.jpg`);
-  if (dest.exists) dest.delete();
-  const src = new File(manipulated.uri);
-  try {
-    src.move(dest);
-  } catch {
-    src.copy(dest);
+  const photos: LocalPhoto[] = [];
+  for (const asset of result.assets) {
+    const w = asset.width ?? 0;
+    const h = asset.height ?? 0;
+    const needsResize = w > MAX_EDGE || h > MAX_EDGE;
+    const manipulated = await manipulateAsync(
+      asset.uri,
+      needsResize
+        ? [{ resize: w >= h ? { width: MAX_EDGE } : { height: MAX_EDGE } }]
+        : [],
+      { compress: JPEG_QUALITY, format: SaveFormat.JPEG },
+    );
+    const clientId = generateClientId();
+    const dest = new File(dir, `${clientId}.jpg`);
+    if (dest.exists) dest.delete();
+    const src = new File(manipulated.uri);
     try {
-      src.delete();
+      src.move(dest);
     } catch {
-      /* best-effort */
+      src.copy(dest);
+      try {
+        src.delete();
+      } catch {
+        /* best-effort */
+      }
     }
+    photos.push({
+      clientId,
+      localUri: dest.uri,
+      takenAt: new Date().toISOString(),
+      zoneRecordId: opts.zoneRecordId,
+      findingId: opts.findingId,
+    });
   }
-  return {
-    clientId,
-    localUri: dest.uri,
-    takenAt: new Date().toISOString(),
-    zoneRecordId: opts.zoneRecordId,
-    findingId: opts.findingId,
-  };
+  return photos;
 }
 
 // Capture a photo for a billing sheet (Task #492 / M7). Same compress +
@@ -177,52 +182,58 @@ export async function captureBillingSheetPhoto(opts: {
   };
 }
 
-// Pick a photo from the device library for a billing sheet. Mirrors
-// captureBillingSheetPhoto exactly (same resize/compress pipeline, same
-// return shape) so callers are interchangeable.
+// Pick one or more photos from the device library for a billing sheet. Mirrors
+// captureBillingSheetPhoto exactly (same resize/compress pipeline, same return
+// shape) so callers can queue each result independently. Returns an empty array
+// when the user cancels.
 export async function pickBillingSheetPhotoFromLibrary(opts: {
   scopeKey: string;
-}): Promise<{ clientId: string; localUri: string; takenAt: string } | null> {
+}): Promise<Array<{ clientId: string; localUri: string; takenAt: string }>> {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: "images",
     quality: 1,
     allowsEditing: false,
+    allowsMultipleSelection: true,
   });
   if (result.canceled || !result.assets || result.assets.length === 0) {
-    return null;
+    return [];
   }
-  const asset = result.assets[0];
-  const w = asset.width ?? 0;
-  const h = asset.height ?? 0;
-  const needsResize = w > MAX_EDGE || h > MAX_EDGE;
-  const manipulated = await manipulateAsync(
-    asset.uri,
-    needsResize
-      ? [{ resize: w >= h ? { width: MAX_EDGE } : { height: MAX_EDGE } }]
-      : [],
-    { compress: JPEG_QUALITY, format: SaveFormat.JPEG },
-  );
-  const clientId = generateClientId();
   const dir = billingSheetPhotoDirectory(opts.scopeKey);
   if (!dir.exists) dir.create({ intermediates: true });
-  const dest = new File(dir, `${clientId}.jpg`);
-  if (dest.exists) dest.delete();
-  const src = new File(manipulated.uri);
-  try {
-    src.move(dest);
-  } catch {
-    src.copy(dest);
+  const photos: Array<{ clientId: string; localUri: string; takenAt: string }> =
+    [];
+  for (const asset of result.assets) {
+    const w = asset.width ?? 0;
+    const h = asset.height ?? 0;
+    const needsResize = w > MAX_EDGE || h > MAX_EDGE;
+    const manipulated = await manipulateAsync(
+      asset.uri,
+      needsResize
+        ? [{ resize: w >= h ? { width: MAX_EDGE } : { height: MAX_EDGE } }]
+        : [],
+      { compress: JPEG_QUALITY, format: SaveFormat.JPEG },
+    );
+    const clientId = generateClientId();
+    const dest = new File(dir, `${clientId}.jpg`);
+    if (dest.exists) dest.delete();
+    const src = new File(manipulated.uri);
     try {
-      src.delete();
+      src.move(dest);
     } catch {
-      /* best-effort */
+      src.copy(dest);
+      try {
+        src.delete();
+      } catch {
+        /* best-effort */
+      }
     }
+    photos.push({
+      clientId,
+      localUri: dest.uri,
+      takenAt: new Date().toISOString(),
+    });
   }
-  return {
-    clientId,
-    localUri: dest.uri,
-    takenAt: new Date().toISOString(),
-  };
+  return photos;
 }
 
 // Capture a photo via the native camera, compress + resize it, and copy

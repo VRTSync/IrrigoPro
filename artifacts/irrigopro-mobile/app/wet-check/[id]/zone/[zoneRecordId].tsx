@@ -609,9 +609,9 @@ export default function ZoneDetailScreen() {
         );
         return;
       }
-      let photo: LocalPhoto | null = null;
+      let photos: LocalPhoto[] = [];
       try {
-        photo = await pickZonePhotoFromLibrary({
+        photos = await pickZonePhotoFromLibrary({
           wetCheckId,
           zoneRecordId,
           findingId: null,
@@ -622,15 +622,20 @@ export default function ZoneDetailScreen() {
         );
         return;
       }
-      if (!photo) return;
-      setLocalPhotos((prev) => [...prev, photo!]);
-      addPhotoMutation.mutate(photo);
+      if (photos.length === 0) return;
+      setLocalPhotos((prev) => [...prev, ...photos]);
+      for (const photo of photos) {
+        addPhotoMutation.mutate(photo);
+      }
     };
 
     Alert.alert("Add Photo", undefined, [
       { text: "Cancel", style: "cancel" },
       { text: "Take Photo", onPress: captureFromCamera },
-      { text: "Choose from Library", onPress: pickFromLibrary },
+      {
+        text: "Choose from Library (tap to select multiple)",
+        onPress: pickFromLibrary,
+      },
     ]);
   }, [isLocked, wetCheckId, zoneRecordId, addPhotoMutation]);
 
