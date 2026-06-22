@@ -808,6 +808,7 @@ export default function WorkOrders() {
                                   {/* Assignment dropdown for managers and admins — hidden for billed */}
                                   {canReassign && !isBilled(workOrder) && (
                                     <Select
+                                      value={workOrder.assignedTechnicianId?.toString() ?? ""}
                                       onValueChange={(techId: string) => {
                                         const selectedTech = Array.isArray(fieldTechs) ? fieldTechs.find((tech: any) => tech.id.toString() === techId) : undefined;
                                         if (selectedTech) {
@@ -1158,6 +1159,7 @@ export default function WorkOrders() {
                           {/* Assignment dropdown for managers and admins */}
                           {!isBilled(workOrder) && canReassign && (
                             <Select
+                              value={workOrder.assignedTechnicianId?.toString() ?? ""}
                               onValueChange={(techId: string) => {
                                 const selectedTech = Array.isArray(fieldTechs) ? fieldTechs.find((tech: any) => tech.id.toString() === techId) : undefined;
                                 if (selectedTech) {
