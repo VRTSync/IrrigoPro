@@ -951,6 +951,7 @@ import {
   users, invoices, invoiceItems, zones, fieldWorkSessions, fieldWorkItems, notifications,
   companies, siteMaps, controllers, irrigationZones, partUsage, utilityMarkers, propertyZones, invoicePdfs,
   wetCheckPhotos, wetChecks, wetCheckFindings, wetCheckBillings,
+  workOrderZonePhotos,
 } from "@workspace/db";
 import { eq, desc, and, or, gte, lte, like, isNull, asc, sql, inArray, type SQL } from "drizzle-orm";
 
@@ -13976,6 +13977,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const esRows = await db.select({ id: estimates.id }).from(estimates)
       .where(and(eq(estimates.companyId, user.companyId), overlaps(estimates.photos))).limit(1);
     if (esRows.length > 0) return true;
+
+    // 5) work_order_zone_photos rows owned by this company (joined via
+    //    work_orders → customers). These are the structured per-zone
+    //    inspection photos and are NOT covered by the work_orders.photos[]
+    //    array check above.
+    const wzpRows = await db
+      .select({ id: workOrderZonePhotos.id })
+      .from(workOrderZonePhotos)
+      .innerJoin(workOrders, eq(workOrders.id, workOrderZonePhotos.workOrderId))
+      .innerJoin(customers, eq(customers.id, workOrders.customerId))
+      .where(and(
+        eq(customers.companyId, user.companyId),
+        sql`${workOrderZonePhotos.url} = ANY(${sql.param(candidates)}::text[])`,
+      ))
+      .limit(1);
+    if (wzpRows.length > 0) return true;
 
     res.status(403).json({ error: "Forbidden" });
     return false;

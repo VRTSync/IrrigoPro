@@ -379,7 +379,7 @@ export function InspectionZoneChecklist({
                   {!readOnly && (
                     <FileUpload
                       type="photo"
-                      label="Add photo"
+                      label="photo"
                       accept="image/*"
                       capture="environment"
                       multiple
