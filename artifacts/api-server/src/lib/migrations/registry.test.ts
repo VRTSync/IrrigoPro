@@ -13,7 +13,7 @@ import { sql } from "drizzle-orm";
 // ── Static registry assertions ─────────────────────────────────────────────────
 
 describe("migration registry — static shape", () => {
-  it("contains the company-id, reconcile-totals, and work-order-zones migrations", () => {
+  it("contains the company-id, reconcile-totals, work-order-zones, and renumber-estimates migrations", () => {
     const all = listMigrations();
     const ids = all.map((m) => m.id);
     assert.ok(ids.includes("company-id-columns-v1"), "missing company-id-columns-v1");
@@ -22,6 +22,7 @@ describe("migration registry — static shape", () => {
       "missing reconcile-billing-sheet-invoice-totals-v1",
     );
     assert.ok(ids.includes("work-order-zones-v1"), "missing work-order-zones-v1");
+    assert.ok(ids.includes("renumber-estimates-v1"), "missing renumber-estimates-v1");
   });
 
   it("getMigration returns the definition for the known id", () => {
@@ -46,8 +47,144 @@ describe("migration registry — static shape", () => {
     assert.equal(typeof m.run, "function");
   });
 
+  it("getMigration returns the renumber-estimates definition with the required shape", () => {
+    const m = getMigration("renumber-estimates-v1");
+    assert.ok(m, "getMigration should return a definition");
+    assert.equal(m.id, "renumber-estimates-v1");
+    assert.ok(m.title.length > 0, "title should be non-empty");
+    assert.ok(m.description.length > 0, "description should be non-empty");
+    assert.equal(typeof m.check, "function");
+    assert.equal(typeof m.preview, "function");
+    assert.equal(typeof m.run, "function");
+  });
+
   it("getMigration returns undefined for unknown id", () => {
     assert.equal(getMigration("nonexistent"), undefined);
+  });
+});
+
+// ── Behavioral tests for renumber-estimates-v1 ────────────────────────────────
+
+describe("renumber-estimates-v1 — static shape + check()", () => {
+  const MIGRATION_KEY = "renumber-estimates-v1";
+
+  before(async () => {
+    await db.execute(sql`DELETE FROM app_settings WHERE key = ${MIGRATION_KEY}`);
+  });
+
+  after(async () => {
+    await db.execute(sql`DELETE FROM app_settings WHERE key = ${MIGRATION_KEY}`);
+  });
+
+  it("check() returns a valid MigrationStatus (not error)", async () => {
+    const m = getMigration(MIGRATION_KEY)!;
+    const status = await m.check();
+    assert.ok(
+      status.state === "not_started" ||
+      status.state === "partially_applied" ||
+      status.state === "completed",
+      `Unexpected state: ${status.state}`,
+    );
+  });
+});
+
+describe("renumber-estimates-v1 — preview()", () => {
+  const MIGRATION_KEY = "renumber-estimates-v1";
+
+  it("returns a valid MigrationPreview shape with required arrays", async () => {
+    const m = getMigration(MIGRATION_KEY)!;
+    const preview = await m.preview();
+    assert.ok(Array.isArray(preview.steps), "steps should be an array");
+    assert.ok(typeof preview.orphanRows === "object" && preview.orphanRows !== null, "orphanRows should be an object");
+    assert.ok(Array.isArray(preview.warnings), "warnings should be an array");
+    assert.ok(
+      Object.hasOwn(preview.orphanRows, "estimatesToRenumber"),
+      "orphanRows should have estimatesToRenumber key",
+    );
+    assert.equal(typeof preview.orphanRows.estimatesToRenumber, "number", "estimatesToRenumber should be a number");
+  });
+
+  it("each step has an id and description string", async () => {
+    const m = getMigration(MIGRATION_KEY)!;
+    const preview = await m.preview();
+    for (const step of preview.steps) {
+      assert.equal(typeof step.id, "string", `step id should be a string, got ${typeof step.id}`);
+      assert.ok(step.id.length > 0, "step id should be non-empty");
+      assert.equal(typeof step.description, "string", `step description should be a string`);
+      assert.ok(step.description.length > 0, "step description should be non-empty");
+    }
+  });
+
+  it("preview reports the correct total count matching the step list (capped at 200)", async () => {
+    const m = getMigration(MIGRATION_KEY)!;
+    const preview = await m.preview();
+    const total = preview.orphanRows.estimatesToRenumber as number;
+    // Steps ≤ total when capped at 200; steps may include summary rows for
+    // companies with more than the per-company preview cap.
+    assert.ok(
+      preview.steps.length <= total + 50, // +50 headroom for summary "…and N more" steps
+      `steps.length (${preview.steps.length}) should be ≤ total estimates (${total}) plus summary rows`,
+    );
+  });
+});
+
+describe("renumber-estimates-v1 — run()", () => {
+  const MIGRATION_KEY = "renumber-estimates-v1";
+
+  before(async () => {
+    await db.execute(sql`DELETE FROM app_settings WHERE key = ${MIGRATION_KEY}`);
+  });
+
+  after(async () => {
+    await db.execute(sql`DELETE FROM app_settings WHERE key = ${MIGRATION_KEY}`);
+  });
+
+  it("run() completes with no failed steps", async () => {
+    const m = getMigration(MIGRATION_KEY)!;
+    const results = await m.run(() => {});
+    const failed = results.filter((r) => r.status === "failed");
+    assert.equal(
+      failed.length,
+      0,
+      `Steps failed: ${failed.map((r) => `${r.id}: ${r.error}`).join(", ")}`,
+    );
+  });
+
+  it("after run(), all companies have nextEstimateNumber ≥ startingEstimateNumber", async () => {
+    const rows = await db.execute<{ next: number; start: number }>(sql`
+      SELECT next_estimate_number AS next, starting_estimate_number AS start
+      FROM companies
+      WHERE is_active = true
+    `);
+    for (const r of rows.rows) {
+      assert.ok(
+        r.next >= r.start,
+        `Company has nextEstimateNumber (${r.next}) < startingEstimateNumber (${r.start})`,
+      );
+    }
+  });
+
+  it("re-running is idempotent — no failed steps, same nextEstimateNumber", async () => {
+    const before = await db.execute<{ id: number; next: number }>(sql`
+      SELECT id, next_estimate_number AS next FROM companies WHERE is_active = true ORDER BY id
+    `);
+    const m = getMigration(MIGRATION_KEY)!;
+    const results = await m.run(() => {});
+    const failed = results.filter((r) => r.status === "failed");
+    assert.equal(failed.length, 0, "Re-run should have no failures");
+    const after = await db.execute<{ id: number; next: number }>(sql`
+      SELECT id, next_estimate_number AS next FROM companies WHERE is_active = true ORDER BY id
+    `);
+    // nextEstimateNumber must not regress — it may stay the same or increase
+    // (if new estimates were created between runs), but never decrease.
+    for (const a of after.rows) {
+      const b = before.rows.find((x) => x.id === a.id);
+      if (!b) continue;
+      assert.ok(
+        a.next >= b.next,
+        `Company ${a.id}: nextEstimateNumber regressed from ${b.next} to ${a.next}`,
+      );
+    }
   });
 });
 

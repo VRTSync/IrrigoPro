@@ -2487,6 +2487,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `),
       ]);
 
+      // Fetch estimate-number sequence settings so the drawer can display
+      // and edit them without an extra round-trip to /api/companies.
+      const settingsRes = await db.execute<{
+        startingEstimateNumber: number;
+        nextEstimateNumber: number;
+      }>(sql`
+        SELECT starting_estimate_number AS "startingEstimateNumber",
+               next_estimate_number    AS "nextEstimateNumber"
+        FROM companies
+        WHERE id = ${id}
+        LIMIT 1
+      `);
+      const companySettings = settingsRes.rows[0] ?? null;
+
       res.setHeader("Cache-Control", "no-store");
       res.json({
         company,
@@ -2498,6 +2512,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           syncQueueDepth: company.syncQueue,
           photoUploadPct: company.photoUploadPct,
         },
+        companySettings,
       });
     } catch (e) {
       const { status, message } = classifyAndLog(req, e, {

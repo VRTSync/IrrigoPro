@@ -146,6 +146,7 @@ import {
 } from "@workspace/db";
 import { db } from "./db";
 import { sql, eq, like, ilike, desc, and, gte, lte, or, isNull, isNotNull, inArray, gt } from "drizzle-orm";
+import { logger } from "./lib/logger";
 import bcrypt from "bcrypt";
 import { processEstimatePayload, type EstimatePayloadInput } from "./estimate-payload";
 import { applyNoPartNeededInvariant } from "./storage/wet-check-finding-invariants";
@@ -2469,6 +2470,10 @@ export class DatabaseStorage implements IStorage {
     companyId: number | null | undefined,
   ): Promise<string> {
     if (companyId == null) {
+      logger.warn(
+        { companyId },
+        "[allocateNextEstimateNumber] companyId is null — falling back to timestamp-based estimate number. A regression has occurred: all real create paths should supply a companyId.",
+      );
       return `EST-${Date.now()}`;
     }
     type ExecResult =

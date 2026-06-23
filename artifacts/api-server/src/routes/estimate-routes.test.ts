@@ -156,16 +156,25 @@ function buildBody(opts: {
 
 // ─── HTTP harness ─────────────────────────────────────────────────────────────
 // Mounts a real Express app with the *real* registerEstimateRoutes and a
-// noop auth middleware so request validation, status codes, and response
-// bodies are all exercised the same way they would be in production.
-async function startServer(stub: EstimateRoutesStorage): Promise<{
+// stub auth middleware that stamps `authenticatedUserCompanyId` so the
+// hardened companyId guard (which rejects null with 400) doesn't block
+// all tests. Pass `companyId: null` explicitly to test the rejection path.
+async function startServer(
+  stub: EstimateRoutesStorage,
+  opts: { companyId?: number | null } = {},
+): Promise<{
   baseUrl: string;
   close: () => Promise<void>;
 }> {
   const app: Express = express();
   app.use(express.json());
-  const noopAuth: RequestHandler = (_req, _res, next) => next();
-  registerEstimateRoutes(app, stub, noopAuth);
+  const companyId = opts.companyId !== undefined ? opts.companyId : 1;
+  const stubAuth: RequestHandler = (req, _res, next) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (req as unknown as Record<string, any>).authenticatedUserCompanyId = companyId;
+    next();
+  };
+  registerEstimateRoutes(app, stub, stubAuth);
   const server: Server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const port = (server.address() as AddressInfo).port;
@@ -937,5 +946,54 @@ describe("POST /api/estimates/:id/convert-to-work-order — assign-tech + empty-
     assert.equal(stub.assignCalls[0]!.userId, 7);
     assert.equal(stub.assignCalls[0]!.userName, "Pat Tech");
     assert.equal(stub.assignCalls[0]!.workOrderId, body.workOrder.id);
+  });
+});
+
+// ── POST /api/estimates — companyId guard ──────────────────────────────────────
+// Validates that the hardened create route rejects requests from auth contexts
+// that have no companyId rather than silently minting a timestamp-based number.
+
+describe("POST /api/estimates — companyId guard", () => {
+  it("returns 400 when authenticatedUserCompanyId is null (no company context)", async () => {
+    const stub = makeStorageStub();
+    stub.customers.set(1, makeCustomer(1, "45.00"));
+    // Start server with companyId: null to simulate a company-less auth context.
+    const { baseUrl, close } = await startServer(stub, { companyId: null });
+    try {
+      const res = await fetch(`${baseUrl}/api/estimates`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(buildBody({ customerId: 1, tamperedLaborRate: 45 })),
+      });
+      assert.equal(res.status, 400, "should be rejected with 400 when no company context");
+      const body = (await res.json()) as { message: string };
+      assert.ok(
+        body.message.toLowerCase().includes("company"),
+        `response message should mention company, got: ${body.message}`,
+      );
+    } finally {
+      await close();
+    }
+  });
+
+  it("stamps companyId from auth context onto the estimate payload", async () => {
+    const stub = makeStorageStub();
+    stub.customers.set(1, makeCustomer(1, "50.00"));
+    // Company 42 from auth — the payload must not be trusted for this field.
+    const { baseUrl, close } = await startServer(stub, { companyId: 42 });
+    try {
+      const res = await fetch(`${baseUrl}/api/estimates`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(buildBody({ customerId: 1, tamperedLaborRate: 50 })),
+      });
+      assert.equal(res.status, 201);
+      // The storage stub captures the raw payload; the companyId on the estimate
+      // must match the auth-stamped value, not whatever the client may have sent.
+      const estimateCompanyId = (stub.lastCreatePayload?.estimate as Record<string, unknown>)?.companyId;
+      assert.equal(estimateCompanyId, 42, "companyId should be stamped from auth context");
+    } finally {
+      await close();
+    }
   });
 });

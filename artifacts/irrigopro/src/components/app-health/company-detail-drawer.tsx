@@ -27,6 +27,7 @@ type DetailResponse = {
   users: Array<{ id: number; name: string; username: string; role: string; lastSeenAt: string | null; isActive: boolean }>;
   topIssues: Array<{ fingerprint: string; name: string; sampleMessage: string | null; severity: string; eventCount: number; lastSeenAt: string }>;
   resources: { storageBytes: number | null; monthlyApiCalls: number | null; syncQueueDepth: number | null; photoUploadPct: number | null };
+  companySettings: { startingEstimateNumber: number; nextEstimateNumber: number } | null;
 };
 
 export function CompanyDetailDrawer({
@@ -172,6 +173,15 @@ export function CompanyDetailDrawer({
             </Section>
 
             <CompanyAdminActions companyId={data.company.id} appVersion={data.company.appVersion ?? null} />
+
+            {data.companySettings != null && (
+              <CompanyEstimateSettings
+                companyId={data.company.id}
+                startingEstimateNumber={data.companySettings.startingEstimateNumber}
+                nextEstimateNumber={data.companySettings.nextEstimateNumber}
+                onSaved={() => refetch()}
+              />
+            )}
 
             <CompanyContactActions companyId={data.company.id} companyName={data.company.name} />
 
@@ -590,6 +600,84 @@ function CompanyContactActions({ companyId, companyName }: { companyId: number; 
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+function CompanyEstimateSettings({
+  companyId,
+  startingEstimateNumber,
+  nextEstimateNumber,
+  onSaved,
+}: {
+  companyId: number;
+  startingEstimateNumber: number;
+  nextEstimateNumber: number;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [newStart, setNewStart] = useState<string>(String(startingEstimateNumber));
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    const n = parseInt(newStart, 10);
+    if (!Number.isFinite(n) || n < 10000) {
+      toast({ title: "Invalid value", description: "Starting estimate number must be at least 5 digits (≥ 10000).", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/companies/${companyId}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...buildAuthHeaders() },
+        body: JSON.stringify({ startingEstimateNumber: n }),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      toast({ title: "Saved", description: `Starting estimate number updated to ${n}. Future allocations will continue from max(${n}, current next).` });
+      onSaved();
+    } catch (e) {
+      toast({ title: "Couldn't save", description: e instanceof Error ? e.message : "Try again", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Estimate number sequence</div>
+      <div className="rounded-md border bg-gray-50 p-3 space-y-2">
+        <div className="grid grid-cols-2 gap-3 text-xs">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Starting number</div>
+            <Input
+              type="number"
+              min={10000}
+              value={newStart}
+              onChange={(e) => setNewStart(e.target.value)}
+              className="h-8 text-sm font-mono"
+            />
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Next to allocate</div>
+            <div className="h-8 flex items-center px-2 rounded border bg-white text-sm font-mono text-gray-700">
+              {nextEstimateNumber}
+            </div>
+          </div>
+        </div>
+        <div className="text-[10px] text-gray-500">
+          nextEstimateNumber is monotonically non-decreasing — raising startingEstimateNumber above the current next will pin the next allocation at the new start.
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleSave}
+          disabled={saving || newStart === String(startingEstimateNumber)}
+        >
+          {saving ? <Loader2 className="h-3 w-3 mr-2 animate-spin" /> : null}
+          Save
+        </Button>
+      </div>
     </div>
   );
 }

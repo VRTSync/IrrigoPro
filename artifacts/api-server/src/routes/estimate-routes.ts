@@ -466,9 +466,13 @@ export function registerEstimateRoutes(
           typeof req.authenticatedUserCompanyId === "number"
             ? req.authenticatedUserCompanyId
             : null;
-        if (authCompanyId != null) {
-          estimateBody.companyId = authCompanyId;
+        if (authCompanyId == null) {
+          res.status(400).json({
+            message: "Cannot create estimate: authenticated user has no company context. Ensure the request carries valid auth headers.",
+          });
+          return;
         }
+        estimateBody.companyId = authCompanyId;
         if (authUserId != null) {
           estimateBody.createdByUserId = authUserId;
           if (storage.getUser) {
