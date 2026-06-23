@@ -131,3 +131,4 @@ channel = "stable-25_05"
 
 [userenv.shared]
 USE_DB_OAUTH_STATE = "1"
+SENDGRID_FROM_EMAIL = "info@highplainsprop.com"
