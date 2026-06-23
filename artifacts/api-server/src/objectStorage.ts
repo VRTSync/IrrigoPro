@@ -538,6 +538,61 @@ export class ObjectStorageService {
     const pathParts = url.pathname.split('/');
     return pathParts[pathParts.length - 1];
   }
+
+  // Upload a drawn-signature PNG buffer to object storage and return its
+  // canonical key (e.g. `signatures/<uuid>`). The blob is stored with
+  // `private, no-cache` headers so it is never served unauthenticated;
+  // access is always through a short-lived signed URL minted at read time.
+  async uploadSignatureBuffer(pngBuffer: Buffer): Promise<string> {
+    const key = `signatures/${randomUUID()}`;
+    await this.writeBufferToFirstSearchPath(
+      key,
+      pngBuffer,
+      "image/png",
+      "private, max-age=0, no-cache",
+    );
+    return key;
+  }
+
+  // Mint a short-lived signed GET URL for a `signatures/<uuid>` object key.
+  // Returns null when the key does not exist in any configured search path or
+  // when object storage is unavailable (treat null as a missing signature).
+  async getSignatureSignedUrl(key: string, ttlSec = 3600): Promise<string | null> {
+    const publicSearchPaths = this.getPublicObjectSearchPaths();
+    for (const basePath of publicSearchPaths) {
+      const fullPath = `${basePath}/${key}`;
+      const { bucketName, objectName } = parseObjectPath(fullPath);
+      try {
+        const bucket = objectStorageClient.bucket(bucketName);
+        const [exists] = await bucket.file(objectName).exists();
+        if (!exists) continue;
+        return await signObjectURL({ bucketName, objectName, method: "GET", ttlSec });
+      } catch {
+        // try next search path
+      }
+    }
+    return null;
+  }
+
+  // Resolve the stored `approvalSignatureData` value for an API response or
+  // PDF render. Rules:
+  //  - Typed signatures are plain text — returned unchanged.
+  //  - Drawn signatures stored as object-storage keys (`signatures/<uuid>`)
+  //    are swapped for a short-lived (default 1 h) signed GET URL.
+  //  - Legacy drawn signatures already stored as a `data:image/png;base64,…`
+  //    data URI are returned as-is (no object-storage lookup needed).
+  //  - null / undefined → null.
+  async resolveSignatureData(
+    signatureType: string | null | undefined,
+    signatureData: string | null | undefined,
+    ttlSec = 3600,
+  ): Promise<string | null> {
+    if (!signatureData) return null;
+    if (signatureType !== "drawn" || !signatureData.startsWith("signatures/")) {
+      return signatureData;
+    }
+    return this.getSignatureSignedUrl(signatureData, ttlSec);
+  }
 }
 
 function parseObjectPath(path: string): { bucketName: string; objectName: string } {

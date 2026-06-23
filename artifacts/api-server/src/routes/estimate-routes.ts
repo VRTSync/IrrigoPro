@@ -50,6 +50,7 @@ import {
   resolvePutLaborRate,
   type EstimatePayloadInput,
 } from "../estimate-payload";
+import { ObjectStorageService } from "../objectStorage";
 import {
   recordAuditEvent as defaultRecordAuditEvent,
   type AuditEventInput,
@@ -414,8 +415,18 @@ export function registerEstimateRoutes(
         res.status(404).json({ message: "Estimate not found" });
         return;
       }
+      // Task #1514 — resolve drawn-signature storage key to a short-lived
+      // signed URL before sending to the client, so the response never
+      // contains a large base64 data URI or a bare unguessable object key.
+      const estAny = estimate as Record<string, unknown>;
+      const oss = new ObjectStorageService();
+      const resolvedSigData = await oss.resolveSignatureData(
+        estAny.approvalSignatureType as string | null,
+        estAny.approvalSignatureData as string | null,
+      );
+      const resolvedEstimate = { ...estimate, approvalSignatureData: resolvedSigData };
       // Task #643 — strip pricing fields for field_tech.
-      res.json(applyPricingVisibility(req, estimate));
+      res.json(applyPricingVisibility(req, resolvedEstimate));
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to fetch estimate" });
@@ -1996,6 +2007,27 @@ export function registerEstimateRoutes(
         return;
       }
 
+      // ── For drawn signatures: offload PNG to object storage ───────────
+      // Upload only after all guards pass (token valid, not expired, still
+      // pending) so unauthenticated / invalid requests cannot trigger
+      // object-storage writes (storage-abuse / cost-amplification vector).
+      // Falls back to inline if object storage is unavailable so approval
+      // never fails due to infrastructure unavailability.
+      let storedSignatureData = signatureData;
+      if (signatureType === "drawn") {
+        try {
+          const oss = new ObjectStorageService();
+          const base64 = signatureData.replace(/^data:image\/png;base64,/, "");
+          const buf = Buffer.from(base64, "base64");
+          storedSignatureData = await oss.uploadSignatureBuffer(buf);
+        } catch (uploadErr) {
+          req.log.warn(
+            { err: uploadErr },
+            "approve-via-token: signature upload to object storage failed, persisting inline",
+          );
+        }
+      }
+
       // ── Capture IP from request (proxy-aware) ─────────────────────────────
       const signerIp =
         (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ??
@@ -2012,7 +2044,7 @@ export function registerEstimateRoutes(
         approvalRespondedAt: now,
         approvedAt: now,
         approvalSignatureType: signatureType,
-        approvalSignatureData: signatureData,
+        approvalSignatureData: storedSignatureData,
         approvalSignerName: signerName,
         approvalSignedAt: now,
         approvalSignerIp: signerIp,
@@ -2109,8 +2141,21 @@ export function registerEstimateRoutes(
             ? await storage.getCompanyProfile!(estimate.companyId)
             : undefined;
 
+          // Task #1514 — resolve any stored object-storage key to a signed URL
+          // so puppeteer can fetch the <img src="..."> when rendering the PDF.
+          const ossEmail = new ObjectStorageService();
+          const signedAny = signedEstimate as Record<string, unknown>;
+          const resolvedEmailSigData = await ossEmail.resolveSignatureData(
+            signedAny.approvalSignatureType as string | null,
+            signedAny.approvalSignatureData as string | null,
+          );
+          const signedEstimateForPdf = {
+            ...signedEstimate,
+            approvalSignatureData: resolvedEmailSigData,
+          };
+
           const { renderEstimatePdf } = await import("../estimate-pdf");
-          const pdfBuffer = await renderEstimatePdf(signedEstimate, {
+          const pdfBuffer = await renderEstimatePdf(signedEstimateForPdf, {
             company: company ?? null,
           });
 
@@ -2414,8 +2459,19 @@ export function registerEstimateRoutes(
         ? await storage.getCompanyProfile!(estimate.companyId)
         : undefined;
 
+      // Task #1514 — resolve a stored object-storage key to a signed URL so
+      // puppeteer can fetch it when rendering the <img src="..."> in the HTML
+      // template. Legacy data URIs and typed-name values pass through unchanged.
+      const oss = new ObjectStorageService();
+      const pdfEstAny = estimate as Record<string, unknown>;
+      const resolvedSigData = await oss.resolveSignatureData(
+        pdfEstAny.approvalSignatureType as string | null,
+        pdfEstAny.approvalSignatureData as string | null,
+      );
+      const estimateForPdf = { ...estimate, approvalSignatureData: resolvedSigData };
+
       const { renderEstimatePdf } = await import("../estimate-pdf");
-      const pdf = await renderEstimatePdf(estimate, { company: company ?? null });
+      const pdf = await renderEstimatePdf(estimateForPdf, { company: company ?? null });
 
       const wantsDownload = String(req.query?.download ?? "") === "1";
       res.setHeader("Content-Type", "application/pdf");

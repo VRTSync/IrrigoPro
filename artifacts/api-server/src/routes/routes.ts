@@ -12110,9 +12110,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const origEstimate = await storage.getEstimate(workOrder.estimateId as number);
           if (origEstimate) {
+            // Task #1514 — resolve a stored object-storage key (`signatures/<uuid>`)
+            // to a short-lived signed URL so the WO detail response never contains
+            // a raw base64 data URI. Typed names and legacy inline URIs pass through.
+            const oss = new ObjectStorageService();
+            const origAny = origEstimate as Record<string, unknown>;
+            const resolvedSigData = await oss.resolveSignatureData(
+              origAny.approvalSignatureType as string | null,
+              origAny.approvalSignatureData as string | null,
+            );
             estimateSignatureFields = {
               approvalSignatureType: origEstimate.approvalSignatureType ?? null,
-              approvalSignatureData: origEstimate.approvalSignatureData ?? null,
+              approvalSignatureData: resolvedSigData,
               approvalSignerName: origEstimate.approvalSignerName ?? null,
               approvalSignedAt: origEstimate.approvalSignedAt ?? null,
               approvalSignerIp: origEstimate.approvalSignerIp ?? null,
