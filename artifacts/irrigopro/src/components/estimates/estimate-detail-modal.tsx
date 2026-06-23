@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, authedPdfUrl } from "@/lib/queryClient";
-import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink, Send, Eye, Download, Trash2, Link as LinkIcon, Copy } from "lucide-react";
+import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink, Send, Eye, Download, Trash2, Link as LinkIcon, Copy, PenLine } from "lucide-react";
 import { EstimateMediaBlock } from "@/components/estimates/estimate-media-block";
 import { buildMapsUrl } from "@/lib/maps-url";
 import type { Estimate } from "@workspace/db/schema";
@@ -1087,6 +1087,103 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                 </CardContent>
               </Card>
               )
+            )}
+
+            {/* Customer Signature — only rendered when the customer signed via
+                the approval flow (approvalSignatureType is set). Shows the
+                drawn image or typed-name display alongside signer name, date,
+                and IP so managers can audit the approval at a glance. */}
+            {estimate.approvalSignatureType && (
+              <Card data-testid="estimate-detail-signature-block">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg flex items-center space-x-2">
+                    <PenLine className="w-5 h-5 text-green-600" />
+                    <span>Customer Signature</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {estimate.approvalSignatureType === "drawn" &&
+                    estimate.approvalSignatureData && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wide">
+                          Drawn Signature
+                        </p>
+                        <div className="inline-block rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
+                          <img
+                            src={estimate.approvalSignatureData}
+                            alt="Customer signature"
+                            className="max-h-24 max-w-xs object-contain"
+                            data-testid="signature-image"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                  {estimate.approvalSignatureType === "typed" &&
+                    estimate.approvalSignatureData && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wide">
+                          Typed Signature
+                        </p>
+                        <div
+                          className="inline-block rounded-lg border border-gray-200 bg-white px-6 py-3 shadow-sm"
+                          data-testid="signature-typed"
+                        >
+                          <span className="font-signature text-2xl text-gray-800 italic">
+                            {estimate.approvalSignatureData}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm pt-1">
+                    {estimate.approvalSignerName && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-0.5">
+                          Signer Name
+                        </p>
+                        <p className="text-gray-900 font-medium" data-testid="signature-signer-name">
+                          {estimate.approvalSignerName}
+                        </p>
+                      </div>
+                    )}
+                    {estimate.approvalSignedAt && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-0.5">
+                          Signed
+                        </p>
+                        <p className="text-gray-900" data-testid="signature-signed-at">
+                          {new Date(estimate.approvalSignedAt).toLocaleString("en-US", {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                          })}
+                        </p>
+                      </div>
+                    )}
+                    {estimate.approvalSignerIp && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-0.5">
+                          IP Address
+                        </p>
+                        <p className="text-gray-600 font-mono text-xs" data-testid="signature-signer-ip">
+                          {estimate.approvalSignerIp}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {estimate.approvalConsentText && (
+                    <details className="text-xs text-gray-500 pt-1">
+                      <summary className="cursor-pointer hover:text-gray-700 select-none">
+                        Consent text shown to customer
+                      </summary>
+                      <p className="mt-2 whitespace-pre-wrap bg-gray-50 rounded p-3 border border-gray-100 leading-relaxed">
+                        {estimate.approvalConsentText}
+                      </p>
+                    </details>
+                  )}
+                </CardContent>
+              </Card>
             )}
               </div>
             </div>
