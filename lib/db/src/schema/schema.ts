@@ -496,6 +496,23 @@ export const estimates = pgTable("estimates", {
   // number from the customer's controller setup this estimate is for.
   controllerLetter: text("controller_letter"),
   zoneNumber: integer("zone_number"),
+  // Task #1499 — Customer signature captured at approval time.
+  // All seven columns are nullable; they are populated only when the
+  // customer completes the "Sign to approve" flow (POST approve-via-token).
+  // approvalSignatureType: 'drawn' | 'typed'
+  // approvalSignatureData: base64 PNG data URI (drawn) or typed name text
+  // approvalSignerName:    printed name as entered by the customer
+  // approvalSignedAt:      UTC timestamp when the signature was submitted
+  // approvalSignerIp:      IP address recorded from the POST request
+  // approvalConsentText:   verbatim consent blurb shown to the customer
+  // approvalConsentAcceptedAt: UTC timestamp of consent acceptance
+  approvalSignatureType: text("approval_signature_type"),
+  approvalSignatureData: text("approval_signature_data"),
+  approvalSignerName: text("approval_signer_name"),
+  approvalSignedAt: timestamp("approval_signed_at"),
+  approvalSignerIp: text("approval_signer_ip"),
+  approvalConsentText: text("approval_consent_text"),
+  approvalConsentAcceptedAt: timestamp("approval_consent_accepted_at"),
   // Task #634 — manager-facing soft delete for draft estimates. The
   // row stays in the database (auditable) but every read path filters
   // `deletedAt IS NULL` by default. Only super_admin can opt-in to

@@ -661,6 +661,45 @@ export function buildEstimateHtml(
 
   ${termsBlock}
 
+  ${(() => {
+    // Task #1499 — Render a "Customer Approved" signature block when the
+    // estimate has signature fields. Drawn signatures are embedded as a PNG;
+    // typed names render in a script font. Older / unapproved estimates
+    // render the generic blank signature lines (no visible change).
+    const sigType = (estimate as unknown as Record<string, unknown>).approvalSignatureType as string | null | undefined;
+    const sigData = (estimate as unknown as Record<string, unknown>).approvalSignatureData as string | null | undefined;
+    const signerName = (estimate as unknown as Record<string, unknown>).approvalSignerName as string | null | undefined;
+    const signedAt = (estimate as unknown as Record<string, unknown>).approvalSignedAt as Date | string | null | undefined;
+    const signerIp = (estimate as unknown as Record<string, unknown>).approvalSignerIp as string | null | undefined;
+    const consentText = (estimate as unknown as Record<string, unknown>).approvalConsentText as string | null | undefined;
+
+    if (sigType && sigData && signerName) {
+      const signedDate = signedAt ? fmtDate(signedAt instanceof Date ? signedAt : new Date(signedAt as string)) : '';
+      const sigDisplay = sigType === 'drawn'
+        ? `<img src="${escapeHtml(sigData)}" alt="Customer signature" style="max-height:60px;max-width:280px;display:block;margin-bottom:4px;" />`
+        : `<div style="font-family:'Dancing Script',cursive,serif;font-size:22px;color:#111827;margin-bottom:4px;">${escapeHtml(sigData)}</div>`;
+      return `
+  <section class="card" style="margin-top: 18px; background: #f0fdf4; border-color: #86efac;">
+    <h2 style="color: #15803d; border-color: #22c55e;">Customer Approved</h2>
+    <div style="display:flex;gap:32px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:200px;">
+        <div class="lbl-sm" style="margin-bottom:4px;">Signature</div>
+        ${sigDisplay}
+        <div class="lbl-sm">Signed by</div>
+        <div class="name">${escapeHtml(signerName)}</div>
+        ${signedDate ? `<div class="muted" style="margin-top:2px;">Date: ${escapeHtml(signedDate)}</div>` : ''}
+        ${signerIp ? `<div class="muted">IP: ${escapeHtml(signerIp)}</div>` : ''}
+      </div>
+      ${consentText ? `<div style="flex:2;min-width:200px;">
+        <div class="lbl-sm" style="margin-bottom:4px;">Consent Statement</div>
+        <div class="muted" style="font-size:9.5px;line-height:1.5;">${escapeHtml(consentText)}</div>
+      </div>` : ''}
+    </div>
+  </section>`;
+    }
+
+    // Fallback: blank approval lines for unsigned / internal estimates
+    return `
   <div class="sig">
     <div class="block">
       <div class="lbl-sm">Customer Approval</div>
@@ -670,7 +709,8 @@ export function buildEstimateHtml(
       <div class="lbl-sm">Prepared By</div>
       <div class="name">${escapeHtml(estimate.createdBy || companyName)}</div>
     </div>
-  </div>
+  </div>`;
+  })()}
 
 </body>
 </html>`;

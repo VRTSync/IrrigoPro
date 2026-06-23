@@ -1846,9 +1846,22 @@ export function registerEstimateRoutes(
         (a): a is string => typeof a === "string" && a.length > 0,
       );
 
+      // Task #1499 — include company name so the frontend can interpolate
+      // it into the consent blurb without hardcoding "IrrigoPro".
+      let companyName = "IrrigoPro";
+      if (full.companyId) {
+        try {
+          const company = await storage.getCompanyProfile!(full.companyId);
+          if (company?.name) companyName = company.name;
+        } catch {
+          // Non-fatal — fall back to default
+        }
+      }
+
       res.json({
         alreadyResponded,
         status: full.status,
+        companyName,
         estimate: {
           id: full.id,
           estimateNumber: full.estimateNumber,
@@ -1883,57 +1896,126 @@ export function registerEstimateRoutes(
     }
   });
 
-  // ── GET /api/estimates/approve-via-token/:token ───────────────────────
-  // Approve estimate via token (customer clicks link). Public unauth path;
-  // response shape (HTML for the error/already-responded branches, JSON
-  // for the happy path) must not change — the marketing site / customer
-  // emails depend on this exact contract.
-  app.get("/api/estimates/approve-via-token/:token", async (req, res) => {
+  // ── GET /api/estimates/approve-via-token/:token ───────────────────
+  // Task #1499 — Old GET handler now redirects to the approval page so
+  // stale email links and link-scanners cannot auto-approve. The actual
+  // approval is gated behind POST approve-via-token/:token (see below).
+  app.get("/api/estimates/approve-via-token/:token", (req, res) => {
+    const token = String(req.params.token);
+    res.redirect(302, `/estimate-approval/${token}`);
+  });
+
+  // ── POST /api/estimates/approve-via-token/:token ──────────────────
+  // Task #1499 — Signed approval endpoint. Requires all three of:
+  //   • signatureType (‘drawn’ | ‘typed’), signatureData (non-empty)
+  //   • signerName (non-empty printed name)
+  //   • consentAccepted === true and consentText (non-empty)
+  // All seven signature fields are persisted atomically with the lifecycle
+  // transition; the audit note carries the signer name. Work-order
+  // auto-creation and confirmation email are unchanged from the old GET flow.
+  app.post("/api/estimates/approve-via-token/:token", async (req, res) => {
     try {
       const token = String(req.params.token);
+
+      // ── Validate signature payload ───────────────────────────────
+      // Drawn signatures MUST be a data URI in PNG format to prevent
+      // SSRF when the value is later embedded in a server-rendered PDF
+      // <img src="...">. Typed names are constrained to plain text.
+      const DrawnSignatureSchema = z.object({
+        signatureType: z.literal("drawn"),
+        signatureData: z
+          .string()
+          .min(100, "Signature image is required")
+          .max(2_000_000, "Signature image too large (max ~1.5 MB)")
+          .refine(
+            (v) => v.startsWith("data:image/png;base64,"),
+            "Drawn signature must be a PNG data URI (data:image/png;base64,...)",
+          ),
+        signerName: z.string().min(1, "Printed name is required").max(200),
+        consentAccepted: z.literal(true),
+        consentText: z.string().min(1, "Consent text is required").max(4000),
+      });
+      const TypedSignatureSchema = z.object({
+        signatureType: z.literal("typed"),
+        signatureData: z
+          .string()
+          .min(1, "Typed name is required")
+          .max(200, "Typed name too long"),
+        signerName: z.string().min(1, "Printed name is required").max(200),
+        consentAccepted: z.literal(true),
+        consentText: z.string().min(1, "Consent text is required").max(4000),
+      });
+      const SignatureSchema = z.discriminatedUnion("signatureType", [
+        DrawnSignatureSchema,
+        TypedSignatureSchema,
+      ]);
+
+      const parsed = SignatureSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({
+          error: "validation_error",
+          message: "Missing required signature fields",
+          issues: parsed.error.issues,
+        });
+        return;
+      }
+      const { signatureType, signatureData, signerName, consentText } = parsed.data;
+
+      // ── Look up estimate by token ────────────────────────────────────
       const list = await storage.getEstimates!();
       const estimate = list.find((e) => e.approvalToken === token);
 
       if (!estimate) {
-        res.status(404).send(`
-          <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h2 style="color: #ef4444;">Invalid or Expired Link</h2>
-            <p>This approval link is no longer valid. Please contact us directly.</p>
-          </body></html>
-        `);
+        res.status(404).json({ error: "not_found", message: "Invalid or expired link." });
         return;
       }
 
-      // Check if token has expired
+      // Expired token
       if (estimate.tokenExpiresAt && new Date() > new Date(estimate.tokenExpiresAt)) {
-        // Mark estimate as expired
         await storage.updateEstimate!(estimate.id, { status: "expired" });
-        res.status(400).send(`
-          <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h2 style="color: #ef4444;">Link Expired</h2>
-            <p>This approval link has expired. Please contact us to request a new estimate.</p>
-          </body></html>
-        `);
+        res.status(410).json({
+          error: "expired",
+          message: "This approval link has expired.",
+          estimateNumber: estimate.estimateNumber,
+        });
         return;
       }
 
+      // Already responded
       if (estimate.status !== "pending") {
-        res.status(400).send(`
-          <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h2 style="color: #f59e0b;">Already Responded</h2>
-            <p>You have already responded to this estimate. Thank you!</p>
-          </body></html>
-        `);
+        res.status(409).json({
+          error: "already_responded",
+          message: "You have already responded to this estimate.",
+          status: estimate.status,
+        });
         return;
       }
 
-      // Approve the estimate with approval source tracking
+      // ── Capture IP from request (proxy-aware) ─────────────────────────────
+      const signerIp =
+        (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ??
+        req.socket?.remoteAddress ??
+        "unknown";
+
+      const now = new Date();
+
+      // ── Atomic persist: approval + signature fields ────────────────────────
       await storage.updateEstimate!(estimate.id, {
         status: "approved",
+        lifecycle: "approved",
         approvalSource: "email_link",
-        approvalRespondedAt: new Date(),
-        approvedAt: new Date(),
-      });
+        approvalRespondedAt: now,
+        approvedAt: now,
+        approvalSignatureType: signatureType,
+        approvalSignatureData: signatureData,
+        approvalSignerName: signerName,
+        approvalSignedAt: now,
+        approvalSignerIp: signerIp,
+        approvalConsentText: consentText,
+        approvalConsentAcceptedAt: now,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+
       await recordLifecycleAudit(req, {
         resource: "estimate",
         action: "estimate.customer_approved",
@@ -1946,16 +2028,15 @@ export function registerEstimateRoutes(
         },
         before: { status: estimate.status },
         after: { status: "approved" },
-        summary: `Customer approved estimate ${formatEstimateNumber(estimate.estimateNumber)}`,
-        extra: { approvalSource: "email_link" },
+        summary: `Customer approved estimate ${formatEstimateNumber(estimate.estimateNumber)} with signature by ${signerName}`,
+        extra: { approvalSource: "email_link", signerName, signatureType, signerIp },
       });
 
-      // Auto-convert to work order (per business rule: estimates auto-create work orders when approved)
+      // ── Auto-convert to work order ───────────────────────────────────────
       let workOrder: WorkOrder | null = null;
       try {
         workOrder = await storage.createWorkOrderFromEstimate!(estimate.id);
 
-        // Auto-assign to the company's irrigation manager
         const irrigationManager = await storage.getIrrigationManagerForCompany!(
           estimate.companyId!,
         );
@@ -1965,8 +2046,6 @@ export function registerEstimateRoutes(
             irrigationManager.id,
             irrigationManager.name,
           );
-
-          // Create notification for the assigned manager
           await storage.createNotification!({
             userId: irrigationManager.id,
             type: "work_order_assigned",
@@ -1980,10 +2059,9 @@ export function registerEstimateRoutes(
           { err: workOrderError, estimateId: estimate.id },
           "approve-via-token: auto work-order creation failed — estimate approval recorded, work order skipped",
         );
-        // Continue — estimate approval must succeed even if work-order creation fails
       }
 
-      // Notify company admins that the customer approved the estimate
+      // ── Notify company admins ───────────────────────────────────────────────────
       try {
         const allUsers = await storage.getUsers!();
         const adminUsers = allUsers.filter(
@@ -2004,7 +2082,7 @@ export function registerEstimateRoutes(
         console.error("Failed to send approval notifications:", notifError);
       }
 
-      // Send confirmation email
+      // ── Confirmation email ─────────────────────────────────────────────────────────────
       const { EmailService } = await import("../email-service");
       await EmailService.sendApprovalConfirmation(
         estimate.customerEmail,
@@ -2012,13 +2090,7 @@ export function registerEstimateRoutes(
         true,
       );
 
-      // Task #666 — surface the estimate's photos and attachments on
-      // the customer-facing confirmation page. Photos are pre-signed
-      // here because the customer is unauthenticated and can't call
-      // the `/api/photos/signed-urls` batch endpoint themselves.
-      // Attachments are returned verbatim; the page only shows the
-      // filename portion so we don't expose internal storage keys
-      // as clickable URLs.
+      // ── Pre-sign photos for the confirmation screen ──────────────────────────────
       let photoSignedUrls: Array<{ photoId: string; url: string | null }> = [];
       try {
         const photos = (estimate.photos ?? []).filter(
@@ -2031,11 +2103,7 @@ export function registerEstimateRoutes(
             photos.map(async (raw) => {
               const photoId = raw.replace(/^\//, "").replace(/^api\/photos\//, "");
               try {
-                const signed = await photoService.getPhotoDownloadURL(
-                  photoId,
-                  900,
-                  "medium",
-                );
+                const signed = await photoService.getPhotoDownloadURL(photoId, 900, "medium");
                 return { photoId, url: signed ?? null };
               } catch {
                 return { photoId, url: null };
@@ -2051,12 +2119,13 @@ export function registerEstimateRoutes(
         (a): a is string => typeof a === "string" && a.length > 0,
       );
 
-      // Return JSON response for the approval page
       res.json({
         success: true,
         message: "Estimate approved successfully",
         estimateNumber: estimate.estimateNumber,
         customerEmail: estimate.customerEmail,
+        signerName,
+        signatureType,
         workOrderCreated: !!workOrder,
         workOrderNumber: workOrder?.workOrderNumber,
         photos: photoSignedUrls,
@@ -2064,17 +2133,10 @@ export function registerEstimateRoutes(
       });
     } catch (error) {
       console.error("Error approving estimate via token:", error);
-      res.status(500).send(`
-        <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-          <h2 style="color: #ef4444;">Error</h2>
-          <p>Something went wrong. Please contact us directly.</p>
-        </body></html>
-      `);
+      res.status(500).json({ error: "server_error", message: "Something went wrong. Please contact us directly." });
     }
   });
 
-  // ── GET /api/estimates/reject-via-token/:token ────────────────────────
-  // Reject estimate via token (customer clicks link). Public unauth path
   // — preserve the HTML response body shape exactly.
   app.get("/api/estimates/reject-via-token/:token", async (req, res) => {
     try {
