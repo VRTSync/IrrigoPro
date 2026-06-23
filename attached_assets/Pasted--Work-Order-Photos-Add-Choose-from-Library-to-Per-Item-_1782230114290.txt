@@ -1,0 +1,44 @@
+# Work Order Photos — Add "Choose from Library" to Per-Item Photo Capture
+
+**What & Why**
+In the inspection → estimate → **work order** stage, a tech adds completed-work photos per zone/work item via the "Add photo" button (`inspection-zone-checklist.tsx:380`). Taking a new photo works great, but there's **no way to pick an existing photo from the camera roll** — so a tech who already shot the photo can't attach it.
+
+**Root cause:** that button is the shared `FileUpload` component, whose single hidden file input is hard-set to `capture="environment"` (`file-upload.tsx:662–670`). On mobile, `capture="environment"` sends the input **straight to the live camera and hides the photo-library option**. One input + `capture` = camera only.
+
+**The app already has the right pattern** — the wet-check `PhotoCaptureButton.tsx` uses **two** inputs behind a small menu: "Take Photo" (input *with* `capture="environment"`) and "Choose from Library" (a second input *without* `capture`, so the OS shows the photo picker), both routed through one handler. We just need the same dual-source behavior in `FileUpload` so the work-order path gets it. (Note: `PhotoCaptureButton` itself can't be reused here — it posts to `/api/wet-checks/:id/photos`; the work-order path needs `FileUpload`'s upload/compress/retry pipeline and `handleZoneFiles` diffing.)
+
+Single frontend slice. No backend change. No schema change.
+
+---
+
+## Done looks like
+- On the work-order zone checklist, tapping the per-item photo button presents **both** options — **Take Photo** (live camera, unchanged) and **Choose from Library** (camera roll / photo picker).
+- Picking from the library runs through the **same** existing upload pipeline (compression, progress, retry, the zone-photo POST) — identical to a taken photo.
+- Multi-select still works for library picks (`multiple` honored).
+- Non-photo uses of `FileUpload` (attachments) are **unchanged** — still a single button.
+
+## Steps (mirror `PhotoCaptureButton`'s proven pattern)
+1. **`file-upload.tsx` — add a second input + a source menu for photos.** Keep the current `capture`-bearing input as the **camera** input; add a second hidden input that is identical except it **omits `capture`** (the library input). Both call the existing `handleFileSelect`.
+2. **Render a small menu for `type === 'photo'`** instead of the single button: a `DropdownMenu` (same as `PhotoCaptureButton`) with **"Take Photo"** → clicks the camera input, and **"Choose from Library"** → clicks the library input. For `type === 'attachment'`, keep the existing single-button behavior (no camera/library split).
+   - Reuse `Camera` / `ImageIcon` from `lucide-react` and the `@/components/ui/dropdown-menu` primitives already used by `PhotoCaptureButton`, so styling matches.
+   - Disable the trigger while `isUploading`, same as today.
+   - Reset `value=''` on whichever input fired (already done in `handleFileSelect`'s `finally` via `fileInputRef`; extend to cover both refs).
+3. **No change needed at the call site logic** — `inspection-zone-checklist.tsx` keeps passing `type="photo"`, `accept="image/*"`, `capture="environment"`, `multiple`. The camera input keeps `capture`; the new library input ignores it. (Leaving `capture` passed in is what designates the camera input.)
+4. Confirm the same improvement naturally reaches the **estimate** photo capture and any other `FileUpload type="photo"` surfaces (it should, since the change is in the shared component) — and that none regress.
+
+## Tests
+- On a phone, the work-order per-item photo button shows **Take Photo** and **Choose from Library**; library opens the camera roll and the selected photo uploads and appears under "Completed-work photos."
+- Library multi-select uploads all selected photos.
+- Taken photos still work exactly as before (camera opens directly from "Take Photo").
+- Attachment uploads elsewhere are unchanged (single button, no menu).
+- Upload progress/retry/finalize behave identically for camera vs. library photos.
+
+## Out of scope
+- Backend photo endpoints / storage (unchanged).
+- The wet-check `PhotoCaptureButton` (already correct — it's the reference).
+- Offline photo queueing (the WO path uses `FileUpload`'s online pipeline; not changing that here).
+
+## Relevant files
+- `artifacts/irrigopro/src/components/ui/file-upload.tsx` (single `capture` input ~662–670; trigger button ~643–660; `handleFileSelect` value-reset ~614–618) — **the change**
+- `artifacts/irrigopro/src/components/work-orders/inspection-zone-checklist.tsx:380` (the work-order call site — no logic change)
+- Reference pattern (no change): `artifacts/irrigopro/src/pages/wet-checks/PhotoCaptureButton.tsx:159–207` (two inputs + DropdownMenu, camera vs. library)
