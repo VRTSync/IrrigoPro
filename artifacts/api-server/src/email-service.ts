@@ -9,6 +9,8 @@ const DEFAULT_FROM_EMAIL =
   process.env.FROM_EMAIL ||
   process.env.POSTMARK_FROM_EMAIL ||
   'estimates@highplainsprop.com';
+const SENDGRID_FROM_NAME =
+  process.env.SENDGRID_FROM_NAME || 'High Plains Irrigation Team';
 
 if (SENDGRID_API_KEY) {
   sgMail.setApiKey(SENDGRID_API_KEY);
@@ -139,12 +141,12 @@ export class EmailService {
 
     try {
       await sgMail.send({
-        from: DEFAULT_FROM_EMAIL,
+        from: { email: DEFAULT_FROM_EMAIL, name: SENDGRID_FROM_NAME },
         ...(replyToAddr ? { replyTo: replyToAddr } : {}),
         to: toAddr,
         ...(ccList.length ? { cc: ccList } : {}),
         ...(bccList.length ? { bcc: bccList } : {}),
-        subject: `Estimate Approval Required - ${formatEstimateNumber(data.estimateNumber)}`,
+        subject: `Irrigation Estimate #${String(data.estimateNumber).replace(/^EST-?/i, '')}`,
         html: htmlContent,
         text: textContent,
         categories: ['estimate-approval'],
