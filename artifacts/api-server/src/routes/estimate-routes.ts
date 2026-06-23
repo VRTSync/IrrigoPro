@@ -1454,7 +1454,9 @@ export function registerEstimateRoutes(
     const resolvedCc = (opts.cc ?? []).filter((s) => s && s.trim().length > 0);
     const resolvedBcc = (opts.bcc ?? []).filter((s) => s && s.trim().length > 0);
 
-    const { EmailService } = await import("../email-service");
+    const { EmailService, } = await import("../email-service");
+    const { isInspectionOriginEstimate } = await import("../estimate-pdf-html");
+    const isInspectionOrigin = isInspectionOriginEstimate(items);
     await EmailService.sendEstimateApprovalEmail({
       estimateId: estimateWithItems.id,
       estimateNumber: estimateWithItems.estimateNumber,
@@ -1468,6 +1470,11 @@ export function registerEstimateRoutes(
       controllerLetter: estimateWithItems.controllerLetter ?? null,
       zoneNumber: estimateWithItems.zoneNumber ?? null,
       totalAmount: `$${parseFloat(estimateWithItems.totalAmount).toFixed(2)}`,
+      partsSubtotal: parseFloat(estimateWithItems.partsSubtotal) || 0,
+      laborSubtotal: parseFloat(estimateWithItems.laborSubtotal) || 0,
+      totalLaborHours: parseFloat(estimateWithItems.totalLaborHours) || 0,
+      laborRate,
+      isInspectionOrigin,
       approvalToken,
       estimateDate: effectiveEstimateDate.toLocaleDateString(),
       createdBy: estimateWithItems.createdBy,
@@ -1486,6 +1493,9 @@ export function registerEstimateRoutes(
         partsCost: parseFloat(item.totalPrice),
         laborCost: parseFloat(item.laborHours) * laborRate,
         lineTotal: parseFloat(item.totalPrice) + parseFloat(item.laborHours) * laborRate,
+        controllerLetter: item.controllerLetter ?? null,
+        zoneNumber: item.zoneNumber ?? null,
+        issueType: item.issueType ?? null,
       })),
     });
 

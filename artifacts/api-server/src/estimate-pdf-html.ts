@@ -115,7 +115,7 @@ interface ZoneGroup {
   zoneTotal: number;
 }
 
-function buildZoneGroups(items: EstimateItem[], laborRate: number): ZoneGroup[] {
+export function buildZoneGroups(items: EstimateItem[], laborRate: number): ZoneGroup[] {
   const groupMap = new Map<string, ZoneGroup>();
 
   for (const item of items) {

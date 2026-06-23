@@ -35,6 +35,13 @@ export interface EstimateEmailData {
   controllerLetter?: string | null;
   zoneNumber?: number | null;
   totalAmount: string;
+  // Numeric subtotals for the breakdown block (Parts → Labor → Total).
+  partsSubtotal?: number;
+  laborSubtotal?: number;
+  totalLaborHours?: number;
+  laborRate?: number;
+  // When true the email renders zone-grouped (inspection-origin estimate).
+  isInspectionOrigin?: boolean;
   approvalToken: string;
   estimateDate: string;
   createdBy: string;
@@ -49,6 +56,10 @@ export interface EstimateEmailData {
     partsCost: number;
     laborCost: number;
     lineTotal: number;
+    // Zone fields present for inspection-origin estimates.
+    controllerLetter?: string | null;
+    zoneNumber?: number | null;
+    issueType?: string | null;
   }>;
   // Task #616 — optional recipient overrides + manager note. When `to`
   // is omitted the email goes to `customerEmail` on file. `cc`/`bcc`
@@ -95,13 +106,15 @@ export class EmailService {
 
     const approveUrl = `${this.baseUrl}/estimate-approval/${data.approvalToken}`;
     const rejectUrl = `${this.baseUrl}/api/estimates/reject-via-token/${data.approvalToken}`;
-    const viewUrl = `${this.baseUrl}/api/estimates/view-via-token/${data.approvalToken}`;
+    const viewUrl = `${this.baseUrl}/estimate-approval/${data.approvalToken}`;
 
     // Get company information including logo
     const company = await storage.getCompanyProfile(data.companyId);
+    const resolvedLogoUrl = company?.logo ? this.getCompanyLogoUrl(company.logo) : null;
+    console.log(`[estimate-email] send est=${data.estimateNumber} logo=${resolvedLogoUrl ?? '(none)'} baseUrl=${this.baseUrl}`);
     const companyInfo = {
       name: company?.name || 'IrrigoPro',
-      logo: company?.logo ? this.getCompanyLogoUrl(company.logo) : null,
+      logo: resolvedLogoUrl,
       email: company?.email || DEFAULT_FROM_EMAIL,
       phone: company?.phone || '',
       website: company?.website || ''
@@ -197,6 +210,214 @@ export class EmailService {
     return `${baseUrl}/api/company-logo/${logoPath}`;
   }
 
+  // ── Zone-grouping for inspection-origin estimates ─────────────────────────
+
+  private static buildEmailZoneGroups(
+    items: NonNullable<EstimateEmailData['items']>,
+    laborRate: number,
+  ) {
+    type EmailZoneGroup = {
+      controllerLetter: string;
+      zoneNumber: number;
+      zoneLabel: string;
+      items: NonNullable<EstimateEmailData['items']>;
+      partsTotal: number;
+      laborHrs: number;
+      laborAmt: number;
+      zoneTotal: number;
+    };
+    const groupMap = new Map<string, EmailZoneGroup>();
+    for (const item of items) {
+      const cl = item.controllerLetter ?? '';
+      const zn = item.zoneNumber ?? 0;
+      const key = `${cl}|${zn}`;
+      let group = groupMap.get(key);
+      if (!group) {
+        const zoneLabel =
+          cl && zn
+            ? `Controller ${cl} \u00b7 Zone ${zn}`
+            : cl
+            ? `Controller ${cl}`
+            : `Zone ${zn}`;
+        group = {
+          controllerLetter: cl,
+          zoneNumber: zn,
+          zoneLabel,
+          items: [],
+          partsTotal: 0,
+          laborHrs: 0,
+          laborAmt: 0,
+          zoneTotal: 0,
+        };
+        groupMap.set(key, group);
+      }
+      group.items.push(item);
+      group.partsTotal += item.partsCost;
+      group.laborHrs += item.laborHours;
+    }
+    for (const g of groupMap.values()) {
+      g.laborAmt = g.laborHrs * laborRate;
+      g.zoneTotal = g.partsTotal + g.laborAmt;
+    }
+    return [...groupMap.values()].sort((a, b) => {
+      const cl = a.controllerLetter.localeCompare(b.controllerLetter);
+      if (cl !== 0) return cl;
+      return a.zoneNumber - b.zoneNumber;
+    });
+  }
+
+  private static fmt(n: number): string {
+    return `$${n.toFixed(2)}`;
+  }
+
+  private static renderEmailTotalsBlock(
+    partsSubtotal: number,
+    laborSubtotal: number,
+    totalLaborHours: number,
+    laborRate: number,
+    grandTotal: string,
+  ): string {
+    const laborLabel = `Labor (${totalLaborHours.toFixed(2)}h \u00d7 ${this.fmt(laborRate)}/hr)`;
+    return `
+      <table role="presentation" style="width: 100%; max-width: 320px; margin: 16px 0 0 auto; border-collapse: collapse; font-size: 14px;">
+        <tr>
+          <td style="padding: 5px 8px; color: #6b7280;">Parts Subtotal</td>
+          <td style="padding: 5px 8px; text-align: right; color: #1f2937;">${this.fmt(partsSubtotal)}</td>
+        </tr>
+        <tr>
+          <td style="padding: 5px 8px; color: #6b7280;">${this.escapeHtml(laborLabel)}</td>
+          <td style="padding: 5px 8px; text-align: right; color: #1f2937;">${this.fmt(laborSubtotal)}</td>
+        </tr>
+        <tr style="border-top: 2px solid #1E5A99;">
+          <td style="padding: 8px 8px; font-weight: 700; color: #1f2937; font-size: 15px;">Total</td>
+          <td style="padding: 8px 8px; text-align: right; font-weight: 700; color: #1E5A99; font-size: 18px;">${this.escapeHtml(grandTotal)}</td>
+        </tr>
+      </table>`;
+  }
+
+  private static renderZoneGroupedEmailHTML(
+    data: EstimateEmailData,
+  ): string {
+    const items = data.items ?? [];
+    const laborRate = data.laborRate ?? 0;
+    const groups = this.buildEmailZoneGroups(items, laborRate);
+    const th = (label: string, align: string = 'left') =>
+      `<th style="padding: 7px 9px; text-align: ${align}; background: #143F6B; color: white; font-size: 12px; font-weight: 600;">${label}</th>`;
+    const tdStyle = (extra = '') =>
+      `padding: 7px 9px; border-bottom: 1px solid #e5e7eb; font-size: 13px; vertical-align: top; ${extra}`;
+
+    const summaryRows = groups
+      .map(
+        (g, idx) => `
+        <tr style="${idx % 2 === 1 ? 'background: #f9fafb;' : ''}">
+          <td style="${tdStyle('font-weight: 600;')}">${this.escapeHtml(g.zoneLabel)}</td>
+          <td style="${tdStyle('text-align: right;')}">${g.items.length}</td>
+          <td style="${tdStyle('text-align: right;')}">${this.fmt(g.partsTotal)}</td>
+          <td style="${tdStyle('text-align: right;')}">${g.laborHrs.toFixed(2)}h</td>
+          <td style="${tdStyle('text-align: right; font-weight: 600;')}">${this.fmt(g.zoneTotal)}</td>
+        </tr>`,
+      )
+      .join('');
+    const summaryTotals = `
+        <tr style="background: #f0f6ff; border-top: 2px solid #1E5A99;">
+          <td style="${tdStyle('font-weight: 700;')}">Totals</td>
+          <td style="${tdStyle('text-align: right; font-weight: 700;')}">${groups.reduce((s, g) => s + g.items.length, 0)}</td>
+          <td style="${tdStyle('text-align: right; font-weight: 700;')}">${this.fmt(groups.reduce((s, g) => s + g.partsTotal, 0))}</td>
+          <td style="${tdStyle('text-align: right; font-weight: 700;')}">${groups.reduce((s, g) => s + g.laborHrs, 0).toFixed(2)}h</td>
+          <td style="${tdStyle('text-align: right; font-weight: 700;')}">${this.fmt(groups.reduce((s, g) => s + g.zoneTotal, 0))}</td>
+        </tr>`;
+
+    const summaryTable = `
+      <h3 style="color: #374151; margin: 0 0 10px 0; font-size: 15px;">Repairs Summary by Zone</h3>
+      <table role="presentation" style="width: 100%; border-collapse: collapse; border: 1px solid #dce8f7; font-size: 13px; margin-bottom: 20px;">
+        <thead><tr>${th('Zone')}${th('Repairs', 'right')}${th('Parts', 'right')}${th('Labor hrs', 'right')}${th('Zone Total', 'right')}</tr></thead>
+        <tbody>${summaryRows}${summaryTotals}</tbody>
+      </table>`;
+
+    const zoneBlocks = groups
+      .map((g) => {
+        const workRows = g.items
+          .map((item, idx) => {
+            const issueLabel = item.issueType
+              ? item.issueType.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+              : item.description || item.partName;
+            return `
+          <tr style="${idx % 2 === 1 ? 'background: #f9fafb;' : ''}">
+            <td style="${tdStyle('')}">${this.escapeHtml(issueLabel)}</td>
+            <td style="${tdStyle('text-align: right;')}">${item.quantity}</td>
+            <td style="${tdStyle('text-align: right;')}">${this.fmt(item.partPrice)}</td>
+            <td style="${tdStyle('text-align: right;')}">${this.fmt(item.partsCost)}</td>
+          </tr>`;
+          })
+          .join('');
+        const laborRow = `
+          <tr style="background: #f8fafc;">
+            <td colspan="3" style="${tdStyle('color: #6b7280; font-style: italic;')}">Zone labor &middot; ${g.laborHrs.toFixed(2)}h &times; ${this.fmt(laborRate)}/hr</td>
+            <td style="${tdStyle('text-align: right; font-style: italic; color: #6b7280;')}">${this.fmt(g.laborAmt)}</td>
+          </tr>`;
+        const subtotalRow = `
+          <tr style="background: #f0f6ff; border-top: 2px solid #1E5A99;">
+            <td colspan="3" style="${tdStyle('font-weight: 700;')}">${this.escapeHtml(g.zoneLabel)} Subtotal</td>
+            <td style="${tdStyle('text-align: right; font-weight: 700; color: #143F6B;')}">${this.fmt(g.zoneTotal)}</td>
+          </tr>`;
+        return `
+        <div style="margin-bottom: 16px; border: 1px solid #dce8f7; border-radius: 6px; overflow: hidden;">
+          <div style="background: #1E5A99; color: white; padding: 8px 12px; display: flex; justify-content: space-between;">
+            <span style="font-weight: 700; font-size: 13px;">${this.escapeHtml(g.zoneLabel)}</span>
+            <span style="font-weight: 700; font-size: 13px;">${this.fmt(g.zoneTotal)}</span>
+          </div>
+          <table role="presentation" style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <thead><tr style="background: #143F6B;">
+              ${th('Work / Finding')}${th('Qty', 'right')}${th('Unit Price', 'right')}${th('Parts Total', 'right')}
+            </tr></thead>
+            <tbody>${workRows}${laborRow}${subtotalRow}</tbody>
+          </table>
+        </div>`;
+      })
+      .join('');
+
+    return `
+      <div style="margin: 20px 0;">
+        <h3 style="color: #374151; margin-bottom: 16px;">Zone Detail</h3>
+        ${summaryTable}
+        ${zoneBlocks}
+      </div>`;
+  }
+
+  private static renderFlatEmailItemsHTML(
+    data: EstimateEmailData,
+  ): string {
+    if (!data.items?.length) return '';
+    const itemsRowsHTML = data.items
+      .map(
+        (item) => `
+        <tr>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top; color: #1f2937;">${this.escapeHtml(item.description || item.partName)}</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap;">${item.quantity}</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap;">${this.fmt(item.partPrice)}</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap;">${this.fmt(item.laborCost)} (${item.laborHours.toFixed(2)}h)</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap; font-weight: 600;">${this.fmt(item.lineTotal)}</td>
+        </tr>`,
+      )
+      .join('');
+    return `
+      <div style="margin: 20px 0;">
+        <h3 style="color: #374151; margin-bottom: 16px;">Line Items</h3>
+        <table role="presentation" style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; font-size: 14px;">
+          <thead>
+            <tr style="background: #f3f4f6;">
+              <th style="padding: 10px 12px; text-align: left; color: #374151; font-weight: 600;">Description</th>
+              <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Qty</th>
+              <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Unit</th>
+              <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Labor</th>
+              <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Line Total</th>
+            </tr>
+          </thead>
+          <tbody>${itemsRowsHTML}</tbody>
+        </table>
+      </div>`;
+  }
+
   private static generateEstimateEmailHTML(
     data: EstimateEmailData, 
     approveUrl: string, 
@@ -210,32 +431,23 @@ export class EmailService {
       website: string;
     }
   ): string {
-    const itemsRowsHTML = data.items?.map(item => `
-        <tr>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top; color: #1f2937;">${item.description || item.partName}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap;">${item.quantity}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap;">$${item.partPrice.toFixed(2)}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap;">${item.laborHours.toFixed(2)}h</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap; font-weight: 600;">$${item.lineTotal.toFixed(2)}</td>
-        </tr>
-    `).join('') || '';
+    const partsSubtotal = data.partsSubtotal ?? 0;
+    const laborSubtotal = data.laborSubtotal ?? 0;
+    const totalLaborHours = data.totalLaborHours ?? 0;
+    const laborRate = data.laborRate ?? 0;
+    const hasBreakdown = partsSubtotal > 0 || laborSubtotal > 0;
 
-    const itemsHTML = itemsRowsHTML ? `
-      <table role="presentation" style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; font-size: 14px;">
-        <thead>
-          <tr style="background: #f3f4f6;">
-            <th style="padding: 10px 12px; text-align: left; color: #374151; font-weight: 600;">Description</th>
-            <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Qty</th>
-            <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Unit</th>
-            <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Labor</th>
-            <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Line Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${itemsRowsHTML}
-        </tbody>
-      </table>
-    ` : '';
+    const lineItemsSection = data.isInspectionOrigin
+      ? this.renderZoneGroupedEmailHTML(data)
+      : this.renderFlatEmailItemsHTML(data);
+
+    const totalsBlock = hasBreakdown
+      ? this.renderEmailTotalsBlock(partsSubtotal, laborSubtotal, totalLaborHours, laborRate, data.totalAmount)
+      : `
+      <div style="background: #1f2937; color: white; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
+        <h3 style="margin: 0; font-size: 24px;">Total Estimate</h3>
+        <p style="margin: 8px 0 0 0; font-size: 32px; font-weight: bold;">${this.escapeHtml(data.totalAmount)}</p>
+      </div>`;
 
     return `
 <!DOCTYPE html>
@@ -249,7 +461,7 @@ export class EmailService {
   <div style="background: linear-gradient(135deg, #1E5A99, #0E3B6B); color: white; padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
     ${companyInfo.logo ? `
     <div style="margin-bottom: 20px;">
-      <img src="${companyInfo.logo}" alt="${companyInfo.name} Logo" style="max-height: 60px; max-width: 200px; object-fit: contain;">
+      <img src="${companyInfo.logo}" alt="${this.escapeHtml(companyInfo.name)} Logo" style="max-height: 60px; max-width: 200px; object-fit: contain;">
     </div>
     ` : ''}
     <h1 style="margin: 0; font-size: 28px;">Irrigation Estimate</h1>
@@ -257,7 +469,7 @@ export class EmailService {
   </div>
   
   <div style="background: white; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px; padding: 30px;">
-    <h2 style="color: #1f2937; margin-top: 0;">Hello ${data.customerName},</h2>
+    <h2 style="color: #1f2937; margin-top: 0;">Hello ${this.escapeHtml(data.customerName)},</h2>
     
     <p style="font-size: 16px; color: #4b5563;">
       We've prepared an estimate for your irrigation project. Please review the details below and let us know if you'd like to proceed.
@@ -276,19 +488,19 @@ export class EmailService {
         </tr>
         <tr>
           <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Project:</td>
-          <td style="padding: 8px 0; color: #1f2937;">${data.projectName}</td>
+          <td style="padding: 8px 0; color: #1f2937;">${this.escapeHtml(data.projectName)}</td>
         </tr>
         ${data.projectAddress ? `
         <tr>
           <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Location:</td>
-          <td style="padding: 8px 0; color: #1f2937;">${data.projectAddress}</td>
+          <td style="padding: 8px 0; color: #1f2937;">${this.escapeHtml(data.projectAddress)}</td>
         </tr>
         ` : ''}
         ${data.workLocationLat && data.workLocationLng ? `
         <tr>
           <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Pinned spot:</td>
           <td style="padding: 8px 0; color: #1f2937;">
-            ${data.workLocationAddress ? `${data.workLocationAddress}<br/>` : ''}
+            ${data.workLocationAddress ? `${this.escapeHtml(data.workLocationAddress)}<br/>` : ''}
             <a href="https://www.google.com/maps/search/?api=1&query=${data.workLocationLat},${data.workLocationLng}" style="color: #1E5A99;">View on map</a>
             <span style="color: #6b7280; font-size: 12px;">(${parseFloat(String(data.workLocationLat)).toFixed(6)}, ${parseFloat(String(data.workLocationLng)).toFixed(6)})</span>
           </td>
@@ -297,16 +509,16 @@ export class EmailService {
         ${data.controllerLetter || data.zoneNumber ? `
         <tr>
           <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Controller / Zone:</td>
-          <td style="padding: 8px 0; color: #1f2937;">${data.controllerLetter ? `Controller ${data.controllerLetter}` : ''}${data.controllerLetter && data.zoneNumber ? ' · ' : ''}${data.zoneNumber ? `Zone ${data.zoneNumber}` : ''}</td>
+          <td style="padding: 8px 0; color: #1f2937;">${data.controllerLetter ? `Controller ${this.escapeHtml(data.controllerLetter)}` : ''}${data.controllerLetter && data.zoneNumber ? ' · ' : ''}${data.zoneNumber ? `Zone ${data.zoneNumber}` : ''}</td>
         </tr>
         ` : ''}
         <tr>
           <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Date:</td>
-          <td style="padding: 8px 0; color: #1f2937;">${data.estimateDate}</td>
+          <td style="padding: 8px 0; color: #1f2937;">${this.escapeHtml(data.estimateDate)}</td>
         </tr>
         <tr>
           <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Prepared by:</td>
-          <td style="padding: 8px 0; color: #1f2937;">${data.createdBy}</td>
+          <td style="padding: 8px 0; color: #1f2937;">${this.escapeHtml(data.createdBy)}</td>
         </tr>
       </table>
     </div>
@@ -318,16 +530,10 @@ export class EmailService {
     </div>
     ` : ''}
 
-    ${itemsHTML ? `
-    <div style="margin: 20px 0;">
-      <h3 style="color: #374151; margin-bottom: 16px;">Line Items</h3>
-      ${itemsHTML}
-    </div>
-    ` : ''}
+    ${lineItemsSection}
 
-    <div style="background: #1f2937; color: white; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
-      <h3 style="margin: 0; font-size: 24px;">Total Estimate</h3>
-      <p style="margin: 8px 0 0 0; font-size: 32px; font-weight: bold;">${data.totalAmount}</p>
+    <div style="margin: 20px 0; border-top: 1px solid #e5e7eb; padding-top: 16px;">
+      ${totalsBlock}
     </div>
 
     <div style="text-align: center; margin: 30px 0;">
@@ -347,10 +553,10 @@ export class EmailService {
         Need to review the full details? <a href="${viewUrl}" style="color: #1E5A99;">View Complete Estimate</a>
       </p>
       <div style="margin: 20px 0; color: #6b7280; font-size: 14px;">
-        <p style="margin: 4px 0; font-weight: 600; color: #374151;">${companyInfo.name}</p>
-        ${companyInfo.phone ? `<p style="margin: 4px 0;">📞 ${companyInfo.phone}</p>` : ''}
-        ${companyInfo.email ? `<p style="margin: 4px 0;">✉️ ${companyInfo.email}</p>` : ''}
-        ${companyInfo.website ? `<p style="margin: 4px 0;">🌐 <a href="${companyInfo.website}" style="color: #1E5A99;">${companyInfo.website}</a></p>` : ''}
+        <p style="margin: 4px 0; font-weight: 600; color: #374151;">${this.escapeHtml(companyInfo.name)}</p>
+        ${companyInfo.phone ? `<p style="margin: 4px 0;">📞 ${this.escapeHtml(companyInfo.phone)}</p>` : ''}
+        ${companyInfo.email ? `<p style="margin: 4px 0;">✉️ ${this.escapeHtml(companyInfo.email)}</p>` : ''}
+        ${companyInfo.website ? `<p style="margin: 4px 0;">🌐 <a href="${companyInfo.website}" style="color: #1E5A99;">${this.escapeHtml(companyInfo.website)}</a></p>` : ''}
       </div>
       <p style="color: #6b7280; font-size: 12px; margin: 8px 0 0 0;">
         Questions? Reply to this email or call us directly.
@@ -374,9 +580,40 @@ export class EmailService {
       website: string;
     }
   ): string {
-    const itemsText = data.items?.map(item =>
-      `${item.description || item.partName}: ${item.quantity} × $${item.partPrice.toFixed(2)} + Labor ${item.laborHours.toFixed(2)}h ($${item.laborCost.toFixed(2)}) = $${item.lineTotal.toFixed(2)}`
-    ).join('\n') || '';
+    const partsSubtotal = data.partsSubtotal ?? 0;
+    const laborSubtotal = data.laborSubtotal ?? 0;
+    const totalLaborHours = data.totalLaborHours ?? 0;
+    const laborRate = data.laborRate ?? 0;
+    const hasBreakdown = partsSubtotal > 0 || laborSubtotal > 0;
+
+    const itemsText = data.isInspectionOrigin
+      ? (() => {
+          const groups = this.buildEmailZoneGroups(data.items ?? [], laborRate);
+          return groups
+            .map((g) => {
+              const zoneItems = g.items
+                .map((item) => `  ${item.description || item.partName}: ${item.quantity} × ${this.fmt(item.partPrice)} = ${this.fmt(item.partsCost)}`)
+                .join('\n');
+              return `${g.zoneLabel}\n${zoneItems}\n  Zone labor: ${g.laborHrs.toFixed(2)}h × ${this.fmt(laborRate)}/hr = ${this.fmt(g.laborAmt)}\n  Zone Subtotal: ${this.fmt(g.zoneTotal)}`;
+            })
+            .join('\n\n');
+        })()
+      : data.items
+          ?.map(
+            (item) =>
+              `${item.description || item.partName}: ${item.quantity} × ${this.fmt(item.partPrice)} + Labor ${item.laborHours.toFixed(2)}h (${this.fmt(item.laborCost)}) = ${this.fmt(item.lineTotal)}`,
+          )
+          .join('\n') ?? '';
+
+    const breakdownText = hasBreakdown
+      ? `
+PRICE BREAKDOWN:
+  Parts Subtotal: ${this.fmt(partsSubtotal)}
+  Labor (${totalLaborHours.toFixed(2)}h × ${this.fmt(laborRate)}/hr): ${this.fmt(laborSubtotal)}
+  ─────────────────────────
+  Total: ${data.totalAmount}`
+      : `
+TOTAL ESTIMATE: ${data.totalAmount}`;
 
     return `
 IRRIGATION ESTIMATE - APPROVAL REQUIRED
@@ -402,15 +639,15 @@ WORK DESCRIPTION:
 ${data.workDescription}
 ` : ''}
 ${itemsText ? `
-LINE ITEMS:
+${data.isInspectionOrigin ? 'ZONE DETAIL:' : 'LINE ITEMS:'}
 ${itemsText}
 ` : ''}
-
-TOTAL ESTIMATE: ${data.totalAmount}
+${breakdownText}
 
 ACTIONS:
 - To approve this estimate, visit: ${approveUrl}
 - To decline this estimate, visit: ${rejectUrl}
+- To view the full estimate, visit: ${approveUrl}
 
 ---
 ${companyInfo.name}
