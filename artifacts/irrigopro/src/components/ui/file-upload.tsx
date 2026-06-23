@@ -4,7 +4,13 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { Upload, X, Image, FileText, Eye, Loader2, CheckCircle2, AlertCircle, RotateCw } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Upload, X, Image, FileText, Eye, Loader2, CheckCircle2, AlertCircle, RotateCw, Camera, ImageIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { safeGet } from "@/utils/safeStorage";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
@@ -176,6 +182,7 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [lightboxName, setLightboxName] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const libraryInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const photoUrls = type === 'photo' && Array.isArray(files)
     ? files.filter(f => !f.previewUrl).map(f => f.url)
@@ -612,9 +619,8 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
         });
       }
     } finally {
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (libraryInputRef.current) libraryInputRef.current.value = '';
     }
   };
 
@@ -640,34 +646,85 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isUploading}
-          className="flex items-center gap-2"
-          data-testid={`button-add-${type}`}
-        >
-          <Upload className="w-4 h-4" />
-          {isUploading ? "Uploading..." : `Add ${label}`}
-        </Button>
-        {type === 'photo' && (
-          <span className="text-sm text-gray-500">Accepted: JPG, PNG, GIF</span>
-        )}
-        {type === 'attachment' && (
-          <span className="text-sm text-gray-500">Landscape plans, documents, etc.</span>
+        {type === 'photo' ? (
+          <>
+            {/* Camera input — `capture` opens live camera */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={accept}
+              multiple={multiple}
+              capture={capture}
+              onChange={(e) => handleFileSelect(e.target.files)}
+              className="hidden"
+            />
+            {/* Library input — no `capture` so the OS photo picker opens */}
+            <input
+              ref={libraryInputRef}
+              type="file"
+              accept={accept}
+              multiple={multiple}
+              onChange={(e) => handleFileSelect(e.target.files)}
+              className="hidden"
+            />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isUploading}
+                  className="flex items-center gap-2"
+                  data-testid={`button-add-${type}`}
+                >
+                  <Camera className="w-4 h-4" />
+                  {isUploading ? "Uploading..." : `Add ${label}`}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem
+                  onSelect={(e) => { e.preventDefault(); fileInputRef.current?.click(); }}
+                  data-testid={`button-add-${type}-camera`}
+                >
+                  <Camera className="w-4 h-4 mr-2" />
+                  Take Photo
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={(e) => { e.preventDefault(); libraryInputRef.current?.click(); }}
+                  data-testid={`button-add-${type}-library`}
+                >
+                  <ImageIcon className="w-4 h-4 mr-2" />
+                  Choose from Library
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <span className="text-sm text-gray-500">Accepted: JPG, PNG, GIF</span>
+          </>
+        ) : (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={accept}
+              multiple={multiple}
+              capture={capture}
+              onChange={(e) => handleFileSelect(e.target.files)}
+              className="hidden"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              className="flex items-center gap-2"
+              data-testid={`button-add-${type}`}
+            >
+              <Upload className="w-4 h-4" />
+              {isUploading ? "Uploading..." : `Add ${label}`}
+            </Button>
+            <span className="text-sm text-gray-500">Landscape plans, documents, etc.</span>
+          </>
         )}
       </div>
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept={accept}
-        multiple={multiple}
-        capture={capture}
-        onChange={(e) => handleFileSelect(e.target.files)}
-        className="hidden"
-      />
 
       {jobs.length > 0 && (
         <div className="space-y-2" data-testid="upload-progress-list">
