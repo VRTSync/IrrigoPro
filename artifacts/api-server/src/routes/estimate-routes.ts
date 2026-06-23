@@ -2067,11 +2067,15 @@ export function registerEstimateRoutes(
       }
 
       // ── Notify company admins ───────────────────────────────────────────────────
+      let adminEmails: string[] = [];
       try {
         const allUsers = await storage.getUsers!();
         const adminUsers = allUsers.filter(
           (u) => u.role === "company_admin" && u.companyId === estimate.companyId,
         );
+        adminEmails = adminUsers
+          .map((u) => u.email)
+          .filter((e): e is string => typeof e === "string" && e.length > 0);
         for (const admin of adminUsers) {
           await storage.createNotification!({
             userId: admin.id,
@@ -2086,6 +2090,46 @@ export function registerEstimateRoutes(
       } catch (notifError) {
         console.error("Failed to send approval notifications:", notifError);
       }
+
+      // ── Signed PDF email to company admins ────────────────────────────────────
+      // Fire-and-forget: render the estimate PDF with the newly-saved signature
+      // block and email it to every company admin. Wrapped in its own try/catch
+      // so a PDF render or SendGrid failure never blocks the approval response.
+      void (async () => {
+        try {
+          if (adminEmails.length === 0) return;
+
+          // Re-fetch the estimate so the signature fields persisted above are
+          // included in the PDF render (the local `estimate` snapshot predates
+          // the updateEstimate call).
+          const signedEstimate = await storage.getEstimate(estimate.id);
+          if (!signedEstimate) return;
+
+          const company = estimate.companyId
+            ? await storage.getCompanyProfile!(estimate.companyId)
+            : undefined;
+
+          const { renderEstimatePdf } = await import("../estimate-pdf");
+          const pdfBuffer = await renderEstimatePdf(signedEstimate, {
+            company: company ?? null,
+          });
+
+          const { EmailService: ES } = await import("../email-service");
+          await ES.sendSignedEstimateCopyToAdmins({
+            adminEmails,
+            estimateNumber: estimate.estimateNumber,
+            customerName: estimate.customerName,
+            signerName,
+            pdfBuffer,
+            companyName: company?.name ?? "IrrigoPro",
+          });
+        } catch (pdfEmailErr) {
+          req.log.warn(
+            { err: pdfEmailErr, estimateId: estimate.id },
+            "approve-via-token: signed PDF email to admins failed — approval unaffected",
+          );
+        }
+      })();
 
       // ── Confirmation email ─────────────────────────────────────────────────────────────
       const { EmailService } = await import("../email-service");

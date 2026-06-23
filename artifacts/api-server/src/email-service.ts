@@ -1002,4 +1002,101 @@ This is an automated email from IrrigoPro
       categories: [args.tag || 'budget-alert'],
     });
   }
+
+  // Send the signed estimate PDF to each company admin after a customer approval.
+  // Called fire-and-forget from the approve-via-token handler; errors are logged
+  // but never propagate to the caller so the approval response is unaffected.
+  static async sendSignedEstimateCopyToAdmins(args: {
+    adminEmails: string[];
+    estimateNumber: string;
+    customerName: string;
+    signerName: string;
+    pdfBuffer: Buffer;
+    companyName: string;
+  }): Promise<void> {
+    if (!isEmailConfigured()) {
+      console.warn('sendSignedEstimateCopyToAdmins: SENDGRID_API_KEY not set — skipping');
+      return;
+    }
+    if (args.adminEmails.length === 0) return;
+
+    const fmtNum = formatEstimateNumber(args.estimateNumber);
+    const subject = `Signed Estimate ${fmtNum} — ${args.customerName}`;
+
+    const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:20px;">
+  <div style="background:linear-gradient(135deg,#15803d,#166534);color:white;padding:24px 30px;border-radius:10px 10px 0 0;">
+    <h1 style="margin:0;font-size:22px;">Estimate Approved &amp; Signed</h1>
+    <p style="margin:6px 0 0;font-size:15px;opacity:.9;">${args.companyName}</p>
+  </div>
+  <div style="background:#fff;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 10px 10px;padding:28px;">
+    <p style="font-size:16px;color:#1f2937;">
+      <strong>${args.customerName}</strong> has approved and signed estimate <strong>${fmtNum}</strong>.
+    </p>
+    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:16px 20px;margin:20px 0;">
+      <table style="border-collapse:collapse;width:100%;">
+        <tr>
+          <td style="padding:4px 0;font-weight:600;color:#6b7280;width:120px;">Estimate</td>
+          <td style="padding:4px 0;color:#111827;">${fmtNum}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;font-weight:600;color:#6b7280;">Customer</td>
+          <td style="padding:4px 0;color:#111827;">${args.customerName}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;font-weight:600;color:#6b7280;">Signed by</td>
+          <td style="padding:4px 0;color:#111827;">${args.signerName}</td>
+        </tr>
+      </table>
+    </div>
+    <p style="color:#4b5563;font-size:14px;">The signed PDF is attached to this email for your records.</p>
+    <p style="color:#6b7280;font-size:12px;margin-top:24px;">— ${args.companyName}</p>
+  </div>
+</body>
+</html>`;
+
+    const text = `Estimate Approved & Signed — ${fmtNum}
+
+${args.customerName} has approved and signed estimate ${fmtNum}.
+Signed by: ${args.signerName}
+
+The signed PDF is attached to this email for your records.
+
+— ${args.companyName}`;
+
+    const safeCustomer = args.customerName
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\/\\:*?"<>|\x00-\x1f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const filename = safeCustomer
+      ? `${safeCustomer} - ${fmtNum} (Signed).pdf`
+      : `estimate-${fmtNum}-signed.pdf`;
+
+    for (const adminEmail of args.adminEmails) {
+      try {
+        await sgMail.send({
+          from: DEFAULT_FROM_EMAIL,
+          to: adminEmail,
+          subject,
+          html,
+          text,
+          categories: ['estimate-signed-copy'],
+          attachments: [
+            {
+              content: args.pdfBuffer.toString('base64'),
+              filename,
+              type: 'application/pdf',
+              disposition: 'attachment',
+            },
+          ],
+        });
+      } catch (err) {
+        console.error(`sendSignedEstimateCopyToAdmins: failed to email ${adminEmail}:`, err);
+      }
+    }
+  }
 }
