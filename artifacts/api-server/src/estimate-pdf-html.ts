@@ -662,31 +662,31 @@ export function buildEstimateHtml(
   ${termsBlock}
 
   ${(() => {
-    // Task #1499 — Render a "Customer Approved" signature block when the
-    // estimate has signature fields. Drawn signatures are embedded as a PNG;
-    // typed names render in a script font. Older / unapproved estimates
-    // render the generic blank signature lines (no visible change).
-    const sigType = (estimate as unknown as Record<string, unknown>).approvalSignatureType as string | null | undefined;
-    const sigData = (estimate as unknown as Record<string, unknown>).approvalSignatureData as string | null | undefined;
-    const signerName = (estimate as unknown as Record<string, unknown>).approvalSignerName as string | null | undefined;
-    const signedAt = (estimate as unknown as Record<string, unknown>).approvalSignedAt as Date | string | null | undefined;
-    const signerIp = (estimate as unknown as Record<string, unknown>).approvalSignerIp as string | null | undefined;
-    const consentText = (estimate as unknown as Record<string, unknown>).approvalConsentText as string | null | undefined;
+    // Task #1513 — Render a "Approved By" signature block when the estimate
+    // has a stored approval signature. Drawn signatures are embedded as a PNG
+    // data URI; typed names render in a script font. The block appears
+    // whenever approvalSignatureData is present; unsigned estimates fall
+    // through to the blank approval lines below.
+    const sigData = estimate.approvalSignatureData;
+    const sigType = estimate.approvalSignatureType;
+    const signerName = estimate.approvalSignerName;
+    const signedAt = estimate.approvalSignedAt;
+    const signerIp = estimate.approvalSignerIp;
+    const consentText = estimate.approvalConsentText;
 
-    if (sigType && sigData && signerName) {
+    if (sigData) {
       const signedDate = signedAt ? fmtDate(signedAt instanceof Date ? signedAt : new Date(signedAt as string)) : '';
       const sigDisplay = sigType === 'drawn'
         ? `<img src="${escapeHtml(sigData)}" alt="Customer signature" style="max-height:60px;max-width:280px;display:block;margin-bottom:4px;" />`
         : `<div style="font-family:'Dancing Script',cursive,serif;font-size:22px;color:#111827;margin-bottom:4px;">${escapeHtml(sigData)}</div>`;
       return `
   <section class="card" style="margin-top: 18px; background: #f0fdf4; border-color: #86efac;">
-    <h2 style="color: #15803d; border-color: #22c55e;">Customer Approved</h2>
+    <h2 style="color: #15803d; border-color: #22c55e;">Approved By</h2>
     <div style="display:flex;gap:32px;flex-wrap:wrap;">
       <div style="flex:1;min-width:200px;">
         <div class="lbl-sm" style="margin-bottom:4px;">Signature</div>
         ${sigDisplay}
-        <div class="lbl-sm">Signed by</div>
-        <div class="name">${escapeHtml(signerName)}</div>
+        ${signerName ? `<div class="lbl-sm" style="margin-top:6px;">Signed by</div><div class="name">${escapeHtml(signerName)}</div>` : ''}
         ${signedDate ? `<div class="muted" style="margin-top:2px;">Date: ${escapeHtml(signedDate)}</div>` : ''}
         ${signerIp ? `<div class="muted">IP: ${escapeHtml(signerIp)}</div>` : ''}
       </div>
