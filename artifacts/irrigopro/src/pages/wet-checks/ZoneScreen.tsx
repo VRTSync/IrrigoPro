@@ -476,6 +476,35 @@ function InlineFindingEditor({
   );
 }
 
+// ─── Photo–finding attachment helpers ────────────────────────────────────────
+
+// Optimistic photos (captured before the finding has synced to the server)
+// carry extra non-schema fields so we can match by client-id when there is
+// no numeric finding id yet. These fields are set by PhotoCaptureButton and
+// are intentionally absent from the DB schema type.
+type PhotoClientLinked = WetCheckPhoto & {
+  findingClientId?: string | null;
+  zoneRecordClientId?: string | null;
+};
+
+// Returns true when `photo` belongs to `finding` by either the numeric id
+// (synced photo / synced finding) or by the client-id pair (in-flight photo
+// captured while the finding is still queued offline).
+function isPhotoAttachedToFinding(
+  photo: WetCheckPhoto,
+  finding: Pick<WetCheckFinding, "id" | "clientId">,
+): boolean {
+  const p = photo as PhotoClientLinked;
+  if (p.findingId != null && finding.id > 0 && p.findingId === finding.id) return true;
+  if (
+    p.findingClientId &&
+    finding.clientId &&
+    p.findingClientId === finding.clientId
+  )
+    return true;
+  return false;
+}
+
 // ─── Zone screen (YES/NO/N-A + findings + photos) ────────────────────────────
 
 // Exported for tests (Task #511 regression). Production callers use this
@@ -1448,7 +1477,7 @@ export function ZoneScreen({
                               )}
                             </div>
                             {(() => {
-                              const fp = mergedPhotos.filter((p) => p.findingId === f.id);
+                              const fp = mergedPhotos.filter((p) => isPhotoAttachedToFinding(p, f));
                               if (fp.length === 0) return null;
                               return (
                                 <div
@@ -1518,7 +1547,13 @@ export function ZoneScreen({
 
           {/* Zone-level photos (when not in Needs Work mode or in readOnly) */}
           {(() => {
-            const zoneOnlyPhotos = mergedPhotos.filter((p) => p.findingId == null);
+            // A photo is "zone-only / loose" only when it is not attached to
+            // any finding by numeric id OR by client-id. This prevents the
+            // false-alarm banner for photos captured on an unsynced finding
+            // (findingId is null but findingClientId matches the finding).
+            const zoneOnlyPhotos = mergedPhotos.filter(
+              (p) => !findings.some((f) => isPhotoAttachedToFinding(p, f)),
+            );
             if (zoneOnlyPhotos.length === 0) return null;
             if (findings.length > 0) {
               const options = findings

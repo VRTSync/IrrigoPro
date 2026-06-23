@@ -99,6 +99,9 @@ export function PhotoCaptureButton({
         // pre-save) that need a stable id to display the thumbnail.
         // The negative id is replaced by the real server id once the
         // metadata POST resolves and React Query refetches.
+        // findingClientId / zoneRecordClientId are non-schema extras
+        // that let ZoneScreen's "loose" detection match by client-id
+        // while the finding is still unsynced (no numeric id yet).
         const optimistic: WetCheckPhoto = {
           id: -Date.now(),
           wetCheckId,
@@ -107,6 +110,8 @@ export function PhotoCaptureButton({
           zoneRecordId: zoneRecordId ?? null,
           findingId: findingId ?? null,
           clientId: queued.clientId,
+          findingClientId: findingClientId ?? null,
+          zoneRecordClientId: zoneRecordClientId ?? null,
         } as unknown as WetCheckPhoto;
         onUploaded?.(optimistic);
         toast({
