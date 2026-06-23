@@ -1862,6 +1862,8 @@ export function registerEstimateRoutes(
         alreadyResponded,
         status: full.status,
         companyName,
+        approvalSignerName: (full as any).approvalSignerName ?? null,
+        approvalSignedAt: (full as any).approvalSignedAt ?? null,
         estimate: {
           id: full.id,
           estimateNumber: full.estimateNumber,
@@ -1983,10 +1985,13 @@ export function registerEstimateRoutes(
 
       // Already responded
       if (estimate.status !== "pending") {
+        const estAny = estimate as any;
         res.status(409).json({
           error: "already_responded",
           message: "You have already responded to this estimate.",
           status: estimate.status,
+          signerName: estAny.approvalSignerName ?? null,
+          signedAt: estAny.approvalSignedAt ? new Date(estAny.approvalSignedAt).toISOString() : null,
         });
         return;
       }

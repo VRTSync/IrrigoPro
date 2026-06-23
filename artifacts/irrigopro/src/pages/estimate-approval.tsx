@@ -51,6 +51,8 @@ type EstimateView = {
   alreadyResponded: boolean;
   status: string;
   companyName?: string;
+  approvalSignerName?: string | null;
+  approvalSignedAt?: string | null;
   estimate: {
     id: number;
     estimateNumber: string;
@@ -93,6 +95,7 @@ type ActionState =
   | { kind: "pending"; action: "approve" | "reject" }
   | { kind: "approved"; estimateNumber: string; customerEmail: string; signerName?: string; signatureType?: string; signatureData?: string }
   | { kind: "rejected"; estimateNumber: string }
+  | { kind: "already-approved"; signerName?: string; signedAt?: string }
   | { kind: "action-error"; message?: string };
 
 function fmtCurrency(amount: string | number) {
@@ -340,6 +343,15 @@ export default function EstimateApproval() {
           consentText,
         }),
       });
+      if (res.status === 409) {
+        const j = await res.json().catch(() => ({}));
+        setAction({
+          kind: "already-approved",
+          signerName: j?.signerName ?? printedName.trim() ?? undefined,
+          signedAt: j?.signedAt ?? undefined,
+        });
+        return;
+      }
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         setAction({ kind: "action-error", message: j?.message });
@@ -443,6 +455,24 @@ export default function EstimateApproval() {
         </div>
       );
     }
+    if (action.kind === "already-approved") {
+      return (
+        <div className="text-center">
+          <CheckCircle className="h-16 w-16 text-green-600 mx-auto mb-4" />
+          <h1 className="text-3xl font-bold text-green-600 mb-4">Already Approved</h1>
+          <p className="text-gray-700 mb-2">This estimate has already been approved.</p>
+          {(action.signerName || action.signedAt) && (
+            <p className="text-gray-500 text-sm">
+              {action.signerName && (
+                <>Signed by <strong>{action.signerName}</strong></>
+              )}
+              {action.signerName && action.signedAt && " on "}
+              {action.signedAt && fmtDate(action.signedAt)}
+            </p>
+          )}
+        </div>
+      );
+    }
     if (action.kind === "action-error") {
       return (
         <div className="text-center">
@@ -503,7 +533,7 @@ export default function EstimateApproval() {
     }
 
     // ─── Ready: render details + Approve/Reject ──────────────────────
-    const { estimate, photos, attachments, alreadyResponded, status, companyName } = load.data;
+    const { estimate, photos, attachments, alreadyResponded, status, companyName, approvalSignerName, approvalSignedAt } = load.data;
     const responseLabel =
       status === "approved" ? "approved" : status === "rejected" ? "declined" : "responded to";
 
@@ -527,6 +557,12 @@ export default function EstimateApproval() {
         {alreadyResponded && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
             You have already {responseLabel} this estimate.
+            {status === "approved" && approvalSignerName && (
+              <span className="block mt-1 text-blue-700">
+                Signed by <strong>{approvalSignerName}</strong>
+                {approvalSignedAt && <> on {fmtDate(approvalSignedAt)}</>}
+              </span>
+            )}
           </div>
         )}
 
