@@ -1,0 +1,102 @@
+# Estimate — Capture Customer Signature on Approval
+
+**What & Why**
+When a customer approves an estimate from the emailed approval link, capture a **signature** as proof of approval. Today approval is a single click — the customer taps "Approve Estimate" on the token page and it fires `GET /api/estimates/approve-via-token/:token`, which flips the estimate to `approved` and auto-creates the work order, with no record of who approved or any binding artifact. We want a real, defensible approval: the customer **must sign** (draw or type) and accept a consent statement before the approval goes through, and the signature is embedded on the **approved estimate PDF**.
+
+**Approved UX (validated with Randy via the `estimate-signature-approval-flow.html` mockup):**
+- Email → token approval page (unchanged entry).
+- Tapping **Approve Estimate** opens a **"Sign to approve"** sheet: a **Draw / Type** toggle (finger/mouse drawing *or* typed name rendered in a script font), a **Printed name** field, and a **required consent checkbox + blurb**.
+- Approve is **disabled** until: a signature exists (drawn ink or typed name) **and** printed name is filled **and** consent is checked.
+- **Decline stays one-tap** — no signature required to decline.
+- After submit: approval recorded with the signature; work-order auto-creation unchanged; signature embedded on the estimate PDF.
+
+**Consent blurb (use verbatim):**
+> **This is an official approval.** By signing, I confirm I am authorized to approve estimate {EST-NUMBER} for the amount of {TOTAL} and authorize {Company Name} to proceed with the work described.
+
+Four slices. One schema change (additive). Schema push + any backfill are run by Replit.
+
+---
+
+## Slice 1 — Schema + storage
+### Files
+- `lib/db/src/schema/schema.ts` (`estimates`) + migration (additive; apply with the db push).
+- `artifacts/api-server/src/storage.ts` (estimate update path used by token-approve).
+
+### Changes
+Add to `estimates` (all nullable; populated only on signed approval):
+- `approvalSignatureType text` — `'drawn' | 'typed'`.
+- `approvalSignatureData text` — for `drawn`: the PNG **data URL** of the signature; for `typed`: the typed string. (Signatures are a few KB; a text column is fine and avoids a token-scoped upload endpoint on the public path. Can migrate to object storage later if ever needed.)
+- `approvalSignerName text` — the printed name.
+- `approvalSignedAt timestamp`.
+- `approvalSignerIp text` — captured server-side from the request for the audit record.
+- `approvalConsentText text` — the exact consent statement shown (with the estimate number/total/company interpolated), stored as the record of what was agreed.
+- `approvalConsentAcceptedAt timestamp`.
+
+No change to existing approval columns (`status`, `approvedAt`, lifecycle) — these continue to be set as today.
+
+---
+
+## Slice 2 — Backend: signature-gated token approval
+### Files
+- `artifacts/api-server/src/routes/estimate-routes.ts` (`GET /api/estimates/approve-via-token/:token` ~1886–2066; `view-by-token` ~1788; reject ~2077 unchanged).
+
+### Changes
+- **Convert approval to a POST that requires the signature payload.** Add `POST /api/estimates/approve-via-token/:token` (public, unauth — same token-scoped access as the existing GET) accepting:
+  ```
+  { signatureType: 'drawn'|'typed', signatureData: string, signerName: string, consentAccepted: true, consentText: string }
+  ```
+- **Validate before approving** (reject 400 if any missing): `signatureType` valid, `signatureData` non-empty, `signerName` non-empty, `consentAccepted === true`. Capture `approvalSignerIp` from the request (respect proxy headers as the app already does elsewhere).
+- **Persist the signature fields (Slice 1) atomically with the approval** — set them in the *same* update that flips lifecycle to `approved`/stamps `approvedAt`, so an estimate is never `approved` without its signature. Keep the existing auto-work-order creation, confirmation email, and audit log; **extend the lifecycle audit** to note "approved with signature by {signerName}".
+- **Retire the GET approve path.** Replace the old `GET …/approve-via-token/:token` with a handler that redirects to the approval page (so any prefetch/scanner or stale link can't approve without a signature). Reject (`reject-via-token`) stays a GET — declines need no signature.
+- **`view-by-token`**: no change needed beyond ensuring the response still carries the fields the page needs (estimate number, total, customer/company name) so the page can render the consent blurb with the real values.
+
+**Security note (bonus):** moving approval from a GET link to a POST with a required signed payload also closes the latent risk of an email link-scanner auto-approving via prefetch.
+
+---
+
+## Slice 3 — Frontend: the "Sign to approve" sheet
+### Files
+- `artifacts/irrigopro/src/pages/estimate-approval.tsx` (the public approval page; current Approve button ~478–490 calls `submit("approve")` ~153 via GET).
+
+### Changes
+- On **Approve Estimate**, open a bottom sheet/modal **"Sign to approve"** (match the mockup):
+  - **Draw / Type** toggle. **Draw** = a `<canvas>` signature pad (mouse + touch, with Clear); export `toDataURL()` PNG. **Type** = a text input rendered live in a script font; the typed string is the signature.
+  - **Printed name** input (prefill from typed signature when in Type mode; still editable).
+  - **Consent checkbox + blurb** (verbatim text above, with `{EST-NUMBER}`, `{TOTAL}`, `{Company Name}` interpolated from the loaded estimate).
+  - **Approve & Submit** button disabled until signature + printed name + consent are all present.
+- On submit, **POST** to `approve-via-token` (Slice 2) with the payload; on success show the existing "Estimate Approved!" screen, plus echo the captured signature + signer name back to the customer (as in the mockup).
+- Keep **Decline** exactly as today (one-tap GET reject).
+- Handle the usual states (pending spinner, error, already-responded, expired) as the page already does.
+
+---
+
+## Slice 4 — Signature on the approved estimate PDF
+### Files
+- `artifacts/api-server/src/estimate-pdf-html.ts` (PDF HTML), `estimate-payload.ts` / `pdf-view-model.ts` (feed the new fields through).
+
+### Changes
+- When the estimate is approved **and** has signature fields, render an **"Customer Approved" signature block** on the PDF (match the mockup's stamp): the signature (drawn PNG `<img>` from `approvalSignatureData`, or the typed name in a script font), **Signed by** {approvalSignerName}, **Date** {approvalSignedAt}, the stored **consent statement**, and the captured **IP**. Place it near the totals/acceptance area.
+- Estimates without signatures (older, or not yet approved) render the PDF exactly as today — no empty block.
+
+---
+
+## Tests
+- Approve flow: cannot submit until drawn-or-typed signature + printed name + consent are all present; on submit the estimate becomes `approved`, signature fields persist, work order auto-creates (as today), and the PDF shows the signature block.
+- Typed vs. drawn both persist and render correctly on the PDF.
+- Decline still works in one tap with no signature.
+- The old `GET approve-via-token` no longer approves (redirects to the page); reject GET unchanged.
+- `approvalSignerIp` and `approvalConsentText` are recorded; lifecycle audit notes the signer.
+- Expired/invalid token and already-responded states behave as before.
+
+## Out of scope
+- Manager-view display of the signature and carrying it onto the work order (Randy chose PDF-only for now — easy follow-ups if wanted later).
+- Internal (non-token) approve/reject paths and manager billing approvals (`approve-routes.ts`) — unchanged.
+- E-signature legal/notary integrations — this is an in-app intent-to-sign record (name + signature + consent + timestamp + IP).
+
+## Relevant files
+- `lib/db/src/schema/schema.ts` (`estimates` + signature fields)
+- `artifacts/api-server/src/routes/estimate-routes.ts` (`approve-via-token` GET→POST ~1886–2066; `view-by-token` ~1788)
+- `artifacts/api-server/src/storage.ts` (estimate approval update)
+- `artifacts/irrigopro/src/pages/estimate-approval.tsx` (signing sheet; `submit()` ~153; approve button ~478)
+- `artifacts/api-server/src/estimate-pdf-html.ts`, `estimate-payload.ts`, `pdf-view-model.ts` (PDF signature block)
+- Visual reference: `estimate-signature-approval-flow.html` (approved flow + consent wording + PDF stamp)
