@@ -1,0 +1,62 @@
+# Estimate Approval Email — Make It Read Like the PDF
+
+**What & Why**
+The estimate approval email works (sends, approves) but the body needs polish so it "reasonably feels like the PDF." Four issues, from one file (`artifacts/api-server/src/email-service.ts`) plus one config item:
+
+1. **Labor is missing — it jumps from parts to total.** The line-items table shows Description / Qty / Unit / **Labor (hours only, e.g. "2.00h")** / Line Total, then goes straight to a single "Total Estimate." There's no **Parts subtotal → Labor subtotal ($) → Total** breakdown like the PDF. The per-item data already carries `partsCost` and `laborCost` (`EstimateEmailData.items`, lines 43–52), so the subtotals can be computed today.
+2. **Layout should be ticket-type aware.** Inspection wet-check estimates must be **zone-grouped** (Repairs Summary by zone → per-zone line items) like the PDF, not one flat table. Standard estimates keep a single clean table.
+3. **Logo not findable (broken image).** The logo route `GET /api/company-logo/:logoId` is **public** (`routes.ts:4453`, no auth) — so the cause is the **base URL**, not auth. `EmailService.baseUrl` (lines 64–83) falls back to a Replit dev URL when `APP_BASE_URL` isn't set; the recipient's mail client can't reach that host, so `<img src>` fails.
+4. **"View Complete Estimate" link is broken.** `viewUrl` is built as `…/api/estimates/view-**via**-token/${token}` (line 98) — that route **does not exist** (the real one is `view-**by**-token`, and it returns JSON, not a viewable page). It should point at the customer page.
+
+---
+
+## Slice 1 — Add the parts/labor/total breakdown (the "jumps to total" fix)
+### File: `email-service.ts` (`generateEstimateEmailHTML` ~200–363; `generateEstimateEmailText` ~365+)
+- After the line-items table, render a **totals block** matching the PDF:
+  - **Parts subtotal** = Σ `item.partsCost`
+  - **Labor subtotal** = Σ `item.laborCost` (show total labor hours alongside, e.g. "12.5 h — $X")
+  - **Total** = `data.totalAmount` (unchanged)
+- In the line-items table, make labor read as money + hours (not just "2.00h") so a row's labor is legible. Keep columns tight for mobile mail clients.
+- Mirror the same subtotals in the **plain-text** body.
+- Use table-based, inline-styled HTML (already the approach) for mail-client compatibility.
+
+## Slice 2 — Ticket-type-aware layout (inspection = zone-grouped like the PDF)
+### Files
+- `email-service.ts` (email HTML builder).
+- `artifacts/api-server/src/estimate-pdf-html.ts` (PDF already groups by `(controllerLetter, zoneNumber, issueType)`) — **extract/reuse a shared grouping helper** so the email and PDF can't drift.
+- The send flow that populates `EstimateEmailData.items` (`estimate-routes.ts` `_sendEstimateApprovalEmailFlow`) — **pass the zone fields** (`controllerLetter`, `zoneNumber`, `issueType`) through so the email can group, and a flag/derivation for "is inspection-origin."
+### Changes
+- For an **inspection-origin** estimate (items carry zone data / `originWetCheckId`), render the email body **zone-grouped**: a Repairs-Summary-by-zone block, then per Controller → Zone sections with the work (clean issue-type label · part · qty · labor · line total) and a per-zone subtotal — matching the PDF/`inspection-estimate-zone-detail-redesign.html`.
+- **Standard (non-inspection)** estimates render the single improved table from Slice 1.
+- Totals (Slice 1) apply to both.
+
+## Slice 3 — Fix the logo (config + guard)
+- **Config:** set `APP_BASE_URL` to the public app domain (e.g. `https://irrigopro.com`) in the deployment env so `baseUrl` — and therefore the logo `<img src>` and all email links — resolve to a host the recipient can reach. (Run by Replit.)
+- **Guard (code):** confirm `getCompanyLogoUrl` (lines 184–198) produces an absolute, public URL; verify the company actually has a `logo` saved (else the block is correctly omitted). The route is public, so once the host is correct the image loads. Consider logging the resolved logo URL on send for quick verification.
+
+## Slice 4 — Fix the "View Complete Estimate" link
+### File: `email-service.ts` (line 98; used at HTML ~347)
+- Repoint `viewUrl` to the **working customer page**: `${this.baseUrl}/estimate-approval/${data.approvalToken}` (same page the Approve button opens, which renders the full estimate). Remove the bogus `/api/estimates/view-via-token/...`.
+- (Optional) If a PDF-by-token download is desired instead, wire it to a real public token route; otherwise the approval page is the correct "view complete estimate" target.
+
+---
+
+## Tests
+- Standard estimate email shows line items **and** a Parts/Labor/Total breakdown; numbers reconcile to `totalAmount`.
+- Inspection wet-check estimate email renders **zone-grouped** (matches the PDF structure); standard estimate stays a single table.
+- The header logo loads in a real mail client (Gmail/Apple Mail) — i.e. the resolved `/api/company-logo/...` URL is publicly reachable.
+- "View Complete Estimate" opens the estimate approval page (no 404/JSON).
+- Plain-text body mirrors the breakdown.
+
+## Out of scope
+- The approval/sign flow and signature capture (separate, in progress).
+- The PDF itself (it's the reference/source of truth for layout).
+- Decline/approve button behavior (unchanged).
+
+## Relevant files
+- `artifacts/api-server/src/email-service.ts` (`baseUrl` 64–83; `getCompanyLogoUrl` 184–198; `generateEstimateEmailHTML` 200–363; `generateEstimateEmailText` 365+; `viewUrl` 98)
+- `artifacts/api-server/src/estimate-pdf-html.ts` (zone grouping to share)
+- `artifacts/api-server/src/routes/estimate-routes.ts` (`_sendEstimateApprovalEmailFlow` — pass zone fields/inspection flag into `EstimateEmailData`)
+- `artifacts/api-server/src/routes/routes.ts:4453` (`/api/company-logo/:logoId` — public, for reference)
+- Config: `APP_BASE_URL` deployment env var
+- Visual reference: estimate PDF / `inspection-estimate-zone-detail-redesign.html`

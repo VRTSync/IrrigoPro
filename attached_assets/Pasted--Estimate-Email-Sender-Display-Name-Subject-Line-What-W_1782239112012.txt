@@ -1,0 +1,40 @@
+# Estimate Email — Sender Display Name & Subject Line
+
+**What & Why**
+Two small copy changes to the estimate approval email:
+1. **From (display name):** show **"High Plains Irrigation Team"** as the sender name instead of the bare email address.
+2. **Subject:** change from `Estimate Approval Required - {EST-NUMBER}` to **`Irrigation Estimate #{number}`**.
+
+No SendGrid re-verification needed — the **envelope From address stays the verified `info@highplainsprop.com`** (`DEFAULT_FROM_EMAIL`). Only the friendly name and subject text change. Single small change in one file. No schema change.
+
+## File
+- `artifacts/api-server/src/email-service.ts` — `sendEstimateApprovalEmail` (`from` ~129; `subject` ~134).
+
+## Changes
+1. **From name.** Replace `from: DEFAULT_FROM_EMAIL` with a named sender:
+   ```ts
+   from: { email: DEFAULT_FROM_EMAIL, name: SENDGRID_FROM_NAME }
+   ```
+   where `SENDGRID_FROM_NAME` defaults to **`"High Plains Irrigation Team"`** (make it an env var / company-profile-derived value so it isn't hard-coded forever, but the default/value Randy wants now is exactly "High Plains Irrigation Team"). Keep the existing `replyTo` (company profile email) unchanged.
+2. **Subject.** Replace:
+   ```ts
+   subject: `Estimate Approval Required - ${formatEstimateNumber(data.estimateNumber)}`,
+   ```
+   with a subject that reads **`Irrigation Estimate #1778541777944`**.
+   - **Avoid a doubled prefix.** `formatEstimateNumber` returns `EST-1778541777944`, so `Irrigation Estimate #${formatEstimateNumber(...)}` would render the ugly `Irrigation Estimate #EST-1778541777944`. Use the **raw estimate number** (strip any leading `EST-`/`#`):
+     ```ts
+     subject: `Irrigation Estimate #${String(data.estimateNumber).replace(/^EST-?/i, '')}`,
+     ```
+   - Net: **"Irrigation Estimate #1778541777944"** — no "Approval Required", no doubled prefix.
+
+## Tests
+- A sent estimate email shows the sender as **High Plains Irrigation Team** (with `info@highplainsprop.com` underneath as the address), and replies still route to the company's reply-to.
+- The subject reads **"Irrigation Estimate #1778541"** (no "Approval Required", no doubled `#`).
+- SendGrid still accepts the send (no sender-identity error — address unchanged).
+
+## Out of scope
+- The email body redesign (separate ticket).
+- The from **address** itself (`info@highplainsprop.com`, already set).
+
+## Relevant files
+- `artifacts/api-server/src/email-service.ts` (`from` ~129, `subject` ~134; `DEFAULT_FROM_EMAIL` ~7–11)
