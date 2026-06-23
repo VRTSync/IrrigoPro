@@ -55,6 +55,7 @@ import {
   Link as LinkIcon,
 } from "lucide-react";
 import { PricingAuditHistory } from "@/components/billing/pricing-audit-history";
+import { ApprovalSignatureBlock } from "@/components/estimates/approval-signature-block";
 import { EditableField, InlineEditProvider, InlineEditContext } from "@/components/ui/editable-field";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
@@ -672,6 +673,22 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
               <BilledIndicator
                 invoiceId={workOrder.invoiceId}
                 billedAt={workOrder.billedAt}
+              />
+            )}
+
+            {/* Approval signature — present when this WO originated from an
+                estimate the customer signed online (Task #1500). The seven
+                approvalSignature* fields are read-through from the estimate
+                by GET /api/work-orders/:id and merged into the WO payload. */}
+            {(workOrder as any).approvalSignatureData && (
+              <ApprovalSignatureBlock
+                approvalSignatureType={(workOrder as any).approvalSignatureType}
+                approvalSignatureData={(workOrder as any).approvalSignatureData}
+                approvalSignerName={(workOrder as any).approvalSignerName}
+                approvalSignedAt={(workOrder as any).approvalSignedAt}
+                approvalSignerIp={(workOrder as any).approvalSignerIp}
+                approvalConsentText={(workOrder as any).approvalConsentText}
+                approvalConsentAcceptedAt={(workOrder as any).approvalConsentAcceptedAt}
               />
             )}
 

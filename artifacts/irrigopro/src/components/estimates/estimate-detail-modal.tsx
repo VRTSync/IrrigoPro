@@ -18,6 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, authedPdfUrl } from "@/lib/queryClient";
 import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink, Send, Eye, Download, Trash2, Link as LinkIcon, Copy, PenLine } from "lucide-react";
 import { EstimateMediaBlock } from "@/components/estimates/estimate-media-block";
+import { ApprovalSignatureBlock } from "@/components/estimates/approval-signature-block";
 import { buildMapsUrl } from "@/lib/maps-url";
 import type { Estimate } from "@workspace/db/schema";
 import {
@@ -809,6 +810,19 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
             {/* Scrollable Content */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-6">
               <div className="space-y-4 sm:space-y-6">
+            {/* Approval signature — shown when the customer drew or typed a
+                signature during the online approval flow (Task #1500). */}
+            {(isApproved(estimate) || isConvertedToWorkOrder(estimate)) && (
+              <ApprovalSignatureBlock
+                approvalSignatureType={estimate.approvalSignatureType as string | null | undefined}
+                approvalSignatureData={estimate.approvalSignatureData}
+                approvalSignerName={estimate.approvalSignerName}
+                approvalSignedAt={estimate.approvalSignedAt as string | null | undefined}
+                approvalSignerIp={estimate.approvalSignerIp}
+                approvalConsentText={estimate.approvalConsentText}
+                approvalConsentAcceptedAt={estimate.approvalConsentAcceptedAt as string | null | undefined}
+              />
+            )}
             {/* Header Information */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
               <Card>

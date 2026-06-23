@@ -53,6 +53,7 @@ import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { preparePhotoForUpload } from "@/lib/photo-prep";
 import { PricingAuditHistory } from "@/components/billing/pricing-audit-history";
+import { ApprovalSignatureBlock } from "@/components/estimates/approval-signature-block";
 import { History, Cpu, Droplets, Navigation } from "lucide-react";
 import { buildMapsUrl } from "@/lib/maps-url";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -1373,6 +1374,22 @@ export function CompletedWorkDetailModal({
                   )}
                 </div>
               </div>
+            )}
+
+            {/* Approval signature — shown for work orders that originated from
+                a customer-signed estimate (Task #1500). The signature fields
+                are merged into the WO payload by GET /api/work-orders/:id;
+                they are never present on pure billing-sheet records. */}
+            {isWorkOrder && (wo as any)?.approvalSignatureData && (
+              <ApprovalSignatureBlock
+                approvalSignatureType={(wo as any).approvalSignatureType}
+                approvalSignatureData={(wo as any).approvalSignatureData}
+                approvalSignerName={(wo as any).approvalSignerName}
+                approvalSignedAt={(wo as any).approvalSignedAt}
+                approvalSignerIp={(wo as any).approvalSignerIp}
+                approvalConsentText={(wo as any).approvalConsentText}
+                approvalConsentAcceptedAt={(wo as any).approvalConsentAcceptedAt}
+              />
             )}
 
             {/* Notes from Irrigation Manager — billing manager callout (Task #1459).

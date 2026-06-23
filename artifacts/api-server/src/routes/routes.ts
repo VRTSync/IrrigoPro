@@ -12099,8 +12099,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         notes: item.notes ?? null,
         totalPrice: item.totalPrice,
       }));
+      // Task #1500 — read-through the seven approval-signature fields from
+      // the originating estimate when the WO was created from one. The
+      // signature lives on the estimate (no new WO columns); we merge the
+      // fields here so both the tech-facing and manager-facing detail views
+      // can render the "Customer Approved — Signature on File" block without
+      // a separate client fetch.
+      let estimateSignatureFields: Record<string, unknown> = {};
+      if (workOrder.estimateId) {
+        try {
+          const origEstimate = await storage.getEstimate(workOrder.estimateId as number);
+          if (origEstimate) {
+            estimateSignatureFields = {
+              approvalSignatureType: origEstimate.approvalSignatureType ?? null,
+              approvalSignatureData: origEstimate.approvalSignatureData ?? null,
+              approvalSignerName: origEstimate.approvalSignerName ?? null,
+              approvalSignedAt: origEstimate.approvalSignedAt ?? null,
+              approvalSignerIp: origEstimate.approvalSignerIp ?? null,
+              approvalConsentText: origEstimate.approvalConsentText ?? null,
+              approvalConsentAcceptedAt: origEstimate.approvalConsentAcceptedAt ?? null,
+            };
+          }
+        } catch {
+          // Non-fatal — WO detail still works without the signature fields.
+        }
+      }
       // Strip pricing fields for field technicians
-      res.json(applyPricingVisibility(req, { ...workOrder, customer: customerRatesWo, items: woItems }));
+      res.json(applyPricingVisibility(req, { ...workOrder, customer: customerRatesWo, items: woItems, ...estimateSignatureFields }));
     } catch (error) {
       req.log ? req.log.error(error) : console.error(error);
       res.status(500).json({ message: "Failed to fetch work order" });
