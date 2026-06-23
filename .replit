@@ -32,6 +32,10 @@ args = "pdf-cover-header"
 task = "workflow.run"
 args = "wc-customer-picker-filter"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "wc-in-flight-photos"
+
 [[workflows.workflow]]
 name = "auth-middleware-coverage"
 author = "agent"
@@ -75,6 +79,17 @@ args = "pnpm --filter @workspace/irrigopro exec vitest run src/pages/wet-checks/
 
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow]]
+name = "wc-in-flight-photos"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd artifacts/irrigopro && npx vitest run src/pages/wet-checks-in-flight-photos.test.tsx"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [agent]
 stack = "PNPM_WORKSPACE"
