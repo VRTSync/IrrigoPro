@@ -16275,6 +16275,112 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Customer-facing condition report PDF ──────────────────────────────────
+  // Separate from the internal /pdf route — no labor, PSI/GPM, or pricing.
+  // Only manager/admin/billing roles may download or send this report.
+
+  app.get("/api/wet-checks/:id/report-pdf", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isWetCheckManagerRole(req.authenticatedUserRole)) {
+      res.status(403).json({ message: "Access restricted to manager/admin/billing roles" }); return;
+    }
+    try {
+      const id = parseInt(req.params.id);
+      if (Number.isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
+      const wc = await storage.getWetCheck(id, cid);
+      if (!wc) { res.status(404).json({ message: "Not found" }); return; }
+
+      const company = await storage.getCompanyProfile(cid);
+      const { renderWetCheckReportPdf } = await import("../wet-check-report-pdf");
+      const pdf = await renderWetCheckReportPdf(wc, { company: company ?? null });
+
+      const wantsDownload = String(req.query?.download ?? "") === "1";
+      const safeCustomer = (wc.customerName ?? "")
+        // eslint-disable-next-line no-control-regex
+        .replace(/[\/\\:*?"<>|\x00-\x1f]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const date = wc.startedAt
+        ? new Date(wc.startedAt).toISOString().slice(0, 10)
+        : "unknown";
+      const filename = safeCustomer
+        ? `${safeCustomer} - Inspection Report - ${date}.pdf`
+        : `inspection-report-${id}-${date}.pdf`;
+      // eslint-disable-next-line no-control-regex
+      const asciiFilename = filename.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
+      const utf8Filename = encodeURIComponent(filename);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `${wantsDownload ? "attachment" : "inline"}; filename="${asciiFilename}"; filename*=UTF-8''${utf8Filename}`,
+      );
+      res.send(pdf);
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "wetCheckReportPdf",
+        ctx: { cid, wetCheckId: req.params.id },
+        fallbackMessage: "Failed to generate customer report PDF",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  app.post("/api/wet-checks/:id/report/send", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isWetCheckManagerRole(req.authenticatedUserRole)) {
+      res.status(403).json({ message: "Access restricted to manager/admin/billing roles" }); return;
+    }
+    try {
+      const id = parseInt(req.params.id);
+      if (Number.isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
+      const wc = await storage.getWetCheck(id, cid);
+      if (!wc) { res.status(404).json({ message: "Not found" }); return; }
+
+      const { to, note } = req.body ?? {};
+      // Determine recipient: explicit override or customer email on file
+      let toEmail: string | null = typeof to === "string" && to.trim() ? to.trim() : null;
+      if (!toEmail) {
+        const customer = await storage.getCustomer(wc.customerId);
+        toEmail = customer?.email ?? null;
+      }
+      if (!toEmail) {
+        res.status(422).json({ message: "No email address on file for this customer. Provide a 'to' email." });
+        return;
+      }
+
+      const company = await storage.getCompanyProfile(cid);
+      const { renderWetCheckReportPdf } = await import("../wet-check-report-pdf");
+      const pdf = await renderWetCheckReportPdf(wc, { company: company ?? null });
+
+      const inspectionDate = wc.startedAt
+        ? new Date(wc.startedAt).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
+        : "—";
+
+      await EmailService.sendWetCheckReport({
+        to: toEmail,
+        customerName: wc.customerName ?? "",
+        propertyAddress: wc.propertyAddress ?? null,
+        technicianName: wc.technicianName ?? null,
+        inspectionDate,
+        companyName: company?.name ?? "IrrigoPro",
+        companyEmail: company?.email ?? null,
+        companyPhone: company?.phone ?? null,
+        pdfBuffer: pdf,
+        wetCheckId: id,
+        note: typeof note === "string" ? note : undefined,
+      });
+
+      res.json({ sent: true, to: toEmail });
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "wetCheckReportSend",
+        ctx: { cid, wetCheckId: req.params.id },
+        fallbackMessage: "Failed to send customer report",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
   // numControllers is intentionally NOT accepted from the client — the
   // server is authoritative and always derives it from the customer record
   // (customer.totalControllers) so a manipulated client cannot under- or

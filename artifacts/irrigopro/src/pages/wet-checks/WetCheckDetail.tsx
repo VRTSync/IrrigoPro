@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { ActivityTab } from "@/components/activity/ActivityTab";
 import { useLocation, Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Loader2, ChevronLeft, CheckCircle2, Wrench, AlertTriangle, Camera, Download, Droplets } from "lucide-react";
+import { Loader2, ChevronLeft, CheckCircle2, Wrench, AlertTriangle, Camera, Download, Droplets, Send, FileText } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/lib/auth-context";
 import { countZonePhotos } from "@/lib/wet-check-photos";
 import { apiRequest, asArray, queryClient, useArrayQuery, authedPdfUrl } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -136,6 +140,26 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [preview, setPreview] = useState<SubmitPreview | null>(null);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [isDownloadingReport, setIsDownloadingReport] = useState(false);
+  const [sendReportOpen, setSendReportOpen] = useState(false);
+  const [sendReportEmail, setSendReportEmail] = useState("");
+  const [sendReportNote, setSendReportNote] = useState("");
+  const { user: authUser } = useAuth();
+
+  // Manager-tier roles that may download/send the customer report
+  const canSeeCustomerReport = (
+    authUser?.role === "irrigation_manager" ||
+    authUser?.role === "company_admin" ||
+    authUser?.role === "super_admin" ||
+    authUser?.role === "billing_manager"
+  );
+
+  const { data: wcCustomer } = useQuery<import("@workspace/db/schema").Customer>({
+    queryKey: ["/api/customers", wc?.customerId],
+    queryFn: () => apiRequest(`/api/customers/${wc!.customerId}`),
+    enabled: !!wc?.customerId && canSeeCustomerReport,
+    staleTime: 5 * 60 * 1000,
+  });
 
   // Slice 3 — server-authoritative WET_CHECK_AUTO_BILL flag. When OFF,
   // the field UI must fall back to the Slice 2 plain-submit flow (no
@@ -145,6 +169,19 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
     staleTime: 5 * 60 * 1000,
   });
   const autoBillEnabled = autoBillCfg?.enabled ?? true;
+
+  const sendReportMut = useMutation({
+    mutationFn: ({ to, note }: { to: string; note: string }) =>
+      apiRequest(`/api/wet-checks/${wc?.id ?? id}/report/send`, "POST", { to: to || undefined, note: note || undefined }),
+    onSuccess: (_res, vars) => {
+      toast({ title: "Report sent", description: `Inspection report emailed to ${vars.to || "customer"}.` });
+      setSendReportOpen(false);
+      setSendReportEmail("");
+      setSendReportNote("");
+    },
+    onError: (e: any) =>
+      toast({ title: "Couldn't send report", description: e?.message, variant: "destructive" }),
+  });
 
   const previewMut = useMutation({
     mutationFn: (): Promise<SubmitPreview> =>
@@ -694,6 +731,81 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
                 <Download className="w-4 h-4 mr-1" />
                 {isDownloadingPdf ? "Preparing..." : "Download PDF"}
               </Button>
+              {canSeeCustomerReport && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isDownloadingReport}
+                    data-testid="wet-check-download-report"
+                    onClick={async () => {
+                      if (isDownloadingReport) return;
+                      setIsDownloadingReport(true);
+                      try {
+                        const url = authedPdfUrl(`/api/wet-checks/${wc.id}/report-pdf`, { download: "1" });
+                        const res = await fetch(url, { credentials: "include" });
+                        if (!res.ok) {
+                          let msg = `Failed (${res.status})`;
+                          try {
+                            const ct = res.headers.get("content-type") ?? "";
+                            if (ct.includes("application/json")) {
+                              const j = await res.json();
+                              if (j?.message) msg = j.message;
+                            } else {
+                              const t = await res.text();
+                              if (t) msg = t;
+                            }
+                          } catch { /* ignore */ }
+                          throw new Error(msg);
+                        }
+                        const blob = await res.blob();
+                        const objUrl = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = objUrl;
+                        const date = wc.startedAt
+                          ? new Date(wc.startedAt).toISOString().slice(0, 10)
+                          : "unknown";
+                        const safeName = (wc.customerName ?? "")
+                          .replace(/[/\\:*?"<>|]/g, " ")
+                          .replace(/\s+/g, " ")
+                          .trim();
+                        a.download = safeName
+                          ? `${safeName} - Inspection Report - ${date}.pdf`
+                          : `inspection-report-${wc.id}-${date}.pdf`;
+                        a.rel = "noopener";
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
+                      } catch (err) {
+                        toast({
+                          title: "Couldn't download customer report",
+                          description: err instanceof Error ? err.message : "Please try again.",
+                          variant: "destructive",
+                        });
+                      } finally {
+                        setIsDownloadingReport(false);
+                      }
+                    }}
+                  >
+                    <FileText className="w-4 h-4 mr-1" />
+                    {isDownloadingReport ? "Preparing..." : "Customer Report"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    data-testid="wet-check-send-report"
+                    onClick={() => {
+                      setSendReportEmail(wcCustomer?.email ?? "");
+                      setSendReportNote("");
+                      setSendReportOpen(true);
+                    }}
+                  >
+                    <Send className="w-4 h-4 mr-1" />
+                    Send to Customer
+                  </Button>
+                </>
+              )}
             </>
           )}
           <OfflineSyncUI />
@@ -1080,6 +1192,59 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
         </div>
         <ActivityTab resource="wet-checks" id={wc?.id ?? null} />
       </div>
+
+      {/* Send Customer Report modal */}
+      <Dialog open={sendReportOpen} onOpenChange={(o) => { if (!sendReportMut.isPending) setSendReportOpen(o); }}>
+        <DialogContent data-testid="send-report-dialog">
+          <DialogHeader>
+            <DialogTitle>Send Inspection Report to Customer</DialogTitle>
+            <DialogDescription>
+              A PDF condition report (zones, findings, photos — no pricing) will be emailed to the customer.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-1">
+            <div className="space-y-1.5">
+              <Label htmlFor="send-report-email">Recipient email</Label>
+              <Input
+                id="send-report-email"
+                type="email"
+                placeholder="customer@example.com (leave blank to use email on file)"
+                value={sendReportEmail}
+                onChange={e => setSendReportEmail(e.target.value)}
+                data-testid="send-report-email-input"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="send-report-note">Note to customer <span className="text-muted-foreground text-xs">(optional)</span></Label>
+              <Textarea
+                id="send-report-note"
+                rows={3}
+                placeholder="Add a note that appears in the email body…"
+                value={sendReportNote}
+                onChange={e => setSendReportNote(e.target.value)}
+                data-testid="send-report-note-input"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setSendReportOpen(false)}
+              disabled={sendReportMut.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => sendReportMut.mutate({ to: sendReportEmail, note: sendReportNote })}
+              disabled={sendReportMut.isPending}
+              data-testid="send-report-confirm"
+            >
+              {sendReportMut.isPending ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Send className="w-4 h-4 mr-1" />}
+              Send Report
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Submit-confirm modal — surfaces the server's preview of what
           will be auto-billed and what will land in the manager queue

@@ -13,7 +13,19 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, useLocation, Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useArrayQuery } from "@/lib/queryClient";
-import { apiRequest, asArray, parseApiError } from "@/lib/queryClient";
+import { apiRequest, asArray, parseApiError, authedPdfUrl } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cachedApiRequest } from "@/lib/offline/api";
 import {
   AlertDialog,
@@ -28,7 +40,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/hooks/use-toast";
 import { LaborHoursStepper } from "@/components/ui/labor-hours-stepper";
 import {
   Loader2,
@@ -45,6 +56,8 @@ import {
   Info,
   FileCheck,
   DollarSign,
+  Send,
+  Download,
 } from "lucide-react";
 import type {
   WetCheckWithDetails,
@@ -732,6 +745,12 @@ function ManagerCTA({ wc }: { wc: WetCheckWithDetails }) {
 // ─── Main view ───────────────────────────────────────────────────────────────
 
 function ManagerWetCheckDetailView({ id }: { id: number }) {
+  const { toast } = useToast();
+  const [isDownloadingReport, setIsDownloadingReport] = useState(false);
+  const [sendReportOpen, setSendReportOpen] = useState(false);
+  const [sendReportEmail, setSendReportEmail] = useState("");
+  const [sendReportNote, setSendReportNote] = useState("");
+
   const { data: wc, isLoading } = useQuery<WetCheckWithDetails>({
     queryKey: ["/api/wet-checks", id],
     queryFn: () => apiRequest(`/api/wet-checks/${id}`),
@@ -748,6 +767,19 @@ function ManagerWetCheckDetailView({ id }: { id: number }) {
     queryKey: ["/api/customers", wc?.customerId],
     queryFn: () => apiRequest(`/api/customers/${wc!.customerId}`),
     enabled: !!wc?.customerId,
+  });
+
+  const sendReportMut = useMutation({
+    mutationFn: ({ to, note }: { to: string; note: string }) =>
+      apiRequest(`/api/wet-checks/${id}/report/send`, "POST", { to: to || undefined, note: note || undefined }),
+    onSuccess: (_res, vars) => {
+      toast({ title: "Report sent", description: `Inspection report emailed to ${vars.to || "customer"}.` });
+      setSendReportOpen(false);
+      setSendReportEmail("");
+      setSendReportNote("");
+    },
+    onError: (e: any) =>
+      toast({ title: "Couldn't send report", description: e?.message, variant: "destructive" }),
   });
 
   if (isLoading || !wc) {
@@ -868,6 +900,62 @@ function ManagerWetCheckDetailView({ id }: { id: number }) {
             </div>
           )}
         </div>
+      </div>
+
+      {/* ── Customer report actions ── */}
+      <div className="flex flex-wrap gap-2" data-testid="mgr-customer-report-actions">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={isDownloadingReport}
+          data-testid="mgr-download-customer-report"
+          onClick={async () => {
+            if (isDownloadingReport) return;
+            setIsDownloadingReport(true);
+            try {
+              const url = authedPdfUrl(`/api/wet-checks/${id}/report-pdf`, { download: "1" });
+              const res = await fetch(url, { credentials: "include" });
+              if (!res.ok) {
+                let msg = `Failed (${res.status})`;
+                try {
+                  const ct = res.headers.get("content-type") ?? "";
+                  if (ct.includes("application/json")) {
+                    const j = await res.json(); if (j?.message) msg = j.message;
+                  } else { const t = await res.text(); if (t) msg = t; }
+                } catch { /* ignore */ }
+                throw new Error(msg);
+              }
+              const blob = await res.blob();
+              const objUrl = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = objUrl;
+              const date = wc.startedAt ? new Date(wc.startedAt).toISOString().slice(0, 10) : "unknown";
+              const safeName = (wc.customerName ?? "").replace(/[/\\:*?"<>|]/g, " ").replace(/\s+/g, " ").trim();
+              a.download = safeName ? `${safeName} - Inspection Report - ${date}.pdf` : `inspection-report-${id}-${date}.pdf`;
+              a.rel = "noopener";
+              document.body.appendChild(a); a.click(); a.remove();
+              setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
+            } catch (err) {
+              toast({ title: "Couldn't download customer report", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+            } finally { setIsDownloadingReport(false); }
+          }}
+        >
+          <Download className="w-4 h-4 mr-1" />
+          {isDownloadingReport ? "Preparing…" : "Customer Report (PDF)"}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="mgr-send-customer-report"
+          onClick={() => {
+            setSendReportEmail(customer?.email ?? "");
+            setSendReportNote("");
+            setSendReportOpen(true);
+          }}
+        >
+          <Send className="w-4 h-4 mr-1" />
+          Send to Customer
+        </Button>
       </div>
 
       {/* ── Zone status grid ── */}
@@ -1059,6 +1147,55 @@ function ManagerWetCheckDetailView({ id }: { id: number }) {
       <div className="pt-1">
         <ManagerCTA wc={wc} />
       </div>
+
+      {/* ── Send customer report modal ── */}
+      <Dialog open={sendReportOpen} onOpenChange={(o) => { if (!sendReportMut.isPending) setSendReportOpen(o); }}>
+        <DialogContent data-testid="mgr-send-report-dialog">
+          <DialogHeader>
+            <DialogTitle>Send Inspection Report to Customer</DialogTitle>
+            <DialogDescription>
+              A PDF condition report (zones, findings, photos — no pricing) will be emailed to the customer.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-1">
+            <div className="space-y-1.5">
+              <Label htmlFor="mgr-send-report-email">Recipient email</Label>
+              <Input
+                id="mgr-send-report-email"
+                type="email"
+                placeholder="customer@example.com (leave blank to use email on file)"
+                value={sendReportEmail}
+                onChange={e => setSendReportEmail(e.target.value)}
+                data-testid="mgr-send-report-email-input"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="mgr-send-report-note">Note to customer <span className="text-muted-foreground text-xs">(optional)</span></Label>
+              <Textarea
+                id="mgr-send-report-note"
+                rows={3}
+                placeholder="Add a note that appears in the email body…"
+                value={sendReportNote}
+                onChange={e => setSendReportNote(e.target.value)}
+                data-testid="mgr-send-report-note-input"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSendReportOpen(false)} disabled={sendReportMut.isPending}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => sendReportMut.mutate({ to: sendReportEmail, note: sendReportNote })}
+              disabled={sendReportMut.isPending}
+              data-testid="mgr-send-report-confirm"
+            >
+              {sendReportMut.isPending ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Send className="w-4 h-4 mr-1" />}
+              Send Report
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

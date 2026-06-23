@@ -1338,4 +1338,123 @@ The signed PDF is attached to this email for your records.
       }
     }
   }
+
+  /**
+   * Emails the customer-facing wet check condition report as a PDF attachment.
+   * Subject: "Your Irrigation Inspection Results — {propertyAddress}"
+   */
+  static async sendWetCheckReport(args: {
+    to: string;
+    customerName: string;
+    propertyAddress: string | null;
+    technicianName: string | null;
+    inspectionDate: string;
+    companyName: string;
+    companyEmail: string | null;
+    companyPhone: string | null;
+    pdfBuffer: Buffer;
+    wetCheckId: number;
+    note?: string;
+  }): Promise<void> {
+    if (!isEmailConfigured()) {
+      throw new Error('Email is not configured: SENDGRID_API_KEY is missing. Report was not sent.');
+    }
+
+    const property = args.propertyAddress || args.customerName;
+    const subject = `Your Irrigation Inspection Results — ${property}`;
+    const filename = `${property.replace(/[/\\:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim()} - Inspection Report.pdf`;
+
+    const replyToAddr =
+      args.companyEmail && args.companyEmail.trim().length > 0
+        ? args.companyEmail
+        : undefined;
+
+    const noteBlock = args.note && args.note.trim()
+      ? `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px 20px;margin:20px 0;color:#92400e;font-size:14px;line-height:1.5;white-space:pre-wrap;">${this.escapeHtml(args.note)}</div>`
+      : '';
+
+    const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:20px;">
+  <div style="background:linear-gradient(135deg,#1E5A99,#0E3B6B);color:white;padding:30px;border-radius:12px 12px 0 0;text-align:center;">
+    <h1 style="margin:0;font-size:26px;">System Inspection Results</h1>
+    <p style="margin:8px 0 0 0;font-size:16px;opacity:0.9;">${this.escapeHtml(args.companyName)}</p>
+  </div>
+  <div style="background:white;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:30px;">
+    <h2 style="color:#1f2937;margin-top:0;">Hello ${this.escapeHtml(args.customerName)},</h2>
+    <p style="font-size:15px;color:#4b5563;">
+      We've completed an irrigation inspection at <strong>${this.escapeHtml(property)}</strong>.
+      Please find your full system condition report attached to this email.
+    </p>
+    ${noteBlock}
+    <div style="background:#f9fafb;border-radius:8px;padding:20px;margin:20px 0;">
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">
+        <tr><td style="padding:6px 0;font-weight:600;color:#6b7280;">Property:</td><td style="padding:6px 0;color:#1f2937;">${this.escapeHtml(property)}</td></tr>
+        <tr><td style="padding:6px 0;font-weight:600;color:#6b7280;">Inspection date:</td><td style="padding:6px 0;color:#1f2937;">${this.escapeHtml(args.inspectionDate)}</td></tr>
+        ${args.technicianName ? `<tr><td style="padding:6px 0;font-weight:600;color:#6b7280;">Technician:</td><td style="padding:6px 0;color:#1f2937;">${this.escapeHtml(args.technicianName)}</td></tr>` : ''}
+      </table>
+    </div>
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:16px 20px;margin:20px 0;">
+      <p style="margin:0;color:#1e40af;font-size:14px;"><strong>📎 Attachment:</strong> Your detailed condition report is attached to this email.</p>
+    </div>
+    <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:24px;">
+      <p style="color:#6b7280;font-size:13px;margin:0;">Questions? Reply to this email or call us directly.</p>
+      <div style="margin-top:12px;font-size:13px;color:#6b7280;">
+        <p style="margin:3px 0;font-weight:600;color:#374151;">${this.escapeHtml(args.companyName)}</p>
+        ${args.companyPhone ? `<p style="margin:3px 0;">📞 ${this.escapeHtml(args.companyPhone)}</p>` : ''}
+        ${args.companyEmail ? `<p style="margin:3px 0;">✉️ ${this.escapeHtml(args.companyEmail)}</p>` : ''}
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    const text = `Irrigation Inspection Results — ${property}
+
+Hello ${args.customerName},
+
+We've completed an irrigation inspection at ${property}.
+Your full system condition report is attached to this email.
+${args.note && args.note.trim() ? `\nNote from ${args.companyName}:\n${args.note}\n` : ''}
+Inspection date: ${args.inspectionDate}${args.technicianName ? `\nTechnician: ${args.technicianName}` : ''}
+
+Questions? Reply to this email or call us directly.
+
+—
+${args.companyName}${args.companyPhone ? `\n${args.companyPhone}` : ''}${args.companyEmail ? `\n${args.companyEmail}` : ''}
+`;
+
+    try {
+      await sgMail.send({
+        from: { email: DEFAULT_FROM_EMAIL, name: SENDGRID_FROM_NAME },
+        ...(replyToAddr ? { replyTo: replyToAddr } : {}),
+        to: args.to,
+        subject,
+        html,
+        text,
+        categories: ['wet-check-report'],
+        customArgs: { wetCheckId: String(args.wetCheckId) },
+        attachments: [
+          {
+            filename,
+            content: args.pdfBuffer.toString('base64'),
+            type: 'application/pdf',
+            disposition: 'attachment',
+          },
+        ],
+      });
+    } catch (error: any) {
+      const sgErrors = error?.response?.body?.errors;
+      const sgReason = Array.isArray(sgErrors)
+        ? sgErrors.map((e: any) => e?.message).filter((m: unknown): m is string => typeof m === 'string' && m.length > 0).join('; ')
+        : '';
+      const baseMsg = (error instanceof Error && error.message) || 'Unknown SendGrid error';
+      throw new Error(
+        sgReason
+          ? `SendGrid rejected the report email: ${sgReason}`
+          : `Failed to send report email: ${baseMsg}`,
+      );
+    }
+  }
 }
