@@ -1,0 +1,69 @@
+# Wet Check Results Report — Customer-Facing Condition PDF
+
+**What & Why**
+After a wet check, we need a clean, **customer-facing report** that informs the customer of their system's condition. Today the only wet-check document is the **internal** PDF (`GET /api/wet-checks/:id/pdf`, `wet-check-pdf.ts`) — it shows workflow status, technician, **labor hours**, **repair labor per zone**, **PSI/GPM**, and findings counts. That's a back-office record, not something to put in front of a customer.
+
+This adds a separate **Wet Check Results Report**: branded, plain-language, **condition-only (no pricing, no labor, no PSI/GPM, no internal status)**, with a system-health summary and per-zone findings + photos. **Downloadable as a PDF** and **sendable to the customer via a link/email** (like the estimate flow).
+
+**Design decisions (confirmed with Randy):**
+- **Condition report only** — no dollar amounts; the estimate handles pricing/approval.
+- **Delivery:** downloadable PDF (primary) **and** sendable to the customer.
+- **Content:** branded header, system-health summary (zones checked / running well / need attention / N/A), per-zone findings in plain language with **finding photos**, a "zones running well" rollup, and a soft closing line pointing to the estimate. **Exclude** labor, PSI/GPM, pricing, and internal workflow status.
+
+**Visual source of truth:** `wet-check-results-report-mockup.html` (approved layout).
+
+Reuse the existing PDF pipeline (puppeteer render, logo resolution, base64 embedding) — do **not** rebuild it. Three slices.
+
+---
+
+## Slice 1 — The report renderer
+### Files
+- New `artifacts/api-server/src/wet-check-report-pdf.ts` (customer report), modeled on `wet-check-pdf.ts` (`buildWetCheckHtml` / `renderWetCheckPdf`) — reuse `resolveChromiumExecutable`, `fetchLogoAsBase64`, the footer/"Powered by" pattern, and brand-color extraction.
+- `artifacts/api-server/src/inspection-issue-labels.ts` (plain-language issue labels) and `inspection-issue` mapping — use these so findings read as "Broken spray head," not `head_replacement`.
+
+### Build the report from `WetCheckWithDetails`
+- **Header:** company logo + name/contact; doc label "System Inspection — Wet Check Report"; inspection date.
+- **Meta:** Customer, Property address, Inspection date, Inspected by (technician). **No** status/submitted/approved workflow stamps.
+- **System Health Summary:** counts of zones checked, running well (ran OK), need attention (has findings), N/A — plus a simple health bar (% well / attention / N/A). Derive from zone records (`status` / `ranOk`) and findings.
+- **Zones that need attention:** per zone with findings, list each finding using the **plain-language label** + a short human description, and embed the **finding photos** for that zone (fetch + base64-embed via the same path the internal PDF uses for images; sign/serve through object storage). No dispositions/labor.
+- **Zones running well:** a compact rollup ("23 of 28 zones ran cleanly … no action needed") with the zone list.
+- **Closing:** soft next-step line referencing the estimate (keep it gentle; Randy may tune wording).
+- **Explicitly omit:** labor hours, repair labor, PSI/GPM, internal status, and any pricing.
+
+### Acceptance
+- The rendered PDF matches the mockup's structure and contains **no** labor/PSI/GPM/pricing/internal-status data; photos appear under the right zones.
+
+## Slice 2 — Routes: download + send
+### File: `artifacts/api-server/src/routes/routes.ts` (near the existing wet-check PDF route ~16169)
+- **`GET /api/wet-checks/:id/report-pdf`** — `requireAuthentication`, company-scoped; streams the customer report PDF (`Content-Type: application/pdf`, filename like `wet-check-report-<customer>-<date>.pdf`). Mirror the auth/company-scope and error handling of the existing `/pdf` route.
+- **`POST /api/wet-checks/:id/report/send`** — emails the report to the customer (attach the PDF and/or a branded link), reusing the `EmailService`/SendGrid path and the verified `info@highplainsprop.com` sender. Subject e.g. "Your Irrigation Inspection Results — {Property}". (If a public token-link view is wanted later, add it then; the PDF attachment satisfies "send to customer" now.)
+- Keep the existing internal `/pdf` route unchanged.
+
+## Slice 3 — UI entry points
+### Files
+- The wet-check detail / manager review surfaces (e.g. `pages/wet-checks/WetCheckDetail.tsx` / `ManagerWetCheckDetailPage.tsx`, and the snapshot/review views).
+### Changes
+- Add a **"Download Customer Report (PDF)"** action wherever a completed wet check is viewed (manager + admin). Hits `GET …/report-pdf`.
+- Add a **"Send to Customer"** action that calls `POST …/report/send` (confirm recipient = customer email on file, allow override, optional note — consistent with the estimate send modal).
+- Gate to manager/admin/billing roles (not field tech), matching other customer-facing send actions.
+
+## Tests
+- Report PDF renders for a completed wet check with mixed zones: health summary counts are correct; attention zones show findings + photos; "running well" rollup is accurate; **no** labor/PSI/GPM/pricing/status anywhere.
+- Download route returns a valid PDF, company-scoped (other company → 404/403; super-admin cross-tenant OK).
+- Send route emails the customer with the report; sender/reply-to correct; SendGrid accepts.
+- A wet check with zero findings renders a clean "everything running well" report.
+- Logo resolves in the PDF (same resolution as the internal PDF / estimate PDF).
+
+## Out of scope
+- The internal wet-check PDF (`/pdf`) — unchanged, stays the back-office record.
+- Pricing/estimate (separate; the report only points to it).
+- Branch-label display, signature work, email redesign (separate tickets).
+
+## Relevant files
+- New: `artifacts/api-server/src/wet-check-report-pdf.ts` (model on `wet-check-pdf.ts`)
+- `artifacts/api-server/src/wet-check-pdf.ts` (reference: render pipeline, logo, footer)
+- `artifacts/api-server/src/inspection-issue-labels.ts` (plain-language finding labels)
+- `artifacts/api-server/src/routes/routes.ts` (`/api/wet-checks/:id/pdf` ~16169 — add `/report-pdf` + `/report/send`)
+- `artifacts/api-server/src/email-service.ts` (send path; verified sender)
+- `artifacts/irrigopro/src/pages/wet-checks/WetCheckDetail.tsx` / `ManagerWetCheckDetailPage.tsx` (UI buttons)
+- Visual reference: `wet-check-results-report-mockup.html`
