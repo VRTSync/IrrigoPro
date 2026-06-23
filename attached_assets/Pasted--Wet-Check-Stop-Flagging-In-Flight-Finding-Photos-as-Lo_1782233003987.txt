@@ -1,0 +1,43 @@
+# Wet Check — Stop Flagging In-Flight Finding Photos as "Loose"
+
+**What & Why**
+A tech adds a finding ("difficult head replacement"), taps **Photo** on it, and immediately sees the alarming banner **"1 loose photo — not attached to a work item."** The photo is **not** actually loose — it's correctly queued to attach to that finding and snaps into place once it finishes syncing. The warning is a **false alarm during upload**, and it scares techs into thinking evidence is being lost.
+
+**Root cause (frontend optimistic state only — the real upload is fine):**
+- When the photo is captured, the offline queue links it to the finding by **client-id**: `queuePhotoUpload` emits `findingId: "{{f}}"` with `parentClientId = findingClientId`, so the engine attaches it the moment the finding's server id resolves (`lib/offline/api.ts:638–664`). This is correct — the photo *will* attach.
+- But the **optimistic placeholder** photo synthesized for the UI carries only the **numeric** `findingId` (`findingId: findingId ?? null`, `PhotoCaptureButton.tsx:~107`). For a finding that was just created and hasn't synced yet, there is no numeric id — only a `clientId`. So the placeholder gets `findingId = null`.
+- ZoneScreen decides "loose" purely on the numeric id: `zoneOnlyPhotos = mergedPhotos.filter(p => p.findingId == null)` (`ZoneScreen.tsx:1521`), and the per-finding gallery matches purely on `p.findingId === f.id` (`:1451`). With `findingId null` and the finding's `id` not yet assigned, the placeholder matches neither → it falls into `LoosePhotosSection` and trips the banner.
+- Once upload + finding sync complete, the real server photo returns with the real `findingId`, the optimistic copy is dropped (clientId match, `:650–668`), and the warning clears by itself. So it self-heals — but only after a scary detour.
+
+**Net:** purely a client-id-vs-numeric-id mismatch in the optimistic UI. No data is lost; the queued upload is correct. Single frontend slice. No backend change, no schema change.
+
+## Done looks like
+- Taking a photo on a finding — even one that hasn't synced yet — shows the photo under that finding as "Uploading…", **never** in the loose-photos banner.
+- The loose-photos banner only appears for photos that are genuinely unlinked (no finding id **and** no finding client-id) — its real Task #246 purpose.
+- After sync, behavior is unchanged (photo attached under the finding).
+
+## Steps
+1. **Carry the client-id linkage on the optimistic photo** (`PhotoCaptureButton.tsx`, both the offline-queued optimistic object ~102–110 and the online path if it ever synthesizes one): include `findingClientId` (and `zoneRecordClientId`) on the synthesized `WetCheckPhoto`, not just the numeric `findingId`/`zoneRecordId`. (Cast already in use; just add the fields.)
+2. **Make "attached" detection client-id aware** (`ZoneScreen.tsx`):
+   - Per-finding gallery (~1451): treat a photo as belonging to finding `f` if `p.findingId === f.id` **OR** `p.findingClientId === f.clientId`.
+   - Loose bucket (~1521): a photo is loose only if it matches **no** finding by either id **or** clientId (and has no zone/finding client-id linkage) — not merely when numeric `findingId == null`.
+   - Optional: extract a small `isPhotoAttachedToFinding(photo, finding)` helper so the two checks can't drift.
+3. **Leave the offline queue and server untouched** — the queued `photo.upload` already links correctly via `{{f}}`; this is only about what the optimistic UI shows in the meantime.
+4. Sanity: a photo captured as genuine zone-level evidence (no finding context) still shows as loose as designed; the "Delete all / Attach to finding…" safety net (`LoosePhotosSection`) is unchanged for truly-unlinked photos.
+
+## Tests
+- Add a finding while offline (or before it syncs), tap Photo → the photo shows under the finding as "Uploading…"; the loose-photo banner does **not** appear.
+- After reconnect/sync, the photo remains attached to the finding (no flicker into loose).
+- A photo with neither a finding id nor a finding client-id still appears in the loose section (Task #246 path intact).
+- A photo on an already-synced finding (positive id) behaves exactly as today.
+
+## Out of scope
+- The offline upload/queue/link mechanics (already correct).
+- The genuine loose-photo recovery UI (`LoosePhotosSection`) — only its trigger condition is tightened.
+- Server photo endpoints / schema (no change).
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/wet-checks/PhotoCaptureButton.tsx` (optimistic photo synthesis ~102–110 — add `findingClientId`/`zoneRecordClientId`)
+- `artifacts/irrigopro/src/pages/wet-checks/ZoneScreen.tsx` (per-finding match ~1451; loose bucket ~1521 — make client-id aware)
+- `artifacts/irrigopro/src/pages/wet-checks/LoosePhotosSection.tsx` (no logic change; benefits from the tightened trigger)
+- Reference (no change): `artifacts/irrigopro/src/lib/offline/api.ts:638–664` (`queuePhotoUpload` already links by `{{f}}`)
