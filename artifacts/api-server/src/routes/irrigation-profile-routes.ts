@@ -1,4 +1,4 @@
-// Irrigation System Profile — Build 1: Route module.
+// Irrigation System Profile — Build 1 + Build 3: Route module.
 //
 // All routes are company-scoped (companyId from req.authenticatedUserCompanyId).
 // super_admin gets cross-tenant access (companyId = null treated as bypass).
@@ -19,6 +19,8 @@
 //   DELETE /api/irrigation-zones/:id
 //   GET    /api/irrigation-controllers/:id/history
 //   POST   /api/irrigation-controllers/:id/photo
+//   GET    /api/customers/:customerId/irrigation-profile/report-pdf  (Build 3)
+//   POST   /api/customers/:customerId/irrigation-profile/report/send (Build 3)
 
 import type { Express, RequestHandler } from "express";
 import { z } from "zod";
@@ -659,6 +661,166 @@ export function registerIrrigationProfileRoutes(
       } catch (e: any) {
         req.log?.error?.({ err: e, id }, "attachIrrigationControllerPhoto failed");
         res.status(500).json({ message: "Could not attach photo — please retry" });
+      }
+    },
+  );
+
+  // ── GET /api/customers/:customerId/irrigation-profile/report-pdf ────────────
+  // Generates and streams a branded PDF for the customer's full irrigation
+  // profile. Company-scoped; returns 404 on company mismatch.
+  app.get(
+    "/api/customers/:customerId/irrigation-profile/report-pdf",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const customerId = parseId(req.params.customerId);
+      if (!customerId) return badId(res, "customer");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      if (!isManagerRole(role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+
+      // Company guard: verify customer belongs to caller's company.
+      if (!isSuperAdmin(role)) {
+        if (!callerCompanyId) {
+          return res.status(401).json({ message: "Authentication required" });
+        }
+        const customer = await storage.getCustomer(customerId);
+        if (!customer || customer.companyId !== callerCompanyId) {
+          return notFound(res, "Customer");
+        }
+      }
+
+      try {
+        const customer = await storage.getCustomer(customerId);
+        if (!customer) return notFound(res, "Customer");
+
+        const companyId = isSuperAdmin(role)
+          ? (customer.companyId ?? callerCompanyId)
+          : callerCompanyId!;
+
+        const ctrlList = await storage.listIrrigationControllers(companyId, customerId);
+        const detailedControllers = await Promise.all(
+          ctrlList.map((c: any) => storage.getIrrigationController(companyId, c.id)),
+        );
+        const validControllers = detailedControllers.filter(
+          (c: any): c is NonNullable<typeof c> => c !== null,
+        );
+
+        const company = companyId ? await storage.getCompanyProfile(companyId) : null;
+
+        const { renderIrrigationProfilePdf } = await import("../irrigation-profile-pdf");
+        const pdf = await renderIrrigationProfilePdf(customer.name, validControllers, {
+          company: company ?? null,
+          propertyAddress: (customer as any).address ?? null,
+        });
+
+        const wantsDownload = String(req.query?.download ?? "") === "1";
+        const safeCustomer = customer.name
+          // eslint-disable-next-line no-control-regex
+          .replace(/[\/\\:*?"<>|\x00-\x1f]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        const date = new Date().toISOString().slice(0, 10);
+        const filename = safeCustomer
+          ? `${safeCustomer} - Irrigation Profile - ${date}.pdf`
+          : `irrigation-profile-${customerId}-${date}.pdf`;
+        // eslint-disable-next-line no-control-regex
+        const asciiFilename = filename.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
+        const utf8Filename = encodeURIComponent(filename);
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+          "Content-Disposition",
+          `${wantsDownload ? "attachment" : "inline"}; filename="${asciiFilename}"; filename*=UTF-8''${utf8Filename}`,
+        );
+        res.send(pdf);
+      } catch (e: any) {
+        req.log?.error?.({ err: e, customerId }, "irrigationProfileReportPdf failed");
+        res.status(500).json({ message: "Failed to generate irrigation profile PDF" });
+      }
+    },
+  );
+
+  // ── POST /api/customers/:customerId/irrigation-profile/report/send ──────────
+  // Generates the irrigation profile PDF and emails it to the customer.
+  // Company-scoped; returns 404 on company mismatch.
+  app.post(
+    "/api/customers/:customerId/irrigation-profile/report/send",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const customerId = parseId(req.params.customerId);
+      if (!customerId) return badId(res, "customer");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      if (!isManagerRole(role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+      if (!isSuperAdmin(role) && !callerCompanyId) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      try {
+        const customer = await storage.getCustomer(customerId);
+        if (!customer) return notFound(res, "Customer");
+        if (!isSuperAdmin(role) && customer.companyId !== callerCompanyId) {
+          return notFound(res, "Customer");
+        }
+
+        const companyId = isSuperAdmin(role)
+          ? (customer.companyId ?? callerCompanyId!)
+          : callerCompanyId!;
+
+        // Determine recipient: explicit override or customer email on file.
+        const { to } = req.body ?? {};
+        let toEmail: string | null =
+          typeof to === "string" && to.trim() ? to.trim() : null;
+        if (!toEmail) toEmail = (customer as any).email ?? null;
+        if (!toEmail) {
+          return res.status(422).json({
+            message:
+              "No email address on file for this customer. Provide a 'to' email.",
+          });
+        }
+
+        const ctrlList = await storage.listIrrigationControllers(companyId, customerId);
+        const detailedControllers = await Promise.all(
+          ctrlList.map((c: any) => storage.getIrrigationController(companyId, c.id)),
+        );
+        const validControllers = detailedControllers.filter(
+          (c: any): c is NonNullable<typeof c> => c !== null,
+        );
+
+        const company = await storage.getCompanyProfile(companyId);
+
+        const { renderIrrigationProfilePdf } = await import("../irrigation-profile-pdf");
+        const pdf = await renderIrrigationProfilePdf(customer.name, validControllers, {
+          company: company ?? null,
+          propertyAddress: (customer as any).address ?? null,
+        });
+
+        const { EmailService } = await import("../email-service");
+        await EmailService.sendIrrigationProfileReport({
+          to: toEmail,
+          customerName: customer.name,
+          propertyAddress: (customer as any).address ?? null,
+          companyName: company?.name ?? "IrrigoPro",
+          companyEmail: company?.email ?? null,
+          companyPhone: company?.phone ?? null,
+          pdfBuffer: pdf,
+          customerId,
+        });
+
+        res.json({ sent: true, to: toEmail });
+      } catch (e: any) {
+        req.log?.error?.({ err: e, customerId }, "irrigationProfileReportSend failed");
+        res
+          .status(500)
+          .json({ message: e?.message ?? "Failed to send irrigation profile report" });
       }
     },
   );

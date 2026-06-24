@@ -1517,4 +1517,117 @@ ${args.companyName}${args.companyPhone ? `\n${args.companyPhone}` : ''}${args.co
       );
     }
   }
+
+  /**
+   * Emails the customer-facing Irrigation System Profile as a PDF attachment.
+   * Subject: "Your Irrigation System Profile — {property}"
+   */
+  static async sendIrrigationProfileReport(args: {
+    to: string;
+    customerName: string;
+    propertyAddress: string | null;
+    companyName: string;
+    companyEmail: string | null;
+    companyPhone: string | null;
+    pdfBuffer: Buffer;
+    customerId: number;
+  }): Promise<void> {
+    if (!isEmailConfigured()) {
+      throw new Error(
+        'Email is not configured: SENDGRID_API_KEY is missing. Report was not sent.',
+      );
+    }
+
+    const property = args.propertyAddress || args.customerName;
+    const subject = `Your Irrigation System Profile — ${property}`;
+    const filename = `${property
+      .replace(/[/\\:*?"<>|]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()} - Irrigation Profile.pdf`;
+
+    const replyToAddr =
+      args.companyEmail && args.companyEmail.trim().length > 0
+        ? args.companyEmail
+        : undefined;
+
+    const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:20px;">
+  <div style="background:linear-gradient(135deg,#1E5A99,#0E3B6B);color:white;padding:30px;border-radius:12px 12px 0 0;text-align:center;">
+    <h1 style="margin:0;font-size:26px;">Irrigation System Profile</h1>
+    <p style="margin:8px 0 0 0;font-size:16px;opacity:0.9;">${this.escapeHtml(args.companyName)}</p>
+  </div>
+  <div style="background:white;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:30px;">
+    <h2 style="color:#1f2937;margin-top:0;">Hello ${this.escapeHtml(args.customerName)},</h2>
+    <p style="font-size:15px;color:#4b5563;">
+      Please find your irrigation system profile report attached to this email.
+      It includes details for each controller, program, and zone at
+      <strong>${this.escapeHtml(property)}</strong>.
+    </p>
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:16px 20px;margin:20px 0;">
+      <p style="margin:0;color:#1e40af;font-size:14px;">
+        <strong>&#128206; Attachment:</strong> Your irrigation system profile report is attached to this email.
+      </p>
+    </div>
+    <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:24px;">
+      <p style="color:#6b7280;font-size:13px;margin:0;">Questions? Reply to this email or call us directly.</p>
+      <div style="margin-top:12px;font-size:13px;color:#6b7280;">
+        <p style="margin:3px 0;font-weight:600;color:#374151;">${this.escapeHtml(args.companyName)}</p>
+        ${args.companyPhone ? `<p style="margin:3px 0;">&#128222; ${this.escapeHtml(args.companyPhone)}</p>` : ''}
+        ${args.companyEmail ? `<p style="margin:3px 0;">&#9993; ${this.escapeHtml(args.companyEmail)}</p>` : ''}
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    const text = `Irrigation System Profile — ${property}
+
+Hello ${args.customerName},
+
+Please find your irrigation system profile report attached to this email.
+It includes details for each controller, program, and zone at ${property}.
+
+Questions? Reply to this email or call us directly.
+
+—
+${args.companyName}${args.companyPhone ? `\n${args.companyPhone}` : ''}${args.companyEmail ? `\n${args.companyEmail}` : ''}
+`;
+
+    try {
+      await sgMail.send({
+        from: { email: DEFAULT_FROM_EMAIL, name: SENDGRID_FROM_NAME },
+        ...(replyToAddr ? { replyTo: replyToAddr } : {}),
+        to: args.to,
+        subject,
+        html,
+        text,
+        categories: ['irrigation-profile-report'],
+        customArgs: { customerId: String(args.customerId) },
+        attachments: [
+          {
+            filename,
+            content: args.pdfBuffer.toString('base64'),
+            type: 'application/pdf',
+            disposition: 'attachment',
+          },
+        ],
+      });
+    } catch (error: any) {
+      const sgErrors = error?.response?.body?.errors;
+      const sgReason = Array.isArray(sgErrors)
+        ? sgErrors
+            .map((e: any) => e?.message)
+            .filter((m: unknown): m is string => typeof m === 'string' && m.length > 0)
+            .join('; ')
+        : '';
+      const baseMsg = (error instanceof Error && error.message) || 'Unknown SendGrid error';
+      throw new Error(
+        sgReason
+          ? `SendGrid rejected the irrigation profile email: ${sgReason}`
+          : `Failed to send irrigation profile email: ${baseMsg}`,
+      );
+    }
+  }
 }

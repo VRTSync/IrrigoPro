@@ -47,6 +47,8 @@ import {
   X,
   Eye,
   Clock,
+  Mail,
+  Download,
 } from "lucide-react";
 import type {
   IrrigationController,
@@ -1747,6 +1749,9 @@ export default function IrrigationProfile() {
   const { customerId } = useParams();
   const [, setLocation] = useLocation();
   const [showAddController, setShowAddController] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [sendLoading, setSendLoading] = useState(false);
+  const { toast } = useToast();
 
   const { data: customer, isLoading: customerLoading } = useQuery<Customer>({
     queryKey: [`/api/customers/${customerId}`],
@@ -1784,6 +1789,76 @@ export default function IrrigationProfile() {
     .sort((a, b) => new Date(b.lastUpdatedAt!).getTime() - new Date(a.lastUpdatedAt!).getTime())[0];
 
   const isLoading = customerLoading || controllersLoading;
+
+  async function handleGenerateReport() {
+    if (!customerId) return;
+    setReportLoading(true);
+    try {
+      const response = await fetch(
+        `/api/customers/${customerId}/irrigation-profile/report-pdf?download=1`,
+        { credentials: "include" },
+      );
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err?.message ?? "Failed to generate report");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safeCustomer = (customer?.name ?? "customer")
+        .replace(/[/\\:*?"<>|]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const date = new Date().toISOString().slice(0, 10);
+      a.download = `${safeCustomer} - Irrigation Profile - ${date}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast({ title: "Report downloaded" });
+    } catch (err: any) {
+      toast({
+        title: "Report generation failed",
+        description: err?.message ?? "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setReportLoading(false);
+    }
+  }
+
+  async function handleSendReport() {
+    if (!customerId) return;
+    setSendLoading(true);
+    try {
+      const response = await fetch(
+        `/api/customers/${customerId}/irrigation-profile/report/send`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body?.message ?? "Failed to send report");
+      }
+      toast({
+        title: "Report sent",
+        description: body.to ? `Emailed to ${body.to}` : "Report emailed to customer",
+      });
+    } catch (err: any) {
+      toast({
+        title: "Failed to send report",
+        description: err?.message ?? "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setSendLoading(false);
+    }
+  }
 
   if (isLoading) {
     return (
@@ -1836,7 +1911,7 @@ export default function IrrigationProfile() {
                 )}
               </div>
             </div>
-            <div className="flex gap-2 shrink-0">
+            <div className="flex gap-2 shrink-0 flex-wrap">
               {canWrite && (
                 <Button
                   size="sm"
@@ -1847,8 +1922,33 @@ export default function IrrigationProfile() {
                   <Plus className="w-4 h-4" /> Add Controller
                 </Button>
               )}
-              <Button size="sm" variant="outline" disabled className="gap-1.5 opacity-50">
-                <FileText className="w-4 h-4" /> Generate Report
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleGenerateReport}
+                disabled={reportLoading || controllers.length === 0}
+                className="gap-1.5"
+              >
+                {reportLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4" />
+                )}
+                Generate Report
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleSendReport}
+                disabled={sendLoading || controllers.length === 0}
+                className="gap-1.5"
+              >
+                {sendLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Mail className="w-4 h-4" />
+                )}
+                Send Report
               </Button>
             </div>
           </div>
