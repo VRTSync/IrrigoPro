@@ -6,6 +6,7 @@ import { fetchLogoAsBase64 } from './pdf-generator';
 import { VRT_LOGO_DATA_URI } from './assets/vrt-logo.js';
 import { IRRIGOPRO_LOGO_DATA_URI } from './assets/irrigopro-logo.js';
 import { resolveCompanyLogoUrl, pdfLogoBaseUrl } from './logo-url';
+import { isEmptyZone } from './wet-check-zone-filter';
 
 const DEFAULT_BRAND_COLOR = '#1E5A99';
 const DEFAULT_BRAND_DARK = '#143F6B';
@@ -176,7 +177,8 @@ export function buildWetCheckHtml(
     ? `<img src="${opts.logoDataUri}" alt="${esc(companyName)}" class="logo" />`
     : '';
 
-  const zoneRecords = wc.zoneRecords ?? [];
+  const allZoneRecords = wc.zoneRecords ?? [];
+  const zoneRecords = allZoneRecords.filter(z => !isEmptyZone(z));
   const allFindings = zoneRecords.flatMap(z => z.findings ?? []);
   const totalZones = zoneRecords.length;
   const zonesOk = zoneRecords.filter(z => z.status === 'checked_ok').length;

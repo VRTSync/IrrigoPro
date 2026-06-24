@@ -21,6 +21,7 @@ import { fetchLogoAsBase64 } from './pdf-generator';
 import { VRT_LOGO_DATA_URI } from './assets/vrt-logo.js';
 import { IRRIGOPRO_LOGO_DATA_URI } from './assets/irrigopro-logo.js';
 import { humanizeIssueType } from './inspection-issue-labels';
+import { isEmptyZone } from './wet-check-zone-filter';
 import { ObjectStorageService } from './objectStorage';
 import { thumbPath } from './photo-pipeline';
 import sharp from 'sharp';
@@ -275,7 +276,8 @@ export function buildWetCheckReportHtml(
     ? `<img src="${opts.logoDataUri}" alt="${esc(companyName)}" class="logo" />`
     : '';
 
-  const zoneRecords = wc.zoneRecords ?? [];
+  const allZoneRecords = wc.zoneRecords ?? [];
+  const zoneRecords = allZoneRecords.filter(z => !isEmptyZone(z));
   const allPhotos = wc.photos ?? [];
   const summary = deriveHealthSummary(zoneRecords);
 
