@@ -171,7 +171,9 @@ import { recordAuditEvent } from "./routes/audit-log";
 
 // Set of issue types that never require a part (labor-only). Built once from
 // the canonical seed so the convert guard stays in sync with the schema.
-const LABOR_ONLY_ISSUE_TYPES: ReadonlySet<string> = new Set(
+// Exported so the reconcile-finding-disposition migration can reuse it
+// without duplicating the filter logic.
+export const LABOR_ONLY_ISSUE_TYPES: ReadonlySet<string> = new Set(
   WET_CHECK_ISSUE_TYPE_SEED.filter(s => s.laborOnly).map(s => s.issueType),
 );
 
