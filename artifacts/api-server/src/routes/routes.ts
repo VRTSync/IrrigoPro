@@ -386,6 +386,7 @@ import { registerWcLaborBackfillRoutes } from "./admin-wc-labor-backfill-routes"
 import { registerInspectionZoneBackfillRoutes } from "./admin-inspection-zone-backfill-routes";
 import { registerCleanupInvoice71256Routes } from "./cleanup-invoice-71256";
 import { registerWetCheckReconciliationRoutes } from "./wet-check-reconciliation-routes";
+import { registerIrrigationProfileRoutes } from "./irrigation-profile-routes";
 import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
 import { scrubEvent, setScrubCustomerNames } from "../lib/scrubEvent";
 import { setTelemetrySink, withTelemetry, type TelemetryEvent } from "../lib/withTelemetry";
@@ -952,6 +953,7 @@ import {
   companies, siteMaps, controllers, irrigationZones, partUsage, utilityMarkers, propertyZones, invoicePdfs,
   wetCheckPhotos, wetChecks, wetCheckFindings, wetCheckBillings,
   workOrderZonePhotos,
+  irrigationControllers,
 } from "@workspace/db";
 import { eq, desc, and, or, gte, lte, like, isNull, asc, sql, inArray, type SQL } from "drizzle-orm";
 
@@ -14043,6 +14045,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       .limit(1);
     if (wzpRows.length > 0) return true;
 
+    // 6) irrigation_controllers.settings_photo_url — a single text column per
+    //    controller, scoped to this company directly via companyId.
+    const icRows = await db
+      .select({ id: irrigationControllers.id })
+      .from(irrigationControllers)
+      .where(and(
+        eq(irrigationControllers.companyId, user.companyId),
+        sql`${irrigationControllers.settingsPhotoUrl} = ANY(${sql.param(candidates)}::text[])`,
+      ))
+      .limit(1);
+    if (icRows.length > 0) return true;
+
     res.status(403).json({ error: "Forbidden" });
     return false;
   }
@@ -17454,6 +17468,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Task #1293 — Wet Check Reconciliation + Reassign-with-Cascade.
   registerWetCheckReconciliationRoutes(app, { requireAuthentication });
+
+  // Irrigation System Profile — Build 1.
+  // Controllers, programs, zones, history, and settings photo attach.
+  registerIrrigationProfileRoutes(app, { requireAuthentication });
 
   return httpServer;
 }

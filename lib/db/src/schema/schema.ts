@@ -1722,6 +1722,142 @@ export const insertMobileTokenSchema = createInsertSchema(mobileTokens);
 export type MobileToken = typeof mobileTokens.$inferSelect;
 export type InsertMobileToken = z.infer<typeof insertMobileTokenSchema>;
 
+// ─── Irrigation System Profile ────────────────────────────────────────────────
+// Four new tables for the irrigation profile feature (Build 1).
+// Every table carries companyId NOT NULL so rows are directly company-scopable
+// without always joining up through the controller FK chain — mirrors the
+// `company-id-columns` pattern used throughout the rest of the schema.
+//
+// NOTE: `propertyControllers` (below, line ~1287) and these tables are
+// parallel: `propertyControllers` drives the wet-check grid (letter + zone
+// count only); `irrigationControllers` captures the full programming profile.
+// A follow-up task will unify so the new profile becomes the source of truth
+// for the wet-check grid when a profile exists.
+
+export const irrigationControllers = pgTable("irrigation_controllers", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id).notNull(),
+  // Multi-location parity with property_controllers. Empty string means
+  // "no branch / customer-level". NOT NULL with default '' so uniqueness
+  // can use plain typed columns without COALESCE.
+  branchName: text("branch_name").notNull().default(""),
+  name: text("name").notNull(),
+  location: text("location"),
+  brand: text("brand"),
+  model: text("model"),
+  totalZones: integer("total_zones"),
+  notes: text("notes"),
+  settingsPhotoUrl: text("settings_photo_url"),
+  isActive: boolean("is_active").notNull().default(true),
+  lastUpdatedByUserId: integer("last_updated_by_user_id").references(() => users.id),
+  lastUpdatedByName: text("last_updated_by_name"),
+  lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  // Efficient list-by-customer queries (the most common read path).
+  companyCustomerBranchIdx: index("irr_ctrl_company_customer_branch_idx")
+    .on(table.companyId, table.customerId, table.branchName),
+  // Controller name is unique within a customer+branch scope per company.
+  uniqCtrlName: uniqueIndex("uniq_irr_ctrl_name")
+    .on(table.companyId, table.customerId, table.branchName, table.name),
+}));
+
+export const insertIrrigationControllerSchema = createInsertSchema(irrigationControllers);
+export type IrrigationController = typeof irrigationControllers.$inferSelect;
+export type InsertIrrigationController = typeof irrigationControllers.$inferInsert;
+
+export const irrigationPrograms = pgTable("irrigation_programs", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  controllerId: integer("controller_id")
+    .references(() => irrigationControllers.id, { onDelete: "cascade" })
+    .notNull(),
+  // Program letter or name, e.g. "A", "B", "C".
+  name: text("name").notNull(),
+  // Days of week this program runs, e.g. ["Mon","Wed","Fri"].
+  wateringDays: text("watering_days").array(),
+  // One or more daily start times in "HH:MM" format, e.g. ["06:00","18:00"].
+  startTimes: text("start_times").array(),
+  // Seasonal adjustment percentage applied to every zone's run time (default 100 = no adjustment).
+  seasonalAdjustPct: integer("seasonal_adjust_pct").notNull().default(100),
+  isActive: boolean("is_active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  companyControllerIdx: index("irr_prog_company_controller_idx")
+    .on(table.companyId, table.controllerId),
+}));
+
+export const insertIrrigationProgramSchema = createInsertSchema(irrigationPrograms);
+export type IrrigationProgram = typeof irrigationPrograms.$inferSelect;
+export type InsertIrrigationProgram = typeof irrigationPrograms.$inferInsert;
+
+// Named `irrigationProfileZones` (table: irrigation_profile_zones) to avoid
+// collision with the existing `irrigationZones` / `irrigation_zones` table
+// used by the site-map subsystem.
+export const irrigationProfileZones = pgTable("irrigation_profile_zones", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  controllerId: integer("controller_id")
+    .references(() => irrigationControllers.id, { onDelete: "cascade" })
+    .notNull(),
+  // Nullable: a zone not yet assigned to any program.
+  programId: integer("program_id")
+    .references(() => irrigationPrograms.id, { onDelete: "set null" }),
+  zoneNumber: integer("zone_number").notNull(),
+  name: text("name").notNull(),
+  // Enum values: pop_up_spray | rotor | drip | netafim | bubbler | other.
+  zoneType: text("zone_type").notNull().default("other"),
+  runTimeMinutes: integer("run_time_minutes").notNull().default(0),
+  // Drive sequential schedule order within a program.
+  zoneOrder: integer("zone_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  notes: text("notes"),
+  // Per-zone override: when set, this zone starts independently of the
+  // program chain and its own days are used instead of the program's.
+  overrideStartTime: text("override_start_time"),
+  overrideDays: text("override_days").array(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  companyControllerIdx: index("irr_pzone_company_controller_idx")
+    .on(table.companyId, table.controllerId),
+  // Zone numbers are unique within a (company, controller) scope so two
+  // companies can each have "Zone 1" without collision.
+  uniqZoneNumber: uniqueIndex("uniq_irr_pzone_number")
+    .on(table.companyId, table.controllerId, table.zoneNumber),
+}));
+
+export const insertIrrigationProfileZoneSchema = createInsertSchema(irrigationProfileZones);
+export type IrrigationProfileZone = typeof irrigationProfileZones.$inferSelect;
+export type InsertIrrigationProfileZone = typeof irrigationProfileZones.$inferInsert;
+
+// Append-only snapshot log. Every controller save appends one row with the
+// full controller+programs+zones state so managers can review prior settings.
+export const irrigationProfileHistory = pgTable("irrigation_profile_history", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  controllerId: integer("controller_id")
+    .references(() => irrigationControllers.id, { onDelete: "cascade" })
+    .notNull(),
+  // Full state at save time: { controller, programs, zones }.
+  snapshotJson: jsonb("snapshot_json").notNull(),
+  changedByUserId: integer("changed_by_user_id").references(() => users.id),
+  changedByName: text("changed_by_name"),
+  changedAt: timestamp("changed_at", { withTimezone: true }).defaultNow().notNull(),
+  summary: text("summary"),
+}, (table) => ({
+  companyControllerIdx: index("irr_hist_company_controller_idx")
+    .on(table.companyId, table.controllerId),
+}));
+
+export const insertIrrigationProfileHistorySchema = createInsertSchema(irrigationProfileHistory);
+export type IrrigationProfileHistory = typeof irrigationProfileHistory.$inferSelect;
+export type InsertIrrigationProfileHistory = typeof irrigationProfileHistory.$inferInsert;
+
 // Internal migration-tracking table — must be declared here so drizzle-kit
 // does not treat it as an unknown table and attempt to drop it during db:push.
 export const appSettings = pgTable("app_settings", {

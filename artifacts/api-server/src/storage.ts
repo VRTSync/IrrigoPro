@@ -45,6 +45,18 @@ import {
   photoLateAdditions,
   type PhotoLateAddition,
   type InsertPhotoLateAddition,
+  irrigationControllers,
+  irrigationPrograms,
+  irrigationProfileZones,
+  irrigationProfileHistory,
+  type IrrigationController,
+  type InsertIrrigationController,
+  type IrrigationProgram,
+  type InsertIrrigationProgram,
+  type IrrigationProfileZone,
+  type InsertIrrigationProfileZone,
+  type IrrigationProfileHistory,
+  type InsertIrrigationProfileHistory,
   type Company,
   type User,
   type Customer, 
@@ -1188,6 +1200,83 @@ export interface IStorage {
   getWetCheckPhotoUrls(wetCheckId: number): Promise<string[]>;
   /** Returns photo records with zone/finding linkage metadata for grouped PDF rendering (Task #843). */
   getWetCheckPhotosGrouped(wetCheckId: number): Promise<Array<{url: string; zoneRecordId: number | null; findingId: number | null}>>;
+
+  // ── Irrigation System Profile ─────────────────────────────────────────────
+  // All methods filter by companyId. Pass null only for super_admin callers
+  // (cross-tenant). Mutating methods stamp lastUpdatedBy* on the controller
+  // and append a snapshot to irrigation_profile_history atomically.
+
+  listIrrigationControllers(
+    companyId: number | null,
+    customerId: number,
+    branchName?: string,
+  ): Promise<IrrigationController[]>;
+
+  getIrrigationController(
+    companyId: number | null,
+    id: number,
+  ): Promise<(IrrigationController & { programs: IrrigationProgram[]; zones: IrrigationProfileZone[] }) | null>;
+
+  createIrrigationController(
+    data: InsertIrrigationController,
+  ): Promise<IrrigationController>;
+
+  updateIrrigationController(
+    companyId: number | null,
+    id: number,
+    patch: Partial<Omit<InsertIrrigationController, "companyId" | "customerId">>,
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationController | null>;
+
+  deleteIrrigationController(
+    companyId: number | null,
+    id: number,
+  ): Promise<boolean>;
+
+  createIrrigationProgram(
+    companyId: number | null,
+    controllerId: number,
+    data: Omit<InsertIrrigationProgram, "companyId" | "controllerId">,
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationProgram | null>;
+
+  updateIrrigationProgram(
+    companyId: number | null,
+    id: number,
+    patch: Partial<Omit<InsertIrrigationProgram, "companyId" | "controllerId">>,
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationProgram | null>;
+
+  deleteIrrigationProgram(
+    companyId: number | null,
+    id: number,
+    actor?: { id: number; name: string },
+  ): Promise<boolean>;
+
+  createIrrigationZone(
+    companyId: number | null,
+    controllerId: number,
+    data: Omit<InsertIrrigationProfileZone, "companyId" | "controllerId">,
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationProfileZone | null>;
+
+  updateIrrigationZone(
+    companyId: number | null,
+    id: number,
+    patch: Partial<Omit<InsertIrrigationProfileZone, "companyId" | "controllerId">>,
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationProfileZone | null>;
+
+  deleteIrrigationZone(
+    companyId: number | null,
+    id: number,
+    actor?: { id: number; name: string },
+  ): Promise<boolean>;
+
+  getIrrigationHistory(
+    companyId: number | null,
+    controllerId: number,
+  ): Promise<IrrigationProfileHistory[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -10079,6 +10168,369 @@ export class DatabaseStorage implements IStorage {
         wetCheck: updatedWc,
       };
     });
+  }
+
+  // ── Irrigation System Profile implementation ─────────────────────────────────
+
+  // Build a company-guard condition. When companyId is null (super_admin), no
+  // restriction is applied — the caller must already be super_admin.
+  private _irrigationCompanyWhere(
+    table: { companyId: any },
+    companyId: number | null,
+  ) {
+    return companyId !== null ? eq(table.companyId, companyId) : undefined;
+  }
+
+  // Snapshot the full controller+programs+zones state into irrigation_profile_history.
+  // Called inside a transaction after any mutating save.
+  private async _appendIrrigationSnapshot(
+    tx: DbExecutor,
+    ctrl: IrrigationController,
+    actor: { id: number; name: string } | undefined,
+    summary: string,
+  ): Promise<void> {
+    const programs = await (tx as typeof db)
+      .select()
+      .from(irrigationPrograms)
+      .where(eq(irrigationPrograms.controllerId, ctrl.id))
+      .orderBy(irrigationPrograms.sortOrder, irrigationPrograms.id);
+
+    const zones = await (tx as typeof db)
+      .select()
+      .from(irrigationProfileZones)
+      .where(eq(irrigationProfileZones.controllerId, ctrl.id))
+      .orderBy(irrigationProfileZones.zoneOrder, irrigationProfileZones.zoneNumber);
+
+    await (tx as typeof db).insert(irrigationProfileHistory).values({
+      companyId: ctrl.companyId,
+      controllerId: ctrl.id,
+      snapshotJson: { controller: ctrl, programs, zones } as any,
+      changedByUserId: actor?.id ?? null,
+      changedByName: actor?.name ?? null,
+      summary,
+    });
+  }
+
+  // Stamp lastUpdatedBy* on a controller row (inside a transaction).
+  private async _stampControllerUpdated(
+    tx: DbExecutor,
+    controllerId: number,
+    actor: { id: number; name: string } | undefined,
+  ): Promise<IrrigationController | null> {
+    const now = new Date();
+    const [updated] = await (tx as typeof db)
+      .update(irrigationControllers)
+      .set({
+        lastUpdatedByUserId: actor?.id ?? null,
+        lastUpdatedByName: actor?.name ?? null,
+        lastUpdatedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(irrigationControllers.id, controllerId))
+      .returning();
+    return updated ?? null;
+  }
+
+  async listIrrigationControllers(
+    companyId: number | null,
+    customerId: number,
+    branchName?: string,
+  ): Promise<IrrigationController[]> {
+    const conditions = [eq(irrigationControllers.customerId, customerId)];
+    if (companyId !== null) conditions.push(eq(irrigationControllers.companyId, companyId));
+    if (branchName !== undefined) conditions.push(eq(irrigationControllers.branchName, branchName));
+    return db
+      .select()
+      .from(irrigationControllers)
+      .where(and(...conditions))
+      .orderBy(irrigationControllers.name, irrigationControllers.id);
+  }
+
+  async getIrrigationController(
+    companyId: number | null,
+    id: number,
+  ): Promise<(IrrigationController & { programs: IrrigationProgram[]; zones: IrrigationProfileZone[] }) | null> {
+    const conditions = [eq(irrigationControllers.id, id)];
+    if (companyId !== null) conditions.push(eq(irrigationControllers.companyId, companyId));
+
+    const [ctrl] = await db
+      .select()
+      .from(irrigationControllers)
+      .where(and(...conditions));
+    if (!ctrl) return null;
+
+    const [programs, zones] = await Promise.all([
+      db
+        .select()
+        .from(irrigationPrograms)
+        .where(eq(irrigationPrograms.controllerId, id))
+        .orderBy(irrigationPrograms.sortOrder, irrigationPrograms.id),
+      db
+        .select()
+        .from(irrigationProfileZones)
+        .where(eq(irrigationProfileZones.controllerId, id))
+        .orderBy(irrigationProfileZones.zoneOrder, irrigationProfileZones.zoneNumber),
+    ]);
+
+    return { ...ctrl, programs, zones };
+  }
+
+  async createIrrigationController(
+    data: InsertIrrigationController,
+  ): Promise<IrrigationController> {
+    const [ctrl] = await db
+      .insert(irrigationControllers)
+      .values({
+        ...data,
+        lastUpdatedAt: data.lastUpdatedAt ?? new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+    return ctrl;
+  }
+
+  async updateIrrigationController(
+    companyId: number | null,
+    id: number,
+    patch: Partial<Omit<InsertIrrigationController, "companyId" | "customerId">>,
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationController | null> {
+    return db.transaction(async (tx) => {
+      const conditions = [eq(irrigationControllers.id, id)];
+      if (companyId !== null) conditions.push(eq(irrigationControllers.companyId, companyId));
+
+      const now = new Date();
+      const [updated] = await tx
+        .update(irrigationControllers)
+        .set({
+          ...patch,
+          lastUpdatedByUserId: actor?.id ?? patch.lastUpdatedByUserId ?? null,
+          lastUpdatedByName: actor?.name ?? patch.lastUpdatedByName ?? null,
+          lastUpdatedAt: now,
+          updatedAt: now,
+        })
+        .where(and(...conditions))
+        .returning();
+      if (!updated) return null;
+
+      await this._appendIrrigationSnapshot(tx, updated, actor, `Controller "${updated.name}" updated`);
+      return updated;
+    });
+  }
+
+  async deleteIrrigationController(
+    companyId: number | null,
+    id: number,
+  ): Promise<boolean> {
+    const conditions = [eq(irrigationControllers.id, id)];
+    if (companyId !== null) conditions.push(eq(irrigationControllers.companyId, companyId));
+
+    const result = await db
+      .delete(irrigationControllers)
+      .where(and(...conditions))
+      .returning({ id: irrigationControllers.id });
+    return result.length > 0;
+  }
+
+  async createIrrigationProgram(
+    companyId: number | null,
+    controllerId: number,
+    data: Omit<InsertIrrigationProgram, "companyId" | "controllerId">,
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationProgram | null> {
+    return db.transaction(async (tx) => {
+      // Verify controller exists and belongs to the caller's company.
+      const ctrlConds = [eq(irrigationControllers.id, controllerId)];
+      if (companyId !== null) ctrlConds.push(eq(irrigationControllers.companyId, companyId));
+      const [ctrl] = await tx.select().from(irrigationControllers).where(and(...ctrlConds));
+      if (!ctrl) return null;
+
+      const [program] = await tx
+        .insert(irrigationPrograms)
+        .values({ ...data, companyId: ctrl.companyId, controllerId })
+        .returning();
+
+      const stampedCtrl = await this._stampControllerUpdated(tx, controllerId, actor);
+      await this._appendIrrigationSnapshot(
+        tx,
+        stampedCtrl ?? ctrl,
+        actor,
+        `Program "${program.name}" added to controller "${ctrl.name}"`,
+      );
+      return program;
+    });
+  }
+
+  async updateIrrigationProgram(
+    companyId: number | null,
+    id: number,
+    patch: Partial<Omit<InsertIrrigationProgram, "companyId" | "controllerId">>,
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationProgram | null> {
+    return db.transaction(async (tx) => {
+      // Load the program and verify company scope.
+      const progConds = [eq(irrigationPrograms.id, id)];
+      if (companyId !== null) progConds.push(eq(irrigationPrograms.companyId, companyId));
+      const [existing] = await tx.select().from(irrigationPrograms).where(and(...progConds));
+      if (!existing) return null;
+
+      const [updated] = await tx
+        .update(irrigationPrograms)
+        .set({ ...patch, updatedAt: new Date() })
+        .where(eq(irrigationPrograms.id, id))
+        .returning();
+
+      const [ctrl] = await tx
+        .select()
+        .from(irrigationControllers)
+        .where(eq(irrigationControllers.id, existing.controllerId));
+      if (ctrl) {
+        const stampedCtrl = await this._stampControllerUpdated(tx, ctrl.id, actor);
+        await this._appendIrrigationSnapshot(
+          tx,
+          stampedCtrl ?? ctrl,
+          actor,
+          `Program "${updated.name}" updated`,
+        );
+      }
+      return updated;
+    });
+  }
+
+  async deleteIrrigationProgram(
+    companyId: number | null,
+    id: number,
+    actor?: { id: number; name: string },
+  ): Promise<boolean> {
+    return db.transaction(async (tx) => {
+      const progConds = [eq(irrigationPrograms.id, id)];
+      if (companyId !== null) progConds.push(eq(irrigationPrograms.companyId, companyId));
+      const [existing] = await tx.select().from(irrigationPrograms).where(and(...progConds));
+      if (!existing) return false;
+
+      await tx.delete(irrigationPrograms).where(eq(irrigationPrograms.id, id));
+
+      const [ctrl] = await tx
+        .select()
+        .from(irrigationControllers)
+        .where(eq(irrigationControllers.id, existing.controllerId));
+      if (ctrl) {
+        const stampedCtrl = await this._stampControllerUpdated(tx, ctrl.id, actor);
+        await this._appendIrrigationSnapshot(
+          tx,
+          stampedCtrl ?? ctrl,
+          actor,
+          `Program "${existing.name}" deleted from controller "${ctrl.name}"`,
+        );
+      }
+      return true;
+    });
+  }
+
+  async createIrrigationZone(
+    companyId: number | null,
+    controllerId: number,
+    data: Omit<InsertIrrigationProfileZone, "companyId" | "controllerId">,
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationProfileZone | null> {
+    return db.transaction(async (tx) => {
+      const ctrlConds = [eq(irrigationControllers.id, controllerId)];
+      if (companyId !== null) ctrlConds.push(eq(irrigationControllers.companyId, companyId));
+      const [ctrl] = await tx.select().from(irrigationControllers).where(and(...ctrlConds));
+      if (!ctrl) return null;
+
+      const [zone] = await tx
+        .insert(irrigationProfileZones)
+        .values({ ...data, companyId: ctrl.companyId, controllerId })
+        .returning();
+
+      const stampedCtrl = await this._stampControllerUpdated(tx, controllerId, actor);
+      await this._appendIrrigationSnapshot(
+        tx,
+        stampedCtrl ?? ctrl,
+        actor,
+        `Zone ${zone.zoneNumber} "${zone.name}" added to controller "${ctrl.name}"`,
+      );
+      return zone;
+    });
+  }
+
+  async updateIrrigationZone(
+    companyId: number | null,
+    id: number,
+    patch: Partial<Omit<InsertIrrigationProfileZone, "companyId" | "controllerId">>,
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationProfileZone | null> {
+    return db.transaction(async (tx) => {
+      const zoneConds = [eq(irrigationProfileZones.id, id)];
+      if (companyId !== null) zoneConds.push(eq(irrigationProfileZones.companyId, companyId));
+      const [existing] = await tx.select().from(irrigationProfileZones).where(and(...zoneConds));
+      if (!existing) return null;
+
+      const [updated] = await tx
+        .update(irrigationProfileZones)
+        .set({ ...patch, updatedAt: new Date() })
+        .where(eq(irrigationProfileZones.id, id))
+        .returning();
+
+      const [ctrl] = await tx
+        .select()
+        .from(irrigationControllers)
+        .where(eq(irrigationControllers.id, existing.controllerId));
+      if (ctrl) {
+        const stampedCtrl = await this._stampControllerUpdated(tx, ctrl.id, actor);
+        await this._appendIrrigationSnapshot(
+          tx,
+          stampedCtrl ?? ctrl,
+          actor,
+          `Zone ${updated.zoneNumber} "${updated.name}" updated`,
+        );
+      }
+      return updated;
+    });
+  }
+
+  async deleteIrrigationZone(
+    companyId: number | null,
+    id: number,
+    actor?: { id: number; name: string },
+  ): Promise<boolean> {
+    return db.transaction(async (tx) => {
+      const zoneConds = [eq(irrigationProfileZones.id, id)];
+      if (companyId !== null) zoneConds.push(eq(irrigationProfileZones.companyId, companyId));
+      const [existing] = await tx.select().from(irrigationProfileZones).where(and(...zoneConds));
+      if (!existing) return false;
+
+      await tx.delete(irrigationProfileZones).where(eq(irrigationProfileZones.id, id));
+
+      const [ctrl] = await tx
+        .select()
+        .from(irrigationControllers)
+        .where(eq(irrigationControllers.id, existing.controllerId));
+      if (ctrl) {
+        const stampedCtrl = await this._stampControllerUpdated(tx, ctrl.id, actor);
+        await this._appendIrrigationSnapshot(
+          tx,
+          stampedCtrl ?? ctrl,
+          actor,
+          `Zone ${existing.zoneNumber} "${existing.name}" deleted from controller "${ctrl.name}"`,
+        );
+      }
+      return true;
+    });
+  }
+
+  async getIrrigationHistory(
+    companyId: number | null,
+    controllerId: number,
+  ): Promise<IrrigationProfileHistory[]> {
+    const conditions = [eq(irrigationProfileHistory.controllerId, controllerId)];
+    if (companyId !== null) conditions.push(eq(irrigationProfileHistory.companyId, companyId));
+    return db
+      .select()
+      .from(irrigationProfileHistory)
+      .where(and(...conditions))
+      .orderBy(desc(irrigationProfileHistory.changedAt));
   }
 }
 
