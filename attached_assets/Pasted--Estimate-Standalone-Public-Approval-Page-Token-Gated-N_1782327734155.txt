@@ -1,0 +1,75 @@
+# Estimate — Standalone Public Approval Page (Token-Gated, No Login)
+
+**What & Why**
+Customers should land on a **dedicated, public, no-login page** to approve estimates, secured by an **expiring token**. The pieces already exist (a public `estimate-approval.tsx` page, a high-entropy `approvalToken` + `tokenExpiresAt`, and public `view/approve/reject-via-token` endpoints) — but it was reachable only by accident (route mis-placement) and isn't yet a deliberate, hardened, branded experience. This makes it one.
+
+**Confirmed design:** keep **30-day** token expiry; expired/used links show a friendly message with a **"Request a new link"** action that notifies the team to re-send; include a **branded + secure-link trust treatment**; **well-branded with the company logo** and a subtle **IrrigoPro watermark as the page background**.
+
+**Depends on / relates to:** the route-placement fix (`Estimate - Approval Link 404s…`), signature capture on approve (`Estimate - Capture Customer Signature on Approval`), and resend (`Estimate - Allow Resend of an Already-Sent Estimate`). This doc is the umbrella for the public page itself.
+
+**Visual source of truth:** `public-estimate-approval-page-mockup.html` (active / expired / approved states + watermark).
+
+No schema change (token + expiry already exist). Frontend page + one small public endpoint.
+
+---
+
+## Slice 1 — Make it a true standalone public page
+### Files
+- `artifacts/irrigopro/src/App.tsx` (routing), `artifacts/irrigopro/src/pages/estimate-approval.tsx` (the page).
+### Changes
+- Render `/estimate-approval/:token` **regardless of auth state**, fully outside the app shell (no sidebar/nav, no auth-gated data fetches) — hoist the route above the logged-in/logged-out split (per the 404 fix doc). A signed-in staffer previewing the link sees the same public page.
+- The page must make **no authenticated API calls** — only the public token endpoints (`view-by-token`, `approve-via-token` [POST w/ signature], `reject-via-token`, and the new request-new-link).
+- Works on a cold/direct load and when pasted into any browser.
+
+## Slice 2 — Branding & trust treatment
+### Files
+- `estimate-approval.tsx` + its styles; company profile (logo/name/contact) already available via the token view payload (or add to `view-by-token` response if missing).
+### Changes
+- **Branded header:** company **logo** + name; title "Your Irrigation Estimate."
+- **Secure-link trust line:** "🔒 This is a secure approval link prepared for {customerName}." (anti-phishing reassurance).
+- **IrrigoPro watermark background:** a subtle, fixed, low-opacity IrrigoPro mark/wordmark behind the content (see mockup `body::after`), light enough not to hurt readability; use the bundled IrrigoPro logo asset (`assets/irrigopro-logo`) rather than text where practical.
+- **Footer:** company contact + a small "Secure link · expires 30 days after it was sent · Powered by IrrigoPro" line.
+- Mobile-first, readable, matches the estimate PDF/email look.
+- Ensure the company **logo resolves publicly** (same public `/api/company-logo/:id` path used elsewhere; depends on `APP_BASE_URL` being set — see the email spec).
+
+## Slice 3 — Token lifecycle (expiry, lock, states)
+### Files
+- `estimate-approval.tsx`; `artifacts/api-server/src/routes/estimate-routes.ts` (token endpoints).
+### Changes
+- **Expiry: keep 30 days** (`tokenExpiresAt`). No change to duration.
+- **Three clear states on the page:**
+  - **Active** → full estimate + Approve (→ signature step) / Decline.
+  - **Already responded** (approved/rejected) → **locked read-only** confirmation ("You approved estimate #… on {date}"), no re-action. (`alreadyResponded` already exists.)
+  - **Expired / invalid token** → friendly "this link has expired" screen (never a 404) with the **Request a new link** action (Slice 4).
+- Re-confirm the public endpoints reject acting on an expired/used token server-side (defense in depth), returning the state the page renders.
+
+## Slice 4 — "Request a new link" (expired-state self-serve)
+### Files
+- `estimate-routes.ts` (new public endpoint), `email-service.ts` / in-app notification, `estimate-approval.tsx` (button).
+### Changes
+- New **public** endpoint, e.g. `POST /api/estimates/request-new-link/:token` — looks up the estimate by the (possibly expired) token; if found, **notifies the company** (in-app alert + email to the company/reply-to) that the customer requested a fresh link, and records it on the estimate's activity.
+- **Do not** auto-email a new link to an arbitrary address from this public route (avoid an open relay). Two safe options — recommend (a): (a) notify the team so a manager re-sends via the existing **Resend** flow (re-delivers only to the customer email on file); or (b) auto-reissue **only** to the customer email already on the estimate. Either way the destination is always the on-file customer email, never caller-supplied.
+- Rate-limit / debounce so a customer mashing the button doesn't spam the team.
+- Page shows a success confirmation ("We've let High Plains know — they'll send you a fresh link shortly.").
+
+## Tests
+- Open an active link **logged out and logged in** → public page renders both times, no app shell, no 404.
+- Company logo + secure-link line + IrrigoPro watermark all render; logo loads from a public URL.
+- Approve → signature step → success; page then shows the locked "approved" confirmation; re-opening the link shows the same (no re-approve).
+- Decline → locked "declined" confirmation.
+- Expired token → friendly expired screen with "Request a new link"; clicking it notifies the team (and logs activity), shows success, and never emails a caller-supplied address.
+- Invalid/garbage token → friendly invalid screen, not a 404.
+- No authenticated API calls fire on the page (verify network tab is public-endpoints-only).
+
+## Out of scope
+- Token duration changes (staying 30 days) and the resend mechanics themselves (separate doc — reused here).
+- Signature capture internals (separate doc — this page hosts the step).
+- Delivery/bounce tracking.
+
+## Relevant files
+- `artifacts/irrigopro/src/App.tsx` (hoist `/estimate-approval/:token`)
+- `artifacts/irrigopro/src/pages/estimate-approval.tsx` (branding, watermark, states, request-new-link button)
+- `artifacts/api-server/src/routes/estimate-routes.ts` (`view/approve/reject-via-token`; new `request-new-link`)
+- `artifacts/api-server/src/email-service.ts` (company notification; public logo URL)
+- IrrigoPro logo asset: `artifacts/api-server/src/assets/irrigopro-logo` (and the frontend equivalent) for the watermark
+- Visual reference: `public-estimate-approval-page-mockup.html`
