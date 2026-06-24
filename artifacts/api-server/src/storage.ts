@@ -2662,6 +2662,11 @@ export class DatabaseStorage implements IStorage {
       approvalSentAt: Date;
       newEstimateDate: Date | null;
       isResend: boolean;
+      // Task #365 — re-delivery of a non-expired sent estimate. The
+      // estimate is already `sent_to_customer` / lifecycle=`sent` and
+      // the customer hasn't responded yet. We re-stamp the token and
+      // re-send the email without resetting estimateDate.
+      isSentRedelivery?: boolean;
     },
   ): Promise<Estimate | undefined> {
     const setClause: Partial<InsertEstimate> = {
@@ -2678,13 +2683,20 @@ export class DatabaseStorage implements IStorage {
     if (args.newEstimateDate) {
       (setClause as { estimateDate?: Date }).estimateDate = args.newEstimateDate;
     }
-    // The `resend` flow is the only legitimate path that can re-stamp
-    // a row whose internalStatus is already `sent_to_customer` (the
-    // customer-facing `status` is `expired`). For the normal send,
-    // gate on internalStatus being a pre-send value.
+    // Three CAS branches:
+    //   isResend         — expired estimate; gate on status='expired'
+    //   isSentRedelivery — already sent but not expired; gate on
+    //                      internalStatus='sent_to_customer' AND lifecycle='sent'
+    //   normal first send — gate on pre-send internalStatus values
     const whereClause = args.isResend
       ? and(eq(estimates.id, id), eq(estimates.status, "expired"))
-      : and(
+      : args.isSentRedelivery
+        ? and(
+            eq(estimates.id, id),
+            eq(estimates.internalStatus, "sent_to_customer"),
+            eq(estimates.lifecycle as any, "sent"),
+          )
+        : and(
           eq(estimates.id, id),
           or(
             eq(estimates.internalStatus, "pending_approval"),

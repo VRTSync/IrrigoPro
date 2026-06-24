@@ -120,6 +120,7 @@ export interface EstimateRoutesStorage {
       approvalSentAt: Date;
       newEstimateDate: Date | null;
       isResend: boolean;
+      isSentRedelivery?: boolean;
     },
   ): Promise<Estimate | EstimateWithItems | undefined | null>;
   createWorkOrderFromEstimate?(id: number): Promise<WorkOrder>;
@@ -1429,6 +1430,10 @@ export function registerEstimateRoutes(
     estimateId: number,
     opts: {
       resetEstimateDate?: boolean;
+      // Task #365 — re-deliver a non-expired sent estimate without
+      // resetting estimateDate. Passed through to markEstimateSentToCustomer
+      // so the CAS WHERE clause allows internalStatus='sent_to_customer'.
+      isSentRedelivery?: boolean;
       to?: string;
       cc?: string[];
       bcc?: string[];
@@ -1440,7 +1445,12 @@ export function registerEstimateRoutes(
     if (!estimateWithItems) throw new Error(`Estimate ${estimateId} not found`);
 
     const crypto = await import("crypto");
-    const approvalToken = crypto.randomBytes(32).toString("hex");
+    // Task #365 — for sent re-delivery, reuse the existing approval token so
+    // the customer's previously shared link remains valid. Only refresh expiry.
+    // For expired resend and first send, always mint a new token.
+    const approvalToken = opts.isSentRedelivery && estimateWithItems.approvalToken
+      ? (estimateWithItems.approvalToken as string)
+      : crypto.randomBytes(32).toString("hex");
     const tokenExpiresAt = new Date();
     tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 30);
 
@@ -1517,12 +1527,15 @@ export function registerEstimateRoutes(
       approvalSentAt: new Date(),
       newEstimateDate: opts.resetEstimateDate ? effectiveEstimateDate : null,
       isResend: !!opts.resetEstimateDate,
+      isSentRedelivery: !!opts.isSentRedelivery,
     });
     if (!persisted) {
       throw new EstimateSendConflictError(
         opts.resetEstimateDate
           ? "Estimate is no longer in an expired state and cannot be resent"
-          : "Estimate has already been sent to the customer",
+          : opts.isSentRedelivery
+            ? "Estimate is no longer in a sent state and cannot be re-delivered"
+            : "Estimate has already been sent to the customer",
       );
     }
 
@@ -1654,11 +1667,25 @@ export function registerEstimateRoutes(
         });
         return;
       }
-      if (estimate.lifecycleStatus !== "expired") {
-        res.status(400).json({ message: "Only expired estimates can be resent" });
+      // Task #365 — widen to also allow `sent` (awaiting customer reply)
+      // so managers can re-deliver the approval email without needing
+      // to wait for the estimate to expire first. Draft / approved /
+      // rejected / converted estimates are still rejected.
+      const lc = estimate.lifecycleStatus;
+      const isExpiredResend = lc === "expired";
+      const isSentRedelivery = lc === "sent";
+      if (!isExpiredResend && !isSentRedelivery) {
+        const stateLabel = lc ?? estimate.internalStatus ?? "unknown";
+        res.status(400).json({
+          message: `Cannot resend a ${stateLabel} estimate. Only sent or expired estimates may be resent.`,
+        });
         return;
       }
-      await _sendEstimateApprovalEmailFlow(id, { resetEstimateDate: true, req });
+      await _sendEstimateApprovalEmailFlow(id, {
+        resetEstimateDate: isExpiredResend,
+        isSentRedelivery,
+        req,
+      });
       const fresh = await storage.getEstimate(id);
       // Task #641 — audit the resend so the Activity tab shows it.
       await recordLifecycleAudit(req, {
@@ -1668,7 +1695,9 @@ export function registerEstimateRoutes(
         companyId: estimate.companyId ?? null,
         before: { status: estimate.status, internalStatus: estimate.internalStatus },
         after: { status: fresh?.status, internalStatus: fresh?.internalStatus },
-        summary: `Estimate ${estimate.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : id} resent after expiration`,
+        summary: isExpiredResend
+          ? `Estimate ${estimate.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : id} resent after expiration`
+          : `Estimate ${estimate.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : id} re-delivered to customer`,
       });
       res.json({ message: "Estimate resent to customer", estimate: fresh });
     } catch (error) {

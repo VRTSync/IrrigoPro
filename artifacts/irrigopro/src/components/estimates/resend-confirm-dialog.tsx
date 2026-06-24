@@ -29,6 +29,9 @@ interface ResendConfirmDialogProps {
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
   isResending: boolean;
+  // Task #365 — true when the estimate is expired (date reset + new token);
+  // false when it's a re-delivery of a non-expired sent estimate (no date reset).
+  isExpiredResend?: boolean;
 }
 
 export function ResendConfirmDialog({
@@ -37,6 +40,7 @@ export function ResendConfirmDialog({
   onOpenChange,
   onConfirm,
   isResending,
+  isExpiredResend = true,
 }: ResendConfirmDialogProps) {
   const email = estimate?.customerEmail?.trim() ?? "";
   const hasEmail = email.length > 0;
@@ -53,8 +57,18 @@ export function ResendConfirmDialog({
             <AlertDialogHeader>
               <AlertDialogTitle>Resend estimate?</AlertDialogTitle>
               <AlertDialogDescription>
-                This will email {customerName} at <strong>{email}</strong> with a
-                fresh approval link and reset the 30-day expiration window.
+                {isExpiredResend ? (
+                  <>
+                    This will email {customerName} at <strong>{email}</strong> with a
+                    fresh approval link and reset the 30-day expiration window.
+                  </>
+                ) : (
+                  <>
+                    This will re-deliver the approval email to {customerName} at{" "}
+                    <strong>{email}</strong>. The estimate date and approval link
+                    remain unchanged.
+                  </>
+                )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

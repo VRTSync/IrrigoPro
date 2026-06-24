@@ -325,6 +325,15 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     "billing_manager",
   ]);
   const canSendEstimate = currentRole != null && SEND_ROLES.has(currentRole);
+  // Task #365 — matches the server's resend role gate (irrigation_manager
+  // can resend; billing_manager cannot). Mirrors the backend check in
+  // POST /api/estimates/:id/resend.
+  const RESEND_ROLES = new Set<string>([
+    "super_admin",
+    "company_admin",
+    "irrigation_manager",
+  ]);
+  const canResendEstimate = currentRole != null && RESEND_ROLES.has(currentRole);
 
   const buildApprovalUrl = (token: string) => {
     const origin =
@@ -1261,7 +1270,10 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                       </Button>
                     </>
                   )}
-                  {isExpired(estimate) && !isEstimateDeleted && (
+                  {/* Task #365 — show Resend for expired OR for sent-but-not-yet-responded estimates,
+                      gated to irrigation_manager / company_admin / super_admin */}
+                  {(isExpired(estimate) || (isSent(estimate) && isAwaitingCustomerReply(estimate))) &&
+                    !isEstimateDeleted && canResendEstimate && (
                     <Button
                       onClick={() => setShowResendDialog(true)}
                       variant="outline"
@@ -1435,6 +1447,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
         onOpenChange={setShowResendDialog}
         onConfirm={handleConfirmResend}
         isResending={isResending}
+        isExpiredResend={isExpired(estimate)}
       />
       <ConvertToWorkOrderModal
         isOpen={showConvertDialog}
