@@ -55,6 +55,8 @@ import { WcbLaborRateEdit } from "@/components/wet-check-billings/wcb-labor-rate
 import { RateModeToggle } from "@/components/billing-workspace/rate-mode-toggle";
 import { safeGet } from "@/utils/safeStorage";
 import { isNeedsReview } from "@/lib/finding-save-payload";
+import { isInspectionOriginEstimate } from "@/lib/estimate-zone-grouping";
+import { EstimateZoneGroupedView } from "@/components/estimates/estimate-zone-grouped-view";
 import type {
   WetCheckWithDetails,
   WetCheckBilling,
@@ -544,46 +546,20 @@ function InspectionEstimateSection({ wetCheckId, onApproveSuccess }: InspectionE
         estimateId={estimate.id}
       />
 
-      {/* Line items table */}
-      {items.length > 0 ? (
-        <div className="rounded-lg border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm" data-testid="crs-inspection-line-items">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Description</th>
-                {canSeePricing() && (
-                  <>
-                    <th className="px-4 py-2 text-right text-xs font-semibold text-gray-600">Qty</th>
-                    <th className="px-4 py-2 text-right text-xs font-semibold text-gray-600">Unit $</th>
-                    <th className="px-4 py-2 text-right text-xs font-semibold text-gray-600">Total</th>
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {items.map(item => (
-                <tr key={item.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 text-gray-800">
-                    {item.description ?? item.partName ?? "—"}
-                  </td>
-                  {canSeePricing() && (
-                    <>
-                      <td className="px-4 py-2 text-right text-gray-600">{item.quantity ?? 1}</td>
-                      <td className="px-4 py-2 text-right text-gray-600">
-                        ${parseFloat(String(item.partPrice ?? "0")).toFixed(2)}
-                      </td>
-                      <td className="px-4 py-2 text-right font-medium text-gray-900">
-                        ${parseFloat(String(item.totalPrice ?? "0")).toFixed(2)}
-                      </td>
-                    </>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {/* Line items — zone-grouped for inspection-origin estimates */}
+      {isInspectionOriginEstimate(items) ? (
+        <EstimateZoneGroupedView
+          items={items}
+          laborRate={parseFloat(String(estimate.laborRate ?? "0")) || 0}
+          partsSubtotal={partsSubtotal}
+          laborSubtotal={laborSubtotal}
+          totalAmount={totalAmount}
+          totalLaborHours={totalLaborHours}
+          canSeePricing={canSeePricing()}
+          showTotalsFooter={false}
+        />
       ) : (
-        <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 py-6 text-center">
+        <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 py-6 text-center" data-testid="crs-inspection-labor-only">
           <p className="text-sm text-gray-500">No part findings — estimate captures labor only.</p>
         </div>
       )}
