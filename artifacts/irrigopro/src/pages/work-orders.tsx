@@ -1141,9 +1141,32 @@ export default function WorkOrders() {
                             </div>
                           )}
                         </>
-                      ) : (
-                        // Manager/Admin View - View button and Assignment dropdown
+                      ) : (() => {
+                        // Manager/Admin View — derives isMine/isActive once before rendering
+                        const isMine = workOrder.assignedTechnicianId === currentUser?.id;
+                        const isActive =
+                          (workOrder.status === 'pending' ||
+                            workOrder.status === 'assigned' ||
+                            workOrder.status === 'in_progress') &&
+                          workOrder.invoiceId == null;
+                        return (
                         <div className="flex flex-wrap gap-2">
+                          {/* Start / Complete — shown when this manager/admin is the assignee and WO is still active */}
+                          {isMine && isActive && (
+                            <Button
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedWorkOrderForStart(workOrder);
+                              }}
+                              className="bg-blue-600 hover:bg-blue-700 text-white flex-1 sm:flex-none"
+                              data-testid={`button-start-complete-${workOrder.id}`}
+                            >
+                              <Play className="w-4 h-4 mr-1" />
+                              Start / Complete
+                            </Button>
+                          )}
+
                           <Button
                             size="sm"
                             onClick={(e) => {
@@ -1212,7 +1235,8 @@ export default function WorkOrders() {
                             </Button>
                           )}
                         </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   </div>
                 </CardContent>
