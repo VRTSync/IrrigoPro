@@ -521,6 +521,9 @@ export class ObjectStorageService {
   getCompanyLogoPublicURL(logoPath: string): string {
     if (logoPath.startsWith('http')) return logoPath;
     if (logoPath.startsWith('/api/')) return logoPath;
+    if (logoPath.startsWith('company-logos/')) {
+      return `/api/company-logo/${logoPath.slice('company-logos/'.length)}`;
+    }
     return `/api/company-logo/${logoPath}`;
   }
 
