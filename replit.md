@@ -10,6 +10,7 @@ Production irrigation company management app: estimates → work orders → wet 
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - `node --import tsx/esm artifacts/api-server/src/scripts/backfill-wet-check-branch.ts [--dry-run] [--batch=N]` — stamp `branch_name` on wet checks from their billing records (idempotent; resumes via `app_settings.wetCheckBranchBackfill.done`)
+- `node --import tsx/esm artifacts/api-server/src/scripts/backfill-trim-phantom-zones.ts [--dry-run] [--batch=N]` — one-time trim of orphan `not_checked` zone records whose `zoneNumber` exceeds the controller's current `zoneCount` (idempotent; resumes via `app_settings.trimPhantomZones.done`)
 - Required env: `DATABASE_URL` — Postgres connection string; `SENDGRID_API_KEY` — transactional email (estimate sends, password reset, verification, marketing-lead, etc.); optional `SENDGRID_FROM_EMAIL` overrides the default From address (`estimates@highplainsprop.com`)
 
 ## Stack

@@ -1,10 +1,10 @@
 /**
  * Shared zone-filtering predicate for wet check PDF renderers.
  *
- * A zone is "empty" when it was auto-seeded at wet-check creation (default
- * zoneCount = 100) and the technician never touched it.  Such zones carry no
- * real data and should be excluded from both the internal and customer-facing
- * PDF reports so the document doesn't show a wall of "Not Checked" rows.
+ * A zone is "empty" when it was auto-seeded at wet-check creation and the
+ * technician never touched it.  Such zones carry no real data and should be
+ * excluded from both the internal and customer-facing PDF reports so the
+ * document doesn't show a wall of "Not Checked" rows.
  *
  * A zone is kept when ANY of the following is true:
  *  - status is something other than `not_checked` (or null/empty)

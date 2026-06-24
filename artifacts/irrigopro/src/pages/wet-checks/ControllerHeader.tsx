@@ -22,8 +22,8 @@ export function ControllerHeader({
   propertyAddress?: string;
 }) {
   const { toast } = useToast();
-  const [zc, setZc] = useState<string>(String(controller?.zoneCount ?? 100));
-  useEffect(() => { setZc(String(controller?.zoneCount ?? 100)); }, [controller?.zoneCount]);
+  const [zc, setZc] = useState<string>(String(controller?.zoneCount ?? 12));
+  useEffect(() => { setZc(String(controller?.zoneCount ?? 12)); }, [controller?.zoneCount]);
 
   const updateMut = useMutation({
     mutationFn: (n: number) =>

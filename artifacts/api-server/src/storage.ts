@@ -7326,7 +7326,7 @@ export class DatabaseStorage implements IStorage {
           customerId,
           branchName: branch,
           controllerLetter: letter,
-          zoneCount: 100,
+          zoneCount: 12,
         })))
         .onConflictDoNothing();
     }
@@ -7567,7 +7567,7 @@ export class DatabaseStorage implements IStorage {
       ));
     }
 
-    // Add any missing letters up to the new count (default zoneCount = 100).
+    // Add any missing letters up to the new count (default zoneCount = 12).
     await this.ensurePropertyControllers(companyId, customerId, count, branch);
 
     // customers.totalControllers is a customer-level field; only mirror the
@@ -8272,7 +8272,7 @@ export class DatabaseStorage implements IStorage {
       );
       for (const letter of expectedLetters) {
         const ctrl = ctrls.find(c => c.controllerLetter === letter);
-        const zoneCount = ctrl?.zoneCount ?? 100;
+        const zoneCount = ctrl?.zoneCount ?? 0;
         for (let z = 1; z <= zoneCount; z++) {
           if (!seen.has(`${letter}#${z}`)) {
             toInsert.push({

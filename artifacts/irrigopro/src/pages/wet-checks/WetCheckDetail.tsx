@@ -331,7 +331,7 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
   // Drill-down: a specific zone
   if (activeLetter && activeZone) {
     const ctrl = controllers.find(c => c.controllerLetter === activeLetter);
-    const zoneCount = ctrl?.zoneCount ?? 100;
+    const zoneCount = ctrl?.zoneCount ?? 0;
     const records = zonesByLetter(activeLetter);
     const zoneRecord = records.find(z => z.zoneNumber === activeZone);
 
@@ -473,7 +473,7 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
           propertyAddress={wc.propertyAddress ?? undefined}
         />
         <div className="grid grid-cols-5 sm:grid-cols-8 md:grid-cols-10 gap-1.5 sm:gap-1">
-          {Array.from({ length: ctrl?.zoneCount ?? 100 }, (_, i) => i + 1).map(n => {
+          {Array.from({ length: ctrl?.zoneCount ?? 0 }, (_, i) => i + 1).map(n => {
             const r = recordsByZone.get(n);
             const cls = r?.status === "checked_ok"
               ? "bg-green-500 text-white"

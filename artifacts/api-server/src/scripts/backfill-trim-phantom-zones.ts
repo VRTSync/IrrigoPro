@@ -1,0 +1,305 @@
+// Trim orphan `not_checked` wet-check zone records that exceed a controller's
+// current zoneCount.
+//
+// Background: before this fix, `ensurePropertyControllers` seeded new
+// property controllers with zoneCount=100. `ControllerSelectionPage` then
+// created 100 zone records (status='not_checked') per controller even when
+// the real controller had far fewer zones. This script deletes those phantom
+// rows for every in-progress wet check, leaving only zone records whose
+// zoneNumber is <= the controller's current zoneCount.
+//
+// Scope:
+//   - Only `not_checked` records are removed. Zones already checked
+//     (checked_ok, checked_with_issues), explicitly skipped (not_applicable),
+//     or enriched with notes/findings are never touched.
+//   - The script operates on all wet checks (any status) — even submitted or
+//     converted ones may carry phantom rows that inflate PDF zone counts.
+//   - Controllers with no matching `property_controllers` row are skipped
+//     (safe-unknown situation).
+//
+// Idempotent: processed wet-check ids are stored in
+//   app_settings.trimPhantomZones.done
+// Any wet-check id that errors lands in
+//   app_settings.trimPhantomZones.failed
+//
+// Run:
+//   node --import tsx/esm \
+//     artifacts/api-server/src/scripts/backfill-trim-phantom-zones.ts \
+//     [--dry-run] [--batch=N]
+
+try { (process.stdout as unknown as { _handle?: { setBlocking?: (b: boolean) => void } })._handle?.setBlocking?.(true); } catch {}
+try { (process.stderr as unknown as { _handle?: { setBlocking?: (b: boolean) => void } })._handle?.setBlocking?.(true); } catch {}
+
+import { db } from "../db";
+import { wetChecks, wetCheckZoneRecords, propertyControllers, appSettings } from "@workspace/db";
+import { eq, and, gt, inArray, sql } from "drizzle-orm";
+
+const DONE_KEY = "trimPhantomZones.done";
+const FAIL_KEY = "trimPhantomZones.failed";
+
+function parseFlag(name: string): boolean {
+  return process.argv.includes(`--${name}`);
+}
+
+function parseArg(name: string, fallback: number): number {
+  const raw = process.argv.find((a) => a.startsWith(`--${name}=`));
+  if (!raw) return fallback;
+  const n = Number(raw.split("=")[1]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+async function loadIdSet(key: string): Promise<Set<number>> {
+  const rows = await db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, key));
+  if (rows.length === 0) return new Set();
+  try {
+    const parsed = JSON.parse(String((rows[0] as { value: string }).value));
+    if (Array.isArray(parsed)) {
+      return new Set(
+        parsed
+          .map((v) => (typeof v === "number" ? v : Number(v)))
+          .filter((n) => Number.isFinite(n)),
+      );
+    }
+  } catch {
+    // Corrupt value — start fresh.
+  }
+  return new Set();
+}
+
+async function saveIdSet(key: string, ids: Set<number>): Promise<void> {
+  const value = JSON.stringify(Array.from(ids).sort((a, b) => a - b));
+  await db
+    .insert(appSettings)
+    .values({ key, value })
+    .onConflictDoUpdate({
+      target: appSettings.key,
+      set: { value, updatedAt: new Date() },
+    });
+}
+
+interface FailureEntry {
+  id: number;
+  error: string;
+  at: string;
+}
+
+async function loadFailures(): Promise<FailureEntry[]> {
+  const rows = await db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, FAIL_KEY));
+  if (rows.length === 0) return [];
+  try {
+    const parsed = JSON.parse(String((rows[0] as { value: string }).value));
+    return Array.isArray(parsed) ? (parsed as FailureEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function appendFailure(entry: FailureEntry): Promise<void> {
+  const existing = await loadFailures();
+  const value = JSON.stringify([...existing, entry]);
+  await db
+    .insert(appSettings)
+    .values({ key: FAIL_KEY, value })
+    .onConflictDoUpdate({
+      target: appSettings.key,
+      set: { value, updatedAt: new Date() },
+    });
+}
+
+async function main(): Promise<void> {
+  const dryRun = parseFlag("dry-run");
+  const batchSize = parseArg("batch", 200);
+
+  console.log(
+    `[backfill-trim-phantom-zones] starting (dryRun=${dryRun}, batch=${batchSize})`,
+  );
+
+  const done = await loadIdSet(DONE_KEY);
+  console.log(
+    `[backfill-trim-phantom-zones] resume — ${done.size} wet-check ids already processed`,
+  );
+
+  let lastId = 0;
+  let scanned = 0;
+  let trimmed = 0;
+  let skippedAlreadyDone = 0;
+  let skippedNoPhantoms = 0;
+  let failed = 0;
+
+  for (;;) {
+    // Fetch the next batch of wet-check ids that have at least one
+    // not_checked zone record (any wet check status).
+    const rows = await db
+      .selectDistinct({ id: wetChecks.id })
+      .from(wetChecks)
+      .innerJoin(
+        wetCheckZoneRecords,
+        and(
+          eq(wetCheckZoneRecords.wetCheckId, wetChecks.id),
+          eq(wetCheckZoneRecords.status, "not_checked"),
+        ),
+      )
+      .where(sql`${wetChecks.id} > ${lastId}`)
+      .orderBy(wetChecks.id)
+      .limit(batchSize);
+
+    if (rows.length === 0) break;
+
+    for (const row of rows) {
+      scanned += 1;
+      lastId = row.id;
+
+      if (done.has(row.id)) {
+        skippedAlreadyDone += 1;
+        continue;
+      }
+
+      try {
+        // Load the not_checked zone records for this wet check.
+        const notCheckedZones = await db
+          .select({
+            id: wetCheckZoneRecords.id,
+            controllerLetter: wetCheckZoneRecords.controllerLetter,
+            zoneNumber: wetCheckZoneRecords.zoneNumber,
+          })
+          .from(wetCheckZoneRecords)
+          .where(
+            and(
+              eq(wetCheckZoneRecords.wetCheckId, row.id),
+              eq(wetCheckZoneRecords.status, "not_checked"),
+            ),
+          );
+
+        if (notCheckedZones.length === 0) {
+          skippedNoPhantoms += 1;
+          done.add(row.id);
+          continue;
+        }
+
+        // Determine which controller letters are referenced.
+        const letters = [...new Set(notCheckedZones.map((z) => z.controllerLetter))];
+
+        // Load the controllers for this wet check's customer, scoped by the
+        // wet check's branchName. `property_controllers` is branch-scoped:
+        // the customer-level bucket stores branchName='' (empty string). A wet
+        // check with branchName=null also means customer-level, so we
+        // normalize null → '' before filtering — matching the storage layer's
+        // branchKey() convention.
+        const [wc] = await db
+          .select({
+            companyId: wetChecks.companyId,
+            customerId: wetChecks.customerId,
+            branchName: wetChecks.branchName,
+          })
+          .from(wetChecks)
+          .where(eq(wetChecks.id, row.id));
+        if (!wc) {
+          skippedNoPhantoms += 1;
+          done.add(row.id);
+          continue;
+        }
+
+        // Normalize: null or undefined → '' (customer-level bucket in
+        // property_controllers).
+        const branchKey = (wc.branchName ?? "").trim();
+
+        const ctrlRows = await db
+          .select({
+            controllerLetter: propertyControllers.controllerLetter,
+            zoneCount: propertyControllers.zoneCount,
+          })
+          .from(propertyControllers)
+          .where(
+            and(
+              eq(propertyControllers.companyId, wc.companyId),
+              eq(propertyControllers.customerId, wc.customerId),
+              eq(propertyControllers.branchName, branchKey),
+              inArray(propertyControllers.controllerLetter, letters),
+            ),
+          );
+
+        // (companyId, customerId, branchName, controllerLetter) is unique in
+        // property_controllers, so ctrlRows has at most one row per letter.
+        const zoneCountByLetter = new Map(
+          ctrlRows.map((c) => [c.controllerLetter, c.zoneCount]),
+        );
+
+        // Collect zone record ids to delete: those whose zoneNumber exceeds
+        // the controller's current zoneCount.
+        const toDelete: number[] = [];
+        for (const zone of notCheckedZones) {
+          const maxZones = zoneCountByLetter.get(zone.controllerLetter);
+          if (maxZones === undefined) {
+            // Controller not found in property_controllers — skip to be safe.
+            continue;
+          }
+          if (zone.zoneNumber > maxZones) {
+            toDelete.push(zone.id);
+          }
+        }
+
+        if (toDelete.length === 0) {
+          skippedNoPhantoms += 1;
+          done.add(row.id);
+          continue;
+        }
+
+        if (dryRun) {
+          console.log(
+            `[backfill-trim-phantom-zones] dry-run: wet-check id=${row.id} would delete ${toDelete.length} phantom zone record(s)`,
+          );
+        } else {
+          await db
+            .delete(wetCheckZoneRecords)
+            .where(inArray(wetCheckZoneRecords.id, toDelete));
+        }
+
+        trimmed += toDelete.length;
+        done.add(row.id);
+      } catch (err) {
+        failed += 1;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(
+          `[backfill-trim-phantom-zones] FAILED wet-check id=${row.id}: ${msg}`,
+        );
+        if (!dryRun) {
+          await appendFailure({
+            id: row.id,
+            error: msg,
+            at: new Date().toISOString(),
+          });
+        }
+      }
+    }
+
+    // Persist the done set after every batch so a mid-run timeout can resume.
+    if (!dryRun) {
+      await saveIdSet(DONE_KEY, done);
+    }
+
+    console.log(
+      `[backfill-trim-phantom-zones] scanned=${scanned} trimmed=${trimmed} ` +
+        `skippedAlreadyDone=${skippedAlreadyDone} skippedNoPhantoms=${skippedNoPhantoms} ` +
+        `failed=${failed} lastId=${lastId}`,
+    );
+  }
+
+  console.log(
+    `[backfill-trim-phantom-zones] done. scanned=${scanned} trimmed=${trimmed} ` +
+      `skippedAlreadyDone=${skippedAlreadyDone} skippedNoPhantoms=${skippedNoPhantoms} ` +
+      `failed=${failed} dryRun=${dryRun}`,
+  );
+}
+
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error("[backfill-trim-phantom-zones] fatal:", err);
+    process.exit(1);
+  });
