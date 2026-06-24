@@ -51,6 +51,9 @@ type EstimateView = {
   alreadyResponded: boolean;
   status: string;
   companyName?: string;
+  companyLogoUrl?: string | null;
+  companyPhone?: string | null;
+  companyEmail?: string | null;
   approvalSignerName?: string | null;
   approvalSignedAt?: string | null;
   estimate: {
@@ -254,6 +257,12 @@ export default function EstimateApproval() {
 
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   const [action, setAction] = useState<ActionState>({ kind: "idle" });
+  const [newLinkState, setNewLinkState] = useState<
+    | { kind: "idle" }
+    | { kind: "pending" }
+    | { kind: "success" }
+    | { kind: "error"; message?: string }
+  >({ kind: "idle" });
 
   // Signature sheet state
   const [sigMode, setSigMode] = useState<"draw" | "type">("draw");
@@ -376,6 +385,14 @@ export default function EstimateApproval() {
     setAction({ kind: "pending", action: "reject" });
     try {
       const res = await fetch(`/api/estimates/reject-via-token/${token}`, { method: "GET" });
+      // Defense-in-depth: if the server says the token expired between page load
+      // and the button click, surface the expired state rather than a generic error.
+      if (res.status === 410) {
+        const j = await res.json().catch(() => ({}));
+        setLoad({ kind: "expired", estimateNumber: j?.estimateNumber });
+        setAction({ kind: "idle" });
+        return;
+      }
       if (!res.ok) {
         setAction({ kind: "action-error" });
         return;
@@ -384,6 +401,28 @@ export default function EstimateApproval() {
       setAction({ kind: "rejected", estimateNumber: est });
     } catch {
       setAction({ kind: "action-error" });
+    }
+  };
+
+  const requestNewLink = async () => {
+    if (!token || newLinkState.kind === "pending" || newLinkState.kind === "success") return;
+    setNewLinkState({ kind: "pending" });
+    try {
+      const res = await fetch(`/api/estimates/request-new-link/${token}`, { method: "POST" });
+      if (res.status === 429) {
+        setNewLinkState({
+          kind: "error",
+          message: "We already sent a request recently. Please wait a few minutes before trying again.",
+        });
+        return;
+      }
+      if (!res.ok) {
+        setNewLinkState({ kind: "error" });
+        return;
+      }
+      setNewLinkState({ kind: "success" });
+    } catch {
+      setNewLinkState({ kind: "error" });
     }
   };
 
@@ -497,26 +536,55 @@ export default function EstimateApproval() {
     }
     if (load.kind === "not-found") {
       return (
-        <div className="text-center">
-          <AlertCircle className="h-16 w-16 text-yellow-600 mx-auto mb-4" />
-          <h1 className="text-3xl font-bold text-yellow-600 mb-4">Invalid Link</h1>
-          <p className="text-gray-700">
-            This approval link appears to be invalid. Please contact us if you need a new link.
+        <div className="text-center py-4">
+          <AlertCircle className="h-14 w-14 text-yellow-500 mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">This link isn't valid</h1>
+          <p className="text-gray-600 text-sm">
+            The approval link you followed doesn't match any active estimate. It may have
+            already been used, or the link may have been copied incorrectly.
           </p>
         </div>
       );
     }
     if (load.kind === "expired") {
       return (
-        <div className="text-center">
-          <AlertCircle className="h-16 w-16 text-yellow-600 mx-auto mb-4" />
-          <h1 className="text-3xl font-bold text-yellow-600 mb-4">Link Expired</h1>
-          <p className="text-gray-700">
+        <div className="text-center py-4">
+          <AlertCircle className="h-14 w-14 text-yellow-500 mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">This link has expired</h1>
+          <p className="text-gray-600 text-sm mb-6">
             {load.estimateNumber
-              ? `Estimate ${formatEstimateNumber(load.estimateNumber)} is no longer available for approval. `
-              : ""}
-            Please contact us to request a new estimate.
+              ? `The approval link for Estimate ${formatEstimateNumber(load.estimateNumber)} is no longer active — estimate approval links expire 30 days after they're sent.`
+              : "This approval link is no longer active. Estimate approval links expire 30 days after they are sent."}
           </p>
+
+          {newLinkState.kind === "success" ? (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-800">
+              <CheckCircle className="h-5 w-5 text-green-600 mx-auto mb-2" />
+              <p className="font-medium">Request sent!</p>
+              <p className="mt-1 text-green-700">
+                We've let the team know — they'll send you a fresh link shortly.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <Button
+                className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white"
+                disabled={newLinkState.kind === "pending"}
+                onClick={requestNewLink}
+                data-testid="request-new-link-btn"
+              >
+                {newLinkState.kind === "pending" ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : null}
+                Request a new link
+              </Button>
+              {newLinkState.kind === "error" && (
+                <p className="text-sm text-red-600">
+                  {newLinkState.message ?? "Something went wrong. Please contact us directly."}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       );
     }
@@ -872,11 +940,118 @@ export default function EstimateApproval() {
     );
   };
 
+  const companyInfo =
+    load.kind === "ready"
+      ? {
+          name: load.data.companyName ?? "IrrigoPro",
+          logoUrl: load.data.companyLogoUrl,
+          phone: load.data.companyPhone,
+          email: load.data.companyEmail,
+          customerName: load.data.estimate.customerName,
+        }
+      : null;
+
   return (
-    <div className="min-h-screen bg-gray-50 flex items-start sm:items-center justify-center px-4 py-8">
-      <Card className="w-full max-w-2xl bg-white shadow-lg">
-        <CardContent className="p-6 sm:p-8">{renderBody()}</CardContent>
-      </Card>
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Low-opacity watermark rendered behind all content */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 0,
+          pointerEvents: "none",
+          overflow: "hidden",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <span
+          style={{
+            fontWeight: 900,
+            fontSize: "clamp(3rem, 14vw, 10rem)",
+            opacity: 0.045,
+            transform: "rotate(-25deg)",
+            userSelect: "none",
+            whiteSpace: "nowrap",
+            color: "#111827",
+          }}
+        >
+          IrrigoPro
+        </span>
+      </div>
+
+      {/* Branded header — shown once company data is loaded */}
+      {companyInfo && (
+        <header
+          className="bg-white border-b border-gray-200 shadow-sm"
+          style={{ position: "relative", zIndex: 10 }}
+        >
+          <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
+            {companyInfo.logoUrl && (
+              <img
+                src={companyInfo.logoUrl}
+                alt={`${companyInfo.name} logo`}
+                className="h-9 w-auto object-contain flex-shrink-0"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                }}
+              />
+            )}
+            <div className="min-w-0">
+              <div className="font-semibold text-gray-900 text-sm sm:text-base truncate">
+                {companyInfo.name}
+              </div>
+              <div className="flex items-center gap-1 text-xs text-gray-500">
+                <span>🔒</span>
+                <span className="truncate">
+                  Secure approval link prepared for{" "}
+                  <strong className="text-gray-700">{companyInfo.customerName}</strong>
+                </span>
+              </div>
+            </div>
+          </div>
+        </header>
+      )}
+
+      {/* Main scrollable content */}
+      <main
+        className="flex-1 flex items-start sm:items-center justify-center px-4 py-8"
+        style={{ position: "relative", zIndex: 10 }}
+      >
+        <Card className="w-full max-w-2xl bg-white shadow-lg">
+          <CardContent className="p-6 sm:p-8">{renderBody()}</CardContent>
+        </Card>
+      </main>
+
+      {/* Footer */}
+      <footer
+        className="bg-white border-t border-gray-200 py-4 px-4"
+        style={{ position: "relative", zIndex: 10 }}
+      >
+        <div className="max-w-2xl mx-auto text-center">
+          {(companyInfo?.phone || companyInfo?.email) && (
+            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-gray-500 mb-1">
+              {companyInfo.phone && <span>{companyInfo.phone}</span>}
+              {companyInfo.phone && companyInfo.email && (
+                <span aria-hidden="true">·</span>
+              )}
+              {companyInfo.email && (
+                <a
+                  href={`mailto:${companyInfo.email}`}
+                  className="hover:underline"
+                >
+                  {companyInfo.email}
+                </a>
+              )}
+            </div>
+          )}
+          <p className="text-xs text-gray-400">
+            Secure link · expires 30 days after it was sent · Powered by IrrigoPro
+          </p>
+        </div>
+      </footer>
     </div>
   );
 }

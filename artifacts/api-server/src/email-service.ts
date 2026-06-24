@@ -1340,6 +1340,71 @@ The signed PDF is attached to this email for your records.
   }
 
   /**
+   * Task #1544 — notifies company admins / managers that a customer clicked
+   * "Request a new link" on an expired estimate approval page. Never sends a
+   * link to the customer directly; the team re-sends via the Resend flow.
+   */
+  static async sendNewLinkRequestToAdmins(args: {
+    adminEmails: string[];
+    estimateNumber: string;
+    customerName: string;
+    customerEmail: string;
+  }): Promise<void> {
+    if (!isEmailConfigured()) {
+      console.warn('sendNewLinkRequestToAdmins: SENDGRID_API_KEY not set — skipping');
+      return;
+    }
+    const fmtNumber = formatEstimateNumber(args.estimateNumber);
+    const subject = `[Action needed] ${args.customerName} requested a new approval link — Estimate ${fmtNumber}`;
+    const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:20px;">
+  <div style="background:linear-gradient(135deg,#1E5A99,#0E3B6B);color:white;padding:24px 30px;border-radius:12px 12px 0 0;">
+    <h1 style="margin:0;font-size:22px;">New Approval Link Requested</h1>
+  </div>
+  <div style="background:white;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:28px;">
+    <p style="font-size:15px;color:#374151;margin-top:0;">
+      <strong>${this.escapeHtml(args.customerName)}</strong>
+      (${this.escapeHtml(args.customerEmail)}) clicked "Request a new link" on the
+      approval page for Estimate <strong>${this.escapeHtml(fmtNumber)}</strong>.
+      Their previous link has expired.
+    </p>
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:16px;margin:20px 0;">
+      <p style="margin:0;color:#1e40af;font-size:14px;">
+        <strong>Next step:</strong> Open the estimate in IrrigoPro and use the
+        <em>Resend Approval Email</em> action to send them a fresh link to the email
+        address on file. Do not reply to this notification with a link.
+      </p>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:8px;">
+      <tr><td style="padding:6px 0;font-weight:600;color:#6b7280;">Estimate:</td><td style="padding:6px 0;color:#1f2937;">${this.escapeHtml(fmtNumber)}</td></tr>
+      <tr><td style="padding:6px 0;font-weight:600;color:#6b7280;">Customer:</td><td style="padding:6px 0;color:#1f2937;">${this.escapeHtml(args.customerName)}</td></tr>
+      <tr><td style="padding:6px 0;font-weight:600;color:#6b7280;">Email on file:</td><td style="padding:6px 0;color:#1f2937;">${this.escapeHtml(args.customerEmail)}</td></tr>
+    </table>
+  </div>
+</body>
+</html>`;
+    const text = `New Approval Link Requested\n\n${args.customerName} (${args.customerEmail}) requested a new approval link for Estimate ${fmtNumber}.\n\nNext step: open the estimate in IrrigoPro and use the Resend Approval Email action to send them a fresh link to the email address on file.\n`;
+
+    for (const adminEmail of args.adminEmails) {
+      try {
+        await sgMail.send({
+          from: { email: DEFAULT_FROM_EMAIL, name: SENDGRID_FROM_NAME },
+          to: adminEmail,
+          subject,
+          html,
+          text,
+          categories: ['estimate-new-link-request'],
+          customArgs: { estimateNumber: args.estimateNumber },
+        });
+      } catch (err: any) {
+        console.error(`sendNewLinkRequestToAdmins: failed to email ${adminEmail}:`, err?.response?.body ?? err);
+      }
+    }
+  }
+
+  /**
    * Emails the customer-facing wet check condition report as a PDF attachment.
    * Subject: "Your Irrigation Inspection Results — {propertyAddress}"
    */

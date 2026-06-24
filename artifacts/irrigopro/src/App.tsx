@@ -14,6 +14,8 @@ import NotFound from "@/pages/not-found";
 import FieldTechDashboard from "@/pages/field-tech-dashboard";
 import AdminDashboard from "@/pages/admin-dashboard";
 import ManagerWorkspace from "@/pages/manager-workspace";
+// Eager: public token-gated page — must cold-load from a direct URL with no session.
+import EstimateApproval from "@/pages/estimate-approval";
 
 // Task #532 — every other page is route-split via React.lazy. Vite emits
 // per-route chunks; shared deps (React, React Query, Wouter, Tailwind
@@ -52,7 +54,6 @@ const LicenseAgreement = lazyPage(() => import("@/pages/license-agreement"));
 const PrivacyPolicy = lazyPage(() => import("@/pages/privacy-policy"));
 const SwitchUser = lazyPage(() => import("@/pages/switch-user"));
 const CustomerProfile = lazyPage(() => import("@/pages/customer-profile"));
-const EstimateApproval = lazyPage(() => import("@/pages/estimate-approval"));
 const PartsSettings = lazyPage(() => import("@/pages/parts-settings"));
 const PartsPendingApproval = lazyPage(() => import("@/pages/parts-pending-approval"));
 const EstimatesPendingApproval = lazyPage(() => import("@/pages/estimates-pending-approval"));
@@ -163,6 +164,20 @@ function Router() {
       console.warn("[boot] clearStaleCache failed:", cacheErr);
     }
   }, []);
+
+  // Public token-gated page — renders regardless of auth state and before the
+  // login gate. No app shell, no sidebar, no authenticated API calls. Hoisted
+  // above the loading check so a direct URL works even during auth bootstrap.
+  if (currentPath.startsWith("/estimate-approval/")) {
+    return (
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <EstimateApproval />
+          <Toaster />
+        </QueryClientProvider>
+      </TooltipProvider>
+    );
+  }
 
   if (isLoading) {
     return (

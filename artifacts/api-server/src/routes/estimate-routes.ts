@@ -294,6 +294,12 @@ export type EstimateRouteDeps = {
   ) => Promise<void>;
 };
 
+// In-memory rate limiter for POST /api/estimates/request-new-link/:token.
+// Keyed by token; value is the Unix-ms timestamp of the last accepted request.
+// One request per token per 30 minutes max.
+const newLinkRequestLog = new Map<string, number>();
+const NEW_LINK_DEBOUNCE_MS = 30 * 60 * 1000;
+
 export function registerEstimateRoutes(
   app: Express,
   storage: EstimateRoutesStorage,
@@ -1902,13 +1908,29 @@ export function registerEstimateRoutes(
 
       // Task #1499 — include company name so the frontend can interpolate
       // it into the consent blurb without hardcoding "IrrigoPro".
+      // Task #1544 — also expose logo URL, phone, and email for branded header.
       let companyName = "IrrigoPro";
+      let companyLogoUrl: string | null = null;
+      let companyPhone: string | null = null;
+      let companyEmail: string | null = null;
       if (full.companyId) {
         try {
           const company = await storage.getCompanyProfile!(full.companyId);
           if (company?.name) companyName = company.name;
+          if (company?.logo) {
+            const logo = company.logo as string;
+            if (logo.startsWith("http")) {
+              companyLogoUrl = logo;
+            } else if (logo.startsWith("/api/")) {
+              companyLogoUrl = logo;
+            } else {
+              companyLogoUrl = `/api/company-logo/${logo}`;
+            }
+          }
+          companyPhone = (company as any)?.phone ?? null;
+          companyEmail = (company as any)?.email ?? null;
         } catch {
-          // Non-fatal — fall back to default
+          // Non-fatal — fall back to defaults
         }
       }
 
@@ -1916,6 +1938,9 @@ export function registerEstimateRoutes(
         alreadyResponded,
         status: full.status,
         companyName,
+        companyLogoUrl,
+        companyPhone,
+        companyEmail,
         approvalSignerName: (full as any).approvalSignerName ?? null,
         approvalSignedAt: (full as any).approvalSignedAt ?? null,
         estimate: {
@@ -2274,7 +2299,10 @@ export function registerEstimateRoutes(
     }
   });
 
-  // — preserve the HTML response body shape exactly.
+  // Task #1544 — reject-via-token now returns JSON (the React approval page
+  // renders all states; the old HTML responses are retired). Defense-in-depth
+  // tokenExpiresAt check added so expired tokens cannot be acted on even if
+  // the client somehow bypasses the view-by-token expiry screen.
   app.get("/api/estimates/reject-via-token/:token", async (req, res) => {
     try {
       const token = String(req.params.token);
@@ -2282,32 +2310,38 @@ export function registerEstimateRoutes(
       const estimate = list.find((e) => e.approvalToken === token);
 
       if (!estimate) {
-        res.status(404).send(`
-          <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h2 style="color: #ef4444;">Invalid or Expired Link</h2>
-            <p>This approval link is no longer valid. Please contact us directly.</p>
-          </body></html>
-        `);
+        res.status(404).json({ error: "not_found", message: "Invalid or expired link." });
+        return;
+      }
+
+      // Defense-in-depth: block action on expired tokens.
+      if (estimate.tokenExpiresAt && new Date() > new Date(estimate.tokenExpiresAt)) {
+        res.status(410).json({
+          error: "expired",
+          message: "This approval link has expired.",
+          estimateNumber: estimate.estimateNumber,
+        });
         return;
       }
 
       if (estimate.status !== "pending") {
-        res.status(400).send(`
-          <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h2 style="color: #f59e0b;">Already Responded</h2>
-            <p>You have already responded to this estimate. Thank you!</p>
-          </body></html>
-        `);
+        res.status(409).json({
+          error: "already_responded",
+          message: "You have already responded to this estimate.",
+          status: estimate.status,
+        });
         return;
       }
 
       // Reject the estimate with approval source tracking
       await storage.updateEstimate!(estimate.id, {
         status: "rejected",
+        lifecycle: "rejected",
         approvalSource: "email_link",
         approvalRespondedAt: new Date(),
         rejectedAt: new Date(),
-      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
       await recordLifecycleAudit(req, {
         resource: "estimate",
         action: "estimate.customer_rejected",
@@ -2355,30 +2389,119 @@ export function registerEstimateRoutes(
         false,
       );
 
-      res.send(`
-        <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-          <div style="max-width: 600px; margin: 0 auto; background: #fef2f2; border: 1px solid #dc2626; border-radius: 12px; padding: 40px;">
-            <h1 style="color: #dc2626; margin-bottom: 20px;">Estimate Declined</h1>
-            <p style="font-size: 18px; color: #374151; margin-bottom: 20px;">
-              Thank you for your response regarding estimate ${formatEstimateNumber(estimate.estimateNumber)}.
-            </p>
-            <p style="color: #6b7280;">
-              We understand this estimate doesn't meet your needs at this time. Please feel free to contact us if you'd like to discuss alternatives or have any questions.
-            </p>
-            <p style="color: #6b7280; margin-top: 30px;">
-              A confirmation email has been sent to ${estimate.customerEmail}.
-            </p>
-          </div>
-        </body></html>
-      `);
+      res.json({
+        success: true,
+        message: "Estimate declined",
+        estimateNumber: estimate.estimateNumber,
+      });
     } catch (error) {
       console.error("Error rejecting estimate via token:", error);
-      res.status(500).send(`
-        <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-          <h2 style="color: #ef4444;">Error</h2>
-          <p>Something went wrong. Please contact us directly.</p>
-        </body></html>
-      `);
+      res.status(500).json({ error: "server_error", message: "Something went wrong. Please contact us directly." });
+    }
+  });
+
+  // ── POST /api/estimates/request-new-link/:token ───────────────────────
+  // Task #1544 — self-serve "I need a new link" flow for customers with an
+  // expired (or soon-to-expire) estimate. The endpoint:
+  //   1. Looks up the estimate by token (accepts expired tokens).
+  //   2. Applies a 30-minute per-token debounce so a customer can't spam
+  //      the team. Uses an in-process Map — best-effort; acceptable because
+  //      this is a low-volume, non-critical path.
+  //   3. Notifies every company_admin and irrigation_manager for the company
+  //      (in-app notification + email) that the customer would like a fresh
+  //      link. Never sends a link directly to the caller — the team re-sends
+  //      via the existing Resend flow to the customer email on file.
+  //   4. Appends an audit row so the activity is visible on the estimate.
+  // Returns 200 on success, 404 for unknown tokens, 429 for rate-limited
+  // requests. Never 4xx for expired tokens — that is the primary use-case.
+  app.post("/api/estimates/request-new-link/:token", async (req, res) => {
+    try {
+      const token = String(req.params.token);
+
+      // Look up estimate by token (expired tokens are allowed here).
+      const list = await storage.getEstimates!();
+      const estimate = list.find((e) => e.approvalToken === token);
+
+      if (!estimate) {
+        res.status(404).json({ error: "not_found", message: "This link could not be found." });
+        return;
+      }
+
+      // Per-token debounce: 30 minutes.
+      const lastAt = newLinkRequestLog.get(token);
+      const now = Date.now();
+      if (lastAt && now - lastAt < NEW_LINK_DEBOUNCE_MS) {
+        const retryAfterSec = Math.ceil((NEW_LINK_DEBOUNCE_MS - (now - lastAt)) / 1000);
+        res.set("Retry-After", String(retryAfterSec));
+        res.status(429).json({
+          error: "rate_limited",
+          message: "A request was already sent recently. Please wait before trying again.",
+          retryAfterSeconds: retryAfterSec,
+        });
+        return;
+      }
+      newLinkRequestLog.set(token, now);
+
+      // Fire-and-forget: notify company admins and managers.
+      void (async () => {
+        try {
+          if (!storage.getUsers || !storage.createNotification) return;
+          const allUsers = await storage.getUsers();
+          const recipients = allUsers.filter(
+            (u) =>
+              (u.role === "company_admin" || u.role === "irrigation_manager") &&
+              u.companyId === estimate.companyId,
+          );
+          const adminEmails: string[] = recipients
+            .map((u) => u.email)
+            .filter((e): e is string => typeof e === "string" && e.length > 0);
+
+          for (const user of recipients) {
+            await storage.createNotification({
+              userId: user.id,
+              type: "estimate_new_link_requested",
+              title: "Customer Requested a New Approval Link",
+              message: `${estimate.customerName} requested a new approval link for estimate ${formatEstimateNumber(estimate.estimateNumber)}. Use the Resend flow to send them a fresh link.`,
+              relatedEntityType: "estimate",
+              relatedEntityId: estimate.id,
+              isRead: false,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any);
+          }
+
+          // Email notification to admins/managers.
+          if (adminEmails.length > 0) {
+            const { EmailService } = await import("../email-service");
+            await EmailService.sendNewLinkRequestToAdmins({
+              adminEmails,
+              estimateNumber: estimate.estimateNumber,
+              customerName: estimate.customerName,
+              customerEmail: estimate.customerEmail,
+            });
+          }
+        } catch (notifErr) {
+          console.error("request-new-link: notification dispatch failed:", notifErr);
+        }
+      })();
+
+      // Audit row so the event appears on the estimate's activity feed.
+      try {
+        await recordAuditEvent(req, {
+          action: "estimate.new_link_requested",
+          targetId: estimate.id,
+          targetType: "estimate",
+          companyId: estimate.companyId ?? null,
+          summary: `Customer ${estimate.customerName} requested a new approval link for estimate ${formatEstimateNumber(estimate.estimateNumber)}`,
+          details: { estimateNumber: estimate.estimateNumber, customerEmail: estimate.customerEmail },
+        });
+      } catch {
+        // Non-fatal
+      }
+
+      res.json({ success: true, message: "The team has been notified." });
+    } catch (error) {
+      console.error("Error in request-new-link:", error);
+      res.status(500).json({ error: "server_error", message: "Something went wrong. Please try again." });
     }
   });
 
