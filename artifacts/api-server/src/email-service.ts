@@ -2,6 +2,7 @@ import sgMail from '@sendgrid/mail';
 import { ObjectStorageService } from './objectStorage';
 import { storage } from './storage';
 import { formatEstimateNumber } from '@workspace/shared';
+import { resolveCompanyLogoUrl } from './logo-url';
 
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const DEFAULT_FROM_EMAIL =
@@ -75,23 +76,29 @@ export interface EstimateEmailData {
 
 export class EmailService {
   private static get baseUrl() {
-    // Use environment variable if set (flexible for different production domains)
+    // APP_BASE_URL must be set to the public domain in production
+    // (e.g. https://irrigopro.com) so that logo <img> tags and approval-page
+    // links embedded in outgoing emails are reachable by email recipients.
+    // Without it, logo URLs and approval links will point to the Replit
+    // preview domain, which may not be publicly accessible.
     if (process.env.APP_BASE_URL) {
-      return process.env.APP_BASE_URL.replace(/\/$/, ''); // Remove trailing slash
+      return process.env.APP_BASE_URL.replace(/\/$/, '');
     }
-    
-    // Production fallback (maintains existing behavior)
+
     if (process.env.NODE_ENV === 'production') {
+      console.warn(
+        '[email-service] APP_BASE_URL is not set in production — ' +
+        'logo and approval-page URLs in outgoing emails may not be reachable by recipients.',
+      );
       return 'https://irrigopro.com';
     }
-    
-    // For development, use the current Replit domain from REPLIT_DOMAINS
+
+    // Development: use the current Replit preview domain if available
     const replitDomain = process.env.REPLIT_DOMAINS?.split(',')[0];
     if (replitDomain) {
       return `https://${replitDomain}`;
     }
-    
-    // Fallback to standard Replit format
+
     return `https://${process.env.REPL_ID}.${process.env.REPL_OWNER}.replit.dev`;
   }
 
@@ -196,20 +203,8 @@ export class EmailService {
       .replace(/'/g, '&#39;');
   }
 
-  private static getCompanyLogoUrl(logoPath: string): string {
-    if (logoPath.startsWith('http')) {
-      return logoPath; // Already a full URL
-    }
-    
-    const baseUrl = this.baseUrl;
-
-    // Relative path already pointing to the correct serving route
-    if (logoPath.startsWith('/api/')) {
-      return `${baseUrl}${logoPath}`;
-    }
-
-    // Bare logo ID — construct the correct serving route
-    return `${baseUrl}/api/company-logo/${logoPath}`;
+  private static getCompanyLogoUrl(logoPath: string): string | null {
+    return resolveCompanyLogoUrl(logoPath, this.baseUrl);
   }
 
   // ── Zone-grouping for inspection-origin estimates ─────────────────────────

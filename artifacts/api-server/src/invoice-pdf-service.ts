@@ -1,4 +1,5 @@
 import { PDFGenerator, fetchLogoAsBase64 } from './pdf-generator';
+import { resolveCompanyLogoUrl, pdfLogoBaseUrl } from './logo-url';
 import { buildPdfViewModel } from './pdf-view-model';
 import type { PdfBrandColors, PdfWetCheckBillingRow, PdfWcbZonePhotoGroup } from './pdf-view-model';
 import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
@@ -71,54 +72,12 @@ async function extractBrandColorsFromDataUri(dataUri: string): Promise<PdfBrandC
   }
 }
 
-const LOGO_PATH_PATTERNS = [
-  /\/api\/public-objects\/company-logos\/(.+)/,
-  /\/api\/company-logo\/(.+)/,
-];
-
 /**
  * Exported for unit-test verification of the logo path → URL binding.
- *
- * Logo path binding verified (Task #1192):
- *   normalizeLogoPath() on a GCS upload URL saves "company-logos/<uuid>" to the DB.
- *   resolveLogoToFetchableUrl("company-logos/<uuid>") hits the
- *   `startsWith('company-logos/')` branch and produces
- *   `http://localhost:<port>/api/company-logo/<uuid>`, which is the correct
- *   internal endpoint served by GET /api/company-logo/:id. No mismatch found.
+ * Delegates to the shared resolveCompanyLogoUrl helper (logo-url.ts).
  */
 export function resolveLogoToFetchableUrl(storedLogo: string): string {
-  const port = process.env.PORT || 5000;
-  const localBase = `http://localhost:${port}`;
-
-  if (storedLogo.startsWith('http://') || storedLogo.startsWith('https://')) {
-    let pathname: string;
-    try {
-      pathname = new URL(storedLogo).pathname;
-    } catch {
-      console.warn(`[PDF] Invalid logo URL: ${storedLogo}`);
-      return storedLogo;
-    }
-    for (const pattern of LOGO_PATH_PATTERNS) {
-      const match = pathname.match(pattern);
-      if (match) {
-        return `${localBase}/api/company-logo/${match[1]}`;
-      }
-    }
-    console.warn(`[PDF] Logo URL does not match known app paths, skipping: ${storedLogo}`);
-    return storedLogo;
-  }
-
-  if (storedLogo.startsWith('/api/')) {
-    return `${localBase}${storedLogo}`;
-  }
-  if (storedLogo.startsWith('/')) {
-    return `${localBase}/api/company-logo${storedLogo}`;
-  }
-  if (storedLogo.startsWith('company-logos/')) {
-    const logoId = storedLogo.replace('company-logos/', '');
-    return `${localBase}/api/company-logo/${logoId}`;
-  }
-  return `${localBase}/api/company-logo/${storedLogo}`;
+  return resolveCompanyLogoUrl(storedLogo, pdfLogoBaseUrl()) ?? storedLogo;
 }
 
 const TOLERANCE = 0.01;

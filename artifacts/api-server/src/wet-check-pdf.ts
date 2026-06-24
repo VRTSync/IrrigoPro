@@ -5,41 +5,13 @@ import { resolveChromiumExecutable } from './chromium-resolver';
 import { fetchLogoAsBase64 } from './pdf-generator';
 import { VRT_LOGO_DATA_URI } from './assets/vrt-logo.js';
 import { IRRIGOPRO_LOGO_DATA_URI } from './assets/irrigopro-logo.js';
+import { resolveCompanyLogoUrl, pdfLogoBaseUrl } from './logo-url';
 
 const DEFAULT_BRAND_COLOR = '#1E5A99';
 const DEFAULT_BRAND_DARK = '#143F6B';
 
-const LOGO_PATH_PATTERNS = [
-  /\/api\/public-objects\/company-logos\/(.+)/,
-  /\/api\/company-logo\/(.+)/,
-];
-
 function resolveLogoToFetchableUrl(storedLogo: string): string {
-  const port = process.env.PORT || '5000';
-  const localBase = `http://localhost:${port}`;
-
-  if (storedLogo.startsWith('http://') || storedLogo.startsWith('https://')) {
-    let pathname: string;
-    try {
-      pathname = new URL(storedLogo).pathname;
-    } catch {
-      return storedLogo;
-    }
-    for (const pattern of LOGO_PATH_PATTERNS) {
-      const match = pathname.match(pattern);
-      if (match) {
-        return `${localBase}/api/company-logo/${match[1]}`;
-      }
-    }
-    return storedLogo;
-  }
-
-  if (storedLogo.startsWith('/api/')) return `${localBase}${storedLogo}`;
-  if (storedLogo.startsWith('/')) return `${localBase}/api/company-logo${storedLogo}`;
-  if (storedLogo.startsWith('company-logos/')) {
-    return `${localBase}/api/company-logo/${storedLogo.replace('company-logos/', '')}`;
-  }
-  return `${localBase}/api/company-logo/${storedLogo}`;
+  return resolveCompanyLogoUrl(storedLogo, pdfLogoBaseUrl()) ?? storedLogo;
 }
 
 async function extractAccentFromLogo(dataUri: string): Promise<{ accent: string; accentDark: string }> {
