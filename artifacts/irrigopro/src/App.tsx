@@ -79,6 +79,7 @@ const AdminMigrationsPage = lazyPage(() => import("@/pages/admin/migrations"));
 const AdminWcLaborBackfillPage = lazyPage(() => import("@/pages/admin-wc-labor-backfill"));
 const WetCheckReconciliationPage = lazyPage(() => import("@/pages/wet-check-reconciliation"));
 const CustomerSiteMapsPage = lazyPage(() => import("@/pages/customer-site-maps-page"));
+const IrrigationProfilePage = lazyPage(() => import("@/pages/customers/IrrigationProfile"));
 const FieldTechMaps = lazyPage(() => import("@/pages/field-tech-maps"));
 import { NotificationPermissionBanner } from "@/components/notifications/notification-permission-banner";
 import CompanyAdminApp from "@/components/company-admin-app";
@@ -266,6 +267,7 @@ function Router() {
                   <Route path="/customers" component={Customers} />
                   <Route path="/customers/:id/profile" component={CustomerProfile} />
                   <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />
+                  <Route path="/customers/:customerId/irrigation-profile" component={IrrigationProfilePage} />
                   <Route path="/site-maps" component={FieldTechMaps} />
                   <Route path="/financial-pulse" component={FinancialPulsePage} />
                   <Route path="/switch-user" component={SwitchUser} />
@@ -306,6 +308,7 @@ function Router() {
                   <Route path="/customers" component={Customers} />
                   <Route path="/customers/:id/profile" component={CustomerProfile} />
                   <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />
+                  <Route path="/customers/:customerId/irrigation-profile" component={IrrigationProfilePage} />
                   <Route path="/site-maps" component={SiteMapsPage} />
                   <Route path="/work-orders/missing-photos" component={WorkOrdersMissingPhotosReport} />
                   <Route path="/billing-sheets/missing-photos" component={MissingPhotosReport} />
@@ -372,6 +375,7 @@ function Router() {
                   <Route path="/customer-billing" component={RedirectToCommandCenter} />
                   <Route path="/customers" component={Customers} />
                   <Route path="/customers/:id/profile" component={CustomerProfile} />
+                  <Route path="/customers/:customerId/irrigation-profile" component={IrrigationProfilePage} />
                   <Route path="/work-orders/missing-photos" component={WorkOrdersMissingPhotosReport} />
                   <Route path="/work-orders" component={WorkOrders} />
                   <Route path="/billing-sheets/missing-photos" component={MissingPhotosReport} />
@@ -444,6 +448,7 @@ function Router() {
                   <Route path="/wet-checks/:id/summary" component={WetCheckInspectionSummaryPage} />
                   <Route path="/wet-checks/:id" component={WetChecksRoutingPage} />
                   <Route path="/wet-check-billings" component={RedirectToWetChecksApproved} />
+                  <Route path="/customers/:customerId/irrigation-profile" component={IrrigationProfilePage} />
                   <Route path="/system-users" component={SystemUserManagement} />
                   <Route path="/admin/controllers" component={AdminControllers} />
                   <Route path="/admin/client-errors" component={AdminClientErrorsPage} />

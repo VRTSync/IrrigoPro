@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt, DollarSign, Bell } from "lucide-react";
+import { ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt, DollarSign, Bell, Droplets } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Customer } from "@workspace/db/schema";
 import { InvoiceList } from "@/components/billing/invoice-list";
@@ -110,6 +110,14 @@ export default function CustomerProfile() {
               <MapPin className="w-4 h-4 mr-2" />
               View Site Map
             </Button>
+            <Button
+              onClick={() => setLocation(`/customers/${id}/irrigation-profile`)}
+              variant="outline"
+              className="w-full"
+            >
+              <Droplets className="w-4 h-4 mr-2" />
+              Controllers &amp; Zones
+            </Button>
           </div>
         </div>
       </div>
@@ -143,6 +151,13 @@ export default function CustomerProfile() {
           >
             <MapPin className="w-4 h-4 mr-2" />
             View Site Map
+          </Button>
+          <Button
+            onClick={() => setLocation(`/customers/${id}/irrigation-profile`)}
+            variant="outline"
+          >
+            <Droplets className="w-4 h-4 mr-2" />
+            Controllers &amp; Zones
           </Button>
         </div>
       </div>
