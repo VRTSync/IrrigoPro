@@ -566,9 +566,10 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
   const allFindings = wcZoneRecords.flatMap(z => asArray(z.findings));
   const completeCount = allFindings.filter(f => f.resolution === "repaired_in_field").length;
   const pendingFindingCount = allFindings.filter(f => f.resolution === "pending").length;
-  // Task #464 — Complete findings that have neither a part nor the
-  // labor-only confirmation block submit. Surface them inline on the CTA
-  // so the tech knows exactly what to fix before tapping Submit.
+  // Task #1535 — Findings marked complete without a part are now gracefully
+  // re-routed to manager review by the backend instead of blocking submit.
+  // Surface them as a non-blocking informational banner so the tech is aware,
+  // but do not disable the submit button.
   const completeNeedingDecision = allFindings.filter(f =>
     f.resolution === "repaired_in_field" &&
     f.partId == null &&
@@ -1148,9 +1149,10 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
           className="block w-full text-left text-sm rounded border border-amber-300 bg-amber-50 p-3 text-amber-900 cursor-pointer hover:bg-amber-100 active:bg-amber-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 transition-colors"
           data-testid="submit-needs-part-or-no-part-hint"
         >
-          {completeNeedingDecision.length} finding{completeNeedingDecision.length === 1 ? " is" : "s are"} marked complete without a part.
-          Open {completeNeedingDecision.length === 1 ? "it" : "them"} and either pick a part or tick
-          {" "}<span className="font-medium">No part needed (labor only)</span> before submitting.
+          {completeNeedingDecision.length} finding{completeNeedingDecision.length === 1 ? " is" : "s are"} marked complete without a part or labor-only confirmation.
+          {completeNeedingDecision.length === 1 ? "It" : "They"} will be automatically sent to manager review on submit.
+          {" "}Open {completeNeedingDecision.length === 1 ? "it" : "them"} to pick a part or tick
+          {" "}<span className="font-medium">No part needed (labor only)</span> if you want to bill it directly.
         </button>
       )}
 
@@ -1178,7 +1180,7 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
             }
             previewMut.mutate();
           }}
-          disabled={previewMut.isPending || submitMut.isPending || completeNeedingDecision.length > 0}
+          disabled={previewMut.isPending || submitMut.isPending}
           data-testid="btn-submit-wet-check"
         >
           {(previewMut.isPending || submitMut.isPending) ? <Loader2 className="animate-spin" /> : submitCtaLabel}

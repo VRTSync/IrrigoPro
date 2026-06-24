@@ -9,6 +9,47 @@
 // `repairedInField: true` and preserve the existing `noPartNeeded` value
 // instead of silently demoting the finding back to pending.
 
+// ─── Custom-review type constant ─────────────────────────────────────────────
+// "Custom — Flag for Manager" is a synthetic issue type stored in the existing
+// `issueType` column.  It never comes from the WET_CHECK_ISSUE_TYPE_SEED and
+// is never auto-billed. Description lives in `notes`, disposition is always
+// `needs_review`, and ≥1 photo is required before the tech can move on.
+export const CUSTOM_REVIEW_ISSUE_TYPE = "custom_review";
+
+/** True when the issueType represents a tech-flagged-for-manager finding. */
+export function isCustomReview(issueType: string | null | undefined): boolean {
+  return issueType === CUSTOM_REVIEW_ISSUE_TYPE;
+}
+
+/**
+ * Canonical predicate: a finding belongs to the manager review queue when
+ * it is unresolved AND either:
+ *   - it was explicitly flagged as custom_review, OR
+ *   - the tech disposition is not "completed_in_field"
+ *
+ * Routing rules:
+ *   - custom_review: always needs_review while resolution='pending'; drops
+ *     out of the queue once the manager routes it (resolution changes).
+ *   - completed_in_field: auto-routed to WCB snapshot on Approve & Convert,
+ *     so it is excluded from the manager decision queue.
+ *   - All other unresolved findings with techDisposition!='completed_in_field'
+ *     need a manager routing decision.
+ *
+ * Used in the manager wizard, combined-review surface, and submit hardening.
+ */
+export function isNeedsReview(f: {
+  resolution?: string | null;
+  techDisposition?: string | null;
+  issueType?: string | null;
+}): boolean {
+  // Must be unresolved in all cases.
+  if ((f.resolution ?? "pending") !== "pending") return false;
+  // custom_review findings always need review (no-part, no auto-bill).
+  if (isCustomReview(f.issueType)) return true;
+  // Non-custom: needs review unless the tech marked it completed_in_field.
+  return f.techDisposition !== "completed_in_field";
+}
+
 export type FindingSavePayloadInput = {
   selectedPart: { id: number | null; name: string | null; price: string | null } | null;
   partFromEdit: { id: number | null; name: string | null; price: string | null } | null;

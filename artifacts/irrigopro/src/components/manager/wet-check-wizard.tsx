@@ -26,6 +26,7 @@ import { FindingCard, type FindingEdits } from "./finding-card";
 import { DecisionCard } from "./decision-card";
 import { AutoBilledBanner } from "./auto-billed-banner";
 import { LoosePhotosSection, type LooseFindingOption } from "@/pages/wet-checks/LoosePhotosSection";
+import { CUSTOM_REVIEW_ISSUE_TYPE, isNeedsReview } from "@/lib/finding-save-payload";
 
 type Resolution =
   | "pending" | "repaired_in_field" | "sent_to_estimate" | "deferred_to_work_order" | "documented_only";
@@ -102,7 +103,9 @@ function SidebarFindingCard({
 }) {
   const { f, zr } = item;
   const cfg = issueConfigs.find(c => c.issueType === f.issueType);
-  const issueLabel = cfg?.displayLabel ?? f.issueType.replace(/_/g, " ");
+  const issueLabel = f.issueType === CUSTOM_REVIEW_ISSUE_TYPE
+    ? "🚩 Custom — Flag for Manager"
+    : (cfg?.displayLabel ?? f.issueType.replace(/_/g, " "));
   const zoneLabel = `${zr.controllerLetter ?? ""}${zr.zoneNumber ?? ""}`;
   const resolution = f.resolution ?? "pending";
   const badgeKey = isAutoBilled ? "repaired_in_field" : isCompletedInField ? "completed_in_field" : resolution;
@@ -440,14 +443,12 @@ export function WetCheckWizard({ id }: { id: number }) {
     [allFindings],
   );
 
-  // Findings that genuinely need a manager routing decision — excludes
-  // completed_in_field (auto-routed to WCB snapshot on Approve & Convert).
+  // Findings that genuinely need a manager routing decision.
+  // Uses the shared isNeedsReview predicate so counts/lists always agree with
+  // the tech-side queue membership — no split-brain between surfaces.
   const pendingFindings = useMemo(
     () => decisionFindings.filter(
-      ({ f }) =>
-        (f.resolution ?? "pending") === "pending" &&
-        f.convertedAt == null &&
-        f.techDisposition !== "completed_in_field",
+      ({ f }) => isNeedsReview(f) && f.convertedAt == null,
     ),
     [decisionFindings],
   );
@@ -455,19 +456,8 @@ export function WetCheckWizard({ id }: { id: number }) {
   // Left-panel display order: pending (needs decision) first, then
   // completed-in-field (auto-routed), then resolved/converted.
   const sortedFindings = useMemo(() => {
-    const pending = allFindings.filter(
-      ({ f }) =>
-        (f.resolution ?? "pending") === "pending" &&
-        f.convertedAt == null &&
-        f.techDisposition !== "completed_in_field",
-    );
-    const resolved = allFindings.filter(
-      ({ f }) => !(
-        (f.resolution ?? "pending") === "pending" &&
-        f.convertedAt == null &&
-        f.techDisposition !== "completed_in_field"
-      ),
-    );
+    const pending = allFindings.filter(({ f }) => isNeedsReview(f) && f.convertedAt == null);
+    const resolved = allFindings.filter(({ f }) => !(isNeedsReview(f) && f.convertedAt == null));
     return [...pending, ...resolved];
   }, [allFindings]);
 
@@ -551,7 +541,10 @@ export function WetCheckWizard({ id }: { id: number }) {
     () =>
       allFindings.map(({ f, zr }) => {
         const cfg = issueConfigs.find(c => c.issueType === f.issueType);
-        const label = `${cfg?.displayLabel ?? f.issueType} · Controller ${zr.controllerLetter} · Zone ${zr.zoneNumber}`;
+        const displayLabel = f.issueType === CUSTOM_REVIEW_ISSUE_TYPE
+          ? "🚩 Custom — Flag for Manager"
+          : (cfg?.displayLabel ?? f.issueType);
+        const label = `${displayLabel} · Controller ${zr.controllerLetter} · Zone ${zr.zoneNumber}`;
         return { id: f.id, label };
       }),
     [allFindings, issueConfigs],

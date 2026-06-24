@@ -27,7 +27,7 @@ import {
   cachedApiRequest,
 } from "@/lib/offline/api";
 import { LaborHoursStepper } from "@/components/ui/labor-hours-stepper";
-import { buildFindingSavePayload } from "@/lib/finding-save-payload";
+import { buildFindingSavePayload, CUSTOM_REVIEW_ISSUE_TYPE } from "@/lib/finding-save-payload";
 import { openOfflineDB, putFindingMirror } from "@/lib/offline/db";
 import type {
   WetCheckWithDetails,
@@ -505,6 +505,262 @@ function isPhotoAttachedToFinding(
   return false;
 }
 
+// ─── Custom finding editor ("Custom — Flag for Manager") ─────────────────────
+// Single-form editor: description (required) + photo (required) must both be
+// present before anything is written to the server.  The "Save Flag" button is
+// disabled until both gates pass.  No part / qty / labor / Mark-Complete
+// controls appear for this type.
+//
+// Create flow:
+//   1. Tech fills description and taps the camera button (photo uploaded to
+//      zone record linked by findingClientId only — no finding exists yet).
+//   2. "Save Flag" becomes enabled once description.trim() && ≥1 photo.
+//   3. Tap "Save Flag": create finding with the pre-generated clientId, then
+//      the photo's findingClientId already matches → manager can see it.
+//
+// Edit flow: single form with editable description + additional photo capture.
+function CustomFindingEditor({
+  editing,
+  zoneRecordId,
+  zoneRecordClientId,
+  wetCheckId,
+  wetCheckClientId,
+  photos,
+  onSaved,
+  onCancel,
+  onOptimisticPhoto,
+}: {
+  editing: WetCheckFinding | null;
+  zoneRecordId: number | null;
+  zoneRecordClientId: string | null;
+  wetCheckId: number;
+  wetCheckClientId: string | null;
+  photos: WetCheckPhoto[];
+  onSaved: () => void;
+  onCancel: () => void;
+  onOptimisticPhoto: (p: WetCheckPhoto) => void;
+}) {
+  const { toast } = useToast();
+  const [description, setDescription] = useState(editing?.notes ?? "");
+
+  // Pre-generate a stable clientId for the not-yet-created finding.
+  // Photos uploaded before save use this as findingClientId for linking.
+  const [pendingClientId] = useState(() => editing?.clientId ?? newClientId());
+  const [savedId, setSavedId] = useState<number | null>(editing?.id ?? null);
+
+  // Derive the "active" id pair: once saved, use the real id; until then use
+  // the pre-generated clientId so photo linking works immediately.
+  const activeFindingId     = savedId;
+  const activeFindingClientId = pendingClientId;
+
+  // Photos linked to this finding (by id once saved, or by clientId pre-save).
+  const findingPhotos = useMemo(
+    () => photos.filter(p => {
+      const ph = p as { findingId?: number | null; findingClientId?: string | null };
+      if (activeFindingId != null && ph.findingId === activeFindingId) return true;
+      if (ph.findingClientId && ph.findingClientId === activeFindingClientId) return true;
+      return false;
+    }),
+    [photos, activeFindingId, activeFindingClientId],
+  );
+  const hasPhoto = findingPhotos.length > 0;
+
+  // ── Create mutation (runs on "Save Flag" for new findings) ─────────────────
+  const saveMut = useMutation({
+    mutationFn: async ({ desc }: { desc: string }) => {
+      const payload = {
+        issueType:       CUSTOM_REVIEW_ISSUE_TYPE,
+        issueGroup:      "custom_review",
+        notes:           desc,
+        repairedInField: false,
+        techDisposition: "needs_review",
+        partId:          null,
+        partName:        null,
+        partPrice:       null,
+        quantity:        1,
+        laborHours:      "0.25",
+        noPartNeeded:    false,
+      };
+      if (isOfflineQueueEnabled() && zoneRecordClientId) {
+        const res = await offlineCreateFinding({
+          zoneRecordClientId,
+          zoneRecordId: zoneRecordId ?? undefined,
+          wetCheckId,
+          payload,
+          clientId: pendingClientId,
+        });
+        return { id: res.id ?? null };
+      }
+      if (zoneRecordId != null) {
+        const res = await apiRequest(
+          `/api/wet-checks/zone-records/${zoneRecordId}/findings`,
+          "POST",
+          { ...payload, clientId: pendingClientId },
+        ) as { id: number; clientId: string | null };
+        return { id: res.id };
+      }
+      throw new Error("Zone not yet synced — please try again in a moment.");
+    },
+    onSuccess: (res) => {
+      setSavedId(res.id ?? null);
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
+      onSaved();
+    },
+    onError: (e: any) => {
+      toast({ title: "Couldn't save flag", description: e?.message, variant: "destructive" });
+    },
+  });
+
+  // ── Update mutation (edit mode) ────────────────────────────────────────────
+  const updateMut = useMutation({
+    mutationFn: async ({ desc }: { desc: string }) => {
+      if (!editing) return;
+      const patch = { notes: desc };
+      if (isOfflineQueueEnabled() && editing.clientId) {
+        await offlineUpdateFinding(editing.clientId, editing.id, patch);
+        return;
+      }
+      await apiRequest(`/api/wet-checks/findings/${editing.id}`, "PATCH", patch);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
+      onSaved();
+    },
+    onError: (e: any) => {
+      toast({ title: "Couldn't save flag", description: e?.message, variant: "destructive" });
+    },
+  });
+
+  const header = (
+    <div className="flex items-center gap-2">
+      <span className="text-xl" aria-hidden="true">🚩</span>
+      <div>
+        <div className="font-semibold text-rose-900 text-sm">Custom — Flag for Manager</div>
+        <div className="text-xs text-rose-600">
+          {editing ? "Edit flag details" : "Description + at least one photo required"}
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Edit mode ───────────────────────────────────────────────────────────────
+  if (editing) {
+    return (
+      <div className="border-2 border-rose-300 rounded-xl p-4 space-y-3 bg-rose-50" data-testid="custom-finding-editor">
+        {header}
+        <div className="space-y-1">
+          <label className="text-xs font-semibold text-gray-700" htmlFor="custom-finding-desc-edit">
+            Description <span className="text-rose-600">*</span>
+          </label>
+          <Textarea
+            id="custom-finding-desc-edit"
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            className="min-h-[80px] resize-none"
+            data-testid="custom-finding-description"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2 items-center">
+          {findingPhotos.map(p => (
+            <PhotoThumb key={p.id} photo={p} canDelete={true} />
+          ))}
+          <PhotoCaptureButton
+            wetCheckId={wetCheckId}
+            wetCheckClientId={wetCheckClientId}
+            zoneRecordId={zoneRecordId}
+            zoneRecordClientId={zoneRecordClientId}
+            findingId={activeFindingId}
+            findingClientId={activeFindingClientId}
+            onUploaded={onOptimisticPhoto}
+          />
+        </div>
+        <div className="flex gap-2">
+          <Button
+            className="flex-1"
+            onClick={() => updateMut.mutate({ desc: description })}
+            disabled={!description.trim() || updateMut.isPending}
+            data-testid="custom-finding-save"
+          >
+            {updateMut.isPending ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="ghost" onClick={onCancel} disabled={updateMut.isPending}>Cancel</Button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Create mode (single form — nothing saved until both gates pass) ─────────
+  return (
+    <div className="border-2 border-rose-300 rounded-xl p-4 space-y-3 bg-rose-50" data-testid="custom-finding-editor">
+      {header}
+
+      <div className="space-y-1">
+        <label className="text-xs font-semibold text-gray-700" htmlFor="custom-finding-desc">
+          Description <span className="text-rose-600">*</span>
+        </label>
+        <Textarea
+          id="custom-finding-desc"
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder="Describe what needs manager review…"
+          className="min-h-[88px] resize-none"
+          autoFocus
+          data-testid="custom-finding-description"
+        />
+      </div>
+
+      <div>
+        <div className="text-xs font-semibold text-gray-700 mb-1.5">
+          Photo <span className="text-rose-600">*</span>
+        </div>
+        {!hasPhoto && (
+          <div className="flex items-center gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+            <Camera className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            At least one photo is required
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2 items-center">
+          {findingPhotos.map(p => (
+            <PhotoThumb key={p.id} photo={p} canDelete={true} />
+          ))}
+          <PhotoCaptureButton
+            wetCheckId={wetCheckId}
+            wetCheckClientId={wetCheckClientId}
+            zoneRecordId={zoneRecordId}
+            zoneRecordClientId={zoneRecordClientId}
+            findingId={null}
+            findingClientId={activeFindingClientId}
+            onUploaded={onOptimisticPhoto}
+          />
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <Button
+          className="flex-1 bg-rose-600 hover:bg-rose-700 text-white disabled:opacity-50"
+          onClick={() => saveMut.mutate({ desc: description })}
+          disabled={!description.trim() || !hasPhoto || saveMut.isPending}
+          title={
+            !description.trim() && !hasPhoto
+              ? "Add a description and photo to save"
+              : !description.trim()
+                ? "Add a description to save"
+                : !hasPhoto
+                  ? "Add at least one photo to save"
+                  : undefined
+          }
+          data-testid="custom-finding-save"
+        >
+          {saveMut.isPending ? "Saving…" : "Save Flag"}
+        </Button>
+        <Button variant="ghost" onClick={onCancel} disabled={saveMut.isPending} data-testid="custom-finding-cancel">
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Zone screen (YES/NO/N-A + findings + photos) ────────────────────────────
 
 // Exported for tests (Task #511 regression). Production callers use this
@@ -950,48 +1206,6 @@ export function ZoneScreen({
     setStatus.mutate(next);
   }
 
-  // Tech disposition mutation
-  const dispositionQueryKey: readonly unknown[] = ["/api/wet-checks", wetCheckId];
-  const dispositionMut = useMutation({
-    mutationFn: async (vars: {
-      id: number;
-      clientId: string | null;
-      disposition: "completed_in_field" | "needs_review";
-    }) => {
-      const patch = { techDisposition: vars.disposition };
-      if (isOfflineQueueEnabled() && vars.clientId) {
-        await offlineUpdateFinding(vars.clientId, vars.id, patch);
-        return;
-      }
-      await apiRequest(`/api/wet-checks/findings/${vars.id}`, "PATCH", patch);
-    },
-    onMutate: async (vars) => {
-      await queryClient.cancelQueries({ queryKey: dispositionQueryKey });
-      const previous = queryClient.getQueryData<WetCheckWithDetails>(dispositionQueryKey);
-      if (previous) {
-        queryClient.setQueryData<WetCheckWithDetails>(dispositionQueryKey, {
-          ...previous,
-          zoneRecords: asArray(previous.zoneRecords).map((zr) => ({
-            ...zr,
-            findings: asArray(zr.findings).map((f) =>
-              f.id === vars.id ? { ...f, techDisposition: vars.disposition } : f,
-            ),
-          })),
-        });
-      }
-      return { previous };
-    },
-    onError: (e: any, _vars, ctx) => {
-      if (ctx?.previous) queryClient.setQueryData(dispositionQueryKey, ctx.previous);
-      toast({
-        title: "Couldn't update disposition",
-        description: e?.message ?? "Please try again.",
-        variant: "destructive",
-      });
-    },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] }),
-  });
-
   // Task #454/458 — Mark Zone Complete
   const [confirmMarkComplete, setConfirmMarkComplete] = useState(false);
   const findingsCount = asArray(zoneRecord?.findings).length;
@@ -1276,12 +1490,44 @@ export function ZoneScreen({
                             </div>
                           );
                         })}
+                        {/* Task #1535 — "Custom — Flag for Manager" chip */}
+                        <div>
+                          <div className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-1.5">
+                            Flag for Review
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="px-3 py-2 rounded-full border-2 border-rose-300 bg-rose-50 text-sm font-medium text-rose-700 hover:border-rose-500 hover:bg-rose-100 active:bg-rose-200 transition-colors min-h-[44px] inline-flex items-center gap-1.5"
+                              onClick={() => setInlineIssueType(CUSTOM_REVIEW_ISSUE_TYPE)}
+                              data-testid="chip-custom_review"
+                            >
+                              🚩 Custom — Flag for Manager
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}
 
                   {/* Inline editor: new finding */}
                   {inlineIssueType && !inlineEditing && (
+                    inlineIssueType === CUSTOM_REVIEW_ISSUE_TYPE ? (
+                      <CustomFindingEditor
+                        editing={null}
+                        zoneRecordId={zoneRecord?.id ?? null}
+                        zoneRecordClientId={zoneRecord?.clientId ?? null}
+                        wetCheckId={wetCheckId}
+                        wetCheckClientId={wetCheckClientId}
+                        photos={mergedPhotos}
+                        onSaved={() => {
+                          setInlineIssueType(null);
+                          setShowChipSelector(false);
+                        }}
+                        onCancel={() => setInlineIssueType(null)}
+                        onOptimisticPhoto={onOptimisticPhoto}
+                      />
+                    ) : (
                     <InlineFindingEditor
                       issueType={inlineIssueType}
                       editing={null}
@@ -1299,24 +1545,38 @@ export function ZoneScreen({
                       }}
                       onCancel={() => setInlineIssueType(null)}
                     />
-                  )}
+                  ))}
 
                   {/* Inline editor: edit finding */}
                   {inlineEditing && (
-                    <InlineFindingEditor
-                      issueType={inlineEditing.issueType}
-                      editing={inlineEditing}
-                      zoneRecordId={zoneRecord?.id ?? null}
-                      zoneRecordClientId={zoneRecord?.clientId ?? null}
-                      wetCheckId={wetCheckId}
-                      wetCheckClientId={wetCheckClientId}
-                      customerId={customerId}
-                      photos={photos}
-                      readOnly={readOnly}
-                      wetCheckMode={wetCheckMode}
-                      onSaved={() => setInlineEditing(null)}
-                      onCancel={() => setInlineEditing(null)}
-                    />
+                    inlineEditing.issueType === CUSTOM_REVIEW_ISSUE_TYPE ? (
+                      <CustomFindingEditor
+                        editing={inlineEditing}
+                        zoneRecordId={zoneRecord?.id ?? null}
+                        zoneRecordClientId={zoneRecord?.clientId ?? null}
+                        wetCheckId={wetCheckId}
+                        wetCheckClientId={wetCheckClientId}
+                        photos={mergedPhotos}
+                        onSaved={() => setInlineEditing(null)}
+                        onCancel={() => setInlineEditing(null)}
+                        onOptimisticPhoto={onOptimisticPhoto}
+                      />
+                    ) : (
+                      <InlineFindingEditor
+                        issueType={inlineEditing.issueType}
+                        editing={inlineEditing}
+                        zoneRecordId={zoneRecord?.id ?? null}
+                        zoneRecordClientId={zoneRecord?.clientId ?? null}
+                        wetCheckId={wetCheckId}
+                        wetCheckClientId={wetCheckClientId}
+                        customerId={customerId}
+                        photos={photos}
+                        readOnly={readOnly}
+                        wetCheckMode={wetCheckMode}
+                        onSaved={() => setInlineEditing(null)}
+                        onCancel={() => setInlineEditing(null)}
+                      />
+                    )
                   )}
 
                   {/* Existing findings */}
@@ -1346,7 +1606,11 @@ export function ZoneScreen({
                             <div className="flex items-start justify-between gap-2">
                               <div className="text-sm min-w-0">
                                 <div className="font-medium flex items-center gap-2 flex-wrap">
-                                  <span>{f.issueType.replace(/_/g, " ")}</span>
+                                  <span>
+                                    {f.issueType === CUSTOM_REVIEW_ISSUE_TYPE
+                                      ? "🚩 Custom — Flag for Manager"
+                                      : f.issueType.replace(/_/g, " ")}
+                                  </span>
                                   {fc > 0 && (
                                     <span
                                       className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-gray-700 bg-gray-100 border border-gray-300 rounded-full px-1.5 py-0.5"
@@ -1357,11 +1621,20 @@ export function ZoneScreen({
                                     </span>
                                   )}
                                 </div>
-                                <div className="text-xs text-gray-500">
-                                  {f.partName ?? "no part"} · qty {f.quantity} · {f.laborHours}h
-                                  {f.partPrice ? ` · $${f.partPrice}` : ""}
-                                </div>
-                                {f.notes && <div className="text-xs italic text-gray-600">{f.notes}</div>}
+                                {/* Task #1535 — custom_review shows description; others show part/qty/labor */}
+                                {f.issueType === CUSTOM_REVIEW_ISSUE_TYPE ? (
+                                  f.notes && (
+                                    <div className="text-xs font-medium text-rose-700 mt-0.5">{f.notes}</div>
+                                  )
+                                ) : (
+                                  <div className="text-xs text-gray-500">
+                                    {f.partName ?? "no part"} · qty {f.quantity} · {f.laborHours}h
+                                    {f.partPrice ? ` · $${f.partPrice}` : ""}
+                                  </div>
+                                )}
+                                {f.notes && f.issueType !== CUSTOM_REVIEW_ISSUE_TYPE && (
+                                  <div className="text-xs italic text-gray-600">{f.notes}</div>
+                                )}
                                 {f.resolution === "repaired_in_field" && (
                                   <Badge
                                     variant="secondary"
@@ -1373,54 +1646,18 @@ export function ZoneScreen({
                                       : "Completed in field"}
                                   </Badge>
                                 )}
-                                {!readOnly && wetCheckMode !== "inspection" && (
-                                  <div
-                                    className="mt-2 inline-flex rounded-md border overflow-hidden"
-                                    role="group"
-                                    aria-label="Tech disposition"
-                                    data-testid={`finding-disposition-${f.id}`}
+                                {/* Task #1535 — disposition is read-only; the toggle has been removed.
+                                    custom_review always shows the flag badge.
+                                    Other findings show their disposition (set via Mark Complete). */}
+                                {f.issueType === CUSTOM_REVIEW_ISSUE_TYPE ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="mt-1 border-rose-300 text-rose-700 bg-rose-50"
+                                    data-testid={`finding-disposition-badge-${f.id}`}
                                   >
-                                    <button
-                                      type="button"
-                                      className={`px-2 py-1 text-xs ${
-                                        f.techDisposition === "completed_in_field"
-                                          ? "bg-green-600 text-white"
-                                          : "bg-white text-gray-700 hover:bg-gray-50"
-                                      }`}
-                                      onClick={() =>
-                                        dispositionMut.mutate({
-                                          id: f.id,
-                                          clientId: f.clientId ?? null,
-                                          disposition: "completed_in_field",
-                                        })
-                                      }
-                                      disabled={dispositionMut.isPending}
-                                      data-testid={`finding-disposition-${f.id}-completed`}
-                                    >
-                                      Completed in field
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className={`px-2 py-1 text-xs border-l ${
-                                        f.techDisposition !== "completed_in_field"
-                                          ? "bg-amber-500 text-white"
-                                          : "bg-white text-gray-700 hover:bg-gray-50"
-                                      }`}
-                                      onClick={() =>
-                                        dispositionMut.mutate({
-                                          id: f.id,
-                                          clientId: f.clientId ?? null,
-                                          disposition: "needs_review",
-                                        })
-                                      }
-                                      disabled={dispositionMut.isPending}
-                                      data-testid={`finding-disposition-${f.id}-review`}
-                                    >
-                                      Needs manager review
-                                    </button>
-                                  </div>
-                                )}
-                                {readOnly && f.techDisposition && (
+                                    🚩 Flagged for manager review
+                                  </Badge>
+                                ) : f.techDisposition ? (
                                   <Badge
                                     variant="outline"
                                     className={`mt-1 ${
@@ -1434,7 +1671,7 @@ export function ZoneScreen({
                                       ? "Completed in field"
                                       : "Needs manager review"}
                                   </Badge>
-                                )}
+                                ) : null}
                               </div>
                               {!readOnly && (
                                 <div className="flex items-center gap-1 shrink-0">

@@ -4,8 +4,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { authedPhotoSrc } from "@/lib/queryClient";
-import { Wrench, MapPin, StickyNote, Pencil, Camera, Info, type LucideIcon } from "lucide-react";
+import { Wrench, MapPin, StickyNote, Pencil, Camera, Info, Flag, type LucideIcon } from "lucide-react";
 import { PartPicker } from "@/components/parts/part-picker";
+import { CUSTOM_REVIEW_ISSUE_TYPE } from "@/lib/finding-save-payload";
 import type {
   Part, WetCheckFindingWithReason, WetCheckPhoto, WetCheckZoneRecord, IssueTypeConfig,
 } from "@workspace/db/schema";
@@ -30,19 +31,24 @@ interface FindingCardProps {
 }
 
 const ISSUE_ICON: Record<string, { icon: LucideIcon; bg: string; text: string }> = {
-  quick_fix:  { icon: Wrench, bg: "bg-blue-100",   text: "text-blue-700" },
-  advanced:   { icon: Wrench, bg: "bg-amber-100",  text: "text-amber-700" },
-  zone_issue: { icon: Wrench, bg: "bg-purple-100", text: "text-purple-700" },
+  quick_fix:     { icon: Wrench, bg: "bg-blue-100",   text: "text-blue-700" },
+  advanced:      { icon: Wrench, bg: "bg-amber-100",  text: "text-amber-700" },
+  zone_issue:    { icon: Wrench, bg: "bg-purple-100", text: "text-purple-700" },
+  custom_review: { icon: Flag,   bg: "bg-rose-100",   text: "text-rose-700" },
 };
 
 function displayLabel(finding: WetCheckFindingWithReason, config: IssueTypeConfig | null): string {
+  if (finding.issueType === CUSTOM_REVIEW_ISSUE_TYPE) return "Custom — Flagged for Review";
   return config?.displayLabel ?? finding.partName ?? finding.issueType;
 }
 
 export function FindingCard({
   finding, zone, photos, parts, issueConfig, customerLaborRate, edits, onChange,
 }: FindingCardProps) {
-  const groupKey = (finding.issueGroup ?? "advanced") as keyof typeof ISSUE_ICON;
+  const isCustom = finding.issueType === CUSTOM_REVIEW_ISSUE_TYPE;
+  const groupKey = isCustom
+    ? "custom_review"
+    : ((finding.issueGroup ?? "advanced") as keyof typeof ISSUE_ICON);
   const icon = ISSUE_ICON[groupKey] ?? ISSUE_ICON.advanced;
   const Icon = icon.icon;
 
@@ -137,14 +143,32 @@ export function FindingCard({
           <span>Controller {zone.controllerLetter} · Zone {zone.zoneNumber}</span>
         </div>
 
-        <div className="rounded-md border bg-gray-50 p-3 text-sm flex items-start gap-2" data-testid={`wizard-finding-${finding.id}-notes`}>
-          <StickyNote className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />
-          <span className="whitespace-pre-wrap">
-            {finding.notes && finding.notes.trim()
-              ? finding.notes
-              : <span className="text-gray-400 italic">No tech notes</span>}
-          </span>
-        </div>
+        {/* Task #1535 — custom_review: description (stored in notes) shown prominently */}
+        {isCustom ? (
+          <div
+            className="rounded-md border-2 border-rose-200 bg-rose-50 p-3 space-y-1"
+            data-testid={`wizard-finding-${finding.id}-description`}
+          >
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-700 uppercase tracking-wide">
+              <Flag className="w-3.5 h-3.5 shrink-0" aria-hidden />
+              Tech description
+            </div>
+            <p className="text-sm text-rose-900 whitespace-pre-wrap leading-snug">
+              {finding.notes && finding.notes.trim()
+                ? finding.notes
+                : <span className="italic opacity-60">No description provided</span>}
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-md border bg-gray-50 p-3 text-sm flex items-start gap-2" data-testid={`wizard-finding-${finding.id}-notes`}>
+            <StickyNote className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />
+            <span className="whitespace-pre-wrap">
+              {finding.notes && finding.notes.trim()
+                ? finding.notes
+                : <span className="text-gray-400 italic">No tech notes</span>}
+            </span>
+          </div>
+        )}
 
         {photos.length > 0 && (
           <div className="flex gap-2 overflow-x-auto" data-testid={`wizard-finding-${finding.id}-photos`}>

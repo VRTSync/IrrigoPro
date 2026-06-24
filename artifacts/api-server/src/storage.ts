@@ -8223,14 +8223,34 @@ export class DatabaseStorage implements IStorage {
       let wetCheckBillingId: number | null = null;
       let autoBilledCount = 0;
 
-      if (autoBillEnabled && repaired.length > 0) {
+      // Task #1535 — harden submit: findings that are marked "complete" but
+      // cannot auto-bill (missing part, no noPartNeeded, not a labor-only type)
+      // must be gracefully re-routed to needs_review instead of throwing.
+      // This eliminates the "Cannot auto-bill finding" submission blocker for
+      // legacy data and for any future split-brain case.
+      const canAutoBill = (f: WetCheckFinding) =>
+        f.partId != null ||
+        Boolean(f.noPartNeeded) ||
+        LABOR_ONLY_ISSUE_TYPES.has(f.issueType ?? "");
+
+      const repairedBillable   = repaired.filter(f =>  canAutoBill(f));
+      const repairedUnbillable = repaired.filter(f => !canAutoBill(f));
+      if (repairedUnbillable.length > 0) {
+        await tx.update(wetCheckFindings)
+          .set({ resolution: "pending", techDisposition: "needs_review" })
+          .where(inArray(wetCheckFindings.id, repairedUnbillable.map(f => f.id)));
+      }
+      // Count the re-routed findings as pending for the return value.
+      const effectivePendingCount = pendingCount + repairedUnbillable.length;
+
+      if (autoBillEnabled && repairedBillable.length > 0) {
         const [cust] = await tx.select().from(customers).where(eq(customers.id, wc.customerId));
         if (!cust) throw new Error(`Customer ${wc.customerId} not found`);
         const laborRate = parseFloat(String(cust.laborRate ?? "45.00"));
         wetCheckBillingId = await this._writeRepairedInFieldBilling(
-          tx, wc, laborRate, repaired, /* priorWcbId */ null, now,
+          tx, wc, laborRate, repairedBillable, /* priorWcbId */ null, now,
         );
-        autoBilledCount = repaired.length;
+        autoBilledCount = repairedBillable.length;
       }
 
       // Auto-route: any findings where the tech indicated completion
@@ -8238,6 +8258,7 @@ export class DatabaseStorage implements IStorage {
       // to 'repaired_in_field' (e.g., submissions before auto-bill was enabled,
       // or findings that slipped through).  Route them into the same WCB just
       // created (or create one if the auto-bill block didn't fire).
+      // Apply the same billable guard so un-routable rows go to needs_review.
       const completedInFieldUnrouted = allFindings.filter(
         (f) =>
           f.techDisposition === "completed_in_field" &&
@@ -8248,20 +8269,27 @@ export class DatabaseStorage implements IStorage {
           f.workOrderId == null &&
           f.resolution !== "repaired_in_field",
       );
-      if (completedInFieldUnrouted.length > 0) {
+      const completedBillable   = completedInFieldUnrouted.filter(f =>  canAutoBill(f));
+      const completedUnbillable = completedInFieldUnrouted.filter(f => !canAutoBill(f));
+      if (completedUnbillable.length > 0) {
+        await tx.update(wetCheckFindings)
+          .set({ resolution: "pending", techDisposition: "needs_review" })
+          .where(inArray(wetCheckFindings.id, completedUnbillable.map(f => f.id)));
+      }
+      if (completedBillable.length > 0) {
         const [custForRoute] = await tx.select().from(customers)
           .where(eq(customers.id, wc.customerId));
         const routeLaborRate = parseFloat(String(custForRoute?.laborRate ?? "45.00")) || 45;
         const newWcbId = await this._writeRepairedInFieldBilling(
-          tx, wc, routeLaborRate, completedInFieldUnrouted, wetCheckBillingId, now,
+          tx, wc, routeLaborRate, completedBillable, wetCheckBillingId, now,
         );
         if (wetCheckBillingId == null) wetCheckBillingId = newWcbId;
         // _writeRepairedInFieldBilling stamps wetCheckBillingId + convertedAt but
         // not resolution.  Stamp it here so these rows leave the routing queue.
         await tx.update(wetCheckFindings)
           .set({ resolution: "repaired_in_field", resolutionDecidedAt: now })
-          .where(inArray(wetCheckFindings.id, completedInFieldUnrouted.map((f) => f.id)));
-        autoBilledCount += completedInFieldUnrouted.length;
+          .where(inArray(wetCheckFindings.id, completedBillable.map((f) => f.id)));
+        autoBilledCount += completedBillable.length;
       }
 
       // Determine final status. With WET_CHECK_AUTO_BILL OFF, mirror
@@ -8296,7 +8324,7 @@ export class DatabaseStorage implements IStorage {
         updatedAt: now,
       }).where(and(eq(wetChecks.id, id), eq(wetChecks.companyId, companyId))).returning();
 
-      return { wetCheck: updated, billingSheetId: wetCheckBillingId, autoBilledCount, pendingCount };
+      return { wetCheck: updated, billingSheetId: wetCheckBillingId, autoBilledCount, pendingCount: effectivePendingCount };
     });
   }
 
@@ -10071,6 +10099,10 @@ export function computeFindingPendingReason(
     if (f.partId == null && !f.noPartNeeded) {
       return "Tech completed in field, but no part was assigned at submission";
     }
+  }
+  // Task #1535 — custom_review findings are always manager-only
+  if (f.issueType === "custom_review") {
+    return "Tech flagged this for manager attention";
   }
   if (f.techDisposition === "needs_review") {
     return "Tech marked this for manager review";

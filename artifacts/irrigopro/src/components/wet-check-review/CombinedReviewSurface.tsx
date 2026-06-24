@@ -54,6 +54,7 @@ import { ActivityFeed } from "@/components/billing-workspace/activity-feed";
 import { WcbLaborRateEdit } from "@/components/wet-check-billings/wcb-labor-rate-edit";
 import { RateModeToggle } from "@/components/billing-workspace/rate-mode-toggle";
 import { safeGet } from "@/utils/safeStorage";
+import { isNeedsReview } from "@/lib/finding-save-payload";
 import type {
   WetCheckWithDetails,
   WetCheckBilling,
@@ -901,18 +902,18 @@ export function CombinedReviewSurface({ wetCheckId }: CombinedReviewSurfaceProps
       );
 
   // Only count findings that genuinely need a manager routing decision.
-  // completed_in_field findings are auto-routed into the WCB snapshot on
-  // Approve & Convert, so they never appear as "pending" triage items.
+  // Uses the shared isNeedsReview predicate so counts agree with the wizard
+  // and the tech-side queue membership.  Findings already routed downstream
+  // (billingSheetId/estimateId/workOrderId/wetCheckBillingId set) are excluded
+  // via the convertedAt and id guards below.
   const unroutedFindings = allFindings.filter(
     ({ f }) =>
+      isNeedsReview(f) &&
       f.convertedAt == null &&
-      !(f.resolution === "repaired_in_field" && f.billingSheetId != null) &&
       f.billingSheetId == null &&
       f.estimateId == null &&
       f.workOrderId == null &&
-      f.wetCheckBillingId == null &&
-      f.resolution !== "documented_only" &&
-      f.techDisposition !== "completed_in_field",
+      f.wetCheckBillingId == null,
   );
 
   // For service WCs: triage step is shown when there are unrouted findings.

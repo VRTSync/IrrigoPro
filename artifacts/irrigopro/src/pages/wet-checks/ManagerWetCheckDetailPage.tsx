@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cachedApiRequest } from "@/lib/offline/api";
+import { CUSTOM_REVIEW_ISSUE_TYPE } from "@/lib/finding-save-payload";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -180,7 +181,9 @@ function FindingRow({
       )}
       <div className="flex-1 min-w-0">
         <span className="font-medium text-gray-900">
-          {f.issueType.replace(/_/g, " ")}
+          {f.issueType === CUSTOM_REVIEW_ISSUE_TYPE
+            ? "🚩 Custom — Flag for Manager"
+            : f.issueType.replace(/_/g, " ")}
         </span>
         {f.partName && (
           <span className="text-gray-500 text-sm">
