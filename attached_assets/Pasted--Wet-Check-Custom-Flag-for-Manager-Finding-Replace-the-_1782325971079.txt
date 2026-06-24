@@ -1,0 +1,76 @@
+# Wet Check — "Custom — Flag for Manager" Finding (Replace the Manager-Review Toggle)
+
+**What & Why**
+Today a finding's "manager review" state is a **per-finding toggle** that lives in a *second* state field (`techDisposition`) parallel to `resolution`. The quick toggle on the finding card (`ZoneScreen.tsx` `dispositionMut` ~955–966) patches **only `techDisposition`**, leaving `resolution` stale — so the two disagree and different surfaces key off different ones:
+- Review lists key on `techDisposition` (`WetCheckDetail.tsx:639`, `CombinedReviewSurface.tsx:915`, `wet-check-wizard.tsx:450+`).
+- Submit/auto-bill keys on `resolution === "repaired_in_field"` (`storage.ts:8315`).
+
+**Result (the reported bug):** flip a finding from "manager review" → "repaired in field" via the toggle and it gets stuck — looks completed on one screen, still pending on another. Same root cause as the red "Cannot auto-bill finding 783: marked complete but has no part assigned" error (`storage.ts:8400`): the toggle marked it completed for billing without a part, so submit's auto-bill guard throws and blocks the whole submission.
+
+**Fix (Randy's redesign):** remove the per-finding manager-review toggle entirely and make "needs review" an **explicit finding type** chosen from the issue list — **"Custom — Flag for Manager."** A finding is then *either* a concrete fix (tech handles, can auto-bill) *or* a Custom/Flag item (always routes to the manager, never auto-bills). One source of truth → the split-brain can't happen. The Custom type **requires a description + at least one photo** before it can be saved, so the manager gets real context.
+
+**Confirmed decisions:** name **"Custom — Flag for Manager"** (with a "Review" badge); **replace** the toggle entirely; **require notes + ≥1 photo**.
+
+**Visual source of truth:** `custom-flag-for-manager-finding-mockup.html`.
+
+Slices: capture UI, data/routing model, remove the toggle + harden submit, manager-side display, cleanup.
+
+---
+
+## Slice 1 — Capture UI: the new finding type
+### Files
+- `artifacts/irrigopro/src/pages/wet-checks/ZoneScreen.tsx` (issue chip selector + inline finding create), `FindingSheet.tsx` (finding form).
+### Changes
+- Add a distinct group to the issue chip list — e.g. **"Not sure / outside the list?"** — with one chip: **"🚩 Custom — Flag for Manager"** (styled distinctly, with a "REVIEW" badge), matching the mockup.
+- Selecting it opens a **Custom Finding form** that requires:
+  - **Description** (notes) — required.
+  - **At least one photo** — required (reuse the photo capture/`PhotoCaptureButton` + the camera/library picker).
+  - Optional location/detail field.
+- **Save is disabled** until description AND ≥1 photo are present; show the gate state (red "add a description and photo" → green "ready to send for review").
+- A Custom finding has **no part / qty / labor / Mark-Complete** controls — it's a review item, not a billable fix.
+
+## Slice 2 — Data & routing: one source of truth
+### Files
+- `lib/db/src/schema/schema.ts` (`wet_check_findings`), `storage.ts` (finding create/update + submit), `artifacts/irrigopro/src/lib/finding-save-payload.ts`.
+### Changes
+- Represent the Custom type explicitly — recommended: a dedicated `issueType` (e.g. `custom_review`) and/or a boolean `flaggedForManager`. A Custom finding is **always** `resolution = "pending"` + `techDisposition = "needs_review"`, and is **never** eligible for auto-bill (no part path).
+- **Invariant: `resolution` and `techDisposition` never diverge.** Findings can only be set through paths that write both consistently:
+  - Concrete fix via `FindingSheet` → `buildFindingSavePayload` already sets both together (Mark Complete → `repaired_in_field` + `completed_in_field`; unchecked → `pending` + `needs_review`). Keep.
+  - Custom → always `pending` + `needs_review`, never completable.
+- Routing to the manager keys off this single, consistent state (a finding routes to manager when it's not a completed-in-field fix). Audit the review-list selectors so they all agree (prefer one shared predicate, e.g. `isNeedsReview(f)`).
+
+## Slice 3 — Remove the toggle + harden submit
+### Files
+- `ZoneScreen.tsx` (`dispositionMut` ~955–981 and the card toggle UI ~1386–1435), `storage.ts` (submit auto-bill ~8188–8430).
+### Changes
+- **Remove** the per-finding manager-review quick toggle (`dispositionMut` and its card control) — it's the only field path that wrote `techDisposition` alone, and it's the bug's source.
+- **Submit: route, don't throw.** When a finding is `completed_in_field`/`repaired_in_field` but lacks a part and isn't labor-only (the `storage.ts:8400` guard), instead of throwing and blocking the entire submit, **route that single finding to the manager** (treat as needs_review) and continue. One mis-flagged finding must never block submitting the whole wet check. (Belt-and-suspenders; new data won't hit this, but legacy/divergent rows will.)
+
+## Slice 4 — Manager side
+### Files
+- `CombinedReviewSurface.tsx`, `wet-check-wizard.tsx`, `finding-card.tsx`, `ManagerWetCheckDetailPage.tsx`.
+### Changes
+- Show Custom findings clearly in the manager review queue with the description + photos and a "Custom — Flagged" label, so the manager can read context and route it (repair / estimate / work order / document) through the existing triage controls.
+- Ensure the review queue membership uses the single shared predicate from Slice 2 (no more divergence between counts and lists).
+
+## Slice 5 — Cleanup (existing divergent data)
+- One-time reconcile for findings already in the split state (e.g. `techDisposition=completed_in_field` but `resolution=pending`, or vice versa): pick the safe resolution — if it can't be cleanly auto-billed (no part, not labor-only), set it to needs_review and route to manager; otherwise align `resolution` to the completed state. Run by Replit; consider wrapping as a preview-gated admin migration.
+
+## Tests
+- Selecting "Custom — Flag for Manager" requires description + ≥1 photo before Save enables; saved finding shows "Will be reviewed," is never auto-billed, and appears in the manager review queue with notes + photos.
+- A concrete fix finding still bills/needs-review consistently across every surface (counts == lists).
+- There is no per-finding manager-review toggle anywhere in the field flow.
+- Submitting a wet check with a completed-but-no-part finding **routes it to the manager and succeeds** (no hard error / blocked submit).
+- Regression: a finding can never be simultaneously "completed" and "needs review."
+
+## Out of scope
+- Manager triage actions themselves (repair/estimate/WO routing) — unchanged, just fed cleaner input.
+- The estimate/WO/PDF flows downstream (unchanged).
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/wet-checks/ZoneScreen.tsx` (chip selector; `dispositionMut` ~955–981; inline create ~205–240; card toggle ~1386–1435)
+- `artifacts/irrigopro/src/pages/wet-checks/FindingSheet.tsx`; `artifacts/irrigopro/src/lib/finding-save-payload.ts`
+- `lib/db/src/schema/schema.ts` (`wet_check_findings` `resolution` 1440 / `techDisposition` 1452)
+- `artifacts/api-server/src/storage.ts` (submit/auto-bill ~8188–8430; guard ~8400)
+- `artifacts/irrigopro/src/components/wet-check-review/CombinedReviewSurface.tsx`, `components/manager/wet-check-wizard.tsx`, `components/manager/finding-card.tsx`, `pages/wet-checks/ManagerWetCheckDetailPage.tsx`
+- Visual reference: `custom-flag-for-manager-finding-mockup.html`

@@ -1,0 +1,50 @@
+# Wet Check — Reconcile Finding Dispositions (Super-Admin Migration)
+
+**What & Why**
+Some existing wet-check findings are in a **split state**: their `resolution` and `techDisposition` disagree (e.g. `techDisposition = completed_in_field` but `resolution = pending`, or the reverse). This is the data left behind by the old per-finding manager-review toggle, which patched only `techDisposition` and left `resolution` stale — causing findings to get "stuck" in/out of the manager review list and, at submit, to trip the "marked complete but has no part" auto-bill guard.
+
+The code fix that prevents *new* divergence is covered separately in **`Wet Check - Custom Flag-for-Manager Finding (Replace Manager-Review Toggle).md`** (already in progress in Replit). **This document is the one-time data cleanup**, delivered as a **preview-gated admin migration** so Randy can run it himself from **`/admin/migrations`** (no CLI access needed).
+
+Standalone, so it can ship independently of the in-flight Custom-Flag work. No schema change.
+
+---
+
+## Build it as an admin migration (existing framework)
+### Files
+- New `artifacts/api-server/src/lib/migrations/reconcile-finding-disposition.ts` implementing `MigrationDefinition { id, title, description, check(), preview(), run(emit) }` — model on the existing `work-order-zones.ts` and `reconcile-billing-sheet-invoice-totals.ts`.
+- Register it in `artifacts/api-server/src/lib/migrations/registry.ts` so it surfaces in `GET /api/admin/migrations` and the `/admin/migrations` UI (`pages/admin/migrations.tsx` + `MigrationRunner.tsx`). No other frontend change — it just appears in the list.
+
+### Behavior
+- **`check()`** — count `wet_check_findings` where `resolution` and `techDisposition` disagree (the stuck rows). Wrap in try/catch so a check failure never breaks the whole migrations page (per the per-migration check isolation fix).
+- **`preview()`** — list affected findings with `id`, wet check, current `resolution` / `techDisposition`, part/labor info, and the **proposed new state**, so Randy sees old → new before running. Report the candidate count as **informational**, not as a blocking `orphanRows` entry (per the stuck-Run-button fix).
+- **`run(emit)`** — reconcile each finding:
+  - If it **can't** be cleanly auto-billed (no `partId` and not labor-only / not in `LABOR_ONLY_ISSUE_TYPES`): set it to **needs_review** (`resolution = pending`, `techDisposition = needs_review`) and route to the manager.
+  - Otherwise: align `resolution` to the completed/auto-billable state (`repaired_in_field` + `completed_in_field`).
+  - Emit progress per row; **idempotent** — re-running finds nothing.
+- **Acknowledgement:** this changes routing/billing eligibility, so require an ack before Run — drive it via `warnings` (consistent with the reconcile-billing migration), **not** by putting counts into `orphanRows`.
+
+### Acceptance
+- `/admin/migrations` shows a **"Reconcile finding dispositions"** migration.
+- Preview lists the stuck findings with their current vs. proposed state and an accurate count.
+- Run is enabled after acknowledgement; running it clears the divergence; **re-running reports zero** affected.
+- No finding is left simultaneously "completed" and "needs review" afterward.
+- Runs entirely from the super-admin UI — no terminal/CLI step.
+
+## Tests
+- Seed a finding with `techDisposition=completed_in_field` + `resolution=pending` and no part → migration preview flags it; run routes it to needs_review; re-run finds nothing.
+- Seed one that *can* auto-bill (has a part) but is split → run aligns it to repaired_in_field/completed_in_field.
+- A consistent finding (states already agree) is untouched.
+- `check()` failure (simulated) doesn't break the migrations list (isolated per-migration).
+- Run button is enabled only after acknowledgement; never permanently disabled.
+
+## Out of scope
+- The code change that prevents future divergence and the "Custom — Flag for Manager" finding type (separate doc, in progress in Replit).
+- Manager triage actions and downstream estimate/WO/PDF flows (unchanged).
+
+## Relevant files
+- New: `artifacts/api-server/src/lib/migrations/reconcile-finding-disposition.ts`
+- `artifacts/api-server/src/lib/migrations/registry.ts` (register)
+- Reference: `artifacts/api-server/src/lib/migrations/{work-order-zones.ts, reconcile-billing-sheet-invoice-totals.ts, types.ts}`
+- `artifacts/irrigopro/src/pages/admin/migrations.tsx`, `MigrationRunner.tsx` (UI — no change; migration just appears)
+- `lib/db/src/schema/schema.ts` (`wet_check_findings` `resolution` ~1440 / `techDisposition` ~1452)
+- Related (separate, in progress): `Wet Check - Custom Flag-for-Manager Finding (Replace Manager-Review Toggle).md`
