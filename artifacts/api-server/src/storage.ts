@@ -554,6 +554,9 @@ export interface IStorage {
       approvalSentAt: Date;
       newEstimateDate: Date | null;
       isResend: boolean;
+      // Task #1574 — actual delivery address; persisted so the
+      // reject-via-token audit log records the right recipient.
+      sentToEmail?: string;
     },
   ): Promise<Estimate | undefined>;
   updateEstimateWithItems(id: number, estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems>;
@@ -2762,6 +2765,9 @@ export class DatabaseStorage implements IStorage {
       // the customer hasn't responded yet. We re-stamp the token and
       // re-send the email without resetting estimateDate.
       isSentRedelivery?: boolean;
+      // Task #1574 — actual delivery address; persisted so the
+      // reject-via-token POST handler records truthful audit attribution.
+      sentToEmail?: string;
     },
   ): Promise<Estimate | undefined> {
     const setClause: Partial<InsertEstimate> = {
@@ -2769,6 +2775,7 @@ export class DatabaseStorage implements IStorage {
       tokenExpiresAt: args.tokenExpiresAt,
       approvalSentAt: args.approvalSentAt,
       internalStatus: "sent_to_customer",
+      ...(args.sentToEmail ? { sentToEmail: args.sentToEmail } : {}),
       // Task #642 — dual-write the lifecycle column. The resend flow
       // also flips lifecycle back from `expired` (read-time view of
       // `sent` + stale estimateDate) to `sent` since the new

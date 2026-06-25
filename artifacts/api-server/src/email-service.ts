@@ -114,7 +114,10 @@ export class EmailService {
     }
 
     const approveUrl = `${this.baseUrl}/estimate-approval/${data.approvalToken}`;
-    const rejectUrl = `${this.baseUrl}/api/estimates/reject-via-token/${data.approvalToken}`;
+    // Task #1574 — reject link goes to the React portal with ?intent=reject so
+    // email security scanners (MS Safe Links, Google) only fetch a React page,
+    // not the API endpoint that previously committed the rejection immediately.
+    const rejectUrl = `${this.baseUrl}/estimate-approval/${data.approvalToken}?intent=reject`;
     const viewUrl = `${this.baseUrl}/estimate-approval/${data.approvalToken}`;
 
     // Get company information including logo

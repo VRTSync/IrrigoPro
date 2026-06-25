@@ -482,6 +482,10 @@ export const estimates = pgTable("estimates", {
   tokenExpiresAt: timestamp("token_expires_at"), // When approval token expires
   approvalSource: text("approval_source"), // 'email_link', 'manual', etc.
   approvalSentAt: timestamp("approval_sent_at"), // When approval email was sent
+  // Task #1574 — actual delivery address used when sending the approval email.
+  // Differs from customerEmail when the send modal's "To" field is overridden.
+  // Used by the reject-via-token POST handler for truthful audit attribution.
+  sentToEmail: text("sent_to_email"),
   approvalRespondedAt: timestamp("approval_responded_at"), // When customer responded
   // Work order linkage - tracks conversion
   workOrderId: integer("work_order_id"), // References work order created from this estimate

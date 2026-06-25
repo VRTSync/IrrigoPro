@@ -124,6 +124,8 @@ export interface EstimateRoutesStorage {
       newEstimateDate: Date | null;
       isResend: boolean;
       isSentRedelivery?: boolean;
+      // Task #1574 — actual delivery address for truthful audit attribution.
+      sentToEmail?: string;
     },
   ): Promise<Estimate | EstimateWithItems | undefined | null>;
   createWorkOrderFromEstimate?(id: number): Promise<WorkOrder>;
@@ -1625,6 +1627,10 @@ export function registerEstimateRoutes(
       newEstimateDate: opts.resetEstimateDate ? effectiveEstimateDate : null,
       isResend: !!opts.resetEstimateDate,
       isSentRedelivery: !!opts.isSentRedelivery,
+      // Task #1574 — persist actual delivery address so the rejection
+      // audit log records the right recipient even when the send modal's
+      // "To" field was overridden.
+      sentToEmail: resolvedTo,
     });
     if (!persisted) {
       throw new EstimateSendConflictError(
@@ -2390,10 +2396,16 @@ export function registerEstimateRoutes(
     }
   });
 
-  // Task #1544 — reject-via-token now returns JSON (the React approval page
-  // renders all states; the old HTML responses are retired). Defense-in-depth
-  // tokenExpiresAt check added so expired tokens cannot be acted on even if
-  // the client somehow bypasses the view-by-token expiry screen.
+  // Task #1574 — GET is now a safe read-only "confirm intent" endpoint.
+  //
+  // Previously this GET performed the actual rejection, which meant email
+  // security scanners (Microsoft Safe Links, Google link scanners) would
+  // silently reject estimates within seconds of delivery, before any human
+  // saw the email. The reject URL in outbound emails now points to the React
+  // approval portal (/estimate-approval/:token?intent=reject) so scanners
+  // never hit an API endpoint. This GET is kept as a non-destructive fallback
+  // for old emails still in inboxes and for the portal to verify state before
+  // showing the confirm screen.
   app.get("/api/estimates/reject-via-token/:token", async (req, res) => {
     try {
       const token = String(req.params.token);
@@ -2405,7 +2417,59 @@ export function registerEstimateRoutes(
         return;
       }
 
-      // Defense-in-depth: block action on expired tokens.
+      if (estimate.tokenExpiresAt && new Date() > new Date(estimate.tokenExpiresAt)) {
+        res.status(410).json({
+          error: "expired",
+          message: "This approval link has expired.",
+          estimateNumber: estimate.estimateNumber,
+        });
+        return;
+      }
+
+      if (estimate.status !== "pending") {
+        res.status(409).json({
+          error: "already_responded",
+          message: "You have already responded to this estimate.",
+          status: estimate.status,
+        });
+        return;
+      }
+
+      // Safe: returns confirmation intent without writing anything.
+      res.json({
+        intent: "confirm_reject",
+        estimateNumber: estimate.estimateNumber,
+        token,
+      });
+    } catch (error) {
+      req.log?.error({ err: error }, "Error in reject-via-token GET");
+      res.status(500).json({ error: "server_error", message: "Something went wrong. Please contact us directly." });
+    }
+  });
+
+  // Task #1574 — POST performs the actual rejection (requires explicit
+  // customer action; cannot be triggered by email scanner pre-fetch).
+  //
+  // The email's "Reject" link now points to the React approval portal at
+  // /estimate-approval/:token?intent=reject. The portal renders a
+  // "confirm rejection" screen and this endpoint is only called when the
+  // customer clicks the "Decline estimate" button on that screen.
+  //
+  // Audit attribution uses estimate.sentToEmail (the address the email was
+  // actually delivered to, stamped on send) instead of estimate.customerEmail
+  // so the activity feed is truthful when the send modal's To field was
+  // changed from the default.
+  app.post("/api/estimates/reject-via-token/:token", async (req, res) => {
+    try {
+      const token = String(req.params.token);
+      const list = await storage.getEstimates!();
+      const estimate = list.find((e) => e.approvalToken === token);
+
+      if (!estimate) {
+        res.status(404).json({ error: "not_found", message: "Invalid or expired link." });
+        return;
+      }
+
       if (estimate.tokenExpiresAt && new Date() > new Date(estimate.tokenExpiresAt)) {
         res.status(410).json({
           error: "expired",
@@ -2433,20 +2497,26 @@ export function registerEstimateRoutes(
         rejectedAt: new Date(),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any);
+
+      // Task #1574 — use the actual delivery address for audit attribution.
+      // sentToEmail is stamped at send time and differs from customerEmail
+      // when the send modal's To field was overridden by a manager.
+      const auditEmail = (estimate as any).sentToEmail || estimate.customerEmail;
+
       await recordLifecycleAudit(req, {
         resource: "estimate",
         action: "estimate.customer_rejected",
         targetId: estimate.id,
         companyId: estimate.companyId ?? null,
         customer: {
-          email: estimate.customerEmail,
+          email: auditEmail,
           name: estimate.customerName,
           token,
         },
         before: { status: estimate.status },
         after: { status: "rejected" },
         summary: `Customer rejected estimate ${formatEstimateNumber(estimate.estimateNumber)}`,
-        extra: { approvalSource: "email_link" },
+        extra: { approvalSource: "email_link", deliveredTo: auditEmail },
       });
 
       // Notify company admins and managers that customer rejected the estimate
@@ -2469,13 +2539,13 @@ export function registerEstimateRoutes(
           });
         }
       } catch (notifError) {
-        console.error("Failed to send rejection notifications:", notifError);
+        req.log?.warn({ err: notifError }, "Failed to send rejection notifications");
       }
 
       // Send confirmation email
       const { EmailService } = await import("../email-service");
       await EmailService.sendApprovalConfirmation(
-        estimate.customerEmail,
+        auditEmail,
         estimate.estimateNumber,
         false,
       );
@@ -2486,7 +2556,7 @@ export function registerEstimateRoutes(
         estimateNumber: estimate.estimateNumber,
       });
     } catch (error) {
-      console.error("Error rejecting estimate via token:", error);
+      req.log?.error({ err: error }, "Error rejecting estimate via token");
       res.status(500).json({ error: "server_error", message: "Something went wrong. Please contact us directly." });
     }
   });

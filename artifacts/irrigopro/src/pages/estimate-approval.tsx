@@ -96,6 +96,10 @@ type ActionState =
   | { kind: "idle" }
   | { kind: "sign-sheet-open" }
   | { kind: "pending"; action: "approve" | "reject" }
+  // Task #1574 — shown when the page is opened via the reject link
+  // (?intent=reject) or when the customer clicks "Decline". The customer
+  // must explicitly click "Confirm decline" to trigger the POST.
+  | { kind: "confirm-reject" }
   | { kind: "approved"; estimateNumber: string; customerEmail: string; signerName?: string; signatureType?: string; signatureData?: string }
   | { kind: "rejected"; estimateNumber: string }
   | { kind: "already-approved"; signerName?: string; signedAt?: string }
@@ -255,6 +259,15 @@ export default function EstimateApproval() {
     return !t || t === "estimate-approval" ? null : t;
   }, []);
 
+  // Task #1574 — detect ?intent=reject from email reject link
+  const intentReject = useMemo(() => {
+    try {
+      return new URLSearchParams(window.location.search).get("intent") === "reject";
+    } catch {
+      return false;
+    }
+  }, []);
+
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   const [action, setAction] = useState<ActionState>({ kind: "idle" });
   const [newLinkState, setNewLinkState] = useState<
@@ -298,6 +311,11 @@ export default function EstimateApproval() {
         }
         const data = (await res.json()) as EstimateView;
         setLoad({ kind: "ready", data });
+        // Task #1574 — email reject link includes ?intent=reject so the portal
+        // opens straight to the confirm screen without any GET to the API.
+        if (intentReject && !data.alreadyResponded) {
+          setAction({ kind: "confirm-reject" });
+        }
       } catch (err) {
         if (!cancelled) setLoad({ kind: "error" });
       }
@@ -305,7 +323,7 @@ export default function EstimateApproval() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, intentReject]);
 
   const openSignSheet = () => {
     // Pre-fill printed name from typed mode if available
@@ -380,11 +398,21 @@ export default function EstimateApproval() {
     }
   };
 
-  const submitReject = async () => {
+  // Task #1574 — shows the confirm screen; the actual POST happens in
+  // submitRejectConfirmed. Clicking "Decline" no longer immediately fires
+  // an API call so email scanners cannot trigger this path.
+  const initiateReject = () => {
+    setAction({ kind: "confirm-reject" });
+  };
+
+  // Task #1574 — called only when the customer explicitly clicks "Confirm
+  // decline" on the confirm screen. Uses POST (not GET) so it cannot be
+  // pre-fetched by email security scanners.
+  const submitRejectConfirmed = async () => {
     if (!token) return;
     setAction({ kind: "pending", action: "reject" });
     try {
-      const res = await fetch(`/api/estimates/reject-via-token/${token}`, { method: "GET" });
+      const res = await fetch(`/api/estimates/reject-via-token/${token}`, { method: "POST" });
       // Defense-in-depth: if the server says the token expired between page load
       // and the button click, surface the expired state rather than a generic error.
       if (res.status === 410) {
@@ -394,7 +422,8 @@ export default function EstimateApproval() {
         return;
       }
       if (!res.ok) {
-        setAction({ kind: "action-error" });
+        const j = await res.json().catch(() => ({}));
+        setAction({ kind: "action-error", message: j?.message });
         return;
       }
       const est = load.kind === "ready" ? load.data.estimate.estimateNumber : "";
@@ -476,6 +505,43 @@ export default function EstimateApproval() {
               A confirmation email has been sent to {action.customerEmail}
             </p>
           )}
+        </div>
+      );
+    }
+    if (action.kind === "confirm-reject") {
+      const estimateNumber =
+        load.kind === "ready" ? load.data.estimate.estimateNumber : undefined;
+      return (
+        <div className="text-center">
+          <XCircle className="h-16 w-16 text-red-400 mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-gray-800 mb-3">Decline this estimate?</h1>
+          {estimateNumber && (
+            <p className="text-gray-600 mb-2">
+              You are about to decline estimate{" "}
+              <strong>{formatEstimateNumber(estimateNumber)}</strong>.
+            </p>
+          )}
+          <p className="text-gray-500 text-sm mb-6">
+            Our team will be notified. If you change your mind, contact us directly.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <Button
+              variant="outline"
+              className="sm:flex-1 max-w-xs mx-auto sm:mx-0"
+              onClick={() => setAction({ kind: "idle" })}
+              data-testid="confirm-reject-cancel-btn"
+            >
+              Cancel
+            </Button>
+            <Button
+              className="sm:flex-1 max-w-xs mx-auto sm:mx-0 bg-red-600 hover:bg-red-700 text-white"
+              onClick={submitRejectConfirmed}
+              data-testid="confirm-reject-confirm-btn"
+            >
+              <XCircle className="w-4 h-4 mr-2" />
+              Decline estimate
+            </Button>
+          </div>
         </div>
       );
     }
@@ -787,14 +853,10 @@ export default function EstimateApproval() {
               variant="outline"
               className="w-full sm:flex-1 text-red-600 border-red-200 hover:bg-red-50"
               disabled={action.kind === "pending"}
-              onClick={submitReject}
+              onClick={initiateReject}
               data-testid="approval-reject-btn"
             >
-              {action.kind === "pending" && action.action === "reject" ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <XCircle className="w-4 h-4 mr-2" />
-              )}
+              <XCircle className="w-4 h-4 mr-2" />
               Decline Estimate
             </Button>
             <Button
