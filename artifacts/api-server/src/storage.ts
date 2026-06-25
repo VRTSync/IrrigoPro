@@ -647,6 +647,10 @@ export interface IStorage {
     estimate: Estimate;
     deletedWorkOrderId: number | null;
   }>;
+  // Reverts a rejected estimate back to `sent` state. Returns the updated
+  // estimate on success, or `undefined` if the row was not in `rejected`
+  // lifecycle (precondition miss — caller should treat as 409).
+  unrejectedEstimate(id: number): Promise<Estimate | undefined>;
   updateWorkOrder(id: number, workOrder: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined>;
   deleteWorkOrder(id: number): Promise<boolean>;
   hasInvoiceItems(workOrderId: number): Promise<boolean>;
@@ -3892,6 +3896,20 @@ export class DatabaseStorage implements IStorage {
 
       return { estimate: updated, deletedWorkOrderId };
     });
+  }
+
+  async unrejectedEstimate(id: number): Promise<Estimate | undefined> {
+    const [updated] = await db
+      .update(estimates)
+      .set({
+        status: "pending",
+        internalStatus: "sent_to_customer",
+        lifecycle: "sent",
+        updatedAt: new Date(),
+      })
+      .where(and(eq(estimates.id, id), eq(estimates.lifecycle, "rejected")))
+      .returning();
+    return updated;
   }
 
   async updateWorkOrder(id: number, workOrder: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined> {

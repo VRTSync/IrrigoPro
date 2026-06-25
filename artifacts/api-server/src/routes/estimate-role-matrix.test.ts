@@ -46,6 +46,7 @@ import {
   ESTIMATE_SUBMIT_FOR_REVIEW_ROLES,
   ESTIMATE_SEND_TO_CUSTOMER_ROLES,
   ESTIMATE_UNAPPROVE_ROLES,
+  ESTIMATE_UNREJECT_ROLES,
   type TransitionAction,
 } from "./estimate-role-guards";
 import {
@@ -626,6 +627,68 @@ describe("Estimate role × screen matrix (Task #632)", () => {
       );
     } finally {
       await new Promise<void>((r) => server2.close(() => r()));
+    }
+  });
+
+  // ─── Unreject — role gate ────────────────────────────────────────────
+  // POST /api/estimates/:id/unreject is restricted to super_admin and
+  // company_admin — mirrors the unapprove role gate. Billing managers,
+  // irrigation managers, and field techs must all see 403.
+  it("POST /api/estimates/:id/unreject: 200 for {super_admin, company_admin}, 403 for all other roles", async () => {
+    const rejectedEstimate = {
+      id: 1,
+      companyId: 1,
+      customerId: 1,
+      estimateNumber: "EST-00001",
+      status: "rejected",
+      internalStatus: "sent_to_customer",
+      lifecycle: "rejected",
+      estimateDate: new Date(),
+      items: [],
+    } as unknown as import("@workspace/db").EstimateWithItems;
+    const sentEstimate = {
+      ...rejectedEstimate,
+      status: "pending",
+      internalStatus: "sent_to_customer",
+      lifecycle: "sent",
+    } as unknown as import("@workspace/db").EstimateWithItems;
+
+    function makeRejectedStub(): EstimateRoutesStorage {
+      return {
+        async getCustomer() { return undefined; },
+        async getEstimate() { return rejectedEstimate; },
+        async createEstimateFromPayload() { throw new Error("not used"); },
+        async updateEstimateWithItems() { throw new Error("not used"); },
+        async unrejectedEstimate() {
+          return sentEstimate as any;
+        },
+      };
+    }
+
+    const app3: import("express").Express = express();
+    app3.use(express.json());
+    registerEstimateRoutes(app3, makeRejectedStub(), stubAuth);
+    const server3: Server = createServer(app3);
+    await new Promise<void>((r) => server3.listen(0, r));
+    const port3 = (server3.address() as AddressInfo).port;
+    const url3 = `http://127.0.0.1:${port3}`;
+    try {
+      for (const role of ROLES) {
+        const expected = ESTIMATE_UNREJECT_ROLES.has(role) ? 200 : 403;
+        const got = await callAs(url3, "POST", "/api/estimates/1/unreject", role, {});
+        assert.equal(
+          got,
+          expected,
+          `unreject as ${role}: expected HTTP ${expected}, got ${got}`,
+        );
+      }
+      assert.equal(
+        await callAs(url3, "POST", "/api/estimates/1/unreject", null, {}),
+        401,
+        "unreject unauthenticated",
+      );
+    } finally {
+      await new Promise<void>((r) => server3.close(() => r()));
     }
   });
 

@@ -76,6 +76,14 @@ export const ESTIMATE_UNAPPROVE_ROLES = new Set<string>([
   "company_admin",
 ]);
 
+// Roles that may revert a rejected estimate back to `sent` via
+// POST /api/estimates/:id/unreject. Mirrors ESTIMATE_UNAPPROVE_ROLES —
+// same admin tiers, same rationale.
+export const ESTIMATE_UNREJECT_ROLES = new Set<string>([
+  "super_admin",
+  "company_admin",
+]);
+
 // ─── Middlewares ──────────────────────────────────────────────────────────────
 
 // Middleware gating estimate approval / customer-delivery routes.

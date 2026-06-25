@@ -40,6 +40,7 @@ import {
   isDraft,
   isExpired,
   isPendingReview,
+  isRejected,
   isSent,
   lifecycleOf,
   reviewStageLabelOf,
@@ -97,6 +98,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   const [showSendDialog, setShowSendDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showUnapproveDialog, setShowUnapproveDialog] = useState(false);
+  const [showUnrejectDialog, setShowUnrejectDialog] = useState(false);
   // Task #680 — Mark as Sent dialog state. `markSentResult` holds the
   // freshly minted customer approval URL after a successful mark so
   // the same dialog can flip to "Done — copy this link".
@@ -410,6 +412,30 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     },
   });
 
+  const unrejectedEstimateMutation = useMutation({
+    mutationFn: async () => {
+      if (!estimateId) throw new Error("Missing estimate id");
+      return apiRequest(`/api/estimates/${estimateId}/unreject`, "POST");
+    },
+    onSuccess: () => {
+      toast({
+        title: "Estimate reverted to sent",
+        description: "The rejection has been undone. The estimate is back in Sent status.",
+      });
+      setShowUnrejectDialog(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Couldn't revert estimate",
+        description: err?.message || "Please try again.",
+        variant: "destructive",
+      });
+      setShowUnrejectDialog(false);
+    },
+  });
+
   const deleteEstimateMutation = useMutation({
     mutationFn: async () => {
       if (!estimateId) throw new Error("Missing estimate id");
@@ -456,6 +482,14 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     currentRole != null &&
     UNAPPROVE_ROLES.has(currentRole) &&
     isApproved(estimate ?? null);
+
+  // Unreject — mirrors the server-side ESTIMATE_UNREJECT_ROLES guard.
+  // Only company_admin and super_admin may undo an accidental rejection.
+  const UNREJECT_ROLES = new Set<string>(["super_admin", "company_admin"]);
+  const canUnrejectEstimate =
+    currentRole != null &&
+    UNREJECT_ROLES.has(currentRole) &&
+    isRejected(estimate ?? null);
 
   // Task #634 — show the Delete control only on still-draft rows. The
   // server enforces the same precondition; this just avoids surfacing
@@ -1216,6 +1250,20 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                       {unapproveEstimateMutation.isPending ? "Reverting…" : "Unapprove"}
                     </Button>
                   )}
+                  {/* Unreject — visible only to company_admin and super_admin
+                      when the estimate is in the rejected lifecycle. */}
+                  {canUnrejectEstimate && !isEstimateDeleted && (
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowUnrejectDialog(true)}
+                      disabled={unrejectedEstimateMutation.isPending}
+                      className="border-amber-300 text-amber-700 hover:bg-amber-50 w-full sm:w-auto"
+                      data-testid="detail-modal-unreject"
+                    >
+                      <XCircle className="w-4 h-4 mr-2" />
+                      {unrejectedEstimateMutation.isPending ? "Reverting…" : "Revert to Sent"}
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1370,6 +1418,35 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
               data-testid="unapprove-confirm"
             >
               {unapproveEstimateMutation.isPending ? "Reverting…" : "Revert to Sent"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={showUnrejectDialog} onOpenChange={setShowUnrejectDialog}>
+        <AlertDialogContent data-testid="unreject-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revert this estimate to Sent?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will undo the rejection and step the estimate back to{" "}
+              <span className="font-semibold">Sent</span> status. The customer
+              will not be notified automatically — use the existing resend flow
+              if you want to re-deliver the estimate.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={unrejectedEstimateMutation.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={unrejectedEstimateMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                unrejectedEstimateMutation.mutate();
+              }}
+              className="bg-amber-600 hover:bg-amber-700"
+              data-testid="unreject-confirm"
+            >
+              {unrejectedEstimateMutation.isPending ? "Reverting…" : "Revert to Sent"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

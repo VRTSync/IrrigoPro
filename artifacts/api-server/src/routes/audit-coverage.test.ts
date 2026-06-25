@@ -20,6 +20,7 @@ import { dirname, join } from "node:path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const routesSrc = readFileSync(join(__dirname, "routes.ts"), "utf8");
+const estimateRoutesSrc = readFileSync(join(__dirname, "estimate-routes.ts"), "utf8");
 
 function nearby(haystack: string, marker: string, window = 40000): string | null {
   const idx = haystack.indexOf(marker);
@@ -170,6 +171,21 @@ describe("Task #641 — every lifecycle transition emits a recordLifecycleAudit 
     assert.ok(
       routesSrc.includes('app.get("/api/wet-check-billings/:id/activity"'),
       "GET /api/wet-check-billings/:id/activity not found in routes.ts",
+    );
+  });
+
+  // ── estimate.unrejected audit coverage ────────────────────────────────
+  it("POST /api/estimates/:id/unreject emits estimate.unrejected audit action", () => {
+    const idx = estimateRoutesSrc.indexOf('"/api/estimates/:id/unreject"');
+    assert.ok(idx >= 0, 'marker "/api/estimates/:id/unreject" not found in estimate-routes.ts');
+    const region = estimateRoutesSrc.slice(idx, idx + 5000);
+    assert.ok(
+      region.includes("recordAuditEvent("),
+      "expected recordAuditEvent() near /unreject handler",
+    );
+    assert.ok(
+      region.includes("estimate.unrejected"),
+      'expected action "estimate.unrejected" near /unreject handler',
     );
   });
 

@@ -106,6 +106,9 @@ export interface EstimateRoutesStorage {
     estimate: Estimate;
     deletedWorkOrderId: number | null;
   }>;
+  // Optional — required only by POST /api/estimates/:id/unreject.
+  // Returns undefined when the estimate was not in `rejected` lifecycle.
+  unrejectedEstimate?(id: number): Promise<Estimate | undefined>;
   internallyApproveEstimateIfPending?(
     id: number,
   ): Promise<Estimate | EstimateWithItems | undefined | null>;
@@ -1208,6 +1211,94 @@ export function registerEstimateRoutes(
         }
         console.error("Error unapproving estimate:", error);
         res.status(500).json({ message: "Failed to revert estimate approval." });
+      }
+    },
+  );
+
+  // ── POST /api/estimates/:id/unreject ─────────────────────────────────
+  // Reverts an accidentally rejected estimate back to `sent`. This is
+  // the mirror of the `unapprove` flow but simpler — rejected estimates
+  // never have linked work orders so the only mutation is the status
+  // flip. Restricted to company_admin and super_admin (same guard as
+  // unapprove) so billing managers cannot silently undo a rejection they
+  // didn't originate.
+  app.post(
+    "/api/estimates/:id/unreject",
+    requireAuthentication,
+    async (req: any, res) => {
+      try {
+        const id = parseInt(String(req.params.id));
+        if (isNaN(id) || id <= 0) {
+          res.status(400).json({ message: "Invalid estimate ID" });
+          return;
+        }
+        const role = req.authenticatedUserRole as string | undefined;
+        if (role !== "company_admin" && role !== "super_admin") {
+          res.status(403).json({
+            message:
+              "Access denied. Reverting a rejection is restricted to company administrators.",
+          });
+          return;
+        }
+
+        const existing = await storage.getEstimate(id);
+        if (!existing) {
+          res.status(404).json({ message: "Estimate not found" });
+          return;
+        }
+        if (!estimateOwnershipMatches(req, existing.companyId)) {
+          res.status(404).json({ message: "Estimate not found" });
+          return;
+        }
+        if (existing.lifecycle !== "rejected") {
+          res.status(409).json({
+            message: "Only rejected estimates can be reverted to sent.",
+            lifecycle: existing.lifecycle,
+          });
+          return;
+        }
+
+        const userId = (req.authenticatedUserId as number | undefined) ?? null;
+
+        const updated = await storage.unrejectedEstimate!(id);
+        if (!updated) {
+          // The pre-flight passed but the UPDATE found no matching row —
+          // extremely unlikely race condition; surface as 409.
+          res.status(409).json({
+            message: "Estimate is no longer in rejected state.",
+            lifecycle: existing.lifecycle,
+          });
+          return;
+        }
+
+        try {
+          await recordAuditEvent(req, {
+            actorUserId: userId,
+            actorRole: role ?? null,
+            actorCompanyId: req.authenticatedUserCompanyId ?? null,
+            actionType: "estimate",
+            action: "estimate.unrejected",
+            targetType: "estimate",
+            targetId: String(id),
+            summary: `Estimate ${existing.estimateNumber ? formatEstimateNumber(existing.estimateNumber) : id} reverted from rejected to sent`,
+            details: {
+              estimateId: id,
+              estimateNumber: existing.estimateNumber ?? null,
+              before: { lifecycle: "rejected", status: existing.status, internalStatus: existing.internalStatus },
+              after: { lifecycle: "sent", status: "pending", internalStatus: "sent_to_customer" },
+            },
+          });
+        } catch {
+          // best-effort audit; transition already committed
+        }
+
+        res.json({
+          message: "Estimate reverted to sent successfully.",
+          estimate: updated,
+        });
+      } catch (error: any) {
+        console.error("Error unrejecting estimate:", error);
+        res.status(500).json({ message: "Failed to revert estimate rejection." });
       }
     },
   );
