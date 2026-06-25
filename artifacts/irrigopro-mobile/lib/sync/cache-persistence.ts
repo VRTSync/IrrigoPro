@@ -21,7 +21,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { QueryClient } from "@tanstack/react-query";
 
-const STORAGE_KEY_BASE = "irrigopro.qcache.v2";
+const STORAGE_KEY_BASE = "irrigopro.qcache.v3";
 const ANON_SESSION = "_anon";
 const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const FLUSH_DELAY_MS = 800;

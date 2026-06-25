@@ -238,7 +238,7 @@ export default function ZoneDetailScreen() {
   }, [wc, zoneRecordId]);
 
   const headerTitle = zone
-    ? `Controller ${zone.controllerLetter} · Zone ${zone.zoneNumber}`
+    ? `Controller ${zone.controllerLetter} · Zone ${zone.zoneNumber ?? "?"}`
     : "Zone";
 
   // ─── Mutations ─────────────────────────────────────────────────────────
@@ -1212,7 +1212,7 @@ function ZoneStatusCard({
           style={[styles.headerNumber, { color: colors.mutedForeground }]}
           numberOfLines={1}
         >
-          Controller {zone.controllerLetter} · Zone {zone.zoneNumber}
+          Controller {zone.controllerLetter} · Zone {zone.zoneNumber ?? "?"}
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           {photoCount > 0 ? (

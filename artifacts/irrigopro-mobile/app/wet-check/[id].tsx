@@ -880,7 +880,7 @@ function ControllerSection({
                     accessibilityLabel={`Zone ${z.zoneNumber}`}
                   >
                     <Text style={[styles.zoneTileText, { color: tone.fg }]}>
-                      {z.zoneNumber}
+                      {z.zoneNumber ?? "?"}
                     </Text>
                     {markedComplete ? (
                       <View style={styles.markedCompleteDot}>
