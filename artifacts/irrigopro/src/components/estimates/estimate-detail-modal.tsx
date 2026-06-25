@@ -113,11 +113,12 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   const currentRole = readCurrentUserRole();
   const canSeeEstimatePdf = currentRole != null && PDF_READ_ROLES.has(currentRole);
   // Task #680 — same gate as the server's `requireEstimateApprovalAccess`.
-  // Field techs and irrigation managers do not see Email / Mark as Sent.
+  // Field techs do not see Email / Mark as Sent.
   const SEND_ROLES = new Set<string>([
     "super_admin",
     "company_admin",
     "billing_manager",
+    "irrigation_manager",
   ]);
   const canSendEstimate = currentRole != null && SEND_ROLES.has(currentRole);
   // Task #365 — matches the server's resend role gate (irrigation_manager

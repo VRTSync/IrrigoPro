@@ -204,14 +204,16 @@ export const createEstimateWithItemsSchema = z.object({
 // ─── Helpers (estimate-specific) ─────────────────────────────────────────────
 
 // Middleware gating estimate approval / customer-delivery routes.
-// Slice 7 — only billing roles (billing_manager, company_admin, super_admin)
-// can internally approve, reject, or send estimates to customers.
+// Slice 7 — billing roles (billing_manager, company_admin, super_admin)
+// plus irrigation_manager can internally approve, reject, or send
+// estimates to customers.
 export const requireEstimateApprovalAccess: RequestHandler = (req, res, next) => {
   const userRole = req.authenticatedUserRole;
   if (
     userRole !== "company_admin" &&
     userRole !== "billing_manager" &&
-    userRole !== "super_admin"
+    userRole !== "super_admin" &&
+    userRole !== "irrigation_manager"
   ) {
     res.status(403).json({
       message:

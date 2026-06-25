@@ -693,7 +693,7 @@ describe("Estimate role × screen matrix (Task #632)", () => {
   });
 
   // ─── Transition handler-level role dispatch ─────────────────────────────
-  it("POST /api/estimates/:id/transition gates submit_for_review/resend to {super_admin, company_admin, irrigation_manager} and send_to_customer to {super_admin, company_admin, billing_manager}", async () => {
+  it("POST /api/estimates/:id/transition gates submit_for_review/resend to {super_admin, company_admin, irrigation_manager} and send_to_customer to {super_admin, company_admin, billing_manager, irrigation_manager}", async () => {
     const actions: TransitionAction[] = ["submit_for_review", "resend", "send_to_customer"];
     for (const action of actions) {
       const allowed =

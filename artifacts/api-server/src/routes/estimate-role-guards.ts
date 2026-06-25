@@ -19,6 +19,7 @@ export const ESTIMATE_APPROVAL_ROLES = new Set<string>([
   "super_admin",
   "company_admin",
   "billing_manager",
+  "irrigation_manager",
 ]);
 
 // Roles that may render or download the priced estimate PDF. Wider than
@@ -64,6 +65,7 @@ export const ESTIMATE_SEND_TO_CUSTOMER_ROLES = new Set<string>([
   "super_admin",
   "company_admin",
   "billing_manager",
+  "irrigation_manager",
 ]);
 
 // Roles that may revert an approved estimate back to `sent` via

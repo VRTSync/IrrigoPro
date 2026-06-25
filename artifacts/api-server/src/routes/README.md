@@ -8,14 +8,14 @@ When the matrix changes, update all three together.
 
 ## Roles in play
 
-| Role                  | Notes                                                                                            |
-| --------------------- | ------------------------------------------------------------------------------------------------ |
-| `super_admin`         | Replit operator. Bypasses cross-company ownership checks.                                        |
-| `company_admin`       | Company owner. Full estimate authority.                                                          |
-| `billing_manager`     | Approves estimates, sends to customer. Cannot submit-for-review (handler-level check).           |
-| `manager`             | Canonical "irrigation manager" role. Can *read* the PDF; cannot internally approve.              |
-| `irrigation_manager`  | Legacy alias for `manager`. Honored by PDF gate AND by `/transition` submit-for-review path.     |
-| `field_tech`          | Truck-level role. No estimate read PDF, no approval, no email, no transition.                    |
+| Role                  | Notes                                                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `super_admin`         | Replit operator. Bypasses cross-company ownership checks.                                                           |
+| `company_admin`       | Company owner. Full estimate authority.                                                                             |
+| `billing_manager`     | Approves estimates, sends to customer. Cannot submit-for-review (handler-level check).                              |
+| `manager`             | Retired alias; honored only by the PDF gate for back-compat. Cannot internally approve or send.                     |
+| `irrigation_manager`  | Full estimate delivery authority: internal approve, reject, send to customer, mark as sent, submit-for-review/resend. |
+| `field_tech`          | Truck-level role. No estimate read PDF, no approval, no email, no transition.                                       |
 
 ## Endpoint × role matrix
 
@@ -26,7 +26,7 @@ guard rejects with 403. `401` = unauthenticated. `n/a` = not applicable
 Guards referenced below are exported from `./estimate-role-guards.ts`:
 
 - `requireEstimateApprovalAccess` — `ESTIMATE_APPROVAL_ROLES` =
-  `{super_admin, company_admin, billing_manager}`.
+  `{super_admin, company_admin, billing_manager, irrigation_manager}`.
 - `requireEstimatePdfAccess` — `ESTIMATE_PDF_READ_ROLES` =
   `{super_admin, company_admin, billing_manager, manager,
   irrigation_manager}`.
@@ -35,26 +35,26 @@ Guards referenced below are exported from `./estimate-role-guards.ts`:
   - `submit_for_review` / `resend` → `ESTIMATE_SUBMIT_FOR_REVIEW_ROLES`
     = `{super_admin, company_admin, irrigation_manager}`.
   - `send_to_customer` → `ESTIMATE_SEND_TO_CUSTOMER_ROLES` =
-    `{super_admin, company_admin, billing_manager}`.
+    `{super_admin, company_admin, billing_manager, irrigation_manager}`.
 
 | Method | Path                                              | Guard                                                  | super_admin | company_admin | manager | irrigation_manager | billing_manager | field_tech | anon |
 | ------ | ------------------------------------------------- | ------------------------------------------------------ | ----------- | ------------- | ------- | ------------------ | --------------- | ---------- | ---- |
 | GET    | `/api/estimates`                                  | (none)                                                 | ✓           | ✓             | ✓       | ✓                  | ✓               | ✓          | ✓    |
 | GET    | `/api/estimates/:id`                              | (none)                                                 | ✓           | ✓             | ✓       | ✓                  | ✓               | ✓          | ✓    |
-| GET    | `/api/estimates/pending-approval`                 | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | 403                | ✓               | 403        | 401  |
+| GET    | `/api/estimates/pending-approval`                 | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | ✓                  | ✓               | 403        | 401  |
 | POST   | `/api/estimates`                                  | `requireAuth`                                          | ✓           | ✓             | ✓       | ✓                  | ✓               | ✓          | 401  |
 | PUT    | `/api/estimates/:id`                              | `requireAuth`                                          | ✓           | ✓             | ✓       | ✓                  | ✓               | ✓          | 401  |
 | POST   | `/api/estimates/:id/submit-for-review`            | `requireAuth`                                          | ✓           | ✓             | ✓       | ✓                  | ✓               | ✓          | 401  |
 | DELETE | `/api/estimates/:id`                              | `requireAuth`                                          | ✓           | ✓             | ✓       | ✓                  | ✓               | ✓          | 401  |
-| POST   | `/api/estimates/:id/approve` (legacy)             | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | 403                | ✓               | 403        | 401  |
-| POST   | `/api/estimates/:id/reject`                       | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | 403                | ✓               | 403        | 401  |
-| PATCH  | `/api/estimates/:id/approve`                      | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | 403                | ✓               | 403        | 401  |
-| PATCH  | `/api/estimates/:id/reject`                       | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | 403                | ✓               | 403        | 401  |
-| PATCH  | `/api/estimates/:id/internal-approve`             | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | 403                | ✓               | 403        | 401  |
-| POST   | `/api/estimates/:id/send-approval-email`          | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | 403                | ✓               | 403        | 401  |
-| POST   | `/api/estimates/:id/email`                        | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | 403                | ✓               | 403        | 401  |
+| POST   | `/api/estimates/:id/approve` (legacy)             | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | ✓                  | ✓               | 403        | 401  |
+| POST   | `/api/estimates/:id/reject`                       | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | ✓                  | ✓               | 403        | 401  |
+| PATCH  | `/api/estimates/:id/approve`                      | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | ✓                  | ✓               | 403        | 401  |
+| PATCH  | `/api/estimates/:id/reject`                       | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | ✓                  | ✓               | 403        | 401  |
+| PATCH  | `/api/estimates/:id/internal-approve`             | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | ✓                  | ✓               | 403        | 401  |
+| POST   | `/api/estimates/:id/send-approval-email`          | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | ✓                  | ✓               | 403        | 401  |
+| POST   | `/api/estimates/:id/email`                        | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | ✓                  | ✓               | 403        | 401  |
 | POST   | `/api/estimates/:id/transition` (submit_for_review/resend) | `requireAuth` + handler dispatch (`canPerformEstimateTransition`) | ✓ | ✓ | 403 | ✓ | 403 | 403 | 401 |
-| POST   | `/api/estimates/:id/transition` (send_to_customer)         | `requireAuth` + handler dispatch                       | ✓           | ✓             | 403     | 403                | ✓               | 403        | 401  |
+| POST   | `/api/estimates/:id/transition` (send_to_customer)         | `requireAuth` + handler dispatch                       | ✓           | ✓             | 403     | ✓                  | ✓               | 403        | 401  |
 | POST   | `/api/estimates/:id/convert-to-work-order`        | `requireAuth`                                          | ✓           | ✓             | ✓       | ✓                  | ✓               | ✓          | 401  |
 | GET    | `/api/estimates/:id/pdf`                          | `requireAuth` + `requireEstimatePdfAccess`             | ✓           | ✓             | ✓       | ✓                  | ✓               | 403        | 401  |
 | POST   | `/api/estimates/:id/pdf`                          | `requireAuth` + `requireEstimatePdfAccess`             | ✓           | ✓             | ✓       | ✓                  | ✓               | 403        | 401  |
