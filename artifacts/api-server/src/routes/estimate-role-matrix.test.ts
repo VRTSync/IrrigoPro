@@ -61,10 +61,11 @@ import type {
 } from "@workspace/db";
 
 // ─── Roles under test ─────────────────────────────────────────────────────────
-// `manager` is the canonical role name; `irrigation_manager` is the
-// legacy alias that the PDF/transition gates still honor. Both are
-// exercised so a future cleanup of the alias is forced through this
-// test.
+// `irrigation_manager` is the canonical role name (Task #643).
+// `manager` is the retired legacy alias that still appears in
+// ESTIMATE_PDF_READ_ROLES for back-compat but is excluded from
+// approval and transition gates. Both are exercised so a future
+// removal of the alias forces a deliberate update to this test.
 const ROLES = [
   "super_admin",
   "company_admin",
@@ -149,10 +150,21 @@ async function startMatrixServer(): Promise<Harness> {
   // List — auth-optional in routes.ts (no middleware at all).
   app.get("/api/estimates", ok);
 
-  // Pending approval list — requireAuthentication + requireEstimateApprovalAccess.
-  // MUST be mounted BEFORE the /:id catch-all so Express's first-match
-  // rule routes `/pending-approval` here, not to the catch-all detail
-  // route. routes.ts has the same ordering constraint.
+  // ── Routes registered BEFORE registerEstimateRoutes() ──────────────────
+  //
+  // Express matches routes first-come-first-served. Stubs mounted here
+  // shadow the corresponding real handlers from registerEstimateRoutes()
+  // so the test pins the *middleware gate* (403 vs non-403) rather than
+  // the downstream business logic (404 / 500 from the stub storage).
+  //
+  // Stubs that need to test the gate: approval-gated and PDF endpoints.
+  // They are mounted with the *real exported* guards from
+  // estimate-role-guards.ts so any drift between the exported constants
+  // and the test's role expectations is caught immediately.
+
+  // Pending approval list — requireEstimateApprovalAccess gate.
+  // MUST be before /:id so Express doesn't route `pending-approval`
+  // into the catch-all detail handler.
   app.get(
     "/api/estimates/pending-approval",
     stubAuth,
@@ -160,21 +172,11 @@ async function startMatrixServer(): Promise<Harness> {
     ok,
   );
 
-  // Detail — auth-optional, mounted after pending-approval.
-  app.get("/api/estimates/:id", ok);
-
-  // POST/PUT/submit-for-review — mounted from the real
-  // registerEstimateRoutes() so any future role gating added there is
-  // observed by this test.
-  registerEstimateRoutes(app, makeStorageStub(), stubAuth);
-
-  // DELETE — auth-only, no role gate. Confirms every authenticated
-  // role can issue a DELETE (the storage layer would handle ownership
-  // separately; this matrix only pins the middleware chain).
-  app.delete("/api/estimates/:id", stubAuth, ok);
-
   // Approve / reject / internal-approve (POST + PATCH variants) +
   // send-approval-email + email — all gated by requireEstimateApprovalAccess.
+  // Mounted here (before registerEstimateRoutes) so the stub fires and
+  // returns 200 for allowed roles; the real handler would return 404
+  // (getEstimate → undefined in the stub).
   for (const path of [
     "/api/estimates/:id/approve",
     "/api/estimates/:id/reject",
@@ -191,10 +193,38 @@ async function startMatrixServer(): Promise<Harness> {
     app.patch(path, stubAuth, requireEstimateApprovalAccess, ok);
   }
 
+  // PDF (GET + POST) — gated by requireEstimatePdfAccess.
+  // Mounted before registerEstimateRoutes for the same reason: the real
+  // handler would call getEstimate() → undefined → 404, masking the
+  // middleware gate result.
+  app.get("/api/estimates/:id/pdf", stubAuth, requireEstimatePdfAccess, ok);
+  app.post("/api/estimates/:id/pdf", stubAuth, requireEstimatePdfAccess, ok);
+
+  // Detail — auth-optional, mounted after fixed-path stubs above.
+  app.get("/api/estimates/:id", ok);
+
+  // ── registerEstimateRoutes() ────────────────────────────────────────────
+  // POST/PUT/submit-for-review — mounted from the real
+  // registerEstimateRoutes() so any future role gating added there is
+  // observed by this test. Routes for endpoints already stubbed above
+  // are also registered here but are shadowed by the earlier stubs.
+  registerEstimateRoutes(app, makeStorageStub(), stubAuth);
+
+  // ── Routes registered AFTER registerEstimateRoutes() ───────────────────
+  //
+  // DELETE and convert-to-work-order are intentionally left here so the
+  // *real* handlers from registerEstimateRoutes() run. This lets the
+  // test document real handler behavior (error codes from the stub
+  // storage) rather than a simple 200 stub. See the DELETE test below
+  // for the expected codes and rationale.
+
   // Transition — auth-only at middleware level; per-action role
   // dispatch lives inside the handler. Mirror that here using the
   // canPerformEstimateTransition predicate so the test pins the
   // handler-level rules exactly.
+  // Mounted after registerEstimateRoutes so it does NOT shadow the
+  // real /transition route (registerEstimateRoutes does not register
+  // /transition; it uses /resend separately).
   app.post(
     "/api/estimates/:id/transition",
     stubAuth,
@@ -218,13 +248,6 @@ async function startMatrixServer(): Promise<Harness> {
     },
     ok,
   );
-
-  // Convert-to-work-order — auth-only, no role gate.
-  app.post("/api/estimates/:id/convert-to-work-order", stubAuth, ok);
-
-  // PDF (GET + POST) — gated by requireEstimatePdfAccess.
-  app.get("/api/estimates/:id/pdf", stubAuth, requireEstimatePdfAccess, ok);
-  app.post("/api/estimates/:id/pdf", stubAuth, requireEstimatePdfAccess, ok);
 
   const server: Server = createServer(app);
   await new Promise<void>((r) => server.listen(0, r));
@@ -296,8 +319,9 @@ describe("Estimate role × screen matrix (Task #632)", () => {
 
   // ─── Approval-gated endpoints ───────────────────────────────────────────
   // approve / reject / internal-approve / send-approval-email / email /
-  // pending-approval list — billing_manager + company_admin + super_admin only.
-  it("Approval-gated endpoints return 200 for {super_admin, company_admin, billing_manager} and 403 for {manager, irrigation_manager, field_tech}", async () => {
+  // pending-approval list — ESTIMATE_APPROVAL_ROLES (super_admin,
+  // company_admin, billing_manager, irrigation_manager) only.
+  it("Approval-gated endpoints return 200 for {super_admin, company_admin, billing_manager, irrigation_manager} and 403 for {manager, field_tech}", async () => {
     const cases: { method: "GET" | "POST" | "PATCH"; path: string }[] = [
       { method: "GET", path: "/api/estimates/pending-approval" },
       { method: "POST", path: "/api/estimates/1/approve" },
@@ -324,7 +348,12 @@ describe("Estimate role × screen matrix (Task #632)", () => {
   });
 
   // ─── PDF endpoint ───────────────────────────────────────────────────────
-  it("GET/POST /api/estimates/:id/pdf return 200 for {super_admin, company_admin, billing_manager, manager, irrigation_manager} and 403 for {field_tech}", async () => {
+  // PDF stubs are mounted before registerEstimateRoutes() in startMatrixServer
+  // so the stub (stubAuth + requireEstimatePdfAccess + ok) fires first.
+  // Allowed roles get 200; blocked roles get 403. ESTIMATE_PDF_READ_ROLES
+  // no longer includes the retired `manager` alias (Task #643) — both
+  // `manager` and `field_tech` see 403.
+  it("GET/POST /api/estimates/:id/pdf: 200 for {super_admin, company_admin, billing_manager, irrigation_manager}, 403 for {manager, field_tech}", async () => {
     for (const role of ROLES) {
       const expected = ESTIMATE_PDF_READ_ROLES.has(role) ? 200 : 403;
       assert.equal(
@@ -382,17 +411,37 @@ describe("Estimate role × screen matrix (Task #632)", () => {
     );
   });
 
-  // ─── DELETE and convert-to-work-order (no role guard) ───────────────────
-  it("DELETE /api/estimates/:id and POST /:id/convert-to-work-order accept every authenticated role", async () => {
+  // ─── DELETE and convert-to-work-order ───────────────────────────────────
+  // Both routes are handled by real handlers from registerEstimateRoutes()
+  // (no stubs are mounted for them in this harness). Expected codes per
+  // endpoint:
+  //
+  //   DELETE — the handler has an inline ESTIMATE_DELETE_ROLES allowlist
+  //     that excludes the retired `manager` alias (Task #643). Every
+  //     current canonical role is in the list. Because the stub's
+  //     getEstimate() returns undefined, any role that passes the allowlist
+  //     gets 404 "Estimate not found" — not 403. `manager` gets 403 at the
+  //     allowlist gate before the storage call.
+  //
+  //   convert-to-work-order — no role gate beyond requireAuthentication.
+  //     The handler calls storage.createWorkOrderFromEstimate!() which is
+  //     not provided by makeStorageStub() → TypeError → caught → 500.
+  //     All authenticated roles (including `manager`) reach the handler.
+  it("DELETE: 404 for canonical roles (reached handler), 403 for legacy manager alias; convert-to-work-order: 500 for all (no role gate)", async () => {
     for (const role of ROLES) {
+      // manager excluded by inline ESTIMATE_DELETE_ROLES → 403.
+      // All other roles pass → getEstimate() → undefined → 404.
+      const deleteExpected = role === "manager" ? 403 : 404;
       assert.equal(
         await callAs(baseUrl, "DELETE", "/api/estimates/1", role),
-        200,
+        deleteExpected,
         `DELETE as ${role}`,
       );
+      // No role gate — all authenticated roles reach the handler;
+      // createWorkOrderFromEstimate not in stub → 500.
       assert.equal(
         await callAs(baseUrl, "POST", "/api/estimates/1/convert-to-work-order", role, {}),
-        200,
+        500,
         `convert as ${role}`,
       );
     }
@@ -720,24 +769,27 @@ describe("Estimate role × screen matrix (Task #632)", () => {
     );
   });
 
-  // ─── Manager-only role specifically excluded from approval ──────────────
-  // Pin the bug the task #630 spec was originally written to surface:
-  // `manager` is *not* in the approval set, even though it sounds
-  // like it should be. The PDF set DOES include it. Locking that
-  // asymmetry down here so a future "widen approval to managers"
-  // refactor has to update this test deliberately.
-  it("manager role: 403 on approval endpoints but 200 on the PDF endpoint", async () => {
+  // ─── Legacy manager alias locked out of both approval and PDF ───────────
+  // The retired `manager` alias (Task #643) is excluded from both
+  // ESTIMATE_APPROVAL_ROLES and ESTIMATE_PDF_READ_ROLES. Every gated
+  // endpoint returns 403 for this role. Locking this down so a future
+  // cleanup of the alias must update this test deliberately.
+  it("legacy manager alias: 403 on approval endpoints AND on the PDF endpoint", async () => {
     assert.equal(
       await callAs(baseUrl, "PATCH", "/api/estimates/1/approve", "manager", {}),
       403,
+      "manager: PATCH approve should 403",
     );
     assert.equal(
       await callAs(baseUrl, "GET", "/api/estimates/pending-approval", "manager"),
       403,
+      "manager: GET pending-approval should 403",
     );
+    // manager is NOT in ESTIMATE_PDF_READ_ROLES (Task #643 retired the alias).
     assert.equal(
       await callAs(baseUrl, "GET", "/api/estimates/1/pdf", "manager"),
-      200,
+      403,
+      "manager: GET pdf should 403",
     );
   });
 

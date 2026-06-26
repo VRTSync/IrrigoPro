@@ -26,11 +26,12 @@ export const ESTIMATE_APPROVAL_ROLES = new Set<string>([
 // the approval set because reading the document is not a mutation —
 // managers operationally need to see it. field_tech is excluded so the
 // pricing-stripped tech view can't be sidestepped via the PDF.
+// Task #643 — the legacy `manager` alias was retired; only the
+// canonical `irrigation_manager` role is accepted now.
 export const ESTIMATE_PDF_READ_ROLES = new Set<string>([
   "super_admin",
   "company_admin",
   "billing_manager",
-  "manager",
   "irrigation_manager",
 ]);
 
@@ -89,8 +90,9 @@ export const ESTIMATE_UNREJECT_ROLES = new Set<string>([
 // ─── Middlewares ──────────────────────────────────────────────────────────────
 
 // Middleware gating estimate approval / customer-delivery routes.
-// Only billing roles (billing_manager, company_admin, super_admin) can
-// internally approve, reject, or send estimates to customers.
+// Only roles in ESTIMATE_APPROVAL_ROLES (billing_manager, company_admin,
+// super_admin, irrigation_manager) can internally approve, reject, or
+// send estimates to customers.
 export const requireEstimateApprovalAccess: RequestHandler = (req, res, next) => {
   const userRole = (req as unknown as { authenticatedUserRole?: string }).authenticatedUserRole;
   if (!userRole || !ESTIMATE_APPROVAL_ROLES.has(userRole)) {
