@@ -27,6 +27,9 @@ interface StatusStrip {
   };
 }
 
+// Minimal shape — we only need the count from the array length.
+type PendingEstimate = { id: number };
+
 function formatTodayHeader(): string {
   return new Date().toLocaleDateString([], {
     weekday: "long",
@@ -161,8 +164,18 @@ export function ManagerTodayScreen() {
     refetchInterval: 60_000,
   });
 
+  // Task #1581 — pending estimates count for irrigation managers.
+  // Fetched separately so the status-strip contract stays unchanged.
+  const { data: pendingEstimates = [] } = useQuery<PendingEstimate[]>({
+    queryKey: ["/api/estimates/pending-approval"],
+    queryFn: () => apiRequest<PendingEstimate[]>("/api/estimates/pending-approval"),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+
   const ind = data?.indicators;
   const ages = data?.oldestAgeHours;
+  const pendingEstimateCount = pendingEstimates.length;
 
   return (
     <SafeAreaView
@@ -201,6 +214,12 @@ export function ManagerTodayScreen() {
         </Text>
 
         <View style={styles.tilesSection}>
+          <ActionTile
+            label="Pending estimates"
+            count={pendingEstimateCount}
+            subtitle={pendingEstimateCount > 0 ? "Awaiting approval or send" : ""}
+            onPress={() => router.push("/estimates" as any)}
+          />
           <ActionTile
             label="Wet checks pending review"
             count={ind?.wcsPendingReview ?? 0}
