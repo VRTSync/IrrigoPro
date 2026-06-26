@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ActivityTab } from "@/components/activity/ActivityTab";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, authedPdfUrl } from "@/lib/queryClient";
-import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink, Send, Eye, Download, Trash2, Link as LinkIcon, Copy, PenLine } from "lucide-react";
+import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink, Send, Eye, Download, Trash2, Link as LinkIcon, Copy, PenLine, ChevronUp, ChevronDown } from "lucide-react";
 import { EstimateMediaBlock } from "@/components/estimates/estimate-media-block";
 import { ApprovalSignatureBlock } from "@/components/estimates/approval-signature-block";
 import { buildMapsUrl } from "@/lib/maps-url";
@@ -107,6 +107,13 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     approvalToken: string;
     url: string;
   } | null>(null);
+  const [actionsOpen, setActionsOpen] = useState(true);
+
+  // Reset the mobile action drawer to open whenever a different estimate
+  // is loaded so users always see the actions immediately on open.
+  useEffect(() => {
+    setActionsOpen(true);
+  }, [estimateId]);
 
   // Compute once per mount — the user's role rarely changes during a
   // session and we don't want this gate to flicker as React re-renders.
@@ -1053,6 +1060,27 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
               className="flex-shrink-0 p-4 sm:p-6 border-t border-gray-200 bg-gray-50"
               data-testid="detail-modal-footer"
             >
+              {/* Mobile-only pill handle — hidden on sm+ */}
+              <div className="flex justify-center mb-2 sm:hidden">
+                <button
+                  type="button"
+                  onClick={() => setActionsOpen((prev) => !prev)}
+                  aria-expanded={actionsOpen}
+                  aria-controls="detail-modal-footer-actions"
+                  className="flex items-center gap-1 px-4 py-1 rounded-full bg-gray-200 hover:bg-gray-300 text-gray-600 text-sm transition-colors"
+                >
+                  {actionsOpen ? (
+                    <ChevronUp className="w-4 h-4" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+              {/* Collapsible region — full-height on sm+, animated on mobile */}
+              <div
+                id="detail-modal-footer-actions"
+                className={`overflow-hidden transition-all duration-200 sm:max-h-none sm:overflow-visible${actionsOpen ? " max-h-[600px]" : " max-h-0"}`}
+              >
               <div className="flex flex-col-reverse sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-3">
                 <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-3">
                   <Button
@@ -1266,6 +1294,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                     </Button>
                   )}
                 </div>
+              </div>
               </div>
             </div>
 
