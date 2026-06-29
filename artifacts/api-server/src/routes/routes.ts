@@ -4918,6 +4918,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // User routes
+  // Role rank for ceiling checks (higher = more privileged).
+  const ROLE_RANK: Record<string, number> = {
+    super_admin: 4,
+    company_admin: 3,
+    billing_manager: 2,
+    irrigation_manager: 2,
+    field_tech: 1,
+  };
+
   app.get("/api/users", requireAuthentication, async (req, res) => {
     try {
       const users = await storage.getUsers();
@@ -4947,6 +4956,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // User management routes for system admin
   app.post("/api/users", requireAuthentication, async (req, res) => {
     try {
+      if (req.authenticatedUserRole !== 'super_admin') {
+        res.status(403).json({ message: "Forbidden: super_admin only" });
+        return;
+      }
       const userData = insertUserSchema.parse(req.body);
       const user = await storage.createUser(userData);
       // Remove password from response
@@ -4966,8 +4979,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/users/:id", requireAuthentication, async (req, res) => {
     try {
       const userId = parseInt(req.params.id);
+      const callerRole = req.authenticatedUserRole;
+      const callerCompanyId = req.authenticatedUserCompanyId ?? null;
       const userData = insertUserSchema.partial().parse(req.body);
       const before = await storage.getUser(userId);
+      // Cross-company guard: non-super_admin callers can only edit users in their own company.
+      if (callerRole !== 'super_admin' && before && before.companyId !== callerCompanyId) {
+        res.status(403).json({ message: "Forbidden: cannot edit users from another company" });
+        return;
+      }
+      // Role-ceiling guard: only fires when the role is actually changing (so
+      // echoing the existing role in a self-edit is never blocked).
+      if (userData.role && userData.role !== before?.role && callerRole !== 'super_admin') {
+        const callerRank = ROLE_RANK[callerRole ?? ''] ?? 0;
+        const targetRank = ROLE_RANK[userData.role] ?? 0;
+        if (targetRank >= callerRank) {
+          res.status(403).json({ message: "Forbidden: cannot assign a role at or above your own" });
+          return;
+        }
+      }
       const user = await storage.updateUser(userId, userData);
       if (!user) {
         res.status(404).json({ message: "User not found" });
@@ -5130,7 +5160,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/users/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      const callerRolePatch = req.authenticatedUserRole;
+      const callerCompanyIdPatch = req.authenticatedUserCompanyId ?? null;
       const userData = insertUserSchema.partial().parse(req.body);
+      const before = await storage.getUser(id);
+      // Cross-company guard.
+      if (callerRolePatch !== 'super_admin' && before && before.companyId !== callerCompanyIdPatch) {
+        res.status(403).json({ message: "Forbidden: cannot edit users from another company" });
+        return;
+      }
+      // Role-ceiling guard (only fires when the role is actually changing).
+      if (userData.role && userData.role !== before?.role && callerRolePatch !== 'super_admin') {
+        const callerRankPatch = ROLE_RANK[callerRolePatch ?? ''] ?? 0;
+        const targetRankPatch = ROLE_RANK[userData.role] ?? 0;
+        if (targetRankPatch >= callerRankPatch) {
+          res.status(403).json({ message: "Forbidden: cannot assign a role at or above your own" });
+          return;
+        }
+      }
       const user = await storage.updateUser(id, userData);
       if (!user) {
         res.status(404).json({ message: "User not found" });
@@ -5208,7 +5255,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Company-scoped user management routes (for company admins)
-  app.get("/api/company/:companyId/users", requireCompanySetup, async (req, res) => {
+  app.get("/api/company/:companyId/users", requireAuthentication, requireCompanySetup, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
       const users = await storage.getUsers(companyId);
@@ -5221,9 +5268,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/company/:companyId/users", requireCompanySetup, async (req, res) => {
+  app.post("/api/company/:companyId/users", requireAuthentication, requireCompanySetup, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
+      const callerRolePost = req.authenticatedUserRole;
+      const callerCompanyIdPost = req.authenticatedUserCompanyId ?? null;
+      // Admin-only gate: only super_admin or company_admin may manage company users.
+      if (callerRolePost !== 'super_admin' && callerRolePost !== 'company_admin') {
+        res.status(403).json({ message: "Forbidden: only company admins can manage users" });
+        return;
+      }
+      // Company-match guard: non-super_admin callers can only create users in their own company.
+      if (callerRolePost !== 'super_admin' && callerCompanyIdPost !== companyId) {
+        res.status(403).json({ message: "Forbidden: cannot create users in another company" });
+        return;
+      }
+      // Role-ceiling guard: callers can only assign roles strictly below their own rank.
+      const newRole: string = typeof req.body.role === 'string' ? req.body.role : '';
+      if (newRole && callerRolePost !== 'super_admin') {
+        const callerRankPost = ROLE_RANK[callerRolePost ?? ''] ?? 0;
+        const targetRankPost = ROLE_RANK[newRole] ?? 0;
+        if (targetRankPost >= callerRankPost) {
+          res.status(403).json({ message: "Forbidden: cannot assign a role at or above your own" });
+          return;
+        }
+      }
 
       // Phone is required for new users — it becomes the username
       const { phone, email, name, password, role } = req.body;
@@ -5279,10 +5348,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/company/:companyId/users/:userId", requireCompanySetup, async (req, res) => {
+  app.put("/api/company/:companyId/users/:userId", requireAuthentication, requireCompanySetup, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
       const userId = parseInt(req.params.userId);
+      const callerRolePut = req.authenticatedUserRole;
+      const callerCompanyIdPut = req.authenticatedUserCompanyId ?? null;
+      // Admin-only gate: only super_admin or company_admin may manage company users.
+      if (callerRolePut !== 'super_admin' && callerRolePut !== 'company_admin') {
+        res.status(403).json({ message: "Forbidden: only company admins can manage users" });
+        return;
+      }
+      // Company-match guard: non-super_admin callers can only edit users in their own company.
+      if (callerRolePut !== 'super_admin' && callerCompanyIdPut !== companyId) {
+        res.status(403).json({ message: "Forbidden: cannot edit users in another company" });
+        return;
+      }
       
       // Verify user belongs to company
       const existingUser = await storage.getUser(userId);
@@ -5292,6 +5373,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const userData = insertUserSchema.partial().parse(req.body);
+      // Role-ceiling guard: only fires when the role is actually changing.
+      if (userData.role && userData.role !== existingUser?.role && callerRolePut !== 'super_admin') {
+        const callerRankPut = ROLE_RANK[callerRolePut ?? ''] ?? 0;
+        const targetRankPut = ROLE_RANK[userData.role] ?? 0;
+        if (targetRankPut >= callerRankPut) {
+          res.status(403).json({ message: "Forbidden: cannot assign a role at or above your own" });
+          return;
+        }
+      }
 
       // If phone is being updated, also update username to match (phone = username for new-style accounts)
       const updatePayload: any = { ...userData };
@@ -5323,7 +5413,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/company/:companyId/users/:userId/deactivate", requireCompanySetup, async (req, res) => {
+  app.post("/api/company/:companyId/users/:userId/deactivate", requireAuthentication, requireCompanySetup, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
       const userId = parseInt(req.params.userId);
@@ -5348,7 +5438,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Company admin password change endpoint
-  app.post("/api/company/:companyId/users/:userId/change-password", requireCompanySetup, async (req, res) => {
+  app.post("/api/company/:companyId/users/:userId/change-password", requireAuthentication, requireCompanySetup, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
       const userId = parseInt(req.params.userId);
@@ -5383,91 +5473,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Password change error:', error);
       res.status(500).json({ message: "Failed to change password" });
-    }
-  });
-
-  // Test endpoint to check database and users
-  app.get("/api/test-auth", async (req, res) => {
-    try {
-      const allUsers = await storage.getUsers();
-      res.json({ 
-        message: "Server is running", 
-        timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV,
-        userCount: allUsers.length,
-        users: allUsers.map(u => ({ id: u.id, username: u.username, role: u.role, emailVerified: u.emailVerified }))
-      });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ 
-        message: "Database connection failed", 
-        timestamp: new Date().toISOString()
-      });
-    }
-  });
-
-  // Admin reset users endpoint
-  app.post("/api/admin/reset-users", async (req, res) => {
-    try {
-      // Hash password123 for all users
-      const password = await bcrypt.hash('password123', 10);
-      
-      // Reset all user passwords
-      const users = await storage.getUsers();
-      for (const user of users) {
-        await storage.updateUser(user.id, {
-          password,
-          emailVerified: true,
-          passwordResetToken: null,
-          passwordResetExpires: null
-        });
-      }
-      
-      void recordAuditEvent(req, {
-        actorUserId: null,
-        actorLabel: 'system',
-        actorRole: 'super_admin',
-        actorCompanyId: null,
-        actionType: 'admin',
-        action: 'admin_reset_users',
-        severity: 'critical',
-        targetType: 'user',
-        targetId: null,
-        summary: `Mass password reset across ${users.length} accounts`,
-        details: { usersUpdated: users.length },
-      });
-
-      res.json({ 
-        message: "All user passwords reset to 'password123'", 
-        usersUpdated: users.length 
-      });
-    } catch (error) {
-      console.error('Password reset error:', error);
-      res.status(500).json({ message: "Failed to reset passwords" });
-    }
-  });
-
-  // Emergency Randy password reset
-  app.post("/api/reset-randy-password", async (req, res) => {
-    try {
-      const newPassword = 'admin123';
-      const hashedPassword = await bcrypt.hash(newPassword, 10);
-      
-      // Update Randy's password
-      const user = await storage.updateUserPassword('randy@highplainsprop.com', hashedPassword);
-      if (!user) {
-        res.status(404).json({ message: "Randy not found" });
-        return;
-      }
-      
-      res.json({ 
-        message: "Randy's password reset to 'admin123'",
-        username: "randy@highplainsprop.com",
-        newPassword: "admin123"
-      });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Password reset failed" });
     }
   });
 
@@ -6097,7 +6102,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const billingVisible = req.query.billingVisible === "true";
       const activeOnly = req.query.active === "true";
-      let customers = await storage.getCustomers();
+      const callerRoleCustomers = req.authenticatedUserRole;
+      if (callerRoleCustomers !== 'super_admin' && !req.authenticatedUserCompanyId) {
+        res.status(403).json({ message: "Forbidden: user has no company association" });
+        return;
+      }
+      const callerCidCustomers: number | undefined = callerRoleCustomers === 'super_admin'
+        ? undefined
+        : (req.authenticatedUserCompanyId ?? undefined);
+      let customers = await storage.getCustomers(callerCidCustomers);
       if (billingVisible) {
         customers = customers.filter(c => !c.hiddenFromBilling);
       }
@@ -7937,9 +7950,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Field Tech Parts route (without pricing)
-  app.get("/api/parts/field-tech", async (req, res) => {
+  app.get("/api/parts/field-tech", requireAuthentication, async (req, res) => {
     try {
-      const parts = await storage.getParts();
+      const callerRoleParts = req.authenticatedUserRole;
+      if (callerRoleParts !== 'super_admin' && !req.authenticatedUserCompanyId) {
+        res.status(403).json({ message: "Forbidden: user has no company association" });
+        return;
+      }
+      const callerCidParts: number | null = callerRoleParts === 'super_admin' ? null : (req.authenticatedUserCompanyId ?? null);
+      const parts = await storage.getParts(callerCidParts);
       // Remove pricing information for field techs
       const fieldTechParts = parts.map(part => ({
         id: part.id,
@@ -9679,11 +9698,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Invoice routes (placeholder endpoints)
-  app.get("/api/invoices", async (req, res) => {
+  app.get("/api/invoices", requireAuthentication, async (req, res) => {
     try {
       const customerId = req.query.customerId ? parseInt(req.query.customerId as string) : undefined;
 
-      const callerCompanyId9543 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+      const _invoiceCallerRole = (req as any).authenticatedUserRole as string | undefined;
+      if (_invoiceCallerRole !== 'super_admin' && !(req as any).authenticatedUserCompanyId) {
+        res.status(403).json({ message: "Forbidden: user has no company association" });
+        return;
+      }
+      const callerCompanyId9543 = _invoiceCallerRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
       const allInvoices = await storage.getInvoices(callerCompanyId9543);
 
       // Filter by customer if provided
@@ -9740,7 +9764,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Sorted workDate DESC by the storage layer; pricing stripped for field_tech.
   app.get("/api/wet-check-billings", requireAuthentication, async (req, res) => {
     try {
-      const billings = await storage.getAllWetCheckBillingsWithCounts();
+      const callerRoleWcb = req.authenticatedUserRole;
+      if (callerRoleWcb !== 'super_admin' && !req.authenticatedUserCompanyId) {
+        res.status(403).json({ message: "Forbidden: user has no company association" });
+        return;
+      }
+      const callerCidWcb: number | null = callerRoleWcb === 'super_admin' ? null : (req.authenticatedUserCompanyId ?? null);
+      const billings = await storage.getAllWetCheckBillingsWithCounts(callerCidWcb);
       res.json(applyPricingVisibility(req, billings));
     } catch (error) {
       logger.error({ err: error }, "GET /api/wet-check-billings failed");
@@ -9757,7 +9787,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(400).json({ message: "Invalid wet check billing id" });
         return;
       }
-      const wetCheckBilling = await storage.getWetCheckBillingById(id, null);
+      const wcbCallerRole = req.authenticatedUserRole;
+      if (wcbCallerRole !== 'super_admin' && !req.authenticatedUserCompanyId) {
+        res.status(403).json({ message: "Forbidden: user has no company association" });
+        return;
+      }
+      const wcbCallerCompanyId: number | null = wcbCallerRole === 'super_admin' ? null : (req.authenticatedUserCompanyId ?? null);
+      const wetCheckBilling = await storage.getWetCheckBillingById(id, wcbCallerCompanyId);
       if (!wetCheckBilling) {
         res.status(404).json({ message: "Wet check billing not found" });
         return;
@@ -9980,14 +10016,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Billing Sheets API - for work done without work orders
   // Note: Pricing fields are stripped for field_tech role via applyPricingVisibility
-  app.get("/api/billing-sheets", async (req, res) => {
+  app.get("/api/billing-sheets", requireAuthentication, async (req, res) => {
     try {
       const { technician } = req.query;
-      
-      const callerCompanyId9680 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
+
+      const _bsCallerRole = (req as any).authenticatedUserRole as string | undefined;
+      if (_bsCallerRole !== 'super_admin' && !(req as any).authenticatedUserCompanyId) {
+        res.status(403).json({ message: "Forbidden: user has no company association" });
+        return;
+      }
+      const callerCompanyId9680 = _bsCallerRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
       let billingSheets;
       if (technician) {
-        billingSheets = await storage.getBillingSheetsByTechnician(parseInt(technician as string));
+        billingSheets = await storage.getBillingSheetsByTechnician(parseInt(technician as string), callerCompanyId9680);
       } else {
         billingSheets = await storage.getAllBillingSheets(callerCompanyId9680);
       }
@@ -13940,6 +13981,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const photoId = String(raw || "");
         if (!photoId) return { photoId, url: null };
 
+        // Ownership check — unauthorized ids return { photoId, url: null } silently
+        // so the caller can distinguish "missing" from "forbidden" without leaking
+        // which photo ids exist in other tenants.
+        const allowed = await canViewPhoto(req, photoId);
+        if (!allowed) return { photoId, url: null };
+
         // Legacy /uploads paths: try object-storage first (post-backfill
         // they live there), then fall through to the proxy which still has
         // the on-disk fallback for un-backfilled installs. We KEEP the
@@ -13975,18 +14022,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // database (so a forged x-user-* tuple is caught the moment we look it
   // up) and confirm the photo belongs to a record this user's company
   // owns. Super admins keep cross-tenant access.
-  async function assertCanViewPhoto(req: any, res: any, photoId: string): Promise<boolean> {
+
+  // Shared boolean check — performs all six table checks and returns
+  // true/false without writing to res. Used by assertCanViewPhoto
+  // (single-photo endpoint) and the batch signed-URL handler.
+  async function canViewPhoto(req: any, photoId: string): Promise<boolean> {
     const userId = req.authenticatedUserId as number | undefined;
-    if (!userId) { res.status(401).json({ error: "Authentication required" }); return false; }
+    if (!userId) return false;
 
     const user = await storage.getUser(userId);
-    if (!user) { res.status(401).json({ error: "Authentication required" }); return false; }
+    if (!user) return false;
 
-    // super_admin can view any photo across tenants (mirrors existing
-    // cross-tenant access on other admin routes).
+    // super_admin can view any photo across tenants.
     if (user.role === "super_admin") return true;
 
-    if (!user.companyId) { res.status(403).json({ error: "Forbidden" }); return false; }
+    if (!user.companyId) return false;
 
     // Normalize the requested key so we can match it against stored values
     // (DB rows store the canonical `photos/<uuid>` key, but a caller may
@@ -13994,11 +14044,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const stripped = photoId.replace(/^\/+/, "").replace(/__(thumb|medium)\.jpg$/i, "");
     // Task #600 — collapse a legacy double `photos/photos/<uuid>` prefix to
     // the canonical `photos/<uuid>` so the lookup actually matches the stored
-    // row instead of bubbling a DB error up as a 500. Production logs show
-    // GET /api/photos/photos%2F<uuid> reaches here with `photoId` already
-    // double-prefixed; without this normalization the candidate list misses
-    // every wet_check_photos / work_orders / billing_sheets / estimates row
-    // and the route crashes on the first failed query.
+    // row instead of bubbling a DB error up as a 500.
     const deDoubled = stripped.replace(/^photos\/photos\//, "photos/");
     const candidates = Array.from(new Set([photoId, stripped, deDoubled]));
 
@@ -14057,8 +14103,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       .limit(1);
     if (icRows.length > 0) return true;
 
-    res.status(403).json({ error: "Forbidden" });
     return false;
+  }
+
+  // Thin wrapper: surfaces 401 for unauthenticated callers, 403 for
+  // authenticated callers who fail the ownership check.
+  async function assertCanViewPhoto(req: any, res: any, photoId: string): Promise<boolean> {
+    const userId = req.authenticatedUserId as number | undefined;
+    if (!userId) { res.status(401).json({ error: "Authentication required" }); return false; }
+    const user = await storage.getUser(userId);
+    if (!user) { res.status(401).json({ error: "Authentication required" }); return false; }
+    const allowed = await canViewPhoto(req, photoId);
+    if (!allowed) { res.status(403).json({ error: "Forbidden" }); return false; }
+    return true;
   }
 
   app.get("/api/photos/{*photoId}/signed-url", requireAuthentication, async (req, res) => {

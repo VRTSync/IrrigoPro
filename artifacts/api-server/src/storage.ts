@@ -455,7 +455,7 @@ export interface IStorage {
   // Customer-related data
   getEstimatesByCustomer(customerId: number): Promise<Estimate[]>;
   getBillingSheetsByCustomer(customerId: number, companyId: number | null): Promise<BillingSheetWithItems[]>;
-  getBillingSheetsByTechnician(technicianId: number): Promise<BillingSheetWithItems[]>;
+  getBillingSheetsByTechnician(technicianId: number, companyId?: number | null): Promise<BillingSheetWithItems[]>;
   
   // Notifications
   getNotifications(userId: number): Promise<Notification[]>;
@@ -522,7 +522,7 @@ export interface IStorage {
   deletePartFittingType(id: number, companyId: number): Promise<boolean>;
 
   // Parts
-  getParts(): Promise<Part[]>;
+  getParts(companyId?: number | null): Promise<Part[]>;
   getPart(id: number): Promise<Part | undefined>;
   searchParts(query: string): Promise<Part[]>;
   createPart(part: InsertPart): Promise<Part>;
@@ -1181,7 +1181,7 @@ export interface IStorage {
     userId: number | null,
   ): Promise<{ routed: number[]; errors: { findingId: number; message: string }[] }>;
   getAllWetCheckBillings(): Promise<WetCheckBilling[]>;
-  getAllWetCheckBillingsWithCounts(): Promise<WetCheckBillingListItem[]>;
+  getAllWetCheckBillingsWithCounts(companyId?: number | null): Promise<WetCheckBillingListItem[]>;
   getWetCheckBillingById(id: number, companyId: number | null): Promise<WetCheckBilling | undefined>;
   getWetCheckBillingsByCustomer(customerId: number): Promise<WetCheckBillingListItem[]>;
   getWetCheckBillingsByTechnician(technicianId: number): Promise<WetCheckBilling[]>;
@@ -2082,7 +2082,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Parts
-  async getParts(): Promise<Part[]> {
+  async getParts(companyId?: number | null): Promise<Part[]> {
+    if (companyId != null) {
+      return await db.select().from(parts).where(eq(parts.companyId, companyId));
+    }
     return await db.select().from(parts);
   }
 
@@ -4248,8 +4251,8 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(wetCheckBillings).orderBy(desc(wetCheckBillings.createdAt));
   }
 
-  async getAllWetCheckBillingsWithCounts(): Promise<WetCheckBillingListItem[]> {
-    const rows = await db
+  async getAllWetCheckBillingsWithCounts(companyId?: number | null): Promise<WetCheckBillingListItem[]> {
+    const baseQuery = db
       .select({
         wcb: wetCheckBillings,
         issuesCount: sql<number>`cast(count(${wetCheckFindings.id}) as int)`,
@@ -4263,9 +4266,16 @@ export class DatabaseStorage implements IStorage {
       })
       .from(wetCheckBillings)
       .leftJoin(wetCheckFindings, eq(wetCheckFindings.wetCheckBillingId, wetCheckBillings.id))
-      .leftJoin(wetChecks, eq(wetChecks.id, wetCheckBillings.wetCheckId))
-      .groupBy(wetCheckBillings.id, wetChecks.status, wetChecks.mode)
-      .orderBy(desc(wetCheckBillings.workDate), desc(wetCheckBillings.id));
+      .leftJoin(wetChecks, eq(wetChecks.id, wetCheckBillings.wetCheckId));
+    const rows = await (companyId != null
+      ? baseQuery
+          .innerJoin(customers, eq(customers.id, wetCheckBillings.customerId))
+          .where(eq(customers.companyId, companyId))
+          .groupBy(wetCheckBillings.id, wetChecks.status, wetChecks.mode)
+          .orderBy(desc(wetCheckBillings.workDate), desc(wetCheckBillings.id))
+      : baseQuery
+          .groupBy(wetCheckBillings.id, wetChecks.status, wetChecks.mode)
+          .orderBy(desc(wetCheckBillings.workDate), desc(wetCheckBillings.id)));
     return rows.map((r) => ({
       ...r.wcb,
       issuesCount: r.issuesCount ?? 0,
@@ -6327,8 +6337,17 @@ export class DatabaseStorage implements IStorage {
     return sheetsWithItems;
   }
 
-  async getBillingSheetsByTechnician(technicianId: number): Promise<BillingSheetWithItems[]> {
-    const sheets = await db.select().from(billingSheets).where(eq(billingSheets.technicianId, technicianId)).orderBy(desc(billingSheets.createdAt));
+  async getBillingSheetsByTechnician(technicianId: number, companyId?: number | null): Promise<BillingSheetWithItems[]> {
+    const techFilter = eq(billingSheets.technicianId, technicianId);
+    let sheets: (typeof billingSheets.$inferSelect)[];
+    if (companyId != null) {
+      // Scope to caller's company via the technician's companyId (users.companyId).
+      const tech = await db.select({ companyId: users.companyId }).from(users).where(eq(users.id, technicianId)).limit(1);
+      if (!tech.length || tech[0].companyId !== companyId) return [];
+      sheets = await db.select().from(billingSheets).where(techFilter).orderBy(desc(billingSheets.createdAt));
+    } else {
+      sheets = await db.select().from(billingSheets).where(techFilter).orderBy(desc(billingSheets.createdAt));
+    }
     
     // Get items for each billing sheet
     const sheetsWithItems = await Promise.all(sheets.map(async (sheet) => {
