@@ -12,8 +12,6 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import type { Customer } from "@workspace/db/schema";
 import { CustomerForm } from "@/components/customer-form";
-import { CustomerProfile } from "@/components/customers/customer-profile";
-import { CustomerSiteMaps } from "@/components/customers/customer-site-maps";
 import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { displayCustomerAddress } from "@/lib/customer-address";
 import { useToast } from "@/hooks/use-toast";
@@ -31,8 +29,6 @@ import {
 
 export default function Customers() {
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [showSiteMaps, setShowSiteMaps] = useState<Customer | null>(null);
   const [userRole, setUserRole] = useState<string>("company_admin");
   const [activeExpanded, setActiveExpanded] = useState(true);
   const [, setLocation] = useLocation();
@@ -97,25 +93,21 @@ export default function Customers() {
     ? customers?.find((c) => c.id === editCustomerId)
     : undefined;
 
-  // Check for auto-selection from site maps page
+  // Restore deep-link navigation from site-maps page (uses routes instead of inline render)
   useEffect(() => {
     const selectedCustomerId = safeGet('selectedCustomerId');
     const shouldShowSiteMaps = safeGet('showSiteMaps') === 'true';
-    
-    if (selectedCustomerId && customers) {
-      const customer = customers.find(c => c.id.toString() === selectedCustomerId);
-      if (customer) {
-        if (shouldShowSiteMaps) {
-          setShowSiteMaps(customer);
-        } else {
-          setSelectedCustomer(customer);
-        }
-        safeRemove('selectedCustomerId');
-        safeRemove('showSiteMaps');
-        safeRemove('selectedSiteMapId');
+    if (selectedCustomerId) {
+      safeRemove('selectedCustomerId');
+      safeRemove('showSiteMaps');
+      safeRemove('selectedSiteMapId');
+      if (shouldShowSiteMaps) {
+        setLocation(`/customers/${selectedCustomerId}/site-maps`);
+      } else {
+        setLocation(`/customers/${selectedCustomerId}/profile`);
       }
     }
-  }, [customers]);
+  }, [setLocation]);
 
   const filteredCustomers = customers?.filter(customer => {
     const q = searchQuery.toLowerCase();
@@ -134,26 +126,6 @@ export default function Customers() {
 
   if (isLoading) {
     return <CustomerListSkeleton />;
-  }
-
-  if (showSiteMaps) {
-    return (
-      <CustomerSiteMaps 
-        customer={showSiteMaps} 
-        onBack={() => setShowSiteMaps(null)}
-        userRole={userRole}
-      />
-    );
-  }
-
-  if (selectedCustomer) {
-    return (
-      <CustomerProfile 
-        customer={selectedCustomer} 
-        onBack={() => setSelectedCustomer(null)}
-        userRole={userRole}
-      />
-    );
   }
 
   return (
@@ -240,10 +212,7 @@ export default function Customers() {
                     <Card 
                       key={customer.id} 
                       className="glass-card p-4 active:scale-[0.98] transition-all duration-200"
-                      onClick={() => userRole === 'field_tech' 
-                        ? setLocation(`/customers/${customer.id}/profile`)
-                        : setSelectedCustomer(customer)
-                      }
+                      onClick={() => setLocation(`/customers/${customer.id}/profile`)}
                       data-testid={`card-customer-${customer.id}`}
                     >
                       <div className="flex items-center gap-4">
@@ -321,7 +290,7 @@ export default function Customers() {
                           </thead>
                           <tbody className="bg-white divide-y divide-gray-200">
                             {sortedCustomers.map((customer) => (
-                              <tr key={customer.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => userRole !== 'field_tech' && setSelectedCustomer(customer)}>
+                              <tr key={customer.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setLocation(`/customers/${customer.id}/profile`)}>
                                 <td className="px-6 py-4 whitespace-nowrap">
                                   <div className="flex items-center">
                                     <div className="p-2 rounded-lg mr-3 bg-blue-50">
@@ -360,7 +329,7 @@ export default function Customers() {
                                       </Button>
                                     ) : (
                                       <>
-                                        <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-900" onClick={(e) => { e.stopPropagation(); setSelectedCustomer(customer); }}>
+                                        <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-900" onClick={(e) => { e.stopPropagation(); setLocation(`/customers/${customer.id}/profile`); }}>
                                           <Eye className="w-4 h-4" />
                                         </Button>
                                         {(userRole === 'company_admin' || userRole === 'super_admin') && (

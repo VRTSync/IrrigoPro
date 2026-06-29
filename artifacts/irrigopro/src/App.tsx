@@ -448,6 +448,9 @@ function Router() {
                   <Route path="/wet-checks/:id/summary" component={WetCheckInspectionSummaryPage} />
                   <Route path="/wet-checks/:id" component={WetChecksRoutingPage} />
                   <Route path="/wet-check-billings" component={RedirectToWetChecksApproved} />
+                  <Route path="/customers" component={Customers} />
+                  <Route path="/customers/:id/profile" component={CustomerProfile} />
+                  <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />
                   <Route path="/customers/:customerId/irrigation-profile" component={IrrigationProfilePage} />
                   <Route path="/system-users" component={SystemUserManagement} />
                   <Route path="/admin/controllers" component={AdminControllers} />

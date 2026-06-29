@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const PROFILE_SRC = readFileSync(
-  resolve(import.meta.dirname, "./customer-profile.tsx"),
+  resolve(import.meta.dirname, "../../pages/customer-profile.tsx"),
   "utf8",
 );
 
