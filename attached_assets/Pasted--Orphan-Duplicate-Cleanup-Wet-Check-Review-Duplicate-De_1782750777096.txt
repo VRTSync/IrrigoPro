@@ -1,0 +1,60 @@
+# Orphan/Duplicate Cleanup — Wet-Check Review Duplicate + Dead Pages
+
+**What & Why**
+Follow-up to `AUDIT - Orphaned and Duplicate Pages (System-Wide).md`. Resolve the confirmed orphan/duplicate findings so every screen has one canonical, reachable component (PROJECT RULES Rule 3). All frontend; no schema/API change.
+
+---
+
+## Fix 1 — Wet-check review: company_admin is on a STALE duplicate (highest priority)
+The route `/wet-checks/:id/review` renders different components by role:
+- `irrigation_manager` / `billing_manager` / `super_admin` → **`CombinedReviewPage`** (`pages/wet-checks/CombinedReviewPage.tsx`, current, modified 2026-06-16)
+- **`company_admin` → `WetCheckReviewPage`** (`pages/wet-check-review.tsx`, older, 2026-06-03)
+- `field_tech` → `WetCheckInspectionSummaryPage`
+
+So **company_admin gets an older review page** than the other office roles and misses review work that shipped into `CombinedReviewSurface`/`CombinedReviewPage` (e.g. the zone-grouped inspection review).
+
+### Steps
+1. In `App.tsx`, change the **company_admin** switch (the `/wet-checks/:id/review` route, ~line 514) to render **`CombinedReviewPage`**, matching the manager/super_admin roles. (field_tech keeps `WetCheckInspectionSummaryPage` if that's intended for the tech summary.)
+2. Confirm `CombinedReviewPage` renders correctly for a company_admin (role gating inside `CombinedReviewSurface` already covers admins/managers).
+3. Once nothing references it, **delete `pages/wet-check-review.tsx`** (`WetCheckReviewPage`). Grep the repo first to confirm no other import/route uses it.
+4. Verify parity: anything company_admin genuinely needed on the old page exists on `CombinedReviewPage` (it's the newer, fuller version — confirm before deleting).
+
+### Acceptance
+- A company_admin opening a wet-check review sees the **same** review surface as managers (zone-grouped inspection review included).
+- `pages/wet-check-review.tsx` is deleted and unreferenced; no route renders it.
+
+---
+
+## Fix 2 — Delete dead page `manager-dashboard.tsx`
+`pages/manager-dashboard.tsx` is imported/routed **nowhere** (the `/manager-dashboard` path is only a redirect → `RedirectToManagerWorkspace`).
+
+### Steps
+1. Grep the repo to confirm `manager-dashboard` is unreferenced (only the redirect route mentions the path).
+2. **Delete `artifacts/irrigopro/src/pages/manager-dashboard.tsx`.** Leave the `/manager-dashboard → RedirectToManagerWorkspace` alias as-is.
+
+### Acceptance
+- File deleted; build still passes; `/manager-dashboard` still redirects to the manager workspace.
+
+---
+
+## Fix 3 — Verify the field-tech entry cluster (then trim)
+`/field-portal` → `FieldPortal`, `/field-tech` → `FieldTech` **and** `FieldTechDashboard`, with no in-app links found to `/field-portal` or `/field-tech` (field techs land via `/` → `FieldTechDashboard`).
+
+### Steps
+1. **Verify before deleting** (per the "verify before labeling dead" rule): determine which component is the canonical field-tech landing (likely `FieldTechDashboard`), and whether `FieldPortal` / `FieldTech` are still reached by any link, redirect, or role default.
+2. For any that are genuinely unreachable and superseded, **remove the route + delete the component**; if one should be reachable, wire its entry point. Do not delete anything still referenced.
+
+### Acceptance
+- Each field-tech route either has a real entry point or is removed; no dead field-tech page remains; field techs still land on their dashboard.
+
+---
+
+## Out of scope
+- Customer-profile consolidation (already shipped) and the tabbed redesign (separate spec).
+- Any behavior change to the review surface itself (this only routes company_admin to the existing current one).
+
+## Relevant files
+- `artifacts/irrigopro/src/App.tsx` (`/wet-checks/:id/review` company_admin ~514 → `CombinedReviewPage`)
+- Delete: `artifacts/irrigopro/src/pages/wet-check-review.tsx`, `artifacts/irrigopro/src/pages/manager-dashboard.tsx`
+- Keep: `artifacts/irrigopro/src/pages/wet-checks/CombinedReviewPage.tsx`
+- Verify: `pages/field-portal.tsx`, `pages/field-tech.tsx`, `pages/field-tech-dashboard.tsx`

@@ -1,0 +1,58 @@
+# Irrigation Profile — Sync With Existing Controller/Zone Data
+
+**What & Why**
+There are now **two unsynced controller stores**, and the new one launched empty:
+- **Legacy** `property_controllers` — drives the customer-profile **"Irrigation System" card** (`/api/properties/:customerId/controllers`) and the wet-check controller grid. For Woodglenn it holds **11 controllers / 97 zones** (A=7, B=9, C=15, D=6, E=8, F=9, G=5, H=10, I=10, J=10, K=8).
+- **New** `irrigation_controllers` (+ programs/zones) — the rich Irrigation System Profile page. For Woodglenn it shows **"0 controllers."**
+
+So the new profile doesn't reflect data the system already has. This is the reconcile the profile spec deferred (Slice 6) — and it's the data-layer version of the duplicate-page problem (PROJECT RULES Rule 3: don't maintain two diverging sources). Fix in two parts: **seed the new profile from the existing data now**, then **converge to one source of truth** so they can't drift again.
+
+All company-scoped (Rule 1).
+
+---
+
+## Slice 1 — Seed the new profile from existing `property_controllers` (the immediate sync)
+### Goal
+Opening the Irrigation System Profile for a customer that already has `property_controllers` shows those controllers + zone counts (e.g. Woodglenn → 11 controllers / 97 zones), instead of empty.
+
+### Build it two ways (both idempotent, both company-scoped)
+1. **Backfill (existing customers):** an idempotent import — for each `(companyId, customerId, branchName)` that has `property_controllers` rows but **no** `irrigation_controllers`, create:
+   - one `irrigation_controllers` per legacy controller — `name = "Controller {letter}"`, `totalZones = zoneCount`, `companyId`/`customerId`/`branchName` carried over, `isActive = true`;
+   - placeholder `irrigation_profile_zones` for `1…zoneCount` (`zoneNumber`, default `zoneType`, blank run time) so the zone grid matches the count;
+   - leave programs empty for the tech to fill in.
+   Deliver as a **preview-gated admin migration** runnable from `/admin/migrations` (Randy-runnable, no CLI) — `check()` counts customers with legacy controllers but no profile; `preview()` lists what would be created; `run()` imports. Idempotent: skip any customer/branch that already has a profile.
+2. **Lazy on first open:** when the Irrigation Profile page loads for a customer/branch with **no** `irrigation_controllers` but existing `property_controllers`, offer/auto-create the same seed (a one-click "Import existing controllers" or silent seed), so new opens are never empty when legacy data exists.
+
+### Acceptance
+- Woodglenn's Irrigation Profile shows 11 controllers with their zone counts (97 zones total) after the backfill (or on first open), matching the legacy card.
+- Re-running imports nothing (idempotent). Company-scoped; no cross-tenant seeding.
+
+## Slice 2 — Converge to one source of truth (prevent re-divergence)
+Maintaining two controller stores guarantees they drift again. Make `irrigation_controllers` the **canonical** store and have the legacy surfaces read from it:
+- **Customer-profile "Irrigation System" card** (`components/customers/irrigation-system-card.tsx`, currently `/api/properties/:id/controllers`): point it at the canonical profile data — either render a summary from `irrigation_controllers` (controllers + zone counts) linking to the full profile, or keep the quick zone-count editor but back it by the new store. No more reading/writing a separate `property_controllers` count.
+- **Wet-check controller grid:** derive controller letters + zone counts from `irrigation_controllers` (via the `resolveWetCheckControllers` seam noted in the profile spec / the lazy-zone-records work), falling back to `property_controllers` only until the backfill has run.
+- **Plan to retire `property_controllers` as a separate source** once both surfaces read the canonical store (keep the table/migration path or fold its data in — don't leave two editable zone-count stores).
+- Zone counts then live in **one** place; editing in the profile updates the wet-check grid and the card alike.
+
+### Acceptance
+- The customer-profile irrigation card and the new profile show the **same** controllers/zones (no divergence).
+- Changing a controller's zones in the profile is reflected on the card and in the wet-check grid.
+- No surface writes a second, independent controller/zone-count store.
+
+## Tests
+- Backfill: a customer with legacy controllers but no profile → profile populated to match (counts equal); a customer that already has a profile is untouched; cross-company isolation holds.
+- Lazy open: opening an empty profile with legacy data seeds it; opening a profile that exists does nothing.
+- Convergence: the card, the profile, and the wet-check grid agree on controllers/zone counts; an edit in one is reflected in the others.
+- Idempotency: re-running the migration reports zero.
+
+## Out of scope
+- The rich programming data (programs, run times, schedule) — the seed only brings over controllers + zone counts; the tech fills the rest.
+- The tabbed customer-profile redesign and the orphan-page cleanup (separate specs).
+
+## Relevant files
+- New: `artifacts/api-server/src/lib/migrations/import-irrigation-profile-from-property-controllers.ts` (+ registry) — admin migration
+- `artifacts/api-server/src/routes/irrigation-profile-routes.ts` (lazy-seed on empty-profile load), `storage.ts`
+- `lib/db/src/schema/schema.ts` (`property_controllers` ~1287 → `irrigation_controllers`/`irrigation_profile_zones` ~1737)
+- `artifacts/irrigopro/src/components/customers/irrigation-system-card.tsx` (point at canonical store)
+- `artifacts/irrigopro/src/pages/customers/IrrigationProfile.tsx` (lazy import + empty state)
+- Wet-check grid controller source (`resolveWetCheckControllers` seam) — see `Wet Check Zones - Lazy Zone Records` / original profile Slice 6
