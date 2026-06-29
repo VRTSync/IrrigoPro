@@ -761,6 +761,7 @@ export interface IStorage {
 
 
   // Site Maps for customers
+  getSiteMap(id: number): Promise<SiteMap | undefined>;
   getCustomerSiteMaps(customerId: number): Promise<SiteMap[]>;
   getSiteMapControllers(siteMapId: number): Promise<Controller[]>;
   getSiteMapZones(siteMapId: number): Promise<IrrigationZone[]>;
@@ -6846,6 +6847,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Site Maps methods
+  async getSiteMap(id: number): Promise<SiteMap | undefined> {
+    const [row] = await db.select().from(siteMaps).where(eq(siteMaps.id, id)).limit(1);
+    return row ?? undefined;
+  }
+
   async getAllSiteMaps(): Promise<SiteMap[]> {
     return await db.select().from(siteMaps)
       .where(eq(siteMaps.isActive, true))

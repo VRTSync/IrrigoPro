@@ -6417,7 +6417,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Customer site maps routes — extracted to ./site-map-routes.ts
-  registerSiteMapRoutes(app, { requireSiteMapViewAccess, requireCompanyAdminAccess });
+  registerSiteMapRoutes(app, { requireAuthentication, requireSiteMapViewAccess, requireCompanyAdminAccess });
 
   // Invoice preview (no creation, just calculation)
   app.post("/api/invoices/preview", requireAuthentication, async (req, res) => {

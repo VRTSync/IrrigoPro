@@ -9,16 +9,17 @@ import { insertSiteMapSchema } from "@workspace/db";
 import { storage } from "../storage";
 
 export interface RegisterSiteMapRoutesDeps {
+  requireAuthentication: RequestHandler;
   requireSiteMapViewAccess: RequestHandler;
   requireCompanyAdminAccess: RequestHandler;
 }
 
 export function registerSiteMapRoutes(
   app: Express,
-  { requireSiteMapViewAccess, requireCompanyAdminAccess }: RegisterSiteMapRoutesDeps,
+  { requireAuthentication, requireSiteMapViewAccess, requireCompanyAdminAccess }: RegisterSiteMapRoutesDeps,
 ): void {
   // Get all site maps (for overview display)
-  app.get("/api/site-maps", requireSiteMapViewAccess, async (_req, res) => {
+  app.get("/api/site-maps", requireAuthentication, requireSiteMapViewAccess, async (_req, res) => {
     try {
       const siteMaps = await storage.getAllSiteMaps();
       res.json(siteMaps);
@@ -28,9 +29,24 @@ export function registerSiteMapRoutes(
     }
   });
 
-  app.get("/api/customers/:customerId/site-maps", requireSiteMapViewAccess, async (req, res) => {
+  app.get("/api/customers/:customerId/site-maps", requireAuthentication, requireSiteMapViewAccess, async (req: any, res) => {
     try {
       const customerId = parseInt(String(req.params.customerId));
+
+      // Company scoping: verify the customer belongs to the caller's company
+      // before returning any site maps. Super admins can read across companies.
+      const callerCompanyId = req.authenticatedUserCompanyId;
+      const callerRole = req.authenticatedUserRole;
+      if (callerRole !== 'super_admin' && callerCompanyId != null) {
+        const customer = await storage.getCustomer(customerId);
+        if (!customer || customer.companyId !== callerCompanyId) {
+          // Return 404 rather than 403 so we don't reveal whether the
+          // customer exists in another tenant.
+          res.status(404).json({ message: "Customer not found" });
+          return;
+        }
+      }
+
       const siteMaps = await storage.getCustomerSiteMaps(customerId);
       res.json(siteMaps);
     } catch (error) {
@@ -39,9 +55,21 @@ export function registerSiteMapRoutes(
     }
   });
 
-  app.get("/api/site-maps/:siteMapId/controllers", requireSiteMapViewAccess, async (req, res) => {
+  app.get("/api/site-maps/:siteMapId/controllers", requireAuthentication, requireSiteMapViewAccess, async (req: any, res) => {
     try {
       const siteMapId = parseInt(String(req.params.siteMapId));
+
+      // Company scoping: verify the site map belongs to the caller's company.
+      const callerCompanyId = req.authenticatedUserCompanyId;
+      const callerRole = req.authenticatedUserRole;
+      if (callerRole !== 'super_admin' && callerCompanyId != null) {
+        const siteMap = await storage.getSiteMap(siteMapId);
+        if (!siteMap || siteMap.companyId !== callerCompanyId) {
+          res.status(404).json({ message: "Site map not found" });
+          return;
+        }
+      }
+
       const controllers = await storage.getSiteMapControllers(siteMapId);
       res.json(controllers);
     } catch (error) {
@@ -50,9 +78,21 @@ export function registerSiteMapRoutes(
     }
   });
 
-  app.get("/api/site-maps/:siteMapId/zones", requireSiteMapViewAccess, async (req, res) => {
+  app.get("/api/site-maps/:siteMapId/zones", requireAuthentication, requireSiteMapViewAccess, async (req: any, res) => {
     try {
       const siteMapId = parseInt(String(req.params.siteMapId));
+
+      // Company scoping: verify the site map belongs to the caller's company.
+      const callerCompanyId = req.authenticatedUserCompanyId;
+      const callerRole = req.authenticatedUserRole;
+      if (callerRole !== 'super_admin' && callerCompanyId != null) {
+        const siteMap = await storage.getSiteMap(siteMapId);
+        if (!siteMap || siteMap.companyId !== callerCompanyId) {
+          res.status(404).json({ message: "Site map not found" });
+          return;
+        }
+      }
+
       const zones = await storage.getSiteMapZones(siteMapId);
       res.json(zones);
     } catch (error) {
@@ -61,7 +101,7 @@ export function registerSiteMapRoutes(
     }
   });
 
-  app.post("/api/customers/:customerId/site-maps", requireCompanyAdminAccess, async (req, res) => {
+  app.post("/api/customers/:customerId/site-maps", requireAuthentication, requireCompanyAdminAccess, async (req: any, res) => {
     try {
       const customerId = parseInt(String(req.params.customerId));
 
@@ -103,7 +143,7 @@ export function registerSiteMapRoutes(
     }
   });
 
-  app.put("/api/site-maps/:siteMapId", requireCompanyAdminAccess, async (req, res) => {
+  app.put("/api/site-maps/:siteMapId", requireAuthentication, requireCompanyAdminAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(String(req.params.siteMapId));
 
@@ -130,7 +170,7 @@ export function registerSiteMapRoutes(
     }
   });
 
-  app.delete("/api/site-maps/:siteMapId", requireCompanyAdminAccess, async (req, res) => {
+  app.delete("/api/site-maps/:siteMapId", requireAuthentication, requireCompanyAdminAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(String(req.params.siteMapId));
       const success = await storage.deleteSiteMap(siteMapId);
@@ -147,7 +187,7 @@ export function registerSiteMapRoutes(
     }
   });
 
-  app.post("/api/site-maps/:siteMapId/controllers", requireCompanyAdminAccess, async (req, res) => {
+  app.post("/api/site-maps/:siteMapId/controllers", requireAuthentication, requireCompanyAdminAccess, async (req: any, res) => {
     try {
       const siteMapId = parseInt(String(req.params.siteMapId));
       const controllers = req.body.controllers;
@@ -181,7 +221,7 @@ export function registerSiteMapRoutes(
     }
   });
 
-  app.post("/api/site-maps/:siteMapId/zones", requireCompanyAdminAccess, async (req, res) => {
+  app.post("/api/site-maps/:siteMapId/zones", requireAuthentication, requireCompanyAdminAccess, async (req: any, res) => {
     try {
       const siteMapId = parseInt(String(req.params.siteMapId));
       const zones = req.body.zones;
