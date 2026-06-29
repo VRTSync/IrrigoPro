@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -10,22 +9,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Cpu, Droplets, Minus, Plus, Loader2 } from "lucide-react";
+import { Droplets, Loader2, ExternalLink } from "lucide-react";
 import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useLocation } from "wouter";
 import type { Customer, IrrigationController } from "@workspace/db/schema";
+import { IrrigationControllerGrid } from "./irrigation-controller-grid";
 
 const DEFAULT_ZONE_COUNT = 12;
 const MAX_CONTROLLERS = 26;
 const MIN_CONTROLLERS = 1;
-const MIN_ZONES = 1;
-const MAX_ZONES = 100;
 
 function letterFor(index: number) {
   return String.fromCharCode("A".charCodeAt(0) + index);
 }
 
-/** Extract the single uppercase letter from a controller name like "Controller A". */
 function extractLetter(name: string): string {
   return (
     name.trim().split(/\s+/).pop()?.slice(-1).toUpperCase() ??
@@ -40,15 +38,15 @@ interface IrrigationSystemCardProps {
 
 export function IrrigationSystemCard({ customer, canEdit }: IrrigationSystemCardProps) {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const customerId = customer.id;
   const totalControllers = Math.max(
     MIN_CONTROLLERS,
     Math.min(MAX_CONTROLLERS, customer.totalControllers ?? 1),
   );
 
-  // Read from the irrigation_controllers-backed endpoint (single source of truth).
-  const { data: controllers = [], isLoading } = useArrayQuery<IrrigationController>({
-    queryKey: ["/api/customers", customerId, "controllers-profile"],
+  const { data: controllers = [], isLoading, refetch } = useArrayQuery<IrrigationController>({
+    queryKey: [`/api/customers/${customerId}/controllers-profile`],
     queryFn: () => apiRequest(`/api/customers/${customerId}/controllers-profile`),
   });
 
@@ -79,36 +77,13 @@ export function IrrigationSystemCard({ customer, canEdit }: IrrigationSystemCard
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/customers/${customerId}`] });
       queryClient.invalidateQueries({
-        queryKey: ["/api/customers", customerId, "controllers-profile"],
+        queryKey: [`/api/customers/${customerId}/controllers-profile`],
       });
       toast({ title: "Controllers updated" });
     },
     onError: (err: any) => {
       toast({
         title: "Could not update controllers",
-        description: err?.message ?? "Try again in a moment.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const updateZoneCount = useMutation({
-    mutationFn: async (vars: { letter: string; zoneCount: number }) => {
-      const ctrl = controllersByLetter.get(vars.letter);
-      if (!ctrl) throw new Error(`Controller ${vars.letter} not found in profile`);
-      return await apiRequest(`/api/irrigation-controllers/${ctrl.id}`, "PUT", {
-        totalZones: vars.zoneCount,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["/api/customers", customerId, "controllers-profile"],
-      });
-      toast({ title: "Zone count updated" });
-    },
-    onError: (err: any) => {
-      toast({
-        title: "Could not update zone count",
         description: err?.message ?? "Try again in a moment.",
         variant: "destructive",
       });
@@ -144,7 +119,10 @@ export function IrrigationSystemCard({ customer, canEdit }: IrrigationSystemCard
                   }}
                   disabled={updateTotalControllers.isPending}
                 >
-                  <SelectTrigger className="h-8 w-[80px]" data-testid="select-total-controllers">
+                  <SelectTrigger
+                    className="h-8 w-[80px]"
+                    data-testid="select-total-controllers"
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -160,6 +138,15 @@ export function IrrigationSystemCard({ customer, canEdit }: IrrigationSystemCard
                 )}
               </div>
             )}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-xs text-blue-600 hover:text-blue-700 gap-1 h-8 px-2"
+              onClick={() => setLocation(`/customers/${customerId}/irrigation-profile`)}
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Open Full Profile
+            </Button>
           </div>
         </div>
       </CardHeader>
@@ -169,140 +156,28 @@ export function IrrigationSystemCard({ customer, canEdit }: IrrigationSystemCard
             <div className="h-24 bg-gray-100 rounded-lg animate-pulse" />
             <div className="h-24 bg-gray-100 rounded-lg animate-pulse" />
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {letters.map((letter) => {
-              const row = controllersByLetter.get(letter);
-              const zoneCount = row?.totalZones ?? DEFAULT_ZONE_COUNT;
-              return (
-                <ControllerTile
-                  key={letter}
-                  letter={letter}
-                  zoneCount={zoneCount}
-                  canEdit={canEdit}
-                  isSaving={
-                    updateZoneCount.isPending &&
-                    updateZoneCount.variables?.letter === letter
-                  }
-                  onSave={(next) =>
-                    updateZoneCount.mutate({ letter, zoneCount: next })
-                  }
-                />
-              );
-            })}
+        ) : controllers.length === 0 ? (
+          <div className="text-center py-8 text-gray-400">
+            <Droplets className="w-8 h-8 mx-auto mb-2 opacity-30" />
+            <p className="text-sm">No controllers configured yet.</p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-3"
+              onClick={() => setLocation(`/customers/${customerId}/irrigation-profile`)}
+            >
+              Open Full Profile to add controllers
+            </Button>
           </div>
+        ) : (
+          <IrrigationControllerGrid
+            controllers={controllers}
+            customerId={customerId}
+            canEdit={canEdit}
+            onRefreshList={() => refetch()}
+          />
         )}
       </CardContent>
     </Card>
-  );
-}
-
-interface ControllerTileProps {
-  letter: string;
-  zoneCount: number;
-  canEdit: boolean;
-  isSaving: boolean;
-  onSave: (next: number) => void;
-}
-
-function ControllerTile({
-  letter,
-  zoneCount,
-  canEdit,
-  isSaving,
-  onSave,
-}: ControllerTileProps) {
-  const [draft, setDraft] = useState<number>(zoneCount);
-
-  // Keep the local draft in sync when the server value changes (e.g. after a
-  // cache invalidate). Skip while saving so we don't clobber the user's input.
-  useEffect(() => {
-    if (!isSaving) setDraft(zoneCount);
-  }, [zoneCount, isSaving]);
-
-  const clamp = (n: number) =>
-    Math.max(MIN_ZONES, Math.min(MAX_ZONES, Math.floor(n) || MIN_ZONES));
-
-  const commit = (next: number) => {
-    const clamped = clamp(next);
-    setDraft(clamped);
-    if (clamped !== zoneCount) onSave(clamped);
-  };
-
-  return (
-    <div
-      className="rounded-xl border border-gray-200 bg-gradient-to-br from-blue-50/40 to-white p-4"
-      data-testid={`controller-tile-${letter}`}
-    >
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-lg bg-blue-600 text-white font-bold flex items-center justify-center shadow-sm">
-            {letter}
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-gray-900">Controller {letter}</p>
-            <p className="text-xs text-gray-500 flex items-center gap-1">
-              <Cpu className="w-3 h-3" />
-              {zoneCount} {zoneCount === 1 ? "zone" : "zones"}
-            </p>
-          </div>
-        </div>
-        {canEdit && (
-          <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => commit(draft - 1)}
-              disabled={isSaving || draft <= MIN_ZONES}
-              data-testid={`button-zone-decrement-${letter}`}
-            >
-              <Minus className="w-3 h-3" />
-            </Button>
-            <Input
-              type="number"
-              min={MIN_ZONES}
-              max={MAX_ZONES}
-              value={draft}
-              onChange={(e) => setDraft(Number(e.target.value) || MIN_ZONES)}
-              onBlur={() => commit(draft)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.currentTarget.blur();
-                }
-              }}
-              disabled={isSaving}
-              className="h-7 w-14 text-center text-sm"
-              data-testid={`input-zone-count-${letter}`}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => commit(draft + 1)}
-              disabled={isSaving || draft >= MAX_ZONES}
-              data-testid={`button-zone-increment-${letter}`}
-            >
-              <Plus className="w-3 h-3" />
-            </Button>
-            {isSaving && <Loader2 className="w-4 h-4 animate-spin text-gray-400 ml-1" />}
-          </div>
-        )}
-      </div>
-
-      <div className="flex flex-wrap gap-1.5">
-        {Array.from({ length: zoneCount }, (_, i) => i + 1).map((zone) => (
-          <span
-            key={zone}
-            className="inline-flex items-center justify-center min-w-[28px] h-7 px-1.5 rounded-md bg-white border border-blue-200 text-xs font-medium text-blue-900 shadow-sm"
-            data-testid={`zone-chip-${letter}-${zone}`}
-          >
-            {zone}
-          </span>
-        ))}
-      </div>
-    </div>
   );
 }

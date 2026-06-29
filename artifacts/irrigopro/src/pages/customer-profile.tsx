@@ -11,7 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import {
   ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt, DollarSign,
   Bell, Droplets, Wrench, Calendar, Package, ChevronDown, ChevronRight, User,
-  LayoutDashboard, Trees, Edit, ClipboardList, Clock,
+  LayoutDashboard, Trees, Edit, ClipboardList, Clock, Building2, CheckCircle, RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Customer, Estimate, WorkOrder, BillingSheetWithItems, SiteMap } from "@workspace/db/schema";
@@ -259,11 +259,23 @@ export default function CustomerProfile() {
             <Button variant="ghost" size="sm" onClick={() => setLocation("/customers")} className="shrink-0 -ml-2 mt-0.5">
               <ArrowLeft className="w-4 h-4 mr-1" />Back
             </Button>
+            {/* Gradient avatar tile */}
+            <div className="shrink-0 w-11 h-11 rounded-xl bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center shadow-sm mt-0.5">
+              <Building2 className="w-5 h-5 text-white" />
+            </div>
             <div className="flex-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 leading-tight">{displayName}</h1>
-                <Badge variant="default" className="shrink-0">Active Customer</Badge>
-                {customer.quickbooksId && <Badge variant="outline" className="shrink-0">QuickBooks Synced</Badge>}
+                {/* Green "Active" chip */}
+                <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200 text-xs font-medium">
+                  <CheckCircle className="w-3.5 h-3.5" />Active
+                </span>
+                {/* Sky "QuickBooks Synced" chip */}
+                {customer.quickbooksId && (
+                  <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-sky-300 text-sky-700 text-xs font-medium">
+                    <RefreshCw className="w-3 h-3" />QuickBooks Synced
+                  </span>
+                )}
               </div>
               {customer.irrigoName && customer.irrigoName !== customer.name && (
                 <p className="text-sm text-gray-500 mt-0.5">Official: {customer.name}</p>
@@ -271,22 +283,22 @@ export default function CustomerProfile() {
               {/* Compact contact line */}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 mt-1 text-sm text-gray-500">
                 {customer.email && (
-                  <span className="flex items-center gap-1"><Mail className="w-3.5 h-3.5" />{customer.email}</span>
+                  <span className="flex items-center gap-1"><Mail className="w-3.5 h-3.5 text-gray-400" />{customer.email}</span>
                 )}
                 {customer.phone && (
-                  <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5" />{customer.phone}</span>
+                  <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5 text-gray-400" />{customer.phone}</span>
                 )}
                 {addr && (
-                  <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{addr}</span>
+                  <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5 text-gray-400" />{addr}</span>
                 )}
               </div>
             </div>
             {/* Primary action buttons */}
             <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <Button size="sm" onClick={() => setLocation(`/customers/${id}/site-maps`)} className="bg-blue-600 hover:bg-blue-700">
+              <Button size="sm" onClick={() => setLocation(`/customers/${id}/site-maps`)} className="bg-blue-600 hover:bg-blue-700 text-white">
                 <MapPin className="w-4 h-4 mr-1.5" />View Site Map
               </Button>
-              <Button size="sm" variant="outline" onClick={() => setLocation(`/customers/${id}/irrigation-profile`)}>
+              <Button size="sm" variant="outline" className="border-sky-300 text-sky-700 hover:bg-sky-50" onClick={() => setLocation(`/customers/${id}/irrigation-profile`)}>
                 <Droplets className="w-4 h-4 mr-1.5" />Controllers &amp; Zones
               </Button>
               {isAdmin && (
