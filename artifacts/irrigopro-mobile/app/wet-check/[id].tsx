@@ -109,6 +109,12 @@ type WetCheckDetail = {
   photos: WetCheckPhoto[];
 };
 
+type PropertyController = {
+  id: number;
+  controllerLetter: string;
+  zoneCount: number;
+};
+
 const STATUS_LABELS: Record<string, string> = {
   in_progress: "In progress",
   submitted: "Submitted",
@@ -276,30 +282,62 @@ export default function WetCheckDetailScreen() {
 
   const headerTitle = wcd ? `Wet check #${wcd.id}` : "Wet check";
 
-  // Group zone records by controller letter, in alphabetical order.
-  const grouped = useMemo(() => {
-    if (!wcd) return [] as Array<{ letter: string; zones: WetCheckZoneRecord[] }>;
-    const map = new Map<string, WetCheckZoneRecord[]>();
-    for (const z of wcd.zoneRecords) {
-      const list = map.get(z.controllerLetter) ?? [];
-      list.push(z);
-      map.set(z.controllerLetter, list);
+  // Fetch property controllers to know zoneCount per letter for the full grid.
+  const controllersQuery = useQuery({
+    queryKey: ["property-controllers", wcd?.customerId],
+    enabled: wcd != null,
+    queryFn: () =>
+      apiRequest<PropertyController[]>(`/api/properties/${wcd!.customerId}/controllers`),
+    staleTime: 5 * 60_000,
+  });
+  const zoneCountByLetter = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const c of controllersQuery.data ?? []) {
+      map.set(c.controllerLetter, c.zoneCount);
     }
+    return map;
+  }, [controllersQuery.data]);
+
+  const grouped = useMemo(() => {
+    if (!wcd) return [] as Array<{ letter: string; zones: Array<WetCheckZoneRecord | null> }>;
+    // Build a lookup from (letter#zone) → existing record
+    const recordMap = new Map<string, WetCheckZoneRecord>();
+    for (const z of wcd.zoneRecords) {
+      recordMap.set(`${z.controllerLetter}#${z.zoneNumber}`, z);
+    }
+    // Derive which controller letters are in scope
     const letters: string[] = [];
     for (let i = 0; i < (wcd.numControllers ?? 0); i++) {
       letters.push(String.fromCharCode("A".charCodeAt(0) + i));
     }
-    for (const l of map.keys()) {
-      if (!letters.includes(l)) letters.push(l);
+    for (const z of wcd.zoneRecords) {
+      if (!letters.includes(z.controllerLetter)) letters.push(z.controllerLetter);
     }
     letters.sort();
-    return letters.map((letter) => ({
-      letter,
-      zones: (map.get(letter) ?? []).slice().sort(
-        (a, b) => a.zoneNumber - b.zoneNumber,
-      ),
-    }));
-  }, [wcd]);
+    return letters.map((letter) => {
+      // Determine zone count for this controller (fall back to max existing zone number)
+      const zoneCount =
+        zoneCountByLetter.get(letter) ??
+        Math.max(
+          0,
+          ...wcd.zoneRecords
+            .filter((z) => z.controllerLetter === letter)
+            .map((z) => z.zoneNumber),
+        );
+      // Build a slot per zone 1..zoneCount, null where no record exists yet
+      const zones: Array<WetCheckZoneRecord | null> = [];
+      for (let z = 1; z <= zoneCount; z++) {
+        zones.push(recordMap.get(`${letter}#${z}`) ?? null);
+      }
+      // Include any extra records whose zoneNumber exceeds zoneCount
+      for (const r of wcd.zoneRecords) {
+        if (r.controllerLetter === letter && r.zoneNumber > zoneCount) {
+          zones.push(r);
+        }
+      }
+      return { letter, zones };
+    });
+  }, [wcd, zoneCountByLetter]);
 
   const photoCountByZoneId = useMemo(() => {
     const map = new Map<number, number>();
@@ -335,15 +373,63 @@ export default function WetCheckDetailScreen() {
         // been reviewed and confirmed (Mark Zone Complete pressed).
         if (z.markedCompleteAt) markedComplete++;
       } else if (z.status === "not_applicable") na++;
-      else notChecked++;
+      else notChecked++;  // existing not_checked records
+    }
+    // Virtual zones (no record yet) also count as not-checked
+    const recordedKeys = new Set(wcd.zoneRecords.map((z) => `${z.controllerLetter}#${z.zoneNumber}`));
+    for (let i = 0; i < (wcd.numControllers ?? 0); i++) {
+      const letter = String.fromCharCode("A".charCodeAt(0) + i);
+      const zoneCount = zoneCountByLetter.get(letter) ?? 0;
+      for (let z = 1; z <= zoneCount; z++) {
+        if (!recordedKeys.has(`${letter}#${z}`)) notChecked++;
+      }
     }
     return { ok, issues, na, notChecked, markedComplete };
-  }, [wcd]);
+  }, [wcd, zoneCountByLetter]);
 
   const prefetchZone = useCallback(() => {
     if (id == null || !wcd) return;
     queryClient.setQueryData(wetCheckDetailQueryKey(id), wcd);
   }, [queryClient, id, wcd]);
+
+  // Lazy-create a zone record on first tap of an unrecorded zone tile, then
+  // navigate into it. Uses wetCheckMutate so the creation is durably queued
+  // when offline. The server upsert is idempotent so double-taps are safe.
+  const lazyCreateMut = useMutation({
+    mutationFn: async ({ letter, zoneNumber }: { letter: string; zoneNumber: number }) => {
+      if (id == null) throw new Error("Missing wet check id");
+      return wetCheckMutate<WetCheckZoneRecord, { controllerLetter: string; zoneNumber: number; status: string }>({
+        path: `/api/wet-checks/${id}/zone-records`,
+        method: "POST",
+        body: { controllerLetter: letter, zoneNumber, status: "not_checked" },
+        wetCheckId: id,
+        label: "Create zone record",
+      });
+    },
+    onSuccess: (data, { letter: _l, zoneNumber: _z }) => {
+      if (id == null) return;
+      // Whether online or offline-queued, inject the record into the cache so
+      // the zone screen can render immediately. Offline: data.id is a temp
+      // negative id (from makeOptimistic); the zone screen now accepts those.
+      // When the queue drains the wet-check detail refetches and replaces it
+      // with the real id; subsequent mutations set offline against the temp id
+      // may need to be re-applied after sync (known limitation).
+      queryClient.setQueryData<WetCheckDetail | undefined>(
+        wetCheckDetailQueryKey(id),
+        (prev) =>
+          prev
+            ? { ...prev, zoneRecords: [...prev.zoneRecords, { ...data, findings: [] }] }
+            : prev,
+      );
+      router.push({
+        pathname: "/wet-check/[id]/zone/[zoneRecordId]",
+        params: { id: String(id), zoneRecordId: String(data.id) },
+      });
+    },
+    onError: (err) => {
+      Alert.alert("Couldn't open zone", friendlyErrorMessage(err, "Please try again."));
+    },
+  });
 
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -649,15 +735,20 @@ export default function WetCheckDetailScreen() {
                   zones={zones}
                   photoCountByZoneId={photoCountByZoneId}
                   colors={colors}
-                  onZonePress={(zone) => {
-                    prefetchZone();
-                    router.push({
-                      pathname: "/wet-check/[id]/zone/[zoneRecordId]",
-                      params: {
-                        id: String(wcd.id),
-                        zoneRecordId: String(zone.id),
-                      },
-                    });
+                  isCreatingZone={lazyCreateMut.isPending}
+                  onZonePress={(zone, zoneNumber) => {
+                    if (zone === null) {
+                      lazyCreateMut.mutate({ letter, zoneNumber });
+                    } else {
+                      prefetchZone();
+                      router.push({
+                        pathname: "/wet-check/[id]/zone/[zoneRecordId]",
+                        params: {
+                          id: String(wcd.id),
+                          zoneRecordId: String(zone.id),
+                        },
+                      });
+                    }
                   }}
                 />
               ))
@@ -826,16 +917,15 @@ function ControllerSection({
   photoCountByZoneId,
   colors,
   onZonePress,
+  isCreatingZone,
 }: {
   letter: string;
-  zones: WetCheckZoneRecord[];
+  zones: Array<WetCheckZoneRecord | null>;
   photoCountByZoneId: Map<number, number>;
   colors: ReturnType<typeof useColors>;
-  onZonePress: (zone: WetCheckZoneRecord) => void;
+  onZonePress: (zone: WetCheckZoneRecord | null, zoneNumber: number) => void;
+  isCreatingZone: boolean;
 }) {
-  // Task #612 — surface a per-tile finding count so a tech scanning
-  // the grid can see at a glance which zones have work attached
-  // without having to open each one.
   const findingCountForZone = (z: WetCheckZoneRecord): number =>
     Array.isArray(z.findings) ? z.findings.length : 0;
   return (
@@ -855,39 +945,49 @@ function ControllerSection({
       >
         {zones.length === 0 ? (
           <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-            No zones recorded for this controller.
+            No zones configured for this controller.
           </Text>
         ) : (
           <View style={styles.zoneGrid}>
-            {zones.map((z) => {
-              const tone = zoneStatusTone(z.status, colors);
+            {zones.map((z, idx) => {
+              // For virtual (null) zones, zoneNumber is derived from position.
+              // For extra records beyond zoneCount, use the record's zoneNumber.
+              const zoneNumber = z != null ? z.zoneNumber : idx + 1;
+              const tone = z != null ? zoneStatusTone(z.status, colors) : {
+                bg: colors.card,
+                fg: colors.foreground,
+                borderColor: colors.border,
+              };
               const markedComplete =
-                z.status === "checked_with_issues" && z.markedCompleteAt != null;
+                z != null &&
+                z.status === "checked_with_issues" &&
+                z.markedCompleteAt != null;
               return (
-                <View key={z.id} style={styles.zoneCell}>
+                <View key={z != null ? z.id : `virtual-${letter}-${zoneNumber}`} style={styles.zoneCell}>
                   <Pressable
-                    onPress={() => onZonePress(z)}
+                    onPress={() => onZonePress(z, zoneNumber)}
+                    disabled={isCreatingZone && z === null}
                     style={({ pressed }) => [
                       styles.zoneTile,
                       {
                         backgroundColor: tone.bg,
                         borderColor: tone.borderColor ?? "transparent",
                         borderWidth: tone.borderColor ? StyleSheet.hairlineWidth : 0,
-                        opacity: pressed ? 0.7 : 1,
+                        opacity: (pressed || (isCreatingZone && z === null)) ? 0.7 : 1,
                       },
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel={`Zone ${z.zoneNumber}`}
+                    accessibilityLabel={`Zone ${zoneNumber}${z === null ? ", not yet recorded" : ""}`}
                   >
                     <Text style={[styles.zoneTileText, { color: tone.fg }]}>
-                      {z.zoneNumber ?? "?"}
+                      {zoneNumber}
                     </Text>
                     {markedComplete ? (
                       <View style={styles.markedCompleteDot}>
                         <Feather name="check" size={10} color="#16a34a" />
                       </View>
                     ) : null}
-                    {(photoCountByZoneId.get(z.id) ?? 0) > 0 ? (
+                    {z != null && (photoCountByZoneId.get(z.id) ?? 0) > 0 ? (
                       <View
                         style={styles.photoCountDot}
                         accessibilityLabel={`${photoCountByZoneId.get(z.id)} photo${(photoCountByZoneId.get(z.id) ?? 0) === 1 ? "" : "s"}`}
@@ -898,7 +998,7 @@ function ControllerSection({
                         </Text>
                       </View>
                     ) : null}
-                    {findingCountForZone(z) > 0 ? (
+                    {z != null && findingCountForZone(z) > 0 ? (
                       <View
                         style={styles.findingCountDot}
                         accessibilityLabel={`${findingCountForZone(z)} work item${findingCountForZone(z) === 1 ? "" : "s"}`}

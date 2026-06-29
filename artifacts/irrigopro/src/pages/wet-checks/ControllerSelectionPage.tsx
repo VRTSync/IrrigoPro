@@ -234,23 +234,10 @@ export function ControllerSelectionPage({ customerId, branchName }: ControllerSe
 
       const wetCheckId = wc.id;
 
-      // 2. Pre-create zone records for all zones across the selected controllers.
+      // Zone records are created lazily on first interaction — no pre-seeding.
       const selectedCtrlList = controllers
         .filter((c) => selectedLetters.has(c.controllerLetter))
         .sort((a, b) => a.controllerLetter.localeCompare(b.controllerLetter));
-
-      for (const ctrl of selectedCtrlList) {
-        const zonePayloads = Array.from({ length: ctrl.zoneCount }, (_, i) => i + 1);
-        await Promise.all(
-          zonePayloads.map((zoneNumber) =>
-            apiRequest(`/api/wet-checks/${wetCheckId}/zone-records`, "POST", {
-              controllerLetter: ctrl.controllerLetter,
-              zoneNumber,
-              status: "not_checked",
-            }),
-          ),
-        );
-      }
 
       const firstLetter = selectedCtrlList[0]?.controllerLetter ?? null;
       return { wetCheckId, firstLetter };

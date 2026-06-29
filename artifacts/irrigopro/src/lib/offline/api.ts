@@ -288,7 +288,7 @@ export interface UpsertZoneRecordInput {
   wetCheckId?: number;
   controllerLetter: string;
   zoneNumber: number;
-  status: "checked_ok" | "checked_with_issues" | "not_applicable";
+  status: "not_checked" | "checked_ok" | "checked_with_issues" | "not_applicable";
   ranSuccessfully?: boolean | null;
   notes?: string | null;
   clientId?: string;

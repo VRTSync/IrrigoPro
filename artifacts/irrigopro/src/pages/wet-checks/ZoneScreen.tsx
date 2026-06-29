@@ -835,6 +835,35 @@ export function ZoneScreen({
 
   const repairLaborMut = useMutation({
     mutationFn: async (hours: string) => {
+      if (!zoneRecord) {
+        if (isOfflineQueueEnabled() && wetCheckClientId) {
+          // Offline lazy-create: upsert a skeleton zone record then patch.
+          const clientId = newClientId();
+          await offlineUpsertZoneRecord({
+            wetCheckClientId,
+            wetCheckId,
+            controllerLetter: letter,
+            zoneNumber,
+            status: "not_checked",
+            clientId,
+          });
+          await offlinePatchZoneRecordRepairLabor(clientId, undefined, hours);
+        } else if (wetCheckId) {
+          // Online lazy-create: create the zone record, then patch repair-labor.
+          const created = await apiRequest(`/api/wet-checks/${wetCheckId}/zone-records`, "POST", {
+            controllerLetter: letter,
+            zoneNumber,
+            status: "not_checked",
+            clientId: newClientId(),
+          });
+          if (created?.id) {
+            await apiRequest(`/api/wet-checks/zone-records/${created.id}/repair-labor`, "PATCH", {
+              repairLaborHours: hours,
+            });
+          }
+        }
+        return;
+      }
       if (isOfflineQueueEnabled() && zoneRecord?.clientId) {
         await offlinePatchZoneRecordRepairLabor(
           zoneRecord.clientId,
@@ -860,10 +889,36 @@ export function ZoneScreen({
       queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
     },
   });
-  // Debounced save for PSI/flow readings via existing zone record PATCH
+  // Debounced save for PSI/flow readings. If no zone record exists yet,
+  // lazily create one (status: not_checked) with the readings baked in.
   const readingsMut = useMutation({
     mutationFn: async ({ psi, flow }: { psi: string; flow: string }) => {
-      if (!zoneRecord) return;
+      if (!zoneRecord) {
+        if (isOfflineQueueEnabled() && wetCheckClientId) {
+          // Offline lazy-create: upsert a skeleton zone record then patch readings.
+          const clientId = newClientId();
+          await offlineUpsertZoneRecord({
+            wetCheckClientId,
+            wetCheckId,
+            controllerLetter: letter,
+            zoneNumber,
+            status: "not_checked",
+            clientId,
+          });
+          await offlinePatchZoneRecordReadings(clientId, undefined, psi, flow);
+        } else if (wetCheckId) {
+          // Online lazy-create: POST a not_checked record with readings baked in.
+          await apiRequest(`/api/wet-checks/${wetCheckId}/zone-records`, "POST", {
+            controllerLetter: letter,
+            zoneNumber,
+            status: "not_checked",
+            observedPressure: psi.trim() || null,
+            observedFlow: flow.trim() || null,
+            clientId: newClientId(),
+          });
+        }
+        return;
+      }
       await offlinePatchZoneRecordReadings(
         zoneRecord.clientId ?? "",
         zoneRecord.id ?? undefined,

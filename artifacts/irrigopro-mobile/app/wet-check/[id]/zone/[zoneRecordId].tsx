@@ -173,7 +173,9 @@ export default function ZoneDetailScreen() {
   }, [params.id]);
   const zoneRecordId = useMemo(() => {
     const n = Number(params.zoneRecordId);
-    return Number.isFinite(n) && n > 0 ? n : null;
+    // Accept negative ids: offline-queued zone records use a temporary negative
+    // id until the creation request drains and the server assigns a real id.
+    return Number.isFinite(n) && n !== 0 ? n : null;
   }, [params.zoneRecordId]);
 
   const [conflict, setConflict] = useState(false);
