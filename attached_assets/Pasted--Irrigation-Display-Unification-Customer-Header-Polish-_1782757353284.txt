@@ -1,0 +1,58 @@
+# Irrigation Display Unification + Customer Header Polish
+
+Two related UI issues on the customer profile. The data sync worked (both surfaces now show 6 controllers / 72 zones for Villas at the Boulders) — these are presentation problems, not data problems.
+
+---
+
+## Slice 1 — Unify the two irrigation displays (same data, same look)
+The same irrigation data renders **two different ways** for one customer:
+- **Customer-profile "Irrigation System" tab** → `components/customers/irrigation-system-card.tsx` — a **polished card grid** (controller cards A–F, "12 zones", zone-number chips, +/- editor). Looks good.
+- **Standalone Irrigation Profile page** (`/customers/:customerId/irrigation-profile`, `pages/customers/IrrigationProfile.tsx`) — a **plain accordion** (Controller A…F rows with chevrons + trash icons). Looks bare, and is visually detached from the tab.
+
+They should be **one component, one look** (PROJECT RULES Rule 3 — no parallel diverging screens). The card-grid presentation is the keeper.
+
+### Done looks like
+- The standalone Irrigation Profile page renders controllers in the **same polished card-grid style** as the tab — controller cards with the zone chips, expandable for the rich detail (programs, zones, run-time schedule, photo, history), keeping its actions (Add Controller, Generate Report, Send Report).
+- The customer-profile **Irrigation System tab renders the same shared component** (embedded), so tab and full page are identical in data *and* presentation.
+- Editing in one is reflected in the other (already one data source post-sync).
+- No second, divergent irrigation display remains.
+
+### Steps
+1. **Pick the canonical component.** Make the polished card-grid the shared presentation. Extract a single `<IrrigationControllerGrid>` (controller cards + zone chips + expand-to-detail) used by both the tab and the standalone page — don't maintain two layouts.
+2. **Standalone page** (`IrrigationProfile.tsx`): replace the plain accordion list with the card grid. Each controller card expands in place to the full detail (programs A/B/C, zones with run times, auto run-time schedule, settings photo, history) — the rich features stay; only the list presentation changes to match the tab. Keep the header actions (Add Controller / Generate Report / Send Report).
+3. **Customer tab** (`irrigation-system-card.tsx`): render the same shared grid component (or a summary that is visually identical and links to the full page). Remove the divergent second implementation so there's one source of truth for the look.
+4. Keep both mount points (the tab for in-context view, the standalone route for full-screen field capture + deep-link), but **rendered by the same component** so they can never drift again.
+5. Apply the established color/icon treatment (lucide icons, sky/blue accent for irrigation) consistent with the tabbed profile.
+
+### Acceptance
+- Tab and standalone page look the same and show the same controllers/zones.
+- Standalone page is the polished grid, not the bare accordion; all its features (add/edit/report/schedule) still work.
+- One shared component backs both; no duplicate layout code.
+
+---
+
+## Slice 2 — Polish the consolidated customer header
+The new customer header (post-consolidation) is flat and low-color — "boring." Give it the aesthetic treatment from the approved tab mockup (`customer-profile-tabs-redesign-mockup.html`), staying within the app palette and dark-mode-safe.
+
+### Steps
+- **Add color + depth to the header:** a subtle brand gradient strip/background, a **gradient avatar tile** with a building icon next to the customer name, **colored status badges** (green check for Active, sky for QuickBooks Synced) with lucide icons, and accent-styled action buttons (primary **View Site Map**, sky-tinted **Controllers & Zones**, neutral **Edit**).
+- **Icons, not plain text,** on the contact line (mail / phone / map-pin in muted gray) and the tab bar (per the tabbed redesign).
+- Keep it tasteful — accents and one gradient, not a loud fill — consistent with the job-type/status colors already in the app.
+- Must stay responsive (header wraps on mobile) and respect existing dark-mode variables.
+
+### Acceptance
+- The header reads as designed (gradient avatar, colored badges, accent buttons, iconed contact line) — matching the mockup — instead of flat black-on-white.
+- Responsive + dark-mode safe; no layout regression.
+
+---
+
+## Out of scope
+- Data/sync (already handled by the sync spec — both surfaces share one store).
+- The rest of the tabbed redesign (separate spec; this just ensures the header color from it actually lands).
+
+## Relevant files
+- `artifacts/irrigopro/src/components/customers/irrigation-system-card.tsx` (tab grid — extract/share)
+- `artifacts/irrigopro/src/pages/customers/IrrigationProfile.tsx` (standalone — adopt the grid)
+- New: `artifacts/irrigopro/src/components/customers/irrigation-controller-grid.tsx` (shared component)
+- `artifacts/irrigopro/src/pages/customer-profile.tsx` (header polish)
+- Visual reference: `customer-profile-tabs-redesign-mockup.html` (header color + the card look)
