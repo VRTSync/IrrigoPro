@@ -68,7 +68,7 @@ export default function CustomerProfile() {
   function setTab(tab: TabId) {
     const params = new URLSearchParams(search);
     params.set("tab", tab);
-    setLocation(`/customers/${id}?${params.toString()}`);
+    setLocation(`/customers/${id}/profile?${params.toString()}`);
   }
 
   const [userRole, setUserRole] = useState<string>("");
