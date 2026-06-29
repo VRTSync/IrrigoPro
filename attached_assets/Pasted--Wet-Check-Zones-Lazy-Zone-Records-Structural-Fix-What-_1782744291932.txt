@@ -1,0 +1,64 @@
+# Wet Check Zones — Lazy Zone Records (Structural Fix)
+
+**What & Why**
+The whole zone-count problem comes from **pre-creating zone records up front**. At wet-check creation, `ControllerSelectionPage` seeds a `not_checked` record for every zone `1…zoneCount` (and `zoneCount` historically defaulted to 100), producing phantom padding. We've since patched the symptom in three places — seed-from-real-count, a PDF `isEmptyZone` filter, and a destructive trim backfill — all compensating for rows that shouldn't exist.
+
+**This is the structural fix: stop pre-seeding. Create zone records lazily, only when a tech actually touches the zone.** `zoneCount` stops driving data creation and becomes purely a **display hint** that sizes the capture grid.
+
+**Why it's better**
+- **Phantom zones can't exist** — no record = "not checked." Nothing to filter or trim.
+- **Adjusting `zoneCount` is non-destructive** — it only changes how many tiles render; never creates/deletes data. (Exactly the mid-system count-tweaking that caused this.)
+- **The PDF `isEmptyZone` filter and the trim backfill become redundant** (keep the filter as harmless belt-and-suspenders; the one-time cleanup of *existing* phantom rows still runs once — see the backfill-hardening doc).
+- **The default-100 problem disappears** — even an unconfigured controller creates no rows.
+
+Relates to: keep the already-shipped interim (seed-from-real-count + PDF filter) until this lands; `Wet Check Report - Exclude Empty Zones` (filter) and the trim backfill (one-time cleanup, hardened separately). No multi-tenancy change — zone records remain company-scoped through their wet check (Rule 1 unaffected).
+
+---
+
+## Slice 1 — Stop pre-seeding at creation
+### Files
+- `artifacts/irrigopro/src/pages/wet-checks/ControllerSelectionPage.tsx` (~243 — `Array.from({ length: ctrl.zoneCount }, …)` → zone-record create loop).
+- `artifacts/api-server/src/storage.ts` (wet-check create / zone-record seeding path) and the mobile equivalent (`artifacts/irrigopro-mobile/app/wet-check/...`).
+### Changes
+- **Remove the up-front zone-record seeding.** Creating a wet check creates the wet check (+ controller context) only — **no** `not_checked` zone rows.
+- `zoneCount` is still stored/read per controller, but only used to size the capture grid.
+
+## Slice 2 — Capture grid renders from count, creates on touch
+### Files
+- `artifacts/irrigopro/src/pages/wet-checks/ZoneScreen.tsx`, `ZoneStatusGrid.tsx`, `ControllerHeader.tsx` (+ mobile `app/wet-check/[id]/zone/[zoneRecordId].tsx`, `[id].tsx`).
+### Changes
+- The zone grid renders tiles for `1…zoneCount` per controller by **deriving** them, not from stored records: for each zone number, look up an existing record by `(controllerLetter, zoneNumber)`; if none, render a "Not checked" tile backed by no record.
+- **Lazy create on first interaction** — the moment a tech sets a status (Ran OK / Needs Work / N/A), adds a finding, or records a reading on a zone with no record, create the zone record then (with a `clientId`), online or offline (mirror the existing finding/photo offline create pattern). Subsequent edits patch that record.
+- A tile with no record and no interaction stays recordless (= not checked) forever — never persisted.
+
+## Slice 3 — Reads, submit, and downstream operate on real records only
+### Files
+- `storage.ts` (wet-check detail read, submit/auto-bill), `wet-check-pdf.ts` / `wet-check-report-pdf.ts`, review surfaces.
+### Changes
+- Wet-check detail returns the **sparse** set of real zone records; the UI merges them against the `1…zoneCount` grid for display. Summary counts (total/checked/issues/NA) derive from the grid + records (e.g. "checked X of zoneCount").
+- Submit/auto-bill and conversion already operate on actual records — confirm they don't assume a record exists for every zone.
+- PDFs render only real records (the `isEmptyZone` filter becomes a no-op safety net; keep it).
+
+## Slice 4 — One-time cleanup of existing phantom rows
+- Existing wet checks still carry pre-seeded phantom rows. Clean them once via the **hardened** trim (see `Wet Check Zones - Harden Phantom-Zone Trim` — must use the `isEmptyZone` guard, not status-only, and be runnable from the Super-Admin migrations page). After this lands, no new phantoms are created, so the cleanup is a one-shot.
+
+## Tests
+- Create a wet check → **zero** zone records exist until the tech touches a zone; the grid still shows all `1…zoneCount` tiles.
+- Touch zone 3 (set Ran OK) → exactly one zone record is created (zone 3); zones 1,2,4…N still have no record.
+- Lower a controller's `zoneCount` after some zones were checked → no data deleted; the grid shows fewer tiles but checked records beyond the new count still exist and still appear in detail/reports (no silent loss).
+- Offline: touching a zone with no signal creates the record locally (clientId) and syncs on reconnect.
+- PDF/report show only touched zones with no empty padding, with no dependence on the filter.
+- Submit/auto-bill/convert work with a sparse record set.
+
+## Out of scope
+- `zoneCount` UI (Controllers & Zones settings) — unchanged; it just no longer creates rows.
+- The new Irrigation System Profile (separate subsystem).
+- Pricing/triage logic.
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/wet-checks/ControllerSelectionPage.tsx` (~243 seeding — remove)
+- `artifacts/irrigopro/src/pages/wet-checks/ZoneScreen.tsx`, `ZoneStatusGrid.tsx`, `ControllerHeader.tsx`
+- `artifacts/irrigopro-mobile/app/wet-check/[id].tsx`, `app/wet-check/[id]/zone/[zoneRecordId].tsx`
+- `artifacts/api-server/src/storage.ts` (create/read/submit), `wet-check-pdf.ts`, `wet-check-report-pdf.ts`
+- `artifacts/api-server/src/wet-check-zone-filter.ts` (`isEmptyZone` — becomes safety net)
+- Offline create pattern reference: `artifacts/irrigopro/src/lib/offline/api.ts` (finding/photo lazy create)

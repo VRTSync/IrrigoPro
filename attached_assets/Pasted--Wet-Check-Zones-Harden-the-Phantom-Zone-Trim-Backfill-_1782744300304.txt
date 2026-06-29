@@ -1,0 +1,37 @@
+# Wet Check Zones — Harden the Phantom-Zone Trim Backfill
+
+**What & Why**
+`artifacts/api-server/src/scripts/backfill-trim-phantom-zones.ts` hard-deletes wet-check zone records to remove pre-seeded phantom padding. **Its safety guard is weaker than its own comment claims**, creating a (narrow) data-loss risk.
+
+- The header comment says: *"Zones already checked … or enriched with notes/findings are never touched."*
+- But the code only filters on **`status = 'not_checked'`** and **`zoneNumber > current zoneCount`**. It **never checks notes, findings, or readings.**
+- So a `not_checked` zone that carries **notes, a PSI/GPM reading, or `ranSuccessfully`**, and whose `zoneNumber` exceeds the trimmed count, would be **permanently deleted** — even though the shipped display predicate `isEmptyZone` would *keep* it. The backfill is more aggressive than both its comment and the PDF filter, on a **hard delete across all wet checks**.
+
+(Findings are *mostly* incidentally safe because adding one usually flips status off `not_checked`, but notes/readings on a not-checked-status zone are not protected.)
+
+This is the one-time cleanup of existing phantom rows (after lazy zone records lands, no new ones are created — see `Wet Check Zones - Lazy Zone Records`). It should be safe and runnable by Randy.
+
+## Fix
+### File: `artifacts/api-server/src/scripts/backfill-trim-phantom-zones.ts`
+1. **Reuse `isEmptyZone`** (from `artifacts/api-server/src/wet-check-zone-filter.ts`) as the delete guard. A zone is eligible for deletion only when **both**: `zoneNumber > current zoneCount` **and** `isEmptyZone(zone) === true`. Load the fields `isEmptyZone` needs (status, findings, observedPressure, observedFlow, ranSuccessfully, notes, repairLaborHours) for the candidate zones, not just `id/controllerLetter/zoneNumber`.
+2. This makes the code match its comment: anything with notes/findings/readings is never deleted, regardless of zoneNumber.
+3. Keep the existing safety behaviors: controllers with no `property_controllers` row are skipped; idempotent done/failed tracking; dry-run; batch.
+
+### Make it runnable by Randy (no prod terminal)
+4. Wrap the trim as a **preview-gated admin migration** in the existing framework (`lib/migrations/…` + registry), surfaced on the Super-Admin `/admin/migrations` page — `check()` counts trimmable phantom zones, `preview()` lists what would be deleted (controller/zone, current count), `run(emit)` deletes only `isEmptyZone && zoneNumber > zoneCount`. Require acknowledgement via `warnings` (it's a hard delete). Mirror the run-button and per-migration-check-isolation fixes so it can't get stuck. (Keep the CLI script too if useful, but Randy should be able to run it himself.)
+
+## Tests
+- A `not_checked` zone beyond the count **with a note or a PSI reading** is **NOT** deleted (regression for the current gap).
+- A truly empty `not_checked` zone beyond the count **is** deleted.
+- A checked / issues / N/A zone is never deleted regardless of zoneNumber.
+- Re-running finds nothing (idempotent).
+- Runs from `/admin/migrations` with a preview + acknowledgement; never leaves Run permanently disabled.
+
+## Out of scope
+- The structural fix that stops creating phantoms (`Wet Check Zones - Lazy Zone Records`) — this is just the safe one-time cleanup.
+- The PDF empty-zone filter (already shipped).
+
+## Relevant files
+- `artifacts/api-server/src/scripts/backfill-trim-phantom-zones.ts` (delete guard ~candidate loop)
+- `artifacts/api-server/src/wet-check-zone-filter.ts` (`isEmptyZone` — reuse)
+- `artifacts/api-server/src/lib/migrations/` + `registry.ts`, `artifacts/irrigopro/src/pages/admin/migrations.tsx` (wrap as admin migration)
