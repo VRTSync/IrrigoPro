@@ -30,6 +30,7 @@ import { z } from "zod/v4";
 import {
   estimates,
   insertEstimateSchema,
+  wetCheckPhotos,
   type Company,
   type Customer,
   type Estimate,
@@ -1973,16 +1974,43 @@ export function registerEstimateRoutes(
       // Pre-sign site photos so the unauthenticated customer can render
       // them without hitting the auth-gated `/api/photos/signed-urls`
       // batch endpoint.
+      // Task #1624 — also include inspection/finding photos from the
+      // origin wet check when the estimate was generated from an
+      // inspection wet check (originWetCheckId is set).
       let photoSignedUrls: Array<{ photoId: string; url: string | null }> = [];
       try {
-        const photos = (full.photos ?? []).filter(
+        const { ObjectStorageService } = await import("../objectStorage");
+        const photoService = new ObjectStorageService();
+
+        // Site photos stored directly on the estimate
+        const sitePhotos = (full.photos ?? []).filter(
           (p): p is string => typeof p === "string" && p.length > 0,
         );
-        if (photos.length > 0) {
-          const { ObjectStorageService } = await import("../objectStorage");
-          const photoService = new ObjectStorageService();
+
+        // Finding photos from the origin wet check (inspection estimates only)
+        const originWetCheckId = (full as any).originWetCheckId as number | null | undefined;
+        let findingPhotoUrls: string[] = [];
+        if (originWetCheckId) {
+          try {
+            const findingRows = await db
+              .select({ url: wetCheckPhotos.url })
+              .from(wetCheckPhotos)
+              .where(eq(wetCheckPhotos.wetCheckId, originWetCheckId));
+            findingPhotoUrls = findingRows.map((r) => r.url).filter(Boolean);
+          } catch {
+            // Non-fatal — omit finding photos if the query fails
+          }
+        }
+
+        const allPhotoRaws = [
+          ...sitePhotos,
+          // De-duplicate: finding photos that already appear in sitePhotos are skipped
+          ...findingPhotoUrls.filter((u) => !sitePhotos.includes(u)),
+        ];
+
+        if (allPhotoRaws.length > 0) {
           photoSignedUrls = await Promise.all(
-            photos.map(async (raw) => {
+            allPhotoRaws.map(async (raw) => {
               const photoId = raw.replace(/^\//, "").replace(/^api\/photos\//, "");
               try {
                 const signed = await photoService.getPhotoDownloadURL(
@@ -2047,6 +2075,10 @@ export function registerEstimateRoutes(
           estimateNumber: full.estimateNumber,
           projectName: full.projectName,
           projectAddress: full.projectAddress,
+          // Task #1624 — work location for map link on the public approval page
+          workLocationLat: full.workLocationLat ?? null,
+          workLocationLng: full.workLocationLng ?? null,
+          workLocationAddress: full.workLocationAddress ?? null,
           customerName: full.customerName,
           customerEmail: full.customerEmail,
           customerPhone: full.customerPhone,
@@ -2054,6 +2086,9 @@ export function registerEstimateRoutes(
           workDescription: full.workDescription,
           locationNotes: full.locationNotes,
           accessInstructions: full.accessInstructions,
+          // Task #1624 — expose subtotals so totals block reconciles on approval page
+          partsSubtotal: full.partsSubtotal,
+          laborSubtotal: full.laborSubtotal,
           totalAmount: full.totalAmount,
           totalLaborHours: full.totalLaborHours,
           laborRate: full.laborRate,
@@ -2065,6 +2100,10 @@ export function registerEstimateRoutes(
             partPrice: it.partPrice,
             laborHours: it.laborHours,
             totalPrice: it.totalPrice,
+            // Task #1624 — zone context for inspection-origin estimates
+            controllerLetter: (it as any).controllerLetter ?? null,
+            zoneNumber: (it as any).zoneNumber ?? null,
+            issueType: (it as any).issueType ?? null,
           })),
         },
         photos: photoSignedUrls,

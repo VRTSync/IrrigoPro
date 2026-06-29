@@ -19,8 +19,11 @@ import {
   PenLine,
   Type,
   Trash2,
+  MapPin,
 } from "lucide-react";
 import { formatEstimateNumber } from "@workspace/shared";
+import { isInspectionOriginEstimate } from "@/lib/estimate-zone-grouping";
+import { EstimateZoneGroupedView } from "@/components/estimates/estimate-zone-grouped-view";
 
 function attachmentDisplayName(url: string): string {
   if (!url) return "attachment";
@@ -61,6 +64,9 @@ type EstimateView = {
     estimateNumber: string;
     projectName: string;
     projectAddress: string | null;
+    workLocationLat: string | null;
+    workLocationLng: string | null;
+    workLocationAddress: string | null;
     customerName: string;
     customerEmail: string;
     customerPhone: string | null;
@@ -68,6 +74,8 @@ type EstimateView = {
     workDescription: string | null;
     locationNotes: string | null;
     accessInstructions: string | null;
+    partsSubtotal: string | number | null;
+    laborSubtotal: string | number | null;
     totalAmount: string | number;
     totalLaborHours: string | number | null;
     laborRate: string | number | null;
@@ -79,6 +87,9 @@ type EstimateView = {
       partPrice: string | number;
       laborHours: string | number;
       totalPrice: string | number;
+      controllerLetter: string | null;
+      zoneNumber: number | null;
+      issueType: string | null;
     }>;
   };
   photos: SignedPhoto[];
@@ -677,6 +688,45 @@ export default function EstimateApproval() {
       companyName ?? "IrrigoPro",
     );
 
+    // ── Numeric helpers for totals ────────────────────────────────────
+    const laborRate = parseFloat(String(estimate.laborRate ?? 0)) || 0;
+    const totalLaborHours = parseFloat(String(estimate.totalLaborHours ?? 0)) || 0;
+    // Prefer server-computed subtotals; fall back to local derivation so
+    // the block is always consistent even on older cached payloads.
+    const partsSubtotal =
+      estimate.partsSubtotal != null
+        ? parseFloat(String(estimate.partsSubtotal))
+        : estimate.items.reduce(
+            (s, it) => s + (parseFloat(String(it.totalPrice ?? 0)) || 0),
+            0,
+          );
+    const laborSubtotal =
+      estimate.laborSubtotal != null
+        ? parseFloat(String(estimate.laborSubtotal))
+        : totalLaborHours * laborRate;
+    const grandTotal = parseFloat(String(estimate.totalAmount)) || (partsSubtotal + laborSubtotal);
+
+    // ── Layout routing ────────────────────────────────────────────────
+    // Coerce quantity to number for the EstimateItemLike interface, which
+    // expects number | null | undefined (the API may send string numbers).
+    const itemsForZone = estimate.items.map((it) => ({
+      ...it,
+      quantity: typeof it.quantity === "string" ? parseFloat(it.quantity) || 0 : it.quantity,
+    }));
+    const isInspection = isInspectionOriginEstimate(itemsForZone);
+
+    // ── Location helpers ──────────────────────────────────────────────
+    const hasLatLng =
+      estimate.workLocationLat != null &&
+      estimate.workLocationLng != null &&
+      String(estimate.workLocationLat).trim() !== "" &&
+      String(estimate.workLocationLng).trim() !== "";
+    const mapsUrl = hasLatLng
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+          String(estimate.workLocationLat)
+        )},${encodeURIComponent(String(estimate.workLocationLng))}`
+      : null;
+
     return (
       <div className="space-y-6">
         <div className="text-center">
@@ -709,51 +759,142 @@ export default function EstimateApproval() {
           {estimate.projectAddress && (
             <div className="text-gray-600 text-sm">{estimate.projectAddress}</div>
           )}
-          {estimate.workDescription && (
-            <p className="text-sm text-gray-700 mt-2 whitespace-pre-wrap">
-              {estimate.workDescription}
-            </p>
-          )}
         </section>
 
-        {/* Line items */}
+        {/* Scope of Work — separate section, shown when workDescription is present */}
+        {estimate.workDescription && (
+          <section>
+            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2">
+              Scope of Work
+            </h2>
+            <p className="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 border border-gray-200 rounded-lg p-3">
+              {estimate.workDescription}
+            </p>
+          </section>
+        )}
+
+        {/* Location block — shown when lat/lng or workLocationAddress is present */}
+        {(hasLatLng || estimate.workLocationAddress) && (
+          <section>
+            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2">
+              Work Location
+            </h2>
+            <div className="flex items-start gap-2 text-sm text-gray-700">
+              <MapPin className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
+              <div>
+                {estimate.workLocationAddress && (
+                  <div>{estimate.workLocationAddress}</div>
+                )}
+                {mapsUrl && (
+                  <a
+                    href={mapsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline text-xs font-medium mt-0.5 inline-block"
+                    data-testid="view-on-map-link"
+                  >
+                    View on map ↗
+                  </a>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Line items — zone-grouped for inspection estimates, flat for standard */}
         {estimate.items.length > 0 && (
           <section>
             <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2">
-              Line Items
+              {isInspection ? "Inspection Findings & Repairs" : "Line Items"}
             </h2>
-            <div className="overflow-x-auto border border-gray-200 rounded-lg">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 text-left text-gray-700">
-                    <th className="px-3 py-2">Part</th>
-                    <th className="px-3 py-2 text-right">Qty</th>
-                    <th className="px-3 py-2 text-right">Unit $</th>
-                    <th className="px-3 py-2 text-right">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {estimate.items.map((it) => (
-                    <tr key={it.id} className="border-t border-gray-100 align-top">
-                      <td className="px-3 py-2">
-                        <div className="font-medium text-gray-900">{it.partName}</div>
-                        {it.description && (
-                          <div className="text-xs text-gray-600 mt-0.5">{it.description}</div>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-right">{it.quantity}</td>
-                      <td className="px-3 py-2 text-right">{fmtCurrency(it.partPrice)}</td>
-                      <td className="px-3 py-2 text-right font-medium">
-                        {fmtCurrency(it.totalPrice)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex justify-end mt-3 text-base font-semibold text-gray-900">
-              Total {fmtCurrency(estimate.totalAmount)}
-            </div>
+
+            {isInspection ? (
+              /* Zone-grouped layout reuses the shared component so it matches the PDF */
+              <EstimateZoneGroupedView
+                items={itemsForZone}
+                laborRate={laborRate}
+                partsSubtotal={partsSubtotal}
+                laborSubtotal={laborSubtotal}
+                totalAmount={grandTotal}
+                totalLaborHours={totalLaborHours}
+                canSeePricing={true}
+                showTotalsFooter={true}
+              />
+            ) : (
+              /* Standard flat table — now with Labor column */
+              <>
+                <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 text-left text-gray-700">
+                        <th className="px-3 py-2">Part</th>
+                        <th className="px-3 py-2 text-right">Qty</th>
+                        <th className="px-3 py-2 text-right">Unit Price</th>
+                        <th className="px-3 py-2 text-right">Labor</th>
+                        <th className="px-3 py-2 text-right">Line Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {estimate.items.map((it) => {
+                        const itLaborHrs = parseFloat(String(it.laborHours ?? 0)) || 0;
+                        const itLaborAmt = itLaborHrs * laborRate;
+                        const itPartsTotal = parseFloat(String(it.totalPrice ?? 0)) || 0;
+                        const itLineTotal = itPartsTotal + itLaborAmt;
+                        return (
+                          <tr key={it.id} className="border-t border-gray-100 align-top">
+                            <td className="px-3 py-2">
+                              <div className="font-medium text-gray-900">{it.partName}</div>
+                              {it.description && (
+                                <div className="text-xs text-gray-600 mt-0.5">{it.description}</div>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right">{it.quantity}</td>
+                            <td className="px-3 py-2 text-right">{fmtCurrency(it.partPrice)}</td>
+                            <td className="px-3 py-2 text-right" data-testid={`item-labor-${it.id}`}>
+                              {itLaborHrs > 0 ? (
+                                <span className="text-gray-700">
+                                  {itLaborHrs.toFixed(2)}h
+                                  <span className="text-gray-500 ml-1">
+                                    ({fmtCurrency(itLaborAmt)})
+                                  </span>
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right font-medium">
+                              {fmtCurrency(itLineTotal)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Reconciling totals block */}
+                <div className="flex justify-end mt-3" data-testid="approval-totals-block">
+                  <div className="w-full max-w-xs space-y-1.5 text-sm">
+                    <div className="flex justify-between text-gray-600">
+                      <span>Parts Subtotal</span>
+                      <span className="tabular-nums" data-testid="parts-subtotal">{fmtCurrency(partsSubtotal)}</span>
+                    </div>
+                    {(totalLaborHours > 0 || laborSubtotal > 0) && (
+                      <div className="flex justify-between text-gray-600">
+                        <span>
+                          Labor ({totalLaborHours.toFixed(2)}h × {fmtCurrency(laborRate)}/hr)
+                        </span>
+                        <span className="tabular-nums" data-testid="labor-subtotal">{fmtCurrency(laborSubtotal)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center border-t border-gray-200 pt-1.5 font-bold text-gray-900">
+                      <span>Grand Total</span>
+                      <span className="text-base tabular-nums" data-testid="grand-total">{fmtCurrency(grandTotal)}</span>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </section>
         )}
 
