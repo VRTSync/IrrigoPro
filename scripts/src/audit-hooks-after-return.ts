@@ -37,7 +37,6 @@ const TARGET_GLOBS = [
   "artifacts/irrigopro/src/pages/missing-photos-report.tsx",
   "artifacts/irrigopro/src/pages/company-profile.tsx",
   "artifacts/irrigopro/src/pages/admin-issue-types.tsx",
-  "artifacts/irrigopro/src/pages/manager-dashboard.tsx",
   "artifacts/irrigopro/src/pages/admin-controllers.tsx",
   "artifacts/irrigopro/src/pages/admin-dashboard.tsx",
   "artifacts/irrigopro/src/pages/labor-rate-audit.tsx",

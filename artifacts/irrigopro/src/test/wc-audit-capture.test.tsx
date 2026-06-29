@@ -339,10 +339,10 @@ function seedCache(qc: QueryClient, role: RoleName) {
 
 // /wet-checks — all roles use WetChecksListPage (barrel re-export)
 import WetChecksListPage from "../pages/wet-checks";
-// /wet-checks/pending-review  AND  /wet-checks/:id/review (billing_manager, super_admin)
-import WetCheckReviewPage from "../pages/wet-check-review";
-// /wet-checks/:id/review — irrigation_manager + company_admin
+// /wet-checks/:id/review — irrigation_manager + company_admin (ManagerWetCheckDetailPage)
 import ManagerWetCheckDetailPage from "../pages/wet-checks/ManagerWetCheckDetailPage";
+// /wet-checks/:id/review — billing_manager + super_admin (CombinedReviewPage)
+import CombinedReviewPage from "../pages/wet-checks/CombinedReviewPage";
 // /manager-workspace — irrigation_manager only
 import ManagerWorkspace from "../pages/manager-workspace";
 // Catch-all for roles that have no matching route
@@ -474,38 +474,16 @@ describe("capture: wc-detail", () => {
   }
 
   for (const role of ["billing_manager", "super_admin"] as RoleName[]) {
-    it(`${role} — WetCheckReviewPage → WetCheckWizard (Delta D1: wizard shell, not ManagerWetCheckDetailPage)`, async () => {
+    it(`${role} — CombinedReviewPage (same route as irrigation_manager / company_admin)`, async () => {
       setUser(role);
-      // WetCheckReviewPage self-routes via useRoute("/wet-checks/:id/review"):
-      //   match → renders the real WetCheckWizard(id=1) with all deps pre-seeded.
-      // Delta D1: billing/super get wizard-two-panel; mgr/admin get mgr-findings-summary.
-      const { container, unmount } = renderWithProviders(<WetCheckReviewPage />, {
-        memoryPath: "/wet-checks/1/review",
-        role,
-      });
-      await waitFor(() => screen.getByTestId("wizard-two-panel"), { timeout: 5000 });
+      const { container, unmount } = renderWithProviders(
+        <Route path="/wet-checks/:id/review">
+          <CombinedReviewPage />
+        </Route>,
+        { memoryPath: "/wet-checks/1/review", role },
+      );
+      await waitFor(() => screen.getByTestId("mgr-findings-summary"), { timeout: 5000 });
       writeFixture("wc-detail", role, container.innerHTML);
-      unmount();
-    });
-  }
-});
-
-// ── Surface 3: wc-review (/wet-checks/pending-review) ────────────────────────
-// ALL roles → WetCheckReviewPage → PendingReviewInbox (path not matched by useRoute)
-//   (App.tsx L342/L393/L443, company-admin L198)
-// Cache seed: ["/api/wet-checks/pending-review"] → resolves synchronously.
-// Sentinel: wc-row-1  (QueueCard for fixture row id=1)
-
-describe("capture: wc-review", () => {
-  for (const role of ROLES) {
-    it(`${role}`, async () => {
-      setUser(role);
-      const { container, unmount } = renderWithProviders(<WetCheckReviewPage />, {
-        memoryPath: "/wet-checks/pending-review",
-        role,
-      });
-      await waitFor(() => screen.getByTestId("wc-row-1"), { timeout: 5000 });
-      writeFixture("wc-review", role, container.innerHTML);
       unmount();
     });
   }

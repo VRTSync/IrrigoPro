@@ -49,7 +49,6 @@ import WorkOrders from "@/pages/work-orders";
 import WetCheckSystemPage from "@/pages/wet-checks/WetCheckSystemPage";
 import WetChecksRoutingPage from "@/pages/wet-checks/WetChecksPage";
 import NewWetCheckPage from "@/pages/wet-checks/NewWetCheckPage";
-import WetCheckReviewPage from "@/pages/wet-check-review";
 const WetCheckConfirm = lazy(() => import("@/components/manager/wet-check-confirm").then((m) => ({ default: m.WetCheckConfirm })));
 const WetCheckDone = lazy(() => import("@/components/manager/wet-check-done").then((m) => ({ default: m.WetCheckDone })));
 import AdminIssueTypesPage from "@/pages/admin-issue-types";
