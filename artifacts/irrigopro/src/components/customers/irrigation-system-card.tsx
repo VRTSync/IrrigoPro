@@ -13,7 +13,7 @@ import {
 import { Cpu, Droplets, Minus, Plus, Loader2 } from "lucide-react";
 import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Customer, PropertyController } from "@workspace/db/schema";
+import type { Customer, IrrigationController } from "@workspace/db/schema";
 
 const DEFAULT_ZONE_COUNT = 12;
 const MAX_CONTROLLERS = 26;
@@ -23,6 +23,14 @@ const MAX_ZONES = 100;
 
 function letterFor(index: number) {
   return String.fromCharCode("A".charCodeAt(0) + index);
+}
+
+/** Extract the single uppercase letter from a controller name like "Controller A". */
+function extractLetter(name: string): string {
+  return (
+    name.trim().split(/\s+/).pop()?.slice(-1).toUpperCase() ??
+    name.slice(0, 1).toUpperCase()
+  );
 }
 
 interface IrrigationSystemCardProps {
@@ -38,13 +46,17 @@ export function IrrigationSystemCard({ customer, canEdit }: IrrigationSystemCard
     Math.min(MAX_CONTROLLERS, customer.totalControllers ?? 1),
   );
 
-  const { data: controllers = [], isLoading } = useArrayQuery<PropertyController>({
-    queryKey: ["/api/properties", customerId, "controllers"],
+  // Read from the irrigation_controllers-backed endpoint (single source of truth).
+  const { data: controllers = [], isLoading } = useArrayQuery<IrrigationController>({
+    queryKey: ["/api/customers", customerId, "controllers-profile"],
+    queryFn: () => apiRequest(`/api/customers/${customerId}/controllers-profile`),
   });
 
   const controllersByLetter = useMemo(() => {
-    const map = new Map<string, PropertyController>();
-    (controllers ?? []).forEach((c) => map.set(c.controllerLetter, c));
+    const map = new Map<string, IrrigationController>();
+    for (const c of controllers) {
+      map.set(extractLetter(c.name), c);
+    }
     return map;
   }, [controllers]);
 
@@ -55,7 +67,7 @@ export function IrrigationSystemCard({ customer, canEdit }: IrrigationSystemCard
 
   const totalZones = letters.reduce((sum, letter) => {
     const row = controllersByLetter.get(letter);
-    return sum + (row?.zoneCount ?? DEFAULT_ZONE_COUNT);
+    return sum + (row?.totalZones ?? DEFAULT_ZONE_COUNT);
   }, 0);
 
   const updateTotalControllers = useMutation({
@@ -66,7 +78,9 @@ export function IrrigationSystemCard({ customer, canEdit }: IrrigationSystemCard
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/customers/${customerId}`] });
-      queryClient.invalidateQueries({ queryKey: ["/api/properties", customerId, "controllers"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/customers", customerId, "controllers-profile"],
+      });
       toast({ title: "Controllers updated" });
     },
     onError: (err: any) => {
@@ -80,13 +94,16 @@ export function IrrigationSystemCard({ customer, canEdit }: IrrigationSystemCard
 
   const updateZoneCount = useMutation({
     mutationFn: async (vars: { letter: string; zoneCount: number }) => {
-      return await apiRequest(`/api/properties/${customerId}/controllers`, "PATCH", {
-        controllerLetter: vars.letter,
-        zoneCount: vars.zoneCount,
+      const ctrl = controllersByLetter.get(vars.letter);
+      if (!ctrl) throw new Error(`Controller ${vars.letter} not found in profile`);
+      return await apiRequest(`/api/irrigation-controllers/${ctrl.id}`, "PUT", {
+        totalZones: vars.zoneCount,
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/properties", customerId, "controllers"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/customers", customerId, "controllers-profile"],
+      });
       toast({ title: "Zone count updated" });
     },
     onError: (err: any) => {
@@ -156,7 +173,7 @@ export function IrrigationSystemCard({ customer, canEdit }: IrrigationSystemCard
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {letters.map((letter) => {
               const row = controllersByLetter.get(letter);
-              const zoneCount = row?.zoneCount ?? DEFAULT_ZONE_COUNT;
+              const zoneCount = row?.totalZones ?? DEFAULT_ZONE_COUNT;
               return (
                 <ControllerTile
                   key={letter}
@@ -289,4 +306,3 @@ function ControllerTile({
     </div>
   );
 }
-

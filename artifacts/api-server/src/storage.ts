@@ -924,6 +924,16 @@ export interface IStorage {
     count: number,
     branchName?: string | null,
   ): Promise<PropertyController[]>;
+  // Seed irrigation_controllers + irrigation_profile_zones placeholders for
+  // the given (companyId, customerId, branchName) tuple so that `count` controller
+  // rows named "Controller A" … "Controller {letter}" exist. Uses ON CONFLICT DO NOTHING
+  // — race-safe and idempotent. Returns the full controller list for the tuple.
+  ensureIrrigationControllers(
+    companyId: number,
+    customerId: number,
+    count: number,
+    branchName?: string | null,
+  ): Promise<IrrigationController[]>;
   updatePropertyController(
     companyId: number,
     customerId: number,
@@ -10271,6 +10281,83 @@ export class DatabaseStorage implements IStorage {
       .orderBy(irrigationControllers.name, irrigationControllers.id);
   }
 
+  async ensureIrrigationControllers(
+    companyId: number,
+    customerId: number,
+    count: number,
+    branchName?: string | null,
+  ): Promise<IrrigationController[]> {
+    const branch = typeof branchName === "string" ? branchName.trim() : "";
+    const DEFAULT_ZONE_COUNT = 12;
+
+    const existing = await db
+      .select()
+      .from(irrigationControllers)
+      .where(
+        and(
+          eq(irrigationControllers.companyId, companyId),
+          eq(irrigationControllers.customerId, customerId),
+          eq(irrigationControllers.branchName, branch),
+        ),
+      );
+
+    const haveNames = new Set(existing.map((c) => c.name));
+    const needed: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const letter = String.fromCharCode("A".charCodeAt(0) + i);
+      const name = `Controller ${letter}`;
+      if (!haveNames.has(name)) needed.push(letter);
+    }
+
+    for (const letter of needed) {
+      const name = `Controller ${letter}`;
+      const [inserted] = await db
+        .insert(irrigationControllers)
+        .values({
+          companyId,
+          customerId,
+          branchName: branch,
+          name,
+          totalZones: DEFAULT_ZONE_COUNT,
+          isActive: true,
+          lastUpdatedAt: new Date(),
+        })
+        .onConflictDoNothing()
+        .returning();
+
+      // Seed placeholder zones 1..DEFAULT_ZONE_COUNT for the newly created controller.
+      if (inserted) {
+        for (let z = 1; z <= DEFAULT_ZONE_COUNT; z++) {
+          await db
+            .insert(irrigationProfileZones)
+            .values({
+              companyId,
+              controllerId: inserted.id,
+              zoneNumber: z,
+              name: `Zone ${z}`,
+              zoneType: "other",
+              runTimeMinutes: 0,
+              zoneOrder: z,
+              isActive: true,
+            })
+            .onConflictDoNothing();
+        }
+      }
+    }
+
+    return db
+      .select()
+      .from(irrigationControllers)
+      .where(
+        and(
+          eq(irrigationControllers.companyId, companyId),
+          eq(irrigationControllers.customerId, customerId),
+          eq(irrigationControllers.branchName, branch),
+        ),
+      )
+      .orderBy(irrigationControllers.name, irrigationControllers.id);
+  }
+
   async getIrrigationController(
     companyId: number | null,
     id: number,
@@ -10324,6 +10411,13 @@ export class DatabaseStorage implements IStorage {
       const conditions = [eq(irrigationControllers.id, id)];
       if (companyId !== null) conditions.push(eq(irrigationControllers.companyId, companyId));
 
+      // Load the current controller before updating so we can compare totalZones.
+      const [before] = await tx
+        .select()
+        .from(irrigationControllers)
+        .where(and(...conditions));
+      if (!before) return null;
+
       const now = new Date();
       const [updated] = await tx
         .update(irrigationControllers)
@@ -10337,6 +10431,39 @@ export class DatabaseStorage implements IStorage {
         .where(and(...conditions))
         .returning();
       if (!updated) return null;
+
+      // Non-destructive zone trim: when totalZones decreases, remove trailing
+      // irrigation_profile_zones rows ONLY if they carry no data.
+      // A zone is "safe to delete" when: no programId, runTimeMinutes is 0
+      // or null, and notes is null or empty. Zones with any data are preserved
+      // even if their zoneNumber exceeds the new totalZones cap.
+      const newTotalZones = updated.totalZones;
+      const oldTotalZones = before.totalZones;
+      if (
+        typeof newTotalZones === "number" &&
+        typeof oldTotalZones === "number" &&
+        newTotalZones < oldTotalZones
+      ) {
+        const candidateZones = await tx
+          .select()
+          .from(irrigationProfileZones)
+          .where(
+            and(
+              eq(irrigationProfileZones.controllerId, id),
+              sql`${irrigationProfileZones.zoneNumber} > ${newTotalZones}`,
+            ),
+          );
+
+        for (const zone of candidateZones) {
+          const isEmptyZone =
+            zone.programId === null &&
+            (zone.runTimeMinutes === 0 || zone.runTimeMinutes === null) &&
+            (!zone.notes || zone.notes.trim() === "");
+          if (isEmptyZone) {
+            await tx.delete(irrigationProfileZones).where(eq(irrigationProfileZones.id, zone.id));
+          }
+        }
+      }
 
       await this._appendIrrigationSnapshot(tx, updated, actor, `Controller "${updated.name}" updated`);
       return updated;

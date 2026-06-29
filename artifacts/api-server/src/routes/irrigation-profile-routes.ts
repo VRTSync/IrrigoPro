@@ -168,11 +168,32 @@ export function registerIrrigationProfileRoutes(
           typeof req.query.branchName === "string"
             ? req.query.branchName
             : undefined;
-        const controllers = await storage.listIrrigationControllers(
+
+        let controllers = await storage.listIrrigationControllers(
           callerCompanyId,
           customerId,
           branchName,
         );
+
+        // Lazy seed: when no irrigation profile exists yet for this customer/branch,
+        // check if property_controllers has legacy data and bootstrap irrigation_controllers
+        // from it. This is the automated forward-compat bridge so the profile page
+        // shows controllers that were set up via the wet-check flow before unification.
+        if (controllers.length === 0 && callerCompanyId !== null) {
+          const legacyRows = await storage.listPropertyControllers(callerCompanyId, customerId);
+          const branchFilter = branchName ?? "";
+          const branchRows = legacyRows.filter((r) => (r.branchName ?? "") === branchFilter);
+          if (branchRows.length > 0) {
+            const count = branchRows.length;
+            controllers = await storage.ensureIrrigationControllers(
+              callerCompanyId,
+              customerId,
+              count,
+              branchName ?? null,
+            );
+          }
+        }
+
         res.json(controllers);
       } catch (e: any) {
         req.log?.error?.({ err: e, customerId }, "listIrrigationControllers failed");

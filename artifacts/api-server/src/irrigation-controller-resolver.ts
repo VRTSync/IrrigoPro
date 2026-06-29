@@ -1,18 +1,16 @@
-// Reconcile seam — Slice 6 Phase 1.
+// Reconcile seam — Slice 6.
 //
 // `resolveWetCheckControllers` is the single call site that the wet-check
-// capture and grid screens should use to determine which controllers/zones
-// to display for a customer+branch. Today it always falls back to the old
-// `property_controllers` table (letter + zone-count only). When a full
-// irrigation profile exists in `irrigation_controllers` for this customer/branch
-// it should eventually return that richer data instead — that unification is
-// a follow-up task tracked separately.
+// capture and grid screens use to determine which controllers/zones to display
+// for a customer+branch. It now reads from `irrigation_controllers` first
+// (the canonical post-unification table), falling back to the legacy
+// `property_controllers` table only when no irrigation profile exists for
+// the customer+branch yet (pre-seed state).
 //
-// Phase 1 contract:
-//   - Return type matches the shape consumed by wet-check capture (list of
-//     letters + zone counts). This will change when unification happens.
-//   - No business logic lives here today; just the storage call so the
-//     follow-up can swap the implementation in one place.
+// Mapping from irrigation_controllers → wet-check grid shape:
+//   name:        "Controller A" → letter: "A"
+//   totalZones:  integer        → zoneCount: integer (defaults to 12 if null)
+//   notes:       string | null  → notes: string | null
 
 import { storage } from "./storage";
 
@@ -22,28 +20,52 @@ export interface ResolvedController {
   notes: string | null;
 }
 
+/** Extract the single uppercase letter from a controller name like "Controller A". */
+function extractLetter(name: string): string {
+  return (
+    name.trim().split(/\s+/).pop()?.slice(-1).toUpperCase() ??
+    name.slice(0, 1).toUpperCase()
+  );
+}
+
 /**
  * Returns the controllers that should drive the wet-check grid for a given
- * customer+branch combination. Currently always reads from `property_controllers`
- * (the legacy wet-check grid table).
+ * customer+branch combination.
  *
- * TODO (follow-up unification task): when an irrigation profile exists in
- * `irrigation_controllers` for this companyId + customerId + branchName,
- * derive the controller letters and zone counts from that profile instead,
- * so techs don't need to enter controllers twice.
+ * Priority:
+ *  1. `irrigation_controllers` for this (companyId, customerId, branchName) tuple —
+ *     the canonical post-unification source.
+ *  2. Legacy `property_controllers` — only when no irrigation profile exists yet
+ *     (pre-seed state, before the admin migration or lazy-seed has run).
  */
 export async function resolveWetCheckControllers(
   companyId: number,
   customerId: number,
   branchName?: string | null,
 ): Promise<ResolvedController[]> {
-  // Phase 1: always fall back to property_controllers (old table).
-  const rows = await storage.listPropertyControllers(companyId, customerId);
-
   const branch = branchName ?? null;
-  const filtered = branch
-    ? rows.filter((r) => (r.branchName || null) === branch)
-    : rows;
+  const branchArg = typeof branch === "string" ? branch : undefined;
+
+  // 1. Try irrigation_controllers first (single source of truth).
+  const irrigCtrls = await storage.listIrrigationControllers(
+    companyId,
+    customerId,
+    branchArg,
+  );
+
+  if (irrigCtrls.length > 0) {
+    return irrigCtrls.map((ctrl) => ({
+      letter: extractLetter(ctrl.name),
+      zoneCount: ctrl.totalZones ?? 12,
+      notes: ctrl.notes ?? null,
+    }));
+  }
+
+  // 2. Fall back to property_controllers (legacy pre-seed state).
+  const legacyRows = await storage.listPropertyControllers(companyId, customerId);
+  const filtered = branch !== null
+    ? legacyRows.filter((r) => (r.branchName || null) === branch)
+    : legacyRows;
 
   return filtered.map((r) => ({
     letter: r.controllerLetter,

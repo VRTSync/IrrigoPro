@@ -15594,12 +15594,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return;
         }
         const numControllers = Math.max(1, Math.min(26, Number(customer.totalControllers ?? 1)));
-        // ensurePropertyControllers is idempotent — it only inserts rows for
-        // missing letters. This guarantees the tech sees at least A..N even
-        // on first visit to a previously untouched branch.
-        const rows = await storage.ensurePropertyControllers(cid, customerId, numControllers, branchParam);
-        // Expose the branch name on each row on the wire.
-        res.json(rows.map(r => ({ ...r, branchName: branchParam || null })));
+        // ensureIrrigationControllers is idempotent — it only inserts rows for
+        // missing "Controller {letter}" entries. This guarantees the tech sees
+        // at least A..N even on first visit to a previously untouched branch.
+        // Seeds irrigation_controllers (single source of truth); property_controllers
+        // is no longer written here.
+        const irrigCtrls = await storage.ensureIrrigationControllers(cid, customerId, numControllers, branchParam);
+        // Map IrrigationController → PropertyController-compatible wire shape
+        // so all existing wet-check UI consumers (ControllerSelectionPage, etc.)
+        // continue to work without frontend changes.
+        const mappedRows = irrigCtrls.map(ctrl => ({
+          id: ctrl.id,
+          companyId: ctrl.companyId,
+          customerId: ctrl.customerId,
+          branchName: branchParam || null,
+          controllerLetter: ctrl.name.trim().split(/\s+/).pop()?.slice(-1).toUpperCase() ?? ctrl.name.slice(0, 1).toUpperCase(),
+          zoneCount: ctrl.totalZones ?? 12,
+          notes: ctrl.notes ?? null,
+        }));
+        res.json(mappedRows);
         return;
       }
       // Customer-level endpoint: only return the NULL-branch bucket.
@@ -16449,8 +16462,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? 0
         : Math.max(1, Math.min(26, Number(customer.totalControllers ?? 1)));
       if (!body.blankStart) {
-        // Pass branchName so ensurePropertyControllers seeds the right branch bucket.
-        await storage.ensurePropertyControllers(cid, body.customerId, numControllers, branchName);
+        // Pass branchName so ensureIrrigationControllers seeds the right branch bucket.
+        // Seeds irrigation_controllers (single source of truth); property_controllers
+        // is no longer written here.
+        await storage.ensureIrrigationControllers(cid, body.customerId, numControllers, branchName);
       }
 
       const wc = await storage.createWetCheck({
