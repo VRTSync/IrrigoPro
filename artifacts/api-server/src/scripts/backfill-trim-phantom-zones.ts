@@ -1,17 +1,23 @@
 // Trim orphan `not_checked` wet-check zone records that exceed a controller's
-// current zoneCount.
+// current zoneCount AND carry no real data.
 //
 // Background: before this fix, `ensurePropertyControllers` seeded new
 // property controllers with zoneCount=100. `ControllerSelectionPage` then
 // created 100 zone records (status='not_checked') per controller even when
 // the real controller had far fewer zones. This script deletes those phantom
 // rows for every in-progress wet check, leaving only zone records whose
-// zoneNumber is <= the controller's current zoneCount.
+// zoneNumber is <= the controller's current zoneCount OR that carry real data.
+//
+// Safety guard — a zone is only deleted when BOTH conditions hold:
+//   1. zoneNumber > controller's current zoneCount (it's beyond the range)
+//   2. isEmptyZone(zone) === true — the zone carries no real data (no notes,
+//      PSI/GPM readings, findings, or non-zero repairLaborHours). This matches
+//      the same predicate used by the PDF renderer to decide which zones to
+//      suppress, so a phantom zone with a note or pressure reading is preserved
+//      even when it sits above the zone-count threshold.
 //
 // Scope:
-//   - Only `not_checked` records are removed. Zones already checked
-//     (checked_ok, checked_with_issues), explicitly skipped (not_applicable),
-//     or enriched with notes/findings are never touched.
+//   - Only `not_checked` records are removed (isEmptyZone enforces this too).
 //   - The script operates on all wet checks (any status) — even submitted or
 //     converted ones may carry phantom rows that inflate PDF zone counts.
 //   - Controllers with no matching `property_controllers` row are skipped
@@ -33,6 +39,7 @@ try { (process.stderr as unknown as { _handle?: { setBlocking?: (b: boolean) => 
 import { db } from "../db";
 import { wetChecks, wetCheckZoneRecords, propertyControllers, appSettings } from "@workspace/db";
 import { eq, and, gt, inArray, sql } from "drizzle-orm";
+import { isEmptyZone } from "../wet-check-zone-filter";
 
 const DONE_KEY = "trimPhantomZones.done";
 const FAIL_KEY = "trimPhantomZones.failed";
@@ -161,12 +168,19 @@ async function main(): Promise<void> {
       }
 
       try {
-        // Load the not_checked zone records for this wet check.
+        // Load the not_checked zone records for this wet check — fetch all
+        // fields needed by isEmptyZone so the guard can make an accurate decision.
         const notCheckedZones = await db
           .select({
             id: wetCheckZoneRecords.id,
             controllerLetter: wetCheckZoneRecords.controllerLetter,
             zoneNumber: wetCheckZoneRecords.zoneNumber,
+            status: wetCheckZoneRecords.status,
+            observedPressure: wetCheckZoneRecords.observedPressure,
+            observedFlow: wetCheckZoneRecords.observedFlow,
+            ranSuccessfully: wetCheckZoneRecords.ranSuccessfully,
+            notes: wetCheckZoneRecords.notes,
+            repairLaborHours: wetCheckZoneRecords.repairLaborHours,
           })
           .from(wetCheckZoneRecords)
           .where(
@@ -182,6 +196,20 @@ async function main(): Promise<void> {
           continue;
         }
 
+        // Load finding counts per zone record id so isEmptyZone can check
+        // whether any findings exist without loading the full finding rows.
+        const zoneIds = notCheckedZones.map((z) => z.id);
+        const findingCountRows = await db.execute<{ zone_record_id: number; cnt: string }>(sql`
+          SELECT zone_record_id, COUNT(*) AS cnt
+          FROM wet_check_findings
+          WHERE zone_record_id IN (${sql.join(zoneIds.map((id) => sql`${id}`), sql`, `)})
+          GROUP BY zone_record_id
+        `);
+        const findingCountByZoneId = new Map<number, number>();
+        for (const r of findingCountRows.rows) {
+          findingCountByZoneId.set(Number(r.zone_record_id), Number(r.cnt));
+        }
+
         // Determine which controller letters are referenced.
         const letters = [...new Set(notCheckedZones.map((z) => z.controllerLetter))];
 
@@ -191,14 +219,10 @@ async function main(): Promise<void> {
         // check with branchName=null also means customer-level, so we
         // normalize null → '' before filtering — matching the storage layer's
         // branchKey() convention.
-        const [wc] = await db
-          .select({
-            companyId: wetChecks.companyId,
-            customerId: wetChecks.customerId,
-            branchName: wetChecks.branchName,
-          })
-          .from(wetChecks)
-          .where(eq(wetChecks.id, row.id));
+        const wcRows = await db.execute<{ company_id: number; customer_id: number; branch_name: string | null }>(sql`
+          SELECT company_id, customer_id, branch_name FROM wet_checks WHERE id = ${row.id}
+        `);
+        const wc = wcRows.rows[0];
         if (!wc) {
           skippedNoPhantoms += 1;
           done.add(row.id);
@@ -207,7 +231,7 @@ async function main(): Promise<void> {
 
         // Normalize: null or undefined → '' (customer-level bucket in
         // property_controllers).
-        const branchKey = (wc.branchName ?? "").trim();
+        const branchKey = (wc.branch_name ?? "").trim();
 
         const ctrlRows = await db
           .select({
@@ -217,8 +241,8 @@ async function main(): Promise<void> {
           .from(propertyControllers)
           .where(
             and(
-              eq(propertyControllers.companyId, wc.companyId),
-              eq(propertyControllers.customerId, wc.customerId),
+              eq(propertyControllers.companyId, wc.company_id),
+              eq(propertyControllers.customerId, wc.customer_id),
               eq(propertyControllers.branchName, branchKey),
               inArray(propertyControllers.controllerLetter, letters),
             ),
@@ -231,7 +255,8 @@ async function main(): Promise<void> {
         );
 
         // Collect zone record ids to delete: those whose zoneNumber exceeds
-        // the controller's current zoneCount.
+        // the controller's current zoneCount AND whose isEmptyZone check
+        // confirms they carry no real data.
         const toDelete: number[] = [];
         for (const zone of notCheckedZones) {
           const maxZones = zoneCountByLetter.get(zone.controllerLetter);
@@ -239,7 +264,22 @@ async function main(): Promise<void> {
             // Controller not found in property_controllers — skip to be safe.
             continue;
           }
-          if (zone.zoneNumber > maxZones) {
+          if (zone.zoneNumber <= maxZones) {
+            // Within the current zone count — leave it alone.
+            continue;
+          }
+          // Beyond the zone count — only delete if truly empty (no real data).
+          const findingCount = findingCountByZoneId.get(zone.id) ?? 0;
+          const zoneForGuard = {
+            status: zone.status,
+            findings: findingCount > 0 ? [{}] : [],
+            observedPressure: zone.observedPressure,
+            observedFlow: zone.observedFlow,
+            ranSuccessfully: zone.ranSuccessfully,
+            notes: zone.notes,
+            repairLaborHours: zone.repairLaborHours,
+          };
+          if (isEmptyZone(zoneForGuard)) {
             toDelete.push(zone.id);
           }
         }

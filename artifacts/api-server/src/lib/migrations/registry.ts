@@ -4,6 +4,7 @@ import { reconcileBillingSheetInvoiceTotalsMigration } from './reconcile-billing
 import { workOrderZonesMigration } from './work-order-zones';
 import { renumberEstimatesMigration } from './renumber-estimates';
 import { reconcileFindingDispositionMigration } from './reconcile-finding-disposition';
+import { trimPhantomZonesMigration } from './trim-phantom-zones';
 
 const REGISTRY = new Map<string, MigrationDefinition>([
   [companyIdColumnsMigration.id, companyIdColumnsMigration],
@@ -11,6 +12,7 @@ const REGISTRY = new Map<string, MigrationDefinition>([
   [workOrderZonesMigration.id, workOrderZonesMigration],
   [renumberEstimatesMigration.id, renumberEstimatesMigration],
   [reconcileFindingDispositionMigration.id, reconcileFindingDispositionMigration],
+  [trimPhantomZonesMigration.id, trimPhantomZonesMigration],
 ]);
 
 export function listMigrations(): MigrationDefinition[] {

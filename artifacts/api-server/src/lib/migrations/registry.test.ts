@@ -13,7 +13,7 @@ import { sql } from "drizzle-orm";
 // ── Static registry assertions ─────────────────────────────────────────────────
 
 describe("migration registry — static shape", () => {
-  it("contains the company-id, reconcile-totals, work-order-zones, renumber-estimates, and reconcile-finding-disposition migrations", () => {
+  it("contains the company-id, reconcile-totals, work-order-zones, renumber-estimates, reconcile-finding-disposition, and trim-phantom-zones migrations", () => {
     const all = listMigrations();
     const ids = all.map((m) => m.id);
     assert.ok(ids.includes("company-id-columns-v1"), "missing company-id-columns-v1");
@@ -27,6 +27,7 @@ describe("migration registry — static shape", () => {
       ids.includes("reconcile-finding-disposition-v1"),
       "missing reconcile-finding-disposition-v1",
     );
+    assert.ok(ids.includes("trim-phantom-zones-v1"), "missing trim-phantom-zones-v1");
   });
 
   it("getMigration returns the definition for the known id", () => {
