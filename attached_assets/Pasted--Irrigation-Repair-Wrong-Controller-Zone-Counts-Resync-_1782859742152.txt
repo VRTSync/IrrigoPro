@@ -1,0 +1,37 @@
+# Irrigation — Repair Wrong Controller Zone Counts (Resync on Mismatch)
+
+**What & Why**
+The earlier fix left existing controllers stuck at the wrong count. The import migration's Pass 2 only repairs controllers whose `total_zones IS NULL` — but the corrupted rows hold a **literal value (12)**, written by the old lazy-seed before it was fixed. So the migration finds **0 null controllers** ("nothing to do") and the wrong 12s remain. The lazy-seed fix doesn't help either — it only seeds when a profile is **empty**, so it never touches already-created rows.
+
+**Fix:** repair on **mismatch**, not just null — for every `irrigation_controllers` row, compare `total_zones` to the authoritative `property_controllers.zoneCount` and correct any that differ (including the wrong 12s). `property_controllers` still holds the real original counts (it was frozen as the new store became canonical), so it's the source of truth for this repair.
+
+**Confirmed evidence:** migration preview showed `controllersWithNullZones: 0` before running, yet counts display as 12 — i.e. non-null wrong values the null-only check can't see. `ensureIrrigationControllers` now writes `totalZones: config.zoneCount ?? null` (the source is fixed going forward); this is purely to repair the rows created by the old path.
+
+One-time repair, preview-gated, runnable + re-runnable from `/admin/migrations`. Company-scoped (Rule 1). No schema change.
+
+## Steps
+1. **Change the repair condition from null-only to mismatch.** In `import-irrigation-profile-from-property-controllers.ts` Pass 2 (and its `check()`/`preview()` candidate query, currently `WHERE ic.total_zones IS NULL` ~line 126/197): include rows where `irrigation_controllers.total_zones IS DISTINCT FROM property_controllers.zone_count` for the matched controller — i.e. **null OR wrong value**. Match `irrigation_controllers` to `property_controllers` by `(companyId, customerId, branchName)` and controller identity (map `name` "Controller {letter}" ↔ `controllerLetter`), the same mapping the seed uses.
+2. **Update** each mismatched row's `total_zones` to the legacy `zone_count`, and **sync `irrigation_profile_zones`**: insert missing zones up to the count, and trim trailing placeholders beyond it using the **existing non-destructive guard** (`zone_number > count AND program_id IS NULL AND run_time = 0 AND notes empty`) so no zone with real data is removed.
+3. **Preview shows old → new** per controller (e.g. "Controller C: 12 → 15") and a count of how many will change, so it's reviewable before committing. Keep the acknowledgement gate.
+4. **Rename/relabel** the migration's check key so it reads as "controllers with wrong/missing zone counts" rather than "null zones," so the preview number reflects reality (this is why it showed 0).
+5. Idempotent: after the resync, re-running shows 0 changes. Company-scoped; no cross-tenant reads/writes.
+
+## Safety note
+Because `property_controllers` is now frozen/stale and `irrigation_controllers` is canonical going forward, treat this as a **one-time corruption repair**. The preview gate is the safeguard — Randy reviews the old→new list before committing, so a legitimately-edited count (if any) is visible before it would be changed. After this runs, edits live in the profile (canonical) and `property_controllers` is no longer consulted.
+
+## Tests
+- A controller with `total_zones = 12` but legacy `zone_count = 15` is detected by `check()`/`preview()` (count > 0) and corrected to 15 on run; zone placeholders sync to 15 without deleting data zones.
+- A null `total_zones` is still corrected (superset of the old behavior).
+- A controller already matching its legacy count is untouched; re-running reports 0.
+- Preview lists each old→new change; another company's data is untouched.
+- After running: Woodglenn shows 7/9/15/6/8/9/5/10/10/10/8 (not 12); the card, profile, and wet-check grid agree.
+
+## Out of scope
+- The lazy-seed source (already fixed to carry real counts).
+- CSV import / Add Controller (write real counts already).
+- Dropping `property_controllers` (separate, post-verification).
+
+## Relevant files
+- `artifacts/api-server/src/lib/migrations/import-irrigation-profile-from-property-controllers.ts` (Pass 2 condition ~126/197 → mismatch; check/preview labels; non-destructive zone trim ~213–219)
+- `artifacts/api-server/src/storage.ts` (`ensureIrrigationControllers` — source already correct, reference)
+- `property_controllers.zoneCount` = source of truth for the repair
