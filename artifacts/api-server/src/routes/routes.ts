@@ -4904,8 +4904,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/admin/system-stats", async (req, res) => {
+  app.get("/api/admin/system-stats", requireAuthentication, async (req, res) => {
     try {
+      if (req.authenticatedUserRole !== 'super_admin') {
+        res.status(403).json({ message: "Forbidden: super_admin only" });
+        return;
+      }
       const users = await storage.getUsers();
       res.json({
         totalUsers: users.length,
@@ -6064,19 +6068,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 
   // Dashboard stats
-  app.get("/api/dashboard/stats", async (req, res) => {
-    try {
-      const stats = await storage.getDashboardStats();
-      res.json(stats);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to fetch dashboard stats" });
-    }
-  });
+  // NOTE: The second /api/dashboard/stats registration below was removed.
+  // The authenticated canonical version at line ~5201 takes precedence.
+  // (Removed duplicate unguarded registration — security hardening)
 
-  // Admin-specific stats endpoint
-  app.get("/api/admin/stats", async (req, res) => {
+  // Admin-specific stats endpoint — super_admin only
+  app.get("/api/admin/stats", requireAuthentication, async (req, res) => {
     try {
+      if (req.authenticatedUserRole !== 'super_admin') {
+        res.status(403).json({ message: "Forbidden: super_admin only" });
+        return;
+      }
       const users = await storage.getUsers();
       const estimates = await storage.getEstimates();
       const workOrders = await storage.getWorkOrders(null);
@@ -6086,7 +6088,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         activeUsers: users.filter(u => u.isActive).length,
         totalEstimates: estimates.length,
         totalWorkOrders: workOrders.length,
-        totalInvoices: 0, // Will be updated when invoice endpoint is implemented
+        totalInvoices: 0,
         systemHealth: "good" as const
       };
       
@@ -6135,7 +6137,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Customer billing preview data - includes estimates, work orders, and billing sheets
   // This must come BEFORE the :id route to avoid parameter conflicts
-  app.get("/api/customers/billing-preview", async (req, res) => {
+  app.get("/api/customers/billing-preview", requireAuthentication, async (req, res) => {
     try {
       console.log("Fetching comprehensive customer billing data...");
       const allCustomers = await storage.getCustomers();
@@ -7523,7 +7525,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   );
 
   // Customer-related data endpoints
-  app.get("/api/customers/:id/estimates", async (req, res) => {
+  app.get("/api/customers/:id/estimates", requireAuthentication, async (req, res) => {
     try {
       const customerId = parseInt(req.params.id);
       const estimates = await storage.getEstimatesByCustomer(customerId);
@@ -7535,7 +7537,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/customers/:id/work-orders", async (req, res) => {
+  app.get("/api/customers/:id/work-orders", requireAuthentication, async (req, res) => {
     try {
       const customerId = parseInt(req.params.id);
       const callerCompanyId7414 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
@@ -7547,7 +7549,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/customers/:id/billing-sheets", async (req, res) => {
+  app.get("/api/customers/:id/billing-sheets", requireAuthentication, async (req, res) => {
     try {
       const customerId = parseInt(req.params.id);
       const callerCompanyId7425 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
@@ -14263,7 +14265,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/notifications", async (req, res) => {
+  app.post("/api/notifications", requireAuthentication, async (req, res) => {
     try {
       const validatedData = insertNotificationSchema.parse(req.body);
       const notification = await storage.createNotification(validatedData);
@@ -14274,7 +14276,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/notifications/:id/read", async (req, res) => {
+  app.put("/api/notifications/:id/read", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const success = await storage.markNotificationAsRead(id);
@@ -14289,7 +14291,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/notifications/:userId/read-all", async (req, res) => {
+  app.put("/api/notifications/:userId/read-all", requireAuthentication, async (req, res) => {
     try {
       const userId = parseInt(req.params.userId);
       const success = await storage.markAllNotificationsAsRead(userId);
@@ -14321,7 +14323,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // QuickBooks Developer Portal Required URLs
   
   // Multi-Factor Authentication API endpoints
-  app.post("/api/mfa/setup", async (req, res) => {
+  app.post("/api/mfa/setup", requireAuthentication, async (req, res) => {
     try {
       const userId = req.user?.id;
       const userEmail = req.user?.email;
@@ -14347,7 +14349,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/mfa/verify-setup", async (req, res) => {
+  app.post("/api/mfa/verify-setup", requireAuthentication, async (req, res) => {
     try {
       const userId = req.user?.id;
       const { secret, code, backupCodes } = req.body;
@@ -14434,7 +14436,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/mfa/disable", async (req, res) => {
+  app.post("/api/mfa/disable", requireAuthentication, async (req, res) => {
     try {
       const userId = req.user?.id;
       const { password } = req.body;
@@ -14479,7 +14481,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/mfa/backup-codes/regenerate", async (req, res) => {
+  app.post("/api/mfa/backup-codes/regenerate", requireAuthentication, async (req, res) => {
     try {
       const userId = req.user?.id;
       
@@ -14513,7 +14515,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/mfa/status", async (req, res) => {
+  app.get("/api/mfa/status", requireAuthentication, async (req, res) => {
     try {
       const userId = req.user?.id;
       
