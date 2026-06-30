@@ -169,6 +169,26 @@ export function PhotoImage({
     ? (typeof blobUrl === "string" ? blobUrl : null)
     : resolvedUrl;
 
+  // When the <img> tag itself reports a load error (e.g. the thumb variant
+  // signed URL resolves but the object is still being generated), fall back
+  // to a fresh standalone query for the medium variant. Only activates once
+  // per mount to avoid an infinite retry loop.
+  const [imgError, setImgError] = useState(false);
+  const { data: fallbackData } = useQuery<{ url: string }>({
+    queryKey: ["/api/photos", photoId, "medium", "signed-url-fallback"],
+    queryFn: async () => {
+      const res = await fetch(`/api/photos/${photoId}/signed-url?variant=medium`, {
+        headers: getAuthHeaders(),
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to fetch fallback signed URL");
+      return res.json();
+    },
+    enabled: !!imgError && !!photoId && !isBlobOrDirect,
+    staleTime: 12 * 60 * 1000,
+    retry: 0,
+  });
+
   const showLoading = !isBlobOrDirect && (
     (signedUrlOverride === undefined && (batchManaged || isLoading)) ||
     (isApiFallback && blobUrl === "loading")
@@ -195,5 +215,21 @@ export function PhotoImage({
     );
   }
 
-  return <img src={finalUrl} alt={alt} className={className} onClick={onClick} loading="lazy" />;
+  // If the primary URL errored and we have a fallback, use it.
+  const displayUrl = (imgError && fallbackData?.url) ? fallbackData.url : finalUrl;
+
+  return (
+    <img
+      src={displayUrl}
+      alt={alt}
+      className={className}
+      onClick={onClick}
+      loading="lazy"
+      onError={() => {
+        // Only trigger fallback once, and only when we're not already
+        // showing a blob or a direct URL (those don't have variant siblings).
+        if (!imgError && !isBlobOrDirect) setImgError(true);
+      }}
+    />
+  );
 }

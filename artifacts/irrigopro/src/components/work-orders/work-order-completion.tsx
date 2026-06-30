@@ -70,6 +70,7 @@ interface CompletionUploadedFile {
   url: string;
   fileName: string;
   originalName: string;
+  previewUrl?: string;
 }
 
 interface UsedPart {
@@ -1077,8 +1078,8 @@ export function WorkOrderCompletion({
                   label="Photos"
                   accept="image/*"
                   multiple={true}
-                  files={photos.map(p => ({ url: p.url, fileName: p.fileName, originalName: p.originalName }))}
-                  onFilesChange={(files) => setPhotos(files.map(f => ({ url: f.url, fileName: f.fileName, originalName: f.originalName })))}
+                  files={photos.map(p => ({ url: p.url, fileName: p.fileName, originalName: p.originalName, previewUrl: p.previewUrl }))}
+                  onFilesChange={(files) => setPhotos(files.map(f => ({ url: f.url, fileName: f.fileName, originalName: f.originalName, previewUrl: f.previewUrl })))}
                 />
               </CardContent>
             </Card>
