@@ -18,12 +18,14 @@ import {
   X,
   Mail,
   Download,
+  Upload,
 } from "lucide-react";
 import type {
   IrrigationController,
   Customer,
 } from "@workspace/db/schema";
 import { IrrigationControllerGrid } from "@/components/customers/irrigation-controller-grid";
+import { IrrigationCsvImportModal } from "@/components/customers/IrrigationCsvImportModal";
 
 // ── Add controller form ──────────────────────────────────────────────────────
 
@@ -178,6 +180,7 @@ export default function IrrigationProfile() {
   const { customerId } = useParams();
   const [, setLocation] = useLocation();
   const [showAddController, setShowAddController] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [sendLoading, setSendLoading] = useState(false);
   const { toast } = useToast();
@@ -211,6 +214,12 @@ export default function IrrigationProfile() {
     userRole === "super_admin" ||
     userRole === "irrigation_manager" ||
     userRole === "field_tech";
+
+  // CSV import is manager/admin-only — field_tech and billing_manager cannot import
+  const canImport =
+    userRole === "company_admin" ||
+    userRole === "super_admin" ||
+    userRole === "irrigation_manager";
 
   const totalZoneCount = controllers.reduce((sum, c) => sum + (c.totalZones ?? 0), 0);
   const lastUpdated = controllers
@@ -356,6 +365,16 @@ export default function IrrigationProfile() {
                   <Plus className="w-4 h-4" /> Add Controller
                 </Button>
               )}
+              {canImport && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowImportModal(true)}
+                  className="gap-1.5"
+                >
+                  <Upload className="w-4 h-4" /> Import CSV
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="outline"
@@ -401,6 +420,14 @@ export default function IrrigationProfile() {
         />
       )}
 
+      {/* Irrigation CSV import modal */}
+      <IrrigationCsvImportModal
+        open={showImportModal}
+        onOpenChange={setShowImportModal}
+        customerId={parseInt(customerId!)}
+        branchName=""
+      />
+
       {/* Controller list — empty state */}
       {controllers.length === 0 && !showAddController && (
         <div className="text-center py-12 text-gray-500">
@@ -411,10 +438,19 @@ export default function IrrigationProfile() {
               ? "Add a controller to start building this property's irrigation profile."
               : "No controllers have been added to this property's irrigation profile yet."}
           </p>
-          {canWrite && (
-            <Button className="mt-4 gap-1.5" onClick={() => setShowAddController(true)}>
-              <Plus className="w-4 h-4" /> Add Controller
-            </Button>
+          {(canWrite || canImport) && (
+            <div className="flex justify-center gap-2 mt-4">
+              {canWrite && (
+                <Button className="gap-1.5" onClick={() => setShowAddController(true)}>
+                  <Plus className="w-4 h-4" /> Add Controller
+                </Button>
+              )}
+              {canImport && (
+                <Button variant="outline" className="gap-1.5" onClick={() => setShowImportModal(true)}>
+                  <Upload className="w-4 h-4" /> Import CSV
+                </Button>
+              )}
+            </div>
           )}
         </div>
       )}

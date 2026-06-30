@@ -25,6 +25,7 @@
 import type { Express, RequestHandler } from "express";
 import { z } from "zod";
 import { storage } from "../storage";
+import type { IrrigationImportRow, IrrigationImportRowError, IrrigationZoneTypeEnum } from "../storage";
 
 // ── Role helpers ──────────────────────────────────────────────────────────────
 
@@ -685,6 +686,154 @@ export function registerIrrigationProfileRoutes(
       } catch (e: any) {
         req.log?.error?.({ err: e, id }, "attachIrrigationControllerPhoto failed");
         res.status(500).json({ message: "Could not attach photo — please retry" });
+      }
+    },
+  );
+
+  // ── POST /api/customers/:customerId/irrigation-profile/import-csv ───────────
+  // Parse, validate, and optionally apply a flat one-row-per-zone CSV import.
+  // Body: { mode: 'preview'|'commit', rows: ParsedRow[], branchName?: string }
+  // In preview mode: returns the diff, never writes.
+  // In commit mode: applies the non-destructive merge and appends history snapshots.
+  app.post(
+    "/api/customers/:customerId/irrigation-profile/import-csv",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const customerId = parseId(req.params.customerId);
+      if (!customerId) return badId(res, "customer");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      // Only manager-tier roles (not field_tech) may import
+      if (!role || !MANAGER_ROLES.has(role) || role === "billing_manager") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+      if (!callerCompanyId && !isSuperAdmin(role)) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      // Customer ownership guard
+      if (!isSuperAdmin(role)) {
+        const customer = await storage.getCustomer(customerId);
+        if (!customer || customer.companyId !== callerCompanyId!) {
+          return notFound(res, "Customer");
+        }
+      }
+
+      const { mode, rows, branchName } = req.body ?? {};
+
+      if (mode !== "preview" && mode !== "commit") {
+        return res.status(400).json({ message: "mode must be 'preview' or 'commit'" });
+      }
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ message: "rows must be a non-empty array" });
+      }
+
+      // ── Server-side row validation ─────────────────────────────────────────
+      const VALID_ZONE_TYPES = new Set([
+        "pop_up_spray", "rotor", "drip", "netafim", "bubbler", "other",
+      ]);
+      const VALID_DAYS = new Set(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
+      const TIME_RE = /^\d{1,2}:\d{2}$/;
+
+      const validRows: IrrigationImportRow[] = [];
+      const rowErrors: IrrigationImportRowError[] = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const raw = rows[i];
+        const rowNum = i + 2; // header = row 1
+
+        if (!raw.controllerName || typeof raw.controllerName !== "string") {
+          rowErrors.push({ row: rowNum, field: "Controller", message: "Controller name is required" });
+          continue;
+        }
+        if (!Number.isInteger(raw.zoneNumber) || raw.zoneNumber < 1) {
+          rowErrors.push({ row: rowNum, field: "Zone #", message: "Zone # must be a positive integer" });
+          continue;
+        }
+        if (!raw.zoneName || typeof raw.zoneName !== "string") {
+          rowErrors.push({ row: rowNum, field: "Zone Name", message: "Zone Name is required" });
+          continue;
+        }
+        if (!raw.zoneType || !VALID_ZONE_TYPES.has(raw.zoneType)) {
+          rowErrors.push({
+            row: rowNum,
+            field: "Zone Type",
+            message: `Unknown zone type "${raw.zoneType}". Valid: pop_up_spray, rotor, drip, netafim, bubbler, other`,
+          });
+          continue;
+        }
+        if (typeof raw.runTimeMinutes !== "number" || raw.runTimeMinutes < 0) {
+          rowErrors.push({ row: rowNum, field: "Run Time (min)", message: "Run Time must be ≥ 0" });
+          continue;
+        }
+        if (Array.isArray(raw.startTimes)) {
+          const bad = raw.startTimes.find((t: unknown) => typeof t !== "string" || !TIME_RE.test(t));
+          if (bad !== undefined) {
+            rowErrors.push({ row: rowNum, field: "Start Time", message: `Invalid time format "${bad}"` });
+            continue;
+          }
+        }
+        if (Array.isArray(raw.wateringDays) && raw.wateringDays.length > 0) {
+          const badDay = (raw.wateringDays as unknown[]).find(
+            (d) => typeof d !== "string" || !VALID_DAYS.has(d as string),
+          );
+          if (badDay !== undefined) {
+            rowErrors.push({
+              row: rowNum,
+              field: "Watering Days",
+              message: `Invalid watering day "${badDay}". Valid: Mon, Tue, Wed, Thu, Fri, Sat, Sun`,
+            });
+            continue;
+          }
+        }
+
+        validRows.push({
+          controllerName: String(raw.controllerName).trim(),
+          location: raw.location ? String(raw.location).trim() || null : null,
+          brand: raw.brand ? String(raw.brand).trim() || null : null,
+          model: raw.model ? String(raw.model).trim() || null : null,
+          programName: raw.programName ? String(raw.programName).trim() || null : null,
+          wateringDays: Array.isArray(raw.wateringDays) ? raw.wateringDays : null,
+          startTimes: Array.isArray(raw.startTimes) ? raw.startTimes : null,
+          seasonalAdjustPct: typeof raw.seasonalAdjustPct === "number" ? raw.seasonalAdjustPct : 100,
+          zoneNumber: raw.zoneNumber,
+          zoneName: String(raw.zoneName).trim(),
+          zoneType: raw.zoneType as IrrigationZoneTypeEnum,
+          runTimeMinutes: raw.runTimeMinutes,
+        });
+      }
+
+      // If no valid rows remain, return errors
+      if (validRows.length === 0) {
+        return res.status(422).json({
+          message: "No valid rows found — fix the errors below and retry",
+          rowErrors,
+        });
+      }
+
+      const userId = req.authenticatedUserId as number | undefined;
+      const me = userId ? await storage.getUser(userId) : undefined;
+      const actor = me ? { id: me.id, name: me.name } : undefined;
+
+      const effectiveCompanyId = isSuperAdmin(role)
+        ? (callerCompanyId ?? (await storage.getCustomer(customerId))?.companyId!)
+        : callerCompanyId!;
+
+      try {
+        const result = await storage.importIrrigationProfile(
+          effectiveCompanyId,
+          customerId,
+          typeof branchName === "string" ? branchName : "",
+          validRows,
+          mode as "preview" | "commit",
+          actor,
+        );
+        return res.json({ ...result, rowErrors });
+      } catch (e: any) {
+        req.log?.error?.({ err: e, customerId }, "importIrrigationProfile failed");
+        return res.status(500).json({ message: "Import failed — please retry" });
       }
     },
   );

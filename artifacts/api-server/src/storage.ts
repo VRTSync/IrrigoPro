@@ -1297,6 +1297,84 @@ export interface IStorage {
     companyId: number | null,
     controllerId: number,
   ): Promise<IrrigationProfileHistory[]>;
+
+  importIrrigationProfile(
+    companyId: number,
+    customerId: number,
+    branchName: string,
+    rows: IrrigationImportRow[],
+    mode: "preview" | "commit",
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationImportResult>;
+}
+
+// ── Irrigation CSV import types (shared between route and storage) ─────────────
+
+export type IrrigationZoneTypeEnum =
+  | "pop_up_spray"
+  | "rotor"
+  | "drip"
+  | "netafim"
+  | "bubbler"
+  | "other";
+
+export interface IrrigationImportRow {
+  controllerName: string;
+  location: string | null;
+  brand: string | null;
+  model: string | null;
+  programName: string | null;
+  wateringDays: string[] | null;
+  startTimes: string[] | null;
+  seasonalAdjustPct: number;
+  zoneNumber: number;
+  zoneName: string;
+  zoneType: IrrigationZoneTypeEnum;
+  runTimeMinutes: number;
+}
+
+export interface IrrigationImportRowError {
+  row: number;
+  field: string;
+  message: string;
+}
+
+export interface IrrigationImportZoneDiff {
+  action: "create" | "update" | "no_change";
+  zoneNumber: number;
+  zoneName: string;
+  zoneType: IrrigationZoneTypeEnum;
+  runTimeMinutes: number;
+  changes: Array<{ field: string; from: string | number | null; to: string | number | null }>;
+}
+
+export interface IrrigationImportProgramDiff {
+  programName: string;
+  action: "create" | "update" | "no_change";
+  changes: Array<{ field: string; from: string | number | null | string[]; to: string | number | null | string[] }>;
+}
+
+export interface IrrigationImportControllerDiff {
+  controllerName: string;
+  action: "create" | "update";
+  location: string | null;
+  brand: string | null;
+  model: string | null;
+  programs: IrrigationImportProgramDiff[];
+  zones: IrrigationImportZoneDiff[];
+}
+
+export interface IrrigationImportResult {
+  mode: "preview" | "commit";
+  controllers: IrrigationImportControllerDiff[];
+  summary: {
+    controllersCreated: number;
+    controllersUpdated: number;
+    zonesAdded: number;
+    zonesUpdated: number;
+    programsCreated: number;
+    programsUpdated: number;
+  };
 }
 
 export class DatabaseStorage implements IStorage {
@@ -10705,6 +10783,381 @@ export class DatabaseStorage implements IStorage {
       .from(irrigationProfileHistory)
       .where(and(...conditions))
       .orderBy(desc(irrigationProfileHistory.changedAt));
+  }
+
+  async importIrrigationProfile(
+    companyId: number,
+    customerId: number,
+    branchName: string,
+    rows: IrrigationImportRow[],
+    mode: "preview" | "commit",
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationImportResult> {
+    // ── Group CSV rows by controller name ────────────────────────────────────
+    // Build a map: controllerName → { meta, programs: Map<progName,…>, zones: Map<zoneNum,row> }
+    type ProgMeta = { wateringDays: string[] | null; startTimes: string[] | null; seasonalAdjustPct: number };
+    type CtrlGroup = {
+      location: string | null;
+      brand: string | null;
+      model: string | null;
+      programs: Map<string, ProgMeta>;
+      zones: Map<number, IrrigationImportRow>;
+    };
+    const ctrlGroups = new Map<string, CtrlGroup>();
+    for (const row of rows) {
+      let group = ctrlGroups.get(row.controllerName);
+      if (!group) {
+        group = {
+          location: row.location,
+          brand: row.brand,
+          model: row.model,
+          programs: new Map(),
+          zones: new Map(),
+        };
+        ctrlGroups.set(row.controllerName, group);
+      }
+      // Later rows override controller-level metadata for the same controller
+      if (row.location != null) group.location = row.location;
+      if (row.brand != null) group.brand = row.brand;
+      if (row.model != null) group.model = row.model;
+      // Program: key by name (use "default" when blank)
+      const progKey = row.programName?.trim() || "default";
+      if (row.programName) {
+        group.programs.set(progKey, {
+          wateringDays: row.wateringDays,
+          startTimes: row.startTimes,
+          seasonalAdjustPct: row.seasonalAdjustPct,
+        });
+      }
+      // Zone: key by number (last row wins for duplicates)
+      group.zones.set(row.zoneNumber, row);
+    }
+
+    // ── Load existing controllers for this (company, customer, branch) ────────
+    const existingCtrlList = await db
+      .select()
+      .from(irrigationControllers)
+      .where(
+        and(
+          eq(irrigationControllers.companyId, companyId),
+          eq(irrigationControllers.customerId, customerId),
+          eq(irrigationControllers.branchName, branchName),
+        ),
+      );
+
+    // Build lookup maps for existing data
+    const existingCtrlByName = new Map(existingCtrlList.map((c) => [c.name, c]));
+
+    // ── Build the diff ────────────────────────────────────────────────────────
+    const controllerDiffs: IrrigationImportControllerDiff[] = [];
+
+    for (const [ctrlName, group] of ctrlGroups) {
+      const existingCtrl = existingCtrlByName.get(ctrlName);
+      const ctrlAction: "create" | "update" = existingCtrl ? "update" : "create";
+
+      // Load existing programs and zones for this controller (if it exists)
+      let existingPrograms: IrrigationProgram[] = [];
+      let existingZones: IrrigationProfileZone[] = [];
+      if (existingCtrl) {
+        [existingPrograms, existingZones] = await Promise.all([
+          db
+            .select()
+            .from(irrigationPrograms)
+            .where(eq(irrigationPrograms.controllerId, existingCtrl.id))
+            .orderBy(irrigationPrograms.sortOrder, irrigationPrograms.id),
+          db
+            .select()
+            .from(irrigationProfileZones)
+            .where(eq(irrigationProfileZones.controllerId, existingCtrl.id))
+            .orderBy(irrigationProfileZones.zoneNumber),
+        ]);
+      }
+
+      const existingProgByName = new Map(existingPrograms.map((p) => [p.name, p]));
+      const existingZoneByNumber = new Map(existingZones.map((z) => [z.zoneNumber, z]));
+
+      // Diff programs
+      const programDiffs: IrrigationImportProgramDiff[] = [];
+      for (const [progName, progMeta] of group.programs) {
+        const existingProg = existingProgByName.get(progName);
+        if (!existingProg) {
+          programDiffs.push({ programName: progName, action: "create", changes: [] });
+        } else {
+          const changes: IrrigationImportProgramDiff["changes"] = [];
+          if (progMeta.wateringDays !== null &&
+              JSON.stringify(existingProg.wateringDays ?? []) !== JSON.stringify(progMeta.wateringDays)) {
+            changes.push({ field: "wateringDays", from: existingProg.wateringDays ?? null, to: progMeta.wateringDays });
+          }
+          if (progMeta.startTimes !== null &&
+              JSON.stringify(existingProg.startTimes ?? []) !== JSON.stringify(progMeta.startTimes)) {
+            changes.push({ field: "startTimes", from: existingProg.startTimes ?? null, to: progMeta.startTimes });
+          }
+          if (existingProg.seasonalAdjustPct !== progMeta.seasonalAdjustPct) {
+            changes.push({ field: "seasonalAdjustPct", from: existingProg.seasonalAdjustPct, to: progMeta.seasonalAdjustPct });
+          }
+          programDiffs.push({
+            programName: progName,
+            action: changes.length > 0 ? "update" : "no_change",
+            changes,
+          });
+        }
+      }
+
+      // Diff zones
+      const zoneDiffs: IrrigationImportZoneDiff[] = [];
+      for (const [zoneNum, row] of group.zones) {
+        const existingZone = existingZoneByNumber.get(zoneNum);
+        if (!existingZone) {
+          zoneDiffs.push({
+            action: "create",
+            zoneNumber: zoneNum,
+            zoneName: row.zoneName,
+            zoneType: row.zoneType,
+            runTimeMinutes: row.runTimeMinutes,
+            changes: [],
+          });
+        } else {
+          const changes: IrrigationImportZoneDiff["changes"] = [];
+          if (existingZone.name !== row.zoneName) {
+            changes.push({ field: "zoneName", from: existingZone.name, to: row.zoneName });
+          }
+          if (existingZone.zoneType !== row.zoneType) {
+            changes.push({ field: "zoneType", from: existingZone.zoneType, to: row.zoneType });
+          }
+          if (existingZone.runTimeMinutes !== row.runTimeMinutes) {
+            changes.push({ field: "runTimeMinutes", from: existingZone.runTimeMinutes, to: row.runTimeMinutes });
+          }
+          zoneDiffs.push({
+            action: changes.length > 0 ? "update" : "no_change",
+            zoneNumber: zoneNum,
+            zoneName: row.zoneName,
+            zoneType: row.zoneType,
+            runTimeMinutes: row.runTimeMinutes,
+            changes,
+          });
+        }
+      }
+
+      controllerDiffs.push({
+        controllerName: ctrlName,
+        action: ctrlAction,
+        location: group.location,
+        brand: group.brand,
+        model: group.model,
+        programs: programDiffs,
+        zones: zoneDiffs,
+      });
+    }
+
+    const summary = {
+      controllersCreated: controllerDiffs.filter((c) => c.action === "create").length,
+      controllersUpdated: controllerDiffs.filter((c) => c.action === "update").length,
+      zonesAdded: controllerDiffs.reduce((n, c) => n + c.zones.filter((z) => z.action === "create").length, 0),
+      zonesUpdated: controllerDiffs.reduce((n, c) => n + c.zones.filter((z) => z.action === "update").length, 0),
+      programsCreated: controllerDiffs.reduce((n, c) => n + c.programs.filter((p) => p.action === "create").length, 0),
+      programsUpdated: controllerDiffs.reduce((n, c) => n + c.programs.filter((p) => p.action === "update").length, 0),
+    };
+
+    if (mode === "preview") {
+      return { mode: "preview", controllers: controllerDiffs, summary };
+    }
+
+    // ── Commit mode: apply the merge in a single transaction ─────────────────
+    // We drive writes using the pre-computed controllerDiffs so that re-importing
+    // an identical CSV is a true no-op (no DB writes, no history snapshots).
+    await db.transaction(async (tx) => {
+      const q = tx as unknown as typeof db;
+
+      for (const ctrlDiff of controllerDiffs) {
+        const ctrlName = ctrlDiff.controllerName;
+        const group = ctrlGroups.get(ctrlName)!;
+        const existingCtrl = existingCtrlByName.get(ctrlName);
+
+        const hasProgramChanges = ctrlDiff.programs.some((p) => p.action !== "no_change");
+        const hasZoneChanges = ctrlDiff.zones.some((z) => z.action !== "no_change");
+
+        // No-op: existing controller with nothing to create or update — skip entirely.
+        if (ctrlDiff.action === "update" && !hasProgramChanges && !hasZoneChanges) {
+          continue;
+        }
+
+        let ctrlId: number;
+
+        if (ctrlDiff.action === "create") {
+          // ── Create new controller ────────────────────────────────────────
+          const [newCtrl] = await q
+            .insert(irrigationControllers)
+            .values({
+              companyId,
+              customerId,
+              branchName,
+              name: ctrlName,
+              location: group.location,
+              brand: group.brand,
+              model: group.model,
+              totalZones: group.zones.size > 0 ? Math.max(...group.zones.keys()) : null,
+              isActive: true,
+              lastUpdatedByUserId: actor?.id ?? null,
+              lastUpdatedByName: actor?.name ?? null,
+              lastUpdatedAt: new Date(),
+            })
+            .returning();
+          ctrlId = newCtrl.id;
+        } else {
+          // ── Update existing controller (only fields that actually changed) ─
+          ctrlId = existingCtrl!.id;
+          const maxInputZone = group.zones.size > 0 ? Math.max(...group.zones.keys()) : 0;
+          const newTotalZones =
+            maxInputZone > (existingCtrl!.totalZones ?? 0) ? maxInputZone : existingCtrl!.totalZones;
+
+          const ctrlPatch: Record<string, unknown> = {};
+          if (group.location !== null && group.location !== existingCtrl!.location)
+            ctrlPatch.location = group.location;
+          if (group.brand !== null && group.brand !== existingCtrl!.brand)
+            ctrlPatch.brand = group.brand;
+          if (group.model !== null && group.model !== existingCtrl!.model)
+            ctrlPatch.model = group.model;
+          if (newTotalZones !== existingCtrl!.totalZones) ctrlPatch.totalZones = newTotalZones;
+
+          // Stamp lastUpdated only when there is actual work to do
+          if (Object.keys(ctrlPatch).length > 0 || hasProgramChanges || hasZoneChanges) {
+            ctrlPatch.lastUpdatedByUserId = actor?.id ?? null;
+            ctrlPatch.lastUpdatedByName = actor?.name ?? null;
+            ctrlPatch.lastUpdatedAt = new Date();
+            ctrlPatch.updatedAt = new Date();
+            await q
+              .update(irrigationControllers)
+              .set(ctrlPatch)
+              .where(eq(irrigationControllers.id, ctrlId));
+          }
+        }
+
+        // ── Programs: only create/update those that the diff marks as changed ─
+        const progDiffByName = new Map(ctrlDiff.programs.map((p) => [p.programName, p]));
+        const existingProgByName = new Map(
+          (
+            await q
+              .select()
+              .from(irrigationPrograms)
+              .where(eq(irrigationPrograms.controllerId, ctrlId))
+          ).map((p) => [p.name, p]),
+        );
+        const progNameToId = new Map<string, number>();
+        let sortIdx = existingProgByName.size;
+
+        for (const [progName, progMeta] of group.programs) {
+          const existingProg = existingProgByName.get(progName);
+          const pd = progDiffByName.get(progName);
+
+          if (!existingProg || pd?.action === "create") {
+            // Create
+            const [newProg] = await q
+              .insert(irrigationPrograms)
+              .values({
+                companyId,
+                controllerId: ctrlId,
+                name: progName,
+                wateringDays: progMeta.wateringDays,
+                startTimes: progMeta.startTimes,
+                seasonalAdjustPct: progMeta.seasonalAdjustPct,
+                isActive: true,
+                sortOrder: sortIdx++,
+              })
+              .returning();
+            progNameToId.set(progName, newProg.id);
+          } else if (pd?.action === "update") {
+            // Update only changed fields
+            const patch: Record<string, unknown> = { updatedAt: new Date() };
+            if (progMeta.wateringDays !== null) patch.wateringDays = progMeta.wateringDays;
+            if (progMeta.startTimes !== null) patch.startTimes = progMeta.startTimes;
+            patch.seasonalAdjustPct = progMeta.seasonalAdjustPct;
+            await q
+              .update(irrigationPrograms)
+              .set(patch)
+              .where(eq(irrigationPrograms.id, existingProg.id));
+            progNameToId.set(progName, existingProg.id);
+          } else {
+            // no_change — collect id for zone→program FK only
+            if (existingProg) progNameToId.set(progName, existingProg.id);
+          }
+        }
+
+        // ── Zones: only create/update those that the diff marks as changed ────
+        const zoneDiffByNumber = new Map(ctrlDiff.zones.map((z) => [z.zoneNumber, z]));
+        const existingZoneByNumber = new Map(
+          (
+            await q
+              .select()
+              .from(irrigationProfileZones)
+              .where(eq(irrigationProfileZones.controllerId, ctrlId))
+          ).map((z) => [z.zoneNumber, z]),
+        );
+
+        for (const [zoneNum, row] of group.zones) {
+          const programId = row.programName ? (progNameToId.get(row.programName) ?? null) : null;
+          const existingZone = existingZoneByNumber.get(zoneNum);
+          const zd = zoneDiffByNumber.get(zoneNum);
+
+          if (!existingZone || zd?.action === "create") {
+            await q
+              .insert(irrigationProfileZones)
+              .values({
+                companyId,
+                controllerId: ctrlId,
+                programId,
+                zoneNumber: zoneNum,
+                name: row.zoneName,
+                zoneType: row.zoneType,
+                runTimeMinutes: row.runTimeMinutes,
+                zoneOrder: zoneNum,
+                isActive: true,
+              })
+              .onConflictDoNothing();
+          } else if (zd?.action === "update") {
+            await q
+              .update(irrigationProfileZones)
+              .set({
+                name: row.zoneName,
+                zoneType: row.zoneType,
+                runTimeMinutes: row.runTimeMinutes,
+                programId,
+                updatedAt: new Date(),
+              })
+              .where(eq(irrigationProfileZones.id, existingZone.id));
+          }
+          // no_change: skip write entirely
+        }
+
+        // ── History snapshot: only when actual work was done ─────────────────
+        const [updatedCtrl] = await q
+          .select()
+          .from(irrigationControllers)
+          .where(eq(irrigationControllers.id, ctrlId));
+        const programs = await q
+          .select()
+          .from(irrigationPrograms)
+          .where(eq(irrigationPrograms.controllerId, ctrlId))
+          .orderBy(irrigationPrograms.sortOrder, irrigationPrograms.id);
+        const zones = await q
+          .select()
+          .from(irrigationProfileZones)
+          .where(eq(irrigationProfileZones.controllerId, ctrlId))
+          .orderBy(irrigationProfileZones.zoneOrder, irrigationProfileZones.zoneNumber);
+
+        if (updatedCtrl) {
+          await q.insert(irrigationProfileHistory).values({
+            companyId,
+            controllerId: ctrlId,
+            snapshotJson: { controller: updatedCtrl, programs, zones } as any,
+            changedByUserId: actor?.id ?? null,
+            changedByName: actor?.name ?? null,
+            summary: `CSV import: ${ctrlName}`,
+          });
+        }
+      }
+    });
+
+    return { mode: "commit", controllers: controllerDiffs, summary };
   }
 }
 

@@ -50,6 +50,7 @@
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/node": "catalog:",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
@@ -88,15 +89,16 @@
     "zod": "catalog:"
   },
   "dependencies": {
+    "@workspace/shared": "workspace:*",
     "browser-image-compression": "^2.0.2",
     "idb": "^8.0.3",
     "leaflet": "^1.9.4",
+    "papaparse": "^5.5.4",
     "workbox-cacheable-response": "^7.4.1",
     "workbox-expiration": "^7.4.1",
     "workbox-precaching": "^7.4.1",
     "workbox-routing": "^7.4.1",
     "workbox-strategies": "^7.4.1",
-    "xml2js": "^0.6.2",
-    "@workspace/shared": "workspace:*"
+    "xml2js": "^0.6.2"
   }
 }

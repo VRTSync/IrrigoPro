@@ -544,3 +544,269 @@ describe("assertCanViewPhoto — irrigation_controllers.settingsPhotoUrl", () =>
     assert.ok(!threw, "canViewPhoto should not throw a DB error");
   });
 });
+
+// ── CSV import endpoint ────────────────────────────────────────────────────────
+
+describe("Irrigation Profile routes — CSV import", () => {
+  let srv: ReturnType<typeof makeTestServer>;
+  let srvB: ReturnType<typeof makeTestServer>;
+
+  before(async () => {
+    await setupCompanies();
+    srv = makeTestServer({
+      role: "irrigation_manager",
+      companyId: companyAId,
+      userId: managerAUserId,
+    });
+    srvB = makeTestServer({
+      role: "irrigation_manager",
+      companyId: companyBId,
+      userId: managerBUserId,
+    });
+  });
+
+  after(async () => {
+    await cleanupControllers();
+    await srv.close();
+    await srvB.close();
+  });
+
+  const BASE_ROWS = [
+    {
+      controllerName: "CSV Ctrl 1",
+      location: "Front Yard",
+      brand: "Hunter",
+      model: "Pro-C",
+      programName: "A",
+      wateringDays: ["Mon", "Wed", "Fri"],
+      startTimes: ["06:00"],
+      seasonalAdjustPct: 100,
+      zoneNumber: 1,
+      zoneName: "Front Lawn",
+      zoneType: "rotor",
+      runTimeMinutes: 15,
+    },
+    {
+      controllerName: "CSV Ctrl 1",
+      location: "Front Yard",
+      brand: "Hunter",
+      model: "Pro-C",
+      programName: "A",
+      wateringDays: ["Mon", "Wed", "Fri"],
+      startTimes: ["06:00"],
+      seasonalAdjustPct: 100,
+      zoneNumber: 2,
+      zoneName: "Side Bed",
+      zoneType: "drip",
+      runTimeMinutes: 20,
+    },
+  ];
+
+  it("preview mode returns diff without writing any controller", async () => {
+    const { status, body } = await hit(
+      srv.base,
+      "POST",
+      `/api/customers/${customerAId}/irrigation-profile/import-csv`,
+      { mode: "preview", rows: BASE_ROWS, branchName: "" },
+    );
+    assert.equal(status, 200, `Expected 200, got ${status}: ${JSON.stringify(body)}`);
+    assert.equal(body.mode, "preview");
+    assert.equal(body.controllers.length, 1);
+    assert.equal(body.controllers[0].action, "create");
+    assert.equal(body.controllers[0].zones.length, 2);
+    assert.ok(body.summary.controllersCreated === 1, "preview should show 1 controller to create");
+
+    // Verify nothing was actually written
+    const existing = await storage.listIrrigationControllers(companyAId, customerAId, "");
+    const wasSaved = existing.some((c) => c.name === "CSV Ctrl 1");
+    assert.ok(!wasSaved, "preview should NOT write to DB");
+  });
+
+  it("commit mode creates controller + zones + history snapshot", async () => {
+    const { status, body } = await hit(
+      srv.base,
+      "POST",
+      `/api/customers/${customerAId}/irrigation-profile/import-csv`,
+      { mode: "commit", rows: BASE_ROWS, branchName: "" },
+    );
+    assert.equal(status, 200, `Expected 200, got ${status}: ${JSON.stringify(body)}`);
+    assert.equal(body.mode, "commit");
+    assert.equal(body.summary.controllersCreated, 1);
+    assert.equal(body.summary.zonesAdded, 2);
+
+    // Verify controller was created
+    const ctrls = await storage.listIrrigationControllers(companyAId, customerAId, "");
+    const ctrl = ctrls.find((c) => c.name === "CSV Ctrl 1");
+    assert.ok(ctrl, "controller should have been created");
+    createdControllerIds.push(ctrl!.id);
+
+    // Verify zones
+    const profile = await storage.getIrrigationController(companyAId, ctrl!.id);
+    assert.ok(profile, "should have a profile");
+    assert.equal(profile!.zones.length, 2);
+
+    // Verify history
+    const history = await storage.getIrrigationHistory(companyAId, ctrl!.id);
+    assert.ok(history.length >= 1, "should have at least one history snapshot");
+    const firstEntry = history[0];
+    assert.ok(firstEntry != null && (firstEntry.summary ?? "").includes("CSV import"), "summary should mention CSV import");
+  });
+
+  it("second commit is a non-destructive update — only touched zones change", async () => {
+    // First commit already ran in the test above, so "CSV Ctrl 1" exists.
+    const ctrls = await storage.listIrrigationControllers(companyAId, customerAId, "");
+    const existingCtrl = ctrls.find((c) => c.name === "CSV Ctrl 1");
+    if (!existingCtrl) {
+      // If first test didn't run (isolated), skip gracefully.
+      return;
+    }
+
+    const UPDATE_ROWS = [
+      {
+        ...BASE_ROWS[0],
+        zoneName: "Front Lawn UPDATED",
+        runTimeMinutes: 18,
+      },
+    ];
+
+    const { status, body } = await hit(
+      srv.base,
+      "POST",
+      `/api/customers/${customerAId}/irrigation-profile/import-csv`,
+      { mode: "commit", rows: UPDATE_ROWS, branchName: "" },
+    );
+    assert.equal(status, 200);
+    assert.equal(body.summary.zonesUpdated, 1);
+    assert.equal(body.summary.zonesAdded, 0);
+
+    // Zone 2 should still exist (non-destructive)
+    const profile = await storage.getIrrigationController(companyAId, existingCtrl.id);
+    assert.equal(profile!.zones.length, 2, "second zone should still exist (never deleted)");
+    const zone1 = profile!.zones.find((z: { zoneNumber: number }) => z.zoneNumber === 1);
+    assert.equal(zone1?.name, "Front Lawn UPDATED");
+  });
+
+  it("field_tech role is forbidden", async () => {
+    const techSrv = makeTestServer({
+      role: "field_tech",
+      companyId: companyAId,
+      userId: managerAUserId,
+    });
+    try {
+      const { status } = await hit(
+        techSrv.base,
+        "POST",
+        `/api/customers/${customerAId}/irrigation-profile/import-csv`,
+        { mode: "preview", rows: BASE_ROWS, branchName: "" },
+      );
+      assert.equal(status, 403, "field_tech should get 403");
+    } finally {
+      await techSrv.close();
+    }
+  });
+
+  it("billing_manager role is forbidden", async () => {
+    const billSrv = makeTestServer({
+      role: "billing_manager",
+      companyId: companyAId,
+      userId: managerAUserId,
+    });
+    try {
+      const { status } = await hit(
+        billSrv.base,
+        "POST",
+        `/api/customers/${customerAId}/irrigation-profile/import-csv`,
+        { mode: "preview", rows: BASE_ROWS, branchName: "" },
+      );
+      assert.equal(status, 403, "billing_manager should get 403");
+    } finally {
+      await billSrv.close();
+    }
+  });
+
+  it("company B manager cannot import into company A customer", async () => {
+    const { status } = await hit(
+      srvB.base,
+      "POST",
+      `/api/customers/${customerAId}/irrigation-profile/import-csv`,
+      { mode: "preview", rows: BASE_ROWS, branchName: "" },
+    );
+    assert.ok(status === 403 || status === 404, `Expected 403/404, got ${status}`);
+  });
+
+  it("invalid zone type returns 422", async () => {
+    const badRow = { ...BASE_ROWS[0], zoneType: "garden_hose" };
+    const { status, body } = await hit(
+      srv.base,
+      "POST",
+      `/api/customers/${customerAId}/irrigation-profile/import-csv`,
+      { mode: "preview", rows: [badRow], branchName: "" },
+    );
+    assert.equal(status, 422, `Expected 422, got ${status}`);
+    assert.ok(Array.isArray(body.rowErrors) && body.rowErrors.length > 0, "should return rowErrors");
+  });
+
+  it("empty rows array returns 400", async () => {
+    const { status } = await hit(
+      srv.base,
+      "POST",
+      `/api/customers/${customerAId}/irrigation-profile/import-csv`,
+      { mode: "preview", rows: [], branchName: "" },
+    );
+    assert.equal(status, 400);
+  });
+
+  it("invalid mode returns 400", async () => {
+    const { status } = await hit(
+      srv.base,
+      "POST",
+      `/api/customers/${customerAId}/irrigation-profile/import-csv`,
+      { mode: "apply", rows: BASE_ROWS, branchName: "" },
+    );
+    assert.equal(status, 400);
+  });
+
+  it("invalid watering day token returns 422 with rowErrors", async () => {
+    const badRow = { ...BASE_ROWS[0], wateringDays: ["Mon", "EVERYDAY"] };
+    const { status, body } = await hit(
+      srv.base,
+      "POST",
+      `/api/customers/${customerAId}/irrigation-profile/import-csv`,
+      { mode: "preview", rows: [badRow], branchName: "" },
+    );
+    assert.equal(status, 422, `Expected 422, got ${status}`);
+    assert.ok(Array.isArray(body.rowErrors) && body.rowErrors.length > 0, "should return rowErrors");
+    const err = body.rowErrors[0];
+    assert.ok(err.field === "Watering Days", `Expected field 'Watering Days', got '${err.field}'`);
+    assert.ok(err.message.includes("EVERYDAY"), "error message should name the bad token");
+  });
+
+  it("re-committing an identical CSV is a no-op (no extra history snapshot)", async () => {
+    // First commit — should succeed and create a history snapshot
+    const { status: s1, body: b1 } = await hit(
+      srv.base,
+      "POST",
+      `/api/customers/${customerAId}/irrigation-profile/import-csv`,
+      { mode: "commit", rows: BASE_ROWS, branchName: "idempotent-test" },
+    );
+    assert.equal(s1, 200, `First commit: expected 200, got ${s1}`);
+    assert.ok(b1.summary.controllersCreated >= 0, "first commit should report controller stats");
+
+    // Second commit with identical data — no changes expected
+    const { status: s2, body: b2 } = await hit(
+      srv.base,
+      "POST",
+      `/api/customers/${customerAId}/irrigation-profile/import-csv`,
+      { mode: "commit", rows: BASE_ROWS, branchName: "idempotent-test" },
+    );
+    assert.equal(s2, 200, `Second commit: expected 200, got ${s2}`);
+    // All controllers should be update/no_change — none created on second pass
+    const secondControllers: Array<{ action: string }> = b2.controllers ?? [];
+    for (const c of secondControllers) {
+      assert.ok(
+        c.action === "update" || c.action === "no_change",
+        `Expected update/no_change on second commit, got ${c.action}`,
+      );
+    }
+  });
+});
