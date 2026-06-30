@@ -497,6 +497,7 @@ interface IrrigationCsvImportModalProps {
   onOpenChange: (open: boolean) => void;
   customerId: number;
   branchName?: string;
+  branches?: string[] | null;
 }
 
 type Step = "upload" | "preview" | "done";
@@ -506,7 +507,11 @@ export function IrrigationCsvImportModal({
   onOpenChange,
   customerId,
   branchName = "",
+  branches,
 }: IrrigationCsvImportModalProps) {
+  const normalizedBranches = (branches ?? []).filter(Boolean);
+  const isMultiBranch = normalizedBranches.length > 1;
+
   const [step, setStep] = useState<Step>("upload");
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -515,6 +520,7 @@ export function IrrigationCsvImportModal({
   const [importing, setImporting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [commitResult, setCommitResult] = useState<ImportResult | null>(null);
+  const [selectedBranch, setSelectedBranch] = useState<string>(branchName);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -527,6 +533,7 @@ export function IrrigationCsvImportModal({
     setCommitResult(null);
     setImporting(false);
     setPreviewing(false);
+    setSelectedBranch(branchName);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -558,7 +565,7 @@ export function IrrigationCsvImportModal({
               ...getAuthHeaders(),
             },
             credentials: "include",
-            body: JSON.stringify({ mode: "preview", rows, branchName }),
+            body: JSON.stringify({ mode: "preview", rows, branchName: selectedBranch }),
           },
         );
         const body = await res.json().catch(() => ({}));
@@ -598,7 +605,7 @@ export function IrrigationCsvImportModal({
       return;
     }
     readAndPreview(f);
-  }, [customerId, branchName]);
+  }, [customerId, selectedBranch]);
 
   async function handleImport() {
     if (!previewResult || !file) return;
@@ -620,7 +627,7 @@ export function IrrigationCsvImportModal({
             ...getAuthHeaders(),
           },
           credentials: "include",
-          body: JSON.stringify({ mode: "commit", rows, branchName }),
+          body: JSON.stringify({ mode: "commit", rows, branchName: selectedBranch }),
         },
       );
       const body = await res.json().catch(() => ({}));
@@ -670,6 +677,28 @@ export function IrrigationCsvImportModal({
                 <Download className="w-4 h-4" /> Template
               </Button>
             </div>
+
+            {/* Branch selector — only shown for multi-branch properties */}
+            {isMultiBranch && (
+              <div className="rounded-lg border px-4 py-3 bg-blue-50/40 space-y-1.5">
+                <label className="text-sm font-medium text-gray-800 block">
+                  Import into branch
+                </label>
+                <select
+                  value={selectedBranch}
+                  onChange={(e) => setSelectedBranch(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">— Default (no branch) —</option>
+                  {normalizedBranches.map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500">
+                  Controllers will be placed under the selected branch.
+                </p>
+              </div>
+            )}
 
             {/* Drop zone */}
             <div

@@ -425,7 +425,7 @@ export default function IrrigationProfile() {
         open={showImportModal}
         onOpenChange={setShowImportModal}
         customerId={parseInt(customerId!)}
-        branchName=""
+        branches={customer?.branches as string[] | null | undefined}
       />
 
       {/* Controller list — empty state */}
