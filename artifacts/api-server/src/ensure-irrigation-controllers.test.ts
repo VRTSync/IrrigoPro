@@ -2,7 +2,7 @@
 //
 // Verifies that:
 //  1. ensureIrrigationControllers creates irrigation_controllers rows (not property_controllers).
-//  2. Zone placeholder rows (irrigation_profile_zones) are seeded 1..DEFAULT_ZONE_COUNT.
+//  2. Zone placeholder rows (irrigation_profile_zones) are seeded 1..zoneCount from each config.
 //  3. A second call for the same tuple is a no-op (idempotent).
 //  4. The zone-count trim in updateIrrigationController removes only empty trailing zones.
 //
@@ -34,25 +34,45 @@ describe("ensureIrrigationControllers — basic seeding", () => {
   before(cleanup);
   after(cleanup);
 
-  it("seeds irrigation_controllers rows for count=2 (A, B)", async () => {
+  it("seeds irrigation_controllers rows honoring passed-in zone counts", async () => {
+    const configs = [
+      { name: "Controller A", zoneCount: 7 },
+      { name: "Controller B", zoneCount: 9 },
+    ];
     const rows = await storage.ensureIrrigationControllers(
       TEST_COMPANY_ID,
       TEST_CUSTOMER_ID,
-      2,
+      configs,
       null,
     );
 
     assert.equal(rows.length, 2);
-    const names = rows.map((r) => r.name).sort();
-    assert.deepEqual(names, ["Controller A", "Controller B"]);
+    const sorted = [...rows].sort((a, b) => a.name.localeCompare(b.name));
+    assert.equal(sorted[0].name, "Controller A");
+    assert.equal(sorted[0].totalZones, 7, "totalZones should be 7, not a hardcoded default");
+    assert.equal(sorted[1].name, "Controller B");
+    assert.equal(sorted[1].totalZones, 9, "totalZones should be 9, not a hardcoded default");
     assert.equal(rows[0].companyId, TEST_COMPANY_ID);
     assert.equal(rows[0].customerId, TEST_CUSTOMER_ID);
-    assert.equal(rows[0].totalZones, 12, "default totalZones should be 12");
   });
 
-  it("seeds irrigation_profile_zones placeholder rows for each controller", async () => {
-    const zoneRows = await db.execute<{ controller_id: string; zone_number: string }>(sql`
-      SELECT ic.id AS controller_id, ipz.zone_number
+  it("seeds null totalZones when zoneCount is null (no silent default)", async () => {
+    const configs = [{ name: "Controller C", zoneCount: null }];
+    const rows = await storage.ensureIrrigationControllers(
+      TEST_COMPANY_ID,
+      TEST_CUSTOMER_ID,
+      configs,
+      null,
+    );
+
+    const ctrl = rows.find((r) => r.name === "Controller C");
+    assert.ok(ctrl, "Controller C should be seeded");
+    assert.equal(ctrl!.totalZones, null, "totalZones should be null, not 12");
+  });
+
+  it("seeds irrigation_profile_zones placeholder rows matching each zone count", async () => {
+    const zoneRows = await db.execute<{ controller_name: string; zone_number: string }>(sql`
+      SELECT ic.name AS controller_name, ipz.zone_number
       FROM irrigation_controllers ic
       JOIN irrigation_profile_zones ipz ON ipz.controller_id = ic.id
       WHERE ic.company_id  = ${TEST_COMPANY_ID}
@@ -60,8 +80,17 @@ describe("ensureIrrigationControllers — basic seeding", () => {
       ORDER BY ic.name, ipz.zone_number
     `);
 
-    // 2 controllers × 12 zones each = 24 placeholder rows
-    assert.equal(zoneRows.rows.length, 24);
+    const byController = new Map<string, number[]>();
+    for (const r of zoneRows.rows) {
+      const name = String(r.controller_name);
+      if (!byController.has(name)) byController.set(name, []);
+      byController.get(name)!.push(Number(r.zone_number));
+    }
+
+    // Controller A: 7 zones, Controller B: 9 zones, Controller C: 0 zones (null count)
+    assert.deepEqual(byController.get("Controller A"), [1, 2, 3, 4, 5, 6, 7]);
+    assert.deepEqual(byController.get("Controller B"), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    assert.equal(byController.has("Controller C"), false, "no zones for null-count controller");
   });
 });
 
@@ -70,8 +99,12 @@ describe("ensureIrrigationControllers — idempotency", () => {
   after(cleanup);
 
   it("calling twice for the same tuple creates no duplicate rows", async () => {
-    await storage.ensureIrrigationControllers(TEST_COMPANY_ID, TEST_CUSTOMER_ID, 2, null);
-    await storage.ensureIrrigationControllers(TEST_COMPANY_ID, TEST_CUSTOMER_ID, 2, null);
+    const configs = [
+      { name: "Controller A", zoneCount: 5 },
+      { name: "Controller B", zoneCount: 8 },
+    ];
+    await storage.ensureIrrigationControllers(TEST_COMPANY_ID, TEST_CUSTOMER_ID, configs, null);
+    await storage.ensureIrrigationControllers(TEST_COMPANY_ID, TEST_CUSTOMER_ID, configs, null);
 
     const ctrlCount = await db.execute<{ cnt: string }>(sql`
       SELECT COUNT(*) AS cnt FROM irrigation_controllers
@@ -80,13 +113,22 @@ describe("ensureIrrigationControllers — idempotency", () => {
     assert.equal(Number(ctrlCount.rows[0]?.cnt), 2, "should still have exactly 2 controllers");
   });
 
-  it("growing count adds missing letters without duplicating existing ones", async () => {
-    await storage.ensureIrrigationControllers(TEST_COMPANY_ID, TEST_CUSTOMER_ID, 2, null);
-    const rows = await storage.ensureIrrigationControllers(TEST_COMPANY_ID, TEST_CUSTOMER_ID, 3, null);
+  it("growing config list adds missing entries without duplicating existing ones", async () => {
+    await storage.ensureIrrigationControllers(TEST_COMPANY_ID, TEST_CUSTOMER_ID, [
+      { name: "Controller A", zoneCount: 5 },
+      { name: "Controller B", zoneCount: 8 },
+    ], null);
+    const rows = await storage.ensureIrrigationControllers(TEST_COMPANY_ID, TEST_CUSTOMER_ID, [
+      { name: "Controller A", zoneCount: 5 },
+      { name: "Controller B", zoneCount: 8 },
+      { name: "Controller C", zoneCount: 10 },
+    ], null);
 
     assert.equal(rows.length, 3);
     const names = rows.map((r) => r.name).sort();
     assert.deepEqual(names, ["Controller A", "Controller B", "Controller C"]);
+    const ctrlC = rows.find((r) => r.name === "Controller C");
+    assert.equal(ctrlC?.totalZones, 10, "new controller should have passed-in zone count");
   });
 });
 
@@ -96,10 +138,10 @@ describe("ensureIrrigationControllers — branch isolation", () => {
 
   it("seeds with branchName scoped separately from the null branch", async () => {
     const nullBranch = await storage.ensureIrrigationControllers(
-      TEST_COMPANY_ID, TEST_CUSTOMER_ID, 1, null,
+      TEST_COMPANY_ID, TEST_CUSTOMER_ID, [{ name: "Controller A", zoneCount: 6 }], null,
     );
     const namedBranch = await storage.ensureIrrigationControllers(
-      TEST_COMPANY_ID, TEST_CUSTOMER_ID, 1, "East",
+      TEST_COMPANY_ID, TEST_CUSTOMER_ID, [{ name: "Controller A", zoneCount: 4 }], "East",
     );
 
     assert.equal(nullBranch.length, 1);
@@ -117,7 +159,7 @@ describe("updateIrrigationController — non-destructive zone trim", () => {
     await cleanup();
     // Create a controller with 5 empty placeholder zones.
     const [ctrl] = await storage.ensureIrrigationControllers(
-      TEST_COMPANY_ID, TEST_CUSTOMER_ID, 1, null,
+      TEST_COMPANY_ID, TEST_CUSTOMER_ID, [{ name: "Controller A", zoneCount: 5 }], null,
     );
     controllerId = ctrl!.id;
     // Override totalZones to 5 for our test scenario.

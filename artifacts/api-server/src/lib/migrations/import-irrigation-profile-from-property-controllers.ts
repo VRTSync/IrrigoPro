@@ -1,14 +1,21 @@
 // Admin migration: seed irrigation_controllers + irrigation_profile_zones from property_controllers.
 //
-// For every (companyId, customerId, branchName) tuple that has property_controllers rows
-// but no irrigation_controllers rows, creates one irrigation_controllers row per legacy
-// controller (named "Controller {letter}") with totalZones = zoneCount. Also seeds
-// irrigation_profile_zones placeholder rows (zone numbers 1…zoneCount) so the profile
-// page can display zone counts immediately.
+// Two passes are run:
 //
-// Idempotent: the outer guard skips any tuple that already has at least one
-// irrigation_controllers row. Both inserts use ON CONFLICT DO NOTHING so concurrent or
-// repeated calls produce no duplicates. Does not modify property_controllers.
+// Pass 1 — Seed: For every (companyId, customerId, branchName) tuple that has
+// property_controllers rows but no irrigation_controllers rows at all, create one
+// irrigation_controllers row per legacy controller (named "Controller {letter}") with
+// totalZones = zoneCount from property_controllers. Also seeds irrigation_profile_zones
+// placeholder rows (zone numbers 1…zoneCount) per controller.
+//
+// Pass 2 — Backfill: For every irrigation_controllers row whose totalZones IS NULL,
+// look up the matching property_controllers row (same company/customer/branch/letter) and
+// update total_zones + sync irrigation_profile_zones: insert missing trailing zone
+// placeholders up to the new count, and remove trailing zones beyond the new count only
+// if they carry no programs, run-times, or notes (data zones are never removed).
+//
+// Both inserts use ON CONFLICT DO NOTHING so concurrent or repeated calls are safe.
+// Does not modify property_controllers.
 
 import { db } from '../../db';
 import { sql } from 'drizzle-orm';
@@ -34,6 +41,15 @@ type LegacyControllerRow = {
   zoneCount: number;
 };
 
+type BackfillRow = {
+  irrigationControllerId: number;
+  companyId: number;
+  customerId: number;
+  branchName: string;
+  controllerLetter: string;
+  zoneCount: number;
+};
+
 type TupleKey = string;
 
 function tupleKey(r: LegacyControllerRow): TupleKey {
@@ -43,10 +59,10 @@ function tupleKey(r: LegacyControllerRow): TupleKey {
 // ── DB helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * Load all property_controllers rows whose (companyId, customerId, branchName)
+ * Pass 1 — Load all property_controllers rows whose (companyId, customerId, branchName)
  * tuple has no irrigation_controllers row yet.
  */
-async function loadCandidates(): Promise<LegacyControllerRow[]> {
+async function loadSeedCandidates(): Promise<LegacyControllerRow[]> {
   const result = await db.execute<{
     company_id: string;
     customer_id: string;
@@ -81,7 +97,48 @@ async function loadCandidates(): Promise<LegacyControllerRow[]> {
 }
 
 /**
- * Seed one irrigation_controllers row for a legacy controller, plus
+ * Pass 2 — Load irrigation_controllers rows with totalZones IS NULL that have a
+ * matching property_controllers row (same company/customer/branch, letter extracted
+ * from the last word of the controller name).
+ */
+async function loadBackfillCandidates(): Promise<BackfillRow[]> {
+  const result = await db.execute<{
+    ic_id: string;
+    company_id: string;
+    customer_id: string;
+    branch_name: string;
+    controller_letter: string;
+    zone_count: string;
+  }>(sql`
+    SELECT
+      ic.id            AS ic_id,
+      ic.company_id,
+      ic.customer_id,
+      ic.branch_name,
+      pc.controller_letter,
+      pc.zone_count
+    FROM irrigation_controllers ic
+    JOIN property_controllers pc
+      ON  pc.company_id        = ic.company_id
+      AND pc.customer_id       = ic.customer_id
+      AND pc.branch_name       = ic.branch_name
+      AND pc.controller_letter = upper(right(trim(ic.name), 1))
+    WHERE ic.total_zones IS NULL
+    ORDER BY ic.company_id, ic.customer_id, ic.branch_name, ic.name
+  `);
+
+  return result.rows.map((r) => ({
+    irrigationControllerId: Number(r.ic_id),
+    companyId: Number(r.company_id),
+    customerId: Number(r.customer_id),
+    branchName: String(r.branch_name),
+    controllerLetter: String(r.controller_letter),
+    zoneCount: Number(r.zone_count),
+  }));
+}
+
+/**
+ * Pass 1: seed one irrigation_controllers row for a legacy controller, plus
  * irrigation_profile_zones placeholder rows 1..zoneCount.
  * Uses ON CONFLICT DO NOTHING — race-safe.
  */
@@ -124,6 +181,45 @@ async function seedController(row: LegacyControllerRow): Promise<void> {
   }
 }
 
+/**
+ * Pass 2: backfill total_zones on an existing irrigation_controllers row, then
+ * sync irrigation_profile_zones:
+ *   - Insert missing trailing zone placeholders up to the new count.
+ *   - Remove trailing zone rows beyond the new count ONLY if they have no
+ *     program assignment, non-zero run time, or notes (data zones are kept).
+ */
+async function backfillController(row: BackfillRow): Promise<void> {
+  // 1. Stamp the real zone count on the controller row.
+  await db.execute(sql`
+    UPDATE irrigation_controllers
+    SET total_zones = ${row.zoneCount}, updated_at = NOW()
+    WHERE id = ${row.irrigationControllerId}
+      AND total_zones IS NULL
+  `);
+
+  // 2. Insert any missing placeholder zone rows up to the new count.
+  for (let z = 1; z <= row.zoneCount; z++) {
+    const zoneName = `Zone ${z}`;
+    await db.execute(sql`
+      INSERT INTO irrigation_profile_zones
+        (company_id, controller_id, zone_number, name, zone_type, run_time_minutes, zone_order, is_active, created_at, updated_at)
+      VALUES
+        (${row.companyId}, ${row.irrigationControllerId}, ${z}, ${zoneName}, 'other', 0, ${z}, true, NOW(), NOW())
+      ON CONFLICT (company_id, controller_id, zone_number) DO NOTHING
+    `);
+  }
+
+  // 3. Remove trailing empty zone rows beyond the new count (data zones are kept).
+  await db.execute(sql`
+    DELETE FROM irrigation_profile_zones
+    WHERE controller_id = ${row.irrigationControllerId}
+      AND zone_number   > ${row.zoneCount}
+      AND program_id    IS NULL
+      AND (run_time_minutes IS NULL OR run_time_minutes = 0)
+      AND (notes IS NULL OR notes = '')
+  `);
+}
+
 async function markDone(): Promise<void> {
   await db.execute(sql`
     INSERT INTO app_settings (key, value)
@@ -136,9 +232,14 @@ async function markDone(): Promise<void> {
 
 async function check(): Promise<MigrationStatus> {
   try {
-    const candidates = await loadCandidates();
+    const [seedCandidates, backfillCandidates] = await Promise.all([
+      loadSeedCandidates(),
+      loadBackfillCandidates(),
+    ]);
 
-    if (candidates.length === 0) {
+    const pending = seedCandidates.length + backfillCandidates.length;
+
+    if (pending === 0) {
       const marker = await db.execute(
         sql`SELECT updated_at FROM app_settings WHERE key = ${MIGRATION_KEY}`,
       );
@@ -152,10 +253,12 @@ async function check(): Promise<MigrationStatus> {
       sql`SELECT value FROM app_settings WHERE key = ${MIGRATION_KEY}`,
     );
     if (marker.rows.length > 0) {
-      const tuples = new Set(candidates.map(tupleKey));
+      const tupleSeedCount = new Set(seedCandidates.map(tupleKey)).size;
       return {
         state: 'partially_applied',
-        details: `${tuples.size} customer/branch tuple(s) have legacy controllers but no irrigation profile`,
+        details:
+          `${tupleSeedCount} customer/branch tuple(s) need seeding; ` +
+          `${backfillCandidates.length} controller(s) need totalZones backfill`,
       };
     }
     return { state: 'not_started' };
@@ -166,16 +269,20 @@ async function check(): Promise<MigrationStatus> {
 }
 
 async function preview(): Promise<MigrationPreview> {
-  const candidates = await loadCandidates();
+  const [seedCandidates, backfillCandidates] = await Promise.all([
+    loadSeedCandidates(),
+    loadBackfillCandidates(),
+  ]);
 
   const byTuple = new Map<TupleKey, LegacyControllerRow[]>();
-  for (const r of candidates) {
+  for (const r of seedCandidates) {
     const k = tupleKey(r);
     if (!byTuple.has(k)) byTuple.set(k, []);
     byTuple.get(k)!.push(r);
   }
 
   const steps: MigrationStep[] = [];
+
   for (const [, rows] of byTuple) {
     const first = rows[0]!;
     const letters = rows.map((r) => r.controllerLetter).join(', ');
@@ -183,36 +290,57 @@ async function preview(): Promise<MigrationPreview> {
     steps.push({
       id: tupleKey(first),
       description:
-        `Customer ${first.customerId} (company ${first.companyId})` +
+        `[Seed] Customer ${first.customerId} (company ${first.companyId})` +
         (first.branchName ? ` branch "${first.branchName}"` : '') +
         `: seed ${rows.length} controller(s) [${letters}] → ${totalZones} total zone placeholder(s)`,
     });
   }
 
+  for (const row of backfillCandidates) {
+    steps.push({
+      id: `backfill:${row.irrigationControllerId}`,
+      description:
+        `[Backfill] Controller #${row.irrigationControllerId} (customer ${row.customerId}, company ${row.companyId})` +
+        (row.branchName ? ` branch "${row.branchName}"` : '') +
+        `: set totalZones = ${row.zoneCount} (was null) and sync zone placeholders`,
+    });
+  }
+
   const warnings: string[] = [];
-  if (byTuple.size === 0) {
-    warnings.push('All customers already have an irrigation profile — nothing to seed.');
+  if (steps.length === 0) {
+    warnings.push('All controllers already have zone counts and profiles — nothing to do.');
   } else {
-    warnings.push(
-      `Will seed irrigation_controllers rows for ${byTuple.size} customer/branch tuple(s). ` +
-      'Uses ON CONFLICT DO NOTHING — safe to re-run. ' +
-      'Zone placeholder rows (irrigation_profile_zones) will also be created. ' +
-      'property_controllers is not modified.',
-    );
+    if (byTuple.size > 0) {
+      warnings.push(
+        `Will seed irrigation_controllers rows for ${byTuple.size} customer/branch tuple(s). ` +
+        'Uses ON CONFLICT DO NOTHING — safe to re-run. ' +
+        'Zone placeholder rows (irrigation_profile_zones) will also be created. ' +
+        'property_controllers is not modified.',
+      );
+    }
+    if (backfillCandidates.length > 0) {
+      warnings.push(
+        `Will backfill totalZones on ${backfillCandidates.length} controller(s) whose zone count was null. ` +
+        'Empty trailing zone rows beyond the real count will be removed; zones with data are kept.',
+      );
+    }
   }
 
   return {
     steps,
-    orphanRows: { customersWithoutProfile: byTuple.size },
+    orphanRows: { customersWithoutProfile: byTuple.size, controllersWithNullZones: backfillCandidates.length },
     warnings,
   };
 }
 
 async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
-  const candidates = await loadCandidates();
+  const [seedCandidates, backfillCandidates] = await Promise.all([
+    loadSeedCandidates(),
+    loadBackfillCandidates(),
+  ]);
 
   const byTuple = new Map<TupleKey, LegacyControllerRow[]>();
-  for (const r of candidates) {
+  for (const r of seedCandidates) {
     const k = tupleKey(r);
     if (!byTuple.has(k)) byTuple.set(k, []);
     byTuple.get(k)!.push(r);
@@ -220,7 +348,7 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
 
   const results: MigrationStepResult[] = [];
 
-  if (byTuple.size === 0) {
+  if (byTuple.size === 0 && backfillCandidates.length === 0) {
     results.push({ id: 'seed_summary', status: 'skipped', durationMs: 0, rowsAffected: 0 });
     emit({ step: 'seed_summary', status: 'skipped', rowsAffected: 0 });
     await markDone();
@@ -228,7 +356,7 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
   }
 
   let seeded = 0;
-  let errors = 0;
+  let seedErrors = 0;
 
   for (const [k, rows] of byTuple) {
     const t = Date.now();
@@ -243,7 +371,7 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
         tupleSeeded++;
         seeded++;
       } catch (err) {
-        errors++;
+        seedErrors++;
         const msg = err instanceof Error ? err.message : String(err);
         tupleError = tupleError ? `${tupleError}; ${msg}` : msg;
       }
@@ -264,11 +392,38 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
     }
   }
 
-  const summaryStatus = errors > 0 ? 'failed' : 'success';
-  results.push({ id: 'seed_summary', status: summaryStatus, durationMs: 0, rowsAffected: seeded });
-  emit({ step: 'seed_summary', status: summaryStatus, rowsAffected: seeded });
+  const seedSummaryStatus = seedErrors > 0 ? 'failed' : 'success';
+  results.push({ id: 'seed_summary', status: seedSummaryStatus, durationMs: 0, rowsAffected: seeded });
+  emit({ step: 'seed_summary', status: seedSummaryStatus, rowsAffected: seeded });
 
-  if (errors === 0) {
+  // Pass 2 — Backfill null totalZones.
+  let backfilled = 0;
+  let backfillErrors = 0;
+
+  for (const row of backfillCandidates) {
+    const stepId = `backfill:${row.irrigationControllerId}`;
+    const t = Date.now();
+    emit({ step: stepId, status: 'running' });
+    try {
+      await backfillController(row);
+      backfilled++;
+      results.push({ id: stepId, status: 'success', durationMs: Date.now() - t, rowsAffected: 1 });
+      emit({ step: stepId, status: 'success', rowsAffected: 1 });
+    } catch (err) {
+      backfillErrors++;
+      const msg = err instanceof Error ? err.message : String(err);
+      results.push({ id: stepId, status: 'failed', durationMs: Date.now() - t, rowsAffected: 0, error: msg });
+      emit({ step: stepId, status: 'failed', rowsAffected: 0, error: msg });
+    }
+  }
+
+  if (backfillCandidates.length > 0) {
+    const backfillSummaryStatus = backfillErrors > 0 ? 'failed' : 'success';
+    results.push({ id: 'backfill_summary', status: backfillSummaryStatus, durationMs: 0, rowsAffected: backfilled });
+    emit({ step: 'backfill_summary', status: backfillSummaryStatus, rowsAffected: backfilled });
+  }
+
+  if (seedErrors === 0 && backfillErrors === 0) {
     await markDone();
   }
 
@@ -279,12 +434,14 @@ export const importIrrigationProfileMigration: MigrationDefinition = {
   id: MIGRATION_ID,
   title: 'Seed irrigation profiles from legacy property controller data',
   description:
-    'For every customer that has property_controllers rows but no irrigation_controllers rows, ' +
+    'Pass 1: For every customer that has property_controllers rows but no irrigation_controllers rows, ' +
     'creates one irrigation_controllers row per legacy controller (named "Controller {letter}") ' +
     'with totalZones = the legacy zoneCount. Also seeds irrigation_profile_zones placeholder rows ' +
-    '(zone numbers 1…zoneCount) per controller. Skips any tuple that already has at least one ' +
-    'irrigation_controllers row. Uses ON CONFLICT DO NOTHING — idempotent and race-safe. ' +
-    'Does not modify property_controllers.',
+    '(zone numbers 1…zoneCount) per controller. ' +
+    'Pass 2: For every existing irrigation_controllers row with totalZones IS NULL, looks up the ' +
+    'matching property_controllers row and backfills total_zones + syncs zone placeholders (adds ' +
+    'missing trailing zones; removes empty trailing zones beyond the count — data zones are never deleted). ' +
+    'Both passes use ON CONFLICT DO NOTHING — idempotent and race-safe. Does not modify property_controllers.',
   appSettingsKey: MIGRATION_KEY,
   check,
   preview,

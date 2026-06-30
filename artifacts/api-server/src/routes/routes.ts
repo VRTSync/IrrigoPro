@@ -15658,11 +15658,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         const numControllers = Math.max(1, Math.min(26, Number(customer.totalControllers ?? 1)));
         // ensureIrrigationControllers is idempotent — it only inserts rows for
-        // missing "Controller {letter}" entries. This guarantees the tech sees
-        // at least A..N even on first visit to a previously untouched branch.
+        // missing "Controller {letter}" entries. Build per-controller configs from
+        // property_controllers so zone counts carry through on first-visit seeding.
         // Seeds irrigation_controllers (single source of truth); property_controllers
         // is no longer written here.
-        const irrigCtrls = await storage.ensureIrrigationControllers(cid, customerId, numControllers, branchParam);
+        const legacyPCsForBranch = await storage.listPropertyControllers(cid, customerId);
+        const branchPCMap = new Map(
+          legacyPCsForBranch
+            .filter(r => (r.branchName ?? "") === (branchParam ?? ""))
+            .map(r => [r.controllerLetter, r]),
+        );
+        const seedConfigs = Array.from({ length: numControllers }, (_, i) => {
+          const letter = String.fromCharCode("A".charCodeAt(0) + i);
+          const pc = branchPCMap.get(letter);
+          return { name: `Controller ${letter}`, zoneCount: pc?.zoneCount ?? null };
+        });
+        const irrigCtrls = await storage.ensureIrrigationControllers(cid, customerId, seedConfigs, branchParam);
         // Map IrrigationController → PropertyController-compatible wire shape
         // so all existing wet-check UI consumers (ControllerSelectionPage, etc.)
         // continue to work without frontend changes.
@@ -15672,7 +15683,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           customerId: ctrl.customerId,
           branchName: branchParam || null,
           controllerLetter: ctrl.name.trim().split(/\s+/).pop()?.slice(-1).toUpperCase() ?? ctrl.name.slice(0, 1).toUpperCase(),
-          zoneCount: ctrl.totalZones ?? 12,
+          zoneCount: ctrl.totalZones,
           notes: ctrl.notes ?? null,
         }));
         res.json(mappedRows);
@@ -16526,9 +16537,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         : Math.max(1, Math.min(26, Number(customer.totalControllers ?? 1)));
       if (!body.blankStart) {
         // Pass branchName so ensureIrrigationControllers seeds the right branch bucket.
-        // Seeds irrigation_controllers (single source of truth); property_controllers
-        // is no longer written here.
-        await storage.ensureIrrigationControllers(cid, body.customerId, numControllers, branchName);
+        // Build per-controller configs from property_controllers so zone counts carry
+        // through on first-visit seeding. Seeds irrigation_controllers (single source of
+        // truth); property_controllers is no longer written here.
+        const legacyPCsForWC = await storage.listPropertyControllers(cid, body.customerId);
+        const wcBranchPCMap = new Map(
+          legacyPCsForWC
+            .filter(r => (r.branchName ?? "") === (branchName ?? ""))
+            .map(r => [r.controllerLetter, r]),
+        );
+        const wcSeedConfigs = Array.from({ length: numControllers }, (_, i) => {
+          const letter = String.fromCharCode("A".charCodeAt(0) + i);
+          const pc = wcBranchPCMap.get(letter);
+          return { name: `Controller ${letter}`, zoneCount: pc?.zoneCount ?? null };
+        });
+        await storage.ensureIrrigationControllers(cid, body.customerId, wcSeedConfigs, branchName);
       }
 
       const wc = await storage.createWetCheck({

@@ -22,8 +22,8 @@ export function ControllerHeader({
   propertyAddress?: string;
 }) {
   const { toast } = useToast();
-  const [zc, setZc] = useState<string>(String(controller?.zoneCount ?? 12));
-  useEffect(() => { setZc(String(controller?.zoneCount ?? 12)); }, [controller?.zoneCount]);
+  const [zc, setZc] = useState<string>(controller?.zoneCount != null ? String(controller.zoneCount) : "");
+  useEffect(() => { setZc(controller?.zoneCount != null ? String(controller.zoneCount) : ""); }, [controller?.zoneCount]);
 
   const updateMut = useMutation({
     mutationFn: (n: number) =>
@@ -39,8 +39,8 @@ export function ControllerHeader({
 
   const ok = zoneRecords.filter(r => r.status === "checked_ok").length;
   const issues = zoneRecords.filter(r => r.status === "checked_with_issues").length;
-  const totalZones = controller.zoneCount;
-  const gray = Math.max(0, totalZones - ok - issues);
+  const totalZones = controller.zoneCount ?? null;
+  const gray = totalZones != null ? Math.max(0, totalZones - ok - issues) : 0;
   const total = ok + issues + gray;
   const okPct = total > 0 ? Math.round((ok / total) * 100) : 0;
   const issPct = total > 0 ? Math.round((issues / total) * 100) : 0;
@@ -60,7 +60,9 @@ export function ControllerHeader({
                 {[customerName, propertyAddress].filter(Boolean).join(" · ")}
               </div>
             )}
-            <div className="text-xs text-gray-400 mt-0.5">{controller.zoneCount} zones</div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              {controller.zoneCount != null ? `${controller.zoneCount} zones` : "Zone count not set"}
+            </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <Input

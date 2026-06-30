@@ -926,13 +926,15 @@ export interface IStorage {
     branchName?: string | null,
   ): Promise<PropertyController[]>;
   // Seed irrigation_controllers + irrigation_profile_zones placeholders for
-  // the given (companyId, customerId, branchName) tuple so that `count` controller
-  // rows named "Controller A" … "Controller {letter}" exist. Uses ON CONFLICT DO NOTHING
-  // — race-safe and idempotent. Returns the full controller list for the tuple.
+  // the given (companyId, customerId, branchName) tuple. For each config entry
+  // that does not already have a matching "Controller {letter}" row, inserts a
+  // new row with totalZones = config.zoneCount (null if the count is unknown).
+  // Uses ON CONFLICT DO NOTHING — race-safe and idempotent.
+  // Returns the full controller list for the tuple.
   ensureIrrigationControllers(
     companyId: number,
     customerId: number,
-    count: number,
+    configs: Array<{ name: string; zoneCount: number | null }>,
     branchName?: string | null,
   ): Promise<IrrigationController[]>;
   updatePropertyController(
@@ -10309,11 +10311,10 @@ export class DatabaseStorage implements IStorage {
   async ensureIrrigationControllers(
     companyId: number,
     customerId: number,
-    count: number,
+    configs: Array<{ name: string; zoneCount: number | null }>,
     branchName?: string | null,
   ): Promise<IrrigationController[]> {
     const branch = typeof branchName === "string" ? branchName.trim() : "";
-    const DEFAULT_ZONE_COUNT = 12;
 
     const existing = await db
       .select()
@@ -10327,32 +10328,28 @@ export class DatabaseStorage implements IStorage {
       );
 
     const haveNames = new Set(existing.map((c) => c.name));
-    const needed: string[] = [];
-    for (let i = 0; i < count; i++) {
-      const letter = String.fromCharCode("A".charCodeAt(0) + i);
-      const name = `Controller ${letter}`;
-      if (!haveNames.has(name)) needed.push(letter);
-    }
 
-    for (const letter of needed) {
-      const name = `Controller ${letter}`;
+    for (const config of configs) {
+      if (haveNames.has(config.name)) continue;
+
       const [inserted] = await db
         .insert(irrigationControllers)
         .values({
           companyId,
           customerId,
           branchName: branch,
-          name,
-          totalZones: DEFAULT_ZONE_COUNT,
+          name: config.name,
+          totalZones: config.zoneCount ?? null,
           isActive: true,
           lastUpdatedAt: new Date(),
         })
         .onConflictDoNothing()
         .returning();
 
-      // Seed placeholder zones 1..DEFAULT_ZONE_COUNT for the newly created controller.
-      if (inserted) {
-        for (let z = 1; z <= DEFAULT_ZONE_COUNT; z++) {
+      // Seed placeholder zones 1..zoneCount for the newly created controller.
+      // Only seed when we have a real count — null means "not yet configured".
+      if (inserted && config.zoneCount != null) {
+        for (let z = 1; z <= config.zoneCount; z++) {
           await db
             .insert(irrigationProfileZones)
             .values({

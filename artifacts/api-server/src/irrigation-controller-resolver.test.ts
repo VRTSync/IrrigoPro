@@ -50,7 +50,7 @@ async function resolveWithFakes(
   companyId: number,
   customerId: number,
   branchName?: string | null,
-): Promise<{ letter: string; zoneCount: number; notes: string | null }[]> {
+): Promise<{ letter: string; zoneCount: number | null; notes: string | null }[]> {
   const branch = branchName ?? null;
   const branchArg = typeof branch === "string" ? branch : undefined;
 
@@ -58,7 +58,7 @@ async function resolveWithFakes(
   if (irrigCtrls.length > 0) {
     return irrigCtrls.map((ctrl) => ({
       letter: extractLetter(ctrl.name),
-      zoneCount: ctrl.totalZones ?? 12,
+      zoneCount: ctrl.totalZones ?? null,
       notes: ctrl.notes ?? null,
     }));
   }
@@ -99,7 +99,7 @@ describe("resolveWetCheckControllers — irrigation_controllers primary path", (
     assert.equal(result[1].notes, "note b");
   });
 
-  it("defaults totalZones=null to 12", async () => {
+  it("passes through null totalZones as null (no silent 12 default)", async () => {
     const fakeStorage: FakeStorage = {
       listIrrigationControllers: async () => [
         { id: 1, name: "Controller A", totalZones: null, notes: null, branchName: "" },
@@ -108,7 +108,7 @@ describe("resolveWetCheckControllers — irrigation_controllers primary path", (
     };
 
     const result = await resolveWithFakes(fakeStorage, 1, 42);
-    assert.equal(result[0].zoneCount, 12);
+    assert.equal(result[0].zoneCount, null);
   });
 
   it("extracts single letter from multi-word controller name", async () => {

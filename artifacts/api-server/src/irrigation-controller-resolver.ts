@@ -9,14 +9,14 @@
 //
 // Mapping from irrigation_controllers → wet-check grid shape:
 //   name:        "Controller A" → letter: "A"
-//   totalZones:  integer        → zoneCount: integer (defaults to 12 if null)
+//   totalZones:  integer | null → zoneCount: number | null (null passed through; no fallback)
 //   notes:       string | null  → notes: string | null
 
 import { storage } from "./storage";
 
 export interface ResolvedController {
   letter: string;
-  zoneCount: number;
+  zoneCount: number | null;
   notes: string | null;
 }
 
@@ -56,7 +56,7 @@ export async function resolveWetCheckControllers(
   if (irrigCtrls.length > 0) {
     return irrigCtrls.map((ctrl) => ({
       letter: extractLetter(ctrl.name),
-      zoneCount: ctrl.totalZones ?? 12,
+      zoneCount: ctrl.totalZones ?? null,
       notes: ctrl.notes ?? null,
     }));
   }

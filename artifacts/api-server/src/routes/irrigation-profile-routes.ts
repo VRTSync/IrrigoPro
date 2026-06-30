@@ -184,11 +184,14 @@ export function registerIrrigationProfileRoutes(
           const branchFilter = branchName ?? "";
           const branchRows = legacyRows.filter((r) => (r.branchName ?? "") === branchFilter);
           if (branchRows.length > 0) {
-            const count = branchRows.length;
+            const configs = branchRows.map((r) => ({
+              name: `Controller ${r.controllerLetter}`,
+              zoneCount: r.zoneCount,
+            }));
             controllers = await storage.ensureIrrigationControllers(
               callerCompanyId,
               customerId,
-              count,
+              configs,
               branchName ?? null,
             );
           }
