@@ -183,6 +183,7 @@ export default function IrrigationProfile() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [sendLoading, setSendLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   const { toast } = useToast();
 
   const { data: customer, isLoading: customerLoading } = useQuery<Customer>({
@@ -230,6 +231,44 @@ export default function IrrigationProfile() {
     )[0];
 
   const isLoading = customerLoading || controllersLoading;
+
+  async function handleExportCsv() {
+    if (!customerId) return;
+    setExportLoading(true);
+    try {
+      const response = await fetch(
+        `/api/customers/${customerId}/irrigation-profile/export-csv`,
+        { credentials: "include" },
+      );
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err?.message ?? "Failed to export CSV");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safeCustomer = (customer?.name ?? "customer")
+        .replace(/[/\\:*?"<>|]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const date = new Date().toISOString().slice(0, 10);
+      a.download = `${safeCustomer} - Irrigation Profile - ${date}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast({ title: "CSV exported" });
+    } catch (err: any) {
+      toast({
+        title: "Export failed",
+        description: err?.message ?? "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setExportLoading(false);
+    }
+  }
 
   async function handleGenerateReport() {
     if (!customerId) return;
@@ -366,14 +405,30 @@ export default function IrrigationProfile() {
                 </Button>
               )}
               {canImport && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setShowImportModal(true)}
-                  className="gap-1.5"
-                >
-                  <Upload className="w-4 h-4" /> Import CSV
-                </Button>
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleExportCsv}
+                    disabled={exportLoading || controllers.length === 0}
+                    className="gap-1.5"
+                  >
+                    {exportLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Download className="w-4 h-4" />
+                    )}
+                    Export CSV
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setShowImportModal(true)}
+                    className="gap-1.5"
+                  >
+                    <Upload className="w-4 h-4" /> Import CSV
+                  </Button>
+                </>
               )}
               <Button
                 size="sm"

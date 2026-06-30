@@ -690,6 +690,170 @@ export function registerIrrigationProfileRoutes(
     },
   );
 
+  // ── GET /api/customers/:customerId/irrigation-profile/export-csv ────────────
+  // Serialises the current irrigation profile (controllers → programs → zones)
+  // to a CSV file in the same format as the import template so the file can be
+  // edited and re-imported without modification (round-trip safe).
+  // Access: same manager-tier guard as import (company_admin, super_admin,
+  // irrigation_manager — billing_manager and field_tech are excluded).
+  app.get(
+    "/api/customers/:customerId/irrigation-profile/export-csv",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const customerId = parseId(req.params.customerId);
+      if (!customerId) return badId(res, "customer");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      if (!role || !MANAGER_ROLES.has(role) || role === "billing_manager") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+      if (!callerCompanyId && !isSuperAdmin(role)) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      if (!isSuperAdmin(role)) {
+        const customer = await storage.getCustomer(customerId);
+        if (!customer || customer.companyId !== callerCompanyId!) {
+          return notFound(res, "Customer");
+        }
+      }
+
+      try {
+        const customer = await storage.getCustomer(customerId);
+        if (!customer) return notFound(res, "Customer");
+
+        const companyId = isSuperAdmin(role)
+          ? (customer.companyId ?? callerCompanyId!)
+          : callerCompanyId!;
+
+        const ctrlList = await storage.listIrrigationControllers(companyId, customerId);
+        const detailedControllers = await Promise.all(
+          ctrlList.map((c: any) => storage.getIrrigationController(companyId, c.id)),
+        );
+        const validControllers = detailedControllers.filter(
+          (c: any): c is NonNullable<typeof c> => c !== null,
+        );
+
+        // ── CSV serialisation ────────────────────────────────────────────────
+        const HEADERS = [
+          "Controller",
+          "Location",
+          "Brand",
+          "Model",
+          "Program",
+          "Watering Days",
+          "Start Time",
+          "Seasonal %",
+          "Zone #",
+          "Zone Name",
+          "Zone Type",
+          "Run Time (min)",
+        ];
+
+        function csvCell(val: string | number | null | undefined): string {
+          const s = val == null ? "" : String(val);
+          // Wrap in quotes when the value contains commas, double-quotes, or newlines
+          if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+            return '"' + s.replace(/"/g, '""') + '"';
+          }
+          return s;
+        }
+
+        function csvRow(cells: (string | number | null | undefined)[]): string {
+          return cells.map(csvCell).join(",");
+        }
+
+        const lines: string[] = [HEADERS.join(",")];
+
+        for (const ctrl of validControllers) {
+          const zones: any[] = ctrl.zones ?? [];
+          const programs: any[] = ctrl.programs ?? [];
+
+          const programMap = new Map<number, any>();
+          for (const prog of programs) {
+            programMap.set(prog.id, prog);
+          }
+
+          if (zones.length === 0) {
+            // Controller with no zones: emit a single placeholder row so the
+            // controller name is preserved in the export.
+            lines.push(
+              csvRow([
+                ctrl.name,
+                ctrl.location ?? "",
+                ctrl.brand ?? "",
+                ctrl.model ?? "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+              ]),
+            );
+          } else {
+            // Sort zones by zoneNumber for a predictable, human-readable order.
+            const sortedZones = [...zones].sort(
+              (a: any, b: any) => (a.zoneNumber ?? 0) - (b.zoneNumber ?? 0),
+            );
+            for (const zone of sortedZones) {
+              const prog = zone.programId ? programMap.get(zone.programId) : null;
+              lines.push(
+                csvRow([
+                  ctrl.name,
+                  ctrl.location ?? "",
+                  ctrl.brand ?? "",
+                  ctrl.model ?? "",
+                  prog?.name ?? "",
+                  Array.isArray(prog?.wateringDays) && prog.wateringDays.length > 0
+                    ? (prog.wateringDays as string[]).join(",")
+                    : "",
+                  Array.isArray(prog?.startTimes) && prog.startTimes.length > 0
+                    ? (prog.startTimes as string[]).join(",")
+                    : "",
+                  prog != null ? (prog.seasonalAdjustPct ?? 100) : "",
+                  zone.zoneNumber,
+                  zone.name,
+                  zone.zoneType ?? "other",
+                  zone.runTimeMinutes ?? 0,
+                ]),
+              );
+            }
+          }
+        }
+
+        const csv = lines.join("\n");
+
+        // eslint-disable-next-line no-control-regex
+        const safeCustomer = customer.name
+          .replace(/[\/\\:*?"<>|\x00-\x1f]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        const date = new Date().toISOString().slice(0, 10);
+        const filename = safeCustomer
+          ? `${safeCustomer} - Irrigation Profile - ${date}.csv`
+          : `irrigation-profile-${customerId}-${date}.csv`;
+        // eslint-disable-next-line no-control-regex
+        const asciiFilename = filename.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
+        const utf8Filename = encodeURIComponent(filename);
+
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${asciiFilename}"; filename*=UTF-8''${utf8Filename}`,
+        );
+        res.send(csv);
+      } catch (e: any) {
+        req.log?.error?.({ err: e, customerId }, "irrigationProfileExportCsv failed");
+        res.status(500).json({ message: "Failed to export irrigation profile CSV" });
+      }
+    },
+  );
+
   // ── POST /api/customers/:customerId/irrigation-profile/import-csv ───────────
   // Parse, validate, and optionally apply a flat one-row-per-zone CSV import.
   // Body: { mode: 'preview'|'commit', rows: ParsedRow[], branchName?: string }
