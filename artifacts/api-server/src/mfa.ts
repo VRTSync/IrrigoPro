@@ -20,14 +20,16 @@ class MFAManager {
   private readonly window = 1; // Allow 1 time step tolerance
   private readonly timeStep = 30; // 30 seconds
 
-  // Generate base32 secret for TOTP
+  // Generate base32 secret for TOTP using a cryptographically secure RNG.
+  // Math.random() was replaced — it is not a CSPRNG and must never be used
+  // for security-sensitive secrets. crypto.randomBytes() maps each byte
+  // (mod 32) into the base32 alphabet for ~5 bits of real entropy per char.
   private generateSecret(): string {
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-    let secret = '';
-    for (let i = 0; i < this.secretLength; i++) {
-      secret += alphabet[Math.floor(Math.random() * alphabet.length)];
-    }
-    return secret;
+    const randomBytes = crypto.randomBytes(this.secretLength);
+    return Array.from(randomBytes)
+      .map(byte => alphabet[byte % alphabet.length])
+      .join('');
   }
 
   // Generate backup codes

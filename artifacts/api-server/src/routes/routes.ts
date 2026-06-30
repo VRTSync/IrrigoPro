@@ -4504,7 +4504,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Company routes
-  app.get("/api/companies", async (req, res) => {
+  app.get("/api/companies", requireAuthentication, async (req, res) => {
     try {
       const companies = await storage.getCompanies();
       res.json(companies);
@@ -7824,7 +7824,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Property Zones routes
-  app.get("/api/property-zones", async (req, res) => {
+  app.get("/api/property-zones", requireAuthentication, async (req, res) => {
     try {
       const propertyZones = await storage.getPropertyZones();
       res.json(propertyZones);
@@ -7834,7 +7834,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/property-zones/:id", async (req, res) => {
+  app.get("/api/property-zones/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const propertyZone = await storage.getPropertyZone(id);
@@ -7880,7 +7880,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Field Work Sessions routes
-  app.get("/api/field-work-sessions", async (req, res) => {
+  app.get("/api/field-work-sessions", requireAuthentication, async (req, res) => {
     try {
       const sessions = await storage.getFieldWorkSessions();
       res.json(sessions);
@@ -7890,7 +7890,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/field-work-sessions/:id", async (req, res) => {
+  app.get("/api/field-work-sessions/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const session = await storage.getFieldWorkSession(id);
@@ -9291,7 +9291,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Customer Integration API Routes
   
   // Google Sheets Customer Integration
-  app.get("/api/integrations/google-sheets/customers/status", async (req, res) => {
+  app.get("/api/integrations/google-sheets/customers/status", requireAuthentication, async (req, res) => {
     try {
       const status = await storage.getGoogleSheetsCustomerStatus();
       res.json(status);
@@ -9301,7 +9301,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/integrations/google-sheets/customers/connect", async (req, res) => {
+  app.post("/api/integrations/google-sheets/customers/connect", requireAuthentication, async (req, res) => {
     try {
       const { sheetUrl } = req.body;
       if (!sheetUrl) {
@@ -9316,7 +9316,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/integrations/google-sheets/customers/sync", async (req, res) => {
+  app.post("/api/integrations/google-sheets/customers/sync", requireAuthentication, async (req, res) => {
     try {
       const result = await storage.syncCustomersFromGoogleSheets("placeholder-url");
       res.json(result);
@@ -9326,7 +9326,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/integrations/google-sheets/customers/disconnect", async (req, res) => {
+  app.post("/api/integrations/google-sheets/customers/disconnect", requireAuthentication, async (req, res) => {
     try {
       await storage.disconnectGoogleSheetsCustomers();
       res.json({ message: "Disconnected from Google Sheets successfully" });
@@ -14304,7 +14304,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 
   // PDF Generation Route for Sample Invoice
-  app.get("/api/sample-invoice-pdf", async (req, res) => {
+  app.get("/api/sample-invoice-pdf", requireAuthentication, async (req, res) => {
     try {
       const { PDFGenerator } = await import('../pdf-generator');
       const invoiceUrl = `http://localhost:5000/invoice-preview.html`;
@@ -14544,8 +14544,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Security Assessment API endpoints
-  app.get("/api/security/assessment", async (req, res) => {
+  app.get("/api/security/assessment", requireAuthentication, async (req, res) => {
     try {
+      if (req.authenticatedUserRole !== 'super_admin') {
+        res.status(403).json({ message: "Forbidden: super_admin only" });
+        return;
+      }
       const { securityManager } = await import('../security');
       const assessment = await securityManager.performSecurityAssessment();
       res.json(assessment);
@@ -14555,7 +14559,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/security/status", async (req, res) => {
+  app.get("/api/security/status", requireAuthentication, async (req, res) => {
     try {
       const { securityManager } = await import('../security');
       const status = securityManager.getSecurityStatus();
@@ -14566,7 +14570,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/security/incident", async (req, res) => {
+  app.post("/api/security/incident", requireAuthentication, async (req, res) => {
     try {
       const { securityManager } = await import('../security');
       const { type, severity, description, affectedSystems, userId } = req.body;
@@ -14587,7 +14591,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Logging and troubleshooting API endpoints
-  app.get("/api/logs", async (req, res) => {
+  app.get("/api/logs", requireAuthentication, async (req, res) => {
     try {
       const { level, context, userId, since, limit } = req.query;
       
@@ -14607,7 +14611,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/logs/export", async (req, res) => {
+  app.get("/api/logs/export", requireAuthentication, async (req, res) => {
     try {
       const exportData = {
         exportedAt: new Date().toISOString(),
