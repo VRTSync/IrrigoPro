@@ -1,0 +1,37 @@
+# Work Order Completion — Fix Broken Photo Preview on Upload
+
+**What & Why**
+When a field tech adds a Completion Photo while finishing a work order, the preview sometimes shows a **broken image** (the photo still uploads and saves — only the on-screen preview breaks, transiently).
+
+**Root cause — a thumbnail timing race + a dropped local preview:**
+1. The completion gallery (`FileUpload`) shows each photo by requesting the **server-generated `thumb` variant** of the image. Those variants are produced by the **finalize step, which is fire-and-forget** (not awaited) in `components/ui/file-upload.tsx`. So immediately after an upload, the `thumb` often **doesn't exist yet** → the signed-URL/serve for the thumb fails → broken image. Intermittent by nature: larger photos and **HEIC (iPhone)** take longer to process, so they break more often; a later refresh fixes it.
+2. The completion screen hands photos back to the gallery as `{ url, fileName, originalName }` and **drops the local `previewUrl` blob** (`work-order-completion.tsx:1080`). That blob is the instant, always-available preview of the just-captured photo. Because it's stripped, the gallery has **no fallback** and must wait on the not-yet-ready server thumbnail.
+
+Photo upload + save are fine; this is purely the preview. Frontend fix.
+
+## Done looks like
+- A just-uploaded completion photo shows its preview **immediately and reliably** (from the local blob), regardless of whether the server thumbnail has finished generating.
+- No broken-image box on upload, including large/HEIC photos.
+- Once the server variants exist, normal served thumbnails are used (e.g. on later views/refresh).
+
+## Steps
+1. **Preserve `previewUrl` through the completion flow.** In `work-order-completion.tsx` (~1080) where photos are mapped into `FileUpload`'s `files`, **include `previewUrl`**: `files={photos.map(p => ({ url: p.url, fileName: p.fileName, originalName: p.originalName, previewUrl: p.previewUrl }))}`. The `FileUpload.onFilesChange` result already returns `previewUrl` (`file-upload.tsx:350`) — keep it on the `CompletionUploadedFile` and pass it back so the gallery card uses the blob (`file-upload.tsx:872` prefers `previewUrl` when present). Confirm the same for the component's own preview list (~619–630).
+2. **Don't revoke the blob too early.** Ensure the returned `previewUrl` blob isn't revoked while still displayed — it should live until the photo is removed or the form closes/submits (not on job auto-clear). Verify FileUpload's success-path job cleanup doesn't revoke the blob it just returned.
+3. **Thumb → base/medium fallback in `PhotoImage`.** When a `thumb` variant isn't available yet, the signed-URL/serve path should fall back to the **base/medium** image instead of returning a broken/404, so any surface showing a freshly-uploaded photo (not just this one) degrades gracefully. (Backend `getPhotoDownloadURL` already has a base fallback — make sure the **variant** request returns the base when the thumb is missing rather than failing, and/or have `PhotoImage` retry/relax to a larger variant on thumb error.)
+4. (Optional, robustness) Have `PhotoImage` do a short one-time retry on a freshly-uploaded photo's thumb error, so even without the blob it self-heals within a second or two as finalize completes.
+
+## Tests
+- Add a completion photo (including a large HEIC from an iPhone) → preview shows immediately, no broken image; remove still works; submit saves the photo.
+- After save + refresh, the served thumbnail renders (variants exist by then).
+- A photo whose thumb variant doesn't exist yet renders the base/medium image rather than a broken box.
+- Multiple photos added quickly all preview correctly.
+
+## Out of scope
+- The upload/finalize pipeline itself (uploads succeed) and object storage.
+- The camera/library picker (already shipped) and zone-photo authz (already fixed).
+
+## Relevant files
+- `artifacts/irrigopro/src/components/work-orders/work-order-completion.tsx` (~1080 files map drops `previewUrl`; preview list ~619–630)
+- `artifacts/irrigopro/src/components/ui/file-upload.tsx` (`previewUrl` handling/return ~350; gallery preview ~872; blob revoke timing ~214/244/630)
+- `artifacts/irrigopro/src/components/ui/photo-image.tsx` (thumb → base/medium fallback / retry)
+- `artifacts/api-server/src/objectStorage.ts` (`getPhotoDownloadURL` variant fallback) + finalize variant generation
