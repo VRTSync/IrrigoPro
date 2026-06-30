@@ -186,7 +186,7 @@ interface BranchPickerProps {
 function BranchPicker({ customer, inProgressByBranch, onSelect, onBack }: BranchPickerProps) {
   const branches = (customer.branches ?? []) as string[];
   return (
-    <div className="max-w-4xl mx-auto py-4 space-y-4 px-4 sm:px-4 pb-safe overflow-x-hidden w-full">
+    <div className="max-w-4xl mx-auto py-4 space-y-4 px-4 sm:px-4 pb-nav-safe overflow-x-hidden w-full">
       <div className="flex items-center gap-3">
         <Droplets className="h-6 w-6 text-blue-600 shrink-0" />
         <h1 className="text-2xl font-bold text-gray-900">Select Branch</h1>
@@ -384,7 +384,7 @@ export default function CustomerPickerPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto py-4 space-y-4 px-4 sm:px-4 pb-safe overflow-x-hidden w-full">
+    <div className="max-w-4xl mx-auto py-4 space-y-4 px-4 sm:px-4 pb-nav-safe overflow-x-hidden w-full">
       <OfflineStrip />
 
       <div className="flex items-center gap-3">

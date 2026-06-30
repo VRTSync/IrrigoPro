@@ -312,7 +312,7 @@ export function ControllerSelectionPage({ customerId, branchName }: ControllerSe
   const isBusy = startMutation.isPending || blankStartMutation.isPending;
 
   return (
-    <div className="max-w-3xl mx-auto py-4 px-3 sm:px-4 pb-safe">
+    <div className="max-w-3xl mx-auto py-4 px-3 sm:px-4 pb-nav-safe">
 
       {/* ── Sticky property header ── */}
       <div

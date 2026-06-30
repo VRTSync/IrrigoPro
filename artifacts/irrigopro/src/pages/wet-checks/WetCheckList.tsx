@@ -167,7 +167,7 @@ export function WetCheckList() {
   });
 
   return (
-    <div className="max-w-3xl mx-auto py-4 space-y-4 px-3 sm:px-4 pb-safe">
+    <div className="max-w-3xl mx-auto py-4 space-y-4 px-3 sm:px-4 pb-nav-safe">
       <OfflineStrip />
       <div className="flex items-center justify-between gap-2">
         <h1 className="text-2xl font-bold">Wet Checks</h1>
