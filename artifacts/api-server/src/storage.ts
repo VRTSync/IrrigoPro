@@ -11032,6 +11032,19 @@ export class DatabaseStorage implements IStorage {
           }
         }
 
+        // ── Test seam ─────────────────────────────────────────────────────────
+        // In production this global is never set, so the branch is a single
+        // no-cost typeof check. Integration tests may set
+        // globalThis.__importIrrigationProfileMidTxHook to a function that
+        // throws, proving the transaction is atomic across controller + zone
+        // writes. Always clear the hook in the test's finally block.
+        {
+          const _midTxHook = (globalThis as any).__importIrrigationProfileMidTxHook;
+          if (typeof _midTxHook === "function") {
+            await _midTxHook(ctrlId);
+          }
+        }
+
         // ── Programs: only create/update those that the diff marks as changed ─
         const progDiffByName = new Map(ctrlDiff.programs.map((p) => [p.programName, p]));
         const existingProgByName = new Map(

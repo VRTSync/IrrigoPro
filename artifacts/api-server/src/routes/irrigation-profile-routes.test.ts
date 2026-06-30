@@ -9,6 +9,7 @@
 //   - Customer ownership guard: POST controller under wrong company's customer → 404
 //   - super_admin cross-tenant access
 //   - Name-uniqueness per tenant (two companies can each have "Controller A")
+//   - Transaction rollback: mid-import DB failure rolls back first controller write
 //
 // Pattern mirrors admin-migrations-routes.test.ts: lightweight Express server,
 // stub requireAuthentication, real storage.
@@ -807,6 +808,105 @@ describe("Irrigation Profile routes — CSV import", () => {
         c.action === "update" || c.action === "no_change",
         `Expected update/no_change on second commit, got ${c.action}`,
       );
+    }
+  });
+});
+
+// ── Transaction rollback on mid-import failure ────────────────────────────────
+//
+// importIrrigationProfile runs the full commit inside a single DB transaction.
+// This suite proves the transaction is atomic: a failure that occurs AFTER the
+// first controller row is written must roll back that write so the DB is left
+// in the pre-import state.
+//
+// Technique: set globalThis.__importIrrigationProfileMidTxHook to a function
+// that throws. storage.ts checks this hook inside the real transaction (right
+// after each controller INSERT/UPDATE, before the zone writes) and invokes it
+// when present. The real importIrrigationProfile code path is fully exercised —
+// no method replacement.
+
+describe("CSV import — transaction rollback on mid-import failure", () => {
+  let srv: ReturnType<typeof makeTestServer>;
+  // Timestamp-unique controller name — confirms the row was really rolled back.
+  const ctrlName = `RollbackProbe_${Date.now()}`;
+
+  before(async () => {
+    if (!companyAId) await setupCompanies();
+    srv = makeTestServer({
+      role: "irrigation_manager",
+      companyId: companyAId,
+      userId: managerAUserId,
+    });
+  });
+
+  after(async () => {
+    // Defensive cleanup in case the rollback somehow did not happen.
+    await db
+      .delete(irrigationControllers)
+      .where(
+        and(
+          eq(irrigationControllers.companyId, companyAId),
+          eq(irrigationControllers.name, ctrlName),
+        ),
+      );
+    await srv.close();
+  });
+
+  it("mid-transaction failure rolls back the first controller write and returns 500", async () => {
+    // Install the seam hook so the real importIrrigationProfile transaction
+    // throws after inserting the first controller — simulating any DB error
+    // (constraint violation, FK error, etc.) that might occur mid-commit.
+    (globalThis as any).__importIrrigationProfileMidTxHook = () => {
+      throw new Error("injected mid-transaction failure for rollback test");
+    };
+
+    try {
+      const { status, body } = await hit(
+        srv.base,
+        "POST",
+        `/api/customers/${customerAId}/irrigation-profile/import-csv`,
+        {
+          mode: "commit",
+          branchName: "rollback-test",
+          rows: [
+            {
+              controllerName: ctrlName,
+              zoneNumber: 1,
+              zoneName: "Zone 1",
+              zoneType: "rotor",
+              runTimeMinutes: 10,
+              seasonalAdjustPct: 100,
+            },
+          ],
+        },
+      );
+
+      // (a) Route must surface the error as 500 with a non-empty message field.
+      assert.equal(status, 500, `Expected 500, got ${status}: ${JSON.stringify(body)}`);
+      assert.ok(
+        body !== null && typeof body.message === "string" && body.message.length > 0,
+        `500 body must have a non-empty message field; got: ${JSON.stringify(body)}`,
+      );
+
+      // (b) The controller written inside the thrown transaction must NOT be in
+      //     the DB — Postgres rolled it back before the error reached the route.
+      const leaked = await db
+        .select({ id: irrigationControllers.id })
+        .from(irrigationControllers)
+        .where(
+          and(
+            eq(irrigationControllers.companyId, companyAId),
+            eq(irrigationControllers.name, ctrlName),
+          ),
+        );
+      assert.equal(
+        leaked.length,
+        0,
+        `Transaction rollback failed — controller '${ctrlName}' was persisted after a mid-transaction error (real importIrrigationProfile path)`,
+      );
+    } finally {
+      // Always remove the seam hook so other tests are not affected.
+      delete (globalThis as any).__importIrrigationProfileMidTxHook;
     }
   });
 });
