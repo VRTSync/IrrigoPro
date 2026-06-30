@@ -8,11 +8,14 @@
 // totalZones = zoneCount from property_controllers. Also seeds irrigation_profile_zones
 // placeholder rows (zone numbers 1…zoneCount) per controller.
 //
-// Pass 2 — Backfill: For every irrigation_controllers row whose totalZones IS NULL,
-// look up the matching property_controllers row (same company/customer/branch/letter) and
-// update total_zones + sync irrigation_profile_zones: insert missing trailing zone
-// placeholders up to the new count, and remove trailing zones beyond the new count only
-// if they carry no programs, run-times, or notes (data zones are never removed).
+// Pass 2 — Backfill (mismatch repair): For every irrigation_controllers row whose
+// total_zones IS DISTINCT FROM the authoritative zone_count in property_controllers
+// (covers both null values and wrong non-null values written by the old lazy-seed),
+// look up the matching property_controllers row (same company/customer/branch/letter)
+// and update total_zones to the correct count + sync irrigation_profile_zones: insert
+// missing trailing zone placeholders up to the new count, and remove trailing zones
+// beyond the new count only if they carry no programs, run-times, or notes (data
+// zones are never removed).
 //
 // Both inserts use ON CONFLICT DO NOTHING so concurrent or repeated calls are safe.
 // Does not modify property_controllers.
@@ -48,6 +51,7 @@ type BackfillRow = {
   branchName: string;
   controllerLetter: string;
   zoneCount: number;
+  currentTotalZones: number | null;
 };
 
 type TupleKey = string;
@@ -97,9 +101,11 @@ async function loadSeedCandidates(): Promise<LegacyControllerRow[]> {
 }
 
 /**
- * Pass 2 — Load irrigation_controllers rows with totalZones IS NULL that have a
- * matching property_controllers row (same company/customer/branch, letter extracted
- * from the last word of the controller name).
+ * Pass 2 — Load irrigation_controllers rows whose total_zones IS DISTINCT FROM the
+ * authoritative zone_count in the matching property_controllers row (same
+ * company/customer/branch, letter extracted from the last word of the controller name).
+ * This catches both null values and wrong non-null values (e.g. a lazy-seed that wrote
+ * an incorrect count).
  */
 async function loadBackfillCandidates(): Promise<BackfillRow[]> {
   const result = await db.execute<{
@@ -109,6 +115,7 @@ async function loadBackfillCandidates(): Promise<BackfillRow[]> {
     branch_name: string;
     controller_letter: string;
     zone_count: string;
+    current_total_zones: string | null;
   }>(sql`
     SELECT
       ic.id            AS ic_id,
@@ -116,14 +123,15 @@ async function loadBackfillCandidates(): Promise<BackfillRow[]> {
       ic.customer_id,
       ic.branch_name,
       pc.controller_letter,
-      pc.zone_count
+      pc.zone_count,
+      ic.total_zones   AS current_total_zones
     FROM irrigation_controllers ic
     JOIN property_controllers pc
       ON  pc.company_id        = ic.company_id
       AND pc.customer_id       = ic.customer_id
       AND pc.branch_name       = ic.branch_name
       AND pc.controller_letter = upper(right(trim(ic.name), 1))
-    WHERE ic.total_zones IS NULL
+    WHERE ic.total_zones IS DISTINCT FROM pc.zone_count
     ORDER BY ic.company_id, ic.customer_id, ic.branch_name, ic.name
   `);
 
@@ -134,6 +142,7 @@ async function loadBackfillCandidates(): Promise<BackfillRow[]> {
     branchName: String(r.branch_name),
     controllerLetter: String(r.controller_letter),
     zoneCount: Number(r.zone_count),
+    currentTotalZones: r.current_total_zones == null ? null : Number(r.current_total_zones),
   }));
 }
 
@@ -182,19 +191,18 @@ async function seedController(row: LegacyControllerRow): Promise<void> {
 }
 
 /**
- * Pass 2: backfill total_zones on an existing irrigation_controllers row, then
- * sync irrigation_profile_zones:
+ * Pass 2: fix total_zones on an existing irrigation_controllers row (overwrites any
+ * value — null or a wrong number), then sync irrigation_profile_zones:
  *   - Insert missing trailing zone placeholders up to the new count.
  *   - Remove trailing zone rows beyond the new count ONLY if they have no
  *     program assignment, non-zero run time, or notes (data zones are kept).
  */
 async function backfillController(row: BackfillRow): Promise<void> {
-  // 1. Stamp the real zone count on the controller row.
+  // 1. Stamp the correct zone count on the controller row (overwrites null or wrong value).
   await db.execute(sql`
     UPDATE irrigation_controllers
     SET total_zones = ${row.zoneCount}, updated_at = NOW()
     WHERE id = ${row.irrigationControllerId}
-      AND total_zones IS NULL
   `);
 
   // 2. Insert any missing placeholder zone rows up to the new count.
@@ -258,7 +266,7 @@ async function check(): Promise<MigrationStatus> {
         state: 'partially_applied',
         details:
           `${tupleSeedCount} customer/branch tuple(s) need seeding; ` +
-          `${backfillCandidates.length} controller(s) need totalZones backfill`,
+          `${backfillCandidates.length} controller(s) have wrong/missing zone counts`,
       };
     }
     return { state: 'not_started' };
@@ -297,12 +305,13 @@ async function preview(): Promise<MigrationPreview> {
   }
 
   for (const row of backfillCandidates) {
+    const oldValue = row.currentTotalZones == null ? 'null' : String(row.currentTotalZones);
     steps.push({
       id: `backfill:${row.irrigationControllerId}`,
       description:
         `[Backfill] Controller #${row.irrigationControllerId} (customer ${row.customerId}, company ${row.companyId})` +
         (row.branchName ? ` branch "${row.branchName}"` : '') +
-        `: set totalZones = ${row.zoneCount} (was null) and sync zone placeholders`,
+        `: set totalZones = ${row.zoneCount} (was ${oldValue}) and sync zone placeholders`,
     });
   }
 
@@ -320,7 +329,7 @@ async function preview(): Promise<MigrationPreview> {
     }
     if (backfillCandidates.length > 0) {
       warnings.push(
-        `Will backfill totalZones on ${backfillCandidates.length} controller(s) whose zone count was null. ` +
+        `Will fix totalZones on ${backfillCandidates.length} controller(s) with wrong/missing zone counts. ` +
         'Empty trailing zone rows beyond the real count will be removed; zones with data are kept.',
       );
     }
@@ -328,7 +337,7 @@ async function preview(): Promise<MigrationPreview> {
 
   return {
     steps,
-    orphanRows: { customersWithoutProfile: byTuple.size, controllersWithNullZones: backfillCandidates.length },
+    orphanRows: { customersWithoutProfile: byTuple.size, controllersWithWrongZoneCount: backfillCandidates.length },
     warnings,
   };
 }
@@ -396,7 +405,7 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
   results.push({ id: 'seed_summary', status: seedSummaryStatus, durationMs: 0, rowsAffected: seeded });
   emit({ step: 'seed_summary', status: seedSummaryStatus, rowsAffected: seeded });
 
-  // Pass 2 — Backfill null totalZones.
+  // Pass 2 — Repair mismatched/null totalZones.
   let backfilled = 0;
   let backfillErrors = 0;
 
@@ -438,9 +447,11 @@ export const importIrrigationProfileMigration: MigrationDefinition = {
     'creates one irrigation_controllers row per legacy controller (named "Controller {letter}") ' +
     'with totalZones = the legacy zoneCount. Also seeds irrigation_profile_zones placeholder rows ' +
     '(zone numbers 1…zoneCount) per controller. ' +
-    'Pass 2: For every existing irrigation_controllers row with totalZones IS NULL, looks up the ' +
-    'matching property_controllers row and backfills total_zones + syncs zone placeholders (adds ' +
-    'missing trailing zones; removes empty trailing zones beyond the count — data zones are never deleted). ' +
+    'Pass 2 (mismatch repair): For every existing irrigation_controllers row whose total_zones ' +
+    'IS DISTINCT FROM the authoritative zone_count in property_controllers (covers both null values ' +
+    'and wrong non-null values written by the old lazy-seed), looks up the matching ' +
+    'property_controllers row and corrects total_zones + syncs zone placeholders (adds missing ' +
+    'trailing zones; removes empty trailing zones beyond the count — data zones are never deleted). ' +
     'Both passes use ON CONFLICT DO NOTHING — idempotent and race-safe. Does not modify property_controllers.',
   appSettingsKey: MIGRATION_KEY,
   check,
