@@ -780,17 +780,9 @@ export default function CustomerBilling() {
       return (Number(preview.total ?? preview.combinedTotal) || 0) > 0;
     })
     .sort((a, b) => {
-      // Sort by the same total shown in the card so list order tracks
-      // the displayed number.
-      const pa = getCustomerPreview(a);
-      const pb = getCustomerPreview(b);
-      const ta = billingMonth === 'all'
-        ? (Number(pa.allOpenTotal ?? pa.totalUnbilled) || 0)
-        : (Number(pa.total ?? pa.combinedTotal) || 0);
-      const tb = billingMonth === 'all'
-        ? (Number(pb.allOpenTotal ?? pb.totalUnbilled) || 0)
-        : (Number(pb.total ?? pb.combinedTotal) || 0);
-      return tb - ta;
+      const na = (a.irrigoName ?? a.name ?? '').toLowerCase();
+      const nb = (b.irrigoName ?? b.name ?? '').toLowerCase();
+      return na.localeCompare(nb);
     });
 
   const otherCustomers = filteredCustomers
