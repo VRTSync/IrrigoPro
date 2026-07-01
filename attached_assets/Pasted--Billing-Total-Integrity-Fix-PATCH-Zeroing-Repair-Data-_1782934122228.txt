@@ -1,0 +1,71 @@
+# Billing Total Integrity — Fix PATCH Zeroing, Repair Data, and Guarantee Edits Carry Forward
+
+**What & Why**
+A billing sheet's stored total keeps drifting from `parts + labor`, which blocks invoice PDFs ("Invoice totals validation failed … off by $481.72") and risks invoicing the wrong amount. Today it blocked **billing sheet 267 / invoice 79** ($481.72 in parts dropped from the total). It's recurred despite a validator + a reconcile migration, because the **source write keeps storing a bad total**. This doc fixes the source, repairs the data, closes the guard gap, hardens the class of bug, and guarantees **billing-manager edits are reflected accurately at every stage through to the monthly invoice**.
+
+## Root cause (confirmed in code)
+The generic `PATCH /api/billing-sheets/:id` handler recomputes `totalAmount` **from the patch body**, not the persisted record (`routes.ts ~11260`):
+```js
+const patchPartsSubtotal = parseFloat(billingSheetData.partsSubtotal || '0');
+billingSheetData.totalAmount = (patchLaborSubtotal + patchPartsSubtotal).toFixed(2);
+```
+When a `{ totalHours: 4 }`-only patch arrives, the labor block correctly sets `laborSubtotal = '340.00'`, but the total block reads `partsSubtotal` from the **body** — which is absent → `$0` — so `totalAmount = $340 + $0 = $340`, silently zeroing the existing `$481.72` parts from the total. The record already has the right `partsSubtotal` stored; the total just goes stale/labor-only.
+
+The dedicated `/api/billing-sheets/:id/labor-hours` route does it correctly (reads `bs.partsSubtotal` from the DB). The generic PATCH doesn't. The Task #1422/#1669 drift guard covers the storage item mutators (`addBillingSheetItem`, `_resyncBillingSheetTotalsTx`) but **not** the generic PATCH's inline recompute — that's the unguarded gap.
+
+**Why it reaches the invoice:** the monthly invoice uses the **live** stored totals as authoritative (`routes.ts:227–240`: `bs.partsSubtotal/laborSubtotal/totalAmount`), not an approval-time snapshot. That's good (edits carry forward) — but it means a corrupted stored `totalAmount` is faithfully invoiced. So total integrity is a prerequisite for edits carrying forward accurately.
+
+---
+
+## Slice 1 — Fix the bug (surgical, unblocks now)
+### File: `artifacts/api-server/src/routes/routes.ts` (~11205–11270, generic PATCH `/api/billing-sheets/:id`)
+- In the `totalAmount` recompute block, **fall back to the already-fetched record** for any subtotal not present in the patch body:
+  - `parts = billingSheetData.partsSubtotal ?? existingBsForLockCheck?.partsSubtotal ?? '0'`
+  - `labor = billingSheetData.laborSubtotal ?? existingBsForLockCheck?.laborSubtotal ?? '0'`
+  - `billingSheetData.totalAmount = (parts + labor).toFixed(2)`
+- Symmetric both ways: a `totalHours`-only patch preserves stored parts; a `partsSubtotal`-only patch preserves stored labor.
+- No change to unrelated PATCH behavior (photos, status, workDescription, notes) — those must not touch totals.
+
+## Slice 2 — Harden the class (fast-follow; the real "stop it happening")
+- Route the generic PATCH's total recomputation through the **canonical `_resyncBillingSheetTotalsTx`** (which derives `partsSubtotal` from the persisted items and `laborSubtotal` from hours×rate off the DB record, then `total = parts + labor`) instead of the hand-rolled inline `laborSubtotal + partsSubtotal` from body fields. After that, **no partial-body PATCH on any field can ever zero a sibling subtotal.** Same treatment for the equivalent work-order PATCH path if it shares the pattern.
+- Net: every billing-sheet mutation (items, labor-hours, generic PATCH, rate mode) funnels through one recompute — a single source of truth for `parts / labor / total`.
+
+## Slice 3 — Repair the corrupted data (all of it, not just #267)
+- This bug has been live, so other billing sheets patched with `totalHours`-only after parts were added are also wrong (you just haven't PDF'd them yet).
+- **Run the existing `reconcile-billing-sheet-invoice-totals` admin migration** (Super Admin → Migrations) to repair **every** drifted billing-sheet total to `parts + labor` and propagate the delta to any linked invoice, using **add-parts semantics** (bill the customer the correct higher amount — never lower a total to match a bad one), per the billing-total memory rule. Preview shows before → after; re-runnable/idempotent.
+- Confirm billing sheet 267 → total `$821.72`, and invoice 79's `partsSubtotal`/`totalAmount` updated by `+$481.72`. Log before/after.
+- **Do not** write a 267-only one-off — the migration sweeps the whole class.
+
+## Slice 4 — Close the guard gap (behavioral, not a source scan)
+- Add a **behavioral** test (not a grep for a variable name): create a billing sheet with parts set, PATCH `{ totalHours: X }` only → assert stored `totalAmount === partsSubtotal + laborSubtotal` (parts preserved). Mirror: PATCH `{ partsSubtotal: Y }` only → labor preserved.
+- Keep/extend the drift-guard: after **any** billing-sheet mutation path, `totalAmount === partsSubtotal + laborSubtotal` (a property assertion across add-item, labor-hours, generic PATCH, rate-mode).
+
+## Slice 5 — Guarantee billing-manager edits carry forward to the invoice (accurate at all stages)
+- **Live values, not snapshots:** confirm the monthly invoice (`/api/invoices/monthly`) and preview (`/api/invoices/preview`) read the **current** `partsSubtotal/laborSubtotal/totalAmount` from the records (they do, `routes.ts:227–240`). Do **not** switch to approval-time snapshots (`approvedTotal`/`approvedPartsSnapshot`/`approvedLaborSnapshot`).
+- **Post-approval edits allowed + recompute:** a billing manager must be able to edit an **approved-but-not-yet-invoiced** billing sheet / work order / WCB, and the edit must recompute totals via the canonical resync. Verify the lock (`existingBsForLockCheck` / status checks) blocks only **billed/invoiced** records, not approved ones. (Already-invoiced records stay locked.)
+- **End-to-end consistency test:** as a billing manager, edit a billing sheet's parts and/or labor and save →
+  1. the Command Center / detail shows `totalAmount = parts + labor` (edited values),
+  2. generate the monthly invoice for that customer,
+  3. the invoice **line item**, `partsSubtotal`, `laborSubtotal`, and `totalAmount` equal the edited values,
+  4. the invoice PDF validator passes (no drift).
+  Repeat for a work order and a WCB. The edited number must match at every stage: **record → Command Center → preview → invoice → PDF.**
+
+## Done looks like
+- A `totalHours`-only (or any single-subtotal) PATCH never zeroes the other subtotal from `totalAmount`.
+- All billing-sheet mutations recompute totals through one canonical path; drift is structurally impossible.
+- BS 267 / invoice 79 (and any other silently-drifted records) are repaired via the migration, with add-parts semantics.
+- A behavioral guard test locks the PATCH behavior; the drift-guard covers every mutation path.
+- Billing-manager edits saved before billing are reflected accurately in the Command Center, the preview, the monthly invoice, and the PDF — verified end-to-end.
+
+## Out of scope
+- Wholesale rewrite of the PATCH handler beyond routing totals through the canonical resync.
+- The QuickBooks push mechanics (unchanged) — but the corrected total is what's pushed.
+- The Command Center UI (`customer-billing.tsx`) — do not modify.
+
+## Relevant files
+- `artifacts/api-server/src/routes/routes.ts` (generic PATCH `/api/billing-sheets/:id` ~11205–11270; monthly `/api/invoices/monthly` ~6616; preview ~6438; live-total reads ~227–240 within monthly)
+- `artifacts/api-server/src/storage.ts` (`_resyncBillingSheetTotalsTx` ~5339; `updateBillingSheet` ~4999; `updateBillingSheetLaborHours` ~1213; `createBillingSheet` ~4900)
+- `artifacts/api-server/src/lib/migrations/reconcile-billing-sheet-invoice-totals.ts` (repair sweep — run from Super Admin)
+- `artifacts/api-server/src/invoice-pdf-service.ts` (validator ~162 — the safety net; should never trip after this)
+- `artifacts/api-server/src/routes/invoice-pdf-total-drift.test.ts` (extend with the behavioral PATCH test)
+- Do NOT modify: `artifacts/irrigopro/src/pages/customer-billing.tsx`
