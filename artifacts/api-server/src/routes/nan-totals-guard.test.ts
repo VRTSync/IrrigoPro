@@ -97,15 +97,17 @@ describe("NaN guard — estimate with null-priced adjustment item", () => {
     const [est] = await db.execute<{ id: number }>(sql`
       INSERT INTO estimates (
         company_id, customer_id, customer_name, customer_email,
+        project_name,
         status, internal_status, lifecycle,
         labor_rate, applied_labor_rate, labor_mode, total_labor_hours,
         estimate_number, parts_subtotal, labor_subtotal, total_amount
       )
       VALUES (
         ${testCompanyId}, ${testCustomerId}, 'NaN Guard Customer', 'nan-guard@example.com',
+        'NaN Guard Test Project',
         'approved', 'approved_internal', 'approved',
         95, 95, 'flat', 2,
-        'TEST-NAN-001', NULL, NULL, NULL
+        'TEST-NAN-001', 0.00, 0.00, 0.00
       )
       RETURNING id
     `).then(r => r.rows);
@@ -118,10 +120,11 @@ describe("NaN guard — estimate with null-priced adjustment item", () => {
     `);
 
     // Item 2: adjustment / null-priced line — simulates a wet-check finding
-    // stored before the write-time guard. total_price deliberately NULL.
+    // stored before the write-time guard. The actual bug stored NaN (not NULL)
+    // because `quantity × null` in JS produces NaN and Postgres numeric accepts it.
     await db.execute(sql`
       INSERT INTO estimate_items (estimate_id, part_name, part_price, quantity, labor_hours, total_price, sort_order)
-      VALUES (${testEstimateId}, 'Adjustment — no part', NULL, 1, 0, NULL, 1)
+      VALUES (${testEstimateId}, 'Adjustment — no part', 'NaN', 1, 0, 'NaN', 1)
     `);
   });
 
@@ -190,25 +193,39 @@ describe("NaN guard — estimate with null-priced adjustment item", () => {
 // still returns a clean $0 for that item, with a finite overall total.
 
 let testEstimateId2: number;
+let testCompanyId2: number;
+let testCustomerId2: number;
 
 describe("NaN guard — stored NaN decimal in estimate_items.total_price", () => {
   before(async () => {
-    // Re-use the company/customer from the outer suite if already set up,
-    // or skip gracefully if testCompanyId is not yet assigned (parallel test
-    // runners). Nested before() runs after the outer before().
+    // Own company + customer so this suite is independent of suite 2's cleanup.
+
+    const [co] = await db.execute<{ id: number }>(sql`
+      INSERT INTO companies (name, is_active) VALUES ('NaN Guard Test Co 2', true) RETURNING id
+    `).then(r => r.rows);
+    testCompanyId2 = co.id;
+
+    const [cu] = await db.execute<{ id: number }>(sql`
+      INSERT INTO customers (company_id, name, email)
+      VALUES (${testCompanyId2}, 'NaN Guard Customer 2', 'nan-guard2@example.com')
+      RETURNING id
+    `).then(r => r.rows);
+    testCustomerId2 = cu.id;
 
     const [est] = await db.execute<{ id: number }>(sql`
       INSERT INTO estimates (
         company_id, customer_id, customer_name, customer_email,
+        project_name,
         status, internal_status, lifecycle,
         labor_rate, applied_labor_rate, labor_mode, total_labor_hours,
         estimate_number, parts_subtotal, labor_subtotal, total_amount
       )
       VALUES (
-        ${testCompanyId}, ${testCustomerId}, 'NaN Guard Customer', 'nan-guard@example.com',
+        ${testCompanyId2}, ${testCustomerId2}, 'NaN Guard Customer 2', 'nan-guard2@example.com',
+        'NaN Guard Test Project 2',
         'pending', 'pending_approval', 'pending_review',
         80, 80, 'flat', 1,
-        'TEST-NAN-002', 'NaN', 'NaN', 'NaN'
+        'TEST-NAN-002', 0.00, 0.00, 0.00
       )
       RETURNING id
     `).then(r => r.rows);
@@ -224,6 +241,8 @@ describe("NaN guard — stored NaN decimal in estimate_items.total_price", () =>
   after(async () => {
     await db.execute(sql`DELETE FROM estimate_items WHERE estimate_id = ${testEstimateId2}`);
     await db.execute(sql`DELETE FROM estimates WHERE id = ${testEstimateId2}`);
+    await db.execute(sql`DELETE FROM customers WHERE id = ${testCustomerId2}`);
+    await db.execute(sql`DELETE FROM companies WHERE id = ${testCompanyId2}`);
   });
 
   it("getEstimate() returns finite totals even when DB stores NaN decimals", async () => {

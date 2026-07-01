@@ -9825,9 +9825,9 @@ export class DatabaseStorage implements IStorage {
       const documented = eligible.filter(f => f.resolution === "documented_only");
 
       const calc = (f: typeof allFindings[number]) => {
-        const qty = Number(f.quantity);
-        const partPrice = parseFloat(String(f.partPrice ?? "0"));
-        const laborHours = parseFloat(String(f.laborHours ?? "0"));
+        const qty = money(f.quantity);
+        const partPrice = money(f.partPrice ?? "0");
+        const laborHours = money(f.laborHours ?? "0");
         const partsTotal = partPrice * qty;
         const laborTotal = laborHours * laborRate;
         return { qty, partPrice, laborHours, partsTotal, laborTotal, lineTotal: partsTotal + laborTotal };
@@ -9910,7 +9910,7 @@ export class DatabaseStorage implements IStorage {
           const allItems = await tx.select().from(estimateItems)
             .where(eq(estimateItems.estimateId, priorEstId));
           const partsSubtotal = allItems.reduce(
-            (s, it) => s + parseFloat(String(it.totalPrice ?? "0")), 0);
+            (s, it) => s + money(it.totalPrice), 0);
           const priorEstAny = priorEst as { totalLaborHours?: string | null; laborMode?: string | null } | undefined;
           const persistedFlatHours = parseFloat(String(priorEstAny?.totalLaborHours ?? "0")) || 0;
           const legacyPerPartHours = existingItems.reduce(
