@@ -59,6 +59,7 @@ import {
   type QbRefreshFn,
 } from "../qb-token-utils";
 import { isUnroutedFinding, wcbIsEligible } from "../lib/finding-predicates";
+import { computeBillingSheetTotal } from "../billing-sheet-total";
 import type {
   QbTokenResponse,
   QbTokenResponseValidated,
@@ -11120,6 +11121,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // computeBillingSheetTotal is imported from ../billing-sheet-total.ts —
+  // a shared utility used by the PATCH handler, /labor-hours, and /rate-mode
+  // paths to enforce the totalAmount === partsSubtotal + laborSubtotal invariant
+  // with stored-record fallback for any subtotal absent from the mutation.
+
   app.patch("/api/billing-sheets/:id", requireAuthentication, requireSameCompanyAsBillingSheet, requireBillingSheetUpdateAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -11251,11 +11257,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Recalculate totalAmount whenever subtotals are provided
+      // Task #1669 — Recalculate totalAmount whenever subtotals are provided.
+      // Fall back to the stored record for any subtotal absent from the patch
+      // body so a totalHours-only PATCH never zeroes stored parts, and a
+      // partsSubtotal-only PATCH never zeroes stored labor.
       if (billingSheetData.laborSubtotal !== undefined || billingSheetData.partsSubtotal !== undefined) {
-        const patchLaborSubtotal = parseFloat(billingSheetData.laborSubtotal || '0');
-        const patchPartsSubtotal = parseFloat(billingSheetData.partsSubtotal || '0');
-        billingSheetData.totalAmount = (patchLaborSubtotal + patchPartsSubtotal).toFixed(2);
+        billingSheetData.totalAmount = computeBillingSheetTotal(billingSheetData, existingBsForLockCheck);
       }
       
       // Update the billing sheet

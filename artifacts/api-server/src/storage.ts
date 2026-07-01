@@ -164,6 +164,7 @@ import { sql, eq, like, ilike, desc, and, gte, lte, or, isNull, isNotNull, inArr
 import { logger } from "./lib/logger";
 import bcrypt from "bcrypt";
 import { processEstimatePayload, type EstimatePayloadInput } from "./estimate-payload";
+import { computeBillingSheetTotal } from "./billing-sheet-total";
 import { applyNoPartNeededInvariant } from "./storage/wet-check-finding-invariants";
 import { humanizeIssueType } from "./inspection-issue-labels";
 import { buildInspectionEstimateItems } from "./inspection-estimate-items";
@@ -4696,14 +4697,19 @@ export class DatabaseStorage implements IStorage {
         : parseFloat(String(customer.laborRate ?? "0")) || 0;
       const totalHours = parseFloat(String(bs.totalHours ?? "0")) || 0;
       const laborSubtotal = totalHours * newRate;
-      const partsSubtotal = parseFloat(String(bs.partsSubtotal ?? "0")) || 0;
-      const totalAmount = laborSubtotal + partsSubtotal;
+      // Task #1669 — use the shared helper to guarantee totalAmount === parts + labor.
+      // Pass the computed laborSubtotal as the patched value; parts come from the
+      // stored record so a rate-mode flip never zeroes stored parts.
+      const totalAmount = computeBillingSheetTotal(
+        { laborSubtotal: laborSubtotal.toFixed(2) },
+        { partsSubtotal: bs.partsSubtotal },
+      );
       const [updated] = await tx.update(billingSheets).set({
         rateMode: mode,
         laborRate: newRate.toFixed(2),
         appliedLaborRate: newRate.toFixed(2),
         laborSubtotal: laborSubtotal.toFixed(2),
-        totalAmount: totalAmount.toFixed(2),
+        totalAmount,
         updatedAt: new Date(),
       }).where(eq(billingSheets.id, id)).returning();
       if (!updated) throw new Error(`Billing sheet ${id} update failed`);
@@ -4914,12 +4920,17 @@ export class DatabaseStorage implements IStorage {
       }
       const laborRate = parseFloat(String(bs.appliedLaborRate ?? bs.laborRate ?? "0")) || 0;
       const laborSubtotal = totalHours * laborRate;
-      const partsSubtotal = parseFloat(String(bs.partsSubtotal ?? "0")) || 0;
-      const totalAmount = laborSubtotal + partsSubtotal;
+      // Task #1669 — use the shared helper to guarantee totalAmount === parts + labor.
+      // Pass the computed laborSubtotal as the patched value; parts come from the
+      // stored record so a labor-hours edit never zeroes stored parts.
+      const totalAmount = computeBillingSheetTotal(
+        { laborSubtotal: laborSubtotal.toFixed(2) },
+        { partsSubtotal: bs.partsSubtotal },
+      );
       const [updated] = await tx.update(billingSheets).set({
         totalHours: totalHours.toFixed(2),
         laborSubtotal: laborSubtotal.toFixed(2),
-        totalAmount: totalAmount.toFixed(2),
+        totalAmount,
         updatedAt: new Date(),
       }).where(eq(billingSheets.id, id)).returning();
       if (!updated) throw new Error(`Billing sheet ${id} update failed`);
