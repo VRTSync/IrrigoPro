@@ -412,6 +412,7 @@ import {
   getIntegrationMeta,
 } from "../lib/integration-catalog";
 import { logger } from "../lib/logger";
+import { money } from "../lib/money";
 import { coerceLatLngStrings } from "../lib/coerce-lat-lng";
 import { buildWoLineDescription, buildBsLineDescription, buildWcbLineDescription } from "../lib/qb-line-description";
 import { seedIssueTypeConfigsForActiveCompanies } from "../seed-issue-type-configs";
@@ -6318,11 +6319,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Use the stored financial snapshot as the source of truth.
       // Historical backfill guardrail: if laborSubtotal is null (pre-fix record),
       // fall back to totalAmount for the total but do not fabricate breakdown detail.
+      // money() guards against Postgres NaN decimal values ("NaN" string is truthy
+      // so the legacy `|| '0'` pattern passes "NaN" straight through to parseFloat).
       const workOrders = rawWorkOrders.map(wo => {
         const hasBreakdown = wo.laborSubtotal != null;
-        const laborCost = hasBreakdown ? parseFloat(wo.laborSubtotal || '0') : null;
-        const partsCost = hasBreakdown ? parseFloat(wo.partsSubtotal || '0') : null;
-        const storedTotal = parseFloat(wo.totalAmount || '0');
+        const laborCost = hasBreakdown ? money(wo.laborSubtotal) : null;
+        const partsCost = hasBreakdown ? money(wo.partsSubtotal) : null;
+        const storedTotal = money(wo.totalAmount);
         
         return {
           ...wo,
@@ -6341,9 +6344,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Transform billing sheets to match frontend expectations
       const billingSheets = rawBillingSheets.map(bs => {
-        const laborAmount = parseFloat(bs.laborSubtotal || '0') || 0;
-        const partsAmount = parseFloat(bs.partsSubtotal || '0') || 0;
-        const storedTotal = parseFloat(bs.totalAmount || String(laborAmount + partsAmount));
+        const laborAmount = money(bs.laborSubtotal);
+        const partsAmount = money(bs.partsSubtotal);
+        const storedTotal = money(bs.totalAmount) || (laborAmount + partsAmount);
         
         return {
           ...bs,
@@ -6368,9 +6371,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Transform wet check billings to a parallel shape matching billing sheets
       const wetCheckBillings = rawWetCheckBillings.map(wcb => {
-        const laborCost = parseFloat(wcb.laborSubtotal || '0') || 0;
-        const partsCost = parseFloat(wcb.partsSubtotal || '0') || 0;
-        const totalAmount = parseFloat(wcb.totalAmount || String(laborCost + partsCost));
+        const laborCost = money(wcb.laborSubtotal);
+        const partsCost = money(wcb.partsSubtotal);
+        const totalAmount = money(wcb.totalAmount) || (laborCost + partsCost);
         return {
           ...wcb,
           laborCost,
@@ -10762,7 +10765,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         unitPrice: String(i.unitPrice),
         laborHours: String(i.laborHours ?? 0),
         notes: i.notes ?? null,
-        totalPrice: (i.quantity * i.unitPrice).toFixed(2),
+        totalPrice: (money(i.quantity) * money(i.unitPrice)).toFixed(2),
       }));
       const result = await storage.replaceBillingSheetItemsWithResync(id, insertItems, companyId);
       void recordAuditEvent(req, {
@@ -11381,7 +11384,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           quantity: item.quantity,
           unitPrice: item.unitPrice.toString(),
           laborHours: persistedLaborMode === 'flat' ? '0.00' : (item.laborHours ?? 0).toString(),
-          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
+          totalPrice: (money(item.quantity) * money(item.unitPrice)).toFixed(2),
           notes: item.notes || "",
         }));
         const resyncResult = await storage.replaceBillingSheetItemsAndResync(id, itemsToInsert);
@@ -12317,7 +12320,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         partPrice: String(i.unitPrice),
         quantity: i.quantity,
         laborHours: String(i.laborHours ?? 0),
-        totalPrice: (i.quantity * i.unitPrice).toFixed(2),
+        totalPrice: (money(i.quantity) * money(i.unitPrice)).toFixed(2),
         notes: i.notes ?? null,
       }));
       const result = await storage.replaceWorkOrderItemsWithResync(id, insertItems, companyId);
@@ -13695,7 +13698,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               partDescription: null,
               quantity: String(item.quantity),
               unitPrice: unitPrice.toString(),
-              totalPrice: (qty * unitPrice).toFixed(2),
+              totalPrice: (money(qty) * money(unitPrice)).toFixed(2),
               laborHours: item.laborHours,
               notes: item.notes || null,
             };

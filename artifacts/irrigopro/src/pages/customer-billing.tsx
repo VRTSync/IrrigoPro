@@ -804,7 +804,8 @@ export default function CustomerBilling() {
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
 
   const formatCurrency = (amount: string | number) => {
-    const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+    const raw = typeof amount === 'string' ? parseFloat(amount) : amount;
+    const num = Number.isFinite(raw) ? raw : 0;
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD'
@@ -2330,7 +2331,7 @@ export default function CustomerBilling() {
                                     <Badge className="bg-green-100 text-green-800 text-xs">Approved</Badge>
                                     {wo.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
                                   </div>
-                                  <div className="text-xs text-gray-600 mb-2">
+                                  <div className="text-xs text-gray-600 mb-2 line-clamp-3 overflow-hidden">
                                     {wo.description}
                                   </div>
                                   <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
@@ -2392,7 +2393,7 @@ export default function CustomerBilling() {
                                     <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
                                     {wo.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
                                   </div>
-                                  <div className="text-xs text-gray-600 mb-1">{wo.description}</div>
+                                  <div className="text-xs text-gray-600 mb-1 line-clamp-3 overflow-hidden">{wo.description}</div>
                                   <div className="text-xs text-yellow-700">Not yet billable — awaiting manager review</div>
                                 </div>
                                 <div className="text-sm font-medium text-yellow-700 text-right">
@@ -2574,7 +2575,7 @@ export default function CustomerBilling() {
                                     <Badge className="bg-green-100 text-green-800 text-xs">Approved</Badge>
                                     {wo.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
                                   </div>
-                                  <div className="text-xs text-gray-600 mb-2">{wo.description}</div>
+                                  <div className="text-xs text-gray-600 mb-2 line-clamp-3 overflow-hidden">{wo.description}</div>
                                   <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
                                     {wo.completedAt && (
                                       <div className="flex items-center gap-1">
@@ -2621,7 +2622,7 @@ export default function CustomerBilling() {
                                     <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
                                     {wo.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
                                   </div>
-                                  <div className="text-xs text-gray-600 mb-1">{wo.description}</div>
+                                  <div className="text-xs text-gray-600 mb-1 line-clamp-3 overflow-hidden">{wo.description}</div>
                                   <div className="text-xs text-yellow-700">Awaiting manager review</div>
                                 </div>
                                 <div className="text-sm font-medium text-yellow-700 text-right">

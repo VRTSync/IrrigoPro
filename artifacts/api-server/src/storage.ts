@@ -177,6 +177,7 @@ import {
 import { computeEstimateSummary } from "./estimate-summary";
 import type { EstimateSummary, WetCheckBillingListItem } from "@workspace/db";
 import { ObjectStorageService } from "./objectStorage";
+import { money } from "./lib/money";
 import { resolveIssueTypeKey, seedIssueTypeConfigsForCompany } from "./seeds/issue-type-configs";
 import {
   validateMerge,
@@ -2508,16 +2509,14 @@ export class DatabaseStorage implements IStorage {
         let perPartLaborHours = 0;
 
         items.forEach(item => {
-          const itemTotal = parseFloat(String(item.totalPrice));
-          const itemLaborHours = parseFloat(String(item.laborHours));
-          partsSubtotal += itemTotal;
-          perPartLaborHours += itemLaborHours;
+          partsSubtotal += money(item.totalPrice);
+          perPartLaborHours += money(item.laborHours);
         });
 
         // Prefer the SNAPSHOT appliedLaborRate (locked at creation /
         // conversion) over the mutable customer/estimate laborRate so
         // downstream reads never reprice an estimate if rates change later.
-        const laborRate = parseFloat(String(estimate.appliedLaborRate ?? estimate.laborRate));
+        const laborRate = money(estimate.appliedLaborRate ?? estimate.laborRate);
         // Task #396 — flat mode uses the persisted totalLaborHours; per_part
         // mode keeps the legacy sum-of-line-hours behavior.
         const totalLaborHours = estimate.laborMode === 'flat'
@@ -2572,14 +2571,14 @@ export class DatabaseStorage implements IStorage {
         let partsSubtotal = 0;
         let perPartLaborHours = 0;
         items.forEach(item => {
-          partsSubtotal += parseFloat(String(item.totalPrice));
-          perPartLaborHours += parseFloat(String(item.laborHours));
+          partsSubtotal += money(item.totalPrice);
+          perPartLaborHours += money(item.laborHours);
         });
 
-        const laborRate = parseFloat(String(estimate.appliedLaborRate ?? estimate.laborRate));
+        const laborRate = money(estimate.appliedLaborRate ?? estimate.laborRate);
         // Task #396 — honor flat mode using persisted totalLaborHours.
         const totalLaborHours = estimate.laborMode === 'flat'
-          ? parseFloat(String(estimate.totalLaborHours ?? 0)) || 0
+          ? money(estimate.totalLaborHours ?? 0)
           : perPartLaborHours;
         const laborSubtotal = totalLaborHours * laborRate;
         const totalAmount = partsSubtotal + laborSubtotal;
@@ -2688,18 +2687,16 @@ export class DatabaseStorage implements IStorage {
     let perPartLaborHours = 0;
 
     items.forEach(item => {
-      const itemTotal = parseFloat(String(item.totalPrice));
-      const itemLaborHours = parseFloat(String(item.laborHours));
-      partsSubtotal += itemTotal;
-      perPartLaborHours += itemLaborHours;
+      partsSubtotal += money(item.totalPrice);
+      perPartLaborHours += money(item.laborHours);
     });
 
     // Prefer SNAPSHOT appliedLaborRate so a converted estimate cannot be
     // repriced after customer/estimate laborRate changes downstream.
-    const laborRate = parseFloat(String(estimate.appliedLaborRate ?? estimate.laborRate));
+    const laborRate = money(estimate.appliedLaborRate ?? estimate.laborRate);
     // Task #396 — honor flat mode using persisted totalLaborHours.
     const totalLaborHours = estimate.laborMode === 'flat'
-      ? parseFloat(String(estimate.totalLaborHours ?? 0)) || 0
+      ? money(estimate.totalLaborHours ?? 0)
       : perPartLaborHours;
     const laborSubtotal = totalLaborHours * laborRate;
     const totalAmount = partsSubtotal + laborSubtotal;
@@ -3684,7 +3681,7 @@ export class DatabaseStorage implements IStorage {
         partPrice: item.partPrice,
         quantity: item.quantity,
         laborHours: item.laborHours,
-        totalPrice: item.totalPrice,
+        totalPrice: money(item.totalPrice).toFixed(2),
       }]);
     }
     return newWorkOrder;
@@ -3701,7 +3698,7 @@ export class DatabaseStorage implements IStorage {
         partPrice: item.partPrice,
         quantity: item.quantity,
         laborHours: item.laborHours,
-        totalPrice: item.totalPrice,
+        totalPrice: money(item.totalPrice).toFixed(2),
       })),
     );
   }
@@ -3759,12 +3756,15 @@ export class DatabaseStorage implements IStorage {
       workType: 'estimate_based',
       status: 'pending',
       priority: 'medium',
-      // Pricing snapshot from estimate
+      // Pricing snapshot from estimate — guard against NaN stored in the
+      // estimate's decimal columns (a null partPrice on any line item can
+      // poison the sum). Recompute parts + labor from the already-guarded
+      // getEstimate() totals so the snapshot is always a finite number.
       laborRate: estimate.laborRate,
-      laborSubtotal: estimate.laborSubtotal,
-      partsSubtotal: estimate.partsSubtotal,
-      estimatedTotal: estimate.totalAmount, // Original estimate total for comparison
-      totalAmount: estimate.totalAmount,
+      laborSubtotal: money(estimate.laborSubtotal).toFixed(2),
+      partsSubtotal: money(estimate.partsSubtotal).toFixed(2),
+      estimatedTotal: (money(estimate.partsSubtotal) + money(estimate.laborSubtotal)).toFixed(2),
+      totalAmount: (money(estimate.partsSubtotal) + money(estimate.laborSubtotal)).toFixed(2),
       totalItems: estimate.items?.length || 0,
       // Task #396 — preserve labor mode + aggregate hours across the
       // estimate→work-order conversion so the field tech sees the same
@@ -3790,7 +3790,7 @@ export class DatabaseStorage implements IStorage {
           partPrice: item.partPrice,
           quantity: item.quantity,
           laborHours: item.laborHours,
-          totalPrice: item.totalPrice,
+          totalPrice: money(item.totalPrice).toFixed(2),
           // Task #1437 — carry zone detail forward so the field tech's
           // checklist can group items by controller/zone and show the
           // originating issue. Null on non-inspection estimates.
@@ -3911,10 +3911,36 @@ export class DatabaseStorage implements IStorage {
         status: "pending",
         priority: "medium",
         laborRate: approvedEstimate.laborRate,
-        laborSubtotal: approvedEstimate.laborSubtotal,
-        partsSubtotal: approvedEstimate.partsSubtotal,
-        estimatedTotal: approvedEstimate.totalAmount,
-        totalAmount: approvedEstimate.totalAmount,
+        // Guard against NaN stored in the estimate's decimal columns.
+        // Recompute from items (already loaded at this point) so the
+        // snapshotted work-order totals are always finite numbers.
+        laborSubtotal: (() => {
+          const laborRate2 = money(approvedEstimate.appliedLaborRate ?? approvedEstimate.laborRate);
+          const totalLaborHours2 =
+            (approvedEstimate as unknown as { laborMode?: string }).laborMode === 'flat'
+              ? money((approvedEstimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? 0)
+              : items.reduce((s, i) => s + money(i.laborHours), 0);
+          return (totalLaborHours2 * laborRate2).toFixed(2);
+        })(),
+        partsSubtotal: items.reduce((s, i) => s + money(i.totalPrice), 0).toFixed(2),
+        estimatedTotal: (() => {
+          const laborRate2 = money(approvedEstimate.appliedLaborRate ?? approvedEstimate.laborRate);
+          const totalLaborHours2 =
+            (approvedEstimate as unknown as { laborMode?: string }).laborMode === 'flat'
+              ? money((approvedEstimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? 0)
+              : items.reduce((s, i) => s + money(i.laborHours), 0);
+          const parts2 = items.reduce((s, i) => s + money(i.totalPrice), 0);
+          return (parts2 + totalLaborHours2 * laborRate2).toFixed(2);
+        })(),
+        totalAmount: (() => {
+          const laborRate2 = money(approvedEstimate.appliedLaborRate ?? approvedEstimate.laborRate);
+          const totalLaborHours2 =
+            (approvedEstimate as unknown as { laborMode?: string }).laborMode === 'flat'
+              ? money((approvedEstimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? 0)
+              : items.reduce((s, i) => s + money(i.laborHours), 0);
+          const parts2 = items.reduce((s, i) => s + money(i.totalPrice), 0);
+          return (parts2 + totalLaborHours2 * laborRate2).toFixed(2);
+        })(),
         totalItems: items.length,
         laborMode: (approvedEstimate as unknown as { laborMode?: string }).laborMode ?? "flat",
         totalHours: (approvedEstimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? null,
@@ -3940,7 +3966,7 @@ export class DatabaseStorage implements IStorage {
           partPrice: item.partPrice,
           quantity: item.quantity,
           laborHours: item.laborHours,
-          totalPrice: item.totalPrice,
+          totalPrice: money(item.totalPrice).toFixed(2),
           // Task #1437 — carry zone detail forward (see
           // createWorkOrderFromEstimate; the two paths must stay equivalent).
           controllerLetter: item.controllerLetter ?? null,
@@ -4820,7 +4846,7 @@ export class DatabaseStorage implements IStorage {
         const values = items.map((item) => ({
           ...item,
           billingSheetId: id,
-          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
+          totalPrice: (money(item.quantity) * money(item.unitPrice)).toFixed(2),
         }));
         inserted = await tx.insert(billingSheetItems).values(values).returning();
       }
@@ -4876,11 +4902,11 @@ export class DatabaseStorage implements IStorage {
         const values = items.map((item) => ({
           ...item,
           workOrderId: id,
-          totalPrice: (Number(item.quantity) * Number(item.partPrice)).toString(),
+          totalPrice: (money(item.quantity) * money(item.partPrice)).toFixed(2),
         }));
         inserted = await tx.insert(workOrderItems).values(values).returning();
       }
-      const truePartsSubtotal = inserted.reduce((s, r) => s + parseFloat(String(r.totalPrice || 0)), 0);
+      const truePartsSubtotal = inserted.reduce((s, r) => s + money(r.totalPrice), 0);
       const laborRate = parseFloat(String(wo.laborRate ?? wo.appliedLaborRate ?? "0")) || 0;
       let laborSubtotal: number;
       let newTotalHours: number | undefined;
@@ -5012,7 +5038,7 @@ export class DatabaseStorage implements IStorage {
 
     // If we have items, calculate the totals
     if (items && Array.isArray(items)) {
-      partsSubtotal = items.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unitPrice)), 0);
+      partsSubtotal = items.reduce((sum, item) => sum + (money(item.quantity) * money(item.unitPrice)), 0);
       laborSubtotal = Number(sheetData.totalHours || 0) * Number(sheetData.laborRate || 0);
       totalAmount = laborSubtotal + partsSubtotal;
     }
@@ -5068,7 +5094,7 @@ export class DatabaseStorage implements IStorage {
         const values = items.map(item => ({
           ...item,
           billingSheetId: newSheet.id,
-          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
+          totalPrice: (money(item.quantity) * money(item.unitPrice)).toFixed(2),
         }));
         insertedItems = await db.insert(billingSheetItems).values(values).returning();
       }
@@ -5490,7 +5516,7 @@ export class DatabaseStorage implements IStorage {
       const [newItem] = await tx.insert(billingSheetItems).values({
         ...item,
         billingSheetId,
-        totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString()
+        totalPrice: (money(item.quantity) * money(item.unitPrice)).toFixed(2)
       }).returning();
       await this._resyncBillingSheetTotalsTx(tx, billingSheetId);
       return newItem;
@@ -5501,7 +5527,7 @@ export class DatabaseStorage implements IStorage {
     return db.transaction(async (tx) => {
       const updateData = { ...item };
       if (item.quantity && item.unitPrice) {
-        updateData.totalPrice = (Number(item.quantity) * Number(item.unitPrice)).toString();
+        updateData.totalPrice = (money(item.quantity) * money(item.unitPrice)).toFixed(2);
       }
 
       const [updatedItem] = await tx.update(billingSheetItems).set(updateData).where(eq(billingSheetItems.id, itemId)).returning();
@@ -5541,7 +5567,7 @@ export class DatabaseStorage implements IStorage {
         const values = items.map(item => ({
           ...item,
           billingSheetId,
-          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
+          totalPrice: (money(item.quantity) * money(item.unitPrice)).toFixed(2),
         }));
         inserted = await tx.insert(billingSheetItems).values(values).returning();
       }
@@ -5564,7 +5590,7 @@ export class DatabaseStorage implements IStorage {
         const values = items.map(item => ({
           ...item,
           billingSheetId,
-          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
+          totalPrice: (money(item.quantity) * money(item.unitPrice)).toFixed(2),
         }));
         inserted = await tx.insert(billingSheetItems).values(values).returning();
       }
