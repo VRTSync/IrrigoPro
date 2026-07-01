@@ -1,0 +1,45 @@
+# Work Summary — Stop Auto-Filling the Parts List into the "Description of Work"
+
+**What & Why**
+On completed work orders (and downstream, in the Command Center), the **Work Summary / description of work** shows a wall of concatenated part names (e.g. "Set Nozzle 8', 10', 12' 15' Adjust ... MP Nozzle 3000 (Hunter MP Rotator – MP3000 Series) ..."). That field is reserved for a **human description of the work performed**, not a parts list — the parts already appear itemized in their own Parts & Materials section, with quantities and prices. Dumping them into the summary is redundant, unreadable, and makes the completion record (and the invoice-side detail) look broken.
+
+## Root cause (confirmed in code)
+The field-completion screen **pre-fills the Work Summary with a newline-joined dump of every line item's name.** `work-order-completion.tsx:312–323`:
+```js
+const workDescriptions = workOrderItems
+  .map((item) => item.description || item.partName)   // every part name
+  .filter(Boolean)
+  .join('\n');
+
+form.reset({
+  workSummary: workDescriptions || "Work completed as per estimate",
+  ...
+});
+```
+The tech submits, and `workSummary` is persisted on the work order. The Command Center then renders it: `description: wo.description || wo.workSummary` (`routes.ts:6334`), so when the WO has no separate `description`, the parts-list `workSummary` surfaces as the "description of work." (The **parts** prefill into the `usedParts` / Parts section just above this is correct and should stay — only the text-summary stuffing is the bug.)
+
+## The fix (surgical)
+### File: `artifacts/irrigopro/src/components/work-orders/work-order-completion.tsx` (~312–323)
+- **Remove** the `workDescriptions` join and stop seeding `workSummary` with part names.
+- Default `workSummary` to **empty** so the tech writes an actual description of what they did. The existing validation (`workSummary: z.string().min(10, ...)`, line 58) already forces a real, meaningful entry — so an empty default won't let a blank slip through; it prompts the tech to type.
+- Keep the Parts prefill (`setUsedParts(prefilledParts)`) and the labor-hours prefill (`estimatedHours`) exactly as they are — those belong.
+- Optional nicety: instead of empty, seed a short neutral scaffold like `"Work completed per estimate — "` (still under/над the 10-char rule so they must add detail), or a placeholder/helper text "Describe the work performed (the parts used are recorded separately below)." Placeholder preferred over a prefilled value so it never gets submitted verbatim.
+
+## Optional — clean up already-saved blobs (low priority)
+Existing completed WOs already have the parts-list stuffed in `workSummary`/`description`. If desired, a re-runnable admin migration can detect records whose `workSummary` equals the newline-join of that WO's item part names and blank them (or flag for a manager to rewrite) — but only where it's an exact auto-generated match, never a summary the tech actually wrote. Skip if not worth it; the forward fix stops new ones.
+
+## Done looks like
+- Opening the completion screen shows an **empty** Work Summary (with a helpful placeholder), not a parts list.
+- The tech types a real description; the 10-char minimum still applies.
+- The Parts & Materials section is still prefilled from the estimate items (unchanged).
+- The Command Center / completed-work detail shows the tech's actual description, not a concatenated parts dump.
+
+## Out of scope
+- The NaN total / zeroed-parts fix (already shipped separately).
+- The Parts & Materials prefill and the labor-hours prefill — both correct, leave them.
+- The Command Center UI (`customer-billing.tsx`) — the `wo.description || wo.workSummary` fallback is fine once `workSummary` is no longer a parts dump; don't restructure it.
+
+## Relevant files
+- `artifacts/irrigopro/src/components/work-orders/work-order-completion.tsx` (~312–323 prefill; validation `workSummary` min-10 at ~58)
+- `artifacts/api-server/src/routes/routes.ts:6334` (Command Center shaping `description: wo.description || wo.workSummary` — no change needed, just context)
+- Optional: new admin cleanup migration (Super Admin → Migrations) for legacy blob summaries
