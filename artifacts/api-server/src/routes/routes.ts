@@ -14105,6 +14105,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       .limit(1);
     if (icRows.length > 0) return true;
 
+    // 7) irrigation_backflows.photo_url — single text column per device,
+    //    scoped to this company directly via companyId.
+    const { irrigationBackflows } = await import("@workspace/db/schema");
+    const bfRows = await db
+      .select({ id: irrigationBackflows.id })
+      .from(irrigationBackflows)
+      .where(and(
+        eq(irrigationBackflows.companyId, user.companyId),
+        sql`${irrigationBackflows.photoUrl} = ANY(${sql.param(candidates)}::text[])`,
+      ))
+      .limit(1);
+    if (bfRows.length > 0) return true;
+
     return false;
   }
 

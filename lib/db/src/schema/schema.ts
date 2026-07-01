@@ -1862,6 +1862,55 @@ export const insertIrrigationProfileHistorySchema = createInsertSchema(irrigatio
 export type IrrigationProfileHistory = typeof irrigationProfileHistory.$inferSelect;
 export type InsertIrrigationProfileHistory = typeof irrigationProfileHistory.$inferInsert;
 
+// ─── Irrigation Backflow Preventers ──────────────────────────────────────────
+// Tracks each backflow preventer device per customer, including device
+// attributes and annual certification compliance. Tenancy mirrors
+// `irrigation_controllers`: companyId NOT NULL, branchName NOT NULL default ''.
+
+export const irrigationBackflows = pgTable("irrigation_backflows", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id).notNull(),
+  branchName: text("branch_name").notNull().default(""),
+  // Device attributes
+  name: text("name").notNull(),
+  brand: text("brand"),
+  model: text("model"),
+  size: text("size"),
+  deviceType: text("device_type").notNull().default("other"),
+  // Enum values: rpz | double_check | pvb | spill_resistant_pvb | other
+  serialNumber: text("serial_number"),
+  location: text("location"),
+  installDate: text("install_date"),
+  // date string YYYY-MM-DD
+  photoUrl: text("photo_url"),
+  notes: text("notes"),
+  // Test / compliance
+  lastTestedDate: text("last_tested_date"),
+  nextTestDueDate: text("next_test_due_date"),
+  lastTestResult: text("last_test_result"),
+  // enum: pass | fail | null
+  lastTestedBy: text("last_tested_by"),
+  // Audit / meta
+  isActive: boolean("is_active").notNull().default(true),
+  vrtSyncId: text("vrt_sync_id"),
+  lastUpdatedByUserId: integer("last_updated_by_user_id").references(() => users.id),
+  lastUpdatedByName: text("last_updated_by_name"),
+  lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  companyCustomerBranchIdx: index("irr_backflow_company_customer_branch_idx")
+    .on(table.companyId, table.customerId, table.branchName),
+  uniqSerial: uniqueIndex("uniq_irr_backflow_serial")
+    .on(table.companyId, table.serialNumber)
+    .where(sql`${table.serialNumber} IS NOT NULL AND ${table.serialNumber} <> ''`),
+}));
+
+export const insertIrrigationBackflowSchema = createInsertSchema(irrigationBackflows);
+export type IrrigationBackflow = typeof irrigationBackflows.$inferSelect;
+export type InsertIrrigationBackflow = typeof irrigationBackflows.$inferInsert;
+
 // Internal migration-tracking table — must be declared here so drizzle-kit
 // does not treat it as an unknown table and attempt to drop it during db:push.
 export const appSettings = pgTable("app_settings", {

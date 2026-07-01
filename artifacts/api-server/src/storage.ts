@@ -49,6 +49,7 @@ import {
   irrigationPrograms,
   irrigationProfileZones,
   irrigationProfileHistory,
+  irrigationBackflows,
   type IrrigationController,
   type InsertIrrigationController,
   type IrrigationProgram,
@@ -57,6 +58,8 @@ import {
   type InsertIrrigationProfileZone,
   type IrrigationProfileHistory,
   type InsertIrrigationProfileHistory,
+  type IrrigationBackflow,
+  type InsertIrrigationBackflow,
   type Company,
   type User,
   type Customer, 
@@ -1306,6 +1309,46 @@ export interface IStorage {
     mode: "preview" | "commit",
     actor?: { id: number; name: string },
   ): Promise<IrrigationImportResult>;
+
+  // ── Backflow Preventers ────────────────────────────────────────────────────
+  listBackflows(
+    companyId: number | null,
+    customerId: number,
+    branchName?: string,
+  ): Promise<IrrigationBackflow[]>;
+
+  getBackflow(
+    companyId: number | null,
+    id: number,
+  ): Promise<IrrigationBackflow | null>;
+
+  createBackflow(
+    data: InsertIrrigationBackflow,
+  ): Promise<IrrigationBackflow>;
+
+  updateBackflow(
+    companyId: number | null,
+    id: number,
+    patch: Partial<Omit<InsertIrrigationBackflow, "companyId" | "customerId">>,
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationBackflow | null>;
+
+  deleteBackflow(
+    companyId: number | null,
+    id: number,
+  ): Promise<boolean>;
+
+  logBackflowTest(
+    companyId: number | null,
+    id: number,
+    data: {
+      lastTestedDate: string;
+      lastTestResult: "pass" | "fail";
+      lastTestedBy?: string | null;
+      nextTestDueDate?: string | null;
+    },
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationBackflow | null>;
 }
 
 // ── Irrigation CSV import types (shared between route and storage) ─────────────
@@ -11195,6 +11238,130 @@ export class DatabaseStorage implements IStorage {
     });
 
     return { mode: "commit", controllers: controllerDiffs, summary };
+  }
+
+  // ── Backflow Preventers ────────────────────────────────────────────────────
+
+  async listBackflows(
+    companyId: number | null,
+    customerId: number,
+    branchName?: string,
+  ): Promise<IrrigationBackflow[]> {
+    const conditions = [eq(irrigationBackflows.customerId, customerId)];
+    if (companyId !== null) conditions.push(eq(irrigationBackflows.companyId, companyId));
+    if (branchName !== undefined) conditions.push(eq(irrigationBackflows.branchName, branchName));
+    return db
+      .select()
+      .from(irrigationBackflows)
+      .where(and(...conditions))
+      .orderBy(irrigationBackflows.name, irrigationBackflows.id);
+  }
+
+  async getBackflow(
+    companyId: number | null,
+    id: number,
+  ): Promise<IrrigationBackflow | null> {
+    const conditions = [eq(irrigationBackflows.id, id)];
+    if (companyId !== null) conditions.push(eq(irrigationBackflows.companyId, companyId));
+    const [row] = await db
+      .select()
+      .from(irrigationBackflows)
+      .where(and(...conditions));
+    return row ?? null;
+  }
+
+  async createBackflow(
+    data: InsertIrrigationBackflow,
+  ): Promise<IrrigationBackflow> {
+    const [row] = await db
+      .insert(irrigationBackflows)
+      .values({
+        ...data,
+        lastUpdatedAt: data.lastUpdatedAt ?? new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+    return row;
+  }
+
+  async updateBackflow(
+    companyId: number | null,
+    id: number,
+    patch: Partial<Omit<InsertIrrigationBackflow, "companyId" | "customerId">>,
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationBackflow | null> {
+    const conditions = [eq(irrigationBackflows.id, id)];
+    if (companyId !== null) conditions.push(eq(irrigationBackflows.companyId, companyId));
+    const now = new Date();
+    const [updated] = await db
+      .update(irrigationBackflows)
+      .set({
+        ...patch,
+        lastUpdatedByUserId: actor?.id ?? patch.lastUpdatedByUserId ?? null,
+        lastUpdatedByName: actor?.name ?? patch.lastUpdatedByName ?? null,
+        lastUpdatedAt: now,
+        updatedAt: now,
+      })
+      .where(and(...conditions))
+      .returning();
+    return updated ?? null;
+  }
+
+  async deleteBackflow(
+    companyId: number | null,
+    id: number,
+  ): Promise<boolean> {
+    const conditions = [eq(irrigationBackflows.id, id)];
+    if (companyId !== null) conditions.push(eq(irrigationBackflows.companyId, companyId));
+    const result = await db
+      .delete(irrigationBackflows)
+      .where(and(...conditions))
+      .returning({ id: irrigationBackflows.id });
+    return result.length > 0;
+  }
+
+  async logBackflowTest(
+    companyId: number | null,
+    id: number,
+    data: {
+      lastTestedDate: string;
+      lastTestResult: "pass" | "fail";
+      lastTestedBy?: string | null;
+      nextTestDueDate?: string | null;
+    },
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationBackflow | null> {
+    const conditions = [eq(irrigationBackflows.id, id)];
+    if (companyId !== null) conditions.push(eq(irrigationBackflows.companyId, companyId));
+
+    // Default nextTestDueDate = lastTestedDate + 1 year
+    let nextDue = data.nextTestDueDate ?? null;
+    if (!nextDue && data.lastTestedDate) {
+      try {
+        const d = new Date(data.lastTestedDate);
+        d.setFullYear(d.getFullYear() + 1);
+        nextDue = d.toISOString().slice(0, 10);
+      } catch {
+        // leave null if date parsing fails
+      }
+    }
+
+    const now = new Date();
+    const [updated] = await db
+      .update(irrigationBackflows)
+      .set({
+        lastTestedDate: data.lastTestedDate,
+        lastTestResult: data.lastTestResult,
+        lastTestedBy: data.lastTestedBy ?? null,
+        nextTestDueDate: nextDue,
+        lastUpdatedByUserId: actor?.id ?? null,
+        lastUpdatedByName: actor?.name ?? null,
+        lastUpdatedAt: now,
+        updatedAt: now,
+      })
+      .where(and(...conditions))
+      .returning();
+    return updated ?? null;
   }
 }
 

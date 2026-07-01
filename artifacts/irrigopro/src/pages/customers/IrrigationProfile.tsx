@@ -26,6 +26,7 @@ import type {
 } from "@workspace/db/schema";
 import { IrrigationControllerGrid } from "@/components/customers/irrigation-controller-grid";
 import { IrrigationCsvImportModal } from "@/components/customers/IrrigationCsvImportModal";
+import { BackflowSection } from "@/components/customers/BackflowSection";
 
 // ── Add controller form ──────────────────────────────────────────────────────
 
@@ -519,6 +520,21 @@ export default function IrrigationProfile() {
           onRefreshList={() => refetchControllers()}
         />
       )}
+
+      {/* ── Backflows section ─────────────────────────────────────────────── */}
+      <Card>
+        <CardContent className="pt-4 pb-4">
+          <BackflowSection
+            customerId={parseInt(customerId!)}
+            canManage={
+              userRole === "company_admin" ||
+              userRole === "super_admin" ||
+              userRole === "irrigation_manager"
+            }
+            canLogTest={canWrite}
+          />
+        </CardContent>
+      </Card>
     </div>
   );
 }

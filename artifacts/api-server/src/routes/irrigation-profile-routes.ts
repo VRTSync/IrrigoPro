@@ -1238,4 +1238,273 @@ export function registerIrrigationProfileRoutes(
       }
     },
   );
+
+  // ── Backflow Preventer Routes ─────────────────────────────────────────────
+  //
+  // GET    /api/customers/:customerId/backflows  (list)
+  // POST   /api/customers/:customerId/backflows  (create)
+  // PUT    /api/backflows/:id                    (update)
+  // DELETE /api/backflows/:id
+  // POST   /api/backflows/:id/log-test
+
+  const backflowCreateBody = z.object({
+    name: z.string().min(1).max(200),
+    branchName: z.string().optional(),
+    brand: z.string().nullish(),
+    model: z.string().nullish(),
+    size: z.string().nullish(),
+    deviceType: z.enum(["rpz", "double_check", "pvb", "spill_resistant_pvb", "other"]).optional(),
+    serialNumber: z.string().nullish(),
+    location: z.string().nullish(),
+    installDate: z.string().nullish(),
+    photoUrl: z.string().nullish(),
+    notes: z.string().nullish(),
+    lastTestedDate: z.string().nullish(),
+    nextTestDueDate: z.string().nullish(),
+    lastTestResult: z.enum(["pass", "fail"]).nullish(),
+    lastTestedBy: z.string().nullish(),
+    isActive: z.boolean().optional(),
+  });
+
+  const backflowUpdateBody = backflowCreateBody.partial();
+
+  const logTestBody = z.object({
+    lastTestedDate: z.string().min(1),
+    lastTestResult: z.enum(["pass", "fail"]),
+    lastTestedBy: z.string().nullish(),
+    nextTestDueDate: z.string().nullish(),
+  });
+
+  // ── GET /api/customers/:customerId/backflows ────────────────────────────────
+  app.get(
+    "/api/customers/:customerId/backflows",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const customerId = parseId(req.params.customerId);
+      if (!customerId) return badId(res, "customer");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      if (!isManagerRole(role) && role !== "field_tech") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+
+      if (!isSuperAdmin(role)) {
+        if (!callerCompanyId) {
+          return res.status(401).json({ message: "Authentication required" });
+        }
+        const customer = await storage.getCustomer(customerId);
+        if (!customer || customer.companyId !== callerCompanyId) {
+          return notFound(res, "Customer");
+        }
+      }
+
+      try {
+        const branchName =
+          typeof req.query.branchName === "string" ? req.query.branchName : undefined;
+        const rows = await storage.listBackflows(
+          isSuperAdmin(role) ? null : callerCompanyId,
+          customerId,
+          branchName,
+        );
+        res.json(rows);
+      } catch (e: any) {
+        req.log?.error?.({ err: e, customerId }, "listBackflows failed");
+        res.status(500).json({ message: "Could not load backflows — please retry" });
+      }
+    },
+  );
+
+  // ── POST /api/customers/:customerId/backflows ───────────────────────────────
+  app.post(
+    "/api/customers/:customerId/backflows",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const customerId = parseId(req.params.customerId);
+      if (!customerId) return badId(res, "customer");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      if (!canWrite(role) || role === "field_tech") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+      if (!callerCompanyId && !isSuperAdmin(role)) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      if (!isSuperAdmin(role)) {
+        const customer = await storage.getCustomer(customerId);
+        if (!customer || customer.companyId !== callerCompanyId!) {
+          return notFound(res, "Customer");
+        }
+      }
+
+      const parsed = backflowCreateBody.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+      }
+
+      const userId = req.authenticatedUserId as number | undefined;
+      const me = userId ? await storage.getUser(userId) : undefined;
+
+      try {
+        const companyIdForCreate = isSuperAdmin(role)
+          ? (callerCompanyId ?? (await storage.getCustomer(customerId))?.companyId!)
+          : callerCompanyId!;
+
+        const row = await storage.createBackflow({
+          companyId: companyIdForCreate,
+          customerId,
+          branchName: parsed.data.branchName ?? "",
+          name: parsed.data.name,
+          brand: parsed.data.brand ?? null,
+          model: parsed.data.model ?? null,
+          size: parsed.data.size ?? null,
+          deviceType: parsed.data.deviceType ?? "other",
+          serialNumber: parsed.data.serialNumber ?? null,
+          location: parsed.data.location ?? null,
+          installDate: parsed.data.installDate ?? null,
+          photoUrl: parsed.data.photoUrl ?? null,
+          notes: parsed.data.notes ?? null,
+          lastTestedDate: parsed.data.lastTestedDate ?? null,
+          nextTestDueDate: parsed.data.nextTestDueDate ?? null,
+          lastTestResult: parsed.data.lastTestResult ?? null,
+          lastTestedBy: parsed.data.lastTestedBy ?? null,
+          isActive: parsed.data.isActive ?? true,
+          lastUpdatedByUserId: me?.id ?? null,
+          lastUpdatedByName: me?.name ?? null,
+          lastUpdatedAt: new Date(),
+        });
+        res.status(201).json(row);
+      } catch (e: any) {
+        req.log?.error?.({ err: e, customerId }, "createBackflow failed");
+        res.status(500).json({ message: "Could not create backflow — please retry" });
+      }
+    },
+  );
+
+  // ── PUT /api/backflows/:id ──────────────────────────────────────────────────
+  app.put(
+    "/api/backflows/:id",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const id = parseId(req.params.id);
+      if (!id) return badId(res, "backflow");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      if (!canWrite(role) || role === "field_tech") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+      if (!callerCompanyId && !isSuperAdmin(role)) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      const parsed = backflowUpdateBody.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+      }
+
+      const userId = req.authenticatedUserId as number | undefined;
+      const me = userId ? await storage.getUser(userId) : undefined;
+
+      try {
+        const updated = await storage.updateBackflow(
+          isSuperAdmin(role) ? null : callerCompanyId,
+          id,
+          { ...parsed.data },
+          me ? { id: me.id, name: me.name } : undefined,
+        );
+        if (!updated) return notFound(res, "Backflow");
+        res.json(updated);
+      } catch (e: any) {
+        req.log?.error?.({ err: e, id }, "updateBackflow failed");
+        res.status(500).json({ message: "Could not update backflow — please retry" });
+      }
+    },
+  );
+
+  // ── DELETE /api/backflows/:id ───────────────────────────────────────────────
+  app.delete(
+    "/api/backflows/:id",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const id = parseId(req.params.id);
+      if (!id) return badId(res, "backflow");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      if (!canWrite(role) || role === "field_tech") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+      if (!isSuperAdmin(role) && !callerCompanyId) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      try {
+        const ok = await storage.deleteBackflow(
+          isSuperAdmin(role) ? null : callerCompanyId,
+          id,
+        );
+        if (!ok) return notFound(res, "Backflow");
+        res.json({ ok: true });
+      } catch (e: any) {
+        req.log?.error?.({ err: e, id }, "deleteBackflow failed");
+        res.status(500).json({ message: "Could not delete backflow — please retry" });
+      }
+    },
+  );
+
+  // ── POST /api/backflows/:id/log-test ───────────────────────────────────────
+  // Quick-action: stamps the test date/result and rolls nextTestDueDate +1yr.
+  // field_tech may log tests (same pattern as controller zone photos).
+  app.post(
+    "/api/backflows/:id/log-test",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const id = parseId(req.params.id);
+      if (!id) return badId(res, "backflow");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      if (!isManagerRole(role) && role !== "field_tech") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+      if (!isSuperAdmin(role) && !callerCompanyId) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      const parsed = logTestBody.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+      }
+
+      const userId = req.authenticatedUserId as number | undefined;
+      const me = userId ? await storage.getUser(userId) : undefined;
+
+      try {
+        const updated = await storage.logBackflowTest(
+          isSuperAdmin(role) ? null : callerCompanyId,
+          id,
+          {
+            lastTestedDate: parsed.data.lastTestedDate,
+            lastTestResult: parsed.data.lastTestResult,
+            lastTestedBy: parsed.data.lastTestedBy ?? null,
+            nextTestDueDate: parsed.data.nextTestDueDate ?? null,
+          },
+          me ? { id: me.id, name: me.name } : undefined,
+        );
+        if (!updated) return notFound(res, "Backflow");
+        res.json(updated);
+      } catch (e: any) {
+        req.log?.error?.({ err: e, id }, "logBackflowTest failed");
+        res.status(500).json({ message: "Could not log test — please retry" });
+      }
+    },
+  );
 }
