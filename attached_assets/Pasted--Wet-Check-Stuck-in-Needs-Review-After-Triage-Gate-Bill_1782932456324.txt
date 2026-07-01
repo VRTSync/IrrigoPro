@@ -1,0 +1,43 @@
+# Wet Check — Stuck in "Needs Review" After Triage + Gate Billing Selection
+
+Two related issues, one root cause. (a) A wet check whose findings are all triaged **stays in the Needs Review "Findings to Triage" list**; (b) its Wet Check Billing shouldn't be **selectable for billing while the wet check is still in the review stage**.
+
+**Root cause — the list and the review surface disagree on "unrouted finding."**
+- **Review surface** (`CombinedReviewSurface.tsx:885`): a finding is unrouted only if `isNeedsReview(f)` **and** `convertedAt == null` **and** no `billingSheetId/estimateId/workOrderId/wetCheckBillingId`. For WC-109 this is **0** → "All findings have been triaged."
+- **Needs-review list endpoint** (`routes.ts:175`, `GET /api/wet-checks/needs-review`): a finding is unrouted if `resolution !== "documented_only"` **and** no target id — it does **not** check `isNeedsReview` or `convertedAt`.
+
+So a **repaired-in-field finding that was billed into the approved WCB snapshot** but never got its `wetCheckBillingId` (or `convertedAt`) stamped back on the finding row still trips the list's looser predicate. The wet check keeps showing "Triage: N findings" and never leaves Needs Review — even though it's triaged, `partially_converted`, and the snapshot is approved (screenshot). That same muddled lifecycle is why billing treats it as selectable while it's still shown as in-review.
+
+**Fix:** one shared "unrouted finding" predicate for both surfaces; stamp routing on findings billed into the WCB; and gate billing selection on "the wet check has no genuine unrouted findings." Backend-focused. (Reconciles with `Command Center - Fix Wet Check Billings Dropped From Invoice` — see below.)
+
+## Slice 1 — One predicate, everywhere (fix the stuck list)
+- Extract a single **`isUnroutedFinding(f)`** helper = `isNeedsReview(f) && f.convertedAt == null && billingSheetId/estimateId/workOrderId/wetCheckBillingId all null` (the surface's definition; also exclude `resolution === 'documented_only'`).
+- Use it in **both** `CombinedReviewSurface.tsx:885` and the **needs-review list endpoint** (`routes.ts:175`) so the list count and the surface can never disagree. A finding that is `repaired_in_field`/`completed_in_field` (already handled/in the WCB) is **not** counted as needing triage.
+- Result: a wet check with all findings triaged (routed or repaired-into-WCB) has `unroutedFindings = 0`, so it drops out of "Findings to Triage." It then appears under snapshot-review/approved as appropriate — not stuck in triage.
+
+## Slice 2 — Stamp routing on findings billed into the WCB (belt-and-suspenders)
+- When the WCB snapshot is created/approved from repaired-in-field findings, **stamp `wetCheckBillingId` (and `convertedAt`) on those finding rows** so their routing is recorded (not just implied by resolution). Audit the snapshot-write path (`storage.ts` `_writeRepairedInFieldBilling` / the convert path) — this closes the case where a looser count (or any consumer) sees them as unrouted. (Related: the "convert CIF rescue" logic for `completed_in_field` + `resolution=pending`.)
+
+## Slice 3 — Gate billing selection to reviewed wet checks
+- A WCB should be **billable/selectable only when its wet check is out of the triage stage** — i.e. **no genuine unrouted findings** (`isUnroutedFinding` count == 0) **and** the WCB is `approved_passed_to_billing` + unbilled.
+- Apply this in the billing eligibility used by `/api/invoices/preview` and `/api/invoices/monthly` (and the Command Center selection list source): eligible WCB = `status === 'approved_passed_to_billing' && invoiceId == null && parent wet check has no unrouted findings`.
+- **This replaces the blunt `wetCheckStatus === 'converted'` check** from `Command Center - Fix Wet Check Billings Dropped From Invoice`: a `partially_converted` wet check with everything triaged **is** billable (fixing the dropped-WCB bug), while a wet check still holding untriaged findings is **not** selectable (this request). One consistent rule.
+- Ensure the Command Center picker and the invoice generator use the **same** eligibility (shared selector) so what's shown selectable == what actually bills.
+
+## Tests
+- WC-109 (all findings triaged, `partially_converted`, snapshot approved) → `unroutedFindings = 0`; **leaves "Findings to Triage"**; the list and the surface agree.
+- A wet check with a genuinely untriaged `needs_review` finding still shows in "Findings to Triage" with the right count.
+- Findings billed into a WCB carry `wetCheckBillingId`/`convertedAt`.
+- Billing: a fully-triaged wet check's approved WCB is selectable **and** flows into the invoice; a wet check with untriaged findings is **not** selectable for billing; picker == generator eligibility.
+- Company isolation intact.
+
+## Out of scope
+- The Command Center UI (`customer-billing.tsx`) — don't modify.
+- Redesigning the review flow.
+
+## Relevant files
+- `artifacts/api-server/src/routes/routes.ts` (needs-review `unroutedFindings` ~15793/175; invoice eligibility ~6438/6616)
+- `artifacts/irrigopro/src/components/wet-check-review/CombinedReviewSurface.tsx:885` (surface predicate — the reference; share it)
+- `artifacts/api-server/src/storage.ts` (`_writeRepairedInFieldBilling` / snapshot write — stamp `wetCheckBillingId`; `billing-unbilled-selectors.ts` eligibility)
+- New shared `isUnroutedFinding` helper (used by list + surface + billing gate)
+- Related: `Command Center - Fix Wet Check Billings Dropped From Invoice (Converted-Status Mismatch).md` (this supersedes its `converted` rule)
