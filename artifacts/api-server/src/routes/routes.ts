@@ -17412,108 +17412,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return true;
   };
 
-  app.get("/api/admin/customer-controllers", requireAuthentication, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!requireAdminRole(req, res)) return;
-    try {
-      const rows = await storage.listCustomerControllersOverview(cid);
-      res.json(rows);
-    } catch (e: any) {
-      const { status, message } = classifyAndLog(req, e, {
-        op: "listCustomerControllersOverview",
-        ctx: { cid },
-        fallbackMessage: "Couldn't load controllers — please retry",
-      });
-      res.status(status).json({ message });
-    }
+  // GET /api/admin/customer-controllers — superseded by
+  // GET /api/irrigation-controllers/company-rollup (Task #1653).
+  // Returns 410 Gone so callers get an actionable error rather than a silent 404.
+  app.get("/api/admin/customer-controllers", requireAuthentication, async (_req, res) => {
+    res.status(410).json({
+      message: "This endpoint has been removed. Use GET /api/irrigation-controllers/company-rollup instead.",
+    });
   });
 
-  const setControllerCountBody = z.object({
-    count: z.coerce.number().int().min(1).max(26),
-    confirmDeleteWithZones: z.boolean().optional(),
-    // Optional branch label. Empty / missing == customer-level (NULL).
-    branchName: z.string().nullish(),
-  }).strict();
-
-  app.put("/api/admin/customers/:customerId/controllers", requireAuthentication, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!requireAdminRole(req, res)) return;
-    const customerId = parseInt(req.params.customerId);
-    if (Number.isNaN(customerId)) { res.status(400).json({ message: "Invalid customerId" }); return; }
-    const parsed = setControllerCountBody.safeParse(req.body ?? {});
-    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
-    try {
-      const result = await storage.setCustomerControllerCount(cid, customerId, parsed.data.count, {
-        confirmDeleteWithZones: parsed.data.confirmDeleteWithZones,
-        branchName: parsed.data.branchName ?? null,
-      });
-      // Preserve pre-Task-#320 wire shape on the rows themselves: the
-      // customer-level bucket is exposed as branchName: null.
-      const wireBranch = parsed.data.branchName ?? null;
-      const wireControllers = result.controllers.map(c => ({
-        ...c,
-        branchName: c.branchName ? c.branchName : null,
-      }));
-      res.json({ ...result, controllers: wireControllers, branchName: wireBranch });
-    } catch (e: any) {
-      if (e instanceof ControllerHasZonesError) {
-        res.status(409).json({
-          message: `Removing controllers ${e.letters.join(", ")} would discard their zones. Confirm to proceed.`,
-          letters: e.letters,
-          branchName: parsed.data.branchName ?? null,
-          requiresConfirmation: true,
-        });
-        return;
-      }
-      const { status, message } = classifyAndLog(req, e, {
-        op: "setCustomerControllerCount",
-        ctx: { cid, customerId, count: parsed.data.count },
-        fallbackMessage: "Couldn't update controller count — please retry",
-        recognized: [
-          { test: (_e, raw) => /not found/i.test(raw), status: 404, message: "Not found" },
-          { test: (_e, raw) => /must be between/i.test(raw), status: 400, message: (_e, raw) => raw },
-        ],
-      });
-      res.status(status).json({ message });
-    }
+  // PUT /api/admin/customers/:customerId/controllers — removed (Task #1653).
+  // All writes now go through PUT /api/irrigation-controllers/:id (canonical store).
+  app.put("/api/admin/customers/:customerId/controllers", requireAuthentication, async (_req, res) => {
+    res.status(410).json({
+      message: "This endpoint has been removed. Use PUT /api/irrigation-controllers/:id instead.",
+    });
   });
 
-  const setZoneCountBody = z.object({
-    zoneCount: z.coerce.number().int().min(0).max(200),
-    branchName: z.string().nullish(),
-  }).strict();
-
+  // PUT /api/admin/customers/:customerId/controllers/:letter/zones — removed (Task #1653).
+  // All writes now go through PUT /api/irrigation-controllers/:id (canonical store).
   app.put(
     "/api/admin/customers/:customerId/controllers/:letter/zones",
     requireAuthentication,
-    async (req, res) => {
-      const cid = requireCompanyId(req, res); if (!cid) return;
-      if (!requireAdminRole(req, res)) return;
-      const customerId = parseInt(req.params.customerId);
-      const letter = String(req.params.letter || "").toUpperCase();
-      if (Number.isNaN(customerId)) { res.status(400).json({ message: "Invalid customerId" }); return; }
-      if (!/^[A-Z]$/.test(letter)) { res.status(400).json({ message: "Invalid controller letter" }); return; }
-      const parsed = setZoneCountBody.safeParse(req.body ?? {});
-      if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
-      try {
-        const updated = await storage.updatePropertyController(
-          cid,
-          customerId,
-          letter,
-          { zoneCount: parsed.data.zoneCount },
-          parsed.data.branchName ?? null,
-        );
-        if (!updated) { res.status(404).json({ message: "Controller not found" }); return; }
-        // Preserve pre-Task-#320 wire shape: customer-level → null.
-        res.json({ ...updated, branchName: updated.branchName ? updated.branchName : null });
-      } catch (e: any) {
-        const { status, message } = classifyAndLog(req, e, {
-          op: "updatePropertyControllerZones",
-          ctx: { cid, customerId, letter },
-          fallbackMessage: "Couldn't save zones — please retry",
-        });
-        res.status(status).json({ message });
-      }
+    async (_req, res) => {
+      res.status(410).json({
+        message: "This endpoint has been removed. Use PUT /api/irrigation-controllers/:id instead.",
+      });
     },
   );
 

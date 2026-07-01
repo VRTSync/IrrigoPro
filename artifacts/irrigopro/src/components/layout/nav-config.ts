@@ -222,20 +222,13 @@ export const superAdminNav: NavConfig = {
         { type: "leaf", label: "Switch User", path: "/switch-user", icon: Repeat },
       ],
     },
-    {
-      type: "group",
-      label: "Operations",
-      icon: Briefcase,
-      items: [
-        { type: "leaf", label: "Controllers & Zones", path: "/admin/controllers", icon: Cpu },
-      ],
-    },
     wetCheckGroup,
     {
       type: "group",
       label: "System",
       icon: Settings,
       items: [
+        { type: "leaf", label: "Controllers & Zones", path: "/admin/controllers", icon: Cpu },
         { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
         { type: "leaf", label: "Client Errors", path: "/admin/client-errors", icon: AlertTriangle },
         { type: "leaf", label: "QuickBooks", path: "/quickbooks", icon: Calculator },
@@ -283,7 +276,6 @@ export const companyAdminNav: NavConfig = {
         { type: "leaf", label: "Customers", path: "/customers", icon: Users },
         { type: "leaf", label: "All Customers", path: "/admin/customers", icon: Users },
         { type: "leaf", label: "Maps", path: "/site-maps", icon: MapIcon },
-        { type: "leaf", label: "Controllers & Zones", path: "/admin/controllers", icon: Cpu },
       ],
     },
     {
@@ -319,6 +311,7 @@ export const companyAdminNav: NavConfig = {
       label: "Settings",
       icon: Settings,
       items: [
+        { type: "leaf", label: "Controllers & Zones", path: "/admin/controllers", icon: Cpu },
         { type: "leaf", label: "Team", path: "/users", icon: Users },
         { type: "leaf", label: "Company Profile", path: "/company-profile", icon: Building2 },
         { type: "leaf", label: "QuickBooks", path: "/quickbooks", icon: Calculator },

@@ -6,6 +6,7 @@
 // matching the estimate cross-company ownership guard pattern.
 //
 // Routes:
+//   GET    /api/irrigation-controllers/company-rollup        (admin: company_admin + super_admin)
 //   GET    /api/customers/:customerId/controllers-profile
 //   POST   /api/customers/:customerId/controllers-profile
 //   GET    /api/irrigation-controllers/:id
@@ -24,6 +25,9 @@
 
 import type { Express, RequestHandler } from "express";
 import { z } from "zod";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { db } from "../db";
+import { customers, irrigationControllers } from "@workspace/db";
 import { storage } from "../storage";
 import type { IrrigationImportRow, IrrigationImportRowError, IrrigationZoneTypeEnum } from "../storage";
 
@@ -136,6 +140,83 @@ export function registerIrrigationProfileRoutes(
   deps: IrrigationProfileRouteDeps,
 ): void {
   const { requireAuthentication } = deps;
+
+  // ── GET /api/irrigation-controllers/company-rollup ─────────────────────────
+  // Company-wide roll-up of all customers and their canonical irrigation
+  // controllers (from irrigation_controllers — the single source of truth).
+  // Registered BEFORE /:id so the literal path is not swallowed by the param.
+  // Access: company_admin (own company) and super_admin (all companies).
+  app.get(
+    "/api/irrigation-controllers/company-rollup",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const role = req.authenticatedUserRole as string | undefined;
+      if (role !== "company_admin" && role !== "super_admin") {
+        return res.status(403).json({ message: "Access denied. Company admin or super admin required." });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+      if (!callerCompanyId && !isSuperAdmin(role)) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      try {
+        // Fetch all non-hidden customers scoped to caller's company.
+        const custConditions: any[] = [
+          sql`coalesce(${customers.hiddenFromBilling}, false) = false`,
+        ];
+        if (!isSuperAdmin(role)) {
+          custConditions.push(eq(customers.companyId, callerCompanyId!));
+        }
+
+        const custs = await db
+          .select({
+            id: customers.id,
+            name: customers.name,
+            irrigoName: customers.irrigoName,
+            companyId: customers.companyId,
+          })
+          .from(customers)
+          .where(and(...custConditions))
+          .orderBy(customers.name);
+
+        if (custs.length === 0) {
+          return res.json([]);
+        }
+
+        // Fetch all irrigation controllers for these customers in one query.
+        const custIds = custs.map((c) => c.id);
+        const ctrlConditions: any[] = [inArray(irrigationControllers.customerId, custIds)];
+        if (!isSuperAdmin(role)) {
+          ctrlConditions.push(eq(irrigationControllers.companyId, callerCompanyId!));
+        }
+
+        const allCtrls = await db
+          .select()
+          .from(irrigationControllers)
+          .where(and(...ctrlConditions))
+          .orderBy(irrigationControllers.customerId, irrigationControllers.name, irrigationControllers.id);
+
+        // Group controllers by customerId.
+        const byCustomer = new Map<number, typeof allCtrls>();
+        for (const ctrl of allCtrls) {
+          const arr = byCustomer.get(ctrl.customerId) ?? [];
+          arr.push(ctrl);
+          byCustomer.set(ctrl.customerId, arr);
+        }
+
+        const rollup = custs.map((customer) => ({
+          customer,
+          controllers: byCustomer.get(customer.id) ?? [],
+        }));
+
+        res.json(rollup);
+      } catch (e: any) {
+        req.log?.error?.({ err: e }, "companyRollup failed");
+        res.status(500).json({ message: "Could not load controllers rollup — please retry" });
+      }
+    },
+  );
 
   // ── GET /api/customers/:customerId/controllers-profile ──────────────────────
   app.get(
