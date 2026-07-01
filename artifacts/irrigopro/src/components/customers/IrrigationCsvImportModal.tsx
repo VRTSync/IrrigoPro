@@ -258,7 +258,7 @@ interface ParsedRow {
   startTimes: string[] | null;
   seasonalAdjustPct: number;
   zoneNumber: number;
-  zoneName: string;
+  zoneName: string | null;
   zoneType: string;
   runTimeMinutes: number;
 }
@@ -317,11 +317,7 @@ function parseCsv(text: string): ParseResult {
       return;
     }
 
-    const zoneName = (raw["Zone Name"] ?? "").trim();
-    if (!zoneName) {
-      errors.push({ row: rowNum, field: "Zone Name", message: "Zone Name is required" });
-      return;
-    }
+    const zoneName = (raw["Zone Name"] ?? "").trim() || null;
 
     const rawZoneType = (raw["Zone Type"] ?? "").trim();
     const zoneType = normalizeZoneType(rawZoneType);
@@ -368,7 +364,7 @@ function parseCsv(text: string): ParseResult {
       startTimes,
       seasonalAdjustPct: isNaN(seasonalAdjustPct) ? 100 : seasonalAdjustPct,
       zoneNumber: zoneNum,
-      zoneName,
+      zoneName: zoneName,
       zoneType,
       runTimeMinutes: isNaN(runTimeMinutes) ? 0 : runTimeMinutes,
     });

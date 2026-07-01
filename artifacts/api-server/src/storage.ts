@@ -1328,9 +1328,29 @@ export interface IrrigationImportRow {
   startTimes: string[] | null;
   seasonalAdjustPct: number;
   zoneNumber: number;
-  zoneName: string;
+  zoneName: string | null;
   zoneType: IrrigationZoneTypeEnum;
   runTimeMinutes: number;
+}
+
+/**
+ * Resolve the final zone name for a CSV import row.
+ * - If the CSV supplied a non-blank name, use it.
+ * - Otherwise, keep the existing saved name (never clobber it).
+ * - If there is no existing name (new zone), fall back to `Zone {zoneNumber}`.
+ *
+ * This is the single shared source of truth: called from both the preview-diff
+ * path and the commit-write path so what the manager approves is exactly what
+ * gets saved.
+ */
+export function resolveZoneName(
+  rowName: string | null,
+  existingName: string | undefined,
+  zoneNumber: number,
+): string {
+  if (rowName) return rowName;
+  if (existingName) return existingName;
+  return `Zone ${zoneNumber}`;
 }
 
 export interface IrrigationImportRowError {
@@ -10908,18 +10928,20 @@ export class DatabaseStorage implements IStorage {
       for (const [zoneNum, row] of group.zones) {
         const existingZone = existingZoneByNumber.get(zoneNum);
         if (!existingZone) {
+          const resolvedName = resolveZoneName(row.zoneName, undefined, zoneNum);
           zoneDiffs.push({
             action: "create",
             zoneNumber: zoneNum,
-            zoneName: row.zoneName,
+            zoneName: resolvedName,
             zoneType: row.zoneType,
             runTimeMinutes: row.runTimeMinutes,
             changes: [],
           });
         } else {
+          const resolvedName = resolveZoneName(row.zoneName, existingZone.name, zoneNum);
           const changes: IrrigationImportZoneDiff["changes"] = [];
-          if (existingZone.name !== row.zoneName) {
-            changes.push({ field: "zoneName", from: existingZone.name, to: row.zoneName });
+          if (existingZone.name !== resolvedName) {
+            changes.push({ field: "zoneName", from: existingZone.name, to: resolvedName });
           }
           if (existingZone.zoneType !== row.zoneType) {
             changes.push({ field: "zoneType", from: existingZone.zoneType, to: row.zoneType });
@@ -10930,7 +10952,7 @@ export class DatabaseStorage implements IStorage {
           zoneDiffs.push({
             action: changes.length > 0 ? "update" : "no_change",
             zoneNumber: zoneNum,
-            zoneName: row.zoneName,
+            zoneName: resolvedName,
             zoneType: row.zoneType,
             runTimeMinutes: row.runTimeMinutes,
             changes,
@@ -11112,6 +11134,7 @@ export class DatabaseStorage implements IStorage {
           const zd = zoneDiffByNumber.get(zoneNum);
 
           if (!existingZone || zd?.action === "create") {
+            const resolvedName = resolveZoneName(row.zoneName, undefined, zoneNum);
             await q
               .insert(irrigationProfileZones)
               .values({
@@ -11119,7 +11142,7 @@ export class DatabaseStorage implements IStorage {
                 controllerId: ctrlId,
                 programId,
                 zoneNumber: zoneNum,
-                name: row.zoneName,
+                name: resolvedName,
                 zoneType: row.zoneType,
                 runTimeMinutes: row.runTimeMinutes,
                 zoneOrder: zoneNum,
@@ -11127,10 +11150,11 @@ export class DatabaseStorage implements IStorage {
               })
               .onConflictDoNothing();
           } else if (zd?.action === "update") {
+            const resolvedName = resolveZoneName(row.zoneName, existingZone.name, zoneNum);
             await q
               .update(irrigationProfileZones)
               .set({
-                name: row.zoneName,
+                name: resolvedName,
                 zoneType: row.zoneType,
                 runTimeMinutes: row.runTimeMinutes,
                 programId,

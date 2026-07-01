@@ -997,10 +997,6 @@ export function registerIrrigationProfileRoutes(
           rowErrors.push({ row: rowNum, field: "Zone #", message: "Zone # must be a positive integer" });
           continue;
         }
-        if (!raw.zoneName || typeof raw.zoneName !== "string") {
-          rowErrors.push({ row: rowNum, field: "Zone Name", message: "Zone Name is required" });
-          continue;
-        }
         if (!raw.zoneType || !VALID_ZONE_TYPES.has(raw.zoneType)) {
           rowErrors.push({
             row: rowNum,
@@ -1044,7 +1040,7 @@ export function registerIrrigationProfileRoutes(
           startTimes: Array.isArray(raw.startTimes) ? raw.startTimes : null,
           seasonalAdjustPct: typeof raw.seasonalAdjustPct === "number" ? raw.seasonalAdjustPct : 100,
           zoneNumber: raw.zoneNumber,
-          zoneName: String(raw.zoneName).trim(),
+          zoneName: raw.zoneName ? String(raw.zoneName).trim() || null : null,
           zoneType: raw.zoneType as IrrigationZoneTypeEnum,
           runTimeMinutes: raw.runTimeMinutes,
         });
