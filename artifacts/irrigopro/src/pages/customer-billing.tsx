@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -312,6 +312,15 @@ export default function CustomerBilling() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Stable callback passed to CompletedWorkDetailModal so any save inside the
+  // modal immediately refreshes the Command Center sidebar and detail panel.
+  const handleModalSaved = useCallback(() => {
+    queryClient.invalidateQueries({
+      queryKey: ["/api/customers", selectedCustomerId, "billing", billingMonth],
+    });
+    queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
+  }, [queryClient, selectedCustomerId, billingMonth]);
 
   // User role — read from localStorage (same pattern as financial-pulse.tsx)
   const userRole = (() => {
@@ -3211,6 +3220,7 @@ export default function CustomerBilling() {
           open={showWorkOrderDetail}
           onOpenChange={(open) => { setShowWorkOrderDetail(open); if (!open) setSelectedWorkOrder(null); }}
           showPricing={true}
+          onSaved={handleModalSaved}
         />
       )}
 
@@ -3223,6 +3233,7 @@ export default function CustomerBilling() {
           open={showBillingSheetDetail}
           onOpenChange={(open) => { setShowBillingSheetDetail(open); if (!open) setSelectedBillingSheet(null); }}
           showPricing={true}
+          onSaved={handleModalSaved}
         />
       )}
 
