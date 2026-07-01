@@ -9,12 +9,16 @@
 //
 // What this migration does (idempotent + preview-safe):
 //   1. Scan estimate_items, work_order_items, billing_sheet_items for rows
-//      where totalPrice IS NULL OR isnan(totalPrice).
+//      where totalPrice IS NULL OR total_price = 'NaN'::numeric.
 //      Recompute each as money(quantity) × money(partPrice) = 0 when price is
 //      genuinely absent.
 //   2. Recompute partsSubtotal / laborSubtotal / totalAmount on parent
 //      estimates and work_orders from their repaired items.
 //      Uses add-parts semantics: never silently lower a real total.
+//
+// NOTE: PostgreSQL's isnan() is a float function and does NOT work on
+// numeric/decimal columns. Use `col = 'NaN'::numeric` to detect NaN in
+// numeric columns, and `col != 'NaN'::numeric` to assert it is NOT NaN.
 //
 // Stores "done" marker in app_settings so a clean re-run skips everything.
 
@@ -49,15 +53,15 @@ async function nanItemCounts(): Promise<{
   const [ei, woi, bsi] = await Promise.all([
     db.execute<{ n: string }>(sql`
       SELECT COUNT(*) AS n FROM estimate_items
-      WHERE total_price IS NULL OR isnan(total_price::numeric)
+      WHERE total_price IS NULL OR total_price = 'NaN'::numeric
     `),
     db.execute<{ n: string }>(sql`
       SELECT COUNT(*) AS n FROM work_order_items
-      WHERE total_price IS NULL OR isnan(total_price::numeric)
+      WHERE total_price IS NULL OR total_price = 'NaN'::numeric
     `),
     db.execute<{ n: string }>(sql`
       SELECT COUNT(*) AS n FROM billing_sheet_items
-      WHERE total_price IS NULL OR isnan(total_price::numeric)
+      WHERE total_price IS NULL OR total_price = 'NaN'::numeric
     `),
   ]);
   return {
@@ -71,15 +75,15 @@ async function nanParentCounts(): Promise<{ estimates: number; workOrders: numbe
   const [est, wo] = await Promise.all([
     db.execute<{ n: string }>(sql`
       SELECT COUNT(*) AS n FROM estimates
-      WHERE parts_subtotal IS NULL OR isnan(parts_subtotal::numeric)
-         OR labor_subtotal IS NULL OR isnan(labor_subtotal::numeric)
-         OR total_amount IS NULL OR isnan(total_amount::numeric)
+      WHERE parts_subtotal IS NULL OR parts_subtotal = 'NaN'::numeric
+         OR labor_subtotal IS NULL OR labor_subtotal = 'NaN'::numeric
+         OR total_amount IS NULL OR total_amount = 'NaN'::numeric
     `),
     db.execute<{ n: string }>(sql`
       SELECT COUNT(*) AS n FROM work_orders
-      WHERE parts_subtotal IS NULL OR isnan(parts_subtotal::numeric)
-         OR labor_subtotal IS NULL OR isnan(labor_subtotal::numeric)
-         OR total_amount IS NULL OR isnan(total_amount::numeric)
+      WHERE parts_subtotal IS NULL OR parts_subtotal = 'NaN'::numeric
+         OR labor_subtotal IS NULL OR labor_subtotal = 'NaN'::numeric
+         OR total_amount IS NULL OR total_amount = 'NaN'::numeric
     `),
   ]);
   return {
@@ -151,7 +155,7 @@ async function preview(): Promise<MigrationPreview> {
       id: 'repair_billing_sheet_items',
       description:
         `Recompute ${items.billingSheetItems} billing_sheet_item row(s) where totalPrice IS NULL or NaN ` +
-        `→ money(quantity) × money(partPrice), storing '0.00' when price is absent.`,
+        `→ money(quantity) × money(unitPrice), storing '0.00' when price is absent.`,
     },
     {
       id: 'recompute_estimate_totals',
@@ -201,16 +205,16 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
     try {
       const beforeEI = await db.execute<{ id: number; estimate_id: number; part_name: string; total_price: string | null }>(sql`
         SELECT id, estimate_id, part_name, total_price FROM estimate_items
-        WHERE total_price IS NULL OR isnan(total_price::numeric)
+        WHERE total_price IS NULL OR total_price = 'NaN'::numeric
       `);
       const r = await db.execute<{ id: number; total_price: string }>(sql`
         UPDATE estimate_items
         SET total_price = ROUND(
-          COALESCE(CASE WHEN isnan(quantity::numeric) THEN 0 ELSE quantity::numeric END, 0) *
-          COALESCE(CASE WHEN part_price IS NULL OR isnan(part_price::numeric) THEN 0 ELSE part_price::numeric END, 0),
+          COALESCE(CASE WHEN quantity = 'NaN'::numeric THEN 0 ELSE quantity::numeric END, 0) *
+          COALESCE(CASE WHEN part_price IS NULL OR part_price = 'NaN'::numeric THEN 0 ELSE part_price END, 0),
           2
         )
-        WHERE total_price IS NULL OR isnan(total_price::numeric)
+        WHERE total_price IS NULL OR total_price = 'NaN'::numeric
         RETURNING id, total_price
       `);
       const afterById = new Map(r.rows.map(a => [a.id, a]));
@@ -239,16 +243,16 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
     try {
       const beforeWOI = await db.execute<{ id: number; work_order_id: number; part_name: string; total_price: string | null }>(sql`
         SELECT id, work_order_id, part_name, total_price FROM work_order_items
-        WHERE total_price IS NULL OR isnan(total_price::numeric)
+        WHERE total_price IS NULL OR total_price = 'NaN'::numeric
       `);
       const r = await db.execute<{ id: number; total_price: string }>(sql`
         UPDATE work_order_items
         SET total_price = ROUND(
-          COALESCE(CASE WHEN isnan(quantity::numeric) THEN 0 ELSE quantity::numeric END, 0) *
-          COALESCE(CASE WHEN part_price IS NULL OR isnan(part_price::numeric) THEN 0 ELSE part_price::numeric END, 0),
+          COALESCE(CASE WHEN quantity = 'NaN'::numeric THEN 0 ELSE quantity::numeric END, 0) *
+          COALESCE(CASE WHEN part_price IS NULL OR part_price = 'NaN'::numeric THEN 0 ELSE part_price END, 0),
           2
         )
-        WHERE total_price IS NULL OR isnan(total_price::numeric)
+        WHERE total_price IS NULL OR total_price = 'NaN'::numeric
         RETURNING id, total_price
       `);
       const afterById = new Map(r.rows.map(a => [a.id, a]));
@@ -271,22 +275,26 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
   }
 
   // Step 3 — repair billing_sheet_items (per-row before/after audit log)
+  //
+  // billing_sheet_items uses `unit_price` (decimal) and `quantity` (decimal),
+  // unlike estimate_items / work_order_items which use `part_price` (decimal)
+  // and `quantity` (integer).
   {
     const t = Date.now();
     emit({ step: 'repair_billing_sheet_items', status: 'running' });
     try {
       const beforeBSI = await db.execute<{ id: number; billing_sheet_id: number; part_name: string; total_price: string | null }>(sql`
         SELECT id, billing_sheet_id, part_name, total_price FROM billing_sheet_items
-        WHERE total_price IS NULL OR isnan(total_price::numeric)
+        WHERE total_price IS NULL OR total_price = 'NaN'::numeric
       `);
       const r = await db.execute<{ id: number; total_price: string }>(sql`
         UPDATE billing_sheet_items
         SET total_price = ROUND(
-          COALESCE(CASE WHEN isnan(quantity::numeric) THEN 0 ELSE quantity::numeric END, 0) *
-          COALESCE(CASE WHEN unit_price IS NULL OR isnan(unit_price::numeric) THEN 0 ELSE unit_price::numeric END, 0),
+          (CASE WHEN unit_price = 'NaN'::numeric OR unit_price IS NULL THEN 0 ELSE unit_price END) *
+          (CASE WHEN quantity  = 'NaN'::numeric OR quantity  IS NULL THEN 0 ELSE quantity  END),
           2
         )
-        WHERE total_price IS NULL OR isnan(total_price::numeric)
+        WHERE total_price IS NULL OR total_price = 'NaN'::numeric
         RETURNING id, total_price
       `);
       const afterById = new Map(r.rows.map(a => [a.id, a]));
@@ -326,17 +334,17 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
       const beforeEst = await db.execute<{ id: number; parts_subtotal: string | null; labor_subtotal: string | null; total_amount: string | null }>(sql`
         SELECT id, parts_subtotal, labor_subtotal, total_amount
         FROM estimates
-        WHERE parts_subtotal IS NULL OR isnan(parts_subtotal::numeric)
-           OR labor_subtotal IS NULL OR isnan(labor_subtotal::numeric)
-           OR total_amount IS NULL OR isnan(total_amount::numeric)
+        WHERE parts_subtotal IS NULL OR parts_subtotal = 'NaN'::numeric
+           OR labor_subtotal IS NULL OR labor_subtotal = 'NaN'::numeric
+           OR total_amount IS NULL OR total_amount = 'NaN'::numeric
       `);
 
       const r = await db.execute<{ id: number; parts_subtotal: string; labor_subtotal: string; total_amount: string }>(sql`
         UPDATE estimates e
         SET
           parts_subtotal = ROUND(COALESCE(
-            (SELECT SUM(CASE WHEN isnan(total_price::numeric) OR total_price IS NULL
-                             THEN 0 ELSE total_price::numeric END)
+            (SELECT SUM(CASE WHEN total_price = 'NaN'::numeric OR total_price IS NULL
+                             THEN 0 ELSE total_price END)
              FROM estimate_items WHERE estimate_id = e.id),
             0
           ), 2),
@@ -344,15 +352,15 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
             CASE WHEN e.labor_mode = 'flat'
               THEN
                 COALESCE(
-                  CASE WHEN e.total_labor_hours IS NULL OR isnan(e.total_labor_hours::numeric)
-                       THEN 0 ELSE e.total_labor_hours::numeric END,
+                  CASE WHEN e.total_labor_hours IS NULL OR e.total_labor_hours = 'NaN'::numeric
+                       THEN 0 ELSE e.total_labor_hours END,
                   0
                 ) *
                 COALESCE(
-                  CASE WHEN e.applied_labor_rate IS NOT NULL AND NOT isnan(e.applied_labor_rate::numeric)
-                       THEN e.applied_labor_rate::numeric
-                       WHEN e.labor_rate IS NOT NULL AND NOT isnan(e.labor_rate::numeric)
-                       THEN e.labor_rate::numeric
+                  CASE WHEN e.applied_labor_rate IS NOT NULL AND e.applied_labor_rate != 'NaN'::numeric
+                       THEN e.applied_labor_rate
+                       WHEN e.labor_rate IS NOT NULL AND e.labor_rate != 'NaN'::numeric
+                       THEN e.labor_rate
                        ELSE 0 END,
                   0
                 )
@@ -360,15 +368,15 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
                 COALESCE(
                   (SELECT SUM(
                      COALESCE(
-                       CASE WHEN lh.labor_hours IS NULL OR isnan(lh.labor_hours::numeric)
-                            THEN 0 ELSE lh.labor_hours::numeric END,
+                       CASE WHEN lh.labor_hours IS NULL OR lh.labor_hours = 'NaN'::numeric
+                            THEN 0 ELSE lh.labor_hours END,
                        0
                      ) *
                      COALESCE(
-                       CASE WHEN e.applied_labor_rate IS NOT NULL AND NOT isnan(e.applied_labor_rate::numeric)
-                            THEN e.applied_labor_rate::numeric
-                            WHEN e.labor_rate IS NOT NULL AND NOT isnan(e.labor_rate::numeric)
-                            THEN e.labor_rate::numeric
+                       CASE WHEN e.applied_labor_rate IS NOT NULL AND e.applied_labor_rate != 'NaN'::numeric
+                            THEN e.applied_labor_rate
+                            WHEN e.labor_rate IS NOT NULL AND e.labor_rate != 'NaN'::numeric
+                            THEN e.labor_rate
                             ELSE 0 END,
                        0
                      )
@@ -381,23 +389,23 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
           ),
           total_amount = ROUND(
             COALESCE(
-              (SELECT SUM(CASE WHEN isnan(total_price::numeric) OR total_price IS NULL
-                               THEN 0 ELSE total_price::numeric END)
+              (SELECT SUM(CASE WHEN total_price = 'NaN'::numeric OR total_price IS NULL
+                               THEN 0 ELSE total_price END)
                FROM estimate_items WHERE estimate_id = e.id),
               0
             ) +
             CASE WHEN e.labor_mode = 'flat'
               THEN
                 COALESCE(
-                  CASE WHEN e.total_labor_hours IS NULL OR isnan(e.total_labor_hours::numeric)
-                       THEN 0 ELSE e.total_labor_hours::numeric END,
+                  CASE WHEN e.total_labor_hours IS NULL OR e.total_labor_hours = 'NaN'::numeric
+                       THEN 0 ELSE e.total_labor_hours END,
                   0
                 ) *
                 COALESCE(
-                  CASE WHEN e.applied_labor_rate IS NOT NULL AND NOT isnan(e.applied_labor_rate::numeric)
-                       THEN e.applied_labor_rate::numeric
-                       WHEN e.labor_rate IS NOT NULL AND NOT isnan(e.labor_rate::numeric)
-                       THEN e.labor_rate::numeric
+                  CASE WHEN e.applied_labor_rate IS NOT NULL AND e.applied_labor_rate != 'NaN'::numeric
+                       THEN e.applied_labor_rate
+                       WHEN e.labor_rate IS NOT NULL AND e.labor_rate != 'NaN'::numeric
+                       THEN e.labor_rate
                        ELSE 0 END,
                   0
                 )
@@ -405,15 +413,15 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
                 COALESCE(
                   (SELECT SUM(
                      COALESCE(
-                       CASE WHEN lh.labor_hours IS NULL OR isnan(lh.labor_hours::numeric)
-                            THEN 0 ELSE lh.labor_hours::numeric END,
+                       CASE WHEN lh.labor_hours IS NULL OR lh.labor_hours = 'NaN'::numeric
+                            THEN 0 ELSE lh.labor_hours END,
                        0
                      ) *
                      COALESCE(
-                       CASE WHEN e.applied_labor_rate IS NOT NULL AND NOT isnan(e.applied_labor_rate::numeric)
-                            THEN e.applied_labor_rate::numeric
-                            WHEN e.labor_rate IS NOT NULL AND NOT isnan(e.labor_rate::numeric)
-                            THEN e.labor_rate::numeric
+                       CASE WHEN e.applied_labor_rate IS NOT NULL AND e.applied_labor_rate != 'NaN'::numeric
+                            THEN e.applied_labor_rate
+                            WHEN e.labor_rate IS NOT NULL AND e.labor_rate != 'NaN'::numeric
+                            THEN e.labor_rate
                             ELSE 0 END,
                        0
                      )
@@ -425,9 +433,9 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
             2
           )
         WHERE
-          e.parts_subtotal IS NULL OR isnan(e.parts_subtotal::numeric)
-          OR e.labor_subtotal IS NULL OR isnan(e.labor_subtotal::numeric)
-          OR e.total_amount IS NULL OR isnan(e.total_amount::numeric)
+          e.parts_subtotal IS NULL OR e.parts_subtotal = 'NaN'::numeric
+          OR e.labor_subtotal IS NULL OR e.labor_subtotal = 'NaN'::numeric
+          OR e.total_amount IS NULL OR e.total_amount = 'NaN'::numeric
         RETURNING e.id, e.parts_subtotal, e.labor_subtotal, e.total_amount
       `);
 
@@ -471,52 +479,52 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
       const beforeWo = await db.execute<{ id: number; parts_subtotal: string | null; labor_subtotal: string | null; total_amount: string | null }>(sql`
         SELECT id, parts_subtotal, labor_subtotal, total_amount
         FROM work_orders
-        WHERE parts_subtotal IS NULL OR isnan(parts_subtotal::numeric)
-           OR labor_subtotal IS NULL OR isnan(labor_subtotal::numeric)
-           OR total_amount IS NULL OR isnan(total_amount::numeric)
+        WHERE parts_subtotal IS NULL OR parts_subtotal = 'NaN'::numeric
+           OR labor_subtotal IS NULL OR labor_subtotal = 'NaN'::numeric
+           OR total_amount IS NULL OR total_amount = 'NaN'::numeric
       `);
 
       const r = await db.execute<{ id: number; parts_subtotal: string; labor_subtotal: string; total_amount: string }>(sql`
         UPDATE work_orders wo
         SET
           parts_subtotal = ROUND(COALESCE(
-            (SELECT SUM(CASE WHEN isnan(total_price::numeric) OR total_price IS NULL
-                             THEN 0 ELSE total_price::numeric END)
+            (SELECT SUM(CASE WHEN total_price = 'NaN'::numeric OR total_price IS NULL
+                             THEN 0 ELSE total_price END)
              FROM work_order_items WHERE work_order_id = wo.id),
             0
           ), 2),
           labor_subtotal = ROUND(
             CASE
-              WHEN wo.labor_subtotal IS NOT NULL AND NOT isnan(wo.labor_subtotal::numeric)
-              THEN wo.labor_subtotal::numeric
-              WHEN wo.total_labor_hours IS NOT NULL AND NOT isnan(wo.total_labor_hours::numeric)
-                   AND wo.labor_rate IS NOT NULL AND NOT isnan(wo.labor_rate::numeric)
-              THEN wo.total_labor_hours::numeric * wo.labor_rate::numeric
+              WHEN wo.labor_subtotal IS NOT NULL AND wo.labor_subtotal != 'NaN'::numeric
+              THEN wo.labor_subtotal
+              WHEN wo.total_labor_hours IS NOT NULL AND wo.total_labor_hours != 'NaN'::numeric
+                   AND wo.labor_rate IS NOT NULL AND wo.labor_rate != 'NaN'::numeric
+              THEN wo.total_labor_hours * wo.labor_rate
               ELSE 0
             END,
             2
           ),
           total_amount = ROUND(
             COALESCE(
-              (SELECT SUM(CASE WHEN isnan(total_price::numeric) OR total_price IS NULL
-                               THEN 0 ELSE total_price::numeric END)
+              (SELECT SUM(CASE WHEN total_price = 'NaN'::numeric OR total_price IS NULL
+                               THEN 0 ELSE total_price END)
                FROM work_order_items WHERE work_order_id = wo.id),
               0
             ) +
             CASE
-              WHEN wo.labor_subtotal IS NOT NULL AND NOT isnan(wo.labor_subtotal::numeric)
-              THEN wo.labor_subtotal::numeric
-              WHEN wo.total_labor_hours IS NOT NULL AND NOT isnan(wo.total_labor_hours::numeric)
-                   AND wo.labor_rate IS NOT NULL AND NOT isnan(wo.labor_rate::numeric)
-              THEN wo.total_labor_hours::numeric * wo.labor_rate::numeric
+              WHEN wo.labor_subtotal IS NOT NULL AND wo.labor_subtotal != 'NaN'::numeric
+              THEN wo.labor_subtotal
+              WHEN wo.total_labor_hours IS NOT NULL AND wo.total_labor_hours != 'NaN'::numeric
+                   AND wo.labor_rate IS NOT NULL AND wo.labor_rate != 'NaN'::numeric
+              THEN wo.total_labor_hours * wo.labor_rate
               ELSE 0
             END,
             2
           )
         WHERE
-          wo.parts_subtotal IS NULL OR isnan(wo.parts_subtotal::numeric)
-          OR wo.labor_subtotal IS NULL OR isnan(wo.labor_subtotal::numeric)
-          OR wo.total_amount IS NULL OR isnan(wo.total_amount::numeric)
+          wo.parts_subtotal IS NULL OR wo.parts_subtotal = 'NaN'::numeric
+          OR wo.labor_subtotal IS NULL OR wo.labor_subtotal = 'NaN'::numeric
+          OR wo.total_amount IS NULL OR wo.total_amount = 'NaN'::numeric
         RETURNING wo.id, wo.parts_subtotal, wo.labor_subtotal, wo.total_amount
       `);
 
@@ -569,7 +577,7 @@ export const repairNanTotalsMigration: MigrationDefinition = {
   description:
     'Scans estimate_items, work_order_items, and billing_sheet_items for rows where ' +
     'totalPrice IS NULL or NaN (caused by null partPrice × quantity). Recomputes each ' +
-    'item from money(quantity) × money(partPrice) — storing $0.00 where price is absent. ' +
+    'item from money(quantity) × money(partPrice/unitPrice) — storing $0.00 where price is absent. ' +
     'Then recomputes partsSubtotal / laborSubtotal / totalAmount on parent estimates and ' +
     'work orders. Idempotent: a clean re-run after the repair repairs 0 rows.',
   appSettingsKey: DONE_KEY,
