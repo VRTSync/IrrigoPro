@@ -58,6 +58,7 @@ import {
   type QbStorageAdapter,
   type QbRefreshFn,
 } from "../qb-token-utils";
+import { isUnroutedFinding, wcbIsEligible } from "../lib/finding-predicates";
 import type {
   QbTokenResponse,
   QbTokenResponseValidated,
@@ -6384,8 +6385,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // billing-preview so the two headline numbers agree for the same
       // selectedMonth. Cutoff is upper-bound only (open start). Null
       // work-date records are always included and flagged undated:true.
-      // 'converted' visibility note: wetCheckStatus === 'converted' is NOT
-      // gated here; that gate belongs only on invoice-construction paths.
+      // Visibility note: the billing-eligible gate belongs only on invoice-construction
+      // paths; the partition here includes all approved WCBs regardless of parent status.
       const detailPartition = computeUnbilledPartition(
         workOrders,
         billingSheets,
@@ -6457,13 +6458,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Query eligible wet check billings for this customer (Slice 2+)
       const allWcbsForPreview = await storage.getWetCheckBillingsByCustomer(customerId);
-      // INVOICE-CONSTRUCTION gate: wetCheckStatus === 'converted' is intentional here.
-      // Do NOT remove it — a WCB whose parent wet check is still partially_converted
-      // should not yet be included in an invoice. This is tracked separately from the
-      // visibility filters above which must NOT gate on wetCheckStatus.
-      const eligibleWcbs = allWcbsForPreview.filter(wcb =>
-        wcb.status === 'approved_passed_to_billing' && wcb.invoiceId == null && wcb.wetCheckStatus === 'converted',
-      );
+      // INVOICE-CONSTRUCTION gate: a WCB is eligible when it is approved,
+      // not yet on an invoice, and the parent wet check has zero unrouted findings
+      // (i.e. every finding is triaged — no outstanding manager decisions).
+      const eligibleWcbs = allWcbsForPreview.filter(wcb => wcbIsEligible(wcb));
 
       // Filter to only include selected items
       let selectedWorkOrders: (typeof allWorkOrders)[number][] = [];
@@ -6751,13 +6749,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Query eligible wet check billings for this customer (Slice 2+)
       const allWcbsForMonthly = await storage.getWetCheckBillingsByCustomer(customerId);
-      // INVOICE-CONSTRUCTION gate: wetCheckStatus === 'converted' is intentional here.
-      // Do NOT remove it — a WCB whose parent wet check is still partially_converted
-      // should not yet be included in an invoice. This is tracked separately from the
-      // visibility filters above which must NOT gate on wetCheckStatus.
-      const eligibleWcbsMonthly = allWcbsForMonthly.filter(wcb =>
-        wcb.status === 'approved_passed_to_billing' && wcb.invoiceId == null && wcb.wetCheckStatus === 'converted',
-      );
+      // INVOICE-CONSTRUCTION gate: a WCB is eligible when it is approved,
+      // not yet on an invoice, and the parent wet check has zero unrouted findings
+      // (i.e. every finding is triaged — no outstanding manager decisions).
+      const eligibleWcbsMonthly = allWcbsForMonthly.filter(wcb => wcbIsEligible(wcb));
 
       // Filter to only include selected items
       let selectedWorkOrders: (typeof allWorkOrders)[number][] = [];
@@ -15958,15 +15953,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           (wc as any).mode === "inspection" &&
           (inspEst == null || inspEst.lifecycle !== "approved");
 
-        // Unrouted = finding has no routing FK and is not documented_only.
-        const unroutedFindings = wFindings.filter(
-          f =>
-            f.resolution !== "documented_only" &&
-            f.billingSheetId == null &&
-            f.estimateId == null &&
-            f.workOrderId == null &&
-            f.wetCheckBillingId == null,
-        ).length;
+        // Unrouted = finding still needs a manager routing decision AND is not
+        // yet stamped to any destination. Uses the shared isUnroutedFinding
+        // predicate so this count always agrees with CombinedReviewSurface.tsx.
+        const unroutedFindings = wFindings.filter(f => isUnroutedFinding(f)).length;
 
         const s = wc.status;
         let qualifies = false;

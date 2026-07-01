@@ -1556,6 +1556,11 @@ export type WetCheckBillingListItem = WetCheckBilling & {
   findingsRepaired: number;
   findingsToEstimate: number;
   findingsDeferred: number;
+  /** Count of findings on the parent wet check that are still genuinely unrouted
+   *  (isNeedsReview=true, convertedAt null, all four routing FKs null).
+   *  Zero means every finding is triaged — used by wcbIsEligible() for the
+   *  invoice-construction billing gate. */
+  unroutedFindingsCount: number;
 };
 
 export const wetCheckPhotos = pgTable("wet_check_photos", {

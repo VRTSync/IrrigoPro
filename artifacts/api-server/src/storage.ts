@@ -4406,6 +4406,17 @@ export class DatabaseStorage implements IStorage {
         findingsRepaired: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'repaired_in_field' then 1 end) as int)`,
         findingsToEstimate: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'sent_to_estimate' then 1 end) as int)`,
         findingsDeferred: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'deferred_to_work_order' then 1 end) as int)`,
+        unroutedFindingsCount: sql<number>`cast((
+          select count(*) from wet_check_findings wf2
+          where wf2.wet_check_id = wet_check_billings.wet_check_id
+            and (wf2.resolution is null or wf2.resolution = 'pending')
+            and (wf2.issue_type = 'custom_review' or wf2.tech_disposition is distinct from 'completed_in_field')
+            and wf2.converted_at is null
+            and wf2.billing_sheet_id is null
+            and wf2.estimate_id is null
+            and wf2.work_order_id is null
+            and wf2.wet_check_billing_id is null
+        ) as int)`,
       })
       .from(wetCheckBillings)
       .leftJoin(wetCheckFindings, eq(wetCheckFindings.wetCheckBillingId, wetCheckBillings.id))
@@ -4429,6 +4440,7 @@ export class DatabaseStorage implements IStorage {
       findingsRepaired: r.findingsRepaired ?? 0,
       findingsToEstimate: r.findingsToEstimate ?? 0,
       findingsDeferred: r.findingsDeferred ?? 0,
+      unroutedFindingsCount: r.unroutedFindingsCount ?? 0,
     }));
   }
 
@@ -4459,6 +4471,23 @@ export class DatabaseStorage implements IStorage {
         findingsRepaired: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'repaired_in_field' then 1 end) as int)`,
         findingsToEstimate: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'sent_to_estimate' then 1 end) as int)`,
         findingsDeferred: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'deferred_to_work_order' then 1 end) as int)`,
+        // Correlated sub-query: count findings on the PARENT WET CHECK that are
+        // genuinely unrouted (same predicate as isUnroutedFinding in finding-predicates.ts).
+        // Used by wcbIsEligible() to decide whether the WCB is ready to invoice.
+        // resolution IS NULL is treated as 'pending' to match the JS null-coalesce.
+        // 'completed_in_field' tech_disposition is excluded because those findings
+        // are auto-billed and never need manager routing.
+        unroutedFindingsCount: sql<number>`cast((
+          select count(*) from wet_check_findings wf2
+          where wf2.wet_check_id = wet_check_billings.wet_check_id
+            and (wf2.resolution is null or wf2.resolution = 'pending')
+            and (wf2.issue_type = 'custom_review' or wf2.tech_disposition is distinct from 'completed_in_field')
+            and wf2.converted_at is null
+            and wf2.billing_sheet_id is null
+            and wf2.estimate_id is null
+            and wf2.work_order_id is null
+            and wf2.wet_check_billing_id is null
+        ) as int)`,
       })
       .from(wetCheckBillings)
       .leftJoin(wetCheckFindings, eq(wetCheckFindings.wetCheckBillingId, wetCheckBillings.id))
@@ -4476,6 +4505,7 @@ export class DatabaseStorage implements IStorage {
       findingsRepaired: r.findingsRepaired ?? 0,
       findingsToEstimate: r.findingsToEstimate ?? 0,
       findingsDeferred: r.findingsDeferred ?? 0,
+      unroutedFindingsCount: r.unroutedFindingsCount ?? 0,
     }));
   }
 
