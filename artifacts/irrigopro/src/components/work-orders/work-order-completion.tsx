@@ -314,13 +314,8 @@ export function WorkOrderCompletion({
         total + (parseFloat(item.laborHours) * item.quantity), 0
       );
 
-      const workDescriptions = workOrderItems
-        .map((item: any) => item.description || item.partName)
-        .filter(Boolean)
-        .join('\n');
-
       form.reset({
-        workSummary: workDescriptions || "Work completed as per estimate",
+        workSummary: "",
         customerNotes: "Work completed according to estimate specifications",
         totalHours: Math.max(estimatedHours, 0.1),
         // Preserve the WO's persisted labor mode through the prefill.
@@ -789,7 +784,7 @@ export function WorkOrderCompletion({
                       </div>
                       <FormControl>
                         <Textarea
-                          placeholder="Describe the work that was completed, repairs made, issues resolved..."
+                          placeholder="Describe the work performed — parts used are recorded separately below."
                           className="min-h-[100px]"
                           {...field}
                         />
