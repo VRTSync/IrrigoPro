@@ -16,9 +16,20 @@ interface Invoice {
   totalAmount: string;
   periodStart: string;
   periodEnd: string;
+  invoiceMonth: number;
+  invoiceYear: number;
   status: string;
   createdAt: string;
   quickbooksInvoiceId?: string;
+}
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"
+];
+
+function invoiceMonthLabel(invoice: Invoice): string {
+  return `${MONTH_NAMES[invoice.invoiceMonth - 1]} ${invoice.invoiceYear}`;
 }
 
 interface InvoiceListProps {
@@ -135,7 +146,7 @@ export function InvoiceList({ customerId, limit = 20, onOpenPdf }: InvoiceListPr
               <div className="flex items-center gap-2">
                 <Calendar className="w-5 h-5 text-blue-600" />
                 <h3 className="font-semibold text-base" data-testid={`text-month-${invoice.id}`}>
-                  {formatMonthYear(invoice.periodStart)}
+                  {invoiceMonthLabel(invoice)}
                 </h3>
               </div>
               <div className="flex flex-col items-end gap-1">
@@ -211,7 +222,7 @@ export function InvoiceList({ customerId, limit = 20, onOpenPdf }: InvoiceListPr
                 onClick={() =>
                   setAuditInvoice({
                     id: invoice.id,
-                    label: `${formatMonthYear(invoice.periodStart)} · #${invoice.invoiceNumber}`,
+                    label: `${invoiceMonthLabel(invoice)} · #${invoice.invoiceNumber}`,
                     total: formatCurrency(invoice.totalAmount),
                   })
                 }
