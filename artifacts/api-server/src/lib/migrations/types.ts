@@ -45,6 +45,12 @@ export type ProgressEmitter = (event: {
   error?: string;
 }) => void;
 
+export type MigrationRunOptions = {
+  /** Caller must set this to `true` for money-changing migrations (repairs/de-dups).
+   * Migrations that mutate financial data MUST refuse to write unless acknowledged. */
+  acknowledged?: boolean;
+};
+
 export type MigrationDefinition = {
   id: string;
   title: string;
@@ -52,5 +58,5 @@ export type MigrationDefinition = {
   appSettingsKey: string;
   check(): Promise<MigrationStatus>;
   preview(): Promise<MigrationPreview>;
-  run(emit: ProgressEmitter): Promise<MigrationStepResult[]>;
+  run(emit: ProgressEmitter, opts?: MigrationRunOptions): Promise<MigrationStepResult[]>;
 };

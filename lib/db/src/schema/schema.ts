@@ -837,6 +837,13 @@ export const workOrderItems = pgTable("work_order_items", {
   issueType: text("issue_type"),
   // Per-item check-off state for the tech zone checklist. Null = not done.
   completedAt: timestamp("completed_at"),
+  // Slice 3 lineage columns — finding_id links a WO item back to the wet-check
+  // finding that produced it (null for non-inspection items such as field-added
+  // parts). created_at records insert time so duplicate detection is trivial:
+  // COUNT(*) > 1 per (work_order_id, finding_id). Both columns are nullable and
+  // default-safe so the migration is a no-op against existing rows.
+  findingId: integer("finding_id").references(() => wetCheckFindings.id),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 // Invoices - created from completed work orders

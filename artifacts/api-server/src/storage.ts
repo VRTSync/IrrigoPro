@@ -9789,8 +9789,14 @@ export class DatabaseStorage implements IStorage {
     workOrderId: number | null;
   }> {
     return await db.transaction(async (tx) => {
+      // Serialize concurrent conversions of THIS wet check (mirrors
+      // approveEstimateAndCreateWorkOrder's estimate row lock ~3845). The second
+      // waiter blocks here, re-reads the row AFTER the first commits — findings are
+      // stamped (workOrderId/convertedAt) and excluded by `eligible`, so it inserts
+      // nothing. Closes the race without touching the incremental-append design.
       const [wc] = await tx.select().from(wetChecks)
-        .where(and(eq(wetChecks.id, id), eq(wetChecks.companyId, companyId)));
+        .where(and(eq(wetChecks.id, id), eq(wetChecks.companyId, companyId)))
+        .for("update");
       if (!wc) throw new Error(`Wet check ${id} not found for company ${companyId}`);
       if (wc.status !== "submitted" && wc.status !== "partially_converted") {
         throw new Error(`Cannot convert wet check in status ${wc.status}`);
@@ -10064,6 +10070,9 @@ export class DatabaseStorage implements IStorage {
               quantity: l.qty,
               laborHours: l.laborHours.toFixed(2),
               totalPrice: l.partsTotal.toFixed(2),
+              // Slice 3 — stamp lineage so duplicates are detectable by
+              // COUNT(*) > 1 per (workOrderId, findingId).
+              findingId: f.id,
             });
           }
           const existingParts = existingItems.reduce(
@@ -10127,6 +10136,8 @@ export class DatabaseStorage implements IStorage {
                 // Parts-only line total per estimate/WO item convention
                 // (labor is captured at header from laborHours * applied rate).
                 totalPrice: l.partsTotal.toFixed(2),
+                // Slice 3 — stamp lineage for duplicate detection.
+                findingId: f.id,
               };
             }),
           );

@@ -96,6 +96,7 @@ export function registerAdminMigrationsRoutes(
     // Fire-and-forget the runner; the client polls /status.
     void (async () => {
       try {
+        const opts = { acknowledged: req.body?.acknowledged === true };
         const results = await d.run((event) => {
           // Mirror live events into the job's step list.
           const existing = progress.steps.findIndex((s) => s.id === event.step);
@@ -113,7 +114,7 @@ export function registerAdminMigrationsRoutes(
               error: event.error,
             });
           }
-        });
+        }, opts);
         progress.steps = results;
         progress.state = results.some((r) => r.status === 'failed') ? 'failed' : 'succeeded';
         progress.finishedAt = new Date().toISOString();

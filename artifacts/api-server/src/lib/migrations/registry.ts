@@ -7,6 +7,7 @@ import { reconcileFindingDispositionMigration } from './reconcile-finding-dispos
 import { trimPhantomZonesMigration } from './trim-phantom-zones';
 import { importIrrigationProfileMigration } from './import-irrigation-profile-from-property-controllers';
 import { repairNanTotalsMigration } from './repair-nan-totals';
+import { repairDuplicatedWorkOrderItemsMigration } from './repair-duplicated-work-order-items';
 
 const REGISTRY = new Map<string, MigrationDefinition>([
   [companyIdColumnsMigration.id, companyIdColumnsMigration],
@@ -17,6 +18,7 @@ const REGISTRY = new Map<string, MigrationDefinition>([
   [trimPhantomZonesMigration.id, trimPhantomZonesMigration],
   [importIrrigationProfileMigration.id, importIrrigationProfileMigration],
   [repairNanTotalsMigration.id, repairNanTotalsMigration],
+  [repairDuplicatedWorkOrderItemsMigration.id, repairDuplicatedWorkOrderItemsMigration],
 ]);
 
 export function listMigrations(): MigrationDefinition[] {

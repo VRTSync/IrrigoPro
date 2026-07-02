@@ -9426,11 +9426,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
           : 0;
         laborHours = sumFromPersisted > 0 ? sumFromPersisted : sumFromIncoming;
       } else {
-        laborHours = parseFloat(totalHours || '0');
+        laborHours = money(totalHours);
       }
-      const partsCost = parseFloat(totalPartsCost || '0');
 
-      const laborSubtotal = laborHours * appliedLaborRate;
+      // Fetch prior items NOW (before computing partsCost) so we can correctly
+      // handle the empty-usedParts guard further below.  When usedParts is empty
+      // but the WO already has items we must NOT overwrite the header totals with
+      // the client-supplied 0; instead we derive partsCost from the persisted items.
+      const incomingParts: typeof usedParts = usedParts || [];
+      const priorItemsForGuard = await storage.getWorkOrderItems(workOrderId);
+      const skipReplace = incomingParts.length === 0 && priorItemsForGuard.length > 0;
+
+      // partsCost: authoritative value depends on whether we will skip the replace.
+      //   • Normal path (usedParts non-empty, or WO is genuinely empty): use
+      //     client-supplied totalPartsCost (tech-confirmed on the completion form).
+      //   • Skip path (usedParts empty but WO has items): derive from persisted
+      //     item totalPrices so the header stays consistent with the item rows.
+      const partsCost = skipReplace
+        ? priorItemsForGuard.reduce((s, it) => s + money(it.totalPrice), 0)
+        : money(totalPartsCost);
+      const rate = money(appliedLaborRate);
+
+      const laborSubtotal = laborHours * rate;
       const partsSubtotal = partsCost;
       const totalAmount = laborSubtotal + partsSubtotal;
 
@@ -9479,21 +9496,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
-      // Save used parts information
-      for (const part of usedParts || []) {
-        // Get part details from database
-        const partDetails = await storage.getPart(part.partId);
-        if (partDetails) {
-          await storage.addWorkOrderItem({
-            workOrderId,
-            partId: part.partId,
-            partName: partDetails.name,
-            partPrice: partDetails.price,
-            quantity: part.quantity,
-            totalPrice: part.totalCost,
-            laborHours: "0"
-          });
+      // Replace work-order items with the final tech-confirmed set (Slice 1B).
+      // incomingParts / priorItemsForGuard / skipReplace are all computed earlier
+      // (before updateWorkOrder) so the header totals already reflect the correct
+      // partsCost for both the normal and skip paths.
+      if (!skipReplace) {
+        // Build the final item list from all confirmed usedParts.
+        // Pricing strategy:
+        //   • Estimate-origin (prefilled) items already have a snapshotted price in the
+        //     WO items table. Re-fetching from the catalog could silently reprice historical
+        //     work if the catalog changed since the estimate was created. So we use the
+        //     existing WO item's partPrice whenever a matching partId already exists.
+        //   • Field-added items (partId not in priorItems) are genuinely new additions —
+        //     use the current catalog price for them.
+        //   • findingId lineage: carry the prior item's findingId so the wetCheck→WO
+        //     traceability is preserved after replacement. Field-added parts get null.
+        // Build a stack-map so that multiple WO items with the same partId
+        // (e.g. same part in two zones from two distinct findings) each get
+        // their own prior row rather than collapsing to whichever was inserted
+        // last in a simple Map.  Each incoming part shifts() the first queued
+        // prior off the stack; once exhausted, remaining incoming entries are
+        // treated as field-added (catalog-price lookup path).
+        const priorsByPartId = new Map<number | null, (typeof priorItemsForGuard)>();
+        for (const it of priorItemsForGuard) {
+          const list = priorsByPartId.get(it.partId) ?? [];
+          list.push(it);
+          priorsByPartId.set(it.partId, list);
         }
+        const finalItems: Parameters<typeof storage.replaceWorkOrderItemsWithResync>[1] = [];
+        for (const part of incomingParts) {
+          const priorList = part.partId != null ? priorsByPartId.get(part.partId) : undefined;
+          const prior = priorList?.shift(); // consume one prior row per match
+          if (prior) {
+            // Preserve snapshotted price + lineage from the existing WO item.
+            const unitPrice = money(prior.partPrice);
+            finalItems.push({
+              workOrderId,
+              partId: part.partId,
+              partName: prior.partName,
+              partPrice: prior.partPrice,
+              quantity: part.quantity,
+              totalPrice: (money(part.quantity) * unitPrice).toFixed(2),
+              laborHours: prior.laborHours ?? "0",
+              findingId: (prior as any).findingId ?? null,
+            });
+          } else {
+            // Field-added part: look up current catalog price; no finding lineage.
+            const partDetails = await storage.getPart(part.partId);
+            if (partDetails) {
+              finalItems.push({
+                workOrderId,
+                partId: part.partId,
+                partName: partDetails.name,
+                partPrice: partDetails.price,
+                quantity: part.quantity,
+                totalPrice: (money(part.quantity) * money(partDetails.price)).toFixed(2),
+                laborHours: "0",
+                findingId: null,
+              });
+            }
+          }
+        }
+        if (finalItems.length > 0) {
+          await storage.replaceWorkOrderItemsWithResync(workOrderId, finalItems, callerCompanyIdComplete0);
+        } else if (incomingParts.length > 0) {
+          // All part catalog lookups resolved to nothing (e.g. every partId unknown).
+          // Do NOT zero-out the existing items — preserve prior rows to avoid data
+          // loss and log an error so ops can investigate.
+          logger.error(
+            { workOrderId, incomingPartsCount: incomingParts.length },
+            'completion/replace-items: all usedParts failed catalog resolution — preserving prior items to avoid zeroing real data',
+          );
+        }
+      } else {
+        logger.warn(
+          { workOrderId, priorItemCount: priorItemsForGuard.length },
+          'completion/replace-items: usedParts is empty but WO has prior items — skipping replace, header totals derived from persisted items',
+        );
       }
 
       // Log AI generation data if provided
