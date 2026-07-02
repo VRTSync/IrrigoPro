@@ -1310,6 +1310,7 @@ export interface IStorage {
     rows: IrrigationImportRow[],
     mode: "preview" | "commit",
     actor?: { id: number; name: string },
+    replaceControllers?: string[],
   ): Promise<IrrigationImportResult>;
 
   // ── Backflow Preventers ────────────────────────────────────────────────────
@@ -1419,6 +1420,20 @@ export interface IrrigationImportProgramDiff {
   changes: Array<{ field: string; from: string | number | null | string[]; to: string | number | null | string[] }>;
 }
 
+export interface IrrigationImportRemovedZone {
+  id: number;
+  zoneNumber: number;
+  name: string;
+  notes: string | null;
+  overrideStartTime: string | null;
+  overrideDays: string[] | null;
+}
+
+export interface IrrigationImportRemovedProgram {
+  id: number;
+  name: string;
+}
+
 export interface IrrigationImportControllerDiff {
   controllerName: string;
   action: "create" | "update";
@@ -1427,6 +1442,8 @@ export interface IrrigationImportControllerDiff {
   model: string | null;
   programs: IrrigationImportProgramDiff[];
   zones: IrrigationImportZoneDiff[];
+  zonesToRemove?: IrrigationImportRemovedZone[];
+  programsToRemove?: IrrigationImportRemovedProgram[];
 }
 
 export interface IrrigationImportResult {
@@ -1439,6 +1456,8 @@ export interface IrrigationImportResult {
     zonesUpdated: number;
     programsCreated: number;
     programsUpdated: number;
+    zonesRemoved: number;
+    programsRemoved: number;
   };
 }
 
@@ -10922,6 +10941,7 @@ export class DatabaseStorage implements IStorage {
     rows: IrrigationImportRow[],
     mode: "preview" | "commit",
     actor?: { id: number; name: string },
+    replaceControllers: string[] = [],
   ): Promise<IrrigationImportResult> {
     // ── Group CSV rows by controller name ────────────────────────────────────
     // Build a map: controllerName → { meta, programs: Map<progName,…>, zones: Map<zoneNum,row> }
@@ -11070,6 +11090,27 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
+      // ── Replace mode: compute removals (update-mode controllers only) ────────
+      let zonesToRemove: import("./storage").IrrigationImportRemovedZone[] = [];
+      let programsToRemove: import("./storage").IrrigationImportRemovedProgram[] = [];
+      if (ctrlAction === "update" && replaceControllers.includes(ctrlName)) {
+        const csvZoneNumbers = new Set(group.zones.keys());
+        zonesToRemove = existingZones
+          .filter((z) => !csvZoneNumbers.has(z.zoneNumber))
+          .map((z) => ({
+            id: z.id,
+            zoneNumber: z.zoneNumber,
+            name: z.name,
+            notes: z.notes ?? null,
+            overrideStartTime: z.overrideStartTime ?? null,
+            overrideDays: (z.overrideDays ?? null) as string[] | null,
+          }));
+        const csvProgramNames = new Set(group.programs.keys());
+        programsToRemove = existingPrograms
+          .filter((p) => !csvProgramNames.has(p.name))
+          .map((p) => ({ id: p.id, name: p.name }));
+      }
+
       controllerDiffs.push({
         controllerName: ctrlName,
         action: ctrlAction,
@@ -11078,6 +11119,9 @@ export class DatabaseStorage implements IStorage {
         model: group.model,
         programs: programDiffs,
         zones: zoneDiffs,
+        ...(zonesToRemove.length > 0 || programsToRemove.length > 0 || replaceControllers.includes(ctrlName)
+          ? { zonesToRemove, programsToRemove }
+          : {}),
       });
     }
 
@@ -11088,6 +11132,8 @@ export class DatabaseStorage implements IStorage {
       zonesUpdated: controllerDiffs.reduce((n, c) => n + c.zones.filter((z) => z.action === "update").length, 0),
       programsCreated: controllerDiffs.reduce((n, c) => n + c.programs.filter((p) => p.action === "create").length, 0),
       programsUpdated: controllerDiffs.reduce((n, c) => n + c.programs.filter((p) => p.action === "update").length, 0),
+      zonesRemoved: controllerDiffs.reduce((n, c) => n + (c.zonesToRemove?.length ?? 0), 0),
+      programsRemoved: controllerDiffs.reduce((n, c) => n + (c.programsToRemove?.length ?? 0), 0),
     };
 
     if (mode === "preview") {
@@ -11107,9 +11153,13 @@ export class DatabaseStorage implements IStorage {
 
         const hasProgramChanges = ctrlDiff.programs.some((p) => p.action !== "no_change");
         const hasZoneChanges = ctrlDiff.zones.some((z) => z.action !== "no_change");
+        const isReplaceMode = replaceControllers.includes(ctrlName);
+        const hasRemovals =
+          (ctrlDiff.zonesToRemove?.length ?? 0) > 0 ||
+          (ctrlDiff.programsToRemove?.length ?? 0) > 0;
 
-        // No-op: existing controller with nothing to create or update — skip entirely.
-        if (ctrlDiff.action === "update" && !hasProgramChanges && !hasZoneChanges) {
+        // No-op: existing controller with nothing to create, update, or remove — skip entirely.
+        if (ctrlDiff.action === "update" && !hasProgramChanges && !hasZoneChanges && !hasRemovals) {
           continue;
         }
 
@@ -11138,9 +11188,14 @@ export class DatabaseStorage implements IStorage {
         } else {
           // ── Update existing controller (only fields that actually changed) ─
           ctrlId = existingCtrl!.id;
+          // In Replace mode, totalZones is the exact post-delete zone count
+          // (only the CSV zones survive, so group.zones.size is definitive).
+          // In add/update mode it is the high-water mark of max zone number seen
+          // (grows monotonically, never shrinks).
           const maxInputZone = group.zones.size > 0 ? Math.max(...group.zones.keys()) : 0;
-          const newTotalZones =
-            maxInputZone > (existingCtrl!.totalZones ?? 0) ? maxInputZone : existingCtrl!.totalZones;
+          const newTotalZones = isReplaceMode
+            ? (group.zones.size > 0 ? group.zones.size : null)
+            : (maxInputZone > (existingCtrl!.totalZones ?? 0) ? maxInputZone : existingCtrl!.totalZones);
 
           const ctrlPatch: Record<string, unknown> = {};
           if (group.location !== null && group.location !== existingCtrl!.location)
@@ -11152,7 +11207,7 @@ export class DatabaseStorage implements IStorage {
           if (newTotalZones !== existingCtrl!.totalZones) ctrlPatch.totalZones = newTotalZones;
 
           // Stamp lastUpdated only when there is actual work to do
-          if (Object.keys(ctrlPatch).length > 0 || hasProgramChanges || hasZoneChanges) {
+          if (Object.keys(ctrlPatch).length > 0 || hasProgramChanges || hasZoneChanges || hasRemovals) {
             ctrlPatch.lastUpdatedByUserId = actor?.id ?? null;
             ctrlPatch.lastUpdatedByName = actor?.name ?? null;
             ctrlPatch.lastUpdatedAt = new Date();
@@ -11275,6 +11330,45 @@ export class DatabaseStorage implements IStorage {
           // no_change: skip write entirely
         }
 
+        // ── Replace mode: capture pre-delete snapshot then hard-delete ────────
+        // Zones are deleted before programs to avoid relying on the
+        // `onDelete: "set null"` FK cascade from zones → programs.
+        let removedSnapshot: {
+          controller: typeof existingCtrl;
+          zones: IrrigationProfileZone[];
+          programs: IrrigationProgram[];
+        } | undefined;
+        if (isReplaceMode && hasRemovals) {
+          const zoneIdsToRemove = (ctrlDiff.zonesToRemove ?? []).map((z) => z.id);
+          const programIdsToRemove = (ctrlDiff.programsToRemove ?? []).map((p) => p.id);
+
+          // Capture pre-delete state for the `removed` history key.
+          // controller is the pre-delete controller row (existingCtrl is already
+          // in scope from the diff phase and has not been mutated yet).
+          const [removedZones, removedPrograms] = await Promise.all([
+            zoneIdsToRemove.length > 0
+              ? q.select().from(irrigationProfileZones).where(inArray(irrigationProfileZones.id, zoneIdsToRemove))
+              : Promise.resolve([] as any[]),
+            programIdsToRemove.length > 0
+              ? q.select().from(irrigationPrograms).where(inArray(irrigationPrograms.id, programIdsToRemove))
+              : Promise.resolve([] as any[]),
+          ]);
+          removedSnapshot = { controller: existingCtrl, zones: removedZones, programs: removedPrograms };
+
+          // Delete zones first (they reference programs via programId FK)
+          if (zoneIdsToRemove.length > 0) {
+            await q
+              .delete(irrigationProfileZones)
+              .where(inArray(irrigationProfileZones.id, zoneIdsToRemove));
+          }
+          // Delete programs after zones are cleared
+          if (programIdsToRemove.length > 0) {
+            await q
+              .delete(irrigationPrograms)
+              .where(inArray(irrigationPrograms.id, programIdsToRemove));
+          }
+        }
+
         // ── History snapshot: only when actual work was done ─────────────────
         const [updatedCtrl] = await q
           .select()
@@ -11292,10 +11386,14 @@ export class DatabaseStorage implements IStorage {
           .orderBy(irrigationProfileZones.zoneOrder, irrigationProfileZones.zoneNumber);
 
         if (updatedCtrl) {
+          const snapshotJson: Record<string, unknown> = { controller: updatedCtrl, programs, zones };
+          if (removedSnapshot) {
+            snapshotJson.removed = removedSnapshot;
+          }
           await q.insert(irrigationProfileHistory).values({
             companyId,
             controllerId: ctrlId,
-            snapshotJson: { controller: updatedCtrl, programs, zones } as any,
+            snapshotJson: snapshotJson as any,
             changedByUserId: actor?.id ?? null,
             changedByName: actor?.name ?? null,
             summary: `CSV import: ${ctrlName}`,

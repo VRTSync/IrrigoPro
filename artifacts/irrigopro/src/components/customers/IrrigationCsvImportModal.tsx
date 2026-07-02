@@ -11,15 +11,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { safeGet } from "@/utils/safeStorage";
 import {
   Upload,
   Download,
-  FileText,
   AlertCircle,
   CheckCircle2,
   Loader2,
+  Trash2,
   X,
   ChevronDown,
   ChevronUp,
@@ -110,6 +113,20 @@ interface ProgramDiff {
   changes: Array<{ field: string; from: unknown; to: unknown }>;
 }
 
+interface RemovedZone {
+  id: number;
+  zoneNumber: number;
+  name: string;
+  notes: string | null;
+  overrideStartTime: string | null;
+  overrideDays: string[] | null;
+}
+
+interface RemovedProgram {
+  id: number;
+  name: string;
+}
+
 interface ControllerDiff {
   controllerName: string;
   action: "create" | "update";
@@ -118,6 +135,8 @@ interface ControllerDiff {
   model: string | null;
   programs: ProgramDiff[];
   zones: ZoneDiff[];
+  zonesToRemove?: RemovedZone[];
+  programsToRemove?: RemovedProgram[];
 }
 
 interface ImportResult {
@@ -131,6 +150,8 @@ interface ImportResult {
     zonesUpdated: number;
     programsCreated: number;
     programsUpdated: number;
+    zonesRemoved: number;
+    programsRemoved: number;
   };
 }
 
@@ -375,13 +396,24 @@ function parseCsv(text: string): ParseResult {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function ControllerPreviewCard({ diff }: { diff: ControllerDiff }) {
+function ControllerPreviewCard({
+  diff,
+  isReplace,
+  onToggleReplace,
+}: {
+  diff: ControllerDiff;
+  isReplace: boolean;
+  onToggleReplace: (name: string, value: boolean) => void;
+}) {
   const [expanded, setExpanded] = useState(true);
   const newZones = diff.zones.filter((z) => z.action === "create").length;
   const updatedZones = diff.zones.filter((z) => z.action === "update").length;
+  const zonesWillBeRemoved = diff.zonesToRemove ?? [];
+  const programsWillBeRemoved = diff.programsToRemove ?? [];
+  const hasRemovals = isReplace && (zonesWillBeRemoved.length > 0 || programsWillBeRemoved.length > 0);
 
   return (
-    <div className="border rounded-lg overflow-hidden">
+    <div className={`border rounded-lg overflow-hidden ${hasRemovals ? "border-red-300" : ""}`}>
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
@@ -395,6 +427,12 @@ function ControllerPreviewCard({ diff }: { diff: ControllerDiff }) {
           >
             {diff.action === "create" ? "NEW" : "UPDATE"}
           </Badge>
+          {hasRemovals && (
+            <Badge className="text-xs shrink-0 bg-red-600 text-white">
+              <Trash2 className="w-3 h-3 mr-0.5 inline" />
+              {zonesWillBeRemoved.length + programsWillBeRemoved.length} will be deleted
+            </Badge>
+          )}
         </div>
         <div className="flex items-center gap-2 ml-2 shrink-0">
           <span className="text-xs text-gray-500">
@@ -412,6 +450,75 @@ function ControllerPreviewCard({ diff }: { diff: ControllerDiff }) {
 
       {expanded && (
         <div className="divide-y">
+          {/* Replace mode toggle — only shown for existing controllers */}
+          {diff.action === "update" && (
+            <div
+              className={`flex items-center justify-between px-3 py-2 ${isReplace ? "bg-red-50" : "bg-gray-50/40"}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-2">
+                <Switch
+                  id={`replace-${diff.controllerName}`}
+                  checked={isReplace}
+                  onCheckedChange={(v) => onToggleReplace(diff.controllerName, v)}
+                />
+                <Label htmlFor={`replace-${diff.controllerName}`} className="text-xs cursor-pointer select-none">
+                  Replace mode — retire zones/programs not in this file
+                </Label>
+              </div>
+              {(diff.zonesToRemove?.length ?? 0) > 0 || (diff.programsToRemove?.length ?? 0) > 0 ? (
+                <span className="text-xs text-red-600 font-medium">
+                  {diff.zonesToRemove?.length ?? 0} zone{diff.zonesToRemove?.length !== 1 ? "s" : ""},&nbsp;
+                  {diff.programsToRemove?.length ?? 0} program{diff.programsToRemove?.length !== 1 ? "s" : ""} at risk
+                </span>
+              ) : (
+                <span className="text-xs text-gray-400">nothing to remove</span>
+              )}
+            </div>
+          )}
+
+          {/* Removal preview — only when Replace is on and there's something to remove */}
+          {isReplace && (zonesWillBeRemoved.length > 0 || programsWillBeRemoved.length > 0) && (
+            <div className="bg-red-50 px-3 py-2 space-y-2">
+              <p className="text-xs font-semibold text-red-700 flex items-center gap-1">
+                <Trash2 className="w-3 h-3" /> The following will be permanently deleted:
+              </p>
+              {programsWillBeRemoved.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-red-600 mb-1">Programs</p>
+                  <div className="flex flex-wrap gap-1">
+                    {programsWillBeRemoved.map((p) => (
+                      <Badge key={p.id} variant="outline" className="text-xs border-red-400 text-red-700 bg-red-50">
+                        {p.name}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {zonesWillBeRemoved.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-red-600 mb-1">Zones</p>
+                  <div className="space-y-1">
+                    {zonesWillBeRemoved.map((z) => (
+                      <div key={z.id} className="flex items-start gap-2 text-xs">
+                        <span className="text-red-500 font-medium shrink-0">Zone {z.zoneNumber}:</span>
+                        <span className="text-red-700">{z.name}</span>
+                        {(z.notes || z.overrideStartTime || (z.overrideDays && z.overrideDays.length > 0)) && (
+                          <span className="text-orange-600 font-medium ml-1 shrink-0">⚠ has custom settings</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {zonesWillBeRemoved.some((z) => z.notes || z.overrideStartTime || (z.overrideDays?.length ?? 0) > 0) && (
+                    <p className="text-xs text-orange-600 mt-1 italic">
+                      One or more zones above have hand-set notes or override schedules that will be lost.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {diff.programs.length > 0 && (
             <div className="px-3 py-2 bg-indigo-50/60">
               <p className="text-xs font-medium text-indigo-700 mb-1">Programs</p>
@@ -517,6 +624,8 @@ export function IrrigationCsvImportModal({
   const [previewing, setPreviewing] = useState(false);
   const [commitResult, setCommitResult] = useState<ImportResult | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<string>(branchName);
+  const [replaceControllers, setReplaceControllers] = useState<Set<string>>(new Set());
+  const [removalAcknowledged, setRemovalAcknowledged] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -530,6 +639,8 @@ export function IrrigationCsvImportModal({
     setImporting(false);
     setPreviewing(false);
     setSelectedBranch(branchName);
+    setReplaceControllers(new Set());
+    setRemovalAcknowledged(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -551,6 +662,10 @@ export function IrrigationCsvImportModal({
         return;
       }
 
+      // Always ask the server to compute potential removals for all controllers
+      // so the Replace toggle can show the at-risk list without a second round-trip.
+      const allControllerNames = Array.from(new Set(rows.map((r) => r.controllerName)));
+
       try {
         const res = await fetch(
           `/api/customers/${customerId}/irrigation-profile/import-csv`,
@@ -561,12 +676,19 @@ export function IrrigationCsvImportModal({
               ...getAuthHeaders(),
             },
             credentials: "include",
-            body: JSON.stringify({ mode: "preview", rows, branchName: selectedBranch }),
+            body: JSON.stringify({
+              mode: "preview",
+              rows,
+              branchName: selectedBranch,
+              replaceControllers: allControllerNames,
+            }),
           },
         );
         const body = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(body?.message ?? "Preview failed");
         setPreviewResult({ ...body, rowErrors: errors });
+        setReplaceControllers(new Set());
+        setRemovalAcknowledged(false);
         setStep("preview");
       } catch (err: any) {
         toast({
@@ -579,6 +701,15 @@ export function IrrigationCsvImportModal({
       }
     };
     reader.readAsText(f);
+  }
+
+  function handleToggleReplace(ctrlName: string, value: boolean) {
+    setReplaceControllers((prev) => {
+      const next = new Set(prev);
+      if (value) next.add(ctrlName); else next.delete(ctrlName);
+      return next;
+    });
+    setRemovalAcknowledged(false);
   }
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
@@ -623,7 +754,12 @@ export function IrrigationCsvImportModal({
             ...getAuthHeaders(),
           },
           credentials: "include",
-          body: JSON.stringify({ mode: "commit", rows, branchName: selectedBranch }),
+          body: JSON.stringify({
+            mode: "commit",
+            rows,
+            branchName: selectedBranch,
+            replaceControllers: Array.from(replaceControllers),
+          }),
         },
       );
       const body = await res.json().catch(() => ({}));
@@ -634,7 +770,13 @@ export function IrrigationCsvImportModal({
       queryClient.invalidateQueries({
         queryKey: [`/api/customers/${customerId}/controllers-profile`],
       });
-      toast({ title: "Import successful", description: `${body.summary?.zonesAdded ?? 0} zones added, ${body.summary?.zonesUpdated ?? 0} updated` });
+      const removedDesc = (body.summary?.zonesRemoved ?? 0) > 0
+        ? `, ${body.summary.zonesRemoved} removed`
+        : "";
+      toast({
+        title: "Import successful",
+        description: `${body.summary?.zonesAdded ?? 0} zones added, ${body.summary?.zonesUpdated ?? 0} updated${removedDesc}`,
+      });
     } catch (err: any) {
       toast({
         title: "Import failed",
@@ -646,6 +788,17 @@ export function IrrigationCsvImportModal({
     }
   }
 
+  const anyReplaceHasRemovals = previewResult?.controllers.some(
+    (c) =>
+      replaceControllers.has(c.controllerName) &&
+      ((c.zonesToRemove?.length ?? 0) > 0 || (c.programsToRemove?.length ?? 0) > 0),
+  ) ?? false;
+
+  const commitEnabled =
+    previewResult !== null &&
+    previewResult.controllers.length > 0 &&
+    (!anyReplaceHasRemovals || removalAcknowledged);
+
   const summary = commitResult?.summary ?? previewResult?.summary;
 
   return (
@@ -654,7 +807,7 @@ export function IrrigationCsvImportModal({
         <DialogHeader>
           <DialogTitle>Import Irrigation Profile from CSV</DialogTitle>
           <DialogDescription>
-            Upload a CSV to populate controllers, programs, and zones. Existing data is updated — nothing is deleted.
+            Upload a CSV to populate controllers, programs, and zones. By default, existing data is only added or updated. Enable Replace mode per controller to also remove zones and programs absent from the file.
           </DialogDescription>
         </DialogHeader>
 
@@ -796,11 +949,31 @@ export function IrrigationCsvImportModal({
             </div>
 
             {/* Controller diff cards */}
-            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
               {previewResult.controllers.map((diff) => (
-                <ControllerPreviewCard key={diff.controllerName} diff={diff} />
+                <ControllerPreviewCard
+                  key={diff.controllerName}
+                  diff={diff}
+                  isReplace={replaceControllers.has(diff.controllerName)}
+                  onToggleReplace={handleToggleReplace}
+                />
               ))}
             </div>
+
+            {/* Acknowledgment checkbox — required when Replace mode will delete rows */}
+            {anyReplaceHasRemovals && (
+              <div className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2.5">
+                <Checkbox
+                  id="removal-ack"
+                  checked={removalAcknowledged}
+                  onCheckedChange={(v) => setRemovalAcknowledged(!!v)}
+                  className="mt-0.5 border-red-400 data-[state=checked]:bg-red-600 data-[state=checked]:border-red-600"
+                />
+                <Label htmlFor="removal-ack" className="text-xs text-red-700 cursor-pointer leading-relaxed">
+                  I understand that the zones and programs listed above will be permanently deleted and cannot be recovered from the UI. A history snapshot will be saved for manual recovery.
+                </Label>
+              </div>
+            )}
 
             <div className="flex gap-2 border-t pt-3">
               <Button
@@ -814,7 +987,7 @@ export function IrrigationCsvImportModal({
               <Button
                 size="sm"
                 onClick={handleImport}
-                disabled={importing || previewResult.controllers.length === 0}
+                disabled={importing || !commitEnabled}
                 className="gap-1.5 ml-auto"
               >
                 {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
@@ -846,6 +1019,12 @@ export function IrrigationCsvImportModal({
               )}
               {commitResult.summary.programsCreated > 0 && (
                 <Badge className="bg-green-600 text-white">{commitResult.summary.programsCreated} program{commitResult.summary.programsCreated !== 1 ? "s" : ""} created</Badge>
+              )}
+              {(commitResult.summary.zonesRemoved ?? 0) > 0 && (
+                <Badge className="bg-red-600 text-white">{commitResult.summary.zonesRemoved} zone{commitResult.summary.zonesRemoved !== 1 ? "s" : ""} removed</Badge>
+              )}
+              {(commitResult.summary.programsRemoved ?? 0) > 0 && (
+                <Badge className="bg-red-600 text-white">{commitResult.summary.programsRemoved} program{commitResult.summary.programsRemoved !== 1 ? "s" : ""} removed</Badge>
               )}
             </div>
             <div className="flex justify-end gap-2 pt-2 border-t">

@@ -966,7 +966,7 @@ export function registerIrrigationProfileRoutes(
         }
       }
 
-      const { mode, rows, branchName } = req.body ?? {};
+      const { mode, rows, branchName, replaceControllers } = req.body ?? {};
 
       if (mode !== "preview" && mode !== "commit") {
         return res.status(400).json({ message: "mode must be 'preview' or 'commit'" });
@@ -1062,6 +1062,10 @@ export function registerIrrigationProfileRoutes(
         ? (callerCompanyId ?? (await storage.getCustomer(customerId))?.companyId!)
         : callerCompanyId!;
 
+      const safeReplaceControllers: string[] = Array.isArray(replaceControllers)
+        ? replaceControllers.filter((n: unknown) => typeof n === "string")
+        : [];
+
       try {
         const result = await storage.importIrrigationProfile(
           effectiveCompanyId,
@@ -1070,6 +1074,7 @@ export function registerIrrigationProfileRoutes(
           validRows,
           mode as "preview" | "commit",
           actor,
+          safeReplaceControllers,
         );
         return res.json({ ...result, rowErrors });
       } catch (e: any) {
