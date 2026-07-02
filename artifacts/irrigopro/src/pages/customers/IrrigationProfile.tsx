@@ -9,6 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Separator } from "@/components/ui/separator";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft,
@@ -19,6 +26,8 @@ import {
   Mail,
   Download,
   Upload,
+  MoreHorizontal,
+  ChevronDown,
 } from "lucide-react";
 import type {
   IrrigationController,
@@ -369,32 +378,27 @@ export default function IrrigationProfile() {
       <Card>
         <CardContent className="pt-4 pb-4">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">
-                {customer?.name ?? "Customer"} — Controllers &amp; Zones
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-0.5">
+                Irrigation profile
+              </p>
+              <h1 className="text-xl font-bold text-gray-900 truncate">
+                {customer?.name ?? "Customer"}
               </h1>
-              <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-gray-600">
-                <span>
-                  <span className="font-medium">{controllers.length}</span>{" "}
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                  {controllers.length}{" "}
                   {controllers.length === 1 ? "controller" : "controllers"}
                 </span>
                 {totalZoneCount > 0 && (
-                  <span>
-                    <span className="font-medium">{totalZoneCount}</span>{" "}
+                  <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                    {totalZoneCount}{" "}
                     {totalZoneCount === 1 ? "zone" : "zones"}
-                  </span>
-                )}
-                {lastUpdated && (
-                  <span className="text-gray-400 text-xs">
-                    Updated {fmtDateTime(lastUpdated.lastUpdatedAt)}
-                    {lastUpdated.lastUpdatedByName
-                      ? ` by ${lastUpdated.lastUpdatedByName}`
-                      : ""}
                   </span>
                 )}
               </div>
             </div>
-            <div className="flex gap-2 shrink-0 flex-wrap">
+            <div className="flex gap-2 shrink-0">
               {canWrite && (
                 <Button
                   size="sm"
@@ -405,62 +409,92 @@ export default function IrrigationProfile() {
                   <Plus className="w-4 h-4" /> Add Controller
                 </Button>
               )}
-              {canImport && (
-                <>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={handleExportCsv}
-                    disabled={exportLoading || controllers.length === 0}
                     className="gap-1.5"
+                    disabled={controllers.length === 0}
                   >
-                    {exportLoading ? (
+                    {(reportLoading || sendLoading) ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
-                      <Download className="w-4 h-4" />
+                      <FileText className="w-4 h-4" />
                     )}
-                    Export CSV
+                    Report
+                    <ChevronDown className="w-3.5 h-3.5 ml-0.5" />
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setShowImportModal(true)}
-                    className="gap-1.5"
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onSelect={handleGenerateReport}
+                    disabled={reportLoading || controllers.length === 0}
                   >
-                    <Upload className="w-4 h-4" /> Import CSV
-                  </Button>
-                </>
+                    {reportLoading ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Download className="w-4 h-4 mr-2" />
+                    )}
+                    Generate report
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={handleSendReport}
+                    disabled={sendLoading || controllers.length === 0}
+                  >
+                    {sendLoading ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Mail className="w-4 h-4 mr-2" />
+                    )}
+                    Send report
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {canImport && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" variant="outline" className="gap-1.5 px-2">
+                      {exportLoading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <MoreHorizontal className="w-4 h-4" />
+                      )}
+                      <span className="sr-only">More actions</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onSelect={handleExportCsv}
+                      disabled={exportLoading || controllers.length === 0}
+                    >
+                      {exportLoading ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <Download className="w-4 h-4 mr-2" />
+                      )}
+                      Export CSV
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setShowImportModal(true)}>
+                      <Upload className="w-4 h-4 mr-2" />
+                      Import CSV
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleGenerateReport}
-                disabled={reportLoading || controllers.length === 0}
-                className="gap-1.5"
-              >
-                {reportLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Download className="w-4 h-4" />
-                )}
-                Generate Report
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleSendReport}
-                disabled={sendLoading || controllers.length === 0}
-                className="gap-1.5"
-              >
-                {sendLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Mail className="w-4 h-4" />
-                )}
-                Send Report
-              </Button>
             </div>
           </div>
+          {lastUpdated && (
+            <>
+              <Separator className="mt-3 mb-2" />
+              <p className="text-xs text-gray-400">
+                Updated {fmtDateTime(lastUpdated.lastUpdatedAt)}
+                {lastUpdated.lastUpdatedByName
+                  ? ` by ${lastUpdated.lastUpdatedByName}`
+                  : ""}
+              </p>
+            </>
+          )}
         </CardContent>
       </Card>
 
