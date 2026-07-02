@@ -497,9 +497,9 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
             CASE
               WHEN wo.labor_subtotal IS NOT NULL AND wo.labor_subtotal != 'NaN'::numeric
               THEN wo.labor_subtotal
-              WHEN wo.total_labor_hours IS NOT NULL AND wo.total_labor_hours != 'NaN'::numeric
+              WHEN wo.total_hours IS NOT NULL AND wo.total_hours != 'NaN'::numeric
                    AND wo.labor_rate IS NOT NULL AND wo.labor_rate != 'NaN'::numeric
-              THEN wo.total_labor_hours * wo.labor_rate
+              THEN wo.total_hours * wo.labor_rate
               ELSE 0
             END,
             2
@@ -514,9 +514,9 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
             CASE
               WHEN wo.labor_subtotal IS NOT NULL AND wo.labor_subtotal != 'NaN'::numeric
               THEN wo.labor_subtotal
-              WHEN wo.total_labor_hours IS NOT NULL AND wo.total_labor_hours != 'NaN'::numeric
+              WHEN wo.total_hours IS NOT NULL AND wo.total_hours != 'NaN'::numeric
                    AND wo.labor_rate IS NOT NULL AND wo.labor_rate != 'NaN'::numeric
-              THEN wo.total_labor_hours * wo.labor_rate
+              THEN wo.total_hours * wo.labor_rate
               ELSE 0
             END,
             2
