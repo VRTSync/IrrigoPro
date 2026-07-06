@@ -19,9 +19,11 @@ import {
   Building2,
   Activity,
   AlertTriangle,
+  Clock,
   UserCog,
   Repeat,
   Database,
+  Plug,
   type LucideIcon,
 } from "lucide-react";
 
@@ -239,6 +241,17 @@ export const superAdminNav: NavConfig = {
         { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
         { type: "leaf", label: "Client Errors", path: "/admin/client-errors", icon: AlertTriangle },
         { type: "leaf", label: "QuickBooks", path: "/quickbooks", icon: Calculator },
+      ],
+    },
+    {
+      type: "group",
+      label: "Integrations",
+      icon: Plug,
+      defaultOpen: false,
+      items: [
+        { type: "leaf", label: "All Integrations", path: "/super-admin/integrations", icon: Plug },
+        { type: "leaf", label: "Conflicts", path: "/super-admin/integrations/conflicts", icon: AlertTriangle },
+        { type: "leaf", label: "Cron Manager", path: "/super-admin/integrations/cron", icon: Clock },
       ],
     },
     {

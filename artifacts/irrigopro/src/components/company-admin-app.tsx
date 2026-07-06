@@ -10,6 +10,8 @@ import Operations from "@/pages/operations";
 import CompanyUserManagement from "@/pages/company-user-management";
 import CompanyProfile from "@/pages/company-profile";
 import QuickBooksPage from "@/pages/quickbooks";
+import IntegrationsHubPage from "@/pages/integrations/IntegrationsHubPage";
+import AspireSetupPage from "@/pages/integrations/AspireSetupPage";
 import PartsCatalog from "@/pages/parts-catalog";
 import Customers from "@/pages/customers";
 import SiteMapsPage from "@/pages/site-maps";
@@ -170,6 +172,8 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/users" component={CompanyUserManagement} />
           <Route path="/company-profile" component={CompanyProfile} />
           <Route path="/quickbooks" component={QuickBooksPage} />
+          <Route path="/integrations/aspire" component={AspireSetupPage} />
+          <Route path="/integrations" component={IntegrationsHubPage} />
           <Route path="/invoices" component={InvoicesPage} />
           <Route path="/parts-pending-approval" component={PartsPendingApproval} />
           <Route path="/estimates/command-center" component={EstimateCommandCenter} />
