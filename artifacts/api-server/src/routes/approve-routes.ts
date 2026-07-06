@@ -8,6 +8,7 @@
 
 import type { Express, RequestHandler } from "express";
 import type { LifecycleAuditOpts } from "./audit-log";
+import { pushWorkOrderStatusToAspire } from "../services/aspire-sync-service";
 
 // ─── Minimal storage surface ─────────────────────────────────────────────────
 
@@ -27,6 +28,8 @@ export interface ApproveRoutesStorage {
 
   getWorkOrder(id: number, companyId: number | null): Promise<{
     id: number;
+    /** The work order's own companyId — always used for the Aspire push hook. */
+    companyId: number;
     workOrderNumber: string;
     status: string;
     partsSubtotal: string | number | null;
@@ -232,6 +235,15 @@ export function registerApproveRoutes(
         approvedLaborSnapshot: laborSnapshot,
         approvedByRole: userRole,
       });
+
+      // Mission 7b fix — Aspire push hook: fire-and-forget.
+      // Use workOrder.companyId (the row's own companyId), NOT callerCompanyId.
+      // callerCompanyId is null for super_admin sessions, which previously caused
+      // the push to be silently skipped for any cross-company approval. The work
+      // order's own companyId is always non-null and is the correct scope for
+      // the entity-map lookup inside pushWorkOrderStatusToAspire.
+      pushWorkOrderStatusToAspire(id, workOrder.companyId)
+        .catch(() => { /* already logged inside pushWorkOrderStatusToAspire */ });
 
       await recordLifecycleAudit(req, {
         resource: "work_order",
