@@ -71,10 +71,11 @@ export interface QbCustomer {
   [key: string]: unknown;
 }
 
-/** Minimal Invoice shape — we only persist Id and DocNumber back. */
+/** Minimal Invoice shape — we persist Id, DocNumber, and SyncToken back. */
 export interface QbInvoice {
   Id?: string;
   DocNumber?: string;
+  SyncToken?: string;
   [key: string]: unknown;
 }
 

@@ -167,6 +167,7 @@ function makeInvoice(over: Partial<StubInvoice> = {}): StubInvoice {
     sentAt: null as any,
     paidAt: null as any,
     quickbooksInvoiceId: null as any,
+    quickbooksSyncToken: null as any,
     createdAt: now,
     updatedAt: now,
   };

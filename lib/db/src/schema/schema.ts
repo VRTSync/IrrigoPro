@@ -871,6 +871,7 @@ export const invoices = pgTable("invoices", {
   sentAt: timestamp("sent_at"),
   paidAt: timestamp("paid_at"),
   quickbooksInvoiceId: text("quickbooks_invoice_id"),
+  quickbooksSyncToken: text("quickbooks_sync_token"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({

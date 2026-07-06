@@ -1,27 +1,29 @@
-// Task #1443 — Resync a (merged) invoice to QuickBooks.
+// Task #1443 / #1711 — Sync an app invoice to QuickBooks.
 //
 // POST /api/invoices/:id/sync-quickbooks — a billing-capable user pushes a
-// single app invoice's current (merged) totals/line items into QuickBooks as
-// a fresh CREATE. Two modes, gated by the invoice's existing
-// `quickbooksInvoiceId`:
-//   - null id  → "Sync to QuickBooks": create normally, no confirm.
-//   - has id   → "Re-sync to QuickBooks": only with `{ force: true }`. The old
-//                QB invoice (deleted by hand in QuickBooks — manual by design)
-//                is NOT touched; a NEW QB invoice is created and the stored id
-//                is overwritten. A non-forced call here is rejected to prevent
-//                an accidental double-create.
+// single app invoice's current totals/line items into QuickBooks. Behavior
+// is entirely driven by the injected `syncQuickBooksInvoice` function:
+//   - invoice has no QB id  → CREATE a new QB invoice.
+//   - invoice already has a QB id → UPDATE the existing QB invoice in-place.
 //
-// The actual QB create + persistence is injected as `createQuickBooksInvoice`
+// There is no longer a force/non-force distinction at the HTTP layer. The old
+// 409 "already_synced" guard is removed — any sync call for an already-linked
+// invoice now routes to an in-place update, never a duplicate create.
+//
+// The `force` field is accepted (but ignored) for backwards compatibility with
+// existing clients that still send it.
+//
+// The actual QB create/update + persistence is injected as `syncQuickBooksInvoice`
 // (it lives in routes.ts as a closure with access to the QuickBooks request
-// helpers). This module owns the HTTP shape, role guard, company scope, and
-// the force-gating so it can be unit-tested with storage spies + a stubbed
-// create function — no QuickBooks calls in the test path.
+// helpers). This module owns the HTTP shape, role guard, and company scope so
+// it can be unit-tested with storage spies + a stubbed sync function — no
+// QuickBooks calls in the test path.
 
 import type { Express, RequestHandler } from "express";
 import { z } from "zod";
 import { storage } from "../storage";
 
-// Thrown by the injected create function for precondition / QuickBooks
+// Thrown by the injected sync function for precondition / QuickBooks
 // failures so the route can map them to a clear HTTP status + message.
 export class InvoiceSyncError extends Error {
   httpStatus: number;
@@ -43,9 +45,10 @@ export interface SyncInvoiceResult {
 export interface RegisterInvoiceSyncQuickbooksRoutesDeps {
   requireAuthentication: RequestHandler;
   requireBillingAccess: RequestHandler;
-  // Creates a fresh QB invoice from the app invoice's current line items and
-  // persists the new id. Throws InvoiceSyncError on a precondition (customer
-  // not synced, no billable lines, QB not connected) or QuickBooks failure.
+  // Syncs the app invoice to QuickBooks: creates if no QB id exists, updates
+  // in-place if it does. Persists the new/updated QB id and SyncToken.
+  // Throws InvoiceSyncError on a precondition (customer not synced, no
+  // billable lines, QB not connected) or QuickBooks failure.
   createQuickBooksInvoice: (
     invoiceId: number,
     opts: { callerCompanyId: number | null },
@@ -79,7 +82,6 @@ export function registerInvoiceSyncQuickbooksRoutes(
         });
         return;
       }
-      const force = parsed.data.force === true;
 
       const callerCompanyId: number | null =
         req.authenticatedUserRole === "super_admin"
@@ -93,23 +95,12 @@ export function registerInvoiceSyncQuickbooksRoutes(
           return;
         }
 
-        // Re-sync guard: an invoice that already carries a QB id may only be
-        // pushed again with an explicit force (the confirmed "Re-sync" path).
-        // This prevents an accidental second QB invoice from a stray click.
-        if (invoice.quickbooksInvoiceId && !force) {
-          res.status(409).json({
-            message:
-              "This invoice is already linked to a QuickBooks invoice. Delete the old one in QuickBooks, then re-sync.",
-            code: "already_synced",
-          });
-          return;
-        }
-
         const result = await createQuickBooksInvoice(id, { callerCompanyId });
+        const action = invoice.quickbooksInvoiceId ? "updated" : "synced";
         res.json({
           success: true,
           quickbooksId: result.quickbooksId,
-          message: "Invoice synced to QuickBooks successfully",
+          message: `Invoice ${action} in QuickBooks successfully`,
         });
       } catch (err) {
         if (err instanceof InvoiceSyncError) {

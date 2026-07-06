@@ -1,10 +1,13 @@
-// Task #1443 — HTTP tests for POST /api/invoices/:id/sync-quickbooks.
+// Task #1443 / #1711 — HTTP tests for POST /api/invoices/:id/sync-quickbooks.
 //
 // Mounts the route against in-memory storage stubs + a stubbed
-// createQuickBooksInvoice dependency (so no QuickBooks calls happen) and
-// exercises: the role guard, body validation, the 404, the force-gating
-// (null id creates without force; existing id requires force, else 409), and
-// the InvoiceSyncError → httpStatus mapping.
+// `createQuickBooksInvoice` dependency (so no QuickBooks calls happen) and
+// exercises: the role guard, body validation, the 404, and the updated sync
+// behavior — an invoice with a QB id now routes to in-place update (200)
+// instead of returning 409. The old force-gate is gone.
+//
+// Deeper QB tests (SyncToken capture, 5010 retry, legacy token fetch) live in
+// qb-synctoken.test.ts which stubs the QB request helper directly.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -39,7 +42,8 @@ function makeAuth(role: string, companyId: number | null = 1): RequestHandler {
 
 const requireBillingAccess: RequestHandler = (req: any, res, next) => {
   const role = req.authenticatedUserRole;
-  if (role !== "company_admin" && role !== "billing_manager") {
+  const allowed = ["company_admin", "billing_manager", "super_admin"];
+  if (!allowed.includes(role)) {
     res.status(403).json({ message: "Access denied." });
     return;
   }
@@ -152,30 +156,60 @@ describe("POST /api/invoices/:id/sync-quickbooks", () => {
     }
   });
 
-  it("rejects a non-forced re-sync of an already-synced invoice (409)", async () => {
-    let created = false;
+  it("calls sync (not 409) for an already-synced invoice without force", async () => {
+    let syncCalled = false;
     try {
       stubGetInvoiceById({ 1: { id: 1, companyId: 1, quickbooksInvoiceId: "QB-OLD" } });
       const app = buildApp("billing_manager", async () => {
-        created = true;
-        return { quickbooksId: "QB-NEW" };
+        syncCalled = true;
+        return { quickbooksId: "QB-OLD-UPDATED" };
       });
       const { status, body } = await post(app, 1, {});
-      assert.equal(status, 409);
-      assert.equal(body.code, "already_synced");
-      assert.equal(created, false);
+      assert.equal(status, 200);
+      assert.equal(body.success, true);
+      assert.equal(body.quickbooksId, "QB-OLD-UPDATED");
+      assert.equal(syncCalled, true);
     } finally {
       restoreAll();
     }
   });
 
-  it("re-syncs an already-synced invoice with force:true", async () => {
+  it("calls sync for an already-synced invoice with force:true", async () => {
+    let syncCalled = false;
     try {
       stubGetInvoiceById({ 1: { id: 1, companyId: 1, quickbooksInvoiceId: "QB-OLD" } });
-      const app = buildApp("billing_manager", async () => ({ quickbooksId: "QB-NEW-2" }));
+      const app = buildApp("billing_manager", async () => {
+        syncCalled = true;
+        return { quickbooksId: "QB-OLD-UPDATED" };
+      });
       const { status, body } = await post(app, 1, { force: true });
       assert.equal(status, 200);
-      assert.equal(body.quickbooksId, "QB-NEW-2");
+      assert.equal(body.success, true);
+      assert.equal(syncCalled, true);
+    } finally {
+      restoreAll();
+    }
+  });
+
+  it("response message says 'updated' for an already-synced invoice", async () => {
+    try {
+      stubGetInvoiceById({ 1: { id: 1, companyId: 1, quickbooksInvoiceId: "QB-OLD" } });
+      const app = buildApp("billing_manager", async () => ({ quickbooksId: "QB-OLD-UPDATED" }));
+      const { status, body } = await post(app, 1, {});
+      assert.equal(status, 200);
+      assert.match(body.message, /updated/i);
+    } finally {
+      restoreAll();
+    }
+  });
+
+  it("response message says 'synced' for a new invoice", async () => {
+    try {
+      stubGetInvoiceById({ 1: { id: 1, companyId: 1, quickbooksInvoiceId: null } });
+      const app = buildApp("billing_manager", async () => ({ quickbooksId: "QB-NEW" }));
+      const { status, body } = await post(app, 1, {});
+      assert.equal(status, 200);
+      assert.match(body.message, /synced/i);
     } finally {
       restoreAll();
     }
@@ -203,6 +237,22 @@ describe("POST /api/invoices/:id/sync-quickbooks", () => {
       });
       const { status } = await post(app, 1, {});
       assert.equal(status, 500);
+    } finally {
+      restoreAll();
+    }
+  });
+
+  it("company isolation: super_admin sees any company's invoice", async () => {
+    let seenOpts: any = null;
+    try {
+      stubGetInvoiceById({ 5: { id: 5, companyId: 99, quickbooksInvoiceId: null } });
+      const app = buildApp("super_admin", async (_id: number, opts: any) => {
+        seenOpts = opts;
+        return { quickbooksId: "QB-99" };
+      }, null);
+      const { status } = await post(app, 5, {});
+      assert.equal(status, 200);
+      assert.equal(seenOpts.callerCompanyId, null);
     } finally {
       restoreAll();
     }
