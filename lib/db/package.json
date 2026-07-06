@@ -21,5 +21,8 @@
     "@types/node": "catalog:",
     "@types/pg": "^8.18.0",
     "drizzle-kit": "^0.31.9"
+  },
+  "optionalDependencies": {
+    "@esbuild/darwin-arm64": "0.27.3"
   }
 }

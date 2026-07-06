@@ -22,3 +22,4 @@ export * from "./marketing-leads";
 export * from "./client-errors";
 export * from "./audit-log";
 export * from "./incidents";
+export * from "./aspire-schema";
