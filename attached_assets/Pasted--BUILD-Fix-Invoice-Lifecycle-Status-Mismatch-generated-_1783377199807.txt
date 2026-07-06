@@ -1,0 +1,40 @@
+# BUILD — Fix Invoice Lifecycle Status Mismatch ("generated" vs "draft")
+
+**What & Why**
+The invoice delivery and correction actions never appear (or always reject) because the invoice lifecycle was built with two different status vocabularies that were never reconciled. Invoices are **created as `"generated"`**, but the mark-sent and correction workflows gate on `"draft"` / `"sent"` / `"paid"` / `"overdue"` — a generic set this app doesn't use. So `"generated"` falls through every gate: "Mark sent" and "Correct / Reissue" are invisible, and even if shown, the backend rejects mark-sent for non-draft invoices. Fixing this single vocabulary mismatch lights up the whole flow (generate → mark sent → correct/reissue → QuickBooks in-place update). Frontend + backend, small and surgical. Multi-tenancy unchanged.
+
+## Root cause (confirmed in code)
+- Invoices default to `"generated"` — `lib/db/src/schema/schema.ts:918` (`status: text("status").notNull().default("generated") // generated, sent, failed`).
+- **Frontend "Mark sent"** button is gated to `invoice.status === "draft"` — `artifacts/irrigopro/src/pages/invoices.tsx:704`. Invoices are never `"draft"`, so it never renders.
+- **Backend mark-sent** rejects unless `status === "draft"` — `artifacts/api-server/src/routes/invoice-mark-sent-routes.ts:49` ("Only draft invoices can be marked as sent").
+- **Backend mark-unsent** reverts `sent → draft` — same file (~line 8 / the mark-unsent handler).
+- **Frontend "Correct / Reissue"** is gated to `["sent","paid","overdue"].includes(invoice.status)` — `invoices.tsx:787`. Never matches `"generated"`.
+
+Net: a normal issued invoice (`generated`) can't be marked sent and can't be corrected, because every action expects a status the app never assigns.
+
+## Fix — standardize on `generated` as the pre-sent state
+Canonical lifecycle: **`generated` → `sent`** (with correction available on both; `failed`/`cancelled` excluded).
+
+1. **Backend — `artifacts/api-server/src/routes/invoice-mark-sent-routes.ts`:**
+   - mark-sent: change the guard from `status !== "draft"` to `status !== "generated"`; update the message to "Only generated invoices can be marked as sent."
+   - mark-unsent: revert `sent → "generated"` (not `"draft"`); keep the "only valid from `sent`" guard.
+2. **Frontend — `artifacts/irrigopro/src/pages/invoices.tsx:704`:** change the Mark-sent button gate from `invoice.status === "draft"` to `invoice.status === "generated"`. (The Mark-unsent gate at ~721 stays `=== "sent"`.)
+3. **Frontend — `invoices.tsx:787`:** change the Correct/Reissue gate from `["sent","paid","overdue"]` to `["generated","sent"]`.
+4. **Reconcile stragglers:** audit for any other invoice-status `"draft"` / `"paid"` / `"overdue"` references (invoice list filters, financial pulse, the reissue path's new-invoice status) and align them to the real set (`generated | sent | failed | cancelled`). In particular, confirm the **reissue path creates the corrected invoice as `"generated"`** (not `"draft"`) so a reissued invoice is itself markable-sent and correctable.
+
+## Done looks like
+- A `generated` invoice shows **Mark sent** in the ⋯ menu → flips it to `sent` (stamps `sentAt`), no error.
+- A `sent` invoice shows **Mark unsent** (→ back to `generated`) and **Correct / Reissue**.
+- A `generated` invoice also shows **Correct / Reissue**.
+- Huntington Trails #04723 (`generated`) gets both actions; the full loop works: generate → mark sent → correct/reissue → QuickBooks in-place update (#1711).
+- `failed` and `cancelled` invoices show neither mark-sent nor correct.
+
+## Out of scope
+- Renaming the `generated` status or the "Generated" badge — keep the label; only fix the gates.
+- The correction flow internals (#1710) and QB SyncToken update (#1711) — both already built; this only makes their entry points reachable.
+
+## Relevant files
+- `lib/db/src/schema/schema.ts:918` (status enum reference — `generated | sent | failed`)
+- `artifacts/api-server/src/routes/invoice-mark-sent-routes.ts` (mark-sent/unsent guards + revert target)
+- `artifacts/irrigopro/src/pages/invoices.tsx` (Mark-sent gate ~704; Mark-unsent gate ~721; Correct/Reissue gate ~787)
+- Reissue path (invoice-correction-routes.ts / storage) — confirm reissued invoice status = `generated`
