@@ -384,9 +384,11 @@ import { registerInvoiceMarkSentRoutes } from "./invoice-mark-sent-routes";
 import { registerAdminMigrationsRoutes } from "./admin-migrations-routes";
 import { registerWcLaborBackfillRoutes } from "./admin-wc-labor-backfill-routes";
 import { registerInspectionZoneBackfillRoutes } from "./admin-inspection-zone-backfill-routes";
+import { registerAspireSuperAdminRoutes } from "./aspire-super-admin-routes";
 import { registerCleanupInvoice71256Routes } from "./cleanup-invoice-71256";
 import { registerWetCheckReconciliationRoutes } from "./wet-check-reconciliation-routes";
 import { registerIrrigationProfileRoutes } from "./irrigation-profile-routes";
+import { registerAspireTenantRoutes } from "./aspire-tenant-routes";
 import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
 import { scrubEvent, setScrubCustomerNames } from "../lib/scrubEvent";
 import { setTelemetrySink, withTelemetry, type TelemetryEvent } from "../lib/withTelemetry";
@@ -17547,9 +17549,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Task #1293 — Wet Check Reconciliation + Reassign-with-Cascade.
   registerWetCheckReconciliationRoutes(app, { requireAuthentication });
 
+  // Mission 9 — Aspire Super Admin Routes.
+  registerAspireSuperAdminRoutes(app, requireAuthentication);
+
   // Irrigation System Profile — Build 1.
   // Controllers, programs, zones, history, and settings photo attach.
   registerIrrigationProfileRoutes(app, { requireAuthentication });
+
+  // Aspire integration — tenant admin routes (Mission 8).
+  // Mounted at /api/company/:companyId/integrations/*
+  registerAspireTenantRoutes(app, {
+    requireAuthentication,
+    requireCompanyAdminAccess,
+    requireCompanySetup,
+  });
 
   return httpServer;
 }
