@@ -390,6 +390,7 @@ import { registerCleanupInvoice71256Routes } from "./cleanup-invoice-71256";
 import { registerWetCheckReconciliationRoutes } from "./wet-check-reconciliation-routes";
 import { registerIrrigationProfileRoutes } from "./irrigation-profile-routes";
 import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
+import { buildWetCheckGrid } from "../wet-check-grid";
 import { scrubEvent, setScrubCustomerNames } from "../lib/scrubEvent";
 import { setTelemetrySink, withTelemetry, type TelemetryEvent } from "../lib/withTelemetry";
 import { assertCompanyId } from "../lib/migrations/assert-company-id";
@@ -15753,23 +15754,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           res.status(404).json({ message: "Customer not found" });
           return;
         }
-        const numControllers = Math.max(1, Math.min(26, Number(customer.totalControllers ?? 1)));
-        // ensureIrrigationControllers is idempotent — it only inserts rows for
-        // missing "Controller {letter}" entries. Build per-controller configs from
-        // property_controllers so zone counts carry through on first-visit seeding.
-        // Seeds irrigation_controllers (single source of truth); property_controllers
-        // is no longer written here.
+        // Prefer irrigation_controllers profile (single source of truth).
+        // buildWetCheckGrid inspects the already-scoped irrigCtrls list: if non-empty
+        // it uses profile count + zone values; otherwise falls back to
+        // clamp(totalControllers) + property_controllers (legacy path, exact behaviour).
+        const irrigCtrlsForBranch = await storage.listIrrigationControllers(cid, customerId, branchParam);
         const legacyPCsForBranch = await storage.listPropertyControllers(cid, customerId);
-        const branchPCMap = new Map(
-          legacyPCsForBranch
-            .filter(r => (r.branchName ?? "") === (branchParam ?? ""))
-            .map(r => [r.controllerLetter, r]),
+        const { seedConfigs } = buildWetCheckGrid(
+          irrigCtrlsForBranch,
+          customer.totalControllers,
+          legacyPCsForBranch,
+          branchParam,
         );
-        const seedConfigs = Array.from({ length: numControllers }, (_, i) => {
-          const letter = String.fromCharCode("A".charCodeAt(0) + i);
-          const pc = branchPCMap.get(letter);
-          return { name: `Controller ${letter}`, zoneCount: pc?.zoneCount ?? null };
-        });
         const irrigCtrls = await storage.ensureIrrigationControllers(cid, customerId, seedConfigs, branchParam);
         // Map IrrigationController → PropertyController-compatible wire shape
         // so all existing wet-check UI consumers (ControllerSelectionPage, etc.)
@@ -15786,23 +15782,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.json(mappedRows);
         return;
       }
-      // Customer-level endpoint: only return the NULL-branch bucket.
-      // Per task #312, this endpoint feeds the customer-facing irrigation
-      // system card and the wet-check capture flow — both of which are
-      // customer-scoped and would otherwise see duplicate letters once a
-      // customer has branch-scoped controller rows. Branch data is served
-      // exclusively via /api/admin/customer-controllers.
-      const rows = await storage.listPropertyControllers(cid, customerId);
-      // Customer-level bucket is now stored as branch_name = '' (NOT NULL).
-      // Older rows that may still hold NULL during the in-flight migration
-      // are also treated as customer-level here. Map the customer-level
-      // bucket back to branchName: null on the wire so existing API
-      // consumers see the same shape as before Task #320.
-      res.json(
-        rows
-          .filter(r => (r.branchName ?? "") === "")
-          .map(r => ({ ...r, branchName: null })),
+      // Customer-level endpoint: branchKey="" (irrigation_controllers stores
+      // customer-level rows under branchName='', NOT under null/undefined).
+      // buildWetCheckGrid handles both profile and legacy paths.
+      const irrigCtrlsNoBranch = await storage.listIrrigationControllers(cid, customerId, "");
+      const customerNoBranch = await storage.getCustomer(customerId);
+      if (!customerNoBranch || customerNoBranch.companyId !== cid) {
+        res.status(404).json({ message: "Customer not found" });
+        return;
+      }
+      const legacyPCsNoBranch = await storage.listPropertyControllers(cid, customerId);
+      const { seedConfigs: seedConfigsNoBranch } = buildWetCheckGrid(
+        irrigCtrlsNoBranch,
+        customerNoBranch.totalControllers,
+        legacyPCsNoBranch,
+        "",
       );
+      const seededNoBranch = await storage.ensureIrrigationControllers(cid, customerId, seedConfigsNoBranch, "");
+      // Expose customer-level bucket as branchName: null on the wire (pre-Task-#320 shape).
+      res.json(seededNoBranch.map(ctrl => ({
+        id: ctrl.id,
+        companyId: ctrl.companyId,
+        customerId: ctrl.customerId,
+        branchName: null,
+        controllerLetter: ctrl.name.trim().split(/\s+/).pop()?.slice(-1).toUpperCase() ?? ctrl.name.slice(0, 1).toUpperCase(),
+        zoneCount: ctrl.totalZones,
+        notes: ctrl.notes ?? null,
+      })));
     } catch (e: any) {
       const { status, message } = classifyAndLog(req, e, {
         op: "listPropertyControllers",
@@ -16621,29 +16627,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
-      // blankStart=true: caller has confirmed there are no site-map controllers.
-      // Skip ensurePropertyControllers and record numControllers=0 so the wet check
-      // starts empty and the tech adds zones manually (preserving pre-Slice-3 UX).
-      const numControllers = body.blankStart
-        ? 0
-        : Math.max(1, Math.min(26, Number(customer.totalControllers ?? 1)));
-      if (!body.blankStart) {
-        // Pass branchName so ensureIrrigationControllers seeds the right branch bucket.
-        // Build per-controller configs from property_controllers so zone counts carry
-        // through on first-visit seeding. Seeds irrigation_controllers (single source of
-        // truth); property_controllers is no longer written here.
+      // blankStart=true: caller confirmed no site-map controllers.
+      // Skip grid seeding entirely; numControllers=0. Profile is NOT consulted.
+      let numControllers: number;
+      if (body.blankStart) {
+        numControllers = 0;
+      } else {
+        // branchName is null for customer-level; irrigation_controllers stores
+        // customer-level rows under branchName='' — use "" as the branchKey so
+        // listIrrigationControllers applies the branch filter correctly.
+        const branchKey = branchName ?? "";
+        const irrigCtrlsForWC = await storage.listIrrigationControllers(cid, body.customerId, branchKey);
         const legacyPCsForWC = await storage.listPropertyControllers(cid, body.customerId);
-        const wcBranchPCMap = new Map(
-          legacyPCsForWC
-            .filter(r => (r.branchName ?? "") === (branchName ?? ""))
-            .map(r => [r.controllerLetter, r]),
+        const gridResult = buildWetCheckGrid(
+          irrigCtrlsForWC,
+          customer.totalControllers,
+          legacyPCsForWC,
+          branchKey,
         );
-        const wcSeedConfigs = Array.from({ length: numControllers }, (_, i) => {
-          const letter = String.fromCharCode("A".charCodeAt(0) + i);
-          const pc = wcBranchPCMap.get(letter);
-          return { name: `Controller ${letter}`, zoneCount: pc?.zoneCount ?? null };
-        });
-        await storage.ensureIrrigationControllers(cid, body.customerId, wcSeedConfigs, branchName);
+        numControllers = gridResult.numControllers;
+        await storage.ensureIrrigationControllers(cid, body.customerId, gridResult.seedConfigs, branchName);
       }
 
       const wc = await storage.createWetCheck({

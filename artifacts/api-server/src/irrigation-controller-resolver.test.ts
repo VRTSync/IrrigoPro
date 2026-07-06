@@ -210,3 +210,142 @@ describe("extractLetter helper", () => {
     });
   }
 });
+
+// ─── Task #1706 wire-up scenarios ────────────────────────────────────────────
+
+describe("resolveWetCheckControllers — profile count overrides totalControllers", () => {
+  it("3 profile controllers returned even when legacy totalControllers = 1", async () => {
+    // Simulates: customer.totalControllers = 1 (stale legacy integer), but the
+    // irrigation profile has 3 controllers. The resolver should return all 3.
+    const fakeStorage: FakeStorage = {
+      listIrrigationControllers: async () => [
+        { id: 1, name: "Controller A", totalZones: 12, notes: null, branchName: "" },
+        { id: 2, name: "Controller B", totalZones: 8, notes: null, branchName: "" },
+        { id: 3, name: "Controller C", totalZones: 6, notes: null, branchName: "" },
+      ],
+      listPropertyControllers: async () => {
+        throw new Error("should not fall back when irrigation profile has rows");
+      },
+    };
+
+    // totalControllers is not passed to the resolver — the route drives it from resolved.length
+    const result = await resolveWithFakes(fakeStorage, 1, 42);
+    assert.equal(result.length, 3);
+    assert.equal(result[0].letter, "A");
+    assert.equal(result[1].letter, "B");
+    assert.equal(result[2].letter, "C");
+  });
+
+  it("profile zone counts are preserved, not overridden by any default", async () => {
+    const fakeStorage: FakeStorage = {
+      listIrrigationControllers: async () => [
+        { id: 1, name: "Controller A", totalZones: 14, notes: null, branchName: "" },
+      ],
+      listPropertyControllers: async () => [],
+    };
+
+    const result = await resolveWithFakes(fakeStorage, 1, 42);
+    assert.equal(result[0].zoneCount, 14);
+  });
+});
+
+describe("resolveWetCheckControllers — null totalZones never becomes 12", () => {
+  it("null totalZones passes through as null (route must not default to 12)", async () => {
+    const fakeStorage: FakeStorage = {
+      listIrrigationControllers: async () => [
+        { id: 1, name: "Controller A", totalZones: null, notes: null, branchName: "" },
+        { id: 2, name: "Controller B", totalZones: 8, notes: null, branchName: "" },
+      ],
+      listPropertyControllers: async () => [],
+    };
+
+    const result = await resolveWithFakes(fakeStorage, 1, 42);
+    assert.equal(result[0].zoneCount, null, "null totalZones must pass through as null");
+    assert.equal(result[1].zoneCount, 8);
+  });
+});
+
+describe("resolveWetCheckControllers — no-branch (customer-level) read path", () => {
+  it("returns irrigation_controllers rows for customer-level bucket (branchName = '')", async () => {
+    const fakeStorage: FakeStorage = {
+      listIrrigationControllers: async (_cid, _custId, branch) => {
+        // customer-level: caller passes "" for the branchArg
+        if (branch === "") {
+          return [
+            { id: 1, name: "Controller A", totalZones: 10, notes: null, branchName: "" },
+          ];
+        }
+        return [];
+      },
+      listPropertyControllers: async () => {
+        throw new Error("should not read property_controllers when irrigation profile exists");
+      },
+    };
+
+    const result = await resolveWithFakes(fakeStorage, 1, 42, "");
+    assert.equal(result.length, 1);
+    assert.equal(result[0].letter, "A");
+    assert.equal(result[0].zoneCount, 10);
+  });
+
+  it("no-profile customer falls back to property_controllers (no regression)", async () => {
+    let legacyCalled = false;
+    const fakeStorage: FakeStorage = {
+      listIrrigationControllers: async () => [],
+      listPropertyControllers: async () => {
+        legacyCalled = true;
+        return [
+          { controllerLetter: "A", zoneCount: 8, notes: null, branchName: null },
+          { controllerLetter: "B", zoneCount: 4, notes: null, branchName: null },
+        ];
+      },
+    };
+
+    const result = await resolveWithFakes(fakeStorage, 1, 42);
+    assert.ok(legacyCalled);
+    assert.equal(result.length, 2);
+    assert.equal(result[0].letter, "A");
+    assert.equal(result[0].zoneCount, 8);
+  });
+});
+
+describe("resolveWetCheckControllers — branch-scoped company isolation", () => {
+  it("different companyIds get independent results (storage is called with correct cid)", async () => {
+    const callLog: number[] = [];
+    const fakeStorage: FakeStorage = {
+      listIrrigationControllers: async (cid) => {
+        callLog.push(cid as number);
+        if (cid === 10) {
+          return [{ id: 1, name: "Controller A", totalZones: 6, notes: null, branchName: "East" }];
+        }
+        return [];
+      },
+      listPropertyControllers: async () => [],
+    };
+
+    const resultCo10 = await resolveWithFakes(fakeStorage, 10, 99, "East");
+    const resultCo20 = await resolveWithFakes(fakeStorage, 20, 99, "East");
+
+    assert.equal(resultCo10.length, 1, "company 10 should get its profile controllers");
+    assert.equal(resultCo20.length, 0, "company 20 should get no controllers (empty profile)");
+    assert.deepEqual(callLog, [10, 20], "storage called once per company");
+  });
+
+  it("branch X profile does not bleed into branch Y result", async () => {
+    const fakeStorage: FakeStorage = {
+      listIrrigationControllers: async (_cid, _custId, branch) => {
+        if (branch === "North") {
+          return [{ id: 1, name: "Controller A", totalZones: 20, notes: null, branchName: "North" }];
+        }
+        return [];
+      },
+      listPropertyControllers: async () => [],
+    };
+
+    const northResult = await resolveWithFakes(fakeStorage, 1, 42, "North");
+    const southResult = await resolveWithFakes(fakeStorage, 1, 42, "South");
+
+    assert.equal(northResult.length, 1);
+    assert.equal(southResult.length, 0, "South branch has no profile — should return empty");
+  });
+});

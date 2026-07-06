@@ -330,10 +330,11 @@ export function registerIrrigationProfileRoutes(
           ? (callerCompanyId ?? (await storage.getCustomer(customerId))?.companyId!)
           : callerCompanyId!;
 
+        const effectiveBranch = parsed.data.branchName ?? "";
         const controller = await storage.createIrrigationController({
           companyId: companyIdForCreate,
           customerId,
-          branchName: parsed.data.branchName ?? "",
+          branchName: effectiveBranch,
           name: parsed.data.name,
           location: parsed.data.location ?? null,
           brand: parsed.data.brand ?? null,
@@ -346,6 +347,29 @@ export function registerIrrigationProfileRoutes(
           lastUpdatedByName: me?.name ?? null,
           lastUpdatedAt: new Date(),
         });
+
+        // Slice 3: keep customers.totalControllers in sync for the customer-level
+        // bucket (branchName = ""). Branch-scoped controllers do not write the
+        // customer-level integer (matching existing setCustomerControllerCount semantics).
+        if (effectiveBranch === "") {
+          const countRows = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(irrigationControllers)
+            .where(and(
+              eq(irrigationControllers.companyId, companyIdForCreate),
+              eq(irrigationControllers.customerId, customerId),
+              eq(irrigationControllers.branchName, ""),
+            ));
+          const newCount = Number(countRows[0]?.count ?? 0);
+          await db
+            .update(customers)
+            .set({ totalControllers: newCount })
+            .where(and(
+              eq(customers.id, customerId),
+              eq(customers.companyId, companyIdForCreate),
+            ));
+        }
+
         res.status(201).json(controller);
       } catch (e: any) {
         req.log?.error?.({ err: e, customerId }, "createIrrigationController failed");
@@ -441,11 +465,42 @@ export function registerIrrigationProfileRoutes(
       const callerCompanyId = getCallerCompanyId(req);
 
       try {
+        // Fetch before delete so we know branchName/customerId for the sync.
+        const controllerToDelete = await storage.getIrrigationController(
+          isSuperAdmin(role) ? null : callerCompanyId,
+          id,
+        );
+        if (!controllerToDelete) return notFound(res, "Controller");
+
         const ok = await storage.deleteIrrigationController(
           isSuperAdmin(role) ? null : callerCompanyId,
           id,
         );
         if (!ok) return notFound(res, "Controller");
+
+        // Slice 3: keep customers.totalControllers in sync when a customer-level
+        // controller is deleted. Branch-scoped controllers do not affect the count.
+        if (controllerToDelete.branchName === "") {
+          const syncCompanyId = controllerToDelete.companyId;
+          const custId = controllerToDelete.customerId;
+          const countRows = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(irrigationControllers)
+            .where(and(
+              eq(irrigationControllers.companyId, syncCompanyId),
+              eq(irrigationControllers.customerId, custId),
+              eq(irrigationControllers.branchName, ""),
+            ));
+          const newCount = Number(countRows[0]?.count ?? 0);
+          await db
+            .update(customers)
+            .set({ totalControllers: newCount })
+            .where(and(
+              eq(customers.id, custId),
+              eq(customers.companyId, syncCompanyId),
+            ));
+        }
+
         res.json({ ok: true });
       } catch (e: any) {
         req.log?.error?.({ err: e, id }, "deleteIrrigationController failed");
