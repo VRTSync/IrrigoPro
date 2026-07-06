@@ -3,6 +3,7 @@ import { resolveChromiumExecutable } from "./chromium-resolver";
 import { logger } from "./lib/logger";
 import { auditQbTokenEnvironments } from "./qb-boot-audit";
 import { validateAspireEncryptionKey } from "./services/aspire-token-service";
+import { startAspireCron } from "./cron/aspire-cron";
 
 
 try {
@@ -55,6 +56,17 @@ function auditProductionEnv(): void {
 auditProductionEnv();
 
 const { httpServer } = await createApp();
+
+// Mission 7 — start Aspire cron scheduler (health check 02:00 UTC, full sync 03:00 UTC).
+// Fire-and-forget; must not block the server from accepting requests.
+try {
+  startAspireCron();
+} catch (err) {
+  logger.warn(
+    { err: err instanceof Error ? err.message : String(err) },
+    "[boot] Aspire cron failed to start — scheduled syncs will not run until restart",
+  );
+}
 
 // Phase 5a — QB Harden #5: scan existing QB rows for credential/env mismatches.
 // Fire-and-forget; must not block the server from accepting requests.
