@@ -241,7 +241,7 @@ export type PartQtyReconciliation = {
 export function reconcileQuantitiesByPartId(
   woItems: WoItemRow[],
   estItems: EstimateItemRow[],
-): { canAutoRepair: boolean; hadDuplicates: boolean; reconciliation: PartQtyReconciliation[] } {
+): { canAutoRepair: boolean; hadDuplicates: boolean; dedupedDistinctCount: number; reconciliation: PartQtyReconciliation[] } {
   // Step 1: Strip identical rows — de-dup by (partId, partPrice, quantity) signature
   const seenSigs = new Set<string>();
   const dedupedWoItems: WoItemRow[] = [];
@@ -300,7 +300,7 @@ export function reconcileQuantitiesByPartId(
   // also blocked because rebuilding would inflate billed parts beyond deduped actual usage.
   const canAutoRepair = hadDuplicates && reconciliation.every((r) => r.overage === 0);
 
-  return { canAutoRepair, hadDuplicates, reconciliation };
+  return { canAutoRepair, hadDuplicates, dedupedDistinctCount: dedupedWoItems.length, reconciliation };
 }
 
 /**
@@ -561,7 +561,7 @@ type DeferredCandidateRow = {
   invoice_id: string | null;
 };
 
-async function findCandidates(): Promise<CandidateRow[]> {
+export async function findCandidates(): Promise<CandidateRow[]> {
   const r = await db.execute<CandidateRow>(sql`
     SELECT
       wo.id::text                                               AS wo_id,
@@ -802,10 +802,11 @@ async function preview(): Promise<MigrationPreview> {
         const action = s.canAutoRepair
           ? `[auto-repair: ${s.match.pureDuplicates.length} dup(s) removed]`
           : `[MANUAL REVIEW: ${s.reviewReason}]`;
+        const strippedCount = Math.max(0, s.woItemCount - s.qtyRecon.dedupedDistinctCount);
         warnings.push(
           `  WO ${s.workOrderNumber ?? s.woId}: ` +
           `items ${s.woItemCount} → ${s.estItemCount} (estimate) ` +
-          `deduped=${s.qtyRecon.reconciliation.length} part(s) (stripped ${s.woItemCount - s.qtyRecon.reconciliation.reduce((a, r) => a + r.dedupedActualQty, 0)} dup row(s)) ` +
+          `deduped=${s.qtyRecon.reconciliation.length} part(s) (stripped ${strippedCount} dup row(s)) ` +
           `totals: current=$${s.woCurrentTotal.toFixed(2)} → rebuilt=$${rebuiltTotal.toFixed(2)} (est=$${s.estTotal.toFixed(2)}) ` +
           (s.reviewReason
             ? `[MANUAL REVIEW: ${s.reviewReason}]`
@@ -931,6 +932,8 @@ async function run(
     for (const ds of deferredSummaries) {
       if (!ds.canAutoRepair) {
         flaggedCount++;
+        let qtyDeltaDiag = '';
+        try { qtyDeltaDiag = formatPartQtyDeltas(ds.qtyRecon.reconciliation); } catch { qtyDeltaDiag = 'diagnostic error'; }
         logger.warn(
           {
             migration: MIGRATION_ID,
@@ -941,7 +944,7 @@ async function run(
             reason: ds.reviewReason,
             findingCount: ds.findingCount,
             woItemCount: ds.woItemCount,
-            qtyDeltas: formatPartQtyDeltas(ds.qtyRecon.reconciliation),
+            qtyDeltas: qtyDeltaDiag,
           },
           'repair-wo-from-source: deferred-origin WO flagged for manual review — NOT auto-repaired',
         );
@@ -984,6 +987,8 @@ async function run(
     for (const summary of summaries) {
       if (!summary.canAutoRepair) {
         flaggedCount++;
+        let overageDiag = '';
+        try { overageDiag = buildOverageReport(summary.match, summary.estItems); } catch { overageDiag = 'diagnostic error'; }
         logger.warn(
           {
             migration: MIGRATION_ID,
@@ -995,10 +1000,7 @@ async function run(
             fieldAddCount: summary.match.fieldAdds.length,
             driftedCount: summary.match.drifted.length,
             pureDuplicateCount: summary.match.pureDuplicates.length,
-            overageReport: buildOverageReport(
-              summary.match,
-              summary.estItems,
-            ),
+            overageReport: overageDiag,
           },
           'repair-wo-from-source: WO flagged for manual review — NOT auto-repaired',
         );

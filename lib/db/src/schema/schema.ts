@@ -2030,3 +2030,29 @@ export type InvoiceCorrectionLine = typeof invoiceCorrectionLines.$inferSelect;
 export type InsertInvoiceCorrection = z.infer<typeof insertInvoiceCorrectionSchema>;
 export type InsertInvoiceCorrectionLine = z.infer<typeof insertInvoiceCorrectionLineSchema>;
 
+// ── Work-order de-dup correction audit (Task #1718) ──────────────────────────
+// Records every human-confirmed correction applied through the WO Correction
+// Review workflow. Audit trail for the de-dup-to-actuals process.
+export const workOrderCorrections = pgTable("work_order_corrections", {
+  id: serial("id").primaryKey(),
+  woId: integer("wo_id").references(() => workOrders.id).notNull(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  beforeTotal: decimal("before_total", { precision: 12, scale: 2 }).notNull(),
+  afterTotal: decimal("after_total", { precision: 12, scale: 2 }).notNull(),
+  /** JSON: { [partKey: string]: finalQty } — one entry per part row in the corrected set. */
+  perPartFinalQty: jsonb("per_part_final_qty").notNull(),
+  reason: text("reason").notNull(),
+  byUserId: integer("by_user_id").references(() => users.id),
+  appliedAt: timestamp("applied_at").defaultNow().notNull(),
+}, (table) => ({
+  woIdx: index("work_order_corrections_wo_idx").on(table.woId),
+  companyIdx: index("work_order_corrections_company_idx").on(table.companyId),
+}));
+
+export const insertWorkOrderCorrectionSchema = createInsertSchema(workOrderCorrections).omit({
+  id: true, appliedAt: true,
+});
+
+export type WorkOrderCorrection = typeof workOrderCorrections.$inferSelect;
+export type InsertWorkOrderCorrection = z.infer<typeof insertWorkOrderCorrectionSchema>;
+
