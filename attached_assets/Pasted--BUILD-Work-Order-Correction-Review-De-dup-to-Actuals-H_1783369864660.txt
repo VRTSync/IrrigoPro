@@ -1,0 +1,57 @@
+# BUILD — Work Order Correction Review (De-dup to Actuals, Human-Confirmed)
+
+**What & Why**
+The `repair-wo-items-from-source` migration auto-repaired the 3 clean WOs (8 → 5 candidates) but correctly **cannot** fix the remaining 5 — their actual field work diverged from the estimate (field-added parts, non-uniform duplication), so neither the current inflated total nor the estimate is the right number. Example: **WO #26 (WO-1781807328597-643)** shows **$8,872.40** ($7,352.40 parts, ~4.5× duplicated), its estimate is $1,607.70, but the tech installed real parts never on the estimate (Rain Bird FD-101 decoder $292.50, ball valve, couplers, elbow, slip-fix, PVC pipe). The correct amount is the **actual parts installed, de-duplicated to one of each** — which requires a person to confirm, because non-uniform duplication can under-count real quantity. This ticket adds a **per-WO review-and-confirm correction tool** so an operator can set each flagged WO to its true amount, plus fixes the diagnostic bug that makes the current numbers untrustworthy. Server-side + a super-admin/billing UI; do not touch `customer-billing.tsx`. Multi-tenancy intact. Reuses the migration's existing dedup/match functions — no new de-dup logic.
+
+## Prerequisite — Slice 0: fix the de-dup diagnostic accounting
+The migration preview shows impossible **negative "stripped" counts** (`-1`, `-29`, `-11`) and mishandles `partId=null` lines (the "Adjust" labor line on WO #26). Fix these first — nobody should bill off numbers that don't add up:
+- In the summary/report path (`repair-wo-items-from-source.ts` — `matchActualsToEstimate` / `buildWoSummary` / `buildOverageReport` / `formatPartQtyDeltas`), the "stripped dup rows" count must equal `woItemCount − dedupedDistinctCount` and can never be negative. Audit where it's computed; it's currently subtracting in the wrong direction or double-counting.
+- Handle `partId === null` explicitly in `signatureKey`, `matchActualsToEstimate`, and the reconciliation (labor/adjustment lines with no part) — never throw, never produce a NaN or negative in the diagnostics.
+- Wrap the flag-path diagnostic calls in try/catch (defensive) so a report error can never abort a run again.
+
+## Slice 1 — De-dup-to-actuals computation (backend, reuse existing fns)
+Add `computeWorkOrderDedupActuals(woId, companyId)` that returns the proposed corrected item set:
+- Load the WO's `work_order_items`, collapse **exact-duplicate** rows by `signatureKey(partId, partPrice, quantity)` to one representative each (this is the migration's existing "strip append-shape duplication" step — reuse `signatureKey` and the collapse logic).
+- Classify the collapsed distinct rows using `matchActualsToEstimate` into `pureKept` (matches estimate), `fieldAdds` (partId not on estimate — real field parts, **keep**), `drifted` (same part, different price/qty — needs a decision).
+- Return per part: `{ partId, partName, unitPrice, estimateQty, dedupedActualQty, source: kept|fieldAdd|drifted }` and the computed total (`Σ money(qty) × money(unitPrice) + labor`). Include the `partId=null` labor/adjust line as its own row.
+- This is **read-only** — it proposes, it does not write.
+
+## Slice 2 — Review-and-confirm UI + API
+### Files: new `pages/admin/WorkOrderCorrectionReview.tsx`; `routes.ts` (`/api/admin/wo-corrections/*`); entry from the migrations page / a super-admin billing view.
+- **List:** the flagged/duplicated WOs (drive off the migration's candidate detection) — WO number, customer, current total, estimate total, proposed de-duped total, status (billed?).
+- **Per-WO editor** (the core screen): three columns per part — **Estimate qty · De-duped actual qty · Final qty (editable)** — plus unit price, line total, and `source` chips (kept / field-add / drifted). The operator sets the **Final qty** for each part (defaulting to the de-duped actual, so ambiguous cases like WO #26's nozzles — est 29 vs deduped 17 — are a deliberate choice, not a silent revert). Field-adds are listed and kept by default; the operator can remove a line. Live-updating corrected total at the bottom.
+- **Reference panel:** show the estimate line items and the current (inflated) items so the operator has full context.
+- **Confirm** requires a short reason/note (why the final quantities were chosen) before it can apply.
+
+## Slice 3 — Apply + audit + billed-WO handling
+- On confirm, `POST /api/admin/wo-corrections/:woId/apply` writes the operator's final item set via `replaceWorkOrderItemsWithResync(woId, finalItems, companyId)` (canonical delete+insert+resync; recomputes `parts/labor/total` with `money()`), stamping `findingId` where known.
+- **Audit:** snapshot the before items + totals and record `{ woId, beforeTotal, afterTotal, perPartFinalQty, reason, byUserId, at }` (reuse/extend the correction record from the invoice-correction work if present; otherwise a `work_order_corrections` table). Reversible.
+- **Billed WOs (e.g., WO-0513-26, invoiceId set):** `replaceWorkOrderItemsWithResync` throws `WO_LOCKED` by design. Do **not** bypass the lock silently — route billed WOs through the invoice-correction/reissue flow (they need a reissue + QB update), or require an explicit "this WO is invoiced — correct via reissue" step. Never edit a billed WO's items in place without the reissue path.
+- Company-scoped (Rule 1); super_admin / billing_manager only; keep the WO out of billing until corrected + confirmed.
+
+## The 5 to fix (operator worklist)
+- **WO-1780941…-892 / -373 / -210** — already auto-repaired (clean). No action.
+- **WO-1781807328597-643 (WO #26):** heaviest — 151 → 14 distinct parts. Estimate $1,607.70, but real field-adds (FD-101 decoder, ball valve, couplers, elbow, slip-fix, pipe) + several estimate parts showing UNDER (29→17 nozzles, 7→3 heads). **Needs your eyes** on true install quantities — set Final qty per part from the photos/tech notes, keep the field-adds. This is the one where de-dup alone could under-bill.
+- **WO-…763** (River Rock, Delivery) and **WO-…48** (16× Glue & Primer) — cleaner field-add cases; de-duped actuals are likely correct, confirm and apply.
+- **WO-1782857855074-481** — "no duplicate signatures, item count > estimate" — inspect the raw items; may be a genuine data anomaly rather than duplication.
+- **WO-1780513815281-26** — **already billed**; correct via the reissue path, not in place.
+
+## Tests
+- `computeWorkOrderDedupActuals` collapses exact duplicates, keeps field-adds, surfaces drifted, returns finite total = parts + labor.
+- Editor: changing a Final qty updates the total; removing a field-add updates it; confirm is blocked without a reason.
+- Apply rebuilds the WO to the operator's final set via the canonical resync; before/after audited; re-open shows corrected total.
+- Billed WO → blocked from in-place edit, routed to reissue.
+- Diagnostic: stripped count never negative; `partId=null` handled without NaN/throw.
+- Company isolation throughout.
+
+## Out of scope
+- `customer-billing.tsx`.
+- Auto-deciding ambiguous quantities (that's the human step by design).
+- Re-running the migration (this tool handles the residual flagged set the migration can't).
+
+## Relevant files
+- `artifacts/api-server/src/lib/migrations/repair-wo-items-from-source.ts` (reuse `signatureKey`, `matchActualsToEstimate`, `reconcileQuantitiesByPartId`; fix stripped-count + null-partId)
+- `artifacts/api-server/src/routes/routes.ts` (`/api/admin/wo-corrections/*`), `storage.ts` (`computeWorkOrderDedupActuals`, `replaceWorkOrderItemsWithResync` ~4905)
+- `artifacts/irrigopro/src/pages/admin/WorkOrderCorrectionReview.tsx` (new)
+- Related: `BUILD - Invoice Correction and Reissue` (billed-WO path + audit record reuse)
+- Do NOT modify: `artifacts/irrigopro/src/pages/customer-billing.tsx`
