@@ -388,6 +388,7 @@ import {
   fetchQbSyncToken as _fetchQbSyncToken,
 } from "./qb-invoice-ops";
 import { registerInvoiceMarkSentRoutes } from "./invoice-mark-sent-routes";
+import { registerInvoiceCorrectionRoutes } from "./invoice-correction-routes";
 import { registerAdminMigrationsRoutes } from "./admin-migrations-routes";
 import { registerWcLaborBackfillRoutes } from "./admin-wc-labor-backfill-routes";
 import { registerInspectionZoneBackfillRoutes } from "./admin-inspection-zone-backfill-routes";
@@ -7185,6 +7186,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   // Task #1438 — mark an invoice sent / unsent (records delivery, no email).
   registerInvoiceMarkSentRoutes(app, { requireAuthentication, requireBillingAccess });
+  // Task #1710 — Invoice Correction & Reissue (Guided Dispute Flow).
+  registerInvoiceCorrectionRoutes(app, { requireAuthentication, requireBillingAccess });
   // Slice 4a — Super-admin DB migration management page.
   registerAdminMigrationsRoutes(app, requireAuthentication);
 

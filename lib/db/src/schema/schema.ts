@@ -862,7 +862,7 @@ export const invoices = pgTable("invoices", {
   periodStart: timestamp("period_start").notNull(),
   periodEnd: timestamp("period_end").notNull(),
   // Invoice details
-  status: text("status").notNull().default("draft"), // draft, sent, paid, overdue, cancelled
+  status: text("status").notNull().default("draft"), // draft, sent, paid, overdue, cancelled, superseded
   partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
@@ -872,6 +872,11 @@ export const invoices = pgTable("invoices", {
   paidAt: timestamp("paid_at"),
   quickbooksInvoiceId: text("quickbooks_invoice_id"),
   quickbooksSyncToken: text("quickbooks_sync_token"),
+  // Invoice Correction: revision tracking. When an invoice is superseded by a
+  // corrected reissue, `supersededByInvoiceId` links to the new invoice and
+  // `status` flips to 'superseded'. The reissued invoice carries a `-R1` / `-R2`
+  // suffix in its invoiceNumber.
+  supersededByInvoiceId: integer("superseded_by_invoice_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
@@ -1931,4 +1936,97 @@ export const appSettings = pgTable("app_settings", {
   value: text("value").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ─── Invoice Corrections (Task #1710) ────────────────────────────────────────
+// Structured audit record for an invoice correction & reissue flow. One row
+// per correction attempt (whether completed or canceled). Keeps the "why"
+// permanently, and the before/after snapshot lives in invoice_correction_lines.
+//
+// Status lifecycle:  draft → reviewed → reissued → qb_synced
+//                                   ↓
+//                               canceled   (cancelable before reissue)
+//
+// Core invariant: edits always write to the SOURCE tickets. The corrected
+// invoice is re-derived from live ticket totals — no values are pushed backward.
+
+export const invoiceCorrections = pgTable("invoice_corrections", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id).notNull(),
+  originalInvoiceId: integer("original_invoice_id").references(() => invoices.id).notNull(),
+  // Populated after POST …/reissue succeeds.
+  reissuedInvoiceId: integer("reissued_invoice_id").references(() => invoices.id),
+  // Correction workflow state.
+  status: text("status").notNull().default("draft"),
+  // draft | reviewed | reissued | qb_synced | canceled
+  // Why the correction was requested — structured category for analytics.
+  reasonCategory: text("reason_category"),
+  // customer_dispute | pricing_error | duplicate_charge | goodwill_credit |
+  // scope_change | tech_error | other
+  // How the request reached the company.
+  requestSource: text("request_source"),
+  // email | phone | in_person | sms | other
+  // Who (customer or external party) requested the correction.
+  requestedBy: text("requested_by"),
+  // Internal user who approved the correction.
+  approvedByUserId: integer("approved_by_user_id").references(() => users.id),
+  // Free-form correction justification.
+  reasonDetail: text("reason_detail"),
+  // Optional evidence attachment URL (e.g. screenshot from Object Storage).
+  evidenceUrl: text("evidence_url"),
+  // Notes about the evidence.
+  evidenceNote: text("evidence_note"),
+  // Financial snapshots stamped at reissue time.
+  originalTotal: decimal("original_total", { precision: 12, scale: 2 }),
+  correctedTotal: decimal("corrected_total", { precision: 12, scale: 2 }),
+  deltaAmount: decimal("delta_amount", { precision: 12, scale: 2 }),
+  // QuickBooks resync status.
+  qbSyncStatus: text("qb_sync_status").notNull().default("pending"),
+  // pending | synced | failed | skipped
+  qbSyncedAt: timestamp("qb_synced_at"),
+  qbNote: text("qb_note"),
+  createdByUserId: integer("created_by_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  companyIdx: index("invoice_corrections_company_idx").on(table.companyId),
+  originalInvoiceIdx: index("invoice_corrections_original_invoice_idx").on(table.originalInvoiceId),
+}));
+
+// Per-ticket snapshot row inside a correction. One row per ticket that was
+// disputed. Captures before/after totals so the correction is fully auditable
+// even after the source ticket is later modified again.
+export const invoiceCorrectionLines = pgTable("invoice_correction_lines", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  correctionId: integer("correction_id").references(() => invoiceCorrections.id, { onDelete: "cascade" }).notNull(),
+  // Which ticket type and its PK.
+  ticketType: text("ticket_type").notNull(), // billing_sheet | work_order | wcb
+  ticketId: integer("ticket_id").notNull(),
+  // Financial snapshot BEFORE edit.
+  beforeParts: decimal("before_parts", { precision: 12, scale: 2 }),
+  beforeLabor: decimal("before_labor", { precision: 12, scale: 2 }),
+  beforeTotal: decimal("before_total", { precision: 12, scale: 2 }),
+  // Financial snapshot AFTER the correction edits.
+  afterParts: decimal("after_parts", { precision: 12, scale: 2 }),
+  afterLabor: decimal("after_labor", { precision: 12, scale: 2 }),
+  afterTotal: decimal("after_total", { precision: 12, scale: 2 }),
+  // What kind of correction was applied to this ticket.
+  action: text("action").notNull(), // zero_line | adjust | exclude
+  lineNote: text("line_note"),
+}, (table) => ({
+  correctionIdx: index("invoice_correction_lines_correction_idx").on(table.correctionId),
+}));
+
+export const insertInvoiceCorrectionSchema = createInsertSchema(invoiceCorrections).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export const insertInvoiceCorrectionLineSchema = createInsertSchema(invoiceCorrectionLines).omit({
+  id: true,
+});
+
+export type InvoiceCorrection = typeof invoiceCorrections.$inferSelect;
+export type InvoiceCorrectionLine = typeof invoiceCorrectionLines.$inferSelect;
+export type InsertInvoiceCorrection = z.infer<typeof insertInvoiceCorrectionSchema>;
+export type InsertInvoiceCorrectionLine = z.infer<typeof insertInvoiceCorrectionLineSchema>;
 

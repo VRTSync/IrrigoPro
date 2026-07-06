@@ -48,6 +48,7 @@ import {
   ArrowDown,
   ChevronsUpDown,
   MoreHorizontal,
+  Edit3,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -56,6 +57,7 @@ import { InvoiceAuditModal } from "@/components/billing/invoice-audit-modal";
 import { FinancialPulseWidget } from "@/components/financial-pulse/financial-pulse-widget";
 import { exportSingleInvoiceCsv } from "@/lib/invoice-csv";
 import { safeGet } from "@/utils/safeStorage";
+import { InvoiceCorrectionFlow } from "@/pages/invoices/InvoiceCorrectionFlow";
 
 const CSV_EXPORT_ROLES = new Set([
   "company_admin",
@@ -398,6 +400,9 @@ export default function InvoicesPage() {
   // Task #1443 — invoice queued for a confirmed QuickBooks re-sync (it already
   // carries a quickbooksInvoiceId, so this forces a fresh QB invoice).
   const [resyncInvoice, setResyncInvoice] = useState<Invoice | null>(null);
+  // Task #1710 — Invoice Correction & Reissue.
+  const [correctionInvoice, setCorrectionInvoice] = useState<Invoice | null>(null);
+  const canCorrect = !!userRole && MERGE_ROLES.has(userRole);
 
   const handleExportSingleCsv = async (invoice: Invoice) => {
     if (!canExportSingleCsv) return;
@@ -776,6 +781,19 @@ export default function InvoicesPage() {
               <RefreshCw className="w-3.5 h-3.5 mr-2" />
             )}
             Re-sync to QuickBooks
+          </DropdownMenuItem>
+        )}
+        {/* Task #1710 — Correct / Reissue. Only available on issued invoices. */}
+        {canCorrect && ["sent", "paid", "overdue"].includes(invoice.status) && (
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setCorrectionInvoice(invoice);
+            }}
+            data-testid={`button-correct-invoice-${invoice.id}`}
+          >
+            <Edit3 className="w-3.5 h-3.5 mr-2" />
+            Correct / Reissue
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
@@ -1272,6 +1290,15 @@ export default function InvoicesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Task #1710 — Invoice Correction & Reissue flow */}
+      {correctionInvoice && (
+        <InvoiceCorrectionFlow
+          invoice={correctionInvoice}
+          open={correctionInvoice != null}
+          onClose={() => setCorrectionInvoice(null)}
+        />
+      )}
     </div>
   );
 }
