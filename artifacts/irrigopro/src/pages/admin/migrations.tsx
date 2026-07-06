@@ -114,8 +114,15 @@ export function PreviewModal({
                   ? "bg-green-50 border-green-200 text-green-700"
                   : "bg-red-50 border-red-200 text-red-700"
               }`}>
-                Last run: {lastProgress.state}
-                {lastProgress.finishedAt && ` at ${new Date(lastProgress.finishedAt).toLocaleTimeString()}`}
+                <p>Last run: {lastProgress.state}{lastProgress.finishedAt && ` at ${new Date(lastProgress.finishedAt).toLocaleTimeString()}`}</p>
+                {lastProgress.state !== "succeeded" && lastProgress.errorMessage && (
+                  <p className="text-xs mt-1 opacity-80">{lastProgress.errorMessage}</p>
+                )}
+                {lastProgress.state !== "succeeded" && lastProgress.steps.some((s) => s.status === "failed" && s.error) && (
+                  <p className="text-xs mt-1 opacity-80">
+                    {lastProgress.steps.find((s) => s.status === "failed")?.error}
+                  </p>
+                )}
               </div>
             )}
 
@@ -130,6 +137,7 @@ export function PreviewModal({
             ) : (
               <MigrationRunner
                 migrationId={migrationId}
+                acknowledged={acknowledged}
                 onComplete={handleRunComplete}
               />
             )}

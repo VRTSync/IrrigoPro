@@ -6,6 +6,7 @@ import type { MigrationProgress, MigrationStepResult } from "@/types/migrations"
 
 interface MigrationRunnerProps {
   migrationId: string;
+  acknowledged: boolean;
   onComplete?: (progress: MigrationProgress) => void;
 }
 
@@ -17,7 +18,7 @@ function StepIcon({ status }: { status: MigrationStepResult["status"] | "pending
   return <Clock className="w-4 h-4 text-gray-300 shrink-0" />;
 }
 
-export function MigrationRunner({ migrationId, onComplete }: MigrationRunnerProps) {
+export function MigrationRunner({ migrationId, acknowledged, onComplete }: MigrationRunnerProps) {
   const [progress, setProgress] = useState<MigrationProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -36,7 +37,7 @@ export function MigrationRunner({ migrationId, onComplete }: MigrationRunnerProp
     stopPolling();
 
     try {
-      const data = await apiRequest(`/api/admin/migrations/${migrationId}/run`, "POST") as { jobId: string };
+      const data = await apiRequest(`/api/admin/migrations/${migrationId}/run`, "POST", { acknowledged }) as { jobId: string };
       jobIdRef.current = data.jobId;
 
       pollingRef.current = setInterval(async () => {
