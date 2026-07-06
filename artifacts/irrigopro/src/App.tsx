@@ -41,6 +41,10 @@ const AdminClientErrorsPage = lazyPage(() => import("@/pages/admin-client-errors
 const FinancialPulsePage = lazyPage(() => import("@/pages/financial-pulse"));
 const SuperAdminAppHealthPage = lazyPage(() => import("@/pages/super-admin-app-health"));
 const SuperAdminLoosePhotosPage = lazyPage(() => import("@/pages/super-admin-loose-photos"));
+const SuperAdminIntegrationsOverviewPage = lazyPage(() => import("@/pages/super-admin/integrations/IntegrationsOverviewPage"));
+const AspireTenantDetailPage = lazyPage(() => import("@/pages/super-admin/integrations/AspireTenantDetailPage"));
+const GlobalConflictsPage = lazyPage(() => import("@/pages/super-admin/integrations/GlobalConflictsPage"));
+const CronJobManagerPage = lazyPage(() => import("@/pages/super-admin/integrations/CronJobManagerPage"));
 const LaborRateAuditPage = lazyPage(() => import("@/pages/labor-rate-audit"));
 const CustomerBilling = lazyPage(() => import("@/pages/customer-billing"));
 const QuickBooksPage = lazyPage(() => import("@/pages/quickbooks"));
@@ -80,6 +84,7 @@ const WetCheckReconciliationPage = lazyPage(() => import("@/pages/wet-check-reco
 const CustomerSiteMapsPage = lazyPage(() => import("@/pages/customer-site-maps-page"));
 const IrrigationProfilePage = lazyPage(() => import("@/pages/customers/IrrigationProfile"));
 const FieldTechMaps = lazyPage(() => import("@/pages/field-tech-maps"));
+const IntegrationsHubPage = lazyPage(() => import("@/pages/integrations/IntegrationsHubPage"));
 import { NotificationPermissionBanner } from "@/components/notifications/notification-permission-banner";
 import CompanyAdminApp from "@/components/company-admin-app";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
@@ -316,6 +321,7 @@ function Router() {
                   <Route path="/billing-sheets" component={BillingSheets} />
                   <Route path="/wet-check-billings" component={RedirectToWetChecksApproved} />
                   <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
+                  <Route path="/integrations" component={IntegrationsHubPage} />
                   <Route path="/manager/wet-checks" component={RedirectToWetChecks} />
                   <Route path="/manager/wet-checks/:id/confirm">
                     {(params) => <WetCheckConfirm id={parseInt(params.id)} />}
@@ -398,7 +404,7 @@ function Router() {
                   <Route path="/parts-pending-approval" component={PartsPendingApproval} />
                   <Route path="/estimates/pending-approval" component={EstimatesPendingApproval} />
                   <Route path="/quickbooks" component={QuickBooksPage} />
-                  <Route path="/invoices" component={InvoicesPage} />
+                  <Route path="/integrations" component={IntegrationsHubPage} />
                   <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
                   <Route path="/switch-user" component={SwitchUser} />
                   <Route path="/user-profile" component={UserProfile} />
@@ -456,6 +462,10 @@ function Router() {
                   <Route path="/admin/client-errors" component={AdminClientErrorsPage} />
                   <Route path="/super-admin/app-health" component={SuperAdminAppHealthPage} />
                   <Route path="/super-admin/loose-photos" component={SuperAdminLoosePhotosPage} />
+                  <Route path="/super-admin/integrations/conflicts" component={GlobalConflictsPage} />
+                  <Route path="/super-admin/integrations/cron" component={CronJobManagerPage} />
+                  <Route path="/super-admin/integrations/aspire/:companyId" component={AspireTenantDetailPage} />
+                  <Route path="/super-admin/integrations" component={SuperAdminIntegrationsOverviewPage} />
                   <Route path="/admin/migrations" component={AdminMigrationsPage} />
                   <Route path="/admin/wc-labor-backfill" component={AdminWcLaborBackfillPage} />
                   <Route path="/admin/wet-check-reconciliation" component={WetCheckReconciliationPage} />
