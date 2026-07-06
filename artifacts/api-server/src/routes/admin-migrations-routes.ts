@@ -46,6 +46,8 @@ export function registerAdminMigrationsRoutes(
           id: d.id,
           title: d.title,
           description: d.description,
+          deprecated: d.deprecated ?? false,
+          deprecationReason: d.deprecationReason ?? null,
           status: await d.check(),
         };
       } catch (err: any) {
@@ -53,6 +55,8 @@ export function registerAdminMigrationsRoutes(
           id: d.id,
           title: d.title,
           description: d.description,
+          deprecated: d.deprecated ?? false,
+          deprecationReason: d.deprecationReason ?? null,
           status: { state: 'error' as const, details: err?.message ?? String(err) },
         };
       }

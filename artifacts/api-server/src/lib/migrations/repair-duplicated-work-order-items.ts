@@ -667,18 +667,47 @@ async function run(emit: ProgressEmitter, opts?: MigrationRunOptions): Promise<M
   return results;
 }
 
+// ── DEPRECATED run() wrapper ────────────────────────────────────────────────────
+//
+// This migration is superseded by repair-wo-items-from-source-v1, which rebuilds
+// estimate-origin WOs from their authoritative estimate source rather than
+// de-deduplicating by identity.  The old migration flagged all 7 affected WOs
+// for manual review (because estimate-origin WOs have no wet_check_findings links
+// to verify against), so no data was ever repaired by it.  The new migration has
+// the correct strategy.
+//
+// run() below refuses execution and directs the operator to the new migration.
+
+async function runDeprecated(
+  emit: ProgressEmitter,
+  _opts?: MigrationRunOptions,
+): Promise<MigrationStepResult[]> {
+  const msg =
+    'This migration has been superseded by repair-wo-items-from-source-v1. ' +
+    'Please use that migration instead. repair-duplicated-work-order-items-v1 cannot be re-run.';
+  emit({ step: 'detect_duplicates', status: 'failed', error: msg });
+  return [{
+    id: 'detect_duplicates',
+    status: 'failed',
+    durationMs: 0,
+    error: msg,
+  }];
+}
+
 // ── Export ─────────────────────────────────────────────────────────────────────
 
 export const repairDuplicatedWorkOrderItemsMigration: MigrationDefinition = {
   id: MIGRATION_ID,
-  title: 'Repair Duplicated Work-Order Items',
+  title: 'Repair Duplicated Work-Order Items (DEPRECATED)',
   description:
-    'De-duplicates work_order_items rows produced by the pre-fix completion append bug. ' +
-    'Auto-repairs WOs with clean integer-multiple inflation by collapsing exact-duplicate groups (keep lowest id, recompute totals with replaceWorkOrderItemsWithResync semantics). ' +
-    'WOs that do not reconcile to a clean multiple (e.g. field-added parts mixed with duplicates) are flagged for manual review and NOT auto-corrected. ' +
-    'Run AFTER repair-nan-totals and reconcile-billing-sheet-invoice-totals.',
+    'DEPRECATED — superseded by repair-wo-items-from-source-v1, which correctly rebuilds ' +
+    'estimate-origin WOs from their approved estimate rather than de-duplicating by identity. ' +
+    'This migration flagged all 7 affected WOs as needing manual review (no wet_check_findings ' +
+    'links to verify against) and repaired nothing. Use repair-wo-items-from-source-v1 instead.',
   appSettingsKey: DONE_KEY,
+  deprecated: true,
+  deprecationReason: 'Superseded by repair-wo-items-from-source-v1. That migration rebuilds from the estimate source and correctly handles estimate-origin WOs.',
   check,
   preview,
-  run,
+  run: runDeprecated,
 };

@@ -81,6 +81,7 @@ interface UsedPart {
   quantity: number;
   totalCost: number;
   source: 'estimate' | 'field_added';
+  laborHours: string;
 }
 
 interface WorkOrderCompletionProps {
@@ -306,6 +307,7 @@ export function WorkOrderCompletion({
         quantity: item.quantity,
         totalCost: parseFloat(item.totalPrice),
         source: 'estimate' as const,
+        laborHours: String(item.laborHours ?? '0.00'),
       }));
 
       setUsedParts(prefilledParts);
@@ -368,6 +370,7 @@ export function WorkOrderCompletion({
         quantity: 1,
         totalCost: parseFloat(part.price),
         source: 'field_added',
+        laborHours: '0.00',
       };
       setUsedParts(prev => [...prev, newUsedPart]);
     }
@@ -448,6 +451,9 @@ export function WorkOrderCompletion({
         totalHours: completionData.totalHours,
         usedParts: usedParts.map(up => ({
           partId: up.partId,
+          partName: up.partName,
+          partPrice: up.partPrice,
+          laborHours: up.laborHours,
           quantity: up.quantity,
           totalCost: up.totalCost.toFixed(2),
         })),

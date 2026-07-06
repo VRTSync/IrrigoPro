@@ -9399,7 +9399,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         : undefined;
 
       // Snapshot the customer's configured labor rate at the time of completion.
-      const appliedLaborRate = parseFloat(customerForRates?.laborRate || '0');
+      // money() coerces NaN/null/undefined → 0 so appliedLaborRate.toFixed(2) never stores "NaN".
+      const appliedLaborRate = money(customerForRates?.laborRate);
 
       // Task #396 — authoritative labor calculation by mode.
       //   flat     → use the client-supplied totalHours.
@@ -9549,20 +9550,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
               findingId: (prior as any).findingId ?? null,
             });
           } else {
-            // Field-added part: look up current catalog price; no finding lineage.
-            const partDetails = await storage.getPart(part.partId);
-            if (partDetails) {
-              finalItems.push({
-                workOrderId,
-                partId: part.partId,
-                partName: partDetails.name,
-                partPrice: partDetails.price,
-                quantity: part.quantity,
-                totalPrice: (money(part.quantity) * money(partDetails.price)).toFixed(2),
-                laborHours: "0",
-                findingId: null,
-              });
+            // Field-added part: use payload snapshot values as primary source so
+            // no data is silently dropped if the catalog row is missing or stale.
+            // Catalog lookup is only used as a fallback when partName/partPrice are absent.
+            const payloadName: string | undefined = (part as any).partName;
+            const payloadPrice: string | number | undefined = (part as any).partPrice;
+            const payloadLaborHours: string | number | undefined = (part as any).laborHours;
+            let resolvedName: string;
+            let resolvedPrice: string | number;
+            if (payloadName && payloadPrice != null) {
+              resolvedName = payloadName;
+              resolvedPrice = payloadPrice;
+            } else {
+              const partDetails = await storage.getPart(part.partId);
+              resolvedName = payloadName ?? partDetails?.name ?? '';
+              resolvedPrice = payloadPrice ?? partDetails?.price ?? '0';
             }
+            const unitPrice = money(resolvedPrice);
+            finalItems.push({
+              workOrderId,
+              partId: part.partId,
+              partName: resolvedName,
+              partPrice: resolvedPrice,
+              quantity: part.quantity,
+              totalPrice: (money(part.quantity) * unitPrice).toFixed(2),
+              laborHours: payloadLaborHours != null ? String(payloadLaborHours) : "0",
+              findingId: null,
+            });
           }
         }
         if (finalItems.length > 0) {
@@ -9651,14 +9665,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Snapshot the customer's configured labor rate at the time of completion.
+      // Phase 1B: use money() so NaN/Infinity inputs coerce to 0 — prevents
+      // NaN from propagating into stored totals via laborSubtotal/totalAmount.
       const customerForRates = existingWorkOrder.customerId
         ? await storage.getCustomerById(existingWorkOrder.customerId)
         : undefined;
-      const appliedLaborRate = parseFloat(customerForRates?.laborRate || '0');
+      const appliedLaborRate = money(customerForRates?.laborRate);
 
-      // Calculate totals
-      const laborHours = parseFloat(existingWorkOrder.totalHours || '0');
-      const partsCost = parseFloat(existingWorkOrder.totalPartsCost || '0');
+      // Calculate totals — all inputs through money() so NaN/Infinity → 0.
+      const laborHours = money(existingWorkOrder.totalHours);
+      const partsCost = money(existingWorkOrder.totalPartsCost);
       const laborSubtotal = laborHours * appliedLaborRate;
       const partsSubtotal = partsCost;
       const totalAmount = laborSubtotal + partsSubtotal;

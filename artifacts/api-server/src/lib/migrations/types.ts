@@ -56,6 +56,9 @@ export type MigrationDefinition = {
   title: string;
   description: string;
   appSettingsKey: string;
+  /** When true the migration has been superseded and its run() refuses execution. */
+  deprecated?: boolean;
+  deprecationReason?: string;
   check(): Promise<MigrationStatus>;
   preview(): Promise<MigrationPreview>;
   run(emit: ProgressEmitter, opts?: MigrationRunOptions): Promise<MigrationStepResult[]>;

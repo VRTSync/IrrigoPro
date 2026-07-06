@@ -34,6 +34,38 @@ describe("migration registry — static shape", () => {
     );
   });
 
+  it("contains repair-wo-items-from-source-v1 (new) and repair-duplicated-work-order-items-v1 (deprecated)", () => {
+    const all = listMigrations();
+    const ids = all.map((m) => m.id);
+    assert.ok(
+      ids.includes("repair-wo-items-from-source-v1"),
+      "missing repair-wo-items-from-source-v1",
+    );
+    assert.ok(
+      ids.includes("repair-duplicated-work-order-items-v1"),
+      "missing repair-duplicated-work-order-items-v1",
+    );
+  });
+
+  it("repair-duplicated-work-order-items-v1 is marked deprecated in the registry", () => {
+    const all = listMigrations();
+    const deprecated = all.find((m) => m.id === "repair-duplicated-work-order-items-v1");
+    assert.ok(deprecated, "migration should be in registry");
+    assert.equal(deprecated!.deprecated, true, "migration must be marked deprecated");
+  });
+
+  it("repair-wo-items-from-source-v1 has the required MigrationDefinition shape", () => {
+    const m = getMigration("repair-wo-items-from-source-v1");
+    assert.ok(m, "getMigration should return a definition");
+    assert.equal(m.id, "repair-wo-items-from-source-v1");
+    assert.ok(m.title.length > 0, "title should be non-empty");
+    assert.ok(m.description.length > 0, "description should be non-empty");
+    assert.equal(typeof m.check, "function");
+    assert.equal(typeof m.preview, "function");
+    assert.equal(typeof m.run, "function");
+    assert.ok(!m.deprecated, "new migration must NOT be deprecated");
+  });
+
   it("getMigration returns the definition for the known id", () => {
     const m = getMigration("company-id-columns-v1");
     assert.ok(m, "getMigration should return a definition");
