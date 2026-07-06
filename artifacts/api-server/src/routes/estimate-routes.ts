@@ -61,6 +61,7 @@ import { paginate } from "./pagination";
 import { ESTIMATE_PENDING_DELETE_ROLES } from "./estimate-role-guards";
 import { UnapproveEstimateConflictError } from "../storage";
 import { deriveLifecycleForWrite } from "@workspace/shared";
+import { pushWorkOrderStatusToAspire } from "../services/aspire-sync-service";
 
 // Storage surface used by every estimate route. Methods used only by
 // routes that aren't exercised in the existing test suite are marked
@@ -1402,6 +1403,17 @@ export function registerEstimateRoutes(
         // approved estimate with a work order and a notified manager, or
         // nothing changed and they can safely retry.
         const result = await storage.approveEstimateAndCreateWorkOrder!(id);
+
+        // Mission 5 — Aspire push hook: fire-and-forget.
+        // If the approved work order was created from an Aspire ticket, push
+        // the updated status back to Aspire. This must run AFTER the
+        // IrrigoPro transaction commits and must NEVER throw — pushWorkOrder-
+        // StatusToAspire catches all errors internally and records them in
+        // aspire_sync_jobs. An Aspire outage must not block the approval.
+        if (result.workOrder && estimate.companyId != null) {
+          pushWorkOrderStatusToAspire(result.workOrder.id, estimate.companyId)
+            .catch(() => { /* already logged inside pushWorkOrderStatusToAspire */ });
+        }
 
         await recordLifecycleAudit(req, {
           resource: "estimate",
