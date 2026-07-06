@@ -1,0 +1,44 @@
+# BUILD — Rebuild Flagged WOs to Approved Estimate + Clean Up Migration List + Remove WO-Corrections Page
+
+**What & Why**
+The estimate→WO→completion duplication bug is fixed going forward (completion now replaces items instead of appending). For the handful of *historical* work orders still flagged, we're taking the simple path: **rebuild each to its approved estimate** (bill the quote the customer agreed to) and be done — no per-part review tool needed. This ticket does three things: (A) a new migration that rebuilds the flagged non-billed WOs to their estimate, (B) removes completed/deprecated migrations from the admin list, and (C) deletes the now-unneeded Work Order Correction Review page and its backend. Server-side + minor UI removal; do not touch `customer-billing.tsx`. Multi-tenancy intact; migrations run by Randy from Super Admin.
+
+---
+
+## Part A — New migration: rebuild flagged WOs to their estimate
+**File:** new `artifacts/api-server/src/lib/migrations/repair-wo-match-estimate.ts`, registered in `registry.ts`. Follow the `MigrationDefinition` contract (`check`/`preview`/`run`, per-WO audit log, per-step try/catch that surfaces the real error, acknowledgement gate, idempotent done-marker). **Reuse** the existing detection (`findCandidates`) and `buildRebuiltItemsFromEstimate` + `replaceWorkOrderItemsWithResync` from `repair-wo-items-from-source.ts` — this is essentially that migration with the "must match estimate exactly" guard removed.
+
+- **Target:** every flagged estimate-origin candidate WO that is **not billed** (`invoiceId == null`). For each: delete all `work_order_items`, insert one row per `estimate_item` at the estimate's snapshot price, and recompute header totals (`money()`, `total = parts + labor`) via `replaceWorkOrderItemsWithResync`.
+- **Billed WOs (WO-0513-26):** skip with a clear per-WO note ("billed — resolve via invoice reissue"). A migration must not rewrite a billed WO (the resync lock will refuse it anyway).
+- **Preview must show, per WO:** `current parts → estimate parts`, the delta, and billed status — so the acknowledgement is an informed decision.
+- **Flag WO-1782857855074-481 prominently in the preview:** its excess is **not** duplication ("no duplicate signatures"), so rebuilding it to the estimate **drops ~$1,187 of real, distinct line items** (current $2,968.40 → estimate $1,781.04). Surface this explicitly (e.g., a per-WO warning: "reduction is non-duplicate items — confirm you intend to bill the estimate, not the actuals") so it's a conscious choice, not a silent drop.
+- Applies cleanly to WO #26 ($1,607.70), WO-763 ($84.75), WO-48 ($190.42). Idempotent; company-scoped; audit before→after per WO.
+
+## Part B — Remove completed / deprecated migrations from the admin list
+**File:** `artifacts/api-server/src/lib/migrations/registry.ts`. Removing an entry only hides it from the admin page — the code and its `app_settings` done-marker stay, and it can be re-registered if ever needed.
+- **Remove now:** `repairDuplicatedWorkOrderItemsMigration` (the DEPRECATED one — it's a foot-gun that gave the wrong $4,433.70 result).
+- **Remove after Part A's migration has been run** (superseded): `repairWoItemsFromSourceMigration`, and `repairWoMatchEstimateMigration` itself once the flagged WOs are fixed.
+- **Remove the other completed one-shots** that have served their purpose and won't recur — audit each and drop the done ones from the registry: `companyIdColumnsMigration`, `workOrderZonesMigration`, `renumberEstimatesMigration`, `reconcileFindingDispositionMigration`, `trimPhantomZonesMigration`, `importIrrigationProfileMigration`, `repairNanTotalsMigration`. **Keep** anything that is genuinely a re-runnable maintenance utility (confirm `reconcileBillingSheetInvoiceTotalsMigration` — keep it if it's still used to repair billing drift on demand; otherwise remove).
+- Net goal: the migrations page shows only what's still actionable, not a graveyard of finished one-shots.
+
+## Part C — Delete the Work Order Correction Review page + backend
+No longer needed (Part A replaces it). Remove:
+- **Frontend route:** `App.tsx:78` (the `AdminWoCorrectionPage` lazy import) and `App.tsx:461` (`<Route path="/admin/wo-corrections" …>`).
+- **Page component:** delete `artifacts/irrigopro/src/pages/admin/WorkOrderCorrectionReview.tsx`.
+- **Backend routes:** remove `routes.ts:393` (`import { registerAdminWoCorrectionRoutes }`) and `routes.ts:7195` (the `registerAdminWoCorrectionRoutes(app, …)` call); delete `artifacts/api-server/src/routes/admin-wo-correction-routes.ts` and its `.test.ts`.
+- **Storage:** remove `computeWorkOrderDedupActuals` (interface `storage.ts:1262` + impl) and the `WoDedupActuals` type — it's used only by the deleted correction routes/tests (confirmed no other callers).
+- **Do NOT** add the nav link we discussed for `/admin/wo-corrections` — moot.
+- **`work_order_corrections` table:** it's empty (nothing was applied through the tool). Low priority — either drop it in a small migration or leave it as an inert unused table; your call, not blocking.
+
+## Done looks like
+- Running the new migration rebuilds WO #26, 763, and 48 to their estimate totals; WO-0513 is skipped (billed); WO-481 is surfaced with its non-duplicate-reduction warning before it's touched.
+- The migrations page lists only active/re-runnable items — the deprecated dup migration and finished one-shots are gone.
+- `/admin/wo-corrections` 404s; the page, routes, tests, and `computeWorkOrderDedupActuals` are removed; the app builds and existing tests pass.
+
+## Relevant files
+- `artifacts/api-server/src/lib/migrations/repair-wo-match-estimate.ts` (new) + `registry.ts`
+- Reuse from `repair-wo-items-from-source.ts`: `findCandidates`, `buildRebuiltItemsFromEstimate`
+- `artifacts/api-server/src/storage.ts` (`replaceWorkOrderItemsWithResync` ~4905; remove `computeWorkOrderDedupActuals` ~1262)
+- `artifacts/irrigopro/src/App.tsx` (remove lines 78, 461)
+- Delete: `pages/admin/WorkOrderCorrectionReview.tsx`, `routes/admin-wo-correction-routes.ts` (+ test)
+- `routes.ts` (remove import 393, call 7195)
