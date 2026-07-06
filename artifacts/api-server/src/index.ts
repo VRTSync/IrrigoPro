@@ -2,6 +2,8 @@ import { createApp } from "./app";
 import { resolveChromiumExecutable } from "./chromium-resolver";
 import { logger } from "./lib/logger";
 import { auditQbTokenEnvironments } from "./qb-boot-audit";
+import { validateAspireEncryptionKey } from "./services/aspire-token-service";
+
 
 try {
   const chromiumPath = resolveChromiumExecutable();
@@ -26,6 +28,11 @@ const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
+
+// Hard-fail if ASPIRE_ENCRYPTION_KEY is missing or malformed.
+// All environments require this key — it is used for credential encryption,
+// not just in production. The error message explains exactly what to do.
+validateAspireEncryptionKey();
 
 function auditProductionEnv(): void {
   if (process.env["NODE_ENV"] !== "production") return;
