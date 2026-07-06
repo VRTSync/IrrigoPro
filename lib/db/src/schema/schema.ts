@@ -115,6 +115,22 @@ export const customers = pgTable("customers", {
   budgetAlertRecipientUserIds: jsonb("budget_alert_recipient_user_ids").$type<number[]>().default(sql`'[]'::jsonb`),
   budgetAlertChannels: jsonb("budget_alert_channels").$type<{ inApp: boolean; push: boolean; email: boolean }>().default(sql`'{"inApp":true,"push":true,"email":false}'::jsonb`),
   budgetNotifyCustomerContact: boolean("budget_notify_customer_contact").default(false),
+  // Mission 6 — Aspire contact sync. Aspire contacts (secondary contacts
+  // linked to a customer account) have no dedicated IrrigoPro table. They
+  // are stored here as a nullable JSON array on the customer row so the
+  // data is accessible to billing and field-tech views without requiring a
+  // schema join, and without polluting the users table with non-IrrigoPro
+  // accounts. Shape: Array<{ aspireId: string; name: string; email?: string;
+  //   phone?: string; role?: string; isPrimary?: boolean }>.
+  // Updated by syncContacts; never modified by the IrrigoPro app directly.
+  externalContacts: jsonb("external_contacts").$type<Array<{
+    aspireId: string;
+    name: string;
+    email?: string | null;
+    phone?: string | null;
+    role?: string | null;
+    isPrimary?: boolean;
+  }>>(),
 }, (table) => ({
   // Task #532 — index company-scoped lookups (the customers list endpoint
   // and almost every join coming off a customer is filtered by companyId).
