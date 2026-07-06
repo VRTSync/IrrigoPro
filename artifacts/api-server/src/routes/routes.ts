@@ -390,7 +390,6 @@ import {
 import { registerInvoiceMarkSentRoutes } from "./invoice-mark-sent-routes";
 import { registerInvoiceCorrectionRoutes } from "./invoice-correction-routes";
 import { registerAdminMigrationsRoutes } from "./admin-migrations-routes";
-import { registerAdminWoCorrectionRoutes } from "./admin-wo-correction-routes";
 import { registerWcLaborBackfillRoutes } from "./admin-wc-labor-backfill-routes";
 import { registerInspectionZoneBackfillRoutes } from "./admin-inspection-zone-backfill-routes";
 import { registerCleanupInvoice71256Routes } from "./cleanup-invoice-71256";
@@ -7191,8 +7190,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerInvoiceCorrectionRoutes(app, { requireAuthentication, requireBillingAccess });
   // Slice 4a — Super-admin DB migration management page.
   registerAdminMigrationsRoutes(app, requireAuthentication);
-  // Task #1718 — Work-Order Correction Review (De-dup to Actuals).
-  registerAdminWoCorrectionRoutes(app, requireAuthentication);
 
   // WC Labor Slice 2 — bulk seeder endpoint (super_admin only).
   // Triggers seedIssueTypeConfigsForActiveCompanies() on demand so companies

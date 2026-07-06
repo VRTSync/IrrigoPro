@@ -75,7 +75,6 @@ const CombinedReviewPage = lazyPage(() => import("@/pages/wet-checks/CombinedRev
 
 const SiteMapsPage = lazyPage(() => import("@/pages/site-maps"));
 const AdminMigrationsPage = lazyPage(() => import("@/pages/admin/migrations"));
-const AdminWoCorrectionPage = lazyPage(() => import("@/pages/admin/WorkOrderCorrectionReview"));
 const AdminWcLaborBackfillPage = lazyPage(() => import("@/pages/admin-wc-labor-backfill"));
 const WetCheckReconciliationPage = lazyPage(() => import("@/pages/wet-check-reconciliation"));
 const CustomerSiteMapsPage = lazyPage(() => import("@/pages/customer-site-maps-page"));
@@ -458,7 +457,6 @@ function Router() {
                   <Route path="/super-admin/app-health" component={SuperAdminAppHealthPage} />
                   <Route path="/super-admin/loose-photos" component={SuperAdminLoosePhotosPage} />
                   <Route path="/admin/migrations" component={AdminMigrationsPage} />
-                  <Route path="/admin/wo-corrections" component={AdminWoCorrectionPage} />
                   <Route path="/admin/wc-labor-backfill" component={AdminWcLaborBackfillPage} />
                   <Route path="/admin/wet-check-reconciliation" component={WetCheckReconciliationPage} />
                   <Route path="/quickbooks" component={QuickBooksPage} />

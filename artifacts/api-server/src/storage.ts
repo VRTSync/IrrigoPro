@@ -186,37 +186,6 @@ import {
 } from "./invoice-merge";
 import { recordAuditEvent } from "./routes/audit-log";
 
-// ── WO de-dup correction types (Task #1718) ──────────────────────────────────
-// These are compute-only types (not DB rows). Defined here so storage callers
-// and routes can import them from a single stable location. The pure helpers
-// are inlined below to avoid a circular import with the migration file, which
-// already imports `storage` at its top level.
-export type DedupActualRow = {
-  partKey: string;
-  partId: number | null;
-  partName: string;
-  /** Unit price from the authoritative source (estimate snapshot or parts catalog). */
-  unitPrice: number;
-  estimateQty: number;
-  dedupedActualQty: number;
-  source: 'pureKept' | 'fieldAdd' | 'drifted';
-};
-
-export type WoDedupActuals = {
-  woId: number;
-  workOrderNumber: string | null;
-  companyId: number;
-  estimateId: number;
-  isBilled: boolean;
-  invoiceId: number | null;
-  currentTotal: number;
-  estimateTotal: number;
-  /** Running total if operator keeps the de-duped set unchanged. */
-  dedupTotal: number;
-  rows: DedupActualRow[];
-  currentItems: Array<{ id: number; partId: number | null; partName: string; partPrice: number; quantity: number; totalPrice: number }>;
-  estimateItems: Array<{ id: number; partId: number | null; partName: string; partPrice: number; quantity: number }>;
-};
 
 // Set of issue types that never require a part (labor-only). Built once from
 // the canonical seed so the convert guard stays in sync with the schema.
@@ -1252,14 +1221,6 @@ export interface IStorage {
   updateWorkOrderLaborHours(id: number, totalHours: number, companyId: number | null): Promise<WorkOrder & { items: WorkOrderItem[] }>;
   /** Task #1415 — direct labor rate override for work orders (sets appliedLaborRate, recomputes totals). */
   updateWorkOrderLaborRate(id: number, laborRate: number, companyId: number | null): Promise<WorkOrder & { items: WorkOrderItem[] }>;
-  /**
-   * Task #1718 — read-only computation of the de-duped actuals for an estimate-origin WO.
-   * Collapses exact-duplicate WO item rows by (partId, partPrice, quantity) signature,
-   * classifies each collapsed row (pureKept / fieldAdd / drifted), and returns per-part
-   * rows with their authoritative unit prices. Does NOT write anything.
-   * Returns null if the WO is not found or does not have an estimate source.
-   */
-  computeWorkOrderDedupActuals(woId: number, companyId: number | null): Promise<WoDedupActuals | null>;
   deleteWetCheckBilling(id: number): Promise<void>;
   /** Returns the URL strings of all photos attached to a wet check (both zone-level and finding-level). */
   getWetCheckPhotoUrls(wetCheckId: number): Promise<string[]>;
@@ -4990,154 +4951,6 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  /**
-   * Task #1718 — Read-only de-dup classification for an estimate-origin WO.
-   * Pure helpers inlined to avoid circular import with repair-wo-items-from-source.ts.
-   */
-  async computeWorkOrderDedupActuals(
-    woId: number,
-    companyId: number | null,
-  ): Promise<WoDedupActuals | null> {
-    const scope = this._companyScope(companyId);
-    const cond = scope ? and(eq(workOrders.id, woId), scope) : eq(workOrders.id, woId);
-    const [wo] = await db.select().from(workOrders).where(cond);
-    if (!wo || !wo.estimateId) return null;
-
-    const [items, estItems] = await Promise.all([
-      db.select().from(workOrderItems).where(eq(workOrderItems.workOrderId, woId)),
-      db.select().from(estimateItems).where(eq(estimateItems.estimateId, wo.estimateId)),
-    ]);
-
-    // Inline pure helpers (mirrors repair-wo-items-from-source — no circular import)
-
-    /** Exact-duplicate detection key: partId|price|qty. */
-    function sigKey(partId: number | null, partPrice: unknown, quantity: unknown): string {
-      const n = parseFloat(String(partPrice ?? 0));
-      const price = Number.isFinite(n) ? n : 0;
-      return `${partId ?? ''}|${price.toFixed(2)}|${Number(quantity)}`;
-    }
-
-    /**
-     * Stable grouping key for the correction-editor rows.
-     * - Non-null partId  → String(partId)  (one editor row per part, regardless of price drift)
-     * - null partId      → "null|name"  (name-only, price excluded)
-     *
-     * Why name-only for null-part? Mirrors matchActualsToEstimate semantics: a null-part
-     * WO item whose price drifted vs the estimate should be classified as `drifted` (not
-     * `fieldAdd`). Including price in the key would prevent the estimate lookup from
-     * matching, causing misclassification. Two null-part items with the same name but
-     * different prices are treated as the same logical line item in the editor.
-     */
-    function groupKey(partId: number | null, partName: string): string {
-      if (partId != null) return String(partId);
-      return `null|${partName}`;
-    }
-
-    // Step 1: de-dup by exact signature (partId, price, qty) — collapses true duplicates only
-    const seenSigs = new Set<string>();
-    const deduped: typeof items = [];
-    for (const wi of items) {
-      const sig = sigKey(wi.partId, wi.partPrice, wi.quantity);
-      if (!seenSigs.has(sig)) { seenSigs.add(sig); deduped.push(wi); }
-    }
-
-    // Build estimate lookup using the same groupKey convention
-    const estByPartKey = new Map<string, { totalQty: number; unitPrice: number; partName: string }>();
-    for (const ei of estItems) {
-      const key = groupKey(ei.partId, ei.partName);
-      const entry = estByPartKey.get(key);
-      if (entry) {
-        entry.totalQty += Number(ei.quantity);
-      } else {
-        estByPartKey.set(key, {
-          totalQty: Number(ei.quantity),
-          unitPrice: money(ei.partPrice as unknown as string),
-          partName: ei.partName,
-        });
-      }
-    }
-    const estSigs = new Set(
-      estItems.map((ei) => sigKey(ei.partId, ei.partPrice as unknown as string, Number(ei.quantity))),
-    );
-
-    // Step 2: group deduped items by stable partKey, classify each group
-    const grouped = new Map<string, typeof deduped>();
-    for (const wi of deduped) {
-      const key = groupKey(wi.partId, wi.partName);
-      const list = grouped.get(key) ?? [];
-      list.push(wi);
-      grouped.set(key, list);
-    }
-
-    const rows: DedupActualRow[] = [];
-    for (const [partKey, wis] of grouped) {
-      const totalDedupedQty = wis.reduce((s, wi) => s + Number(wi.quantity), 0);
-      const estEntry = estByPartKey.get(partKey);
-      const firstWi = wis[0]!;
-
-      let source: DedupActualRow['source'];
-      let unitPrice: number;
-      const estimateQty = estEntry?.totalQty ?? 0;
-
-      if (estEntry) {
-        unitPrice = estEntry.unitPrice;
-        const allSigMatch = wis.every((wi) => estSigs.has(sigKey(wi.partId, wi.partPrice, wi.quantity)));
-        source = allSigMatch ? 'pureKept' : 'drifted';
-      } else {
-        unitPrice = money(firstWi.partPrice as unknown as string);
-        source = 'fieldAdd';
-      }
-
-      rows.push({
-        partKey,
-        partId: firstWi.partId,
-        partName: firstWi.partName,
-        unitPrice,
-        estimateQty,
-        dedupedActualQty: totalDedupedQty,
-        source,
-      });
-    }
-
-    // Sort: pureKept, drifted, fieldAdd; then by partId
-    const sourceOrder: Record<string, number> = { pureKept: 0, drifted: 1, fieldAdd: 2 };
-    rows.sort((a, b) => {
-      const so = (sourceOrder[a.source] ?? 9) - (sourceOrder[b.source] ?? 9);
-      return so !== 0 ? so : (a.partId ?? -1) - (b.partId ?? -1);
-    });
-
-    const currentTotal = items.reduce((s, wi) => s + money(wi.totalPrice as unknown as string), 0);
-    const estimateTotal = estItems.reduce((s, ei) => s + money(ei.partPrice as unknown as string) * Number(ei.quantity), 0);
-    const dedupTotal = rows.reduce((s, r) => s + r.unitPrice * r.dedupedActualQty, 0);
-
-    return {
-      woId,
-      workOrderNumber: wo.workOrderNumber ?? null,
-      companyId: wo.companyId,
-      estimateId: wo.estimateId,
-      isBilled: wo.invoiceId != null,
-      invoiceId: wo.invoiceId ?? null,
-      currentTotal,
-      estimateTotal,
-      dedupTotal,
-      rows,
-      currentItems: items.map((wi) => ({
-        id: wi.id,
-        partId: wi.partId,
-        partName: wi.partName,
-        partPrice: money(wi.partPrice as unknown as string),
-        quantity: Number(wi.quantity),
-        totalPrice: money(wi.totalPrice as unknown as string),
-      })),
-      estimateItems: estItems.map((ei) => ({
-        id: ei.id,
-        partId: ei.partId,
-        partName: ei.partName,
-        partPrice: money(ei.partPrice as unknown as string),
-        quantity: Number(ei.quantity),
-      })),
-    };
-  }
 
   async updateBillingSheetLaborHours(
     id: number,
