@@ -70,7 +70,6 @@ import { apiRequest } from "@/lib/queryClient";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const DEFAULT_ZONE_COUNT = 12;
 const MIN_ZONES = 1;
 const MAX_ZONES = 100;
 
@@ -1313,7 +1312,7 @@ function ControllerGridTile({
   }, []);
 
   const letter = extractLetter(controller.name);
-  const zoneCount = controller.totalZones ?? DEFAULT_ZONE_COUNT;
+  const zoneCount = controller.totalZones;
 
   const updateZoneCount = useMutation({
     mutationFn: async (next: number) =>
@@ -1456,7 +1455,7 @@ function ControllerGridTile({
               </p>
               <p className="text-xs text-gray-500 flex items-center gap-1">
                 <Cpu className="w-3 h-3" />
-                {zoneCount} {zoneCount === 1 ? "zone" : "zones"}
+                {zoneCount != null ? zoneCount : "—"} {zoneCount === 1 ? "zone" : "zones"}
                 {controller.location && (
                   <span className="ml-1 truncate">· 📍 {controller.location}</span>
                 )}
@@ -1474,16 +1473,16 @@ function ControllerGridTile({
                   className="h-7 w-7"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (!updateZoneCount.isPending && zoneCount > MIN_ZONES) {
-                      updateZoneCount.mutate(zoneCount - 1);
+                    if (!updateZoneCount.isPending && (zoneCount ?? 0) > MIN_ZONES) {
+                      updateZoneCount.mutate((zoneCount ?? 0) - 1);
                     }
                   }}
-                  disabled={updateZoneCount.isPending || zoneCount <= MIN_ZONES}
+                  disabled={updateZoneCount.isPending || (zoneCount ?? 0) <= MIN_ZONES}
                   data-testid={`button-zone-decrement-${letter}`}
                 >
                   <Minus className="w-3 h-3" />
                 </Button>
-                <span className="w-8 text-center text-sm font-medium tabular-nums">{zoneCount}</span>
+                <span className="w-8 text-center text-sm font-medium tabular-nums">{zoneCount ?? "—"}</span>
                 <Button
                   type="button"
                   variant="outline"
@@ -1491,11 +1490,11 @@ function ControllerGridTile({
                   className="h-7 w-7"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (!updateZoneCount.isPending && zoneCount < MAX_ZONES) {
-                      updateZoneCount.mutate(zoneCount + 1);
+                    if (!updateZoneCount.isPending && (zoneCount ?? 0) < MAX_ZONES) {
+                      updateZoneCount.mutate((zoneCount ?? 0) + 1);
                     }
                   }}
-                  disabled={updateZoneCount.isPending || zoneCount >= MAX_ZONES}
+                  disabled={updateZoneCount.isPending || (zoneCount ?? 0) >= MAX_ZONES}
                   data-testid={`button-zone-increment-${letter}`}
                 >
                   <Plus className="w-3 h-3" />
@@ -1523,7 +1522,7 @@ function ControllerGridTile({
         {/* Zone number chips */}
         {!isExpanded && (
           <div className="flex flex-wrap gap-1.5">
-            {Array.from({ length: zoneCount }, (_, i) => i + 1).map((zone) => (
+            {Array.from({ length: zoneCount ?? 0 }, (_, i) => i + 1).map((zone) => (
               <span
                 key={zone}
                 className="inline-flex items-center justify-center min-w-[28px] h-7 px-1.5 rounded-md bg-white border border-blue-200 text-xs font-medium text-blue-900 shadow-sm"

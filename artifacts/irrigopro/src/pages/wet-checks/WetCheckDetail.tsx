@@ -455,7 +455,7 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
     const records = zonesByLetter(activeLetter);
     const recordsByZone = new Map(records.map(r => [r.zoneNumber, r]));
     return (
-      <div className="max-w-3xl mx-auto py-4 space-y-3 px-3 sm:px-4 pb-safe">
+      <div className="max-w-3xl mx-auto py-4 space-y-3 px-3 sm:px-4 pb-nav-safe">
         <PropertyContextHeader
           customerName={wc.customerName}
           propertyAddress={wc.propertyAddress}
@@ -645,7 +645,7 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
         ? "Submit — all work completed"
         : "Submit for manager review";
   return (
-    <div className="max-w-3xl mx-auto py-4 space-y-4 px-3 sm:px-4 pb-safe">
+    <div className="max-w-3xl mx-auto py-4 space-y-4 px-3 sm:px-4 pb-nav-safe">
       <PropertyContextHeader
         customerName={wc.customerName}
         propertyAddress={wc.propertyAddress}

@@ -1,0 +1,54 @@
+# Irrigation Profile — Import Controllers & Zones from CSV
+
+**What & Why**
+Let a manager populate a property's irrigation profile (Controllers → Programs → Zones) by **uploading a CSV** instead of entering everything by hand — turning lists like the freeform "Woodglenn Controllers" doc into structured profile data in one step.
+
+**Confirmed decisions:** **one row per zone** (flat CSV); **preview then merge/update** (non-destructive — never deletes); **one customer/property at a time**. Company-scoped (Rule 1). Built with a match-and-update mindset so **VRTSync** can plug into the same machinery later (see VRTSync memory note).
+
+**Reuse what exists:** model on `components/customer-csv-upload.tsx` → `POST /api/customers/import-csv` and the parts `bulk-import` template-download pattern; Papaparse for parsing.
+
+**Visual reference:** `irrigation-csv-import-mockup.html`.
+
+## CSV format (one row per zone)
+Columns (header row required; controller/program fields repeat per zone):
+`Controller, Location, Brand, Model, Program, Watering Days, Start Time, Seasonal %, Zone #, Zone Name, Zone Type, Run Time (min)`
+- **Controller** = name or letter (groups rows). **Zone Type** ∈ {pop-up spray, rotor, drip, netafim, bubbler, other}. **Watering Days** e.g. `Mon,Wed,Fri` or `MWF`. **Start Time** `HH:MM` (multiple separated by `;`). **Seasonal %** integer. **Run Time** minutes.
+- A downloadable template (headers + 2–3 example rows) is provided.
+
+## Slice 1 — UI: import button + flow
+### Files: `pages/customers/IrrigationProfile.tsx` (+ a new `irrigation-csv-import` modal, modeled on `customer-csv-upload.tsx`)
+- Add an **Import CSV** button next to Add Controller / Generate Report on the profile page.
+- Modal flow (see mockup): **Download template** → **upload/drag-drop CSV** → **Preview & validate** → **Import**.
+- **Preview (dry-run):** parse client-side (Papaparse) and/or call the backend in preview mode; show rows **grouped by controller**, each tagged **NEW** or **UPDATE** (and what changes, e.g. "zone count 12 → 15"), a summary (new controllers / updated / zones added / rows needing attention), and **bad rows highlighted** with a clear per-row error (unknown zone type, bad days/time, non-numeric run time, missing zone #).
+- The user can fix the CSV and re-upload, or import the valid rows. Show progress + success/error toasts.
+
+## Slice 2 — Backend: parse, validate, merge
+### Files: new `routes/irrigation-profile-import-routes.ts` (or extend `irrigation-profile-routes.ts`), `storage.ts`
+- **`POST /api/customers/:customerId/irrigation-profile/import-csv`** with a `mode` of `preview` (validate + return the diff, no writes) and `commit` (apply). `requireAuthentication`, company-scoped, manager/admin only; the customer must belong to the caller's company (404 otherwise).
+- **Parse & validate** each row: required fields, zone-type enum, days/time formats, numeric seasonal %/run time; collect per-row errors with row numbers; never partially write in preview mode.
+- **Group** rows by controller; build the program(s) from the program columns; build zones (number, name, type, run time, program assignment).
+- **Merge (non-destructive):** match existing controllers by name/letter within `(companyId, customerId, branchName)`; **update** matched controllers/programs/zones (incl. `totalZones`), **add** new ones; **never delete** existing controllers or zones not present in the CSV. Adding zones beyond the current count raises `totalZones`; matching zones update in place.
+- **Commit** in a transaction; stamp `lastUpdatedBy*`; append an `irrigation_profile_history` snapshot. Return a summary (created/updated counts).
+- **VRTSync-ready:** when matching, prefer an external id if present; structure the import so a future VRT feed reuses the same match-and-update path (don't hardcode CSV-only assumptions).
+
+## Tests
+- A valid CSV (Woodglenn-style) creates the controllers/programs/zones; the run-time schedule computes from the imported data.
+- Preview mode returns the new/update diff and flags bad rows (bad zone type, missing zone #) with row numbers, and writes nothing.
+- Re-importing the same CSV is a no-op (idempotent merge); changing a run time updates that zone only.
+- Importing into a property that already has controllers **merges** (updates matches, adds new) and never deletes existing data.
+- Company isolation: cannot import into another company's customer (404); import is scoped to the caller's company.
+- Malformed file / wrong headers → clear error, no writes.
+
+## Out of scope
+- Bulk multi-customer import in one file (chose per-property).
+- Replace-all mode (chose merge).
+- VRTSync live integration (this shares its machinery but isn't it).
+- Exporting the profile to CSV (could be an easy companion later).
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/customers/IrrigationProfile.tsx` + new import modal (model on `components/customer-csv-upload.tsx`, `components/parts/bulk-import.tsx`)
+- New: `artifacts/api-server/src/routes/irrigation-profile-import-routes.ts` (or extend `irrigation-profile-routes.ts`)
+- `artifacts/api-server/src/storage.ts` (merge/upsert controllers/programs/zones)
+- `lib/db/src/schema/schema.ts` (`irrigation_controllers` / `irrigation_programs` / `irrigation_profile_zones`)
+- Reference: `POST /api/customers/import-csv` flow; Papaparse
+- Visual reference: `irrigation-csv-import-mockup.html`

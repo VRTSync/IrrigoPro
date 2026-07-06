@@ -58,6 +58,8 @@ import {
   type QbStorageAdapter,
   type QbRefreshFn,
 } from "../qb-token-utils";
+import { isUnroutedFinding, wcbIsEligible } from "../lib/finding-predicates";
+import { computeBillingSheetTotal } from "../billing-sheet-total";
 import type {
   QbTokenResponse,
   QbTokenResponseValidated,
@@ -412,6 +414,7 @@ import {
   getIntegrationMeta,
 } from "../lib/integration-catalog";
 import { logger } from "../lib/logger";
+import { money } from "../lib/money";
 import { coerceLatLngStrings } from "../lib/coerce-lat-lng";
 import { buildWoLineDescription, buildBsLineDescription, buildWcbLineDescription } from "../lib/qb-line-description";
 import { seedIssueTypeConfigsForActiveCompanies } from "../seed-issue-type-configs";
@@ -6318,11 +6321,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Use the stored financial snapshot as the source of truth.
       // Historical backfill guardrail: if laborSubtotal is null (pre-fix record),
       // fall back to totalAmount for the total but do not fabricate breakdown detail.
+      // money() guards against Postgres NaN decimal values ("NaN" string is truthy
+      // so the legacy `|| '0'` pattern passes "NaN" straight through to parseFloat).
       const workOrders = rawWorkOrders.map(wo => {
         const hasBreakdown = wo.laborSubtotal != null;
-        const laborCost = hasBreakdown ? parseFloat(wo.laborSubtotal || '0') : null;
-        const partsCost = hasBreakdown ? parseFloat(wo.partsSubtotal || '0') : null;
-        const storedTotal = parseFloat(wo.totalAmount || '0');
+        const laborCost = hasBreakdown ? money(wo.laborSubtotal) : null;
+        const partsCost = hasBreakdown ? money(wo.partsSubtotal) : null;
+        const storedTotal = money(wo.totalAmount);
         
         return {
           ...wo,
@@ -6341,9 +6346,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Transform billing sheets to match frontend expectations
       const billingSheets = rawBillingSheets.map(bs => {
-        const laborAmount = parseFloat(bs.laborSubtotal || '0') || 0;
-        const partsAmount = parseFloat(bs.partsSubtotal || '0') || 0;
-        const storedTotal = parseFloat(bs.totalAmount || String(laborAmount + partsAmount));
+        const laborAmount = money(bs.laborSubtotal);
+        const partsAmount = money(bs.partsSubtotal);
+        const storedTotal = money(bs.totalAmount) || (laborAmount + partsAmount);
         
         return {
           ...bs,
@@ -6368,9 +6373,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Transform wet check billings to a parallel shape matching billing sheets
       const wetCheckBillings = rawWetCheckBillings.map(wcb => {
-        const laborCost = parseFloat(wcb.laborSubtotal || '0') || 0;
-        const partsCost = parseFloat(wcb.partsSubtotal || '0') || 0;
-        const totalAmount = parseFloat(wcb.totalAmount || String(laborCost + partsCost));
+        const laborCost = money(wcb.laborSubtotal);
+        const partsCost = money(wcb.partsSubtotal);
+        const totalAmount = money(wcb.totalAmount) || (laborCost + partsCost);
         return {
           ...wcb,
           laborCost,
@@ -6386,8 +6391,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // billing-preview so the two headline numbers agree for the same
       // selectedMonth. Cutoff is upper-bound only (open start). Null
       // work-date records are always included and flagged undated:true.
-      // 'converted' visibility note: wetCheckStatus === 'converted' is NOT
-      // gated here; that gate belongs only on invoice-construction paths.
+      // Visibility note: the billing-eligible gate belongs only on invoice-construction
+      // paths; the partition here includes all approved WCBs regardless of parent status.
       const detailPartition = computeUnbilledPartition(
         workOrders,
         billingSheets,
@@ -6459,13 +6464,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Query eligible wet check billings for this customer (Slice 2+)
       const allWcbsForPreview = await storage.getWetCheckBillingsByCustomer(customerId);
-      // INVOICE-CONSTRUCTION gate: wetCheckStatus === 'converted' is intentional here.
-      // Do NOT remove it — a WCB whose parent wet check is still partially_converted
-      // should not yet be included in an invoice. This is tracked separately from the
-      // visibility filters above which must NOT gate on wetCheckStatus.
-      const eligibleWcbs = allWcbsForPreview.filter(wcb =>
-        wcb.status === 'approved_passed_to_billing' && wcb.invoiceId == null && wcb.wetCheckStatus === 'converted',
-      );
+      // INVOICE-CONSTRUCTION gate: a WCB is eligible when it is approved,
+      // not yet on an invoice, and the parent wet check has zero unrouted findings
+      // (i.e. every finding is triaged — no outstanding manager decisions).
+      const eligibleWcbs = allWcbsForPreview.filter(wcb => wcbIsEligible(wcb));
 
       // Filter to only include selected items
       let selectedWorkOrders: (typeof allWorkOrders)[number][] = [];
@@ -6753,13 +6755,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Query eligible wet check billings for this customer (Slice 2+)
       const allWcbsForMonthly = await storage.getWetCheckBillingsByCustomer(customerId);
-      // INVOICE-CONSTRUCTION gate: wetCheckStatus === 'converted' is intentional here.
-      // Do NOT remove it — a WCB whose parent wet check is still partially_converted
-      // should not yet be included in an invoice. This is tracked separately from the
-      // visibility filters above which must NOT gate on wetCheckStatus.
-      const eligibleWcbsMonthly = allWcbsForMonthly.filter(wcb =>
-        wcb.status === 'approved_passed_to_billing' && wcb.invoiceId == null && wcb.wetCheckStatus === 'converted',
-      );
+      // INVOICE-CONSTRUCTION gate: a WCB is eligible when it is approved,
+      // not yet on an invoice, and the parent wet check has zero unrouted findings
+      // (i.e. every finding is triaged — no outstanding manager decisions).
+      const eligibleWcbsMonthly = allWcbsForMonthly.filter(wcb => wcbIsEligible(wcb));
 
       // Filter to only include selected items
       let selectedWorkOrders: (typeof allWorkOrders)[number][] = [];
@@ -10768,7 +10767,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         unitPrice: String(i.unitPrice),
         laborHours: String(i.laborHours ?? 0),
         notes: i.notes ?? null,
-        totalPrice: (i.quantity * i.unitPrice).toFixed(2),
+        totalPrice: (money(i.quantity) * money(i.unitPrice)).toFixed(2),
       }));
       const result = await storage.replaceBillingSheetItemsWithResync(id, insertItems, companyId);
       void recordAuditEvent(req, {
@@ -11127,6 +11126,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // computeBillingSheetTotal is imported from ../billing-sheet-total.ts —
+  // a shared utility used by the PATCH handler, /labor-hours, and /rate-mode
+  // paths to enforce the totalAmount === partsSubtotal + laborSubtotal invariant
+  // with stored-record fallback for any subtotal absent from the mutation.
+
   app.patch("/api/billing-sheets/:id", requireAuthentication, requireSameCompanyAsBillingSheet, requireBillingSheetUpdateAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -11258,11 +11262,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Recalculate totalAmount whenever subtotals are provided
+      // Task #1669 — Recalculate totalAmount whenever subtotals are provided.
+      // Fall back to the stored record for any subtotal absent from the patch
+      // body so a totalHours-only PATCH never zeroes stored parts, and a
+      // partsSubtotal-only PATCH never zeroes stored labor.
       if (billingSheetData.laborSubtotal !== undefined || billingSheetData.partsSubtotal !== undefined) {
-        const patchLaborSubtotal = parseFloat(billingSheetData.laborSubtotal || '0');
-        const patchPartsSubtotal = parseFloat(billingSheetData.partsSubtotal || '0');
-        billingSheetData.totalAmount = (patchLaborSubtotal + patchPartsSubtotal).toFixed(2);
+        billingSheetData.totalAmount = computeBillingSheetTotal(billingSheetData, existingBsForLockCheck);
       }
       
       // Update the billing sheet
@@ -11381,7 +11386,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           quantity: item.quantity,
           unitPrice: item.unitPrice.toString(),
           laborHours: persistedLaborMode === 'flat' ? '0.00' : (item.laborHours ?? 0).toString(),
-          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
+          totalPrice: (money(item.quantity) * money(item.unitPrice)).toFixed(2),
           notes: item.notes || "",
         }));
         const resyncResult = await storage.replaceBillingSheetItemsAndResync(id, itemsToInsert);
@@ -12317,7 +12322,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         partPrice: String(i.unitPrice),
         quantity: i.quantity,
         laborHours: String(i.laborHours ?? 0),
-        totalPrice: (i.quantity * i.unitPrice).toFixed(2),
+        totalPrice: (money(i.quantity) * money(i.unitPrice)).toFixed(2),
         notes: i.notes ?? null,
       }));
       const result = await storage.replaceWorkOrderItemsWithResync(id, insertItems, companyId);
@@ -13695,7 +13700,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               partDescription: null,
               quantity: String(item.quantity),
               unitPrice: unitPrice.toString(),
-              totalPrice: (qty * unitPrice).toFixed(2),
+              totalPrice: (money(qty) * money(unitPrice)).toFixed(2),
               laborHours: item.laborHours,
               notes: item.notes || null,
             };
@@ -14106,6 +14111,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ))
       .limit(1);
     if (icRows.length > 0) return true;
+
+    // 7) irrigation_backflows.photo_url — single text column per device,
+    //    scoped to this company directly via companyId.
+    const { irrigationBackflows } = await import("@workspace/db/schema");
+    const bfRows = await db
+      .select({ id: irrigationBackflows.id })
+      .from(irrigationBackflows)
+      .where(and(
+        eq(irrigationBackflows.companyId, user.companyId),
+        sql`${irrigationBackflows.photoUrl} = ANY(${sql.param(candidates)}::text[])`,
+      ))
+      .limit(1);
+    if (bfRows.length > 0) return true;
 
     return false;
   }
@@ -15660,11 +15678,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         const numControllers = Math.max(1, Math.min(26, Number(customer.totalControllers ?? 1)));
         // ensureIrrigationControllers is idempotent — it only inserts rows for
-        // missing "Controller {letter}" entries. This guarantees the tech sees
-        // at least A..N even on first visit to a previously untouched branch.
+        // missing "Controller {letter}" entries. Build per-controller configs from
+        // property_controllers so zone counts carry through on first-visit seeding.
         // Seeds irrigation_controllers (single source of truth); property_controllers
         // is no longer written here.
-        const irrigCtrls = await storage.ensureIrrigationControllers(cid, customerId, numControllers, branchParam);
+        const legacyPCsForBranch = await storage.listPropertyControllers(cid, customerId);
+        const branchPCMap = new Map(
+          legacyPCsForBranch
+            .filter(r => (r.branchName ?? "") === (branchParam ?? ""))
+            .map(r => [r.controllerLetter, r]),
+        );
+        const seedConfigs = Array.from({ length: numControllers }, (_, i) => {
+          const letter = String.fromCharCode("A".charCodeAt(0) + i);
+          const pc = branchPCMap.get(letter);
+          return { name: `Controller ${letter}`, zoneCount: pc?.zoneCount ?? null };
+        });
+        const irrigCtrls = await storage.ensureIrrigationControllers(cid, customerId, seedConfigs, branchParam);
         // Map IrrigationController → PropertyController-compatible wire shape
         // so all existing wet-check UI consumers (ControllerSelectionPage, etc.)
         // continue to work without frontend changes.
@@ -15674,7 +15703,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           customerId: ctrl.customerId,
           branchName: branchParam || null,
           controllerLetter: ctrl.name.trim().split(/\s+/).pop()?.slice(-1).toUpperCase() ?? ctrl.name.slice(0, 1).toUpperCase(),
-          zoneCount: ctrl.totalZones ?? 12,
+          zoneCount: ctrl.totalZones,
           notes: ctrl.notes ?? null,
         }));
         res.json(mappedRows);
@@ -15936,15 +15965,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           (wc as any).mode === "inspection" &&
           (inspEst == null || inspEst.lifecycle !== "approved");
 
-        // Unrouted = finding has no routing FK and is not documented_only.
-        const unroutedFindings = wFindings.filter(
-          f =>
-            f.resolution !== "documented_only" &&
-            f.billingSheetId == null &&
-            f.estimateId == null &&
-            f.workOrderId == null &&
-            f.wetCheckBillingId == null,
-        ).length;
+        // Unrouted = finding still needs a manager routing decision AND is not
+        // yet stamped to any destination. Uses the shared isUnroutedFinding
+        // predicate so this count always agrees with CombinedReviewSurface.tsx.
+        const unroutedFindings = wFindings.filter(f => isUnroutedFinding(f)).length;
 
         const s = wc.status;
         let qualifies = false;
@@ -16528,9 +16552,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         : Math.max(1, Math.min(26, Number(customer.totalControllers ?? 1)));
       if (!body.blankStart) {
         // Pass branchName so ensureIrrigationControllers seeds the right branch bucket.
-        // Seeds irrigation_controllers (single source of truth); property_controllers
-        // is no longer written here.
-        await storage.ensureIrrigationControllers(cid, body.customerId, numControllers, branchName);
+        // Build per-controller configs from property_controllers so zone counts carry
+        // through on first-visit seeding. Seeds irrigation_controllers (single source of
+        // truth); property_controllers is no longer written here.
+        const legacyPCsForWC = await storage.listPropertyControllers(cid, body.customerId);
+        const wcBranchPCMap = new Map(
+          legacyPCsForWC
+            .filter(r => (r.branchName ?? "") === (branchName ?? ""))
+            .map(r => [r.controllerLetter, r]),
+        );
+        const wcSeedConfigs = Array.from({ length: numControllers }, (_, i) => {
+          const letter = String.fromCharCode("A".charCodeAt(0) + i);
+          const pc = wcBranchPCMap.get(letter);
+          return { name: `Controller ${letter}`, zoneCount: pc?.zoneCount ?? null };
+        });
+        await storage.ensureIrrigationControllers(cid, body.customerId, wcSeedConfigs, branchName);
       }
 
       const wc = await storage.createWetCheck({
@@ -17391,108 +17427,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return true;
   };
 
-  app.get("/api/admin/customer-controllers", requireAuthentication, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!requireAdminRole(req, res)) return;
-    try {
-      const rows = await storage.listCustomerControllersOverview(cid);
-      res.json(rows);
-    } catch (e: any) {
-      const { status, message } = classifyAndLog(req, e, {
-        op: "listCustomerControllersOverview",
-        ctx: { cid },
-        fallbackMessage: "Couldn't load controllers — please retry",
-      });
-      res.status(status).json({ message });
-    }
+  // GET /api/admin/customer-controllers — superseded by
+  // GET /api/irrigation-controllers/company-rollup (Task #1653).
+  // Returns 410 Gone so callers get an actionable error rather than a silent 404.
+  app.get("/api/admin/customer-controllers", requireAuthentication, async (_req, res) => {
+    res.status(410).json({
+      message: "This endpoint has been removed. Use GET /api/irrigation-controllers/company-rollup instead.",
+    });
   });
 
-  const setControllerCountBody = z.object({
-    count: z.coerce.number().int().min(1).max(26),
-    confirmDeleteWithZones: z.boolean().optional(),
-    // Optional branch label. Empty / missing == customer-level (NULL).
-    branchName: z.string().nullish(),
-  }).strict();
-
-  app.put("/api/admin/customers/:customerId/controllers", requireAuthentication, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!requireAdminRole(req, res)) return;
-    const customerId = parseInt(req.params.customerId);
-    if (Number.isNaN(customerId)) { res.status(400).json({ message: "Invalid customerId" }); return; }
-    const parsed = setControllerCountBody.safeParse(req.body ?? {});
-    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
-    try {
-      const result = await storage.setCustomerControllerCount(cid, customerId, parsed.data.count, {
-        confirmDeleteWithZones: parsed.data.confirmDeleteWithZones,
-        branchName: parsed.data.branchName ?? null,
-      });
-      // Preserve pre-Task-#320 wire shape on the rows themselves: the
-      // customer-level bucket is exposed as branchName: null.
-      const wireBranch = parsed.data.branchName ?? null;
-      const wireControllers = result.controllers.map(c => ({
-        ...c,
-        branchName: c.branchName ? c.branchName : null,
-      }));
-      res.json({ ...result, controllers: wireControllers, branchName: wireBranch });
-    } catch (e: any) {
-      if (e instanceof ControllerHasZonesError) {
-        res.status(409).json({
-          message: `Removing controllers ${e.letters.join(", ")} would discard their zones. Confirm to proceed.`,
-          letters: e.letters,
-          branchName: parsed.data.branchName ?? null,
-          requiresConfirmation: true,
-        });
-        return;
-      }
-      const { status, message } = classifyAndLog(req, e, {
-        op: "setCustomerControllerCount",
-        ctx: { cid, customerId, count: parsed.data.count },
-        fallbackMessage: "Couldn't update controller count — please retry",
-        recognized: [
-          { test: (_e, raw) => /not found/i.test(raw), status: 404, message: "Not found" },
-          { test: (_e, raw) => /must be between/i.test(raw), status: 400, message: (_e, raw) => raw },
-        ],
-      });
-      res.status(status).json({ message });
-    }
+  // PUT /api/admin/customers/:customerId/controllers — removed (Task #1653).
+  // All writes now go through PUT /api/irrigation-controllers/:id (canonical store).
+  app.put("/api/admin/customers/:customerId/controllers", requireAuthentication, async (_req, res) => {
+    res.status(410).json({
+      message: "This endpoint has been removed. Use PUT /api/irrigation-controllers/:id instead.",
+    });
   });
 
-  const setZoneCountBody = z.object({
-    zoneCount: z.coerce.number().int().min(0).max(200),
-    branchName: z.string().nullish(),
-  }).strict();
-
+  // PUT /api/admin/customers/:customerId/controllers/:letter/zones — removed (Task #1653).
+  // All writes now go through PUT /api/irrigation-controllers/:id (canonical store).
   app.put(
     "/api/admin/customers/:customerId/controllers/:letter/zones",
     requireAuthentication,
-    async (req, res) => {
-      const cid = requireCompanyId(req, res); if (!cid) return;
-      if (!requireAdminRole(req, res)) return;
-      const customerId = parseInt(req.params.customerId);
-      const letter = String(req.params.letter || "").toUpperCase();
-      if (Number.isNaN(customerId)) { res.status(400).json({ message: "Invalid customerId" }); return; }
-      if (!/^[A-Z]$/.test(letter)) { res.status(400).json({ message: "Invalid controller letter" }); return; }
-      const parsed = setZoneCountBody.safeParse(req.body ?? {});
-      if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
-      try {
-        const updated = await storage.updatePropertyController(
-          cid,
-          customerId,
-          letter,
-          { zoneCount: parsed.data.zoneCount },
-          parsed.data.branchName ?? null,
-        );
-        if (!updated) { res.status(404).json({ message: "Controller not found" }); return; }
-        // Preserve pre-Task-#320 wire shape: customer-level → null.
-        res.json({ ...updated, branchName: updated.branchName ? updated.branchName : null });
-      } catch (e: any) {
-        const { status, message } = classifyAndLog(req, e, {
-          op: "updatePropertyControllerZones",
-          ctx: { cid, customerId, letter },
-          fallbackMessage: "Couldn't save zones — please retry",
-        });
-        res.status(status).json({ message });
-      }
+    async (_req, res) => {
+      res.status(410).json({
+        message: "This endpoint has been removed. Use PUT /api/irrigation-controllers/:id instead.",
+      });
     },
   );
 

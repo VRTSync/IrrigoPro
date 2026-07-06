@@ -6,6 +6,7 @@ import { renumberEstimatesMigration } from './renumber-estimates';
 import { reconcileFindingDispositionMigration } from './reconcile-finding-disposition';
 import { trimPhantomZonesMigration } from './trim-phantom-zones';
 import { importIrrigationProfileMigration } from './import-irrigation-profile-from-property-controllers';
+import { repairNanTotalsMigration } from './repair-nan-totals';
 
 const REGISTRY = new Map<string, MigrationDefinition>([
   [companyIdColumnsMigration.id, companyIdColumnsMigration],
@@ -15,6 +16,7 @@ const REGISTRY = new Map<string, MigrationDefinition>([
   [reconcileFindingDispositionMigration.id, reconcileFindingDispositionMigration],
   [trimPhantomZonesMigration.id, trimPhantomZonesMigration],
   [importIrrigationProfileMigration.id, importIrrigationProfileMigration],
+  [repairNanTotalsMigration.id, repairNanTotalsMigration],
 ]);
 
 export function listMigrations(): MigrationDefinition[] {

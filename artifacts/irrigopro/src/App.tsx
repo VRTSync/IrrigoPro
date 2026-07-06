@@ -516,7 +516,6 @@ function Router() {
                 <Route path="/parts" component={PartsCatalog} />
                 <Route path="/customers" component={Customers} />
                 <Route path="/site-maps" component={SiteMapsPage} />
-                <Route path="/admin/controllers" component={AdminControllers} />
                 <Route path="/customer-billing" component={CustomerBilling} />
                 <Route path="/field-tech" component={FieldTech} />
                 <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />

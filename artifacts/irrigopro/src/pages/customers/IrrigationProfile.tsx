@@ -9,6 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Separator } from "@/components/ui/separator";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft,
@@ -18,12 +25,17 @@ import {
   X,
   Mail,
   Download,
+  Upload,
+  MoreHorizontal,
+  ChevronDown,
 } from "lucide-react";
 import type {
   IrrigationController,
   Customer,
 } from "@workspace/db/schema";
 import { IrrigationControllerGrid } from "@/components/customers/irrigation-controller-grid";
+import { IrrigationCsvImportModal } from "@/components/customers/IrrigationCsvImportModal";
+import { BackflowSection } from "@/components/customers/BackflowSection";
 
 // ── Add controller form ──────────────────────────────────────────────────────
 
@@ -178,8 +190,10 @@ export default function IrrigationProfile() {
   const { customerId } = useParams();
   const [, setLocation] = useLocation();
   const [showAddController, setShowAddController] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [sendLoading, setSendLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   const { toast } = useToast();
 
   const { data: customer, isLoading: customerLoading } = useQuery<Customer>({
@@ -212,6 +226,12 @@ export default function IrrigationProfile() {
     userRole === "irrigation_manager" ||
     userRole === "field_tech";
 
+  // CSV import is manager/admin-only — field_tech and billing_manager cannot import
+  const canImport =
+    userRole === "company_admin" ||
+    userRole === "super_admin" ||
+    userRole === "irrigation_manager";
+
   const totalZoneCount = controllers.reduce((sum, c) => sum + (c.totalZones ?? 0), 0);
   const lastUpdated = controllers
     .filter((c) => c.lastUpdatedAt)
@@ -221,6 +241,44 @@ export default function IrrigationProfile() {
     )[0];
 
   const isLoading = customerLoading || controllersLoading;
+
+  async function handleExportCsv() {
+    if (!customerId) return;
+    setExportLoading(true);
+    try {
+      const response = await fetch(
+        `/api/customers/${customerId}/irrigation-profile/export-csv`,
+        { credentials: "include" },
+      );
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err?.message ?? "Failed to export CSV");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safeCustomer = (customer?.name ?? "customer")
+        .replace(/[/\\:*?"<>|]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const date = new Date().toISOString().slice(0, 10);
+      a.download = `${safeCustomer} - Irrigation Profile - ${date}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast({ title: "CSV exported" });
+    } catch (err: any) {
+      toast({
+        title: "Export failed",
+        description: err?.message ?? "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setExportLoading(false);
+    }
+  }
 
   async function handleGenerateReport() {
     if (!customerId) return;
@@ -320,32 +378,27 @@ export default function IrrigationProfile() {
       <Card>
         <CardContent className="pt-4 pb-4">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">
-                {customer?.name ?? "Customer"} — Controllers &amp; Zones
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-0.5">
+                Irrigation profile
+              </p>
+              <h1 className="text-xl font-bold text-gray-900 truncate">
+                {customer?.name ?? "Customer"}
               </h1>
-              <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-gray-600">
-                <span>
-                  <span className="font-medium">{controllers.length}</span>{" "}
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                  {controllers.length}{" "}
                   {controllers.length === 1 ? "controller" : "controllers"}
                 </span>
                 {totalZoneCount > 0 && (
-                  <span>
-                    <span className="font-medium">{totalZoneCount}</span>{" "}
+                  <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                    {totalZoneCount}{" "}
                     {totalZoneCount === 1 ? "zone" : "zones"}
-                  </span>
-                )}
-                {lastUpdated && (
-                  <span className="text-gray-400 text-xs">
-                    Updated {fmtDateTime(lastUpdated.lastUpdatedAt)}
-                    {lastUpdated.lastUpdatedByName
-                      ? ` by ${lastUpdated.lastUpdatedByName}`
-                      : ""}
                   </span>
                 )}
               </div>
             </div>
-            <div className="flex gap-2 shrink-0 flex-wrap">
+            <div className="flex gap-2 shrink-0">
               {canWrite && (
                 <Button
                   size="sm"
@@ -356,36 +409,92 @@ export default function IrrigationProfile() {
                   <Plus className="w-4 h-4" /> Add Controller
                 </Button>
               )}
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleGenerateReport}
-                disabled={reportLoading || controllers.length === 0}
-                className="gap-1.5"
-              >
-                {reportLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Download className="w-4 h-4" />
-                )}
-                Generate Report
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleSendReport}
-                disabled={sendLoading || controllers.length === 0}
-                className="gap-1.5"
-              >
-                {sendLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Mail className="w-4 h-4" />
-                )}
-                Send Report
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    disabled={controllers.length === 0}
+                  >
+                    {(reportLoading || sendLoading) ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <FileText className="w-4 h-4" />
+                    )}
+                    Report
+                    <ChevronDown className="w-3.5 h-3.5 ml-0.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onSelect={handleGenerateReport}
+                    disabled={reportLoading || controllers.length === 0}
+                  >
+                    {reportLoading ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Download className="w-4 h-4 mr-2" />
+                    )}
+                    Generate report
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={handleSendReport}
+                    disabled={sendLoading || controllers.length === 0}
+                  >
+                    {sendLoading ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Mail className="w-4 h-4 mr-2" />
+                    )}
+                    Send report
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {canImport && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" variant="outline" className="gap-1.5 px-2">
+                      {exportLoading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <MoreHorizontal className="w-4 h-4" />
+                      )}
+                      <span className="sr-only">More actions</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onSelect={handleExportCsv}
+                      disabled={exportLoading || controllers.length === 0}
+                    >
+                      {exportLoading ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <Download className="w-4 h-4 mr-2" />
+                      )}
+                      Export CSV
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setShowImportModal(true)}>
+                      <Upload className="w-4 h-4 mr-2" />
+                      Import CSV
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </div>
           </div>
+          {lastUpdated && (
+            <>
+              <Separator className="mt-3 mb-2" />
+              <p className="text-xs text-gray-400">
+                Updated {fmtDateTime(lastUpdated.lastUpdatedAt)}
+                {lastUpdated.lastUpdatedByName
+                  ? ` by ${lastUpdated.lastUpdatedByName}`
+                  : ""}
+              </p>
+            </>
+          )}
         </CardContent>
       </Card>
 
@@ -401,6 +510,14 @@ export default function IrrigationProfile() {
         />
       )}
 
+      {/* Irrigation CSV import modal */}
+      <IrrigationCsvImportModal
+        open={showImportModal}
+        onOpenChange={setShowImportModal}
+        customerId={parseInt(customerId!)}
+        branches={customer?.branches as string[] | null | undefined}
+      />
+
       {/* Controller list — empty state */}
       {controllers.length === 0 && !showAddController && (
         <div className="text-center py-12 text-gray-500">
@@ -411,10 +528,19 @@ export default function IrrigationProfile() {
               ? "Add a controller to start building this property's irrigation profile."
               : "No controllers have been added to this property's irrigation profile yet."}
           </p>
-          {canWrite && (
-            <Button className="mt-4 gap-1.5" onClick={() => setShowAddController(true)}>
-              <Plus className="w-4 h-4" /> Add Controller
-            </Button>
+          {(canWrite || canImport) && (
+            <div className="flex justify-center gap-2 mt-4">
+              {canWrite && (
+                <Button className="gap-1.5" onClick={() => setShowAddController(true)}>
+                  <Plus className="w-4 h-4" /> Add Controller
+                </Button>
+              )}
+              {canImport && (
+                <Button variant="outline" className="gap-1.5" onClick={() => setShowImportModal(true)}>
+                  <Upload className="w-4 h-4" /> Import CSV
+                </Button>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -428,6 +554,21 @@ export default function IrrigationProfile() {
           onRefreshList={() => refetchControllers()}
         />
       )}
+
+      {/* ── Backflows section ─────────────────────────────────────────────── */}
+      <Card>
+        <CardContent className="pt-4 pb-4">
+          <BackflowSection
+            customerId={parseInt(customerId!)}
+            canManage={
+              userRole === "company_admin" ||
+              userRole === "super_admin" ||
+              userRole === "irrigation_manager"
+            }
+            canLogTest={canWrite}
+          />
+        </CardContent>
+      </Card>
     </div>
   );
 }

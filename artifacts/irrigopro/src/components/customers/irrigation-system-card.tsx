@@ -16,7 +16,6 @@ import { useLocation } from "wouter";
 import type { Customer, IrrigationController } from "@workspace/db/schema";
 import { IrrigationControllerGrid } from "./irrigation-controller-grid";
 
-const DEFAULT_ZONE_COUNT = 12;
 const MAX_CONTROLLERS = 26;
 const MIN_CONTROLLERS = 1;
 
@@ -65,7 +64,8 @@ export function IrrigationSystemCard({ customer, canEdit }: IrrigationSystemCard
 
   const totalZones = letters.reduce((sum, letter) => {
     const row = controllersByLetter.get(letter);
-    return sum + (row?.totalZones ?? DEFAULT_ZONE_COUNT);
+    const zones = row?.totalZones;
+    return zones != null ? sum + zones : sum;
   }, 0);
 
   const updateTotalControllers = useMutation({

@@ -6,6 +6,7 @@
 // matching the estimate cross-company ownership guard pattern.
 //
 // Routes:
+//   GET    /api/irrigation-controllers/company-rollup        (admin: company_admin + super_admin)
 //   GET    /api/customers/:customerId/controllers-profile
 //   POST   /api/customers/:customerId/controllers-profile
 //   GET    /api/irrigation-controllers/:id
@@ -24,7 +25,11 @@
 
 import type { Express, RequestHandler } from "express";
 import { z } from "zod";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { db } from "../db";
+import { customers, irrigationControllers } from "@workspace/db";
 import { storage } from "../storage";
+import type { IrrigationImportRow, IrrigationImportRowError, IrrigationZoneTypeEnum } from "../storage";
 
 // ── Role helpers ──────────────────────────────────────────────────────────────
 
@@ -136,6 +141,83 @@ export function registerIrrigationProfileRoutes(
 ): void {
   const { requireAuthentication } = deps;
 
+  // ── GET /api/irrigation-controllers/company-rollup ─────────────────────────
+  // Company-wide roll-up of all customers and their canonical irrigation
+  // controllers (from irrigation_controllers — the single source of truth).
+  // Registered BEFORE /:id so the literal path is not swallowed by the param.
+  // Access: company_admin (own company) and super_admin (all companies).
+  app.get(
+    "/api/irrigation-controllers/company-rollup",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const role = req.authenticatedUserRole as string | undefined;
+      if (role !== "company_admin" && role !== "super_admin") {
+        return res.status(403).json({ message: "Access denied. Company admin or super admin required." });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+      if (!callerCompanyId && !isSuperAdmin(role)) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      try {
+        // Fetch all non-hidden customers scoped to caller's company.
+        const custConditions: any[] = [
+          sql`coalesce(${customers.hiddenFromBilling}, false) = false`,
+        ];
+        if (!isSuperAdmin(role)) {
+          custConditions.push(eq(customers.companyId, callerCompanyId!));
+        }
+
+        const custs = await db
+          .select({
+            id: customers.id,
+            name: customers.name,
+            irrigoName: customers.irrigoName,
+            companyId: customers.companyId,
+          })
+          .from(customers)
+          .where(and(...custConditions))
+          .orderBy(customers.name);
+
+        if (custs.length === 0) {
+          return res.json([]);
+        }
+
+        // Fetch all irrigation controllers for these customers in one query.
+        const custIds = custs.map((c) => c.id);
+        const ctrlConditions: any[] = [inArray(irrigationControllers.customerId, custIds)];
+        if (!isSuperAdmin(role)) {
+          ctrlConditions.push(eq(irrigationControllers.companyId, callerCompanyId!));
+        }
+
+        const allCtrls = await db
+          .select()
+          .from(irrigationControllers)
+          .where(and(...ctrlConditions))
+          .orderBy(irrigationControllers.customerId, irrigationControllers.name, irrigationControllers.id);
+
+        // Group controllers by customerId.
+        const byCustomer = new Map<number, typeof allCtrls>();
+        for (const ctrl of allCtrls) {
+          const arr = byCustomer.get(ctrl.customerId) ?? [];
+          arr.push(ctrl);
+          byCustomer.set(ctrl.customerId, arr);
+        }
+
+        const rollup = custs.map((customer) => ({
+          customer,
+          controllers: byCustomer.get(customer.id) ?? [],
+        }));
+
+        res.json(rollup);
+      } catch (e: any) {
+        req.log?.error?.({ err: e }, "companyRollup failed");
+        res.status(500).json({ message: "Could not load controllers rollup — please retry" });
+      }
+    },
+  );
+
   // ── GET /api/customers/:customerId/controllers-profile ──────────────────────
   app.get(
     "/api/customers/:customerId/controllers-profile",
@@ -184,11 +266,14 @@ export function registerIrrigationProfileRoutes(
           const branchFilter = branchName ?? "";
           const branchRows = legacyRows.filter((r) => (r.branchName ?? "") === branchFilter);
           if (branchRows.length > 0) {
-            const count = branchRows.length;
+            const configs = branchRows.map((r) => ({
+              name: `Controller ${r.controllerLetter}`,
+              zoneCount: r.zoneCount,
+            }));
             controllers = await storage.ensureIrrigationControllers(
               callerCompanyId,
               customerId,
-              count,
+              configs,
               branchName ?? null,
             );
           }
@@ -686,6 +771,319 @@ export function registerIrrigationProfileRoutes(
     },
   );
 
+  // ── GET /api/customers/:customerId/irrigation-profile/export-csv ────────────
+  // Serialises the current irrigation profile (controllers → programs → zones)
+  // to a CSV file in the same format as the import template so the file can be
+  // edited and re-imported without modification (round-trip safe).
+  // Access: same manager-tier guard as import (company_admin, super_admin,
+  // irrigation_manager — billing_manager and field_tech are excluded).
+  app.get(
+    "/api/customers/:customerId/irrigation-profile/export-csv",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const customerId = parseId(req.params.customerId);
+      if (!customerId) return badId(res, "customer");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      if (!role || !MANAGER_ROLES.has(role) || role === "billing_manager") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+      if (!callerCompanyId && !isSuperAdmin(role)) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      if (!isSuperAdmin(role)) {
+        const customer = await storage.getCustomer(customerId);
+        if (!customer || customer.companyId !== callerCompanyId!) {
+          return notFound(res, "Customer");
+        }
+      }
+
+      try {
+        const customer = await storage.getCustomer(customerId);
+        if (!customer) return notFound(res, "Customer");
+
+        const companyId = isSuperAdmin(role)
+          ? (customer.companyId ?? callerCompanyId!)
+          : callerCompanyId!;
+
+        const ctrlList = await storage.listIrrigationControllers(companyId, customerId);
+        const detailedControllers = await Promise.all(
+          ctrlList.map((c: any) => storage.getIrrigationController(companyId, c.id)),
+        );
+        const validControllers = detailedControllers.filter(
+          (c: any): c is NonNullable<typeof c> => c !== null,
+        );
+
+        // ── CSV serialisation ────────────────────────────────────────────────
+        const HEADERS = [
+          "Controller",
+          "Location",
+          "Brand",
+          "Model",
+          "Program",
+          "Watering Days",
+          "Start Time",
+          "Seasonal %",
+          "Zone #",
+          "Zone Name",
+          "Zone Type",
+          "Run Time (min)",
+        ];
+
+        function csvCell(val: string | number | null | undefined): string {
+          const s = val == null ? "" : String(val);
+          // Wrap in quotes when the value contains commas, double-quotes, or newlines
+          if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+            return '"' + s.replace(/"/g, '""') + '"';
+          }
+          return s;
+        }
+
+        function csvRow(cells: (string | number | null | undefined)[]): string {
+          return cells.map(csvCell).join(",");
+        }
+
+        const lines: string[] = [HEADERS.join(",")];
+
+        for (const ctrl of validControllers) {
+          const zones: any[] = ctrl.zones ?? [];
+          const programs: any[] = ctrl.programs ?? [];
+
+          const programMap = new Map<number, any>();
+          for (const prog of programs) {
+            programMap.set(prog.id, prog);
+          }
+
+          if (zones.length === 0) {
+            // Controller with no zones: emit a single placeholder row so the
+            // controller name is preserved in the export.
+            lines.push(
+              csvRow([
+                ctrl.name,
+                ctrl.location ?? "",
+                ctrl.brand ?? "",
+                ctrl.model ?? "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+              ]),
+            );
+          } else {
+            // Sort zones by zoneNumber for a predictable, human-readable order.
+            const sortedZones = [...zones].sort(
+              (a: any, b: any) => (a.zoneNumber ?? 0) - (b.zoneNumber ?? 0),
+            );
+            for (const zone of sortedZones) {
+              const prog = zone.programId ? programMap.get(zone.programId) : null;
+              lines.push(
+                csvRow([
+                  ctrl.name,
+                  ctrl.location ?? "",
+                  ctrl.brand ?? "",
+                  ctrl.model ?? "",
+                  prog?.name ?? "",
+                  Array.isArray(prog?.wateringDays) && prog.wateringDays.length > 0
+                    ? (prog.wateringDays as string[]).join(",")
+                    : "",
+                  Array.isArray(prog?.startTimes) && prog.startTimes.length > 0
+                    ? (prog.startTimes as string[]).join(",")
+                    : "",
+                  prog != null ? (prog.seasonalAdjustPct ?? 100) : "",
+                  zone.zoneNumber,
+                  zone.name,
+                  zone.zoneType ?? "other",
+                  zone.runTimeMinutes ?? 0,
+                ]),
+              );
+            }
+          }
+        }
+
+        const csv = lines.join("\n");
+
+        // eslint-disable-next-line no-control-regex
+        const safeCustomer = customer.name
+          .replace(/[\/\\:*?"<>|\x00-\x1f]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        const date = new Date().toISOString().slice(0, 10);
+        const filename = safeCustomer
+          ? `${safeCustomer} - Irrigation Profile - ${date}.csv`
+          : `irrigation-profile-${customerId}-${date}.csv`;
+        // eslint-disable-next-line no-control-regex
+        const asciiFilename = filename.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
+        const utf8Filename = encodeURIComponent(filename);
+
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${asciiFilename}"; filename*=UTF-8''${utf8Filename}`,
+        );
+        res.send(csv);
+      } catch (e: any) {
+        req.log?.error?.({ err: e, customerId }, "irrigationProfileExportCsv failed");
+        res.status(500).json({ message: "Failed to export irrigation profile CSV" });
+      }
+    },
+  );
+
+  // ── POST /api/customers/:customerId/irrigation-profile/import-csv ───────────
+  // Parse, validate, and optionally apply a flat one-row-per-zone CSV import.
+  // Body: { mode: 'preview'|'commit', rows: ParsedRow[], branchName?: string }
+  // In preview mode: returns the diff, never writes.
+  // In commit mode: applies the non-destructive merge and appends history snapshots.
+  app.post(
+    "/api/customers/:customerId/irrigation-profile/import-csv",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const customerId = parseId(req.params.customerId);
+      if (!customerId) return badId(res, "customer");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      // Only manager-tier roles (not field_tech) may import
+      if (!role || !MANAGER_ROLES.has(role) || role === "billing_manager") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+      if (!callerCompanyId && !isSuperAdmin(role)) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      // Customer ownership guard
+      if (!isSuperAdmin(role)) {
+        const customer = await storage.getCustomer(customerId);
+        if (!customer || customer.companyId !== callerCompanyId!) {
+          return notFound(res, "Customer");
+        }
+      }
+
+      const { mode, rows, branchName, replaceControllers } = req.body ?? {};
+
+      if (mode !== "preview" && mode !== "commit") {
+        return res.status(400).json({ message: "mode must be 'preview' or 'commit'" });
+      }
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ message: "rows must be a non-empty array" });
+      }
+
+      // ── Server-side row validation ─────────────────────────────────────────
+      const VALID_ZONE_TYPES = new Set([
+        "pop_up_spray", "rotor", "drip", "netafim", "bubbler", "other",
+      ]);
+      const VALID_DAYS = new Set(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
+      const TIME_RE = /^\d{1,2}:\d{2}$/;
+
+      const validRows: IrrigationImportRow[] = [];
+      const rowErrors: IrrigationImportRowError[] = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const raw = rows[i];
+        const rowNum = i + 2; // header = row 1
+
+        if (!raw.controllerName || typeof raw.controllerName !== "string") {
+          rowErrors.push({ row: rowNum, field: "Controller", message: "Controller name is required" });
+          continue;
+        }
+        if (!Number.isInteger(raw.zoneNumber) || raw.zoneNumber < 1) {
+          rowErrors.push({ row: rowNum, field: "Zone #", message: "Zone # must be a positive integer" });
+          continue;
+        }
+        if (!raw.zoneType || !VALID_ZONE_TYPES.has(raw.zoneType)) {
+          rowErrors.push({
+            row: rowNum,
+            field: "Zone Type",
+            message: `Unknown zone type "${raw.zoneType}". Valid: pop_up_spray, rotor, drip, netafim, bubbler, other`,
+          });
+          continue;
+        }
+        if (typeof raw.runTimeMinutes !== "number" || raw.runTimeMinutes < 0) {
+          rowErrors.push({ row: rowNum, field: "Run Time (min)", message: "Run Time must be ≥ 0" });
+          continue;
+        }
+        if (Array.isArray(raw.startTimes)) {
+          const bad = raw.startTimes.find((t: unknown) => typeof t !== "string" || !TIME_RE.test(t));
+          if (bad !== undefined) {
+            rowErrors.push({ row: rowNum, field: "Start Time", message: `Invalid time format "${bad}"` });
+            continue;
+          }
+        }
+        if (Array.isArray(raw.wateringDays) && raw.wateringDays.length > 0) {
+          const badDay = (raw.wateringDays as unknown[]).find(
+            (d) => typeof d !== "string" || !VALID_DAYS.has(d as string),
+          );
+          if (badDay !== undefined) {
+            rowErrors.push({
+              row: rowNum,
+              field: "Watering Days",
+              message: `Invalid watering day "${badDay}". Valid: Mon, Tue, Wed, Thu, Fri, Sat, Sun`,
+            });
+            continue;
+          }
+        }
+
+        validRows.push({
+          controllerName: String(raw.controllerName).trim(),
+          location: raw.location ? String(raw.location).trim() || null : null,
+          brand: raw.brand ? String(raw.brand).trim() || null : null,
+          model: raw.model ? String(raw.model).trim() || null : null,
+          programName: raw.programName ? String(raw.programName).trim() || null : null,
+          wateringDays: Array.isArray(raw.wateringDays) ? raw.wateringDays : null,
+          startTimes: Array.isArray(raw.startTimes) ? raw.startTimes : null,
+          seasonalAdjustPct: typeof raw.seasonalAdjustPct === "number" ? raw.seasonalAdjustPct : 100,
+          zoneNumber: raw.zoneNumber,
+          zoneName: raw.zoneName ? String(raw.zoneName).trim() || null : null,
+          zoneType: raw.zoneType as IrrigationZoneTypeEnum,
+          runTimeMinutes: raw.runTimeMinutes,
+        });
+      }
+
+      // If no valid rows remain, return errors
+      if (validRows.length === 0) {
+        return res.status(422).json({
+          message: "No valid rows found — fix the errors below and retry",
+          rowErrors,
+        });
+      }
+
+      const userId = req.authenticatedUserId as number | undefined;
+      const me = userId ? await storage.getUser(userId) : undefined;
+      const actor = me ? { id: me.id, name: me.name } : undefined;
+
+      const effectiveCompanyId = isSuperAdmin(role)
+        ? (callerCompanyId ?? (await storage.getCustomer(customerId))?.companyId!)
+        : callerCompanyId!;
+
+      const safeReplaceControllers: string[] = Array.isArray(replaceControllers)
+        ? replaceControllers.filter((n: unknown) => typeof n === "string")
+        : [];
+
+      try {
+        const result = await storage.importIrrigationProfile(
+          effectiveCompanyId,
+          customerId,
+          typeof branchName === "string" ? branchName : "",
+          validRows,
+          mode as "preview" | "commit",
+          actor,
+          safeReplaceControllers,
+        );
+        return res.json({ ...result, rowErrors });
+      } catch (e: any) {
+        req.log?.error?.({ err: e, customerId }, "importIrrigationProfile failed");
+        return res.status(500).json({ message: "Import failed — please retry" });
+      }
+    },
+  );
+
   // ── GET /api/customers/:customerId/irrigation-profile/report-pdf ────────────
   // Generates and streams a branded PDF for the customer's full irrigation
   // profile. Company-scoped; returns 404 on company mismatch.
@@ -842,6 +1240,275 @@ export function registerIrrigationProfileRoutes(
         res
           .status(500)
           .json({ message: e?.message ?? "Failed to send irrigation profile report" });
+      }
+    },
+  );
+
+  // ── Backflow Preventer Routes ─────────────────────────────────────────────
+  //
+  // GET    /api/customers/:customerId/backflows  (list)
+  // POST   /api/customers/:customerId/backflows  (create)
+  // PUT    /api/backflows/:id                    (update)
+  // DELETE /api/backflows/:id
+  // POST   /api/backflows/:id/log-test
+
+  const backflowCreateBody = z.object({
+    name: z.string().min(1).max(200),
+    branchName: z.string().optional(),
+    brand: z.string().nullish(),
+    model: z.string().nullish(),
+    size: z.string().nullish(),
+    deviceType: z.enum(["rpz", "double_check", "pvb", "spill_resistant_pvb", "other"]).optional(),
+    serialNumber: z.string().nullish(),
+    location: z.string().nullish(),
+    installDate: z.string().nullish(),
+    photoUrl: z.string().nullish(),
+    notes: z.string().nullish(),
+    lastTestedDate: z.string().nullish(),
+    nextTestDueDate: z.string().nullish(),
+    lastTestResult: z.enum(["pass", "fail"]).nullish(),
+    lastTestedBy: z.string().nullish(),
+    isActive: z.boolean().optional(),
+  });
+
+  const backflowUpdateBody = backflowCreateBody.partial();
+
+  const logTestBody = z.object({
+    lastTestedDate: z.string().min(1),
+    lastTestResult: z.enum(["pass", "fail"]),
+    lastTestedBy: z.string().nullish(),
+    nextTestDueDate: z.string().nullish(),
+  });
+
+  // ── GET /api/customers/:customerId/backflows ────────────────────────────────
+  app.get(
+    "/api/customers/:customerId/backflows",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const customerId = parseId(req.params.customerId);
+      if (!customerId) return badId(res, "customer");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      if (!isManagerRole(role) && role !== "field_tech") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+
+      if (!isSuperAdmin(role)) {
+        if (!callerCompanyId) {
+          return res.status(401).json({ message: "Authentication required" });
+        }
+        const customer = await storage.getCustomer(customerId);
+        if (!customer || customer.companyId !== callerCompanyId) {
+          return notFound(res, "Customer");
+        }
+      }
+
+      try {
+        const branchName =
+          typeof req.query.branchName === "string" ? req.query.branchName : undefined;
+        const rows = await storage.listBackflows(
+          isSuperAdmin(role) ? null : callerCompanyId,
+          customerId,
+          branchName,
+        );
+        res.json(rows);
+      } catch (e: any) {
+        req.log?.error?.({ err: e, customerId }, "listBackflows failed");
+        res.status(500).json({ message: "Could not load backflows — please retry" });
+      }
+    },
+  );
+
+  // ── POST /api/customers/:customerId/backflows ───────────────────────────────
+  app.post(
+    "/api/customers/:customerId/backflows",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const customerId = parseId(req.params.customerId);
+      if (!customerId) return badId(res, "customer");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      if (!canWrite(role) || role === "field_tech") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+      if (!callerCompanyId && !isSuperAdmin(role)) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      if (!isSuperAdmin(role)) {
+        const customer = await storage.getCustomer(customerId);
+        if (!customer || customer.companyId !== callerCompanyId!) {
+          return notFound(res, "Customer");
+        }
+      }
+
+      const parsed = backflowCreateBody.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+      }
+
+      const userId = req.authenticatedUserId as number | undefined;
+      const me = userId ? await storage.getUser(userId) : undefined;
+
+      try {
+        const companyIdForCreate = isSuperAdmin(role)
+          ? (callerCompanyId ?? (await storage.getCustomer(customerId))?.companyId!)
+          : callerCompanyId!;
+
+        const row = await storage.createBackflow({
+          companyId: companyIdForCreate,
+          customerId,
+          branchName: parsed.data.branchName ?? "",
+          name: parsed.data.name,
+          brand: parsed.data.brand ?? null,
+          model: parsed.data.model ?? null,
+          size: parsed.data.size ?? null,
+          deviceType: parsed.data.deviceType ?? "other",
+          serialNumber: parsed.data.serialNumber ?? null,
+          location: parsed.data.location ?? null,
+          installDate: parsed.data.installDate ?? null,
+          photoUrl: parsed.data.photoUrl ?? null,
+          notes: parsed.data.notes ?? null,
+          lastTestedDate: parsed.data.lastTestedDate ?? null,
+          nextTestDueDate: parsed.data.nextTestDueDate ?? null,
+          lastTestResult: parsed.data.lastTestResult ?? null,
+          lastTestedBy: parsed.data.lastTestedBy ?? null,
+          isActive: parsed.data.isActive ?? true,
+          lastUpdatedByUserId: me?.id ?? null,
+          lastUpdatedByName: me?.name ?? null,
+          lastUpdatedAt: new Date(),
+        });
+        res.status(201).json(row);
+      } catch (e: any) {
+        req.log?.error?.({ err: e, customerId }, "createBackflow failed");
+        res.status(500).json({ message: "Could not create backflow — please retry" });
+      }
+    },
+  );
+
+  // ── PUT /api/backflows/:id ──────────────────────────────────────────────────
+  app.put(
+    "/api/backflows/:id",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const id = parseId(req.params.id);
+      if (!id) return badId(res, "backflow");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      if (!canWrite(role) || role === "field_tech") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+      if (!callerCompanyId && !isSuperAdmin(role)) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      const parsed = backflowUpdateBody.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+      }
+
+      const userId = req.authenticatedUserId as number | undefined;
+      const me = userId ? await storage.getUser(userId) : undefined;
+
+      try {
+        const updated = await storage.updateBackflow(
+          isSuperAdmin(role) ? null : callerCompanyId,
+          id,
+          { ...parsed.data },
+          me ? { id: me.id, name: me.name } : undefined,
+        );
+        if (!updated) return notFound(res, "Backflow");
+        res.json(updated);
+      } catch (e: any) {
+        req.log?.error?.({ err: e, id }, "updateBackflow failed");
+        res.status(500).json({ message: "Could not update backflow — please retry" });
+      }
+    },
+  );
+
+  // ── DELETE /api/backflows/:id ───────────────────────────────────────────────
+  app.delete(
+    "/api/backflows/:id",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const id = parseId(req.params.id);
+      if (!id) return badId(res, "backflow");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      if (!canWrite(role) || role === "field_tech") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+      if (!isSuperAdmin(role) && !callerCompanyId) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      try {
+        const ok = await storage.deleteBackflow(
+          isSuperAdmin(role) ? null : callerCompanyId,
+          id,
+        );
+        if (!ok) return notFound(res, "Backflow");
+        res.json({ ok: true });
+      } catch (e: any) {
+        req.log?.error?.({ err: e, id }, "deleteBackflow failed");
+        res.status(500).json({ message: "Could not delete backflow — please retry" });
+      }
+    },
+  );
+
+  // ── POST /api/backflows/:id/log-test ───────────────────────────────────────
+  // Quick-action: stamps the test date/result and rolls nextTestDueDate +1yr.
+  // field_tech may log tests (same pattern as controller zone photos).
+  app.post(
+    "/api/backflows/:id/log-test",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      const id = parseId(req.params.id);
+      if (!id) return badId(res, "backflow");
+
+      const role = req.authenticatedUserRole as string | undefined;
+      if (!isManagerRole(role) && role !== "field_tech") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const callerCompanyId = getCallerCompanyId(req);
+      if (!isSuperAdmin(role) && !callerCompanyId) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      const parsed = logTestBody.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+      }
+
+      const userId = req.authenticatedUserId as number | undefined;
+      const me = userId ? await storage.getUser(userId) : undefined;
+
+      try {
+        const updated = await storage.logBackflowTest(
+          isSuperAdmin(role) ? null : callerCompanyId,
+          id,
+          {
+            lastTestedDate: parsed.data.lastTestedDate,
+            lastTestResult: parsed.data.lastTestResult,
+            lastTestedBy: parsed.data.lastTestedBy ?? null,
+            nextTestDueDate: parsed.data.nextTestDueDate ?? null,
+          },
+          me ? { id: me.id, name: me.name } : undefined,
+        );
+        if (!updated) return notFound(res, "Backflow");
+        res.json(updated);
+      } catch (e: any) {
+        req.log?.error?.({ err: e, id }, "logBackflowTest failed");
+        res.status(500).json({ message: "Could not log test — please retry" });
       }
     },
   );

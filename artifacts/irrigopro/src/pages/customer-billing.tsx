@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -312,6 +312,15 @@ export default function CustomerBilling() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Stable callback passed to CompletedWorkDetailModal so any save inside the
+  // modal immediately refreshes the Command Center sidebar and detail panel.
+  const handleModalSaved = useCallback(() => {
+    queryClient.invalidateQueries({
+      queryKey: ["/api/customers", selectedCustomerId, "billing", billingMonth],
+    });
+    queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
+  }, [queryClient, selectedCustomerId, billingMonth]);
 
   // User role — read from localStorage (same pattern as financial-pulse.tsx)
   const userRole = (() => {
@@ -780,17 +789,9 @@ export default function CustomerBilling() {
       return (Number(preview.total ?? preview.combinedTotal) || 0) > 0;
     })
     .sort((a, b) => {
-      // Sort by the same total shown in the card so list order tracks
-      // the displayed number.
-      const pa = getCustomerPreview(a);
-      const pb = getCustomerPreview(b);
-      const ta = billingMonth === 'all'
-        ? (Number(pa.allOpenTotal ?? pa.totalUnbilled) || 0)
-        : (Number(pa.total ?? pa.combinedTotal) || 0);
-      const tb = billingMonth === 'all'
-        ? (Number(pb.allOpenTotal ?? pb.totalUnbilled) || 0)
-        : (Number(pb.total ?? pb.combinedTotal) || 0);
-      return tb - ta;
+      const na = (a.irrigoName ?? a.name ?? '').toLowerCase();
+      const nb = (b.irrigoName ?? b.name ?? '').toLowerCase();
+      return na.localeCompare(nb);
     });
 
   const otherCustomers = filteredCustomers
@@ -803,7 +804,8 @@ export default function CustomerBilling() {
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
 
   const formatCurrency = (amount: string | number) => {
-    const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+    const raw = typeof amount === 'string' ? parseFloat(amount) : amount;
+    const num = Number.isFinite(raw) ? raw : 0;
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD'
@@ -2329,7 +2331,7 @@ export default function CustomerBilling() {
                                     <Badge className="bg-green-100 text-green-800 text-xs">Approved</Badge>
                                     {wo.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
                                   </div>
-                                  <div className="text-xs text-gray-600 mb-2">
+                                  <div className="text-xs text-gray-600 mb-2 line-clamp-3 overflow-hidden">
                                     {wo.description}
                                   </div>
                                   <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
@@ -2391,7 +2393,7 @@ export default function CustomerBilling() {
                                     <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
                                     {wo.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
                                   </div>
-                                  <div className="text-xs text-gray-600 mb-1">{wo.description}</div>
+                                  <div className="text-xs text-gray-600 mb-1 line-clamp-3 overflow-hidden">{wo.description}</div>
                                   <div className="text-xs text-yellow-700">Not yet billable — awaiting manager review</div>
                                 </div>
                                 <div className="text-sm font-medium text-yellow-700 text-right">
@@ -2573,7 +2575,7 @@ export default function CustomerBilling() {
                                     <Badge className="bg-green-100 text-green-800 text-xs">Approved</Badge>
                                     {wo.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
                                   </div>
-                                  <div className="text-xs text-gray-600 mb-2">{wo.description}</div>
+                                  <div className="text-xs text-gray-600 mb-2 line-clamp-3 overflow-hidden">{wo.description}</div>
                                   <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
                                     {wo.completedAt && (
                                       <div className="flex items-center gap-1">
@@ -2620,7 +2622,7 @@ export default function CustomerBilling() {
                                     <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>
                                     {wo.undated && <Badge className="bg-yellow-100 text-yellow-800 text-xs">no work date</Badge>}
                                   </div>
-                                  <div className="text-xs text-gray-600 mb-1">{wo.description}</div>
+                                  <div className="text-xs text-gray-600 mb-1 line-clamp-3 overflow-hidden">{wo.description}</div>
                                   <div className="text-xs text-yellow-700">Awaiting manager review</div>
                                 </div>
                                 <div className="text-sm font-medium text-yellow-700 text-right">
@@ -3219,6 +3221,7 @@ export default function CustomerBilling() {
           open={showWorkOrderDetail}
           onOpenChange={(open) => { setShowWorkOrderDetail(open); if (!open) setSelectedWorkOrder(null); }}
           showPricing={true}
+          onSaved={handleModalSaved}
         />
       )}
 
@@ -3231,6 +3234,7 @@ export default function CustomerBilling() {
           open={showBillingSheetDetail}
           onOpenChange={(open) => { setShowBillingSheetDetail(open); if (!open) setSelectedBillingSheet(null); }}
           showPricing={true}
+          onSaved={handleModalSaved}
         />
       )}
 

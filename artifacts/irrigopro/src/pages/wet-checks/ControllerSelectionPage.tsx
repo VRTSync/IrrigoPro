@@ -88,7 +88,7 @@ function ControllerCard({ controller, selected, lastCheckedAt, hadIssues, onTogg
 
       {/* Zone count */}
       <p className="text-xs text-gray-500 mb-1">
-        {controller.zoneCount} zone{controller.zoneCount !== 1 ? "s" : ""}
+        {controller.zoneCount != null ? `${controller.zoneCount} zone${controller.zoneCount !== 1 ? "s" : ""}` : "Zone count not set"}
       </p>
 
       {/* Last checked — only shown when this controller had zone records in last check */}
@@ -312,7 +312,7 @@ export function ControllerSelectionPage({ customerId, branchName }: ControllerSe
   const isBusy = startMutation.isPending || blankStartMutation.isPending;
 
   return (
-    <div className="max-w-3xl mx-auto py-4 px-3 sm:px-4 pb-safe">
+    <div className="max-w-3xl mx-auto py-4 px-3 sm:px-4 pb-nav-safe">
 
       {/* ── Sticky property header ── */}
       <div

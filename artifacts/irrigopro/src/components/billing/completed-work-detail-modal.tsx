@@ -92,6 +92,7 @@ interface CompletedWorkDetailModalProps {
   onOpenChange: (open: boolean) => void;
   showPricing?: boolean;
   onApproveSuccess?: () => void;
+  onSaved?: () => void;
 }
 
 const fmt = (date: string | Date | null | undefined) => {
@@ -187,6 +188,7 @@ export function PartsListEditorDialog({
   initialItems,
   canSeePricing,
   readOnly = false,
+  onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -195,6 +197,7 @@ export function PartsListEditorDialog({
   initialItems: (WorkOrderItem | BillingSheetItem)[];
   canSeePricing: boolean;
   readOnly?: boolean;
+  onSaved?: () => void;
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -296,6 +299,7 @@ export function PartsListEditorDialog({
       });
       toast({ title: "Parts saved", description: "Parts list updated successfully." });
       onOpenChange(false);
+      onSaved?.();
     },
     onError: (err: Error) => {
       toast({
@@ -722,6 +726,7 @@ export function CompletedWorkDetailModal({
   onOpenChange,
   showPricing,
   onApproveSuccess,
+  onSaved,
 }: CompletedWorkDetailModalProps) {
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -796,6 +801,7 @@ export function CompletedWorkDetailModal({
       });
       queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets/missing-photos"] });
       queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
+      onSaved?.();
     },
     onError: (err) => {
       toast({
@@ -839,6 +845,7 @@ export function CompletedWorkDetailModal({
       toast({ title: "Technician reassigned", description: `Now assigned to ${updated.technicianName}.` });
       setShowReassignDialog(false);
       queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
+      onSaved?.();
     },
     onError: (err) => {
       toast({ title: "Could not reassign technician", description: parseApiError(err, err.message), variant: "destructive" });
@@ -974,6 +981,7 @@ export function CompletedWorkDetailModal({
     onSuccess: (nextPhotos) => {
       setLocalPhotos(nextPhotos);
       queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
+      onSaved?.();
     },
     onError: (error: any) => {
       toast({
@@ -1164,6 +1172,7 @@ export function CompletedWorkDetailModal({
       queryClient.invalidateQueries({
         queryKey: isWorkOrder ? ["/api/work-orders"] : ["/api/billing-sheets"],
       });
+      onSaved?.();
     },
     onError: (err: Error) => {
       toast({ title: "Could not save", description: parseApiError(err, err.message), variant: "destructive" });
@@ -1649,8 +1658,10 @@ export function CompletedWorkDetailModal({
                                   totalAmount: String((result as any).totalAmount ?? ""),
                                 }));
                               }
+                              onSaved?.();
                             } else {
                               await patchField("totalHours", v, { totalHours: v });
+                              onSaved?.();
                             }
                           }}
                           canEdit={true}
@@ -2098,6 +2109,7 @@ export function CompletedWorkDetailModal({
         initialItems={items}
         canSeePricing={canSeePricing}
         readOnly={isBilledOrInvoiced}
+        onSaved={onSaved}
       />
 
       {/* Lightbox */}

@@ -1,15 +1,14 @@
 /**
  * wcb-invoice-gate.test.ts
  *
- * Invariant: the `wcb.wetCheckStatus === 'converted'` guard must be PRESENT on
- * invoice-construction filter sites (eligibleWcbs / eligibleWcbsMonthly) and
- * must be ABSENT from visibility filter sites (unbilledWetCheckBillings in both
- * the billing-preview and the single-customer billing endpoints).
+ * Invariant: invoice-construction filter sites use `wcbIsEligible(wcb)` which
+ * gates on `unroutedFindingsCount === 0` (every finding on the parent wet check
+ * triaged or auto-billed) rather than the old blunt `wetCheckStatus === 'converted'`
+ * check which blocked partially_converted wet checks even when all findings were
+ * actually routed.
  *
- * Visibility sites must NOT gate on wetCheckStatus so that partially-converted-
- * parent WCBs are still reachable by billing managers. The converted gate on
- * invoice-construction paths remains intentional: a WCB whose parent wet check
- * is still partial should not yet be included in an invoice.
+ * Visibility paths must NOT gate on wetCheckStatus so that partially-converted-
+ * parent WCBs are still reachable by billing managers.
  */
 
 import { describe, it } from "node:test";
@@ -23,6 +22,14 @@ const routesSrc = readFileSync(
   path.join(__dirname, "routes.ts"),
   "utf8",
 );
+const storageSrc = readFileSync(
+  path.join(__dirname, "..", "storage.ts"),
+  "utf8",
+);
+const predicatesSrc = readFileSync(
+  path.join(__dirname, "..", "lib", "finding-predicates.ts"),
+  "utf8",
+);
 
 /**
  * Return the N characters around the first occurrence of `anchor` in `src`.
@@ -33,8 +40,8 @@ function nearby(src: string, anchor: string, window = 800): string | null {
   return src.slice(Math.max(0, idx - window / 2), idx + window / 2);
 }
 
-describe("WCB invoice-gate: converted-status guard", () => {
-  // Invoice-construction paths — converted gate MUST be present.
+describe("WCB invoice-gate: wcbIsEligible guard", () => {
+  // Invoice-construction paths — must use wcbIsEligible (not the old converted check).
   const invoiceConstructionSites = [
     // 3. Invoice preview: eligibleWcbs filter
     "eligibleWcbs = allWcbsForPreview.filter",
@@ -45,19 +52,30 @@ describe("WCB invoice-gate: converted-status guard", () => {
   // Visibility paths — converted gate must be ABSENT (partial-parent WCBs must
   // still surface so billing managers can act on them).
   const visibilitySites = [
-    // 1. Billing-preview customer list: unbilledWetCheckBillings filter
-    "unbilledWetCheckBillings = wetCheckBillingsForCustomer.filter",
-    // 2. Single-customer billing page: unbilledWetCheckBillings filter
-    "unbilledWetCheckBillings = wetCheckBillings.filter",
+    // 1. Billing-preview customer list: WCBs fed into computeUnbilledPartition
+    //    directly from getWetCheckBillingsByCustomer, no converted gate applied.
+    "wetCheckBillingsForCustomer,",
+    // 2. Single-customer billing page: unbilledWetCheckBillings derives from
+    //    computeUnbilledPartition output (detailPartition.approvedWetCheckBillings).
+    "unbilledWetCheckBillings = detailPartition.approvedWetCheckBillings",
   ];
 
   for (const anchor of invoiceConstructionSites) {
-    it(`invoice-construction filter at "${anchor.slice(0, 50)}…" requires wetCheckStatus === 'converted'`, () => {
+    it(`invoice-construction filter at "${anchor.slice(0, 50)}…" calls wcbIsEligible`, () => {
       const region = nearby(routesSrc, anchor, 800);
       assert.ok(region, `anchor not found: ${anchor}`);
       assert.ok(
-        region.includes("wetCheckStatus") && region.includes("converted"),
-        `Expected wetCheckStatus === 'converted' guard near "${anchor.slice(0, 60)}…"\n\nActual region:\n${region}`,
+        region.includes("wcbIsEligible"),
+        `Expected wcbIsEligible call near "${anchor.slice(0, 60)}…"\n\nActual region:\n${region}`,
+      );
+    });
+
+    it(`invoice-construction filter at "${anchor.slice(0, 50)}…" does NOT use old wetCheckStatus === 'converted' guard`, () => {
+      const region = nearby(routesSrc, anchor, 400);
+      assert.ok(region, `anchor not found: ${anchor}`);
+      assert.ok(
+        !region.includes("wetCheckStatus === 'converted'"),
+        `Old blunt wetCheckStatus guard must be removed from "${anchor.slice(0, 60)}…"\n\nActual region:\n${region}`,
       );
     });
   }
@@ -93,15 +111,9 @@ describe("WCB invoice-gate: converted-status guard", () => {
     assert.equal(found, 2, `Expected 2 visibility filter sites, found ${found}`);
   });
 
-  it("getWetCheckBillingsByCustomer implementation JOINs wet_checks and exposes wetCheckStatus", () => {
-    const storageSrc = readFileSync(
-      path.join(__dirname, "..", "storage.ts"),
-      "utf8",
-    );
-    // Use the async implementation line as anchor (not the interface declaration which
-    // appears first in the file but only carries the return-type signature).
+  it("getWetCheckBillingsByCustomer implementation JOINs wet_checks and exposes wetCheckStatus and unroutedFindingsCount", () => {
     const implAnchor = "async getWetCheckBillingsByCustomer(";
-    const region = nearby(storageSrc, implAnchor, 2000);
+    const region = nearby(storageSrc, implAnchor, 3000);
     assert.ok(region, `implementation anchor not found: ${implAnchor}`);
     assert.ok(
       region.includes("WetCheckBillingListItem"),
@@ -111,23 +123,65 @@ describe("WCB invoice-gate: converted-status guard", () => {
       region.includes("wetCheckStatus"),
       "getWetCheckBillingsByCustomer implementation must JOIN wet_checks and expose wetCheckStatus",
     );
+    assert.ok(
+      region.includes("unroutedFindingsCount"),
+      "getWetCheckBillingsByCustomer must compute unroutedFindingsCount via sub-query for the billing gate",
+    );
+  });
+
+  it("wcbIsEligible in finding-predicates.ts gates on unroutedFindingsCount === 0", () => {
+    assert.ok(
+      predicatesSrc.includes("unroutedFindingsCount === 0"),
+      "wcbIsEligible must gate on unroutedFindingsCount === 0, not wetCheckStatus",
+    );
+    assert.ok(
+      !predicatesSrc.includes("wetCheckStatus"),
+      "wcbIsEligible must not gate on wetCheckStatus (use unroutedFindingsCount instead)",
+    );
   });
 
   it("partially_converted WCB at approved_passed_to_billing appears in billing-preview visibility filter", () => {
-    // Regression case: the visibility filter must not contain the 'converted' gate,
-    // so a WCB whose parent wet check is partially_converted is included in approvedTotal.
-    const anchor = "unbilledWetCheckBillings = wetCheckBillingsForCustomer.filter";
-    const region = nearby(routesSrc, anchor, 400) ?? "";
-    assert.ok(region, `anchor not found: ${anchor}`);
-    // Must include approved_passed_to_billing check
-    assert.ok(
-      region.includes("approved_passed_to_billing"),
-      "visibility filter must include approved_passed_to_billing status check",
+    // Regression case: WCBs flow from getWetCheckBillingsByCustomer into
+    // computeUnbilledPartition without a wetCheckStatus === 'converted' gate.
+    // computeUnbilledPartition uses WCB_APPROVED ('approved_passed_to_billing')
+    // as its approved-bucket criterion, so partially-converted-parent WCBs
+    // with that status are included in approvedTotal.
+    //
+    // Verify via the billing-unbilled-selectors source which defines WCB_APPROVED.
+    const selectorsSrc = readFileSync(
+      path.join(__dirname, "..", "billing-unbilled-selectors.ts"),
+      "utf8",
     );
-    // Must NOT gate on wetCheckStatus === 'converted'
     assert.ok(
-      !region.includes("wetCheckStatus === 'converted'"),
-      "visibility filter must not gate on wetCheckStatus === 'converted'",
+      selectorsSrc.includes("WCB_APPROVED = 'approved_passed_to_billing'"),
+      "billing-unbilled-selectors must classify WCB_APPROVED as 'approved_passed_to_billing' — not gated on wetCheckStatus",
+    );
+    assert.ok(
+      !selectorsSrc.includes("wetCheckStatus === 'converted'"),
+      "billing-unbilled-selectors must not gate on wetCheckStatus === 'converted'",
+    );
+    // Also verify the single-customer billing page derives unbilledWetCheckBillings
+    // from the partition (computeUnbilledPartition) output, not from a hard filter.
+    const anchor = "unbilledWetCheckBillings = detailPartition.approvedWetCheckBillings";
+    assert.ok(
+      routesSrc.includes(anchor),
+      `Single-customer billing page must derive unbilledWetCheckBillings from computeUnbilledPartition output (anchor: "${anchor}")`,
+    );
+  });
+
+  it("needs-review endpoint uses isUnroutedFinding (not the old loose predicate)", () => {
+    const anchor = "const unroutedFindings = wFindings.filter";
+    const region = nearby(routesSrc, anchor, 800);
+    assert.ok(region, `anchor not found: ${anchor}`);
+    assert.ok(
+      region.includes("isUnroutedFinding"),
+      "needs-review handler must call isUnroutedFinding so the count agrees with CombinedReviewSurface",
+    );
+    // The old loose predicate looked for routing FKs but did not call isNeedsReview.
+    // Verify it's gone by checking the old sentinel phrase is absent.
+    assert.ok(
+      !region.includes("documented_only"),
+      "Old loose predicate (checking resolution !== 'documented_only') must be replaced by isUnroutedFinding",
     );
   });
 });

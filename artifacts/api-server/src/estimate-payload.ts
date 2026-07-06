@@ -1,4 +1,5 @@
 import type { InsertEstimate, InsertEstimateItem } from "@workspace/db";
+import { money } from "./lib/money";
 
 // Input shape accepted by `processEstimatePayload`. Mirrors the body of
 // POST /api/estimates and is also used by the Wet Check conversion path so
@@ -57,15 +58,15 @@ export function processEstimatePayload(input: EstimatePayloadInput): EstimatePay
 
   const items: InsertEstimateItem[] = input.items.map((item, idx) => {
     const quantity = item.quantity ?? 1;
-    const partPrice = parseFloat(String(item.partPrice ?? 0));
+    const partPrice = money(item.partPrice ?? 0);
     const totalPrice = item.totalPrice !== undefined && item.totalPrice !== null
-      ? parseFloat(String(item.totalPrice))
+      ? money(item.totalPrice)
       : partPrice * quantity;
     return {
       description: item.description ?? "",
       partId: item.partId,
       partName: item.partName ?? null,
-      partPrice: String(partPrice),
+      partPrice: partPrice.toFixed(2),
       quantity,
       // Task #657 — flat-only: per-row labor is always zero on disk.
       laborHours: "0.00",
@@ -76,7 +77,7 @@ export function processEstimatePayload(input: EstimatePayloadInput): EstimatePay
 
   let partsSubtotal = 0;
   for (const item of items) {
-    partsSubtotal += parseFloat(String(item.totalPrice));
+    partsSubtotal += money(item.totalPrice);
   }
 
   const laborRate = parseFloat(String(input.estimate.laborRate));

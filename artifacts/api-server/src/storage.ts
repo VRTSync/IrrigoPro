@@ -49,6 +49,7 @@ import {
   irrigationPrograms,
   irrigationProfileZones,
   irrigationProfileHistory,
+  irrigationBackflows,
   type IrrigationController,
   type InsertIrrigationController,
   type IrrigationProgram,
@@ -57,6 +58,8 @@ import {
   type InsertIrrigationProfileZone,
   type IrrigationProfileHistory,
   type InsertIrrigationProfileHistory,
+  type IrrigationBackflow,
+  type InsertIrrigationBackflow,
   type Company,
   type User,
   type Customer, 
@@ -161,6 +164,7 @@ import { sql, eq, like, ilike, desc, and, gte, lte, or, isNull, isNotNull, inArr
 import { logger } from "./lib/logger";
 import bcrypt from "bcrypt";
 import { processEstimatePayload, type EstimatePayloadInput } from "./estimate-payload";
+import { computeBillingSheetTotal } from "./billing-sheet-total";
 import { applyNoPartNeededInvariant } from "./storage/wet-check-finding-invariants";
 import { humanizeIssueType } from "./inspection-issue-labels";
 import { buildInspectionEstimateItems } from "./inspection-estimate-items";
@@ -173,6 +177,7 @@ import {
 import { computeEstimateSummary } from "./estimate-summary";
 import type { EstimateSummary, WetCheckBillingListItem } from "@workspace/db";
 import { ObjectStorageService } from "./objectStorage";
+import { money } from "./lib/money";
 import { resolveIssueTypeKey, seedIssueTypeConfigsForCompany } from "./seeds/issue-type-configs";
 import {
   validateMerge,
@@ -926,13 +931,15 @@ export interface IStorage {
     branchName?: string | null,
   ): Promise<PropertyController[]>;
   // Seed irrigation_controllers + irrigation_profile_zones placeholders for
-  // the given (companyId, customerId, branchName) tuple so that `count` controller
-  // rows named "Controller A" … "Controller {letter}" exist. Uses ON CONFLICT DO NOTHING
-  // — race-safe and idempotent. Returns the full controller list for the tuple.
+  // the given (companyId, customerId, branchName) tuple. For each config entry
+  // that does not already have a matching "Controller {letter}" row, inserts a
+  // new row with totalZones = config.zoneCount (null if the count is unknown).
+  // Uses ON CONFLICT DO NOTHING — race-safe and idempotent.
+  // Returns the full controller list for the tuple.
   ensureIrrigationControllers(
     companyId: number,
     customerId: number,
-    count: number,
+    configs: Array<{ name: string; zoneCount: number | null }>,
     branchName?: string | null,
   ): Promise<IrrigationController[]>;
   updatePropertyController(
@@ -1295,6 +1302,163 @@ export interface IStorage {
     companyId: number | null,
     controllerId: number,
   ): Promise<IrrigationProfileHistory[]>;
+
+  importIrrigationProfile(
+    companyId: number,
+    customerId: number,
+    branchName: string,
+    rows: IrrigationImportRow[],
+    mode: "preview" | "commit",
+    actor?: { id: number; name: string },
+    replaceControllers?: string[],
+  ): Promise<IrrigationImportResult>;
+
+  // ── Backflow Preventers ────────────────────────────────────────────────────
+  listBackflows(
+    companyId: number | null,
+    customerId: number,
+    branchName?: string,
+  ): Promise<IrrigationBackflow[]>;
+
+  getBackflow(
+    companyId: number | null,
+    id: number,
+  ): Promise<IrrigationBackflow | null>;
+
+  createBackflow(
+    data: InsertIrrigationBackflow,
+  ): Promise<IrrigationBackflow>;
+
+  updateBackflow(
+    companyId: number | null,
+    id: number,
+    patch: Partial<Omit<InsertIrrigationBackflow, "companyId" | "customerId">>,
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationBackflow | null>;
+
+  deleteBackflow(
+    companyId: number | null,
+    id: number,
+  ): Promise<boolean>;
+
+  logBackflowTest(
+    companyId: number | null,
+    id: number,
+    data: {
+      lastTestedDate: string;
+      lastTestResult: "pass" | "fail";
+      lastTestedBy?: string | null;
+      nextTestDueDate?: string | null;
+    },
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationBackflow | null>;
+}
+
+// ── Irrigation CSV import types (shared between route and storage) ─────────────
+
+export type IrrigationZoneTypeEnum =
+  | "pop_up_spray"
+  | "rotor"
+  | "drip"
+  | "netafim"
+  | "bubbler"
+  | "other";
+
+export interface IrrigationImportRow {
+  controllerName: string;
+  location: string | null;
+  brand: string | null;
+  model: string | null;
+  programName: string | null;
+  wateringDays: string[] | null;
+  startTimes: string[] | null;
+  seasonalAdjustPct: number;
+  zoneNumber: number;
+  zoneName: string | null;
+  zoneType: IrrigationZoneTypeEnum;
+  runTimeMinutes: number;
+}
+
+/**
+ * Resolve the final zone name for a CSV import row.
+ * - If the CSV supplied a non-blank name, use it.
+ * - Otherwise, keep the existing saved name (never clobber it).
+ * - If there is no existing name (new zone), fall back to `Zone {zoneNumber}`.
+ *
+ * This is the single shared source of truth: called from both the preview-diff
+ * path and the commit-write path so what the manager approves is exactly what
+ * gets saved.
+ */
+export function resolveZoneName(
+  rowName: string | null,
+  existingName: string | undefined,
+  zoneNumber: number,
+): string {
+  if (rowName) return rowName;
+  if (existingName) return existingName;
+  return `Zone ${zoneNumber}`;
+}
+
+export interface IrrigationImportRowError {
+  row: number;
+  field: string;
+  message: string;
+}
+
+export interface IrrigationImportZoneDiff {
+  action: "create" | "update" | "no_change";
+  zoneNumber: number;
+  zoneName: string;
+  zoneType: IrrigationZoneTypeEnum;
+  runTimeMinutes: number;
+  changes: Array<{ field: string; from: string | number | null; to: string | number | null }>;
+}
+
+export interface IrrigationImportProgramDiff {
+  programName: string;
+  action: "create" | "update" | "no_change";
+  changes: Array<{ field: string; from: string | number | null | string[]; to: string | number | null | string[] }>;
+}
+
+export interface IrrigationImportRemovedZone {
+  id: number;
+  zoneNumber: number;
+  name: string;
+  notes: string | null;
+  overrideStartTime: string | null;
+  overrideDays: string[] | null;
+}
+
+export interface IrrigationImportRemovedProgram {
+  id: number;
+  name: string;
+}
+
+export interface IrrigationImportControllerDiff {
+  controllerName: string;
+  action: "create" | "update";
+  location: string | null;
+  brand: string | null;
+  model: string | null;
+  programs: IrrigationImportProgramDiff[];
+  zones: IrrigationImportZoneDiff[];
+  zonesToRemove?: IrrigationImportRemovedZone[];
+  programsToRemove?: IrrigationImportRemovedProgram[];
+}
+
+export interface IrrigationImportResult {
+  mode: "preview" | "commit";
+  controllers: IrrigationImportControllerDiff[];
+  summary: {
+    controllersCreated: number;
+    controllersUpdated: number;
+    zonesAdded: number;
+    zonesUpdated: number;
+    programsCreated: number;
+    programsUpdated: number;
+    zonesRemoved: number;
+    programsRemoved: number;
+  };
 }
 
 export class DatabaseStorage implements IStorage {
@@ -2364,16 +2528,14 @@ export class DatabaseStorage implements IStorage {
         let perPartLaborHours = 0;
 
         items.forEach(item => {
-          const itemTotal = parseFloat(String(item.totalPrice));
-          const itemLaborHours = parseFloat(String(item.laborHours));
-          partsSubtotal += itemTotal;
-          perPartLaborHours += itemLaborHours;
+          partsSubtotal += money(item.totalPrice);
+          perPartLaborHours += money(item.laborHours);
         });
 
         // Prefer the SNAPSHOT appliedLaborRate (locked at creation /
         // conversion) over the mutable customer/estimate laborRate so
         // downstream reads never reprice an estimate if rates change later.
-        const laborRate = parseFloat(String(estimate.appliedLaborRate ?? estimate.laborRate));
+        const laborRate = money(estimate.appliedLaborRate ?? estimate.laborRate);
         // Task #396 — flat mode uses the persisted totalLaborHours; per_part
         // mode keeps the legacy sum-of-line-hours behavior.
         const totalLaborHours = estimate.laborMode === 'flat'
@@ -2428,14 +2590,14 @@ export class DatabaseStorage implements IStorage {
         let partsSubtotal = 0;
         let perPartLaborHours = 0;
         items.forEach(item => {
-          partsSubtotal += parseFloat(String(item.totalPrice));
-          perPartLaborHours += parseFloat(String(item.laborHours));
+          partsSubtotal += money(item.totalPrice);
+          perPartLaborHours += money(item.laborHours);
         });
 
-        const laborRate = parseFloat(String(estimate.appliedLaborRate ?? estimate.laborRate));
+        const laborRate = money(estimate.appliedLaborRate ?? estimate.laborRate);
         // Task #396 — honor flat mode using persisted totalLaborHours.
         const totalLaborHours = estimate.laborMode === 'flat'
-          ? parseFloat(String(estimate.totalLaborHours ?? 0)) || 0
+          ? money(estimate.totalLaborHours ?? 0)
           : perPartLaborHours;
         const laborSubtotal = totalLaborHours * laborRate;
         const totalAmount = partsSubtotal + laborSubtotal;
@@ -2544,18 +2706,16 @@ export class DatabaseStorage implements IStorage {
     let perPartLaborHours = 0;
 
     items.forEach(item => {
-      const itemTotal = parseFloat(String(item.totalPrice));
-      const itemLaborHours = parseFloat(String(item.laborHours));
-      partsSubtotal += itemTotal;
-      perPartLaborHours += itemLaborHours;
+      partsSubtotal += money(item.totalPrice);
+      perPartLaborHours += money(item.laborHours);
     });
 
     // Prefer SNAPSHOT appliedLaborRate so a converted estimate cannot be
     // repriced after customer/estimate laborRate changes downstream.
-    const laborRate = parseFloat(String(estimate.appliedLaborRate ?? estimate.laborRate));
+    const laborRate = money(estimate.appliedLaborRate ?? estimate.laborRate);
     // Task #396 — honor flat mode using persisted totalLaborHours.
     const totalLaborHours = estimate.laborMode === 'flat'
-      ? parseFloat(String(estimate.totalLaborHours ?? 0)) || 0
+      ? money(estimate.totalLaborHours ?? 0)
       : perPartLaborHours;
     const laborSubtotal = totalLaborHours * laborRate;
     const totalAmount = partsSubtotal + laborSubtotal;
@@ -3540,7 +3700,7 @@ export class DatabaseStorage implements IStorage {
         partPrice: item.partPrice,
         quantity: item.quantity,
         laborHours: item.laborHours,
-        totalPrice: item.totalPrice,
+        totalPrice: money(item.totalPrice).toFixed(2),
       }]);
     }
     return newWorkOrder;
@@ -3557,7 +3717,7 @@ export class DatabaseStorage implements IStorage {
         partPrice: item.partPrice,
         quantity: item.quantity,
         laborHours: item.laborHours,
-        totalPrice: item.totalPrice,
+        totalPrice: money(item.totalPrice).toFixed(2),
       })),
     );
   }
@@ -3615,12 +3775,15 @@ export class DatabaseStorage implements IStorage {
       workType: 'estimate_based',
       status: 'pending',
       priority: 'medium',
-      // Pricing snapshot from estimate
+      // Pricing snapshot from estimate — guard against NaN stored in the
+      // estimate's decimal columns (a null partPrice on any line item can
+      // poison the sum). Recompute parts + labor from the already-guarded
+      // getEstimate() totals so the snapshot is always a finite number.
       laborRate: estimate.laborRate,
-      laborSubtotal: estimate.laborSubtotal,
-      partsSubtotal: estimate.partsSubtotal,
-      estimatedTotal: estimate.totalAmount, // Original estimate total for comparison
-      totalAmount: estimate.totalAmount,
+      laborSubtotal: money(estimate.laborSubtotal).toFixed(2),
+      partsSubtotal: money(estimate.partsSubtotal).toFixed(2),
+      estimatedTotal: (money(estimate.partsSubtotal) + money(estimate.laborSubtotal)).toFixed(2),
+      totalAmount: (money(estimate.partsSubtotal) + money(estimate.laborSubtotal)).toFixed(2),
       totalItems: estimate.items?.length || 0,
       // Task #396 — preserve labor mode + aggregate hours across the
       // estimate→work-order conversion so the field tech sees the same
@@ -3646,7 +3809,7 @@ export class DatabaseStorage implements IStorage {
           partPrice: item.partPrice,
           quantity: item.quantity,
           laborHours: item.laborHours,
-          totalPrice: item.totalPrice,
+          totalPrice: money(item.totalPrice).toFixed(2),
           // Task #1437 — carry zone detail forward so the field tech's
           // checklist can group items by controller/zone and show the
           // originating issue. Null on non-inspection estimates.
@@ -3767,10 +3930,36 @@ export class DatabaseStorage implements IStorage {
         status: "pending",
         priority: "medium",
         laborRate: approvedEstimate.laborRate,
-        laborSubtotal: approvedEstimate.laborSubtotal,
-        partsSubtotal: approvedEstimate.partsSubtotal,
-        estimatedTotal: approvedEstimate.totalAmount,
-        totalAmount: approvedEstimate.totalAmount,
+        // Guard against NaN stored in the estimate's decimal columns.
+        // Recompute from items (already loaded at this point) so the
+        // snapshotted work-order totals are always finite numbers.
+        laborSubtotal: (() => {
+          const laborRate2 = money(approvedEstimate.appliedLaborRate ?? approvedEstimate.laborRate);
+          const totalLaborHours2 =
+            (approvedEstimate as unknown as { laborMode?: string }).laborMode === 'flat'
+              ? money((approvedEstimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? 0)
+              : items.reduce((s, i) => s + money(i.laborHours), 0);
+          return (totalLaborHours2 * laborRate2).toFixed(2);
+        })(),
+        partsSubtotal: items.reduce((s, i) => s + money(i.totalPrice), 0).toFixed(2),
+        estimatedTotal: (() => {
+          const laborRate2 = money(approvedEstimate.appliedLaborRate ?? approvedEstimate.laborRate);
+          const totalLaborHours2 =
+            (approvedEstimate as unknown as { laborMode?: string }).laborMode === 'flat'
+              ? money((approvedEstimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? 0)
+              : items.reduce((s, i) => s + money(i.laborHours), 0);
+          const parts2 = items.reduce((s, i) => s + money(i.totalPrice), 0);
+          return (parts2 + totalLaborHours2 * laborRate2).toFixed(2);
+        })(),
+        totalAmount: (() => {
+          const laborRate2 = money(approvedEstimate.appliedLaborRate ?? approvedEstimate.laborRate);
+          const totalLaborHours2 =
+            (approvedEstimate as unknown as { laborMode?: string }).laborMode === 'flat'
+              ? money((approvedEstimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? 0)
+              : items.reduce((s, i) => s + money(i.laborHours), 0);
+          const parts2 = items.reduce((s, i) => s + money(i.totalPrice), 0);
+          return (parts2 + totalLaborHours2 * laborRate2).toFixed(2);
+        })(),
         totalItems: items.length,
         laborMode: (approvedEstimate as unknown as { laborMode?: string }).laborMode ?? "flat",
         totalHours: (approvedEstimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? null,
@@ -3796,7 +3985,7 @@ export class DatabaseStorage implements IStorage {
           partPrice: item.partPrice,
           quantity: item.quantity,
           laborHours: item.laborHours,
-          totalPrice: item.totalPrice,
+          totalPrice: money(item.totalPrice).toFixed(2),
           // Task #1437 — carry zone detail forward (see
           // createWorkOrderFromEstimate; the two paths must stay equivalent).
           controllerLetter: item.controllerLetter ?? null,
@@ -4263,6 +4452,17 @@ export class DatabaseStorage implements IStorage {
         findingsRepaired: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'repaired_in_field' then 1 end) as int)`,
         findingsToEstimate: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'sent_to_estimate' then 1 end) as int)`,
         findingsDeferred: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'deferred_to_work_order' then 1 end) as int)`,
+        unroutedFindingsCount: sql<number>`cast((
+          select count(*) from wet_check_findings wf2
+          where wf2.wet_check_id = wet_check_billings.wet_check_id
+            and (wf2.resolution is null or wf2.resolution = 'pending')
+            and (wf2.issue_type = 'custom_review' or wf2.tech_disposition is distinct from 'completed_in_field')
+            and wf2.converted_at is null
+            and wf2.billing_sheet_id is null
+            and wf2.estimate_id is null
+            and wf2.work_order_id is null
+            and wf2.wet_check_billing_id is null
+        ) as int)`,
       })
       .from(wetCheckBillings)
       .leftJoin(wetCheckFindings, eq(wetCheckFindings.wetCheckBillingId, wetCheckBillings.id))
@@ -4286,6 +4486,7 @@ export class DatabaseStorage implements IStorage {
       findingsRepaired: r.findingsRepaired ?? 0,
       findingsToEstimate: r.findingsToEstimate ?? 0,
       findingsDeferred: r.findingsDeferred ?? 0,
+      unroutedFindingsCount: r.unroutedFindingsCount ?? 0,
     }));
   }
 
@@ -4316,6 +4517,23 @@ export class DatabaseStorage implements IStorage {
         findingsRepaired: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'repaired_in_field' then 1 end) as int)`,
         findingsToEstimate: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'sent_to_estimate' then 1 end) as int)`,
         findingsDeferred: sql<number>`cast(count(case when ${wetCheckFindings.resolution} = 'deferred_to_work_order' then 1 end) as int)`,
+        // Correlated sub-query: count findings on the PARENT WET CHECK that are
+        // genuinely unrouted (same predicate as isUnroutedFinding in finding-predicates.ts).
+        // Used by wcbIsEligible() to decide whether the WCB is ready to invoice.
+        // resolution IS NULL is treated as 'pending' to match the JS null-coalesce.
+        // 'completed_in_field' tech_disposition is excluded because those findings
+        // are auto-billed and never need manager routing.
+        unroutedFindingsCount: sql<number>`cast((
+          select count(*) from wet_check_findings wf2
+          where wf2.wet_check_id = wet_check_billings.wet_check_id
+            and (wf2.resolution is null or wf2.resolution = 'pending')
+            and (wf2.issue_type = 'custom_review' or wf2.tech_disposition is distinct from 'completed_in_field')
+            and wf2.converted_at is null
+            and wf2.billing_sheet_id is null
+            and wf2.estimate_id is null
+            and wf2.work_order_id is null
+            and wf2.wet_check_billing_id is null
+        ) as int)`,
       })
       .from(wetCheckBillings)
       .leftJoin(wetCheckFindings, eq(wetCheckFindings.wetCheckBillingId, wetCheckBillings.id))
@@ -4333,6 +4551,7 @@ export class DatabaseStorage implements IStorage {
       findingsRepaired: r.findingsRepaired ?? 0,
       findingsToEstimate: r.findingsToEstimate ?? 0,
       findingsDeferred: r.findingsDeferred ?? 0,
+      unroutedFindingsCount: r.unroutedFindingsCount ?? 0,
     }));
   }
 
@@ -4523,14 +4742,19 @@ export class DatabaseStorage implements IStorage {
         : parseFloat(String(customer.laborRate ?? "0")) || 0;
       const totalHours = parseFloat(String(bs.totalHours ?? "0")) || 0;
       const laborSubtotal = totalHours * newRate;
-      const partsSubtotal = parseFloat(String(bs.partsSubtotal ?? "0")) || 0;
-      const totalAmount = laborSubtotal + partsSubtotal;
+      // Task #1669 — use the shared helper to guarantee totalAmount === parts + labor.
+      // Pass the computed laborSubtotal as the patched value; parts come from the
+      // stored record so a rate-mode flip never zeroes stored parts.
+      const totalAmount = computeBillingSheetTotal(
+        { laborSubtotal: laborSubtotal.toFixed(2) },
+        { partsSubtotal: bs.partsSubtotal },
+      );
       const [updated] = await tx.update(billingSheets).set({
         rateMode: mode,
         laborRate: newRate.toFixed(2),
         appliedLaborRate: newRate.toFixed(2),
         laborSubtotal: laborSubtotal.toFixed(2),
-        totalAmount: totalAmount.toFixed(2),
+        totalAmount,
         updatedAt: new Date(),
       }).where(eq(billingSheets.id, id)).returning();
       if (!updated) throw new Error(`Billing sheet ${id} update failed`);
@@ -4641,7 +4865,7 @@ export class DatabaseStorage implements IStorage {
         const values = items.map((item) => ({
           ...item,
           billingSheetId: id,
-          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
+          totalPrice: (money(item.quantity) * money(item.unitPrice)).toFixed(2),
         }));
         inserted = await tx.insert(billingSheetItems).values(values).returning();
       }
@@ -4697,11 +4921,11 @@ export class DatabaseStorage implements IStorage {
         const values = items.map((item) => ({
           ...item,
           workOrderId: id,
-          totalPrice: (Number(item.quantity) * Number(item.partPrice)).toString(),
+          totalPrice: (money(item.quantity) * money(item.partPrice)).toFixed(2),
         }));
         inserted = await tx.insert(workOrderItems).values(values).returning();
       }
-      const truePartsSubtotal = inserted.reduce((s, r) => s + parseFloat(String(r.totalPrice || 0)), 0);
+      const truePartsSubtotal = inserted.reduce((s, r) => s + money(r.totalPrice), 0);
       const laborRate = parseFloat(String(wo.laborRate ?? wo.appliedLaborRate ?? "0")) || 0;
       let laborSubtotal: number;
       let newTotalHours: number | undefined;
@@ -4741,12 +4965,17 @@ export class DatabaseStorage implements IStorage {
       }
       const laborRate = parseFloat(String(bs.appliedLaborRate ?? bs.laborRate ?? "0")) || 0;
       const laborSubtotal = totalHours * laborRate;
-      const partsSubtotal = parseFloat(String(bs.partsSubtotal ?? "0")) || 0;
-      const totalAmount = laborSubtotal + partsSubtotal;
+      // Task #1669 — use the shared helper to guarantee totalAmount === parts + labor.
+      // Pass the computed laborSubtotal as the patched value; parts come from the
+      // stored record so a labor-hours edit never zeroes stored parts.
+      const totalAmount = computeBillingSheetTotal(
+        { laborSubtotal: laborSubtotal.toFixed(2) },
+        { partsSubtotal: bs.partsSubtotal },
+      );
       const [updated] = await tx.update(billingSheets).set({
         totalHours: totalHours.toFixed(2),
         laborSubtotal: laborSubtotal.toFixed(2),
-        totalAmount: totalAmount.toFixed(2),
+        totalAmount,
         updatedAt: new Date(),
       }).where(eq(billingSheets.id, id)).returning();
       if (!updated) throw new Error(`Billing sheet ${id} update failed`);
@@ -4828,7 +5057,7 @@ export class DatabaseStorage implements IStorage {
 
     // If we have items, calculate the totals
     if (items && Array.isArray(items)) {
-      partsSubtotal = items.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unitPrice)), 0);
+      partsSubtotal = items.reduce((sum, item) => sum + (money(item.quantity) * money(item.unitPrice)), 0);
       laborSubtotal = Number(sheetData.totalHours || 0) * Number(sheetData.laborRate || 0);
       totalAmount = laborSubtotal + partsSubtotal;
     }
@@ -4884,7 +5113,7 @@ export class DatabaseStorage implements IStorage {
         const values = items.map(item => ({
           ...item,
           billingSheetId: newSheet.id,
-          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
+          totalPrice: (money(item.quantity) * money(item.unitPrice)).toFixed(2),
         }));
         insertedItems = await db.insert(billingSheetItems).values(values).returning();
       }
@@ -5306,7 +5535,7 @@ export class DatabaseStorage implements IStorage {
       const [newItem] = await tx.insert(billingSheetItems).values({
         ...item,
         billingSheetId,
-        totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString()
+        totalPrice: (money(item.quantity) * money(item.unitPrice)).toFixed(2)
       }).returning();
       await this._resyncBillingSheetTotalsTx(tx, billingSheetId);
       return newItem;
@@ -5317,7 +5546,7 @@ export class DatabaseStorage implements IStorage {
     return db.transaction(async (tx) => {
       const updateData = { ...item };
       if (item.quantity && item.unitPrice) {
-        updateData.totalPrice = (Number(item.quantity) * Number(item.unitPrice)).toString();
+        updateData.totalPrice = (money(item.quantity) * money(item.unitPrice)).toFixed(2);
       }
 
       const [updatedItem] = await tx.update(billingSheetItems).set(updateData).where(eq(billingSheetItems.id, itemId)).returning();
@@ -5357,7 +5586,7 @@ export class DatabaseStorage implements IStorage {
         const values = items.map(item => ({
           ...item,
           billingSheetId,
-          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
+          totalPrice: (money(item.quantity) * money(item.unitPrice)).toFixed(2),
         }));
         inserted = await tx.insert(billingSheetItems).values(values).returning();
       }
@@ -5380,7 +5609,7 @@ export class DatabaseStorage implements IStorage {
         const values = items.map(item => ({
           ...item,
           billingSheetId,
-          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
+          totalPrice: (money(item.quantity) * money(item.unitPrice)).toFixed(2),
         }));
         inserted = await tx.insert(billingSheetItems).values(values).returning();
       }
@@ -9615,9 +9844,9 @@ export class DatabaseStorage implements IStorage {
       const documented = eligible.filter(f => f.resolution === "documented_only");
 
       const calc = (f: typeof allFindings[number]) => {
-        const qty = Number(f.quantity);
-        const partPrice = parseFloat(String(f.partPrice ?? "0"));
-        const laborHours = parseFloat(String(f.laborHours ?? "0"));
+        const qty = money(f.quantity);
+        const partPrice = money(f.partPrice ?? "0");
+        const laborHours = money(f.laborHours ?? "0");
         const partsTotal = partPrice * qty;
         const laborTotal = laborHours * laborRate;
         return { qty, partPrice, laborHours, partsTotal, laborTotal, lineTotal: partsTotal + laborTotal };
@@ -9700,7 +9929,7 @@ export class DatabaseStorage implements IStorage {
           const allItems = await tx.select().from(estimateItems)
             .where(eq(estimateItems.estimateId, priorEstId));
           const partsSubtotal = allItems.reduce(
-            (s, it) => s + parseFloat(String(it.totalPrice ?? "0")), 0);
+            (s, it) => s + money(it.totalPrice), 0);
           const priorEstAny = priorEst as { totalLaborHours?: string | null; laborMode?: string | null } | undefined;
           const persistedFlatHours = parseFloat(String(priorEstAny?.totalLaborHours ?? "0")) || 0;
           const legacyPerPartHours = existingItems.reduce(
@@ -10309,11 +10538,10 @@ export class DatabaseStorage implements IStorage {
   async ensureIrrigationControllers(
     companyId: number,
     customerId: number,
-    count: number,
+    configs: Array<{ name: string; zoneCount: number | null }>,
     branchName?: string | null,
   ): Promise<IrrigationController[]> {
     const branch = typeof branchName === "string" ? branchName.trim() : "";
-    const DEFAULT_ZONE_COUNT = 12;
 
     const existing = await db
       .select()
@@ -10327,32 +10555,28 @@ export class DatabaseStorage implements IStorage {
       );
 
     const haveNames = new Set(existing.map((c) => c.name));
-    const needed: string[] = [];
-    for (let i = 0; i < count; i++) {
-      const letter = String.fromCharCode("A".charCodeAt(0) + i);
-      const name = `Controller ${letter}`;
-      if (!haveNames.has(name)) needed.push(letter);
-    }
 
-    for (const letter of needed) {
-      const name = `Controller ${letter}`;
+    for (const config of configs) {
+      if (haveNames.has(config.name)) continue;
+
       const [inserted] = await db
         .insert(irrigationControllers)
         .values({
           companyId,
           customerId,
           branchName: branch,
-          name,
-          totalZones: DEFAULT_ZONE_COUNT,
+          name: config.name,
+          totalZones: config.zoneCount ?? null,
           isActive: true,
           lastUpdatedAt: new Date(),
         })
         .onConflictDoNothing()
         .returning();
 
-      // Seed placeholder zones 1..DEFAULT_ZONE_COUNT for the newly created controller.
-      if (inserted) {
-        for (let z = 1; z <= DEFAULT_ZONE_COUNT; z++) {
+      // Seed placeholder zones 1..zoneCount for the newly created controller.
+      // Only seed when we have a real count — null means "not yet configured".
+      if (inserted && config.zoneCount != null) {
+        for (let z = 1; z <= config.zoneCount; z++) {
           await db
             .insert(irrigationProfileZones)
             .values({
@@ -10708,6 +10932,601 @@ export class DatabaseStorage implements IStorage {
       .from(irrigationProfileHistory)
       .where(and(...conditions))
       .orderBy(desc(irrigationProfileHistory.changedAt));
+  }
+
+  async importIrrigationProfile(
+    companyId: number,
+    customerId: number,
+    branchName: string,
+    rows: IrrigationImportRow[],
+    mode: "preview" | "commit",
+    actor?: { id: number; name: string },
+    replaceControllers: string[] = [],
+  ): Promise<IrrigationImportResult> {
+    // ── Group CSV rows by controller name ────────────────────────────────────
+    // Build a map: controllerName → { meta, programs: Map<progName,…>, zones: Map<zoneNum,row> }
+    type ProgMeta = { wateringDays: string[] | null; startTimes: string[] | null; seasonalAdjustPct: number };
+    type CtrlGroup = {
+      location: string | null;
+      brand: string | null;
+      model: string | null;
+      programs: Map<string, ProgMeta>;
+      zones: Map<number, IrrigationImportRow>;
+    };
+    const ctrlGroups = new Map<string, CtrlGroup>();
+    for (const row of rows) {
+      let group = ctrlGroups.get(row.controllerName);
+      if (!group) {
+        group = {
+          location: row.location,
+          brand: row.brand,
+          model: row.model,
+          programs: new Map(),
+          zones: new Map(),
+        };
+        ctrlGroups.set(row.controllerName, group);
+      }
+      // Later rows override controller-level metadata for the same controller
+      if (row.location != null) group.location = row.location;
+      if (row.brand != null) group.brand = row.brand;
+      if (row.model != null) group.model = row.model;
+      // Program: key by name (use "default" when blank)
+      const progKey = row.programName?.trim() || "default";
+      if (row.programName) {
+        group.programs.set(progKey, {
+          wateringDays: row.wateringDays,
+          startTimes: row.startTimes,
+          seasonalAdjustPct: row.seasonalAdjustPct,
+        });
+      }
+      // Zone: key by number (last row wins for duplicates)
+      group.zones.set(row.zoneNumber, row);
+    }
+
+    // ── Load existing controllers for this (company, customer, branch) ────────
+    const existingCtrlList = await db
+      .select()
+      .from(irrigationControllers)
+      .where(
+        and(
+          eq(irrigationControllers.companyId, companyId),
+          eq(irrigationControllers.customerId, customerId),
+          eq(irrigationControllers.branchName, branchName),
+        ),
+      );
+
+    // Build lookup maps for existing data
+    const existingCtrlByName = new Map(existingCtrlList.map((c) => [c.name, c]));
+
+    // ── Build the diff ────────────────────────────────────────────────────────
+    const controllerDiffs: IrrigationImportControllerDiff[] = [];
+
+    for (const [ctrlName, group] of ctrlGroups) {
+      const existingCtrl = existingCtrlByName.get(ctrlName);
+      const ctrlAction: "create" | "update" = existingCtrl ? "update" : "create";
+
+      // Load existing programs and zones for this controller (if it exists)
+      let existingPrograms: IrrigationProgram[] = [];
+      let existingZones: IrrigationProfileZone[] = [];
+      if (existingCtrl) {
+        [existingPrograms, existingZones] = await Promise.all([
+          db
+            .select()
+            .from(irrigationPrograms)
+            .where(eq(irrigationPrograms.controllerId, existingCtrl.id))
+            .orderBy(irrigationPrograms.sortOrder, irrigationPrograms.id),
+          db
+            .select()
+            .from(irrigationProfileZones)
+            .where(eq(irrigationProfileZones.controllerId, existingCtrl.id))
+            .orderBy(irrigationProfileZones.zoneNumber),
+        ]);
+      }
+
+      const existingProgByName = new Map(existingPrograms.map((p) => [p.name, p]));
+      const existingZoneByNumber = new Map(existingZones.map((z) => [z.zoneNumber, z]));
+
+      // Diff programs
+      const programDiffs: IrrigationImportProgramDiff[] = [];
+      for (const [progName, progMeta] of group.programs) {
+        const existingProg = existingProgByName.get(progName);
+        if (!existingProg) {
+          programDiffs.push({ programName: progName, action: "create", changes: [] });
+        } else {
+          const changes: IrrigationImportProgramDiff["changes"] = [];
+          if (progMeta.wateringDays !== null &&
+              JSON.stringify(existingProg.wateringDays ?? []) !== JSON.stringify(progMeta.wateringDays)) {
+            changes.push({ field: "wateringDays", from: existingProg.wateringDays ?? null, to: progMeta.wateringDays });
+          }
+          if (progMeta.startTimes !== null &&
+              JSON.stringify(existingProg.startTimes ?? []) !== JSON.stringify(progMeta.startTimes)) {
+            changes.push({ field: "startTimes", from: existingProg.startTimes ?? null, to: progMeta.startTimes });
+          }
+          if (existingProg.seasonalAdjustPct !== progMeta.seasonalAdjustPct) {
+            changes.push({ field: "seasonalAdjustPct", from: existingProg.seasonalAdjustPct, to: progMeta.seasonalAdjustPct });
+          }
+          programDiffs.push({
+            programName: progName,
+            action: changes.length > 0 ? "update" : "no_change",
+            changes,
+          });
+        }
+      }
+
+      // Diff zones
+      const zoneDiffs: IrrigationImportZoneDiff[] = [];
+      for (const [zoneNum, row] of group.zones) {
+        const existingZone = existingZoneByNumber.get(zoneNum);
+        if (!existingZone) {
+          const resolvedName = resolveZoneName(row.zoneName, undefined, zoneNum);
+          zoneDiffs.push({
+            action: "create",
+            zoneNumber: zoneNum,
+            zoneName: resolvedName,
+            zoneType: row.zoneType,
+            runTimeMinutes: row.runTimeMinutes,
+            changes: [],
+          });
+        } else {
+          const resolvedName = resolveZoneName(row.zoneName, existingZone.name, zoneNum);
+          const changes: IrrigationImportZoneDiff["changes"] = [];
+          if (existingZone.name !== resolvedName) {
+            changes.push({ field: "zoneName", from: existingZone.name, to: resolvedName });
+          }
+          if (existingZone.zoneType !== row.zoneType) {
+            changes.push({ field: "zoneType", from: existingZone.zoneType, to: row.zoneType });
+          }
+          if (existingZone.runTimeMinutes !== row.runTimeMinutes) {
+            changes.push({ field: "runTimeMinutes", from: existingZone.runTimeMinutes, to: row.runTimeMinutes });
+          }
+          zoneDiffs.push({
+            action: changes.length > 0 ? "update" : "no_change",
+            zoneNumber: zoneNum,
+            zoneName: resolvedName,
+            zoneType: row.zoneType,
+            runTimeMinutes: row.runTimeMinutes,
+            changes,
+          });
+        }
+      }
+
+      // ── Replace mode: compute removals (update-mode controllers only) ────────
+      let zonesToRemove: import("./storage").IrrigationImportRemovedZone[] = [];
+      let programsToRemove: import("./storage").IrrigationImportRemovedProgram[] = [];
+      if (ctrlAction === "update" && replaceControllers.includes(ctrlName)) {
+        const csvZoneNumbers = new Set(group.zones.keys());
+        zonesToRemove = existingZones
+          .filter((z) => !csvZoneNumbers.has(z.zoneNumber))
+          .map((z) => ({
+            id: z.id,
+            zoneNumber: z.zoneNumber,
+            name: z.name,
+            notes: z.notes ?? null,
+            overrideStartTime: z.overrideStartTime ?? null,
+            overrideDays: (z.overrideDays ?? null) as string[] | null,
+          }));
+        const csvProgramNames = new Set(group.programs.keys());
+        programsToRemove = existingPrograms
+          .filter((p) => !csvProgramNames.has(p.name))
+          .map((p) => ({ id: p.id, name: p.name }));
+      }
+
+      controllerDiffs.push({
+        controllerName: ctrlName,
+        action: ctrlAction,
+        location: group.location,
+        brand: group.brand,
+        model: group.model,
+        programs: programDiffs,
+        zones: zoneDiffs,
+        ...(zonesToRemove.length > 0 || programsToRemove.length > 0 || replaceControllers.includes(ctrlName)
+          ? { zonesToRemove, programsToRemove }
+          : {}),
+      });
+    }
+
+    const summary = {
+      controllersCreated: controllerDiffs.filter((c) => c.action === "create").length,
+      controllersUpdated: controllerDiffs.filter((c) => c.action === "update").length,
+      zonesAdded: controllerDiffs.reduce((n, c) => n + c.zones.filter((z) => z.action === "create").length, 0),
+      zonesUpdated: controllerDiffs.reduce((n, c) => n + c.zones.filter((z) => z.action === "update").length, 0),
+      programsCreated: controllerDiffs.reduce((n, c) => n + c.programs.filter((p) => p.action === "create").length, 0),
+      programsUpdated: controllerDiffs.reduce((n, c) => n + c.programs.filter((p) => p.action === "update").length, 0),
+      zonesRemoved: controllerDiffs.reduce((n, c) => n + (c.zonesToRemove?.length ?? 0), 0),
+      programsRemoved: controllerDiffs.reduce((n, c) => n + (c.programsToRemove?.length ?? 0), 0),
+    };
+
+    if (mode === "preview") {
+      return { mode: "preview", controllers: controllerDiffs, summary };
+    }
+
+    // ── Commit mode: apply the merge in a single transaction ─────────────────
+    // We drive writes using the pre-computed controllerDiffs so that re-importing
+    // an identical CSV is a true no-op (no DB writes, no history snapshots).
+    await db.transaction(async (tx) => {
+      const q = tx as unknown as typeof db;
+
+      for (const ctrlDiff of controllerDiffs) {
+        const ctrlName = ctrlDiff.controllerName;
+        const group = ctrlGroups.get(ctrlName)!;
+        const existingCtrl = existingCtrlByName.get(ctrlName);
+
+        const hasProgramChanges = ctrlDiff.programs.some((p) => p.action !== "no_change");
+        const hasZoneChanges = ctrlDiff.zones.some((z) => z.action !== "no_change");
+        const isReplaceMode = replaceControllers.includes(ctrlName);
+        const hasRemovals =
+          (ctrlDiff.zonesToRemove?.length ?? 0) > 0 ||
+          (ctrlDiff.programsToRemove?.length ?? 0) > 0;
+
+        // No-op: existing controller with nothing to create, update, or remove — skip entirely.
+        if (ctrlDiff.action === "update" && !hasProgramChanges && !hasZoneChanges && !hasRemovals) {
+          continue;
+        }
+
+        let ctrlId: number;
+
+        if (ctrlDiff.action === "create") {
+          // ── Create new controller ────────────────────────────────────────
+          const [newCtrl] = await q
+            .insert(irrigationControllers)
+            .values({
+              companyId,
+              customerId,
+              branchName,
+              name: ctrlName,
+              location: group.location,
+              brand: group.brand,
+              model: group.model,
+              totalZones: group.zones.size > 0 ? Math.max(...group.zones.keys()) : null,
+              isActive: true,
+              lastUpdatedByUserId: actor?.id ?? null,
+              lastUpdatedByName: actor?.name ?? null,
+              lastUpdatedAt: new Date(),
+            })
+            .returning();
+          ctrlId = newCtrl.id;
+        } else {
+          // ── Update existing controller (only fields that actually changed) ─
+          ctrlId = existingCtrl!.id;
+          // In Replace mode, totalZones is the exact post-delete zone count
+          // (only the CSV zones survive, so group.zones.size is definitive).
+          // In add/update mode it is the high-water mark of max zone number seen
+          // (grows monotonically, never shrinks).
+          const maxInputZone = group.zones.size > 0 ? Math.max(...group.zones.keys()) : 0;
+          const newTotalZones = isReplaceMode
+            ? (group.zones.size > 0 ? group.zones.size : null)
+            : (maxInputZone > (existingCtrl!.totalZones ?? 0) ? maxInputZone : existingCtrl!.totalZones);
+
+          const ctrlPatch: Record<string, unknown> = {};
+          if (group.location !== null && group.location !== existingCtrl!.location)
+            ctrlPatch.location = group.location;
+          if (group.brand !== null && group.brand !== existingCtrl!.brand)
+            ctrlPatch.brand = group.brand;
+          if (group.model !== null && group.model !== existingCtrl!.model)
+            ctrlPatch.model = group.model;
+          if (newTotalZones !== existingCtrl!.totalZones) ctrlPatch.totalZones = newTotalZones;
+
+          // Stamp lastUpdated only when there is actual work to do
+          if (Object.keys(ctrlPatch).length > 0 || hasProgramChanges || hasZoneChanges || hasRemovals) {
+            ctrlPatch.lastUpdatedByUserId = actor?.id ?? null;
+            ctrlPatch.lastUpdatedByName = actor?.name ?? null;
+            ctrlPatch.lastUpdatedAt = new Date();
+            ctrlPatch.updatedAt = new Date();
+            await q
+              .update(irrigationControllers)
+              .set(ctrlPatch)
+              .where(eq(irrigationControllers.id, ctrlId));
+          }
+        }
+
+        // ── Test seam ─────────────────────────────────────────────────────────
+        // In production this global is never set, so the branch is a single
+        // no-cost typeof check. Integration tests may set
+        // globalThis.__importIrrigationProfileMidTxHook to a function that
+        // throws, proving the transaction is atomic across controller + zone
+        // writes. Always clear the hook in the test's finally block.
+        {
+          const _midTxHook = (globalThis as any).__importIrrigationProfileMidTxHook;
+          if (typeof _midTxHook === "function") {
+            await _midTxHook(ctrlId);
+          }
+        }
+
+        // ── Programs: only create/update those that the diff marks as changed ─
+        const progDiffByName = new Map(ctrlDiff.programs.map((p) => [p.programName, p]));
+        const existingProgByName = new Map(
+          (
+            await q
+              .select()
+              .from(irrigationPrograms)
+              .where(eq(irrigationPrograms.controllerId, ctrlId))
+          ).map((p) => [p.name, p]),
+        );
+        const progNameToId = new Map<string, number>();
+        let sortIdx = existingProgByName.size;
+
+        for (const [progName, progMeta] of group.programs) {
+          const existingProg = existingProgByName.get(progName);
+          const pd = progDiffByName.get(progName);
+
+          if (!existingProg || pd?.action === "create") {
+            // Create
+            const [newProg] = await q
+              .insert(irrigationPrograms)
+              .values({
+                companyId,
+                controllerId: ctrlId,
+                name: progName,
+                wateringDays: progMeta.wateringDays,
+                startTimes: progMeta.startTimes,
+                seasonalAdjustPct: progMeta.seasonalAdjustPct,
+                isActive: true,
+                sortOrder: sortIdx++,
+              })
+              .returning();
+            progNameToId.set(progName, newProg.id);
+          } else if (pd?.action === "update") {
+            // Update only changed fields
+            const patch: Record<string, unknown> = { updatedAt: new Date() };
+            if (progMeta.wateringDays !== null) patch.wateringDays = progMeta.wateringDays;
+            if (progMeta.startTimes !== null) patch.startTimes = progMeta.startTimes;
+            patch.seasonalAdjustPct = progMeta.seasonalAdjustPct;
+            await q
+              .update(irrigationPrograms)
+              .set(patch)
+              .where(eq(irrigationPrograms.id, existingProg.id));
+            progNameToId.set(progName, existingProg.id);
+          } else {
+            // no_change — collect id for zone→program FK only
+            if (existingProg) progNameToId.set(progName, existingProg.id);
+          }
+        }
+
+        // ── Zones: only create/update those that the diff marks as changed ────
+        const zoneDiffByNumber = new Map(ctrlDiff.zones.map((z) => [z.zoneNumber, z]));
+        const existingZoneByNumber = new Map(
+          (
+            await q
+              .select()
+              .from(irrigationProfileZones)
+              .where(eq(irrigationProfileZones.controllerId, ctrlId))
+          ).map((z) => [z.zoneNumber, z]),
+        );
+
+        for (const [zoneNum, row] of group.zones) {
+          const programId = row.programName ? (progNameToId.get(row.programName) ?? null) : null;
+          const existingZone = existingZoneByNumber.get(zoneNum);
+          const zd = zoneDiffByNumber.get(zoneNum);
+
+          if (!existingZone || zd?.action === "create") {
+            const resolvedName = resolveZoneName(row.zoneName, undefined, zoneNum);
+            await q
+              .insert(irrigationProfileZones)
+              .values({
+                companyId,
+                controllerId: ctrlId,
+                programId,
+                zoneNumber: zoneNum,
+                name: resolvedName,
+                zoneType: row.zoneType,
+                runTimeMinutes: row.runTimeMinutes,
+                zoneOrder: zoneNum,
+                isActive: true,
+              })
+              .onConflictDoNothing();
+          } else if (zd?.action === "update") {
+            const resolvedName = resolveZoneName(row.zoneName, existingZone.name, zoneNum);
+            await q
+              .update(irrigationProfileZones)
+              .set({
+                name: resolvedName,
+                zoneType: row.zoneType,
+                runTimeMinutes: row.runTimeMinutes,
+                programId,
+                updatedAt: new Date(),
+              })
+              .where(eq(irrigationProfileZones.id, existingZone.id));
+          }
+          // no_change: skip write entirely
+        }
+
+        // ── Replace mode: capture pre-delete snapshot then hard-delete ────────
+        // Zones are deleted before programs to avoid relying on the
+        // `onDelete: "set null"` FK cascade from zones → programs.
+        let removedSnapshot: {
+          controller: typeof existingCtrl;
+          zones: IrrigationProfileZone[];
+          programs: IrrigationProgram[];
+        } | undefined;
+        if (isReplaceMode && hasRemovals) {
+          const zoneIdsToRemove = (ctrlDiff.zonesToRemove ?? []).map((z) => z.id);
+          const programIdsToRemove = (ctrlDiff.programsToRemove ?? []).map((p) => p.id);
+
+          // Capture pre-delete state for the `removed` history key.
+          // controller is the pre-delete controller row (existingCtrl is already
+          // in scope from the diff phase and has not been mutated yet).
+          const [removedZones, removedPrograms] = await Promise.all([
+            zoneIdsToRemove.length > 0
+              ? q.select().from(irrigationProfileZones).where(inArray(irrigationProfileZones.id, zoneIdsToRemove))
+              : Promise.resolve([] as any[]),
+            programIdsToRemove.length > 0
+              ? q.select().from(irrigationPrograms).where(inArray(irrigationPrograms.id, programIdsToRemove))
+              : Promise.resolve([] as any[]),
+          ]);
+          removedSnapshot = { controller: existingCtrl, zones: removedZones, programs: removedPrograms };
+
+          // Delete zones first (they reference programs via programId FK)
+          if (zoneIdsToRemove.length > 0) {
+            await q
+              .delete(irrigationProfileZones)
+              .where(inArray(irrigationProfileZones.id, zoneIdsToRemove));
+          }
+          // Delete programs after zones are cleared
+          if (programIdsToRemove.length > 0) {
+            await q
+              .delete(irrigationPrograms)
+              .where(inArray(irrigationPrograms.id, programIdsToRemove));
+          }
+        }
+
+        // ── History snapshot: only when actual work was done ─────────────────
+        const [updatedCtrl] = await q
+          .select()
+          .from(irrigationControllers)
+          .where(eq(irrigationControllers.id, ctrlId));
+        const programs = await q
+          .select()
+          .from(irrigationPrograms)
+          .where(eq(irrigationPrograms.controllerId, ctrlId))
+          .orderBy(irrigationPrograms.sortOrder, irrigationPrograms.id);
+        const zones = await q
+          .select()
+          .from(irrigationProfileZones)
+          .where(eq(irrigationProfileZones.controllerId, ctrlId))
+          .orderBy(irrigationProfileZones.zoneOrder, irrigationProfileZones.zoneNumber);
+
+        if (updatedCtrl) {
+          const snapshotJson: Record<string, unknown> = { controller: updatedCtrl, programs, zones };
+          if (removedSnapshot) {
+            snapshotJson.removed = removedSnapshot;
+          }
+          await q.insert(irrigationProfileHistory).values({
+            companyId,
+            controllerId: ctrlId,
+            snapshotJson: snapshotJson as any,
+            changedByUserId: actor?.id ?? null,
+            changedByName: actor?.name ?? null,
+            summary: `CSV import: ${ctrlName}`,
+          });
+        }
+      }
+    });
+
+    return { mode: "commit", controllers: controllerDiffs, summary };
+  }
+
+  // ── Backflow Preventers ────────────────────────────────────────────────────
+
+  async listBackflows(
+    companyId: number | null,
+    customerId: number,
+    branchName?: string,
+  ): Promise<IrrigationBackflow[]> {
+    const conditions = [eq(irrigationBackflows.customerId, customerId)];
+    if (companyId !== null) conditions.push(eq(irrigationBackflows.companyId, companyId));
+    if (branchName !== undefined) conditions.push(eq(irrigationBackflows.branchName, branchName));
+    return db
+      .select()
+      .from(irrigationBackflows)
+      .where(and(...conditions))
+      .orderBy(irrigationBackflows.name, irrigationBackflows.id);
+  }
+
+  async getBackflow(
+    companyId: number | null,
+    id: number,
+  ): Promise<IrrigationBackflow | null> {
+    const conditions = [eq(irrigationBackflows.id, id)];
+    if (companyId !== null) conditions.push(eq(irrigationBackflows.companyId, companyId));
+    const [row] = await db
+      .select()
+      .from(irrigationBackflows)
+      .where(and(...conditions));
+    return row ?? null;
+  }
+
+  async createBackflow(
+    data: InsertIrrigationBackflow,
+  ): Promise<IrrigationBackflow> {
+    const [row] = await db
+      .insert(irrigationBackflows)
+      .values({
+        ...data,
+        lastUpdatedAt: data.lastUpdatedAt ?? new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+    return row;
+  }
+
+  async updateBackflow(
+    companyId: number | null,
+    id: number,
+    patch: Partial<Omit<InsertIrrigationBackflow, "companyId" | "customerId">>,
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationBackflow | null> {
+    const conditions = [eq(irrigationBackflows.id, id)];
+    if (companyId !== null) conditions.push(eq(irrigationBackflows.companyId, companyId));
+    const now = new Date();
+    const [updated] = await db
+      .update(irrigationBackflows)
+      .set({
+        ...patch,
+        lastUpdatedByUserId: actor?.id ?? patch.lastUpdatedByUserId ?? null,
+        lastUpdatedByName: actor?.name ?? patch.lastUpdatedByName ?? null,
+        lastUpdatedAt: now,
+        updatedAt: now,
+      })
+      .where(and(...conditions))
+      .returning();
+    return updated ?? null;
+  }
+
+  async deleteBackflow(
+    companyId: number | null,
+    id: number,
+  ): Promise<boolean> {
+    const conditions = [eq(irrigationBackflows.id, id)];
+    if (companyId !== null) conditions.push(eq(irrigationBackflows.companyId, companyId));
+    const result = await db
+      .delete(irrigationBackflows)
+      .where(and(...conditions))
+      .returning({ id: irrigationBackflows.id });
+    return result.length > 0;
+  }
+
+  async logBackflowTest(
+    companyId: number | null,
+    id: number,
+    data: {
+      lastTestedDate: string;
+      lastTestResult: "pass" | "fail";
+      lastTestedBy?: string | null;
+      nextTestDueDate?: string | null;
+    },
+    actor?: { id: number; name: string },
+  ): Promise<IrrigationBackflow | null> {
+    const conditions = [eq(irrigationBackflows.id, id)];
+    if (companyId !== null) conditions.push(eq(irrigationBackflows.companyId, companyId));
+
+    // Default nextTestDueDate = lastTestedDate + 1 year
+    let nextDue = data.nextTestDueDate ?? null;
+    if (!nextDue && data.lastTestedDate) {
+      try {
+        const d = new Date(data.lastTestedDate);
+        d.setFullYear(d.getFullYear() + 1);
+        nextDue = d.toISOString().slice(0, 10);
+      } catch {
+        // leave null if date parsing fails
+      }
+    }
+
+    const now = new Date();
+    const [updated] = await db
+      .update(irrigationBackflows)
+      .set({
+        lastTestedDate: data.lastTestedDate,
+        lastTestResult: data.lastTestResult,
+        lastTestedBy: data.lastTestedBy ?? null,
+        nextTestDueDate: nextDue,
+        lastUpdatedByUserId: actor?.id ?? null,
+        lastUpdatedByName: actor?.name ?? null,
+        lastUpdatedAt: now,
+        updatedAt: now,
+      })
+      .where(and(...conditions))
+      .returning();
+    return updated ?? null;
   }
 }
 

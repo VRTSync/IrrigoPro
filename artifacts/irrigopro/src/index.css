@@ -10,6 +10,16 @@
   .mb-safe {
     margin-bottom: env(safe-area-inset-bottom);
   }
+  .pb-nav-safe {
+    padding-bottom: calc(5.25rem + env(safe-area-inset-bottom));
+  }
+}
+
+/* Fallback for browsers that don't support safe-area-inset-bottom */
+@supports not (padding-bottom: env(safe-area-inset-bottom)) {
+  .pb-nav-safe {
+    padding-bottom: 5.25rem;
+  }
 }
 
 /* Mobile-First Design Tokens — IrrigoPro 2026 Rebrand */

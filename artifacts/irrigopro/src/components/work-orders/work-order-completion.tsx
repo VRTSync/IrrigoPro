@@ -70,6 +70,7 @@ interface CompletionUploadedFile {
   url: string;
   fileName: string;
   originalName: string;
+  previewUrl?: string;
 }
 
 interface UsedPart {
@@ -313,13 +314,8 @@ export function WorkOrderCompletion({
         total + (parseFloat(item.laborHours) * item.quantity), 0
       );
 
-      const workDescriptions = workOrderItems
-        .map((item: any) => item.description || item.partName)
-        .filter(Boolean)
-        .join('\n');
-
       form.reset({
-        workSummary: workDescriptions || "Work completed as per estimate",
+        workSummary: "",
         customerNotes: "Work completed according to estimate specifications",
         totalHours: Math.max(estimatedHours, 0.1),
         // Preserve the WO's persisted labor mode through the prefill.
@@ -788,7 +784,7 @@ export function WorkOrderCompletion({
                       </div>
                       <FormControl>
                         <Textarea
-                          placeholder="Describe the work that was completed, repairs made, issues resolved..."
+                          placeholder="Describe the work performed — parts used are recorded separately below."
                           className="min-h-[100px]"
                           {...field}
                         />
@@ -1077,8 +1073,8 @@ export function WorkOrderCompletion({
                   label="Photos"
                   accept="image/*"
                   multiple={true}
-                  files={photos.map(p => ({ url: p.url, fileName: p.fileName, originalName: p.originalName }))}
-                  onFilesChange={(files) => setPhotos(files.map(f => ({ url: f.url, fileName: f.fileName, originalName: f.originalName })))}
+                  files={photos.map(p => ({ url: p.url, fileName: p.fileName, originalName: p.originalName, previewUrl: p.previewUrl }))}
+                  onFilesChange={(files) => setPhotos(files.map(f => ({ url: f.url, fileName: f.fileName, originalName: f.originalName, previewUrl: f.previewUrl })))}
                 />
               </CardContent>
             </Card>
