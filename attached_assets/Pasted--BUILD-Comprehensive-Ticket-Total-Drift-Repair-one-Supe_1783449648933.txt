@@ -1,0 +1,43 @@
+# BUILD — Comprehensive Ticket-Total Drift Repair (one Super-Admin run) + Heal-at-Invoice Prevention
+
+**What & Why**
+Billing sheets #272/#273 blocked invoice 82027's PDF with the old parts-dropped drift (stored total = labor only). The **write bug is fixed** (generic PATCH / labor-hours / rate-mode all route through the #1669 stored-fallback helper — no new drift). But these are **legacy stragglers**: the existing `reconcile-billing-sheet-invoice-totals` migration only repairs **invoiced** billing sheets (`invoiceId IS NOT NULL`, `reconcile-…-db.ts:88`), so records that drifted while un-invoiced were skipped every run and only surface when finally billed. This ticket (1) replaces the narrow migration with **one comprehensive drift-repair migration** that fixes every drifted record — billing sheets, work orders, and WCBs, invoiced or not — in a single run, and (2) adds a **heal-at-invoice-generation** guard so latent drift can never reach the PDF validator again.
+
+## Slice 1 — Comprehensive drift-repair migration (Super Admin)
+**File:** new `artifacts/api-server/src/lib/migrations/repair-ticket-total-drift.ts`, id `repair-ticket-total-drift-v1`, title "Repair Ticket Total Drift (Billing Sheets, Work Orders, WCBs)". Register it in `registry.ts`. **Retire** the narrow `reconcile-billing-sheet-invoice-totals` from the registry (fully subsumed by this — one drift migration on the page, not two). Follow the `MigrationDefinition` contract (`check`/`preview`/`run`, per-record audit log, per-step try/catch surfacing the real error, acknowledgement gate since it changes money, idempotent done-marker).
+
+**Scope — every record whose stored total drifts from parts + labor, regardless of invoice status:**
+- Scan `billing_sheets`, `work_orders`, `wet_check_billings` for `ABS( (COALESCE(parts,0) + COALESCE(labor,0)) − COALESCE(total,0) ) > 0.01`. Do **not** gate on `invoiceId` — this is the fix for the un-invoiced-straggler gap.
+- **Repair each record:** set `totalAmount = money(partsSubtotal) + money(laborSubtotal)` (canonical, `money()`), leaving the (correct) stored subtotals intact — add-parts semantics, never lower a real total to match a bad one.
+- **For invoiced records:** propagate the delta to the parent invoice — recompute the invoice's `partsSubtotal` / `laborSubtotal` / `totalAmount` from its (now-repaired) member tickets so the invoice and its PDF validator agree. (This is what the old reconcile did for billing sheets; extend to WO/WCB.)
+- **Activity stream (Rule 6):** write an `audit_log` entry on each repaired ticket via `recordAuditEvent` — `action: "total_drift_repair"`, before→after totals, `migration` id. So the repair is visible on the ticket's Activity tab.
+
+**Preview must show:** per-record `current total → repaired total (= parts + labor)`, the delta, invoice status/id, and — grouped — per-invoice total change. Counts: `driftedBillingSheets`, `driftedWorkOrders`, `driftedWcbs`, `invoicesAffected`, total `+$` to customers. Verify **#273 → $388.68**, **#272 → $463.68**, invoice 82027 up by $327.36.
+
+**Safety:** company-scoped; idempotent (clean re-run finds 0); add-parts only (bills the correct higher amount, never lowers); acknowledgement gate lists the money change before Run.
+
+## Slice 2 — Heal drift at invoice generation (stop recurrence)
+**File:** `artifacts/api-server/src/routes/routes.ts` (monthly invoice generation / the path that attaches tickets to an invoice, ~6340–6540).
+Today invoice generation uses the ticket's **stored** `totalAmount` as authoritative (`bs.totalAmount` at ~6356), so it inherits any latent drift and the PDF validator blocks it later. Instead, **when a ticket is attached to an invoice, recompute its total canonically first** (`total = money(parts) + money(labor)`), and if it drifted, persist the corrected total on the ticket (with a `total_drift_repair` activity entry) before including it. Net: an invoice can never inherit a drifted total; the validator stops being a tripwire that surfaces months later — drift is healed at the last responsible moment (per Rule 6, on the source ticket).
+
+## Done looks like
+- Running `repair-ticket-total-drift-v1` once repairs **all** drifted billing sheets / WOs / WCBs (invoiced or not); #272 → $463.68, #273 → $388.68; invoice 82027's PDF generates; each repaired ticket shows the repair on its Activity tab.
+- Only **one** drift-repair migration appears on the Super Admin page (the narrow reconcile is retired).
+- After Slice 2, a billing sheet that drifts while un-invoiced is auto-healed the moment it's added to an invoice — the PDF validator no longer trips on legacy drift.
+- Re-running the migration finds 0 candidates.
+
+## Definition of Done (attach proof — Rule 7)
+- [ ] `file:line` for: the new migration + registry entry; the retired reconcile removal; the invoice-generation heal.
+- [ ] Preview screenshot showing #272/#273 (and any others) with before→after and invoice 82027's delta.
+- [ ] Post-run: invoice 82027 PDF **generates**; screenshot. Billing sheet #273 Activity tab shows the `total_drift_repair` entry.
+- [ ] Test: a drifted BS/WO/WCB (invoiced and un-invoiced) is repaired to parts+labor; invoiced record propagates to its invoice; re-run finds 0; company isolation holds.
+- [ ] Test: attaching a drifted sheet to an invoice heals it (Slice 2) — the invoice never inherits the drift.
+- [ ] Deployed; migration visible on Super Admin; commit message matches diff.
+
+## Relevant files
+- `artifacts/api-server/src/lib/migrations/repair-ticket-total-drift.ts` (new) + `registry.ts` (register new, remove reconcile)
+- `artifacts/api-server/src/scripts/reconcile-billing-sheet-invoice-totals-*.ts` (reference for invoice-delta propagation; then retire)
+- `artifacts/api-server/src/lib/money.ts`, `billing-sheet-total.ts` (canonical recompute)
+- `artifacts/api-server/src/routes/audit-log.ts` (`recordAuditEvent` for the activity entries)
+- `artifacts/api-server/src/routes/routes.ts` (~6340–6540 invoice generation — Slice 2 heal)
+- `artifacts/api-server/src/invoice-pdf-service.ts` (the validator — should stop tripping after this)
