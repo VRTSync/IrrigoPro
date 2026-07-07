@@ -6843,6 +6843,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
         periodEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59);
       }
       
+      // Slice 2 — Heal-at-invoice-generation: fix any latent ticket-total drift
+      // before aggregating totals so the PDF validator can never be tripped by
+      // a stale totalAmount inherited from legacy write bugs.
+      //
+      // Add-parts-only semantics: only heal when canonical (parts+labor) EXCEEDS
+      // the stored total (missing parts scenario). Never lower a stored total.
+      //
+      // Fail-safe guarantee: the in-memory record is updated to the canonical
+      // value BEFORE attempting the DB persist. Even if the DB update fails,
+      // the invoice is built with the correct total and the PDF validator passes.
+      // The failed persist is logged so operators can run the repair migration
+      // to fix the stored value durably.
+      const HEAL_TOLERANCE = 0.01;
+      for (const wo of selectedWorkOrders) {
+        const parts = money(wo.partsSubtotal);
+        const labor = money(wo.laborSubtotal);
+        const stored = money(wo.totalAmount);
+        const healed = parts + labor;
+        if (healed > stored + HEAL_TOLERANCE) {
+          // Update in-memory first — invoice aggregation always uses canonical total.
+          (wo as any).totalAmount = healed.toFixed(2);
+          try {
+            await db.execute(sql`UPDATE work_orders SET total_amount = ${healed.toFixed(2)} WHERE id = ${wo.id}`);
+            await recordAuditEvent(req, {
+              action: 'total_drift_repair',
+              actionType: 'data_repair',
+              targetType: 'work_order',
+              targetId: String(wo.id),
+              summary: `Drift healed at invoice generation: $${stored.toFixed(2)} → $${healed.toFixed(2)}`,
+              details: { before: stored, after: healed, source: 'invoice_generation_heal' },
+              severity: 'info',
+            });
+          } catch (healErr) {
+            logger.warn({ err: healErr, woId: wo.id }, '[invoice-heal] work_order DB persist failed — invoice uses canonical in-memory total; run repair migration to fix stored value');
+          }
+        }
+      }
+      for (const bs of selectedBillingSheets) {
+        const parts = money(bs.partsSubtotal);
+        const labor = money(bs.laborSubtotal);
+        const stored = money(bs.totalAmount);
+        const healed = parts + labor;
+        if (healed > stored + HEAL_TOLERANCE) {
+          // Update in-memory first — invoice aggregation always uses canonical total.
+          (bs as any).totalAmount = healed.toFixed(2);
+          try {
+            await db.execute(sql`UPDATE billing_sheets SET total_amount = ${healed.toFixed(2)} WHERE id = ${bs.id}`);
+            await recordAuditEvent(req, {
+              action: 'total_drift_repair',
+              actionType: 'data_repair',
+              targetType: 'billing_sheet',
+              targetId: String(bs.id),
+              summary: `Drift healed at invoice generation: $${stored.toFixed(2)} → $${healed.toFixed(2)}`,
+              details: { before: stored, after: healed, source: 'invoice_generation_heal' },
+              severity: 'info',
+            });
+          } catch (healErr) {
+            logger.warn({ err: healErr, bsId: bs.id }, '[invoice-heal] billing_sheet DB persist failed — invoice uses canonical in-memory total; run repair migration to fix stored value');
+          }
+        }
+      }
+      for (const wcb of selectedWcbs) {
+        const parts = money(wcb.partsSubtotal);
+        const labor = money(wcb.laborSubtotal);
+        const stored = money(wcb.totalAmount);
+        const healed = parts + labor;
+        if (healed > stored + HEAL_TOLERANCE) {
+          // Update in-memory first — invoice aggregation always uses canonical total.
+          (wcb as any).totalAmount = healed.toFixed(2);
+          try {
+            await db.execute(sql`UPDATE wet_check_billings SET total_amount = ${healed.toFixed(2)} WHERE id = ${wcb.id}`);
+            await recordAuditEvent(req, {
+              action: 'total_drift_repair',
+              actionType: 'data_repair',
+              targetType: 'wet_check_billing',
+              targetId: String(wcb.id),
+              summary: `Drift healed at invoice generation: $${stored.toFixed(2)} → $${healed.toFixed(2)}`,
+              details: { before: stored, after: healed, source: 'invoice_generation_heal' },
+              severity: 'info',
+            });
+          } catch (healErr) {
+            logger.warn({ err: healErr, wcbId: wcb.id }, '[invoice-heal] wet_check_billing DB persist failed — invoice uses canonical in-memory total; run repair migration to fix stored value');
+          }
+        }
+      }
+
       // Use stored financial snapshots as the source of truth.
       // Historical backfill guardrail: if laborSubtotal is null (pre-fix record),
       // laborSubtotal/partsSubtotal will aggregate as 0 but totalAmount is authoritative.

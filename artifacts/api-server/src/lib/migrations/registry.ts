@@ -1,11 +1,11 @@
 import type { MigrationDefinition } from './types';
-import { reconcileBillingSheetInvoiceTotalsMigration } from './reconcile-billing-sheet-invoice-totals';
 import { repairWoMatchEstimateMigration } from './repair-wo-match-estimate';
 import { reconcileInspectionPassMigration } from './reconcile-inspection-pass';
 import { invoiceRevisionBackfillMigration } from './invoice-revision-backfill';
+import { repairTicketTotalDriftMigration } from './repair-ticket-total-drift';
 
 const REGISTRY = new Map<string, MigrationDefinition>([
-  [reconcileBillingSheetInvoiceTotalsMigration.id, reconcileBillingSheetInvoiceTotalsMigration],
+  [repairTicketTotalDriftMigration.id, repairTicketTotalDriftMigration],
   [repairWoMatchEstimateMigration.id, repairWoMatchEstimateMigration],
   [reconcileInspectionPassMigration.id, reconcileInspectionPassMigration],
   [invoiceRevisionBackfillMigration.id, invoiceRevisionBackfillMigration],

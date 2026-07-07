@@ -1,10 +1,8 @@
-// Migration registry tests — updated after registry pruning.
+// Migration registry tests — updated after registry swap (Task #1752).
 //
-// Registry now contains only two entries:
-//   - reconcile-billing-sheet-invoice-totals-v1  (re-runnable maintenance utility)
-//   - repair-wo-match-estimate-v1                (new: rebuild flagged WOs to approved estimate)
-//
-// All finished one-shots and deprecated entries have been removed.
+// reconcile-billing-sheet-invoice-totals-v1 has been removed from the registry
+// and replaced by repair-ticket-total-drift-v1, which covers all ticket types
+// regardless of invoice status.
 
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -15,11 +13,11 @@ import { sql } from "drizzle-orm";
 // ── Static registry shape ──────────────────────────────────────────────────────
 
 describe("migration registry — static shape", () => {
-  it("contains reconcile-billing-sheet-invoice-totals-v1", () => {
+  it("contains repair-ticket-total-drift-v1", () => {
     const ids = listMigrations().map((m) => m.id);
     assert.ok(
-      ids.includes("reconcile-billing-sheet-invoice-totals-v1"),
-      "missing reconcile-billing-sheet-invoice-totals-v1",
+      ids.includes("repair-ticket-total-drift-v1"),
+      "missing repair-ticket-total-drift-v1",
     );
   });
 
@@ -36,6 +34,14 @@ describe("migration registry — static shape", () => {
     assert.ok(
       ids.includes("invoice-revision-backfill-v1"),
       "missing invoice-revision-backfill-v1",
+    );
+  });
+
+  it("does NOT contain reconcile-billing-sheet-invoice-totals-v1 (superseded)", () => {
+    const ids = new Set(listMigrations().map((m) => m.id));
+    assert.ok(
+      !ids.has("reconcile-billing-sheet-invoice-totals-v1"),
+      "reconcile-billing-sheet-invoice-totals-v1 should not be in the registry (superseded by repair-ticket-total-drift-v1)",
     );
   });
 
@@ -61,6 +67,18 @@ describe("migration registry — static shape", () => {
     assert.equal(getMigration("nonexistent"), undefined);
   });
 
+  it("repair-ticket-total-drift-v1 has the required MigrationDefinition shape", () => {
+    const m = getMigration("repair-ticket-total-drift-v1");
+    assert.ok(m, "getMigration should return a definition");
+    assert.equal(m.id, "repair-ticket-total-drift-v1");
+    assert.ok(m.title.length > 0, "title should be non-empty");
+    assert.ok(m.description.length > 0, "description should be non-empty");
+    assert.equal(typeof m.check, "function");
+    assert.equal(typeof m.preview, "function");
+    assert.equal(typeof m.run, "function");
+    assert.ok(!m.deprecated, "new migration must NOT be deprecated");
+  });
+
   it("repair-wo-match-estimate-v1 has the required MigrationDefinition shape", () => {
     const m = getMigration("repair-wo-match-estimate-v1");
     assert.ok(m, "getMigration should return a definition");
@@ -71,17 +89,6 @@ describe("migration registry — static shape", () => {
     assert.equal(typeof m.preview, "function");
     assert.equal(typeof m.run, "function");
     assert.ok(!m.deprecated, "new migration must NOT be deprecated");
-  });
-
-  it("reconcile-billing-sheet-invoice-totals-v1 has the required MigrationDefinition shape", () => {
-    const m = getMigration("reconcile-billing-sheet-invoice-totals-v1");
-    assert.ok(m, "getMigration should return a definition");
-    assert.equal(m.id, "reconcile-billing-sheet-invoice-totals-v1");
-    assert.ok(m.title.length > 0, "title should be non-empty");
-    assert.ok(m.description.length > 0, "description should be non-empty");
-    assert.equal(typeof m.check, "function");
-    assert.equal(typeof m.preview, "function");
-    assert.equal(typeof m.run, "function");
   });
 });
 
@@ -117,9 +124,6 @@ describe("repair-wo-match-estimate-v1 — check()", () => {
     `);
     const m = getMigration("repair-wo-match-estimate-v1")!;
     const status = await m.check();
-    // With the done marker set, the check looks for remaining candidates.
-    // On a clean dev DB with no flagged WOs the result is 'completed'.
-    // On a DB with residual candidates it will be 'partially_applied' — both are valid.
     assert.ok(
       status.state === "completed" || status.state === "partially_applied",
       `Expected completed or partially_applied, got ${status.state}`,
