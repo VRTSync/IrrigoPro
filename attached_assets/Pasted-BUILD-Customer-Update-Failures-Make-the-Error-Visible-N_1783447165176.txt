@@ -1,0 +1,89 @@
+BUILD — Customer Update Failures: Make the Error Visible Now; Fix Connection Resilience at the Right Layer
+
+What & Why
+Customer writes are failing in production with a DrizzleQueryError whose real Postgres cause (SQLSTATE + message) is invisible — the catch block only does console.error(error), and pino serializes the wrapper's giant query string without traversing error.cause, so the log truncates before the real cause. A live connection kill was seen during investigation (FATAL: terminating connection due to administrator command = 57P01), suggesting the hosted database is recycling/suspending connections — but that is a hypothesis until the actual error code is captured. This ticket ships in two phases: (1) make the error visible immediately (low-risk, standalone), then (2) fix resilience at the pool layer only after the cause is confirmed — not a speculative per-route retry.
+
+Why phased (corrections to the original approach): the original ticket bolted a per-route retry onto customer-routes.ts before confirming the cause, applied it to non-idempotent creates (duplicate risk), and fixed it at the wrong layer. Connection kills hit every route that touches db, so the durable fix is global, at the pool/driver.
+
+
+Phase 1 — Make the failure visible (ship now, standalone)
+
+File: artifacts/api-server/src/routes/customer-routes.ts.
+Replace bare console.error(error) in the customer create, update, delete, and labor-rate patch catch blocks with structured logging that traverses the DrizzleQueryError to the pg cause:
+
+tsreq.log.error({
+  err: error,
+  pgMessage: (error as any)?.cause?.message ?? null,
+  pgCode: (error as any)?.cause?.code ?? null,      // SQLSTATE, e.g. 57P01 / 08006 / 22P02 / 23505
+  pgDetail: (error as any)?.cause?.detail ?? null,
+  route: "PATCH /api/customers/:id",
+}, "customer write failed");
+
+
+Use a context object (indexed fields) — do not string-concatenate the DrizzleQueryError (that's what's truncating).
+No behavior change, no retry, no schema change. This is purely observability so the next step is targeted, not guessed.
+
+
+Phase 1 done: a failed customer write logs pgMessage + pgCode + pgDetail as discrete fields. Deploy this alone, reproduce/observe a real failure, and read the actual SQLSTATE.
+
+
+Phase 2 — Connection resilience at the pool layer (build ONLY after Phase 1 confirms the cause)
+
+Gate: only build this if the captured pgCode is a connection-termination code (57P01 admin shutdown, 08006 connection failure, 08003 connection does-not-exist) or a connection-closed message. If Phase 1 shows a SQL/type error (e.g. 22P02 invalid json, 23505 unique violation), skip Phase 2 and fix that specific query instead.
+
+File: lib/db/src/index.ts (the pool/driver — currently a bare new Pool({ connectionString: process.env.DATABASE_URL }) with no error handler, no sizing, no keepalive). Fix resilience globally, so every route benefits — not per-route:
+
+
+Add an idle-error handler so a killed idle connection can't throw unhandled and destabilize the process:
+
+
+ts   pool.on("error", (err) => { logger.error({ err, code: (err as any)?.code }, "idle pg client error"); });
+
+
+Tune the pool for the host (hosted/serverless Postgres): set max, idleTimeoutMillis, connectionTimeoutMillis, and keepAlive: true appropriate to the platform's connection limits and autosuspend behavior. (Confirm the host's limits before choosing numbers.)
+Add one resilient query wrapper used by write paths: on a connection-termination code only (57P01 / 08006 / 08003), retry once on a fresh connection. On any other code, rethrow immediately. Put this in one place (a withDbRetry(fn) helper), not scattered across routes.
+
+
+Idempotency guard (critical):
+
+
+Retry is safe for update / delete / labor-rate patch — idempotent.
+Do NOT blind-retry createCustomer. It's a plain db.insert(customers).values(...).returning() (storage.ts:2234) with no idempotency key — if the insert commits but the ack is lost to the drop, a retry creates a duplicate customer. Either exclude create from retry, or make it idempotent first (natural-key uniqueness + onConflict, or an idempotency key) before allowing retry.
+
+
+Root-cause note: if 57P01 "administrator command" is the confirmed cause, it's the hosting platform recycling/suspending connections. The pool tuning + idle handler above is the durable fix; if kills persist, escalate to a serverless-friendly driver / connection strategy as an ops task — but that's only worth doing once the code confirms it.
+
+
+Out of scope
+
+
+Per-route retries in customer-routes.ts (the retry belongs at the pool layer).
+Changing other routes' logging (Phase 1 is customer-routes only for now; the pattern can extend later).
+
+
+Definition of Done (attach proof — Rule 7)
+
+Phase 1:
+
+
+ file:line for each of the 4 customer catch blocks now logging pgMessage/pgCode/pgDetail.
+ Screenshot/paste of a real (or forced) customer-write failure log showing the SQLSTATE code as a discrete field.
+ Deployed; the captured pgCode reported here so Phase 2 can be gated.
+
+
+Phase 2 (only if a connection code was confirmed):
+
+
+ pool.on("error") handler added; pool sizing/keepalive set (state the values + why).
+ withDbRetry helper with one-shot retry scoped to 57P01/08006/08003; used by idempotent write paths only.
+ createCustomer is not blind-retried (excluded, or made idempotent first — show which).
+ Test: forced pg_terminate_backend(pg_backend_pid()) → the idempotent op retries and succeeds on a fresh connection; a create is not silently duplicated.
+ Deployed; commit message matches diff.
+
+
+Relevant files
+
+
+artifacts/api-server/src/routes/customer-routes.ts (Phase 1 logging; create/update/delete/labor-patch catch blocks)
+lib/db/src/index.ts:13-14 (Phase 2 pool: error handler, sizing, withDbRetry)
+artifacts/api-server/src/storage.ts:2234 (createCustomer — non-idempotent; do not blind-retry)
