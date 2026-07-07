@@ -1,0 +1,98 @@
+# BUILD — Wire QuickBooks In-Place Update Into the Correct & Reissue Flow (and Fix the Stale Confirmation Copy)
+
+**What & Why**
+The invoice Correct & Reissue flow now works correctly on the app side — a correction reissues the invoice at the **same number with `revision + 1`** (e.g. #04723 Rev 2), edits the source ticket, and keeps the original as version history. But two things still don't match the intended design at the point of reissue:
+
+1. **QuickBooks is not updated from the reissue flow.** The confirmation screen tells the user "QuickBooks sync must be completed manually — automated QB update is coming soon," so the corrected total never reaches QuickBooks unless someone fixes it by hand. The in-place-update machinery already exists (`updateQbInvoiceInPlace` + the stored `quickbooksSyncToken`, carried forward onto the reissued invoice) — it's just not triggered when the user reissues. The goal is: **reissuing a corrected invoice updates the same QuickBooks invoice in place, from this screen, so there's never a second QB invoice and never a manual step.**
+2. **The confirmation screen describes behavior that no longer happens.** It still says the new invoice gets a `-R1` suffix and the original is marked `superseded` — the old model we replaced. The copy needs to match what the code actually does (stable number, `Rev N`, previous version kept as history, QB updated in place).
+
+This is the last piece to make the correction/reissue loop complete and self-consistent — the customer-facing invoice, the app record, and QuickBooks all reflect the corrected amount after a single confirm, with no leftover artifacts and no manual reconciliation.
+
+## Current state (confirmed in code)
+- **Reissue logic is correct** (`invoice-correction-routes.ts`): the reissued invoice keeps `invoiceNumber` unchanged, sets `revision = nextRevision(original)`, `status: 'generated'`, and carries `quickbooksInvoiceId` + `quickbooksSyncToken` forward (~lines 810–827). The success message is "Invoice #04723 Rev 2 created."
+- **QB in-place update exists** but is a **separate, unlinked step**: `updateQbInvoiceInPlace` (`qb-invoice-ops.ts`) and the `POST /api/invoice-corrections/:id/qb-sync` endpoint route to it (~:945, :1006), but the reissue UI never calls it — it just shows the "manual / coming soon" note (`InvoiceCorrectionFlow.tsx`, Reissue step).
+- **Confirmation copy is stale** (`InvoiceCorrectionFlow.tsx`, Reissue step): still references `-R1`, `superseded`, and manual QB.
+
+## Slice 1 — Update the QuickBooks invoice in place as part of reissue
+The reissue should push the corrected total to the **same** QuickBooks invoice (no duplicate, no void), using the SyncToken that's already carried onto the reissued invoice.
+- After the reissue transaction commits (the corrected `generated` invoice exists with `quickbooksInvoiceId` + `quickbooksSyncToken`), call **`updateQbInvoiceInPlace`** on it — either automatically as the final step of the reissue, or via an explicit "Update QuickBooks" action on the Reissue step (see Slice 3 for which).
+- Refresh and persist the returned `SyncToken` on the reissued invoice (QB increments it on every update). Handle the stale-token case (`5010`) with the existing re-fetch-and-retry-once path.
+- **Never create a second QB invoice and never auto-void.** If the invoice was somehow never in QuickBooks (`quickbooksInvoiceId` null), fall back to a normal create; otherwise always update in place.
+- On QB failure, don't roll back the app-side reissue (the corrected invoice stands) — record `qbSyncStatus` as retryable and surface the error so the user can retry, exactly like the standalone qb-sync endpoint does.
+
+## Slice 1b — Match by invoice number in QuickBooks: update if it exists, create if it doesn't (self-healing)
+**This is the fix for the live "502: Could not fetch current SyncToken for QB invoice 48408" error and the class of bug behind it.** Today the sync trusts the **stored** `quickbooksInvoiceId` and blindly tries an in-place update of that id. When that id points at an invoice that no longer exists in QuickBooks (e.g. it was deleted in QB), the token fetch 404s and the whole sync dead-ends with "Retry the sync" — retrying can never help because the target is gone.
+
+**Change the sync to key off the invoice *number*, not the stored id.** Before updating, look up the invoice in QuickBooks by its `DocNumber` (the IrrigoPro invoice number, e.g. `04723`):
+- **Query QuickBooks for the DocNumber** — `SELECT Id, SyncToken FROM Invoice WHERE DocNumber = '{invoiceNumber}'` via `/v3/company/{realm}/query`.
+- **If it exists → update it in place** using the Id + SyncToken returned by that query (authoritative, live token — no separate `fetchQbSyncToken` guess, no stale-token dead-end). Persist the returned Id + refreshed SyncToken back onto the IrrigoPro invoice (self-heals a stale/wrong stored id).
+- **If it does not exist → create a fresh QB invoice** via `buildAndPostQbInvoice`, then store the new `quickbooksInvoiceId` + `quickbooksSyncToken`. Record it in the activity stream ("QB invoice #{number} not found in QuickBooks; created new {newId}").
+- **Net:** the sync is idempotent and self-healing — it can never create a duplicate (it checks the number first) and can never dead-end on a deleted/stale id (it recreates). This directly unsticks #04723: because 48408 was deleted, the DocNumber lookup finds nothing → it creates a fresh QB invoice #04723 at the corrected total.
+
+Keep the diagnostics too:
+- **Surface the real reason on genuine failures.** For a QB error that isn't "not found" (e.g. 401 expired connection), name it: "QuickBooks connection expired — reconnect QuickBooks and retry," not a generic "Retry the sync." Don't recreate the invoice on an auth failure (the connection, not the invoice, is the problem). Log HTTP status + `intuit_tid`.
+- Retain the stale-token (`5010`) re-fetch-and-retry-once path for the normal update case.
+
+## Slice 1c — Fix the `invoices.tsx` "Re-sync to QuickBooks" modal (it lies about the backend and caused a live outage)
+**This modal actively caused invoice 48408 to be deleted and the sync to dead-end.** The backend `/api/invoices/:id/sync-quickbooks` (`invoice-sync-quickbooks-route.ts`) was rebuilt for the in-place model (#1711): if the invoice has a QB id it **updates it in place**, and the `force` field is **accepted but ignored**. But the frontend resync modal (`invoices.tsx:1406–1459`, Task #1443) still describes the **old** create-new model:
+- Dialog body: "Re-syncing creates a brand-new invoice in QuickBooks … it does not update or remove the existing one." — **false**; it updates in place.
+- Amber warning: "Delete the old invoice in QuickBooks first, otherwise you'll have two invoices." — **actively harmful**; following it deletes the very invoice the in-place update needs, producing the 404.
+- Button: "Create new QuickBooks invoice" + `force: true`. — misleading; `force` is a no-op server-side.
+
+Rewrite this modal to match the backend:
+- Title/body: "Re-sync #{number} to QuickBooks — this **updates the existing** QuickBooks invoice in place with the current totals. It does **not** create a second invoice."
+- **Remove the "delete the old invoice in QuickBooks first" warning entirely.** Do not instruct deletion under the in-place model.
+- Button: "Update QuickBooks invoice" (drop "Create new"). The `force` field can stay in the payload for back-compat but the copy must not imply a new invoice.
+- Since the `!invoice.quickbooksInvoiceId` menu branch already creates a fresh QB invoice for never-synced invoices, this modal is only for already-linked invoices → always the update path.
+
+## Slice 2 — Fix the confirmation copy to match reality
+Rewrite the Reissue-step confirmation text in `InvoiceCorrectionFlow.tsx` so it describes what actually happens:
+- "A corrected invoice will be created as **Rev N** at the same number (**#04723**)." (not a `-R1` suffix)
+- "The previous version is kept as history and excluded from totals." (not "marked superseded" as a scary standalone)
+- "**QuickBooks will be updated in place** — the same invoice, corrected amount (no duplicate)." (replace the "manual / coming soon" warning)
+- Keep "All correction data is permanently recorded for audit."
+
+## Slice 3 — Decide the QB trigger (one small product choice)
+Two acceptable shapes; pick one and make the copy match:
+- **(A) Automatic:** confirming the reissue also updates QuickBooks in the same action, and the result screen shows "QuickBooks updated (invoice #04723, $2,286.09)" or a retry prompt on failure. Simplest for the user.
+- **(B) Explicit step:** after reissue, the Reissue step shows an "Update QuickBooks now" button that calls the in-place update, so the user consciously pushes to QB. Safer/more deliberate for a money system.
+Given QuickBooks is money and your standing rule is deliberate QB actions (never silent/never auto-void), **(B) explicit button is recommended** — the reissue creates the corrected invoice, then one clear "Update QuickBooks" click pushes it in place, with the result shown. Auto (A) is acceptable if you'd rather it be one click total.
+
+## Done looks like
+- Reissuing a corrected invoice updates the **same** QuickBooks invoice to the corrected amount, in place — no second QB invoice, no manual QuickBooks step, no void.
+- The stored `SyncToken` is refreshed after the update; a stale-token conflict self-heals; a QB failure is retryable and doesn't undo the app-side reissue.
+- The confirmation screen's copy matches reality (Rev N at the same number, previous version kept as history, QuickBooks updated in place).
+- Worked example: correcting #04723 by $510 → app shows **#04723 Rev 2 = $2,286.09**, and QuickBooks shows the **same** invoice #04723 at **$2,286.09**.
+
+## Out of scope
+- The reissue/revision logic itself (already built and correct — this only wires QB into it and fixes copy).
+- A paid-invoice credit-note path (a paid invoice needs a credit memo, not an in-place correction — that's a separate future flow; this covers unpaid/unapproved invoices, which is the correction use case).
+- Merge/superseded handling (separate work).
+
+## Tests
+- Reissue a corrected invoice that's in QuickBooks → `updateQbInvoiceInPlace` is called with the carried-forward id + token; QB reflects the corrected total on the same invoice; stored token refreshed; no duplicate QB invoice created.
+- Simulated stale token (`5010`) → re-fetch + single retry succeeds.
+- **DocNumber lookup finds an existing QB invoice** → updates it in place using the queried Id + SyncToken; stored id self-heals if it differed; no duplicate created.
+- **DocNumber lookup finds nothing (invoice deleted in QB, as with 48408)** → creates a fresh QB invoice, stores the new id/token, logs "not found; created new" (reproduces and fixes the live 48408 error).
+- **Stale stored `quickbooksInvoiceId` but the number still exists in QB** → matched by number and updated, and the stored id is corrected to the live one.
+- **Simulated 401/expired connection** → user-facing message says "reconnect QuickBooks," does NOT create a new invoice, does NOT say "Retry the sync."
+- **Two syncs in a row for the same invoice** → second one matches the number and updates; never a duplicate in QB (idempotent).
+- Simulated QB failure → app-side reissue stands; `qbSyncStatus` retryable; error surfaced; retry works.
+- Reissued invoice with no prior `quickbooksInvoiceId` → creates fresh in QB (fallback), not an error.
+- Confirmation copy no longer mentions `-R1` or manual QB; matches the Rev-N / in-place behavior.
+- Company isolation holds on the reissue + QB path.
+
+## Definition of Done (attach proof — Rule 7)
+- [ ] `file:line` for: the QB-in-place call wired into the reissue flow; the **match-by-DocNumber → update-or-create** logic (Slice 1b); the 401 reconnect message + stale-token retry; the `invoices.tsx` resync-modal rewrite (Slice 1c — remove the "delete the old invoice" warning); the reissue confirmation-copy rewrite.
+- [ ] Screenshot: re-syncing #04723 (whose QB invoice was deleted) now **creates a fresh QB invoice** at the corrected total, no error.
+- [ ] Screenshot: the reissue result showing **#04723 Rev 2 = $2,286.09** in the app.
+- [ ] Screenshot: QuickBooks showing the **same** invoice #04723 at the corrected amount (no duplicate).
+- [ ] Screenshot: the updated confirmation screen copy (no `-R1`, no "manual QB").
+- [ ] Test output for the QB in-place / stale-token / failure-retry cases.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+- `artifacts/api-server/src/routes/invoice-correction-routes.ts` (reissue ~810–930; qb-sync endpoint ~940–1010 — the in-place path to call)
+- `artifacts/api-server/src/routes/qb-invoice-ops.ts` (`updateQbInvoiceInPlace`, `fetchQbSyncToken`)
+- `artifacts/irrigopro/src/pages/invoices/InvoiceCorrectionFlow.tsx` (Reissue step — the QB trigger + the confirmation copy)
+- `lib/db/src/schema/schema.ts` (`invoices.quickbooksInvoiceId`, `quickbooksSyncToken`)
