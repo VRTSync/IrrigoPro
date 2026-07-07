@@ -95,25 +95,18 @@ async function startServer(role = "irrigation_manager"): Promise<Harness> {
     }
   });
 
-  // Mirrors the production approve route handler (without audit-log deps).
-  app.post("/api/wet-checks/:id/approve-inspection", auth, async (req: any, res) => {
-    if (!MANAGER_ROLES.has(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
-    const wcId = parseInt(req.params.id);
-    if (isNaN(wcId)) { res.status(400).json({ message: "Invalid wet check id" }); return; }
-    try {
-      const result = await approve(wcId, req.authenticatedUserCompanyId);
-      res.json(result);
-    } catch (e: any) {
-      const msg: string = e.message ?? "Internal error";
-      const status = msg.includes("not in a pending state") || msg.includes("not pending") ? 409 : msg.includes("not found") ? 404 : msg.includes("not an inspection") ? 400 : 500;
-      res.status(status).json({ message: msg });
-    }
+  // approve-inspection is retired — unconditionally returns 410 Gone.
+  app.post("/api/wet-checks/:id/approve-inspection", (_req, res) => {
+    res.status(410).json({
+      message: "This endpoint has been retired. Use POST /api/wet-checks/:id/pass-to-estimates instead.",
+      replacedBy: "/api/wet-checks/:id/pass-to-estimates",
+    });
   });
 
   // Mirrors the production revert-inspection route handler (without audit-log deps).
   app.post("/api/wet-checks/:id/revert-inspection", auth, async (req: any, res) => {
     if (!REVERT_ALLOWED_ROLES.has(req.authenticatedUserRole)) {
-      res.status(403).json({ message: "Forbidden. Reverting an inspection approval requires company_admin or super_admin." });
+      res.status(403).json({ message: "Forbidden. Reverting an inspection hand-off requires company_admin or super_admin." });
       return;
     }
     const wcId = parseInt(req.params.id);
@@ -126,7 +119,8 @@ async function startServer(role = "irrigation_manager"): Promise<Harness> {
       const is409 =
         msg.includes("not in a converted state") ||
         msg.includes("already been included in invoice") ||
-        msg.includes("not approved and cannot be reverted") ||
+        msg.includes("Cannot revert:") ||
+        msg.includes("not in approved_internal state") ||
         msg.includes("not an inspection wet check");
       const status = is409 ? 409 : msg.includes("not found") ? 404 : 500;
       res.status(status).json({ message: msg });
@@ -207,54 +201,36 @@ describe("POST /api/wet-checks/:id/build-inspection-estimate", () => {
   });
 });
 
-// ─── approve-inspection ───────────────────────────────────────────────────────
+// ─── approve-inspection RETIRED (410 tombstone) ───────────────────────────────
+//
+// /approve-inspection was superseded by /pass-to-estimates (Task #1738).
+// The old endpoint stamped lifecycle='approved' (full customer-approval), which
+// was incorrect. The new endpoint only stamps internalStatus='approved_internal'.
+// All clients should use /pass-to-estimates going forward.
 
-describe("POST /api/wet-checks/:id/approve-inspection", () => {
+describe("POST /api/wet-checks/:id/approve-inspection (retired — 410)", () => {
   let h: Harness;
   before(async () => { h = await startServer("irrigation_manager"); });
   after(async () => { await h.close(); });
 
-  it("(f) calls storage.approveInspectionEstimate, returns estimate+wetCheck", async () => {
-    let storageCalled = false;
-    h.setApprove(async (wcId, cid) => {
-      storageCalled = true;
-      assert.equal(wcId, 7);
-      assert.equal(cid, 10);
-      return { estimate: { ...STUB_ESTIMATE, lifecycle: "approved", status: "approved" }, wetCheck: STUB_WC };
-    });
-
+  it("(f) returns 410 Gone — endpoint is retired", async () => {
     const r = await post(`${h.baseUrl}/api/wet-checks/7/approve-inspection`);
+    assert.equal(r.status, 410, "retired endpoint must return 410 Gone");
     const body = await r.json() as any;
-
-    assert.equal(r.status, 200);
-    assert.equal(body.estimate.lifecycle, "approved");
-    assert.equal(body.wetCheck.status, "converted");
-    assert.ok(storageCalled, "storage.approveInspectionEstimate must be called");
+    assert.match(body.message, /retired|pass-to-estimates/i, "body must mention the replacement");
+    assert.ok(typeof body.replacedBy === "string", "replacedBy field must be present");
   });
 
-  it("(g) 'not pending' error maps to 409 Conflict", async () => {
-    h.setApprove(async () => { throw new Error("is not in a pending state and cannot be approved"); });
-    const r = await post(`${h.baseUrl}/api/wet-checks/7/approve-inspection`);
-    assert.equal(r.status, 409);
+  it("(g) 410 returned for any wet check id", async () => {
+    const r = await post(`${h.baseUrl}/api/wet-checks/999/approve-inspection`);
+    assert.equal(r.status, 410);
   });
 
-  it("(h) 'not an inspection' error maps to 400", async () => {
-    h.setApprove(async () => { throw new Error("is not an inspection wet check"); });
-    const r = await post(`${h.baseUrl}/api/wet-checks/7/approve-inspection`);
-    assert.equal(r.status, 400);
-  });
-
-  it("(i) 'not found' error maps to 404", async () => {
-    h.setApprove(async () => { throw new Error("Wet check not found"); });
-    const r = await post(`${h.baseUrl}/api/wet-checks/7/approve-inspection`);
-    assert.equal(r.status, 404);
-  });
-
-  it("(j) returns 403 for field_tech role", async () => {
+  it("(h) 410 returned for field_tech (no auth guard — endpoint is unconditionally retired)", async () => {
     const h2 = await startServer("field_tech");
     try {
       const r = await post(`${h2.baseUrl}/api/wet-checks/7/approve-inspection`);
-      assert.equal(r.status, 403);
+      assert.equal(r.status, 410);
     } finally {
       await h2.close();
     }
@@ -550,26 +526,36 @@ describe("POST /api/wet-checks/:id/revert-inspection", () => {
 });
 
 // ─── needs-review Rule 4 (pure qualification logic) ──────────────────────────
+//
+// Rule 4 was re-keyed in Task #1738: the gate is now the WC's own status
+// (must be in ACTIVE_WC = {submitted, pending_manager_review, partially_converted}).
+// Estimate lifecycle is no longer checked — the WC leaves the queue naturally
+// when it transitions to `converted` at the pass-to-estimates hand-off.
 
-describe("needs-review Rule 4 (inspection estimate pending)", () => {
-  function qualifiesRule4(mode: string, estLifecycle: string | null): boolean {
-    if (mode !== "inspection") return false;
-    if (estLifecycle === null) return true;
-    return estLifecycle !== "approved";
+describe("needs-review Rule 4 (inspection WC status gate)", () => {
+  const ACTIVE_WC = new Set(["submitted", "pending_manager_review", "partially_converted"]);
+
+  function qualifiesRule4(mode: string, wcStatus: string): boolean {
+    return mode === "inspection" && ACTIVE_WC.has(wcStatus);
   }
 
-  it("(e1) inspection WC with no estimate qualifies", () =>
-    assert.ok(qualifiesRule4("inspection", null)));
+  it("(e1) inspection WC in submitted qualifies", () =>
+    assert.ok(qualifiesRule4("inspection", "submitted")));
 
-  it("(e2) inspection WC with pending_review estimate qualifies", () =>
-    assert.ok(qualifiesRule4("inspection", "pending_review")));
+  it("(e2) inspection WC in pending_manager_review qualifies", () =>
+    assert.ok(qualifiesRule4("inspection", "pending_manager_review")));
 
-  it("(e3) inspection WC with approved estimate does not qualify", () =>
-    assert.ok(!qualifiesRule4("inspection", "approved")));
+  it("(e3) inspection WC in converted does NOT qualify (leaves queue at hand-off)", () =>
+    assert.ok(!qualifiesRule4("inspection", "converted")));
 
   it("(e4) service WC does not trigger Rule 4", () =>
-    assert.ok(!qualifiesRule4("service", null)));
+    assert.ok(!qualifiesRule4("service", "submitted")));
 
-  it("(e5) inspection WC with draft estimate qualifies", () =>
-    assert.ok(qualifiesRule4("inspection", "draft")));
+  it("(e5) inspection WC in partially_converted still qualifies (Seam 2 in progress)", () =>
+    assert.ok(qualifiesRule4("inspection", "partially_converted")));
+
+  it("(e6) Rule 4 is independent of estimate lifecycle (Seam 2 victim pattern)", () =>
+    // An inspection WC in submitted qualifies even if its estimate were somehow
+    // already at lifecycle='approved'. The manager still needs to click Pass.
+    assert.ok(qualifiesRule4("inspection", "submitted")));
 });

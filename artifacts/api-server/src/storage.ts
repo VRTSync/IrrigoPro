@@ -1160,10 +1160,12 @@ export interface IStorage {
     manager: { id: number; name: string },
   ): Promise<EstimateWithItems>;
 
-  // Approve the estimate linked to an Inspection wet check and transition the
-  // wet check to `converted`. Atomically stamps `approvedAt` / lifecycle on the
-  // estimate and `fullyConvertedAt` / status='converted' on the wet check.
-  approveInspectionEstimate(
+  // Internal sign-off for an Inspection wet check. Stamps
+  // estimate.internalStatus='approved_internal' (does NOT customer-approve) and
+  // flips the wet check to `converted`. Seam 2 self-heal: if the estimate is
+  // already customer-approved/sent, skips the estimate write but still converts
+  // the WC. Idempotent when the WC is already `converted`.
+  passInspectionToEstimates(
     wcId: number,
     companyId: number,
   ): Promise<{ estimate: EstimateWithItems; wetCheck: WetCheck }>;
@@ -10384,11 +10386,20 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  // approveInspectionEstimate
-  // --------------------------
-  // Approves the estimate linked to an Inspection wet check and transitions the
-  // wet check to `converted`. Must be called by a manager-tier role. Atomic.
-  async approveInspectionEstimate(
+  // passInspectionToEstimates
+  // -------------------------
+  // Manager internal sign-off for an Inspection wet check. Stamps
+  // estimate.internalStatus='approved_internal' (does NOT set lifecycle='approved'
+  // or approvedAt — customer approval rides the normal estimate flow unchanged).
+  // Flips the wet check to `converted` with fullyConvertedAt=now.
+  //
+  // Seam 2 self-heal: if the estimate is already customer-approved/sent (lifecycle
+  // in 'sent'/'approved'/'rejected' OR internalStatus='sent_to_customer'), the
+  // estimate write is skipped but the WC is still converted.
+  //
+  // Idempotency: if the WC is already `converted`, returns current state with no
+  // writes.
+  async passInspectionToEstimates(
     wcId: number,
     companyId: number,
   ): Promise<{ estimate: EstimateWithItems; wetCheck: WetCheck }> {
@@ -10401,57 +10412,72 @@ export class DatabaseStorage implements IStorage {
         throw new Error(`Wet check #${wcId} is not an inspection wet check`);
       }
 
-      // 2. Find the linked estimate.
+      // 2. Idempotency: WC already converted — return stable result without writes.
+      if (wc.status === "converted") {
+        const [existingEstIdem] = await tx.select().from(estimates)
+          .where(eq(estimates.originWetCheckId, wcId));
+        if (existingEstIdem) {
+          const itemsIdem = await tx.select().from(estimateItems)
+            .where(eq(estimateItems.estimateId, existingEstIdem.id));
+          return {
+            estimate: { ...existingEstIdem, lifecycleStatus: computeLifecycleStatus(existingEstIdem), items: itemsIdem } as EstimateWithItems,
+            wetCheck: wc,
+          };
+        }
+      }
+
+      // 3. Find the linked estimate.
       const [existingEst] = await tx.select().from(estimates)
         .where(eq(estimates.originWetCheckId, wcId));
       if (!existingEst) {
         throw new Error(`No estimate found for inspection wet check #${wcId}. Build the estimate first.`);
       }
-      // 3. Acquire a row-lock on the estimate, then use a conditional
-      // WHERE guard (same CAS-style pattern as approveEstimateAndCreateWorkOrder)
-      // so two concurrent approve requests serialize and the second writer
-      // sees zero rows from the guard and hits the idempotency branch.
+
+      // 4. Acquire a row-lock on the estimate (CAS-style pattern).
       const [lockedEst] = await tx.select().from(estimates)
         .where(eq(estimates.id, existingEst.id))
         .for("update");
       if (!lockedEst) throw new Error(`Estimate for wet check #${wcId} not found`);
 
-      if (lockedEst.lifecycle === "approved") {
-        // Already approved — return stable result (idempotent).
-        const items = await tx.select().from(estimateItems)
-          .where(eq(estimateItems.estimateId, lockedEst.id));
-        const [currentWc] = await tx.select().from(wetChecks).where(eq(wetChecks.id, wcId));
-        return {
-          estimate: { ...lockedEst, lifecycleStatus: computeLifecycleStatus(lockedEst), items } as EstimateWithItems,
-          wetCheck: currentWc,
-        };
-      }
-
       const now = new Date();
 
-      // 4. Flip the estimate to approved using a status-gated WHERE clause.
-      // The `status = 'pending'` guard is belt-and-braces: combined with
-      // the FOR UPDATE row lock above it makes the transition idempotent
-      // under concurrency (the same pattern used by approveEstimateAndCreateWorkOrder).
-      const [approvedEst] = await tx.update(estimates)
-        .set({
-          status: "approved",
-          internalStatus: "approved_internal",
-          // Task #642 — dual-write the canonical lifecycle column.
-          lifecycle: "approved",
-          approvedAt: now,
-          updatedAt: now,
-        } as Partial<typeof estimates.$inferInsert>)
-        .where(and(eq(estimates.id, lockedEst.id), eq(estimates.status, "pending")))
-        .returning();
-      if (!approvedEst) {
-        throw new Error(`Estimate for wet check #${wcId} is not in a pending state and cannot be approved`);
+      // 5. Seam 2 self-heal: if the customer has already acted on the estimate
+      //    (lifecycle in sent/approved/rejected or internalStatus=sent_to_customer),
+      //    skip the estimate write — the auto-WO has already been created by the
+      //    token-approve flow. Still convert the WC below.
+      const CUSTOMER_ACTED_LIFECYCLES = new Set(["sent", "approved", "rejected"]);
+      const estimateCustomerActed =
+        CUSTOMER_ACTED_LIFECYCLES.has(lockedEst.lifecycle ?? "") ||
+        lockedEst.internalStatus === "sent_to_customer";
+
+      let finalEst = lockedEst;
+
+      if (!estimateCustomerActed) {
+        // 6. Normal path: internal sign-off only. Guard: only advance from
+        //    pending_approval → approved_internal. Two concurrent callers
+        //    serialize via the FOR UPDATE lock; the second sees zero rows
+        //    returned by the CAS guard and hits idempotency via the WC check
+        //    at step 2 on its next attempt.
+        const [updatedEst] = await tx.update(estimates)
+          .set({
+            internalStatus: "approved_internal",
+            updatedAt: now,
+          } as Partial<typeof estimates.$inferInsert>)
+          .where(and(
+            eq(estimates.id, lockedEst.id),
+            eq(estimates.internalStatus, "pending_approval"),
+          ))
+          .returning();
+        if (!updatedEst) {
+          throw new Error(`Estimate for wet check #${wcId} is not in pending_approval state and cannot be passed to estimates`);
+        }
+        finalEst = updatedEst;
       }
 
       const items = await tx.select().from(estimateItems)
-        .where(eq(estimateItems.estimateId, approvedEst.id));
+        .where(eq(estimateItems.estimateId, finalEst.id));
 
-      // 4. Transition the wet check to `converted`.
+      // 7. Transition the wet check to `converted`.
       const [updatedWc] = await tx.update(wetChecks)
         .set({
           status: "converted",
@@ -10462,7 +10488,7 @@ export class DatabaseStorage implements IStorage {
         .returning();
 
       return {
-        estimate: { ...approvedEst, lifecycleStatus: computeLifecycleStatus(approvedEst), items } as EstimateWithItems,
+        estimate: { ...finalEst, lifecycleStatus: computeLifecycleStatus(finalEst), items } as EstimateWithItems,
         wetCheck: updatedWc,
       };
     });
@@ -10470,11 +10496,16 @@ export class DatabaseStorage implements IStorage {
 
   // unapproveInspectionEstimate
   // ----------------------------
-  // Reverts an accidentally-approved Inspection wet check. Steps both rows back:
-  //   - estimate: lifecycle='pending_review', status='pending', internalStatus='pending_approval', approvedAt=null
+  // Reverts a pass-to-estimates hand-off. Steps both rows back:
+  //   - estimate: internalStatus='pending_approval' (status/lifecycle untouched —
+  //     they were never changed by passInspectionToEstimates)
   //   - wet check: status='submitted', fullyConvertedAt=null
-  // Blocked if any wet_check_billings row for this wet check is already invoiced
-  // (invoiceId IS NOT NULL) — the invoice must be voided first.
+  //
+  // Blocked if:
+  //   - Any wet_check_billings row for this wet check is already invoiced.
+  //   - The estimate has moved beyond approved_internal (sent/approved/rejected or
+  //     internalStatus='sent_to_customer') — the hand-off cannot be undone once the
+  //     estimate has left the building.
   async unapproveInspectionEstimate(
     wcId: number,
     companyId: number,
@@ -10512,22 +10543,33 @@ export class DatabaseStorage implements IStorage {
         .where(eq(estimates.id, existingEst.id))
         .for("update");
       if (!lockedEst) throw new Error(`Estimate for wet check #${wcId} not found`);
-      if (lockedEst.lifecycle !== "approved") {
-        throw new Error(`Estimate for wet check #${wcId} is not approved and cannot be reverted`);
+
+      // 4. New guard: block revert if estimate has already left the building.
+      //    Once sent, approved, or rejected the hand-off cannot be undone.
+      const BLOCKING_LIFECYCLES = new Set(["sent", "approved", "rejected"]);
+      if (
+        BLOCKING_LIFECYCLES.has(lockedEst.lifecycle ?? "") ||
+        lockedEst.internalStatus === "sent_to_customer"
+      ) {
+        throw new Error(
+          `Cannot revert: estimate for wet check #${wcId} has already been sent to the customer or acted upon. The hand-off cannot be undone at this stage.`,
+        );
+      }
+
+      if (lockedEst.internalStatus !== "approved_internal") {
+        throw new Error(`Estimate for wet check #${wcId} is not in approved_internal state and cannot be reverted`);
       }
 
       const now = new Date();
 
-      // 4. Revert the estimate to pending_review using a lifecycle-gated WHERE.
+      // 5. Revert the estimate's internal sign-off using an internalStatus-gated CAS.
+      //    status/lifecycle are untouched — they were never changed by passInspectionToEstimates.
       const [revertedEst] = await tx.update(estimates)
         .set({
-          status: "pending",
           internalStatus: "pending_approval",
-          lifecycle: "pending_review",
-          approvedAt: null,
           updatedAt: now,
         } as Partial<typeof estimates.$inferInsert>)
-        .where(and(eq(estimates.id, lockedEst.id), eq(estimates.lifecycle, "approved")))
+        .where(and(eq(estimates.id, lockedEst.id), eq(estimates.internalStatus, "approved_internal")))
         .returning();
       if (!revertedEst) {
         throw new Error(`Estimate for wet check #${wcId} could not be reverted — concurrent modification detected`);
@@ -10536,7 +10578,7 @@ export class DatabaseStorage implements IStorage {
       const items = await tx.select().from(estimateItems)
         .where(eq(estimateItems.estimateId, revertedEst.id));
 
-      // 5. Revert the wet check to submitted.
+      // 6. Revert the wet check to submitted.
       const [updatedWc] = await tx.update(wetChecks)
         .set({
           status: "submitted",

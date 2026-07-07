@@ -392,12 +392,15 @@ function NoSnapshotYet() {
 
 interface InspectionEstimateSectionProps {
   wetCheckId: number;
-  onApproveSuccess: () => void;
+  // Current status of the wet check, used to drive post-hand-off state.
+  // `converted` → hand-off already done; show banner + optional revert.
+  wcStatus: string;
 }
 
-function InspectionEstimateSection({ wetCheckId, onApproveSuccess }: InspectionEstimateSectionProps) {
+function InspectionEstimateSection({ wetCheckId, wcStatus }: InspectionEstimateSectionProps) {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const [, navigate] = useLocation();
   const [editorOpen, setEditorOpen] = useState(false);
   const [revertDialogOpen, setRevertDialogOpen] = useState(false);
 
@@ -414,48 +417,52 @@ function InspectionEstimateSection({ wetCheckId, onApproveSuccess }: InspectionE
     staleTime: 0,
   });
 
-  const [approveErr, setApproveErr] = useState<string | null>(null);
+  const [passErr, setPassErr] = useState<string | null>(null);
+  const [revertErr, setRevertErr] = useState<string | null>(null);
 
   const revertMut = useMutation({
     mutationFn: () =>
       apiRequest(`/api/wet-checks/${wetCheckId}/revert-inspection`, "POST", {}),
     onSuccess: () => {
       setRevertDialogOpen(false);
+      setRevertErr(null);
       qc.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId] });
       qc.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId, "inspection-estimate"] });
       qc.invalidateQueries({ queryKey: ["/api/wet-checks/needs-review"] });
       qc.invalidateQueries({ queryKey: ["/api/estimates"] });
       toast({
-        title: "Approval reverted",
+        title: "Hand-off reverted",
         description: "Estimate returned to pending review. Wet check returned to submitted.",
       });
       void refetchEstimate();
     },
     onError: (e: any) => {
       setRevertDialogOpen(false);
-      const msg = e?.message ?? "Could not revert the approval. Please try again.";
+      const msg = e?.message ?? "Could not revert the hand-off. Please try again.";
+      setRevertErr(msg);
       toast({ title: "Revert failed", description: msg, variant: "destructive" });
     },
   });
 
-  const approveMut = useMutation({
+  const passMut = useMutation({
     mutationFn: () =>
-      apiRequest(`/api/wet-checks/${wetCheckId}/approve-inspection`, "POST", {}),
+      apiRequest(`/api/wet-checks/${wetCheckId}/pass-to-estimates`, "POST", {}),
     onSuccess: () => {
-      setApproveErr(null);
+      setPassErr(null);
+      // Invalidate WC so wcStatus prop updates to "converted", showing the
+      // in-place banner. Do NOT call onApproveSuccess (which navigates away).
       qc.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId] });
       qc.invalidateQueries({ queryKey: ["/api/wet-checks/needs-review"] });
       qc.invalidateQueries({ queryKey: ["/api/estimates"] });
       toast({
-        title: "Inspection approved",
-        description: "Estimate approved and wet check marked converted.",
+        title: "Passed to estimates",
+        description: "Send it to the customer from the Estimates page.",
       });
-      onApproveSuccess();
     },
     onError: (e: any) => {
-      const msg = e?.message ?? "Could not approve. Please try again.";
-      setApproveErr(msg);
-      toast({ title: "Approval failed", description: msg, variant: "destructive" });
+      const msg = e?.message ?? "Could not pass to estimates. Please try again.";
+      setPassErr(msg);
+      toast({ title: "Pass failed", description: msg, variant: "destructive" });
     },
   });
 
@@ -491,7 +498,14 @@ function InspectionEstimateSection({ wetCheckId, onApproveSuccess }: InspectionE
     );
   }
 
-  const isAlreadyApproved = estimate.lifecycle === "approved";
+  // Post-hand-off state: WC is `converted` (passed to estimates).
+  const isPassedToEstimates = wcStatus === "converted";
+  // Revert is only available while the estimate is still at approved_internal —
+  // once it's been sent/approved/rejected the hand-off cannot be undone.
+  const canRevert = isPassedToEstimates &&
+    canRevertInspectionApproval() &&
+    estimate.internalStatus === "approved_internal";
+
   const items = estimate.items ?? [];
   const partsSubtotal = parseFloat(String(estimate.partsSubtotal ?? "0"));
   const laborSubtotal = parseFloat(String(estimate.laborSubtotal ?? "0"));
@@ -510,16 +524,16 @@ function InspectionEstimateSection({ wetCheckId, onApproveSuccess }: InspectionE
           <Badge
             variant="outline"
             className={`text-xs border ${
-              isAlreadyApproved
-                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+              isPassedToEstimates
+                ? "bg-violet-50 text-violet-700 border-violet-200"
                 : "bg-amber-50 text-amber-700 border-amber-200"
             }`}
             data-testid="crs-inspection-estimate-status"
           >
-            {isAlreadyApproved ? "Approved" : "Pending Approval"}
+            {isPassedToEstimates ? "Passed to Estimates" : "Pending Review"}
           </Badge>
         </div>
-        {!isAlreadyApproved && (
+        {!isPassedToEstimates && (
           <Button
             size="sm"
             variant="outline"
@@ -533,13 +547,12 @@ function InspectionEstimateSection({ wetCheckId, onApproveSuccess }: InspectionE
         )}
       </div>
 
-      {/* Estimate editor modal — lets the manager adjust line items before approving */}
+      {/* Estimate editor modal — lets the manager adjust line items before passing */}
       <EstimateDetailModal
         open={editorOpen}
         onOpenChange={(open) => {
           setEditorOpen(open);
           if (!open) {
-            // Refetch after the editor closes so our preview reflects any edits.
             void refetchEstimate();
           }
         }}
@@ -585,8 +598,8 @@ function InspectionEstimateSection({ wetCheckId, onApproveSuccess }: InspectionE
         </div>
       )}
 
-      {/* Approve action */}
-      {!isAlreadyApproved && (
+      {/* Pass to Estimates action */}
+      {!isPassedToEstimates && (
         <div
           className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-3"
           data-testid="crs-inspection-approve-panel"
@@ -594,50 +607,75 @@ function InspectionEstimateSection({ wetCheckId, onApproveSuccess }: InspectionE
           <div className="flex items-center gap-2">
             <ThumbsUp className="w-4 h-4 text-emerald-600" />
             <span className="text-sm font-medium text-emerald-800">
-              Approve inspection estimate
+              Pass inspection estimate to Estimates
             </span>
           </div>
           <p className="text-xs text-emerald-700">
-            Approving this estimate confirms the documented findings and converts the wet check.
-            The estimate is then available for customer review.
+            This confirms the documented findings and places the estimate in the Estimates queue.
+            The customer will then be sent the estimate for review and approval.
           </p>
 
-          {approveErr && (
+          {passErr && (
             <div
               className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
               data-testid="crs-inspection-approve-error"
             >
               <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              <span>{approveErr}</span>
+              <span>{passErr}</span>
             </div>
           )}
 
           <Button
-            onClick={() => { setApproveErr(null); approveMut.mutate(); }}
-            disabled={approveMut.isPending}
+            onClick={() => { setPassErr(null); passMut.mutate(); }}
+            disabled={passMut.isPending}
             className="bg-emerald-600 hover:bg-emerald-700 text-white"
             data-testid="crs-inspection-approve-button"
           >
-            {approveMut.isPending ? (
-              <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Approving…</>
+            {passMut.isPending ? (
+              <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Passing…</>
             ) : (
               <>
                 <CheckCircle2 className="w-4 h-4 mr-2" />
-                Approve Estimate &amp; Convert
+                Pass to Estimates
               </>
             )}
           </Button>
         </div>
       )}
 
-      {isAlreadyApproved && (
+      {/* Post-hand-off banner */}
+      {isPassedToEstimates && (
         <div className="space-y-3" data-testid="crs-inspection-approved-notice">
-          <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
-            Inspection estimate approved. Wet check converted.
+          <div className="rounded-lg border border-violet-200 bg-violet-50 p-4 space-y-2">
+            <div className="flex items-center gap-2 text-sm text-violet-800 font-medium">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              Passed to estimates — send it to the customer from the Estimates page.
+            </div>
+            <div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-violet-300 text-violet-700 hover:bg-violet-100 text-xs"
+                onClick={() => navigate(`/estimates?openEstimate=${estimate.id}`)}
+                data-testid="crs-inspection-open-estimate-button"
+              >
+                <FileText className="w-3 h-3 mr-1.5" />
+                View {estimate.estimateNumber ?? `EST-${estimate.id}`}
+              </Button>
+            </div>
           </div>
 
-          {canRevertInspectionApproval() && (
+          {revertErr && (
+            <div
+              className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+              data-testid="crs-inspection-revert-error"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>{revertErr}</span>
+            </div>
+          )}
+
+          {canRevert && (
             <div className="flex justify-end">
               <Button
                 size="sm"
@@ -647,7 +685,7 @@ function InspectionEstimateSection({ wetCheckId, onApproveSuccess }: InspectionE
                 data-testid="crs-inspection-revert-button"
               >
                 <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
-                Revert Approval
+                Undo Pass to Estimates
               </Button>
             </div>
           )}
@@ -657,15 +695,16 @@ function InspectionEstimateSection({ wetCheckId, onApproveSuccess }: InspectionE
       <AlertDialog open={revertDialogOpen} onOpenChange={setRevertDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Revert inspection approval?</AlertDialogTitle>
+            <AlertDialogTitle>Undo pass to estimates?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will undo the approval:
+              This will undo the hand-off:
               <ul className="mt-2 space-y-1 list-disc pl-4 text-sm">
-                <li>The estimate returns to <strong>Pending Review</strong> so it can be corrected and re-approved.</li>
+                <li>The estimate returns to <strong>Pending Review</strong> so it can be corrected and re-passed.</li>
                 <li>The wet check returns to <strong>Submitted</strong>.</li>
               </ul>
               <span className="block mt-2">
-                This is blocked if the wet check billing has already been included in an invoice. In that case, void the invoice first.
+                This is blocked once the estimate has been sent to the customer, approved, or rejected.
+                It is also blocked if the wet check billing has already been included in an invoice.
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -680,7 +719,7 @@ function InspectionEstimateSection({ wetCheckId, onApproveSuccess }: InspectionE
               {revertMut.isPending ? (
                 <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Reverting…</>
               ) : (
-                "Revert Approval"
+                "Undo Hand-off"
               )}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -969,11 +1008,11 @@ export function CombinedReviewSurface({ wetCheckId }: CombinedReviewSurfaceProps
         >
           <div className="text-xs text-gray-500 mb-3">
             This is an inspection wet check. All documented findings have been consolidated into a
-            single estimate below. Review the line items and approve to convert the wet check.
+            single estimate below. Review the line items, then pass to estimates so the customer can approve.
           </div>
           <InspectionEstimateSection
             wetCheckId={wetCheckId}
-            onApproveSuccess={handleApproveSuccess}
+            wcStatus={(wc as any).status ?? "submitted"}
           />
         </SectionCard>
       )}

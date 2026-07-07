@@ -16098,16 +16098,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // (submitted or pending_manager_review only — not approved_passed_to_billing).
         const snapshotPending = wcb != null && PENDING_REVIEW_WCB.has(wcb.status);
 
-        // Rule 4 signal (Inspection Mode — Slice 2): this is an inspection
-        // wet check that either has no estimate yet or has one that is not
-        // yet in the 'approved' lifecycle. Once approved the wet check
-        // transitions to 'converted' and leaves the queue naturally.
-        // Guard defensively: if the mode column is absent or not "inspection",
-        // treat as false so this never fires before the Inspection slices land.
-        const inspEst = inspEstByWc.get(wc.id);
+        // Rule 4 signal (Inspection Mode): this is an inspection wet check
+        // whose own status is still active (submitted/pending_manager_review/
+        // partially_converted). The WC leaves the queue naturally once it
+        // transitions to `converted` at the pass-to-estimates hand-off.
+        // No estimate-lifecycle check needed — the WC status alone is the gate.
         const inspectionEstimatePending =
           (wc as any).mode === "inspection" &&
-          (inspEst == null || inspEst.lifecycle !== "approved");
+          ACTIVE_WC.has(wc.status);
 
         // Unrouted = finding still needs a manager routing decision AND is not
         // yet stamped to any destination. Uses the shared isUnroutedFinding
@@ -17504,12 +17502,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // POST /api/wet-checks/:id/approve-inspection
-  //   Approves the estimate linked to an Inspection wet check and transitions
-  //   the wet check to `converted`. Atomic transaction.
+  // POST /api/wet-checks/:id/pass-to-estimates
+  //   Manager internal sign-off for an Inspection wet check. Stamps
+  //   estimate.internalStatus='approved_internal' (does NOT customer-approve the
+  //   estimate) and flips the wet check to `converted`. Seam 2 self-heal: if the
+  //   estimate is already customer-approved/sent, skips the estimate write but
+  //   still converts the WC. Idempotent when the WC is already converted.
   //   Role: any manager-tier role with company scope.
   //
-  app.post("/api/wet-checks/:id/approve-inspection", requireAuthentication, async (req, res) => {
+  app.post("/api/wet-checks/:id/pass-to-estimates", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     if (!isWetCheckManagerRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     const userId = req.authenticatedUserId;
@@ -17517,39 +17518,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const wcId = parseInt(req.params.id);
     if (isNaN(wcId)) { res.status(400).json({ message: "Invalid wet check id" }); return; }
     try {
-      const result = await storage.approveInspectionEstimate(wcId, cid);
+      const result = await storage.passInspectionToEstimates(wcId, cid);
       await recordLifecycleAudit(req, {
         resource: "wet_check",
-        action: "wet_check.inspection_approved",
+        action: "wet_check.inspection_passed_to_estimates",
         targetId: wcId,
         companyId: cid,
-        after: { estimateId: result.estimate.id, wetCheckStatus: result.wetCheck.status },
-        summary: `Inspection wet check ${wcId} approved → estimate #${result.estimate.id} approved, WC converted`,
+        after: { estimateId: result.estimate.id, estimateInternalStatus: result.estimate.internalStatus, wetCheckStatus: result.wetCheck.status },
+        summary: `Inspection wet check ${wcId} passed to estimates → estimate #${result.estimate.id} at approved_internal, WC converted`,
         extra: { estimateId: result.estimate.id },
       });
       res.json(result);
     } catch (e: any) {
       const { status, message } = classifyAndLog(req, e, {
-        op: "approveInspectionEstimate",
+        op: "passInspectionToEstimates",
         ctx: { cid, wcId },
-        fallbackMessage: "Could not approve inspection estimate — please retry",
+        recognized: [
+          {
+            test: (_e, raw) =>
+              raw.includes("not in pending_approval state") ||
+              raw.includes("not in a pending state"),
+            status: 409,
+            message: (_e, raw) => raw,
+          },
+          {
+            test: (_e, raw) => raw.includes("not found"),
+            status: 404,
+            message: (_e, raw) => raw,
+          },
+          {
+            test: (_e, raw) => raw.includes("not an inspection"),
+            status: 400,
+            message: (_e, raw) => raw,
+          },
+        ],
+        fallbackMessage: "Could not pass inspection to estimates — please retry",
       });
       res.status(status).json({ message });
     }
   });
 
+  // POST /api/wet-checks/:id/approve-inspection  ← RETIRED (410)
+  //   This endpoint has been superseded by /pass-to-estimates.
+  //   The old behaviour (lifecycle='approved' customer-approval impersonation) was
+  //   incorrect; the new endpoint only stamps internalStatus='approved_internal'.
+  app.post("/api/wet-checks/:id/approve-inspection", (_req, res) => {
+    res.status(410).json({
+      message: "This endpoint has been retired. Use POST /api/wet-checks/:id/pass-to-estimates instead.",
+      replacedBy: "/api/wet-checks/:id/pass-to-estimates",
+    });
+  });
+
   // POST /api/wet-checks/:id/revert-inspection
-  //   Reverts an accidentally-approved Inspection wet check. Atomically:
-  //     - estimate → lifecycle='pending_review', status='pending', internalStatus='pending_approval', approvedAt=null
+  //   Reverts a pass-to-estimates hand-off. Atomically:
+  //     - estimate → internalStatus='pending_approval' (status/lifecycle untouched)
   //     - wet check → status='submitted', fullyConvertedAt=null
-  //   Blocked with 409 if any WCB row for this wet check has already been invoiced.
-  //   Role: company_admin and super_admin only (narrower than approve).
+  //   Blocked with 409 if:
+  //     - any WCB row is already invoiced
+  //     - estimate has moved beyond approved_internal (sent/approved/rejected)
+  //   Role: company_admin and super_admin only (narrower than pass-to-estimates).
   //
   app.post("/api/wet-checks/:id/revert-inspection", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     const role = req.authenticatedUserRole;
     if (role !== "company_admin" && role !== "super_admin") {
-      res.status(403).json({ message: "Forbidden. Reverting an inspection approval requires company_admin or super_admin." });
+      res.status(403).json({ message: "Forbidden. Reverting an inspection hand-off requires company_admin or super_admin." });
       return;
     }
     const wcId = parseInt(req.params.id);
@@ -17558,12 +17591,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const result = await storage.unapproveInspectionEstimate(wcId, cid);
       await recordLifecycleAudit(req, {
         resource: "wet_check",
-        action: "estimate.inspection_unapproved",
+        action: "wet_check.inspection_pass_reverted",
         targetId: wcId,
         companyId: cid,
-        before: { wetCheckStatus: "converted", estimateLifecycle: "approved" },
-        after: { estimateId: result.estimate.id, wetCheckStatus: result.wetCheck.status, estimateLifecycle: result.estimate.lifecycle },
-        summary: `Inspection wet check ${wcId} approval reverted → estimate #${result.estimate.id} back to pending_review, WC back to submitted`,
+        before: { wetCheckStatus: "converted", estimateInternalStatus: "approved_internal" },
+        after: { estimateId: result.estimate.id, wetCheckStatus: result.wetCheck.status, estimateInternalStatus: result.estimate.internalStatus },
+        summary: `Inspection wet check ${wcId} hand-off reverted → estimate #${result.estimate.id} back to pending_approval, WC back to submitted`,
         extra: { estimateId: result.estimate.id },
       });
       res.json(result);
@@ -17576,7 +17609,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             test: (_e, raw) =>
               raw.includes("not in a converted state") ||
               raw.includes("already been included in invoice") ||
-              raw.includes("not approved and cannot be reverted") ||
+              raw.includes("Cannot revert:") ||
+              raw.includes("not in approved_internal state") ||
               raw.includes("not an inspection wet check"),
             status: 409,
             message: (_e, raw) => raw,
@@ -17587,7 +17621,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             message: (_e, raw) => raw,
           },
         ],
-        fallbackMessage: "Could not revert inspection approval — please retry",
+        fallbackMessage: "Could not revert inspection hand-off — please retry",
       });
       res.status(status).json({ message });
     }

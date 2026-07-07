@@ -1,10 +1,12 @@
 import type { MigrationDefinition } from './types';
 import { reconcileBillingSheetInvoiceTotalsMigration } from './reconcile-billing-sheet-invoice-totals';
 import { repairWoMatchEstimateMigration } from './repair-wo-match-estimate';
+import { reconcileInspectionPassMigration } from './reconcile-inspection-pass';
 
 const REGISTRY = new Map<string, MigrationDefinition>([
   [reconcileBillingSheetInvoiceTotalsMigration.id, reconcileBillingSheetInvoiceTotalsMigration],
   [repairWoMatchEstimateMigration.id, repairWoMatchEstimateMigration],
+  [reconcileInspectionPassMigration.id, reconcileInspectionPassMigration],
 ]);
 
 export function listMigrations(): MigrationDefinition[] {
