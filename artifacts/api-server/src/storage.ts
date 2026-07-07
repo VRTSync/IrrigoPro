@@ -6864,7 +6864,7 @@ export class DatabaseStorage implements IStorage {
     const conditions = [
       gte(invoices.createdAt, monthStart),
       sql`${invoices.createdAt} < ${nextMonthStart}`,
-      sql`${invoices.status} NOT IN ('draft','cancelled')`,
+      sql`${invoices.status} NOT IN ('draft','cancelled','superseded')`,
     ];
     if (companyId !== null) {
       conditions.push(eq(customers.companyId, companyId));

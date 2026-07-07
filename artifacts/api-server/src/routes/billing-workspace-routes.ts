@@ -970,7 +970,7 @@ async function overdueSummary(req: any): Promise<{
   let overdueAmount = 0;
   for (const inv of scoped) {
     const status = String(inv.status ?? "").toLowerCase();
-    if (status === "draft" || status === "cancelled" || status === "paid") continue;
+    if (status === "draft" || status === "cancelled" || status === "paid" || status === "superseded") continue;
     const due = inv.dueDate ? new Date(inv.dueDate).getTime() : NaN;
     if (!Number.isFinite(due) || due >= now) continue;
     overdueCount += 1;

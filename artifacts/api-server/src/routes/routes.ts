@@ -7188,7 +7188,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Task #1438 — mark an invoice sent / unsent (records delivery, no email).
   registerInvoiceMarkSentRoutes(app, { requireAuthentication, requireBillingAccess });
   // Task #1710 — Invoice Correction & Reissue (Guided Dispute Flow).
-  registerInvoiceCorrectionRoutes(app, { requireAuthentication, requireBillingAccess });
+  // syncInvoiceToQb: inject the local closure so the qb-sync endpoint can
+  // call updateQbInvoiceInPlace without duplicating QB plumbing here.
+  registerInvoiceCorrectionRoutes(app, {
+    requireAuthentication,
+    requireBillingAccess,
+    syncInvoiceToQb: createQuickBooksInvoiceForInvoice,
+  });
   // Slice 4a — Super-admin DB migration management page.
   registerAdminMigrationsRoutes(app, requireAuthentication);
 

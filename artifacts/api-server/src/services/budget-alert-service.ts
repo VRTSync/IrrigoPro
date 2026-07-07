@@ -469,7 +469,7 @@ export async function checkBudgetThresholds(invoice: Invoice): Promise<void> {
     let monthSpend = 0;
     let yearSpend = 0;
     for (const inv of allInvoices) {
-      if (inv.status === "draft" || inv.status === "cancelled") continue;
+      if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
       const total = parseDecimal(inv.totalAmount) ?? 0;
       const when =
         inv.createdAt instanceof Date

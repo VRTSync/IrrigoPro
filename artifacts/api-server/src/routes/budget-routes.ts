@@ -88,7 +88,7 @@ export function registerBudgetRoutes(
         let monthSpend = 0;
         let yearSpend = 0;
         for (const inv of invoices) {
-          if (inv.status === "draft" || inv.status === "cancelled") continue;
+          if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
           const total = parseDecimal(inv.totalAmount) ?? 0;
           const when = inv.createdAt instanceof Date
             ? inv.createdAt

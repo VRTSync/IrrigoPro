@@ -584,7 +584,7 @@ export function registerFinancialPulseRoutes(
         const marginWindow = period === "ytd" ? ytd : mtd;
         const invoiceIdsInWindow = allInvoices
           .filter((inv) => {
-            if (inv.status === "draft" || inv.status === "cancelled")
+            if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded")
               return false;
             const d = inv.createdAt instanceof Date
               ? inv.createdAt
@@ -809,7 +809,7 @@ export function registerFinancialPulseRoutes(
         ]);
         const invoiceIdsInWindow = allInvoices
           .filter((inv) => {
-            if (inv.status === "draft" || inv.status === "cancelled")
+            if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded")
               return false;
             const d = inv.createdAt instanceof Date
               ? inv.createdAt
@@ -979,7 +979,7 @@ export function registerFinancialPulseRoutes(
         const allInvoices = await loadInvoicesForCustomers(customerIds);
         const invoiceIdsInWindow = allInvoices
           .filter((inv) => {
-            if (inv.status === "draft" || inv.status === "cancelled")
+            if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded")
               return false;
             const d = inv.createdAt instanceof Date
               ? inv.createdAt
@@ -1057,7 +1057,7 @@ export function registerFinancialPulseRoutes(
         const allInvoices = await loadInvoicesForCustomers(customerIds);
         const invoiceIdsInWindow = allInvoices
           .filter((inv) => {
-            if (inv.status === "draft" || inv.status === "cancelled")
+            if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded")
               return false;
             const d = inv.createdAt instanceof Date
               ? inv.createdAt
@@ -1350,7 +1350,7 @@ export function registerFinancialPulseRoutes(
         // non-draft/cancelled invoice for this customer.
         let lastInvoiceAt: string | null = null;
         for (const inv of allInvoices) {
-          if (inv.status === "draft" || inv.status === "cancelled") continue;
+          if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
           const d = inv.createdAt instanceof Date
             ? inv.createdAt
             : new Date(inv.createdAt as unknown as string);
@@ -1369,7 +1369,7 @@ export function registerFinancialPulseRoutes(
         let monthSpend = 0;
         let yearSpend = 0;
         for (const inv of allInvoices) {
-          if (inv.status === "draft" || inv.status === "cancelled") continue;
+          if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
           const d = inv.createdAt instanceof Date
             ? inv.createdAt
             : new Date(inv.createdAt as unknown as string);
@@ -1543,7 +1543,7 @@ export function registerFinancialPulseRoutes(
         // invoicedYtd + inFlightTotal avoids any double-count. (Task #814)
         let invoicedYtd = 0;
         for (const inv of allInvoices) {
-          if (inv.status === "draft" || inv.status === "cancelled") continue;
+          if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
           if ((inv.invoiceYear ?? 0) !== currentYear) continue;
           invoicedYtd += toNum(inv.totalAmount);
         }

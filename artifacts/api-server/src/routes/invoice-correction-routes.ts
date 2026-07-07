@@ -1,9 +1,10 @@
 // Task #1710 — Invoice Correction & Reissue (Guided Dispute Flow)
+// Task #1739 Amendment — Stable invoice number + revision protocol
 //
 // Implements the full correction lifecycle:
 //   POST   /api/invoice-corrections           — open a draft correction
 //   PATCH  /api/invoice-corrections/:id       — update reason/evidence/reviewed state
-//   POST   /api/invoice-corrections/:id/reissue  — create corrected invoice (-R1)
+//   POST   /api/invoice-corrections/:id/reissue  — create corrected invoice (same number, revision+1)
 //   POST   /api/invoice-corrections/:id/qb-sync  — resync QB (stubbed, 501)
 //   POST   /api/invoice-corrections/:id/cancel   — cancel a draft correction
 //   GET    /api/invoice-corrections/:id           — fetch correction with lines
@@ -21,7 +22,7 @@
 
 import type { Express, RequestHandler } from "express";
 import { z } from "zod/v4";
-import { db } from "../db";
+import { db as dbModule } from "../db";
 import { eq, and, isNull } from "drizzle-orm";
 import {
   invoiceCorrections,
@@ -32,11 +33,31 @@ import {
   workOrders,
   wetCheckBillings,
 } from "@workspace/db/schema";
-import { storage } from "../storage";
+import { storage as storageModule } from "../storage";
+import { recordAuditEvent } from "./audit-log";
+import { computeBillingSheetTotal } from "../billing-sheet-total";
 
 export interface RegisterInvoiceCorrectionRoutesDeps {
   requireAuthentication: RequestHandler;
   requireBillingAccess: RequestHandler;
+  /** Optional — injected by routes.ts so the qb-sync endpoint can call
+   *  updateQbInvoiceInPlace (or buildAndPostQbInvoice) without duplicating
+   *  the QB credential/integration plumbing here. */
+  syncInvoiceToQb?: (
+    invoiceId: number,
+    opts: { callerCompanyId: number | null },
+  ) => Promise<{ quickbooksId?: string }>;
+  /**
+   * Test-only injection — uses the module-level `db` singleton in production.
+   * Accepts any object that implements the Drizzle fluent builder interface.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  _db?: any;
+  /**
+   * Test-only injection — uses the module-level `storage` singleton in production.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  _storageApi?: any;
 }
 
 // ── Validation schemas ──────────────────────────────────────────────────────
@@ -94,7 +115,13 @@ const updateCorrectionSchema = z.object({
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Derive the next revision suffix for an invoice number. */
+/**
+ * @deprecated Task #1739 Amendment — the reissue engine no longer appends a
+ * `-R1` suffix.  Corrected invoices keep the same base `invoiceNumber` and
+ * increment the `revision` column instead.  This function is retained only so
+ * that legacy test fixtures do not need to be removed wholesale; it must not
+ * be called from production paths.
+ */
 export function deriveRevisionNumber(invoiceNumber: string): string {
   const match = invoiceNumber.match(/^(.*)-R(\d+)$/);
   if (match) {
@@ -103,12 +130,21 @@ export function deriveRevisionNumber(invoiceNumber: string): string {
   return `${invoiceNumber}-R1`;
 }
 
-/** Sum ticket totals from live invoice items. */
+/** Return the next revision number for a corrected invoice. */
+function nextRevision(original: { revision?: number | null }): number {
+  return (original.revision ?? 1) + 1;
+}
+
+/** Sum ticket totals from live invoice items.
+ *  Pass the transaction executor (`tx`) when calling from inside a transaction
+ *  so the sum reflects any ticket mutations made earlier in the same tx. */
 async function computeLiveTotalsFromTickets(
   invoiceId: number,
   excludedTickets: Array<{ ticketType: string; ticketId: number }>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  executor: any = dbModule,
 ): Promise<{ partsSubtotal: number; laborSubtotal: number; totalAmount: number }> {
-  const items = await db
+  const items = await executor
     .select()
     .from(invoiceItems)
     .where(eq(invoiceItems.invoiceId, invoiceId));
@@ -126,7 +162,7 @@ async function computeLiveTotalsFromTickets(
     if (isExcluded) continue;
 
     if (item.sourceType === "billing_sheet" && item.billingSheetId) {
-      const bs = await db
+      const bs = await executor
         .select({ partsSubtotal: billingSheets.partsSubtotal, laborSubtotal: billingSheets.laborSubtotal })
         .from(billingSheets)
         .where(eq(billingSheets.id, item.billingSheetId))
@@ -136,7 +172,7 @@ async function computeLiveTotalsFromTickets(
         labor += parseFloat(bs[0].laborSubtotal ?? "0");
       }
     } else if (item.sourceType === "work_order" && item.workOrderId) {
-      const wo = await db
+      const wo = await executor
         .select({ partsSubtotal: workOrders.partsSubtotal, laborSubtotal: workOrders.laborSubtotal })
         .from(workOrders)
         .where(eq(workOrders.id, item.workOrderId))
@@ -146,7 +182,7 @@ async function computeLiveTotalsFromTickets(
         labor += parseFloat(String(wo[0].laborSubtotal ?? "0"));
       }
     } else if (item.sourceType === "wet_check_billing" && item.wetCheckBillingId) {
-      const wcb = await db
+      const wcb = await executor
         .select({ partsSubtotal: wetCheckBillings.partsSubtotal, laborSubtotal: wetCheckBillings.laborSubtotal })
         .from(wetCheckBillings)
         .where(eq(wetCheckBillings.id, item.wetCheckBillingId))
@@ -169,8 +205,15 @@ async function computeLiveTotalsFromTickets(
 
 export function registerInvoiceCorrectionRoutes(
   app: Express,
-  { requireAuthentication, requireBillingAccess }: RegisterInvoiceCorrectionRoutesDeps,
+  deps: RegisterInvoiceCorrectionRoutesDeps,
 ): void {
+  const { requireAuthentication, requireBillingAccess, syncInvoiceToQb } = deps;
+  // Allow test injection; fall back to module-level singletons in production.
+  // Local `db` and `storage` shadow the module-level imports inside this function.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db: any = deps._db ?? dbModule;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const storage: any = deps._storageApi ?? storageModule;
   // ── GET /api/invoices/:invoiceId/correction-tickets ─────────────────────
   // Returns the tickets (billing sheets, work orders, wet check billings)
   // associated with an invoice, formatted for the Dispute step selector.
@@ -487,9 +530,11 @@ export function registerInvoiceCorrectionRoutes(
   );
 
   // ── POST /api/invoice-corrections/:id/reissue ────────────────────────────
-  // Create a corrected invoice that supersedes the original. The invoice
-  // number gets a -R1 (or -R2, etc.) suffix. The original invoice is marked
-  // `superseded`. Ticket totals are re-derived from live DB state.
+  // Create a corrected invoice that supersedes the original. The base
+  // invoiceNumber is kept identical; the new invoice gets revision+1 so the
+  // version chain reads #04723 Rev 1 → Rev 2, etc. The original invoice is
+  // marked `superseded`. Paid invoices are blocked — use a credit note.
+  // Ticket totals are re-derived from live DB state.
   app.post(
     "/api/invoice-corrections/:id/reissue",
     requireAuthentication,
@@ -535,37 +580,235 @@ export function registerInvoiceCorrectionRoutes(
           return;
         }
 
-        // Get correction lines to know which tickets to exclude.
+        // Paid invoices cannot be corrected in-place; the customer has already
+        // settled the balance. Surface a credit-note stub message so the caller
+        // knows the right path forward.
+        if (originalInvoice.status === "paid") {
+          res.status(400).json({
+            message:
+              "This invoice has already been paid and cannot be corrected in-place. Issue a credit note to adjust the customer's balance.",
+            code: "PAID_INVOICE_USE_CREDIT_NOTE",
+          });
+          return;
+        }
+
+        // Get correction lines to know which tickets to exclude / mutate.
         const lines = await db
           .select()
           .from(invoiceCorrectionLines)
           .where(eq(invoiceCorrectionLines.correctionId, id));
 
+        // ── Source-ticket membership guard ─────────────────────────────────────
+        // Validate that every correction line references a ticket that actually
+        // belongs to the original invoice.  This prevents a crafted correction
+        // on invoice A from mutating unrelated billed tickets in the same company.
+        if (lines.length > 0) {
+          const memberRows = await db
+            .select({
+              billingSheetId: invoiceItems.billingSheetId,
+              workOrderId: invoiceItems.workOrderId,
+              wetCheckBillingId: invoiceItems.wetCheckBillingId,
+            })
+            .from(invoiceItems)
+            .where(eq(invoiceItems.invoiceId, correction.originalInvoiceId));
+
+          const memberTickets = new Set<string>();
+          for (const it of memberRows) {
+            if (it.billingSheetId != null) memberTickets.add(`billing_sheet:${it.billingSheetId}`);
+            if (it.workOrderId != null) memberTickets.add(`work_order:${it.workOrderId}`);
+            if (it.wetCheckBillingId != null) memberTickets.add(`wcb:${it.wetCheckBillingId}`);
+          }
+
+          const invalidLines = lines.filter(
+            (l: any) => !memberTickets.has(`${l.ticketType}:${l.ticketId}`),
+          );
+          if (invalidLines.length > 0) {
+            res.status(400).json({
+              message:
+                "One or more correction lines reference tickets not belonging to the original invoice.",
+              invalidLines: invalidLines.map((l: any) => ({
+                ticketType: l.ticketType,
+                ticketId: l.ticketId,
+              })),
+            });
+            return;
+          }
+        }
+
         const excludedTickets = lines
-          .filter((l) => l.action === "exclude")
-          .map((l) => ({ ticketType: l.ticketType, ticketId: l.ticketId }));
+          .filter((l: any) => l.action === "exclude")
+          .map((l: any) => ({ ticketType: l.ticketType, ticketId: l.ticketId }));
 
-        // Derive live totals from the (now-edited) source tickets.
-        const liveTotals = await computeLiveTotalsFromTickets(
-          correction.originalInvoiceId,
-          excludedTickets,
-        );
+        // All mutations (ticket corrections + invoice creation) run inside one
+        // transaction so a failure anywhere rolls back every change atomically.
+        const result = await db.transaction(async (tx: any) => {
+          const txNow = new Date();
 
-        const reissuedNumber = deriveRevisionNumber(originalInvoice.invoiceNumber);
+          // ── Step 1: Apply source-ticket mutations (zero_line / adjust) ────
+          // Edits always write to source tickets; the reissued invoice
+          // re-derives totals from live ticket state (architectural invariant).
+          for (const line of lines) {
+            if (line.action === "exclude") continue;
 
-        // Create the reissued invoice inside a DB transaction.
-        const result = await db.transaction(async (tx) => {
-          // Mark original as superseded.
+            if (line.action === "zero_line") {
+              if (line.ticketType === "billing_sheet") {
+                const [bs] = await tx.select().from(billingSheets)
+                  .where(and(eq(billingSheets.id, line.ticketId), eq(billingSheets.companyId, correction.companyId))).limit(1);
+                if (bs) {
+                  const newTotal = computeBillingSheetTotal({ laborSubtotal: "0.00" }, bs);
+                  await tx.update(billingSheets)
+                    .set({ laborSubtotal: "0.00", totalAmount: newTotal, updatedAt: txNow })
+                    .where(and(eq(billingSheets.id, line.ticketId), eq(billingSheets.companyId, correction.companyId)));
+                  await recordAuditEvent(req, {
+                    action: "billing_correction",
+                    targetType: "billing_sheet",
+                    targetId: String(line.ticketId),
+                    actorUserId: (req as any).authenticatedUserId ?? null,
+                    actorRole: (req as any).authenticatedUserRole ?? null,
+                    actorCompanyId: correction.companyId,
+                    summary: `Zero-lined labor on billing sheet ${line.ticketId} for correction ${id}${correction.reasonCategory ? ` [${correction.reasonCategory}]` : ""}`,
+                    details: { correctionId: id, reasonCategory: correction.reasonCategory ?? null, requestedBy: correction.requestedBy ?? null, evidenceUrl: correction.evidenceUrl ?? null, lineNote: line.lineNote, before: { laborSubtotal: bs.laborSubtotal, totalAmount: bs.totalAmount }, after: { laborSubtotal: "0.00", totalAmount: newTotal } },
+                  }, { tx, strict: true });
+                }
+              } else if (line.ticketType === "work_order") {
+                const [wo] = await tx.select({ partsSubtotal: workOrders.partsSubtotal, laborSubtotal: workOrders.laborSubtotal, totalAmount: workOrders.totalAmount })
+                  .from(workOrders).where(and(eq(workOrders.id, line.ticketId), eq(workOrders.companyId, correction.companyId))).limit(1);
+                if (wo) {
+                  const newTotal = (parseFloat(String(wo.partsSubtotal ?? "0")) || 0).toFixed(2);
+                  await tx.update(workOrders)
+                    .set({ laborSubtotal: "0.00", totalAmount: newTotal, updatedAt: txNow })
+                    .where(and(eq(workOrders.id, line.ticketId), eq(workOrders.companyId, correction.companyId)));
+                  await recordAuditEvent(req, {
+                    action: "billing_correction",
+                    targetType: "work_order",
+                    targetId: String(line.ticketId),
+                    actorUserId: (req as any).authenticatedUserId ?? null,
+                    actorRole: (req as any).authenticatedUserRole ?? null,
+                    actorCompanyId: correction.companyId,
+                    summary: `Zero-lined labor on work order ${line.ticketId} for correction ${id}${correction.reasonCategory ? ` [${correction.reasonCategory}]` : ""}`,
+                    details: { correctionId: id, reasonCategory: correction.reasonCategory ?? null, requestedBy: correction.requestedBy ?? null, evidenceUrl: correction.evidenceUrl ?? null, lineNote: line.lineNote, before: { laborSubtotal: wo.laborSubtotal, totalAmount: wo.totalAmount }, after: { laborSubtotal: "0.00", totalAmount: newTotal } },
+                  }, { tx, strict: true });
+                }
+              } else if (line.ticketType === "wcb") {
+                const [wcb] = await tx.select({ partsSubtotal: wetCheckBillings.partsSubtotal, laborSubtotal: wetCheckBillings.laborSubtotal, totalAmount: wetCheckBillings.totalAmount })
+                  .from(wetCheckBillings).where(and(eq(wetCheckBillings.id, line.ticketId), eq(wetCheckBillings.invoiceId, correction.originalInvoiceId))).limit(1);
+                if (wcb) {
+                  const newTotal = (parseFloat(String(wcb.partsSubtotal ?? "0")) || 0).toFixed(2);
+                  await tx.update(wetCheckBillings)
+                    .set({ laborSubtotal: "0.00", totalAmount: newTotal, updatedAt: txNow })
+                    .where(and(eq(wetCheckBillings.id, line.ticketId), eq(wetCheckBillings.invoiceId, correction.originalInvoiceId)));
+                  await recordAuditEvent(req, {
+                    action: "billing_correction",
+                    targetType: "wet_check_billing",
+                    targetId: String(line.ticketId),
+                    actorUserId: (req as any).authenticatedUserId ?? null,
+                    actorRole: (req as any).authenticatedUserRole ?? null,
+                    actorCompanyId: correction.companyId,
+                    summary: `Zero-lined labor on wet check billing ${line.ticketId} for correction ${id}${correction.reasonCategory ? ` [${correction.reasonCategory}]` : ""}`,
+                    details: { correctionId: id, reasonCategory: correction.reasonCategory ?? null, requestedBy: correction.requestedBy ?? null, evidenceUrl: correction.evidenceUrl ?? null, lineNote: line.lineNote, before: { laborSubtotal: wcb.laborSubtotal, totalAmount: wcb.totalAmount }, after: { laborSubtotal: "0.00", totalAmount: newTotal } },
+                  }, { tx, strict: true });
+                }
+              }
+            } else if (line.action === "adjust") {
+              if (line.ticketType === "billing_sheet") {
+                const [bs] = await tx.select().from(billingSheets)
+                  .where(and(eq(billingSheets.id, line.ticketId), eq(billingSheets.companyId, correction.companyId))).limit(1);
+                if (bs) {
+                  const patchParts = line.afterParts != null ? String(line.afterParts) : null;
+                  const patchLabor = line.afterLabor != null ? String(line.afterLabor) : null;
+                  const newTotal = computeBillingSheetTotal({ partsSubtotal: patchParts, laborSubtotal: patchLabor }, bs);
+                  const updates: Record<string, unknown> = { totalAmount: newTotal, updatedAt: txNow };
+                  if (patchParts != null) updates.partsSubtotal = patchParts;
+                  if (patchLabor != null) updates.laborSubtotal = patchLabor;
+                  await tx.update(billingSheets).set(updates as any).where(and(eq(billingSheets.id, line.ticketId), eq(billingSheets.companyId, correction.companyId)));
+                  await recordAuditEvent(req, {
+                    action: "billing_correction",
+                    targetType: "billing_sheet",
+                    targetId: String(line.ticketId),
+                    actorUserId: (req as any).authenticatedUserId ?? null,
+                    actorRole: (req as any).authenticatedUserRole ?? null,
+                    actorCompanyId: correction.companyId,
+                    summary: `Adjusted billing sheet ${line.ticketId} for correction ${id}${correction.reasonCategory ? ` [${correction.reasonCategory}]` : ""}`,
+                    details: { correctionId: id, reasonCategory: correction.reasonCategory ?? null, requestedBy: correction.requestedBy ?? null, evidenceUrl: correction.evidenceUrl ?? null, lineNote: line.lineNote, before: { partsSubtotal: bs.partsSubtotal, laborSubtotal: bs.laborSubtotal, totalAmount: bs.totalAmount }, after: { partsSubtotal: patchParts, laborSubtotal: patchLabor, totalAmount: newTotal } },
+                  }, { tx, strict: true });
+                }
+              } else if (line.ticketType === "work_order") {
+                const [wo] = await tx.select({ partsSubtotal: workOrders.partsSubtotal, laborSubtotal: workOrders.laborSubtotal, totalAmount: workOrders.totalAmount })
+                  .from(workOrders).where(and(eq(workOrders.id, line.ticketId), eq(workOrders.companyId, correction.companyId))).limit(1);
+                if (wo) {
+                  const patchParts = line.afterParts != null ? String(line.afterParts) : null;
+                  const patchLabor = line.afterLabor != null ? String(line.afterLabor) : null;
+                  const newParts = parseFloat(String(patchParts ?? wo.partsSubtotal ?? "0")) || 0;
+                  const newLabor = parseFloat(String(patchLabor ?? wo.laborSubtotal ?? "0")) || 0;
+                  const newTotal = (newParts + newLabor).toFixed(2);
+                  const updates: Record<string, unknown> = { totalAmount: newTotal, updatedAt: txNow };
+                  if (patchParts != null) updates.partsSubtotal = patchParts;
+                  if (patchLabor != null) updates.laborSubtotal = patchLabor;
+                  await tx.update(workOrders).set(updates as any).where(and(eq(workOrders.id, line.ticketId), eq(workOrders.companyId, correction.companyId)));
+                  await recordAuditEvent(req, {
+                    action: "billing_correction",
+                    targetType: "work_order",
+                    targetId: String(line.ticketId),
+                    actorUserId: (req as any).authenticatedUserId ?? null,
+                    actorRole: (req as any).authenticatedUserRole ?? null,
+                    actorCompanyId: correction.companyId,
+                    summary: `Adjusted work order ${line.ticketId} for correction ${id}${correction.reasonCategory ? ` [${correction.reasonCategory}]` : ""}`,
+                    details: { correctionId: id, reasonCategory: correction.reasonCategory ?? null, requestedBy: correction.requestedBy ?? null, evidenceUrl: correction.evidenceUrl ?? null, lineNote: line.lineNote, before: { partsSubtotal: wo.partsSubtotal, laborSubtotal: wo.laborSubtotal, totalAmount: wo.totalAmount }, after: { partsSubtotal: patchParts, laborSubtotal: patchLabor, totalAmount: newTotal } },
+                  }, { tx, strict: true });
+                }
+              } else if (line.ticketType === "wcb") {
+                const [wcb] = await tx.select({ partsSubtotal: wetCheckBillings.partsSubtotal, laborSubtotal: wetCheckBillings.laborSubtotal, totalAmount: wetCheckBillings.totalAmount })
+                  .from(wetCheckBillings).where(and(eq(wetCheckBillings.id, line.ticketId), eq(wetCheckBillings.invoiceId, correction.originalInvoiceId))).limit(1);
+                if (wcb) {
+                  const patchParts = line.afterParts != null ? String(line.afterParts) : null;
+                  const patchLabor = line.afterLabor != null ? String(line.afterLabor) : null;
+                  const newParts = parseFloat(String(patchParts ?? wcb.partsSubtotal ?? "0")) || 0;
+                  const newLabor = parseFloat(String(patchLabor ?? wcb.laborSubtotal ?? "0")) || 0;
+                  const newTotal = (newParts + newLabor).toFixed(2);
+                  const updates: Record<string, unknown> = { totalAmount: newTotal, updatedAt: txNow };
+                  if (patchParts != null) updates.partsSubtotal = patchParts;
+                  if (patchLabor != null) updates.laborSubtotal = patchLabor;
+                  await tx.update(wetCheckBillings).set(updates as any).where(and(eq(wetCheckBillings.id, line.ticketId), eq(wetCheckBillings.invoiceId, correction.originalInvoiceId)));
+                  await recordAuditEvent(req, {
+                    action: "billing_correction",
+                    targetType: "wet_check_billing",
+                    targetId: String(line.ticketId),
+                    actorUserId: (req as any).authenticatedUserId ?? null,
+                    actorRole: (req as any).authenticatedUserRole ?? null,
+                    actorCompanyId: correction.companyId,
+                    summary: `Adjusted wet check billing ${line.ticketId} for correction ${id}${correction.reasonCategory ? ` [${correction.reasonCategory}]` : ""}`,
+                    details: { correctionId: id, reasonCategory: correction.reasonCategory ?? null, requestedBy: correction.requestedBy ?? null, evidenceUrl: correction.evidenceUrl ?? null, lineNote: line.lineNote, before: { partsSubtotal: wcb.partsSubtotal, laborSubtotal: wcb.laborSubtotal, totalAmount: wcb.totalAmount }, after: { partsSubtotal: patchParts, laborSubtotal: patchLabor, totalAmount: newTotal } },
+                  }, { tx, strict: true });
+                }
+              }
+            }
+          }
+
+          // ── Step 2: Re-derive live totals using the tx executor so the sum
+          //    reflects ticket mutations made in Step 1 (tx reads own writes).
+          const liveTotals = await computeLiveTotalsFromTickets(
+            correction.originalInvoiceId,
+            excludedTickets,
+            tx,
+          );
+
+          // ── Step 3: Mark original as superseded.
           await tx
             .update(invoices)
-            .set({ status: "superseded", updatedAt: new Date() })
+            .set({ status: "superseded", updatedAt: txNow })
             .where(eq(invoices.id, correction.originalInvoiceId));
 
-          // Create the new invoice (same period/customer, corrected totals).
+          // ── Step 4: Create the new invoice.
+          // - status is "generated" (not "draft") so it's immediately billable.
+          // - QB linkage carried forward: same quickbooksInvoiceId + SyncToken so
+          //   the qb-sync endpoint can call updateQbInvoiceInPlace in-place rather
+          //   than creating a duplicate QB invoice.
           const [newInvoice] = await tx
             .insert(invoices)
             .values({
-              invoiceNumber: reissuedNumber,
+              // Stable number protocol: same base number, revision bumped.
+              invoiceNumber: originalInvoice.invoiceNumber,
+              revision: nextRevision(originalInvoice),
               customerId: originalInvoice.customerId,
               companyId: originalInvoice.companyId,
               customerName: originalInvoice.customerName,
@@ -575,11 +818,13 @@ export function registerInvoiceCorrectionRoutes(
               invoiceYear: originalInvoice.invoiceYear,
               periodStart: originalInvoice.periodStart,
               periodEnd: originalInvoice.periodEnd,
-              status: "draft",
+              status: "generated",
               partsSubtotal: liveTotals.partsSubtotal.toFixed(2),
               laborSubtotal: liveTotals.laborSubtotal.toFixed(2),
               totalAmount: liveTotals.totalAmount.toFixed(2),
               dueDate: originalInvoice.dueDate ?? null,
+              quickbooksInvoiceId: (originalInvoice as any).quickbooksInvoiceId ?? null,
+              quickbooksSyncToken: (originalInvoice as any).quickbooksSyncToken ?? null,
             })
             .returning();
 
@@ -591,7 +836,7 @@ export function registerInvoiceCorrectionRoutes(
 
           for (const item of originalItems) {
             const isExcluded = excludedTickets.some(
-              (e) =>
+              (e: any) =>
                 (e.ticketType === "billing_sheet" && e.ticketId === item.billingSheetId) ||
                 (e.ticketType === "work_order" && e.ticketId === item.workOrderId) ||
                 (e.ticketType === "wcb" && e.ticketId === item.wetCheckBillingId),
@@ -655,10 +900,11 @@ export function registerInvoiceCorrectionRoutes(
             }
           }
 
-          // Stamp the original invoice with the superseded-by link.
+          // Stamp the original invoice with the superseded-by link so the
+          // version chain is navigable without string-parsing invoice numbers.
           await tx
             .update(invoices)
-            .set({ supersededByInvoiceId: newInvoice.id })
+            .set({ supersededByInvoiceId: newInvoice.id, updatedAt: txNow })
             .where(eq(invoices.id, correction.originalInvoiceId));
 
           // Finalize the correction record.
@@ -681,7 +927,7 @@ export function registerInvoiceCorrectionRoutes(
         });
 
         res.status(200).json({
-          message: `Invoice reissued as ${reissuedNumber}.`,
+          message: `Invoice #${result.reissuedInvoice?.invoiceNumber} Rev ${result.reissuedInvoice?.revision} created.`,
           correction: result.correction,
           reissuedInvoice: result.reissuedInvoice,
           originalInvoiceId: correction.originalInvoiceId,
@@ -694,65 +940,99 @@ export function registerInvoiceCorrectionRoutes(
   );
 
   // ── POST /api/invoice-corrections/:id/qb-sync ────────────────────────────
-  // TODO (Slice 4): carry the original quickbooksInvoiceId + quickbooksSyncToken
-  // onto the reissued invoice and call updateQbInvoiceInPlace. The QB SyncToken
-  // Capture prerequisite has not yet merged; stub returns 501 with a clear message
-  // so the rest of the correction flow ships independently.
+  // Syncs the reissued invoice to QuickBooks in-place (never creates a duplicate).
+  // The reissued invoice carries the original QB id + SyncToken so the shared
+  // syncInvoiceToQb helper routes to updateQbInvoiceInPlace automatically.
+  // If syncInvoiceToQb was not injected (e.g. tests), falls back to 501.
   app.post(
     "/api/invoice-corrections/:id/qb-sync",
     requireAuthentication,
     requireBillingAccess,
     async (req: any, res) => {
-      const id = parseInt(String(req.params.id));
-      if (isNaN(id) || id <= 0) {
-        res.status(400).json({ message: "Invalid correction ID" });
-        return;
-      }
+      try {
+        const id = parseInt(String(req.params.id));
+        if (isNaN(id) || id <= 0) {
+          res.status(400).json({ message: "Invalid correction ID" });
+          return;
+        }
 
-      const callerCompanyId: number | null =
-        req.authenticatedUserRole === "super_admin"
-          ? null
-          : (req.authenticatedUserCompanyId ?? null);
+        const callerCompanyId: number | null =
+          req.authenticatedUserRole === "super_admin"
+            ? null
+            : (req.authenticatedUserCompanyId ?? null);
 
-      const [correction] = await db
-        .select()
-        .from(invoiceCorrections)
-        .where(
-          callerCompanyId != null
-            ? and(eq(invoiceCorrections.id, id), eq(invoiceCorrections.companyId, callerCompanyId))
-            : eq(invoiceCorrections.id, id),
-        )
-        .limit(1);
+        const [correction] = await db
+          .select()
+          .from(invoiceCorrections)
+          .where(
+            callerCompanyId != null
+              ? and(eq(invoiceCorrections.id, id), eq(invoiceCorrections.companyId, callerCompanyId))
+              : eq(invoiceCorrections.id, id),
+          )
+          .limit(1);
 
-      if (!correction) {
-        res.status(404).json({ message: "Correction not found" });
-        return;
-      }
+        if (!correction) {
+          res.status(404).json({ message: "Correction not found" });
+          return;
+        }
 
-      if (correction.status !== "reissued") {
-        res.status(400).json({
-          message: "Only reissued corrections can be QB-synced. Complete the reissue step first.",
+        if (correction.status !== "reissued") {
+          res.status(400).json({
+            message: "Only reissued corrections can be QB-synced. Complete the reissue step first.",
+          });
+          return;
+        }
+
+        if (!correction.reissuedInvoiceId) {
+          res.status(400).json({ message: "No reissued invoice id on correction record." });
+          return;
+        }
+
+        if (!syncInvoiceToQb) {
+          // syncInvoiceToQb not injected (e.g. test environment). Mark skipped.
+          await db
+            .update(invoiceCorrections)
+            .set({ qbSyncStatus: "skipped", qbNote: "QB sync not available in this environment.", updatedAt: new Date() })
+            .where(eq(invoiceCorrections.id, id));
+          res.status(501).json({
+            message: "QuickBooks sync is not available in this environment.",
+            qbSyncStatus: "skipped",
+          });
+          return;
+        }
+
+        // Delegate to the shared sync function. Because the reissued invoice
+        // carries the original quickbooksInvoiceId, this routes to in-place
+        // update (updateQbInvoiceInPlace) rather than creating a new QB record.
+        const syncResult = await syncInvoiceToQb(correction.reissuedInvoiceId, { callerCompanyId });
+
+        await db
+          .update(invoiceCorrections)
+          .set({
+            qbSyncStatus: "synced",
+            qbNote: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(invoiceCorrections.id, id));
+
+        res.status(200).json({
+          message: "QuickBooks invoice updated in-place.",
+          qbSyncStatus: "synced",
+          quickbooksId: syncResult.quickbooksId,
         });
-        return;
+      } catch (err: any) {
+        req.log?.error?.({ err }, "qb-sync correction failed");
+        // Mark the correction so operators know it needs a retry.
+        await db
+          .update(invoiceCorrections)
+          .set({
+            qbSyncStatus: "failed",
+            qbNote: err?.message ?? "Unknown error during QB sync.",
+            updatedAt: new Date(),
+          })
+          .where(eq(invoiceCorrections.id, parseInt(String(req.params.id))));
+        res.status(502).json({ message: err?.message ?? "QB sync failed. Retry the endpoint once the issue is resolved." });
       }
-
-      // Record the skipped/stub status so the correction can be retried later.
-      await db
-        .update(invoiceCorrections)
-        .set({
-          qbSyncStatus: "skipped",
-          qbNote: "QB SyncToken Capture not yet available — sync manually in QuickBooks.",
-          updatedAt: new Date(),
-        })
-        .where(eq(invoiceCorrections.id, id));
-
-      res.status(501).json({
-        message:
-          "QuickBooks in-place update is not yet available (prerequisite not merged). " +
-          "The correction has been recorded as reissued. Sync the QuickBooks invoice manually, " +
-          "or retry this endpoint once the QB SyncToken Capture feature ships.",
-        qbSyncStatus: "skipped",
-      });
     },
   );
 
@@ -836,7 +1116,7 @@ export async function getOpenCorrectionForInvoice(
           eq(invoiceCorrections.status, "draft"),
         );
 
-  const rows = await db
+  const rows = await dbModule
     .select({ id: invoiceCorrections.id })
     .from(invoiceCorrections)
     .where(where)

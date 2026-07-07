@@ -31,6 +31,14 @@ describe("migration registry — static shape", () => {
     );
   });
 
+  it("contains invoice-revision-backfill-v1", () => {
+    const ids = listMigrations().map((m) => m.id);
+    assert.ok(
+      ids.includes("invoice-revision-backfill-v1"),
+      "missing invoice-revision-backfill-v1",
+    );
+  });
+
   it("does NOT contain any of the removed one-shot migrations", () => {
     const ids = new Set(listMigrations().map((m) => m.id));
     const removed = [

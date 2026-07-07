@@ -856,7 +856,12 @@ export const workOrderItems = pgTable("work_order_items", {
 // Monthly consolidated invoices that include all work for a customer
 export const invoices = pgTable("invoices", {
   id: serial("id").primaryKey(),
-  invoiceNumber: text("invoice_number").notNull().unique(),
+  // invoice_number is stable across corrections — the same base number (#04723)
+  // is kept when a correction is reissued.  revision bumps (1 → 2 → …) track
+  // iterations.  Uniqueness is enforced on the (company_id, invoice_number,
+  // revision) composite so the same base number can appear for Rev 1 and Rev 2.
+  invoiceNumber: text("invoice_number").notNull(),
+  revision: integer("revision").notNull().default(1),
   customerId: integer("customer_id").references(() => customers.id).notNull(),
   companyId: integer("company_id").references(() => companies.id).notNull(),
   customerName: text("customer_name").notNull(),
@@ -880,13 +885,20 @@ export const invoices = pgTable("invoices", {
   quickbooksSyncToken: text("quickbooks_sync_token"),
   // Invoice Correction: revision tracking. When an invoice is superseded by a
   // corrected reissue, `supersededByInvoiceId` links to the new invoice and
-  // `status` flips to 'superseded'. The reissued invoice carries a `-R1` / `-R2`
-  // suffix in its invoiceNumber.
+  // `status` flips to 'superseded'. The base invoiceNumber never changes;
+  // `revision` increments (1 → 2 → …) to track correction iterations.
   supersededByInvoiceId: integer("superseded_by_invoice_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
   companyIdx: index("invoices_company_idx").on(table.companyId),
+  // Composite unique: same base number can appear for Rev 1, Rev 2, etc.
+  // Replaces the old single-column unique on invoice_number.
+  invoiceNumberRevisionUniq: uniqueIndex("invoices_invoice_number_revision_uniq").on(
+    table.companyId,
+    table.invoiceNumber,
+    table.revision,
+  ),
 }));
 
 // Line items for monthly invoices - can come from work orders OR billing sheets

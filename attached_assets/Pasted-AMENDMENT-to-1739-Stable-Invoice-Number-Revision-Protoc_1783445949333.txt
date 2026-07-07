@@ -1,0 +1,88 @@
+AMENDMENT to #1739 — Stable Invoice Number + Revision Protocol (drop the -R suffix)
+
+Fold this into #1739 before finalizing the version-chain slice (Step 7). #1739 keeps the number clean in the list (nesting under supersededByInvoiceId) but still renames the invoice to -R1 via deriveRevisionNumber. That's incompatible with the in-place QuickBooks update (which keeps the original DocNumber) and reads to the customer like a second invoice. Change the protocol so the invoice number is stable and immutable; a correction bumps an internal revision, not the number.
+
+Why (governs the change)
+
+
+The QB in-place update (#1711) keeps one QB invoice at its original DocNumber (#04723). If our number becomes #04723-R1, the system and QuickBooks permanently disagree and the customer (holding #04723) is confused. The customer/QB-facing number must not change on correction.
+-R1 → -R2 → … gets ugly and reads as separate documents. A revision counter is cleaner and is the natural partner to the existing supersededByInvoiceId chain.
+Root blocker today: invoices.invoiceNumber is .notNull().unique() (single-column) — which is the only reason a suffix was needed to avoid a collision.
+
+
+Changes
+
+Schema
+
+
+Add revision: integer("revision").notNull().default(1) to invoices.
+Drop the single-column unique on invoice_number; add composite unique (company_id, invoice_number, revision). (Migration: add column default 1, backfill existing rows to revision = 1, swap the constraint.)
+Keep supersededByInvoiceId as-is.
+
+
+Reissue logic (invoice-correction-routes.ts)
+
+
+Do not call deriveRevisionNumber. The reissued invoice keeps the same invoiceNumber as the original and sets revision = original.revision + 1. Remove/retire deriveRevisionNumber.
+Still: original → superseded + supersededByInvoiceId = new; new invoice status: "generated"; carry quickbooksInvoiceId + quickbooksSyncToken forward (from #1739).
+
+
+QuickBooks
+
+
+The QB DocNumber stays the base number (#04723) on the in-place update — do not send -R1. (updateQbInvoiceInPlace already targets the same QB invoice; just pass the base invoiceNumber.)
+
+
+Display / PDF (update #1739 Step 7 wording)
+
+
+The version-chain row shows the base number with the revision: "#04723 · Rev 2 (corrected)" — not #04723-R1. The superseded predecessor nests beneath as "Rev 1 — superseded [date]".
+The reissued customer PDF carries a header marker: "Corrected invoice — supersedes original dated {originalDate}", base number #04723 unchanged.
+
+
+Accounting gate (reserve the fork, don't build the alt path now)
+
+
+Correct-in-place at the same number applies to unpaid/unapproved invoices (Huntington is unapproved). If an invoice is already paid, block in-place correction and surface "issue a credit note" instead — stub/flag it for a future credit-note flow. For now: only allow correction when status ∈ {generated, sent, overdue} and not paid.
+
+
+One-time cleanup — unwind the botched #04723-R1
+
+The prior broken run left #04723 (superseded, $2,796.09) and #04723-R1 (draft, wrong $2,796.09). The corrected engine won't retroactively repair that pair. Add a small, company-scoped admin action (or a one-off in the reissue-fix migration) that unwinds it so you can re-run cleanly:
+
+
+Delete #04723-R1 (the draft reissue) and its invoice_items.
+Restore #04723 to status: "generated", clear supersededByInvoiceId.
+Reset the correction record (invoice_corrections) for that invoice to draft (or delete it) so the correction can be re-run.
+Verify no source ticket was mutated by the botched run (it wasn't — that was the bug), so nothing to revert on the tickets.
+Then re-run the Huntington $510 correction with the fixed engine → reissues as #04723 Rev 2 = $2,286.09, one row, Rev 1 nested.
+
+
+Acceptance (adds to #1739's Done)
+
+
+A correction reissues at the same invoiceNumber with revision + 1; the list shows "#04723 · Rev 2", Rev 1 nested and excluded from totals.
+QuickBooks shows a single #04723 at the corrected amount (no -R1).
+After the unwind, #04723 is a single active generated invoice at $2,796.09 with no stray -R1; re-running the correction lands it at Rev 2 = $2,286.09.
+Composite uniqueness holds; existing invoices backfilled to revision = 1.
+
+
+Definition of Done (attach proof — Rule 7)
+
+
+ Schema migration applied; existing invoices revision = 1; composite unique in place.
+ Reissue keeps base number + bumps revision (no -R suffix); deriveRevisionNumber removed.
+ Screenshot: invoices list showing "#04723 · Rev 2" with Rev 1 nested; no -R1 anywhere.
+ Screenshot: QuickBooks invoice still #04723 at the corrected amount.
+ Screenshot: the list after the unwind (single #04723 generated), then after re-correction (Rev 2 = $2,286.09).
+ Deployed; newest commit = this work; commit message matches diff.
+
+
+Relevant files
+
+
+lib/db/src/schema/schema.ts (invoices: add revision; swap unique constraint) + migration
+artifacts/api-server/src/routes/invoice-correction-routes.ts (reissue: same number + revision+1; drop deriveRevisionNumber; paid-status gate)
+artifacts/api-server/src/routes/qb-invoice-ops.ts (pass base DocNumber)
+artifacts/api-server/src/invoice-pdf-service.ts (revision/corrected marker)
+artifacts/irrigopro/src/pages/invoices.tsx ("Rev N" display in the version chain)

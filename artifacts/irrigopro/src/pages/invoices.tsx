@@ -39,6 +39,7 @@ import {
   Loader2,
   AlertCircle,
   ChevronLeft,
+  ChevronDown,
   DollarSign,
   ClipboardList,
   Download,
@@ -85,6 +86,7 @@ function getCurrentUserRole(): string | null {
 interface Invoice {
   id: number;
   invoiceNumber: string;
+  revision?: number;
   customerId: number;
   customerName: string;
   customerEmail: string;
@@ -100,6 +102,7 @@ interface Invoice {
   sentAt?: string | null;
   dueDate?: string | null;
   quickbooksInvoiceId?: string;
+  supersededByInvoiceId?: number | null;
 }
 
 const MONTH_NAMES = [
@@ -321,9 +324,9 @@ function readAgingFromUrl(): AgingFilter {
 }
 
 // Same exclusion set as `computeOutstandingAr` — paid / draft /
-// cancelled invoices are not part of A/R aging.
+// cancelled / superseded invoices are not part of A/R aging.
 function isOpenAr(inv: Invoice): boolean {
-  if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "paid") {
+  if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "paid" || inv.status === "superseded") {
     return false;
   }
   // The server's `computeOutstandingAr` also excludes any invoice
@@ -403,6 +406,14 @@ export default function InvoicesPage() {
   // Task #1710 — Invoice Correction & Reissue.
   const [correctionInvoice, setCorrectionInvoice] = useState<Invoice | null>(null);
   const canCorrect = !!userRole && MERGE_ROLES.has(userRole);
+  // Version-chain history toggle: key is the active invoice id; value true = expanded.
+  const [expandedHistory, setExpandedHistory] = useState<Set<number>>(new Set());
+  const toggleHistory = (id: number) =>
+    setExpandedHistory((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
 
   const handleExportSingleCsv = async (invoice: Invoice) => {
     if (!canExportSingleCsv) return;
@@ -549,7 +560,11 @@ export default function InvoicesPage() {
   // most-recent-first month structure stays intact (Task #1423).
   const sortedInvoices = (items: Invoice[]) => sortInvoices(items, sort);
 
-  const totalBilled = filteredInvoices.reduce((sum, inv) => sum + parseFloat(inv.totalAmount), 0);
+  // Superseded invoices are kept in filteredInvoices so they can be shown as
+  // version history beneath their replacement; exclude them from every total.
+  const totalBilled = filteredInvoices
+    .filter((inv) => inv.status !== "superseded")
+    .reduce((sum, inv) => sum + parseFloat(inv.totalAmount), 0);
 
   const monthOptions = generateMonthOptions();
 
@@ -936,7 +951,36 @@ export default function InvoicesPage() {
         {/* Grouped invoice list */}
         <div className="space-y-8">
           {groups.map((group) => {
-            const groupTotal = group.invoices.reduce((s, inv) => s + parseFloat(inv.totalAmount), 0);
+            // Superseded invoices are excluded from the group total; they appear
+            // as collapsed version history beneath their replacement.
+            const activeInvoices = group.invoices.filter((inv) => inv.status !== "superseded");
+            const supersededInvoices = group.invoices.filter((inv) => inv.status === "superseded");
+            // Build a predecessor map keyed by the NEW invoice id that superseded each entry.
+            // supersededInvoice.supersededByInvoiceId points at the invoice that replaced it.
+            const predecessorMap = new Map<number, Invoice[]>();
+            for (const inv of supersededInvoices) {
+              if (inv.supersededByInvoiceId != null) {
+                const arr = predecessorMap.get(inv.supersededByInvoiceId) ?? [];
+                arr.push(inv);
+                predecessorMap.set(inv.supersededByInvoiceId, arr);
+              }
+            }
+            const groupTotal = activeInvoices.reduce((s, inv) => s + parseFloat(inv.totalAmount), 0);
+            // Walk the supersededByInvoiceId FK chain backward to collect all predecessors
+            // for a given active invoice id. Handles multi-revision chains (R1 → R2 → R3)
+            // without any invoice-number string parsing.
+            const predecessorsFor = (activeId: number): Invoice[] => {
+              const result: Invoice[] = [];
+              let currentId = activeId;
+              while (true) {
+                const prevs = predecessorMap.get(currentId) ?? [];
+                if (prevs.length === 0) break;
+                const prev = prevs[0];
+                result.push(prev);
+                currentId = prev.id;
+              }
+              return result;
+            };
             return (
               <div key={group.key}>
                 {/* Month Header */}
@@ -945,7 +989,7 @@ export default function InvoicesPage() {
                     <Calendar className="w-4 h-4 text-blue-600" />
                     <h2 className="text-base font-semibold text-gray-800">{group.label}</h2>
                     <Badge variant="secondary" className="text-xs">
-                      {group.invoices.length} invoice{group.invoices.length !== 1 ? "s" : ""}
+                      {activeInvoices.length} invoice{activeInvoices.length !== 1 ? "s" : ""}
                     </Badge>
                   </div>
                   <span className="text-sm font-semibold text-gray-700">{formatCurrency(groupTotal)}</span>
@@ -968,7 +1012,11 @@ export default function InvoicesPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {sortedInvoices(group.invoices).map((invoice) => (
+                      {sortedInvoices(activeInvoices).map((invoice) => {
+                        const history = predecessorsFor(invoice.id);
+                        const isExpanded = expandedHistory.has(invoice.id);
+                        return (
+                        <>
                         <TableRow key={invoice.id} className="hover:bg-gray-50">
                           {canMerge && (
                             <TableCell className="w-8">
@@ -986,7 +1034,26 @@ export default function InvoicesPage() {
                             {invoice.customerName}
                           </TableCell>
                           <TableCell className="text-gray-600 whitespace-nowrap">
+                            <div className="flex items-center gap-1">
                             #{invoice.invoiceNumber}
+                            {(invoice.revision ?? 1) > 1 && (
+                              <span className="text-xs font-medium text-amber-700 bg-amber-100 px-1 py-0.5 rounded">
+                                Rev {invoice.revision}
+                              </span>
+                            )}
+                            {history.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => toggleHistory(invoice.id)}
+                                className="ml-1 text-xs text-gray-400 hover:text-gray-600 flex items-center gap-0.5"
+                                title={isExpanded ? "Hide version history" : "Show version history"}
+                                aria-label={isExpanded ? "Hide version history" : `Show ${history.length} prior version${history.length !== 1 ? "s" : ""}`}
+                              >
+                                <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                                {history.length}
+                              </button>
+                            )}
+                            </div>
                           </TableCell>
                           <TableCell className="whitespace-nowrap">
                             <div className="flex items-center gap-1.5">
@@ -1007,7 +1074,34 @@ export default function InvoicesPage() {
                             {renderActionsMenu(invoice)}
                           </TableCell>
                         </TableRow>
-                      ))}
+                        {/* Version history rows — shown when the user expands the chain */}
+                        {isExpanded && history.map((prev) => (
+                          <TableRow key={prev.id} className="bg-amber-50 text-xs text-gray-400 italic">
+                            {canMerge && <TableCell />}
+                            <TableCell className="whitespace-nowrap max-w-[200px] truncate pl-8">
+                              {prev.customerName}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap pl-6">
+                              ↳ #{prev.invoiceNumber}
+                              {(prev.revision ?? 1) >= 1 && (
+                                <span className="ml-1 text-xs text-gray-400">Rev {prev.revision ?? 1}</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap">
+                              {getStatusBadge(prev.status)}
+                            </TableCell>
+                            <TableCell className="text-right whitespace-nowrap line-through">
+                              {formatCurrency(prev.totalAmount)}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap" title={periodRangeOf(prev)}>
+                              {periodLabelOf(prev)}
+                            </TableCell>
+                            <TableCell />
+                          </TableRow>
+                        ))}
+                        </>
+                      );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
@@ -1015,8 +1109,12 @@ export default function InvoicesPage() {
                 {/* Invoice cards — mobile fallback (Task #1439) so the
                     list never overflows on narrow screens. */}
                 <div className="md:hidden space-y-3">
-                  {sortedInvoices(group.invoices).map((invoice) => (
-                    <Card key={invoice.id} className="border-gray-200">
+                  {sortedInvoices(activeInvoices).map((invoice) => {
+                    const history = predecessorsFor(invoice.id);
+                    const isExpanded = expandedHistory.has(invoice.id);
+                    return (
+                    <div key={invoice.id} className="space-y-0">
+                    <Card className="border-gray-200">
                       <CardContent className="p-4">
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-2 min-w-0">
@@ -1032,7 +1130,25 @@ export default function InvoicesPage() {
                               <p className="font-medium text-gray-900 truncate">
                                 {invoice.customerName}
                               </p>
-                              <p className="text-xs text-gray-500">#{invoice.invoiceNumber}</p>
+                              <div className="flex items-center gap-1">
+                                <p className="text-xs text-gray-500">
+                                  #{invoice.invoiceNumber}
+                                  {(invoice.revision ?? 1) > 1 && (
+                                    <span className="ml-1 font-medium text-amber-700">Rev {invoice.revision}</span>
+                                  )}
+                                </p>
+                                {history.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleHistory(invoice.id)}
+                                    className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-0.5"
+                                    aria-label={isExpanded ? "Hide version history" : `Show ${history.length} prior version${history.length !== 1 ? "s" : ""}`}
+                                  >
+                                    <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                                    {history.length}
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </div>
                           {renderActionsMenu(invoice)}
@@ -1054,7 +1170,32 @@ export default function InvoicesPage() {
                         </div>
                       </CardContent>
                     </Card>
-                  ))}
+                    {/* Version history cards — collapsed by default */}
+                    {isExpanded && history.map((prev) => (
+                      <Card key={prev.id} className="border-amber-200 bg-amber-50 ml-4">
+                        <CardContent className="p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-xs text-gray-500 italic truncate">
+                                ↳ #{prev.invoiceNumber} Rev {prev.revision ?? 1} — {prev.customerName}
+                              </p>
+                            </div>
+                            {getStatusBadge(prev.status)}
+                          </div>
+                          <div className="mt-1 flex items-center justify-between gap-2">
+                            <span className="text-xs text-gray-400 italic" title={periodRangeOf(prev)}>
+                              {periodLabelOf(prev)}
+                            </span>
+                            <span className="text-xs text-gray-400 line-through">
+                              {formatCurrency(prev.totalAmount)}
+                            </span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                    </div>
+                    );
+                  })}
                 </div>
               </div>
             );
