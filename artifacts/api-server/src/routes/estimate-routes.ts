@@ -129,7 +129,7 @@ export interface EstimateRoutesStorage {
       sentToEmail?: string;
     },
   ): Promise<Estimate | EstimateWithItems | undefined | null>;
-  createWorkOrderFromEstimate?(id: number): Promise<WorkOrder>;
+  createWorkOrderFromEstimate?(id: number, companyId?: number | null): Promise<WorkOrder>;
   getIrrigationManagerForCompany?(
     companyId: number,
   ): Promise<User | undefined | null>;
@@ -2242,22 +2242,48 @@ export function registerEstimateRoutes(
 
       const now = new Date();
 
-      // ── Atomic persist: approval + signature fields ────────────────────────
-      await storage.updateEstimate!(estimate.id, {
-        status: "approved",
-        lifecycle: "approved",
-        approvalSource: "email_link",
-        approvalRespondedAt: now,
-        approvedAt: now,
-        approvalSignatureType: signatureType,
-        approvalSignatureData: storedSignatureData,
-        approvalSignerName: signerName,
-        approvalSignedAt: now,
-        approvalSignerIp: signerIp,
-        approvalConsentText: consentText,
-        approvalConsentAcceptedAt: now,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
+      // ── CAS persist: approval + signature fields ───────────────────────────
+      // Seam 3 — Replace the plain updateEstimate call with a conditional
+      // write so two concurrent submissions on the same token serialize at
+      // the DB level. `WHERE status = 'pending'` means the second writer's
+      // UPDATE touches zero rows and we return 409 instead of overwriting
+      // the winner's legal-signature record. All twelve fields must land
+      // atomically in the same conditional write — omitting any of them
+      // would silently drop data from the legal-signature record.
+      const [updatedEstimate] = await db.update(estimates)
+        .set({
+          status: "approved",
+          lifecycle: "approved",
+          approvalSource: "email_link",
+          approvalRespondedAt: now,
+          approvedAt: now,
+          approvalSignatureType: signatureType,
+          approvalSignatureData: storedSignatureData,
+          approvalSignerName: signerName,
+          approvalSignedAt: now,
+          approvalSignerIp: signerIp,
+          approvalConsentText: consentText,
+          approvalConsentAcceptedAt: now,
+        })
+        .where(and(eq(estimates.id, estimate.id), eq(estimates.status, "pending")))
+        .returning();
+
+      if (!updatedEstimate) {
+        // CAS miss — another caller already transitioned the estimate out of
+        // "pending". Re-read the current row so the 409 body reflects the
+        // WINNER's persisted state (status, signer, timestamp) rather than
+        // the stale pre-CAS snapshot which still shows "pending".
+        const [winner] = await db.select().from(estimates).where(eq(estimates.id, estimate.id)).limit(1);
+        const current = (winner ?? estimate) as any;
+        res.status(409).json({
+          error: "already_responded",
+          message: "You have already responded to this estimate.",
+          status: current.status,
+          signerName: current.approvalSignerName ?? null,
+          signedAt: current.approvalSignedAt ? new Date(current.approvalSignedAt).toISOString() : null,
+        });
+        return;
+      }
 
       await recordLifecycleAudit(req, {
         resource: "estimate",
@@ -2529,15 +2555,35 @@ export function registerEstimateRoutes(
         return;
       }
 
-      // Reject the estimate with approval source tracking
-      await storage.updateEstimate!(estimate.id, {
-        status: "rejected",
-        lifecycle: "rejected",
-        approvalSource: "email_link",
-        approvalRespondedAt: new Date(),
-        rejectedAt: new Date(),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
+      // ── CAS persist: rejection ─────────────────────────────────────────────
+      // Seam 3 — conditional write so two concurrent rejections (or a race
+      // between an approve and a reject on the same token) serialize at DB
+      // level. Zero rows returned means someone else already transitioned the
+      // estimate → 409 `already_responded`.
+      const rejectNow = new Date();
+      const [rejectedEstimate] = await db.update(estimates)
+        .set({
+          status: "rejected",
+          lifecycle: "rejected",
+          approvalSource: "email_link",
+          approvalRespondedAt: rejectNow,
+          rejectedAt: rejectNow,
+        })
+        .where(and(eq(estimates.id, estimate.id), eq(estimates.status, "pending")))
+        .returning();
+
+      if (!rejectedEstimate) {
+        // CAS miss — re-read so the 409 body reflects the winner's current state,
+        // not the stale "pending" snapshot captured before the CAS attempt.
+        const [winner] = await db.select().from(estimates).where(eq(estimates.id, estimate.id)).limit(1);
+        const current = (winner ?? estimate) as any;
+        res.status(409).json({
+          error: "already_responded",
+          message: "You have already responded to this estimate.",
+          status: current.status ?? estimate.status,
+        });
+        return;
+      }
 
       // Task #1574 — use the actual delivery address for audit attribution.
       // sentToEmail is stamped at send time and differs from customerEmail
@@ -2712,6 +2758,9 @@ export function registerEstimateRoutes(
   app.post(
     "/api/estimates/:id/convert-to-work-order",
     requireAuthentication,
+    // Seam 3 — role guard: only billing-tier and manager roles may convert.
+    // Mirrors the guard on the approve/send routes (requireEstimateApprovalAccess).
+    requireEstimateApprovalAccess,
     async (req, res) => {
       try {
         const id = parseInt(String(req.params.id));
@@ -2725,10 +2774,25 @@ export function registerEstimateRoutes(
           scheduledDate?: string;
           notes?: string;
         };
-        const estBefore = await storage.getEstimate(id).catch(() => null);
 
-        // Use the new storage function that handles all validation and conversion
-        const workOrder = await storage.createWorkOrderFromEstimate!(id);
+        // Seam 3 — load the estimate before conversion so we can enforce
+        // company-ownership tenancy. 404 on not-found or cross-company
+        // (existence-leak convention: never reveal whether the id exists
+        // for a different tenant).
+        const estBefore = await storage.getEstimate(id).catch(() => null);
+        if (!estBefore) {
+          res.status(404).json({ message: "Estimate not found" });
+          return;
+        }
+        if (!estimateOwnershipMatches(req, estBefore.companyId)) {
+          res.status(404).json({ message: "Estimate not found" });
+          return;
+        }
+
+        // Pass the verified companyId into the storage function so the
+        // internal SELECT...FOR UPDATE also scopes by company, preventing
+        // a forged id from locking a row in another tenant's company.
+        const workOrder = await storage.createWorkOrderFromEstimate!(id, estBefore.companyId);
 
         if (estBefore?.workOrderId != null) {
           req.log.warn(

@@ -423,11 +423,15 @@ describe("Estimate role × screen matrix (Task #632)", () => {
   //     gets 404 "Estimate not found" — not 403. `manager` gets 403 at the
   //     allowlist gate before the storage call.
   //
-  //   convert-to-work-order — no role gate beyond requireAuthentication.
-  //     The handler calls storage.createWorkOrderFromEstimate!() which is
-  //     not provided by makeStorageStub() → TypeError → caught → 500.
-  //     All authenticated roles (including `manager`) reach the handler.
-  it("DELETE: 404 for canonical roles (reached handler), 403 for legacy manager alias; convert-to-work-order: 500 for all (no role gate)", async () => {
+  //   convert-to-work-order — Seam 3 (Task #1740) added
+  //     requireEstimateApprovalAccess: field_tech and the retired `manager`
+  //     alias → 403. Authorized roles (company_admin, super_admin,
+  //     irrigation_manager, billing_manager) pass the guard and then hit
+  //     the tenancy check, which calls getEstimate(). The stub's
+  //     getEstimate() returns undefined → 404 "Estimate not found".
+  it("DELETE: 404 for canonical roles (reached handler), 403 for legacy manager alias; convert-to-work-order: role-gated (403) then 404 for authorized roles", async () => {
+    // Roles excluded by requireEstimateApprovalAccess or inline allowlists.
+    const convertDenied = new Set<string>(["field_tech", "manager"]);
     for (const role of ROLES) {
       // manager excluded by inline ESTIMATE_DELETE_ROLES → 403.
       // All other roles pass → getEstimate() → undefined → 404.
@@ -437,11 +441,12 @@ describe("Estimate role × screen matrix (Task #632)", () => {
         deleteExpected,
         `DELETE as ${role}`,
       );
-      // No role gate — all authenticated roles reach the handler;
-      // createWorkOrderFromEstimate not in stub → 500.
+      // Seam 3: field_tech and manager denied at role gate → 403.
+      // Authorized roles pass gate, then getEstimate() → undefined → 404.
+      const convertExpected = convertDenied.has(role) ? 403 : 404;
       assert.equal(
         await callAs(baseUrl, "POST", "/api/estimates/1/convert-to-work-order", role, {}),
-        500,
+        convertExpected,
         `convert as ${role}`,
       );
     }

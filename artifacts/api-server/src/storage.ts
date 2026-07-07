@@ -635,7 +635,7 @@ export interface IStorage {
   getWorkOrdersByEstimate(estimateId: number, companyId: number | null): Promise<WorkOrder[]>;
   getWorkOrder(id: number, companyId: number | null): Promise<WorkOrder | undefined>;
   createWorkOrder(workOrder: InsertWorkOrder, estimateItems?: EstimateItem[]): Promise<WorkOrder>;
-  createWorkOrderFromEstimate(estimateId: number): Promise<WorkOrder>;
+  createWorkOrderFromEstimate(estimateId: number, companyId?: number | null): Promise<WorkOrder>;
   // Task #611 — atomic "approve estimate" lifecycle action. Flips the
   // estimate to `approved`, auto-creates the work order (with items),
   // auto-assigns to the company's irrigation manager, and writes the
@@ -3739,117 +3739,193 @@ export class DatabaseStorage implements IStorage {
     );
   }
 
-  async createWorkOrderFromEstimate(estimateId: number): Promise<WorkOrder> {
-    // Get the estimate with its zones and items
-    const estimate = await this.getEstimate(estimateId);
-    if (!estimate) {
-      throw new Error(`Estimate ${estimateId} not found`);
-    }
-    
-    // Check if work order already exists — idempotent: return the existing
-    // work order instead of throwing so double-clicks and the
-    // approve-via-token auto-convert path are both safe.
-    const existingWorkOrders = await this.getWorkOrdersByEstimate(estimateId, null);
-    if (existingWorkOrders.length > 0) {
-      return existingWorkOrders[0];
-    }
+  async createWorkOrderFromEstimate(estimateId: number, companyId?: number | null): Promise<WorkOrder> {
+    // Seam 3 — Entire conversion is wrapped in a single transaction with a
+    // SELECT ... FOR UPDATE row lock on the estimate so two concurrent calls
+    // serialize here rather than racing past the idempotency check and both
+    // inserting a work order. If the unique partial index fires anyway (e.g.
+    // two callers lock on different DB replicas), we catch the 23505 code,
+    // read back the winner's WO, and return it idempotently.
+    try {
+      return await db.transaction(async (tx) => {
+        // ── Row-lock the estimate ─────────────────────────────────────────
+        const scope = companyId != null
+          ? and(eq(estimates.id, estimateId), eq(estimates.companyId, companyId))
+          : eq(estimates.id, estimateId);
+        const [estimate] = await tx.select().from(estimates).where(scope).for("update");
+        if (!estimate) {
+          throw new Error(`Estimate ${estimateId} not found`);
+        }
 
-    if (estimate.status !== 'approved') {
-      throw new Error(`Estimate ${estimateId} must be approved before creating work order`);
-    }
+        // ── Idempotency re-check inside the transaction ───────────────────
+        // A second caller that wins the row lock after the first commits will
+        // see the WO already in place and return it immediately.
+        const [priorWo] = await tx.select().from(workOrders)
+          .where(eq(workOrders.estimateId, estimateId))
+          .limit(1);
+        if (priorWo) {
+          // Emit the same audit event as the 23505 catch path so both
+          // idempotency paths (lock re-check and unique-index collision)
+          // are observable in the audit log. Fire-and-forget — the WO
+          // was already committed by the first caller so this TX can
+          // commit cleanly even if the audit write races.
+          recordAuditEvent(null, {
+            action: 'work_order.duplicate_create_blocked',
+            severity: 'warning',
+            targetType: 'estimate',
+            targetId: String(estimateId),
+            summary: `Duplicate WO create blocked for estimate ${estimateId} — lock re-check found prior WO ${(priorWo as unknown as { id: number }).id}`,
+            details: { estimateId, companyId: companyId ?? null, priorWorkOrderId: (priorWo as unknown as { id: number }).id },
+          }).catch(() => {});
+          return priorWo as unknown as WorkOrder;
+        }
 
-    // Generate work order number
-    const workOrderNumber = `WO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    
-    // Create the work order with full pricing snapshot from estimate
-    const workOrderData: InsertWorkOrder & { workOrderNumber: string; companyId: number } = {
-      workOrderNumber,
-      estimateId: estimateId,
-      customerId: estimate.customerId!,
-      companyId: estimate.companyId!,
-      customerName: estimate.customerName,
-      customerEmail: estimate.customerEmail,
-      customerPhone: estimate.customerPhone,
-      projectName: estimate.projectName,
-      projectAddress: estimate.projectAddress,
-      locationNotes: estimate.locationNotes,
-      accessInstructions: estimate.accessInstructions,
-      // Task #445 — carry the estimate's free-form work description into
-      // the work order's scope field so the field tech sees the same
-      // scope context the estimator wrote, without manual re-entry.
-      // No-op when the source estimate has no work description.
-      ...(estimate.workDescription
-        ? { description: estimate.workDescription }
-        : {}),
-      // Carry the pinned map location and irrigation context forward so
-      // the field tech sees the same pin / controller / zone the estimate
-      // was scoped to.
-      workLocationLat: estimate.workLocationLat,
-      workLocationLng: estimate.workLocationLng,
-      workLocationAddress: estimate.workLocationAddress,
-      controllerLetter: estimate.controllerLetter,
-      zoneNumber: estimate.zoneNumber,
-      workType: 'estimate_based',
-      status: 'pending',
-      priority: 'medium',
-      // Pricing snapshot from estimate — guard against NaN stored in the
-      // estimate's decimal columns (a null partPrice on any line item can
-      // poison the sum). Recompute parts + labor from the already-guarded
-      // getEstimate() totals so the snapshot is always a finite number.
-      laborRate: estimate.laborRate,
-      laborSubtotal: money(estimate.laborSubtotal).toFixed(2),
-      partsSubtotal: money(estimate.partsSubtotal).toFixed(2),
-      estimatedTotal: (money(estimate.partsSubtotal) + money(estimate.laborSubtotal)).toFixed(2),
-      totalAmount: (money(estimate.partsSubtotal) + money(estimate.laborSubtotal)).toFixed(2),
-      totalItems: estimate.items?.length || 0,
-      // Task #396 — preserve labor mode + aggregate hours across the
-      // estimate→work-order conversion so the field tech sees the same
-      // labor breakdown the customer approved.
-      laborMode: (estimate as unknown as { laborMode?: string }).laborMode ?? 'flat',
-      totalHours: (estimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? null,
-      // Slice 3 — carry lineage tag from the source estimate so the WO
-      // detail view can surface a "From Wet Check #X" banner.
-      originWetCheckId: (estimate as unknown as { originWetCheckId?: number | null }).originWetCheckId ?? null,
-      // Task #315 — carry branchName from the estimate (which got it from
-      // the originating wet check) so the work order lands on the right branch.
-      branchName: (estimate as unknown as { branchName?: string | null }).branchName ?? null,
-    };
+        if (estimate.status !== 'approved') {
+          throw new Error(`Estimate ${estimateId} must be approved before creating work order`);
+        }
 
-    const [newWorkOrder] = await db.insert(workOrders).values(toDrizzleInsert<DrizzleWorkOrderInsert>(workOrderData)).returning();
+        // ── Load items inside the transaction ─────────────────────────────
+        const items = await tx.select().from(estimateItems)
+          .where(eq(estimateItems.estimateId, estimateId))
+          .orderBy(estimateItems.sortOrder);
 
-    if (estimate.items) {
-      for (const item of estimate.items) {
-        await db.insert(workOrderItems).values({
-          workOrderId: newWorkOrder.id,
-          partId: item.partId,
-          partName: item.partName,
-          partPrice: item.partPrice,
-          quantity: item.quantity,
-          laborHours: item.laborHours,
-          totalPrice: money(item.totalPrice).toFixed(2),
-          // Task #1437 — carry zone detail forward so the field tech's
-          // checklist can group items by controller/zone and show the
-          // originating issue. Null on non-inspection estimates.
-          controllerLetter: (item as { controllerLetter?: string | null }).controllerLetter ?? null,
-          zoneNumber: (item as { zoneNumber?: number | null }).zoneNumber ?? null,
-          issueType: (item as { issueType?: string | null }).issueType ?? null,
-        });
+        const workOrderNumber = `WO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const workOrderData: InsertWorkOrder & { workOrderNumber: string; companyId: number } = {
+          workOrderNumber,
+          estimateId: estimateId,
+          customerId: estimate.customerId!,
+          companyId: estimate.companyId!,
+          customerName: estimate.customerName,
+          customerEmail: estimate.customerEmail,
+          customerPhone: estimate.customerPhone,
+          projectName: estimate.projectName,
+          projectAddress: estimate.projectAddress,
+          locationNotes: estimate.locationNotes,
+          accessInstructions: estimate.accessInstructions,
+          // Task #445 — carry the estimate's free-form work description into
+          // the work order's scope field so the field tech sees the same
+          // scope context the estimator wrote, without manual re-entry.
+          // No-op when the source estimate has no work description.
+          ...(estimate.workDescription
+            ? { description: estimate.workDescription }
+            : {}),
+          // Carry the pinned map location and irrigation context forward so
+          // the field tech sees the same pin / controller / zone the estimate
+          // was scoped to.
+          workLocationLat: estimate.workLocationLat,
+          workLocationLng: estimate.workLocationLng,
+          workLocationAddress: estimate.workLocationAddress,
+          controllerLetter: estimate.controllerLetter,
+          zoneNumber: estimate.zoneNumber,
+          workType: 'estimate_based',
+          status: 'pending',
+          priority: 'medium',
+          // Pricing snapshot from estimate — guard against NaN stored in the
+          // estimate's decimal columns (a null partPrice on any line item can
+          // poison the sum). Recompute from items so the snapshot is always
+          // a finite number.
+          laborRate: estimate.laborRate,
+          laborSubtotal: (() => {
+            const laborRate2 = money((estimate as unknown as { appliedLaborRate?: string }).appliedLaborRate ?? estimate.laborRate);
+            const totalLaborHours2 =
+              (estimate as unknown as { laborMode?: string }).laborMode === 'flat'
+                ? money((estimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? 0)
+                : items.reduce((s, i) => s + money(i.laborHours), 0);
+            return (totalLaborHours2 * laborRate2).toFixed(2);
+          })(),
+          partsSubtotal: items.reduce((s, i) => s + money(i.totalPrice), 0).toFixed(2),
+          estimatedTotal: (() => {
+            const laborRate2 = money((estimate as unknown as { appliedLaborRate?: string }).appliedLaborRate ?? estimate.laborRate);
+            const totalLaborHours2 =
+              (estimate as unknown as { laborMode?: string }).laborMode === 'flat'
+                ? money((estimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? 0)
+                : items.reduce((s, i) => s + money(i.laborHours), 0);
+            const parts2 = items.reduce((s, i) => s + money(i.totalPrice), 0);
+            return (parts2 + totalLaborHours2 * laborRate2).toFixed(2);
+          })(),
+          totalAmount: (() => {
+            const laborRate2 = money((estimate as unknown as { appliedLaborRate?: string }).appliedLaborRate ?? estimate.laborRate);
+            const totalLaborHours2 =
+              (estimate as unknown as { laborMode?: string }).laborMode === 'flat'
+                ? money((estimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? 0)
+                : items.reduce((s, i) => s + money(i.laborHours), 0);
+            const parts2 = items.reduce((s, i) => s + money(i.totalPrice), 0);
+            return (parts2 + totalLaborHours2 * laborRate2).toFixed(2);
+          })(),
+          totalItems: items.length,
+          // Task #396 — preserve labor mode + aggregate hours across the
+          // estimate→work-order conversion so the field tech sees the same
+          // labor breakdown the customer approved.
+          laborMode: (estimate as unknown as { laborMode?: string }).laborMode ?? 'flat',
+          totalHours: (estimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? null,
+          // Slice 3 — carry lineage tag from the source estimate so the WO
+          // detail view can surface a "From Wet Check #X" banner.
+          originWetCheckId: (estimate as unknown as { originWetCheckId?: number | null }).originWetCheckId ?? null,
+          // Task #315 — carry branchName from the estimate (which got it from
+          // the originating wet check) so the work order lands on the right branch.
+          branchName: (estimate as unknown as { branchName?: string | null }).branchName ?? null,
+        };
+
+        const [newWorkOrder] = await tx.insert(workOrders)
+          .values(toDrizzleInsert<DrizzleWorkOrderInsert>(workOrderData))
+          .returning();
+
+        for (const item of items) {
+          await tx.insert(workOrderItems).values({
+            workOrderId: newWorkOrder.id,
+            partId: item.partId,
+            partName: item.partName,
+            partPrice: item.partPrice,
+            quantity: item.quantity,
+            laborHours: item.laborHours,
+            totalPrice: money(item.totalPrice).toFixed(2),
+            // Task #1437 — carry zone detail forward so the field tech's
+            // checklist can group items by controller/zone and show the
+            // originating issue. Null on non-inspection estimates.
+            controllerLetter: (item as { controllerLetter?: string | null }).controllerLetter ?? null,
+            zoneNumber: (item as { zoneNumber?: number | null }).zoneNumber ?? null,
+            issueType: (item as { issueType?: string | null }).issueType ?? null,
+          });
+        }
+
+        // Update estimate with work order reference and stamp the converted status
+        // so isConvertedToWorkOrder() returns true and the button hides.
+        await tx.update(estimates)
+          .set({
+            status: 'converted_to_work_order',
+            workOrderId: newWorkOrder.id,
+            // Task #642 — dual-write the canonical lifecycle column.
+            // converted_to_work_order maps to the 'approved' bucket.
+            lifecycle: 'approved',
+          })
+          .where(eq(estimates.id, estimateId));
+
+        return newWorkOrder as unknown as WorkOrder;
+      });
+    } catch (err: unknown) {
+      // ── Unique-index collision (23505) ────────────────────────────────────
+      // If two callers race past the row-lock (e.g. the first TX committed
+      // between the lock acquisition and the insert), the unique partial index
+      // on work_orders(estimate_id) fires. We catch it here, read back the
+      // winner's WO, emit an audit event, and return it idempotently so the
+      // caller gets a valid work order regardless of whether it won the race.
+      const pgCode = (err as { code?: string }).code;
+      if (pgCode === '23505') {
+        recordAuditEvent(null, {
+          action: 'work_order.duplicate_create_blocked',
+          severity: 'warning',
+          targetType: 'estimate',
+          targetId: String(estimateId),
+          summary: `Duplicate WO create blocked for estimate ${estimateId} — unique index enforced`,
+          details: { estimateId, companyId: companyId ?? null },
+        }).catch(() => {});
+        const [existing] = await db.select().from(workOrders)
+          .where(eq(workOrders.estimateId, estimateId))
+          .limit(1);
+        if (existing) return existing as unknown as WorkOrder;
       }
+      throw err;
     }
-
-    // Update estimate with work order reference and stamp the converted status
-    // so isConvertedToWorkOrder() returns true and the button hides.
-    await db.update(estimates)
-      .set({ 
-        status: 'converted_to_work_order',
-        workOrderId: newWorkOrder.id,
-        // Task #642 — dual-write the canonical lifecycle column.
-        // converted_to_work_order maps to the 'approved' bucket.
-        lifecycle: 'approved',
-      })
-      .where(eq(estimates.id, estimateId));
-
-    return newWorkOrder;
   }
 
   // Task #611 — atomic estimate-approval lifecycle. Wraps the four

@@ -809,7 +809,13 @@ export const workOrders = pgTable("work_orders", {
   companyStatusScheduledIdx: index("work_orders_company_status_scheduled_idx").on(table.companyId, table.status, table.scheduledDate),
   assignedTechIdx: index("work_orders_assigned_tech_idx").on(table.assignedTechnicianId),
   invoiceIdx: index("work_orders_invoice_idx").on(table.invoiceId),
-  estimateIdx: index("work_orders_estimate_idx").on(table.estimateId),
+  // Seam 3 — enforces one work order per estimate at the DB level.
+  // Partial (WHERE estimate_id IS NOT NULL) so direct WOs with no
+  // estimate (null) remain unrestricted — multiple unlinked WOs
+  // for the same customer are normal and must continue to work.
+  estimateUniqueIdx: uniqueIndex("work_orders_estimate_unique_idx")
+    .on(table.estimateId)
+    .where(sql`estimate_id IS NOT NULL`),
   statusScheduledIdx: index("work_orders_status_scheduled_idx").on(table.status, table.scheduledDate),
 }));
 

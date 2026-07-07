@@ -161,7 +161,7 @@ function buildBody(opts: {
 // all tests. Pass `companyId: null` explicitly to test the rejection path.
 async function startServer(
   stub: EstimateRoutesStorage,
-  opts: { companyId?: number | null } = {},
+  opts: { companyId?: number | null; role?: string } = {},
 ): Promise<{
   baseUrl: string;
   close: () => Promise<void>;
@@ -169,9 +169,15 @@ async function startServer(
   const app: Express = express();
   app.use(express.json());
   const companyId = opts.companyId !== undefined ? opts.companyId : 1;
+  // Seam 3 — the convert route now requires requireEstimateApprovalAccess,
+  // so stubAuth must set a role. Default to "company_admin" so existing
+  // tests that never set a role continue to exercise the convert path.
+  const role = opts.role ?? "company_admin";
   const stubAuth: RequestHandler = (req, _res, next) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (req as unknown as Record<string, any>).authenticatedUserCompanyId = companyId;
+    const r = req as unknown as Record<string, any>;
+    r.authenticatedUserCompanyId = companyId;
+    r.authenticatedUserRole = req.header("x-user-role") || role;
     next();
   };
   registerEstimateRoutes(app, stub, stubAuth);
