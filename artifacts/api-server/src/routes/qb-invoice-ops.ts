@@ -45,6 +45,17 @@ export interface QbUpdateResult {
   quickbooksError?: string;
 }
 
+/**
+ * Result of looking up a QB invoice by DocNumber.
+ *  - `{ id, syncToken }` — found; use these for an in-place update
+ *  - `null`              — not found; fall through to create
+ *  - `"auth_error"`     — 401 / expired token; caller must prompt reconnect
+ */
+export type QbDocNumberLookupResult =
+  | { id: string; syncToken: string }
+  | null
+  | "auth_error";
+
 // ─── QB Fault helper ─────────────────────────────────────────────────────────
 
 function extractQbFaultCode(body: string): string | undefined {
@@ -57,6 +68,59 @@ function extractQbFaultCode(body: string): string | undefined {
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
+
+/**
+ * Look up a QB invoice by DocNumber using the QB query API.
+ *
+ * Returns:
+ *   `{ id, syncToken }` — invoice found; use these values for an in-place update.
+ *   `null`              — invoice not found in QB; caller should create a fresh one.
+ *   `"auth_error"`      — 401 response; QB token is expired; caller must prompt reconnect.
+ *
+ * Any other network/server error returns `null` (treat as "not found" rather than hard-fail,
+ * so the caller can still attempt a create or surface the error upstream).
+ */
+export async function lookupQbInvoiceByDocNumber(
+  makeRequest: QbMakeRequestFn,
+  apiBase: string,
+  integration: { realmId: string; accessToken: string },
+  docNumber: string,
+): Promise<QbDocNumberLookupResult> {
+  try {
+    const query = encodeURIComponent(`SELECT Id, SyncToken FROM Invoice WHERE DocNumber = '${docNumber}'`);
+    const resp = await makeRequest(
+      `${apiBase}/v3/company/${integration.realmId}/query?query=${query}&minorversion=73`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${integration.accessToken}`,
+          Accept: "application/json",
+        },
+      },
+      "QB DocNumber lookup",
+      integration.realmId,
+    );
+
+    if (resp.status === 401) {
+      return "auth_error";
+    }
+
+    if (!resp.ok) {
+      return null;
+    }
+
+    const data = (await resp.json()) as {
+      QueryResponse?: { Invoice?: Array<{ Id?: string; SyncToken?: string }> };
+    };
+    const first = data?.QueryResponse?.Invoice?.[0];
+    if (!first?.Id) {
+      return null;
+    }
+    return { id: first.Id, syncToken: first.SyncToken ?? "0" };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Fetch the current SyncToken for an existing QB invoice.

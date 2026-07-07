@@ -683,12 +683,20 @@ function ReissueStep({
   reissuedInvoice,
   onReissue,
   isReissuing,
+  qbSyncState,
+  qbSyncError,
+  onQbSync,
+  isQbSyncing,
 }: {
   invoice: Invoice;
   correctionId: number | null;
-  reissuedInvoice: { id: number; invoiceNumber: string; totalAmount: string } | null;
+  reissuedInvoice: { id: number; invoiceNumber: string; totalAmount: string; revision: number } | null;
   onReissue: () => void;
   isReissuing: boolean;
+  qbSyncState: "idle" | "synced" | "failed";
+  qbSyncError: string | null;
+  onQbSync: () => void;
+  isQbSyncing: boolean;
 }) {
   if (reissuedInvoice) {
     return (
@@ -696,17 +704,66 @@ function ReissueStep({
         <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
         <h3 className="text-lg font-semibold text-gray-900">Invoice Reissued</h3>
         <p className="text-gray-600 text-sm">
-          Invoice <strong>#{invoice.invoiceNumber}</strong> has been superseded.
-        </p>
-        <p className="text-gray-600 text-sm">
-          New invoice <strong>#{reissuedInvoice.invoiceNumber}</strong> issued for{" "}
+          Rev {reissuedInvoice.revision} at the same number (
+          <strong>#{reissuedInvoice.invoiceNumber}</strong>) — corrected total{" "}
           <strong>{formatCurrency(reissuedInvoice.totalAmount)}</strong>.
         </p>
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700 text-left">
-          <strong>QuickBooks:</strong> QB sync is not yet automated for corrections. Please manually
-          update or void the original QuickBooks invoice ({invoice.invoiceNumber}) and create a new
-          one for the corrected amount.
-        </div>
+        <p className="text-gray-600 text-sm">
+          Previous version kept as history, excluded from totals.
+        </p>
+
+        {qbSyncState === "synced" ? (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-800 text-left flex gap-2 items-start">
+            <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>
+              QuickBooks updated — invoice #{reissuedInvoice.invoiceNumber},{" "}
+              {formatCurrency(reissuedInvoice.totalAmount)}.
+            </span>
+          </div>
+        ) : qbSyncState === "failed" ? (
+          <div className="space-y-2">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 text-left">
+              <strong>QuickBooks update failed.</strong>{" "}
+              {qbSyncError ?? "Unknown error."} The app-side reissue is saved — retry when ready.
+            </div>
+            <Button
+              onClick={onQbSync}
+              disabled={isQbSyncing}
+              variant="outline"
+              className="w-full"
+            >
+              {isQbSyncing ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Updating QuickBooks…
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Retry QuickBooks Update
+                </>
+              )}
+            </Button>
+          </div>
+        ) : (
+          <Button
+            onClick={onQbSync}
+            disabled={isQbSyncing}
+            className="w-full bg-blue-600 hover:bg-blue-700"
+          >
+            {isQbSyncing ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Updating QuickBooks…
+              </>
+            ) : (
+              <>
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Update QuickBooks
+              </>
+            )}
+          </Button>
+        )}
       </div>
     );
   }
@@ -719,23 +776,20 @@ function ReissueStep({
       <ul className="space-y-2 text-sm">
         <li className="flex gap-2 text-gray-700">
           <CheckCircle2 className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
-          A new invoice will be created with a <strong>-R1</strong> suffix (e.g.{" "}
-          <code className="bg-gray-100 px-1 rounded">
-            {invoice.invoiceNumber}-R1
-          </code>
-          ).
+          Rev N at the same number (<strong>#{invoice.invoiceNumber}</strong>) — same invoice
+          number, corrected amount, no suffix.
         </li>
         <li className="flex gap-2 text-gray-700">
           <CheckCircle2 className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
-          The original invoice will be marked <Badge className="bg-gray-200 text-gray-700 text-xs">superseded</Badge>.
+          Previous version kept as history, excluded from totals.
         </li>
         <li className="flex gap-2 text-gray-700">
           <CheckCircle2 className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
-          All correction data is permanently recorded for audit purposes.
+          All correction data permanently recorded for audit purposes.
         </li>
-        <li className="flex gap-2 text-amber-700">
-          <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-          QuickBooks sync must be completed manually — automated QB update is coming soon.
+        <li className="flex gap-2 text-blue-700">
+          <CheckCircle2 className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+          QuickBooks will be updated in place — same invoice, corrected amount, no duplicate.
         </li>
       </ul>
       <Button
@@ -790,7 +844,10 @@ export function InvoiceCorrectionFlow({
     id: number;
     invoiceNumber: string;
     totalAmount: string;
+    revision: number;
   } | null>(null);
+  const [qbSyncState, setQbSyncState] = useState<"idle" | "synced" | "failed">("idle");
+  const [qbSyncError, setQbSyncError] = useState<string | null>(null);
 
   // Fetch tickets for this invoice.
   const { data: ticketsData, isLoading: ticketsLoading } = useQuery<{
@@ -825,6 +882,8 @@ export function InvoiceCorrectionFlow({
         evidenceNote: "",
       });
       setReissuedInvoice(null);
+      setQbSyncState("idle");
+      setQbSyncError(null);
     }
   }, [open]);
 
@@ -877,6 +936,21 @@ export function InvoiceCorrectionFlow({
     },
     onError: (err: Error) => {
       toast({ title: "Reissue failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  // QuickBooks sync mutation — deliberate user action after reissue.
+  const qbSyncMutation = useMutation({
+    mutationFn: () =>
+      apiRequest(`/api/invoice-corrections/${correctionId}/qb-sync`, "POST"),
+    onSuccess: () => {
+      setQbSyncState("synced");
+      setQbSyncError(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    },
+    onError: (err: Error) => {
+      setQbSyncState("failed");
+      setQbSyncError(err.message);
     },
   });
 
@@ -1029,6 +1103,10 @@ export function InvoiceCorrectionFlow({
                 reissuedInvoice={reissuedInvoice}
                 onReissue={() => reissueMutation.mutate()}
                 isReissuing={reissueMutation.isPending}
+                qbSyncState={qbSyncState}
+                qbSyncError={qbSyncError}
+                onQbSync={() => qbSyncMutation.mutate()}
+                isQbSyncing={qbSyncMutation.isPending}
               />
             )}
           </div>

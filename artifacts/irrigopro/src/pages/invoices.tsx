@@ -1403,10 +1403,9 @@ export default function InvoicesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Task #1443 — confirm a QuickBooks re-sync. The invoice already points
-          at a QB invoice; this creates a brand-new QB invoice and overwrites
-          the link. The old QB invoice is NOT touched, so warn the user to
-          delete it by hand first to avoid a duplicate in QuickBooks. */}
+      {/* Re-sync confirmation. The backend updates the existing QB invoice
+          in-place (DocNumber-first lookup → sparse update). No duplicate is
+          created; the old QB invoice is NOT deleted or voided. */}
       <Dialog
         open={resyncInvoice != null}
         onOpenChange={(open) => {
@@ -1415,28 +1414,18 @@ export default function InvoicesPage() {
       >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Re-sync to QuickBooks</DialogTitle>
+            <DialogTitle>Re-sync #{resyncInvoice?.invoiceNumber} to QuickBooks</DialogTitle>
             <DialogDescription>
               {resyncInvoice
-                ? `Invoice ${resyncInvoice.invoiceNumber} is already linked to a QuickBooks invoice. Re-syncing creates a brand-new invoice in QuickBooks with the current totals — it does not update or remove the existing one.`
+                ? `Updates the existing QuickBooks invoice for #${resyncInvoice.invoiceNumber} in place with the current totals — same QB invoice, corrected amount, no duplicate.`
                 : ""}
             </DialogDescription>
           </DialogHeader>
-          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>
-                Delete the old invoice in QuickBooks first, otherwise you'll
-                have two invoices for this customer.
-              </span>
-            </div>
-          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setResyncInvoice(null)}>
               Cancel
             </Button>
             <Button
-              variant="destructive"
               disabled={syncMutation.isPending}
               onClick={() => {
                 if (!resyncInvoice) return;
@@ -1449,12 +1438,12 @@ export default function InvoicesPage() {
               {syncMutation.isPending ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Re-syncing…
+                  Updating…
                 </>
               ) : (
                 <>
                   <RefreshCw className="w-4 h-4 mr-2" />
-                  Create new QuickBooks invoice
+                  Update QuickBooks invoice
                 </>
               )}
             </Button>

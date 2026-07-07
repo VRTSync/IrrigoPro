@@ -387,6 +387,7 @@ import {
   buildAndPostQbInvoice as _buildAndPostQbInvoice,
   updateQbInvoiceInPlace as _updateQbInvoiceInPlace,
   fetchQbSyncToken as _fetchQbSyncToken,
+  lookupQbInvoiceByDocNumber as _lookupQbInvoiceByDocNumber,
 } from "./qb-invoice-ops";
 import { registerInvoiceMarkSentRoutes } from "./invoice-mark-sent-routes";
 import { registerInvoiceCorrectionRoutes } from "./invoice-correction-routes";
@@ -8415,6 +8416,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return _fetchQbSyncToken(makeQuickBooksRequest, apiBase, integration, invoiceId);
   }
 
+  // Task #1764 — look up a QB invoice by DocNumber (query API).
+  // Returns { id, syncToken } when found, null when not found, "auth_error" on 401.
+  async function lookupQbInvoiceByDocNumber(
+    integration: any,
+    docNumber: string,
+  ) {
+    const apiBase = process.env.NODE_ENV === 'production'
+      ? 'https://quickbooks.api.intuit.com'
+      : 'https://sandbox-quickbooks.api.intuit.com';
+    return _lookupQbInvoiceByDocNumber(makeQuickBooksRequest, apiBase, integration, docNumber);
+  }
+
   // Task #1711 — update an existing QB invoice in-place (sparse update).
   // Prefers the stored SyncToken; fetches it from QB when missing (legacy rows).
   // Self-heals on fault 5010 (stale token). Never falls back to a duplicate create.
@@ -8491,8 +8504,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
     }
 
-    // Task #1711 — prefer in-place update when this invoice already has a QB id.
-    if (invoice.quickbooksInvoiceId) {
+    // Task #1764 — DocNumber-first lookup: find the QB invoice by number so we
+    // self-heal a stale or deleted stored id (e.g. QB #48408 deleted manually).
+    // If the lookup returns auth_error the QB token is expired — surface a clear
+    // "reconnect" message and do NOT fall through to create a duplicate.
+    const docLookup = await lookupQbInvoiceByDocNumber(integration, invoice.invoiceNumber);
+
+    if (docLookup === "auth_error") {
+      throw new InvoiceSyncError(
+        "QuickBooks session expired. Please reconnect QuickBooks and retry the sync.",
+        401,
+      );
+    }
+
+    if (docLookup) {
+      // QB has an invoice with this DocNumber → update in place using the live
+      // id + SyncToken (self-heals if the stored id differed).
       let updateResult: { quickbooksId?: string; quickbooksSyncToken?: string; quickbooksError?: string };
       try {
         updateResult = await updateQbInvoiceInPlace({
@@ -8500,9 +8527,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           customer,
           docNumber: invoice.invoiceNumber,
           qbLines,
-          operation: 'Invoice In-Place Update',
-          quickbooksInvoiceId: invoice.quickbooksInvoiceId,
-          quickbooksSyncToken: invoice.quickbooksSyncToken ?? null,
+          operation: 'Invoice In-Place Update (DocNumber-first)',
+          quickbooksInvoiceId: docLookup.id,
+          quickbooksSyncToken: docLookup.syncToken,
         });
       } catch (err: any) {
         throw new InvoiceSyncError(err?.message || "Failed to update invoice in QuickBooks.", 400);
@@ -8516,10 +8543,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (Object.keys(qbUpdateFields).length > 0) {
         await storage.updateInvoice(invoiceId, qbUpdateFields);
       }
-      return { quickbooksId: updateResult.quickbooksId ?? invoice.quickbooksInvoiceId };
+      return { quickbooksId: updateResult.quickbooksId ?? docLookup.id };
     }
 
-    // No existing QB id — create a fresh QB invoice.
+    // DocNumber not found in QB → create a fresh QB invoice and store the new id/token.
     let result: { quickbooksId?: string; qbDocNumber?: string; quickbooksSyncToken?: string; quickbooksError?: string };
     try {
       result = await buildAndPostQbInvoice({
