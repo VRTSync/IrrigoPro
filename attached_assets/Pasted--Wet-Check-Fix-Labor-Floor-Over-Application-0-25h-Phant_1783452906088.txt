@@ -1,0 +1,56 @@
+# Wet Check — Fix Labor-Floor Over-Application (0.25h Phantom Labor on Custom & Inspection Findings)
+
+**What & Why**
+Task #1735 introduced a server-side laborHours snap-and-floor (nearest 0.25, minimum 0.25) on finding create/PATCH. Audit (2026-07-07, `AUDIT - Wet Check Flow Hardening…`) found it is applied **unconditionally**, and the client now hardcodes `laborHours: "0.25"` on custom-finding creation (`ZoneScreen.tsx:626`). Two drifts result:
+
+1. **Custom (Flag for Manager) findings carry 0.25h phantom labor.** The invariant is that custom findings have no part/qty/labor — the #1735 escape-route conversion itself zeroes labor to "0.00". A fresh custom finding now stores 0.25h; if the manager routes it to an estimate/WO, `calc()` bills 0.25h × labor rate the field never captured.
+2. **Inspection findings can't record 0 labor.** The inline form defaults to "0" (`ZoneScreen.tsx:82`); a part-only line is floored to 0.25 — inflating every inspection estimate by 0.25h × rate per zero-labor finding.
+
+Both violate Rule 4: the office bills labor the field never captured.
+
+**The rule after this fix:** reject NaN/negative everywhere; quantize positive values to the nearest 0.25 everywhere; apply the **0.25 minimum only to billable service captures** (`repairedInField: true`). Custom findings always store 0.00. Inspection findings may store 0.00.
+
+**Mode scope (Rule 5), per guard:**
+- 0.25 floor → service mode, non-custom, `repairedInField: true` only.
+- Custom `laborHours` force-to-0.00 → both modes (custom findings are manager-review items everywhere).
+- NaN/negative rejection + 0.25-step quantize of positive values → both modes (unchanged).
+
+## Slice 1 — Server: scope the floor (routes.ts finding create ~17198-17204 + PATCH quantize block)
+
+- **POST:** after the existing NaN/negative rejection: if `issueType === 'custom_review'` → force stored `laborHours = "0.00"` (ignore client value — matches the escape-route conversion). Else if the save is a billable service capture (`wcMode === 'service'` and `repairedInField === true` — the only way a non-custom service finding can save under #1735) → quantize with the 0.25 floor (current behavior). Else (inspection mode) → quantize to nearest 0.25 **without** the floor; 0 stays "0.00".
+- **PATCH:** same decision using the already-loaded context (the handler loads `wcInfo.mode` and the stored finding): effective-custom → force "0.00"; billable service (body `repairedInField: true`, or stored `resolution='repaired_in_field'` left unchanged) → floor; inspection → no floor.
+- No tenancy or role changes (Rule 1 untouched).
+
+## Slice 2 — Client: remove the hardcoded 0.25 on custom creation
+
+- `ZoneScreen.tsx:626` — custom-finding create payload `laborHours: "0.25"` → `"0.00"` (server now forces it anyway; keep client and server telling the same story).
+- Verify no other custom-create path sends non-zero labor (`FindingSheet` escape-route conversion already zeroes — confirm unchanged).
+
+## Slice 3 — Data check, then repair only if needed (Seam 3 pattern: check first, no reflexive migration)
+
+- #1735 shipped 2026-07-07, so exposure is hours, not months. Run read-only checks first:
+  ```sql
+  -- custom findings stamped with phantom labor
+  SELECT id, wet_check_id, created_at FROM wet_check_findings
+  WHERE issue_type = 'custom_review' AND labor_hours <> 0;
+  -- inspection-mode findings floored from 0 cannot be distinguished from a real 0.25 —
+  -- so instead list inspection findings created since the #1735 deploy for eyeball review:
+  SELECT f.id, f.wet_check_id, f.labor_hours, f.created_at FROM wet_check_findings f
+  JOIN wet_checks w ON w.id = f.wet_check_id
+  WHERE w.mode = 'inspection' AND f.labor_hours = 0.25 AND f.created_at >= '2026-07-07';
+  ```
+- Custom rows found → single UPDATE to 0.00 (safe: custom labor is 0 by invariant). Inspection rows: Randy eyeballs the list — a genuine 0.25h entry is indistinguishable from a floored 0, so no automated repair; correct any affected estimate line items through the estimate editor before sending.
+- If both queries return nothing relevant, no data work — record the result in the ticket (as with Seam 3's pre-flight).
+
+## Tests
+- Service billable capture: labor 0 / blank → stored 0.25 (floor intact); 1.1 → 1.00 (quantize intact).
+- Custom create (both modes): client sends 0.25 or nothing → stored "0.00"; escape-route conversion still zeroes.
+- Inspection create: labor 0 → stored "0.00"; labor 1.6 → 1.50; NaN/negative → 400.
+- PATCH: manager edit of labor on a pending service finding → quantized, no floor forced onto custom; billable finding edit keeps the floor.
+- Regression (Rule 5): #1735 service guards unchanged (complete-or-flag, billability 400s); inspection estimate built from a 0-labor finding shows 0 labor for that line.
+
+## Relevant files
+- `artifacts/api-server/src/routes/routes.ts` — finding create quantize block (~17198-17204) + PATCH quantize block (anchor on the "Quantize laborHours" comments, not line numbers)
+- `artifacts/irrigopro/src/pages/wet-checks/ZoneScreen.tsx` — :626 (custom create payload), :82 (inline form default)
+- `artifacts/irrigopro/src/pages/wet-checks/FindingSheet.tsx` — escape-route conversion (verify only, no change)
+- Origin: `AUDIT - Wet Check Flow Hardening (Tasks 1735, 1738, 1740) - Post-Pull Verification.md`, Finding 1
