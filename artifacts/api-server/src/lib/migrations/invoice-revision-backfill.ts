@@ -19,7 +19,7 @@
 import { db } from '../../db';
 import { sql } from 'drizzle-orm';
 import { eq, and } from 'drizzle-orm';
-import { invoices, invoiceItems, invoiceCorrections, appSettings } from '@workspace/db/schema';
+import { invoices, invoiceItems, invoiceCorrections, appSettings, billingSheets, workOrders, wetCheckBillings, invoicePdfs } from '@workspace/db/schema';
 import type {
   MigrationDefinition,
   MigrationStatus,
@@ -153,15 +153,38 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
   let unwound = 0;
   for (const stray of strays) {
     // Find the original invoice that was superseded and points to this stray.
-    const originalRows = await db.execute(sql`
+    const originalResult = await db.execute(sql`
       SELECT id FROM invoices
       WHERE superseded_by_invoice_id = ${stray.id}
         AND status = 'superseded'
       LIMIT 1
     `);
-    const originalId = (originalRows as unknown as any[])[0]?.id ?? null;
+    const originalRows = (originalResult as any).rows ?? (originalResult as unknown as any[]);
+    const originalId: number | null = originalRows[0]?.id ? Number(originalRows[0].id) : null;
 
-    // Delete the stray reissue's invoice_items first (FK child).
+    // Re-point billing_sheets, work_orders, wet_check_billings from the stray
+    // back to the original BEFORE deleting the stray so FK children don't dangle.
+    if (originalId) {
+      await db
+        .update(billingSheets)
+        .set({ invoiceId: originalId, updatedAt: new Date() } as any)
+        .where(eq(billingSheets.invoiceId, stray.id));
+
+      await db
+        .update(workOrders)
+        .set({ invoiceId: originalId, updatedAt: new Date() } as any)
+        .where(eq(workOrders.invoiceId, stray.id));
+
+      await db
+        .update(wetCheckBillings)
+        .set({ invoiceId: originalId, updatedAt: new Date() } as any)
+        .where(eq(wetCheckBillings.invoiceId, stray.id));
+    }
+
+    // Delete invoice_pdfs for the stray (they belong to R1, not the original).
+    await db.delete(invoicePdfs).where(eq(invoicePdfs.invoiceId, stray.id));
+
+    // Delete the stray reissue's invoice_items (FK child).
     await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, stray.id));
 
     // Delete the stray reissue invoice itself.
