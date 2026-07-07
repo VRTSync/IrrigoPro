@@ -17279,14 +17279,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
     }
-    // Snap laborHours to the nearest 0.25h, floor 0.25. Reject NaN/negative.
-    // Applies in both service and inspection modes.
+    // Snap laborHours to nearest 0.25h. Reject NaN/negative.
+    // Floor rules (Task #1757 — fix over-application of the 0.25 floor):
+    //   custom_review (flag for manager) → always "0.00" (no part/qty/labor stored)
+    //   billable service capture (non-custom + service mode + repairedInField) → floor 0.25
+    //   all other (inspection mode, or non-billable service) → quantize, no floor
     const rawLaborNum = parseFloat(String(body.laborHours));
     if (!isFinite(rawLaborNum) || rawLaborNum < 0) {
       res.status(400).json({ message: "Labor hours must be a non-negative number." });
       return;
     }
-    const quantizedLaborHours = Math.max(0.25, Math.round(rawLaborNum * 4) / 4).toFixed(2);
+    const isPostCustom = body.issueType === "custom_review";
+    const quantizedLaborHours = isPostCustom
+      ? "0.00"
+      : (wcMode === "service" && body.repairedInField)
+        ? Math.max(0.25, Math.round(rawLaborNum * 4) / 4).toFixed(2)
+        : (Math.round(rawLaborNum * 4) / 4).toFixed(2);
 
     try {
       const userId = req.authenticatedUserId ?? null;
@@ -17362,34 +17370,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     const body = parsed.data;
 
+    // Task #1757 — fetch finding snapshot unconditionally. It is needed by:
+    //   (a) the service-mode complete-or-flag guards below,
+    //   (b) the labor-quantize branch (effective issue type),
+    //   (c) the always-force "0.00" for custom_review findings (even notes-only PATCHes).
+    let findingSnapshot: { issueType: string; resolution: string; partId: number | null; noPartNeeded: boolean } | null = null;
+    try {
+      findingSnapshot = await storage.getWetCheckFindingSnapshot(findingId, cid);
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "getWetCheckFindingSnapshot",
+        ctx: { cid, findingId },
+        fallbackMessage: "Couldn't load finding — please retry",
+      });
+      res.status(status).json({ message });
+      return;
+    }
+    if (findingSnapshot === null) { res.status(404).json({ message: "Not found" }); return; }
+
+    // Effective issue type: body override wins; otherwise use the stored value.
+    // Used by every downstream branch so computed once here.
+    const effectivePatchIssueType = body.issueType ?? findingSnapshot.issueType;
+    const effectivePatchIsCustom = effectivePatchIssueType === "custom_review";
+
     // Task #1735 — enforce complete-or-flag + billability on PATCH.
     // Guards apply only in "service" mode. Inspection wet checks are document-only
     // and their findings may be saved without repairedInField at any time.
     if (wcMode === "service") {
-      // Fetch finding snapshot once — needed by both guards below.
-      let snapshot: { issueType: string; resolution: string; partId: number | null; noPartNeeded: boolean } | null = null;
-      try {
-        snapshot = await storage.getWetCheckFindingSnapshot(findingId, cid);
-      } catch (e: any) {
-        const { status, message } = classifyAndLog(req, e, {
-          op: "getWetCheckFindingSnapshot",
-          ctx: { cid, findingId },
-          fallbackMessage: "Couldn't load finding — please retry",
-        });
-        res.status(status).json({ message });
-        return;
-      }
-      if (snapshot == null) { res.status(404).json({ message: "Not found" }); return; }
-
-      // Effective issue type: body override wins; otherwise use the stored value.
-      // A client that omits issueType while sending repairedInField:false on an
-      // already-custom_review finding must still be treated as custom and allowed.
-      const effectiveIssueType = body.issueType ?? snapshot.issueType;
-      const effectiveIsCustom = effectiveIssueType === "custom_review";
-
       // Guard 1: explicit repairedInField: false on a non-custom finding → reject.
       // Conversion to custom_review (flag for manager) is the only allowed path.
-      if (body.repairedInField === false && !effectiveIsCustom) {
+      if (body.repairedInField === false && !effectivePatchIsCustom) {
         res.status(400).json({
           message: "Non-custom findings cannot be saved without marking them complete. Mark it complete, or flag it for your manager instead.",
         });
@@ -17406,16 +17416,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         body.noPartNeeded !== undefined ||
         body.issueType !== undefined;
 
-      if (isTouchingBillability && !effectiveIsCustom) {
+      if (isTouchingBillability && !effectivePatchIsCustom) {
         const resultResolution =
           body.repairedInField === true ? "repaired_in_field"
           : body.repairedInField === false ? "pending"
-          : snapshot.resolution;
-        const resultPartId = body.partId !== undefined ? body.partId : snapshot.partId;
-        const resultNoPartNeeded = body.noPartNeeded !== undefined ? body.noPartNeeded : snapshot.noPartNeeded;
+          : findingSnapshot.resolution;
+        const resultPartId = body.partId !== undefined ? body.partId : findingSnapshot.partId;
+        const resultNoPartNeeded = body.noPartNeeded !== undefined ? body.noPartNeeded : findingSnapshot.noPartNeeded;
 
         if (resultResolution === "repaired_in_field") {
-          const isLaborOnly = LABOR_ONLY_ISSUE_TYPES.has(effectiveIssueType);
+          const isLaborOnly = LABOR_ONLY_ISSUE_TYPES.has(effectivePatchIssueType);
           if (!resultPartId && !resultNoPartNeeded && !isLaborOnly) {
             res.status(400).json({
               message: "Select a part or confirm no part needed before saving.",
@@ -17426,18 +17436,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
     // Quantize laborHours on PATCH when explicitly provided.
-    // Reject NaN or negative — snap to nearest 0.25h, floor 0.25.
+    // Reject NaN/negative. Floor rules (Task #1757 — fix over-application of 0.25 floor):
+    //   effective-custom → force "0.00" (also enforced unconditionally below)
+    //   billable service (body repairedInField:true, or stored resolution=repaired_in_field) → floor 0.25
+    //   inspection mode, or non-billable service → quantize, no floor
     if (body.laborHours !== undefined) {
       const rawPatchLabor = parseFloat(String(body.laborHours));
       if (!isFinite(rawPatchLabor) || rawPatchLabor < 0) {
         res.status(400).json({ message: "Labor hours must be a non-negative number." });
         return;
       }
-      (body as any).laborHours = Math.max(0.25, Math.round(rawPatchLabor * 4) / 4).toFixed(2);
+      const isBillableServicePatch =
+        wcMode === "service" &&
+        !effectivePatchIsCustom &&
+        (body.repairedInField === true || findingSnapshot.resolution === "repaired_in_field");
+      if (effectivePatchIsCustom) {
+        (body as any).laborHours = "0.00";
+      } else if (isBillableServicePatch) {
+        (body as any).laborHours = Math.max(0.25, Math.round(rawPatchLabor * 4) / 4).toFixed(2);
+      } else {
+        (body as any).laborHours = (Math.round(rawPatchLabor * 4) / 4).toFixed(2);
+      }
     }
 
     const userId = req.authenticatedUserId ?? null;
     const patch = buildFindingPatchFromBody(body, userId);
+    // Task #1757 — custom_review findings always store 0.00 labor, regardless of
+    // whether laborHours was present in the body. This covers notes-only PATCHes
+    // to already-custom findings where the client never sends a laborHours field.
+    if (effectivePatchIsCustom) {
+      patch.laborHours = "0.00";
+    }
     // Task #1735 — when converting a finding to custom_review, force-clear
     // billing fields so no orphan part/qty/labor survives the conversion.
     if (body.issueType === "custom_review" && body.repairedInField === false) {
@@ -17445,7 +17474,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       patch.partName = null;
       patch.partPrice = null;
       patch.quantity = 1;
-      patch.laborHours = "0.25";
+      patch.laborHours = "0.00";
       patch.noPartNeeded = false;
     }
     try {

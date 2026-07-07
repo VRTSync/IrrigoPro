@@ -623,7 +623,7 @@ function CustomFindingEditor({
         partName:        null,
         partPrice:       null,
         quantity:        1,
-        laborHours:      "0.25",
+        laborHours:      "0.00",
         noPartNeeded:    false,
       };
       if (isOfflineQueueEnabled() && zoneRecordClientId) {

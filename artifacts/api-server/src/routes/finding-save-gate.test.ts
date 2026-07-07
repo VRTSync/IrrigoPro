@@ -1,4 +1,5 @@
 // Task #1735 — server-side enforcement of complete-or-flag at finding save.
+// Task #1757 — fix over-application of the 0.25 labor floor.
 //
 // Guards apply only when the parent wet check is in "service" mode.
 // Inspection wet checks are document-only; their findings skip all gates.
@@ -6,7 +7,10 @@
 // POST guard:  non-custom must have repairedInField + billability; service mode only.
 // PATCH guard 1: explicit repairedInField:false blocked for non-custom (effective type).
 // PATCH guard 2: merge-state billability — only when patch touches billability fields.
-// laborHours snap-and-floor applies in both modes.
+// Labor floor rules (Task #1757):
+//   custom_review → always "0.00"
+//   billable service (non-custom + service mode + repairedInField) → floor 0.25
+//   inspection, or non-billable service → quantize, no floor
 //
 // Uses node:test / node:assert — no vitest dependency required.
 
@@ -55,13 +59,22 @@ function applyPostGuards(
   if (!isFinite(rawLabor) || rawLabor < 0) {
     return { ok: false, status: 400, message: "Labor hours must be a non-negative number." };
   }
-  const quantizedLabor = Math.max(0.25, Math.round(rawLabor * 4) / 4).toFixed(2);
+  // Task #1757 — three-way floor branch.
+  const isPostCustom = body.issueType === CUSTOM_REVIEW_ISSUE_TYPE;
+  const quantizedLabor = isPostCustom
+    ? "0.00"
+    : (wcMode === "service" && body.repairedInField)
+      ? Math.max(0.25, Math.round(rawLabor * 4) / 4).toFixed(2)
+      : (Math.round(rawLabor * 4) / 4).toFixed(2);
   return { ok: true, quantizedLabor };
 }
 
 // ─── PATCH guard 1 helper (repairedInField:false gate) ───────────────────────
 // Uses effective issue type (snapshot merged with body) so an already-custom
 // finding is correctly treated as custom even when body omits issueType.
+// Task #1757 — also applies the three-way labor floor and unconditional
+// custom-force (mirrors the route: custom_review always gets labor="0.00"
+// even when laborHours is absent from the body).
 
 function applyPatchGuard1(
   wcMode: "service" | "inspection",
@@ -72,18 +85,33 @@ function applyPatchGuard1(
     laborHours?: string | number;
   }
 ): { ok: true; quantizedLabor?: string } | { ok: false; status: number; message: string } {
+  const effectivePatchIssueType = body.issueType ?? snapshot.issueType;
+  const effectivePatchIsCustom = effectivePatchIssueType === CUSTOM_REVIEW_ISSUE_TYPE;
+
   if (wcMode === "service") {
-    const effectiveIsCustom = (body.issueType ?? snapshot.issueType) === CUSTOM_REVIEW_ISSUE_TYPE;
-    if (body.repairedInField === false && !effectiveIsCustom) {
+    if (body.repairedInField === false && !effectivePatchIsCustom) {
       return { ok: false, status: 400, message: "Non-custom findings cannot be saved without marking them complete." };
     }
   }
+
+  // Task #1757 — custom_review always stores 0.00, regardless of whether
+  // laborHours was supplied. Mirror the unconditional post-buildPatch force.
+  if (effectivePatchIsCustom) {
+    return { ok: true, quantizedLabor: "0.00" };
+  }
+
   if (body.laborHours !== undefined) {
     const raw = parseFloat(String(body.laborHours));
     if (!isFinite(raw) || raw < 0) {
       return { ok: false, status: 400, message: "Labor hours must be a non-negative number." };
     }
-    const quantizedLabor = Math.max(0.25, Math.round(raw * 4) / 4).toFixed(2);
+    // Task #1757 — three-way floor branch (mirrors route logic).
+    const isBillableService =
+      wcMode === "service" &&
+      (body.repairedInField === true || snapshot.resolution === "repaired_in_field");
+    const quantizedLabor = isBillableService
+      ? Math.max(0.25, Math.round(raw * 4) / 4).toFixed(2)
+      : (Math.round(raw * 4) / 4).toFixed(2);
     return { ok: true, quantizedLabor };
   }
   return { ok: true };
@@ -409,5 +437,228 @@ describe("LABOR_ONLY_ISSUE_TYPES", () => {
 
   it("does not include custom_review", () => {
     assert.equal(LABOR_ONLY_ISSUE_TYPES.has(CUSTOM_REVIEW_ISSUE_TYPE), false);
+  });
+});
+
+// ─── Task #1757 — Labor floor correctness ─────────────────────────────────────
+// Verifies the three-way floor branch introduced in Task #1757:
+//   custom_review → always "0.00"
+//   billable service (non-custom + service + repairedInField) → floor 0.25
+//   inspection / non-billable service → quantize, no floor
+
+describe("POST labor floor — custom_review always stores 0.00", () => {
+  it("service mode: custom_review with any laborHours value → 0.00", () => {
+    const result = applyPostGuards("service", {
+      issueType: CUSTOM_REVIEW_ISSUE_TYPE,
+      repairedInField: false,
+      laborHours: "0.25",
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "0.00");
+  });
+
+  it("service mode: custom_review with 1.5 laborHours → still 0.00", () => {
+    const result = applyPostGuards("service", {
+      issueType: CUSTOM_REVIEW_ISSUE_TYPE,
+      repairedInField: false,
+      laborHours: "1.5",
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "0.00");
+  });
+
+  it("inspection mode: custom_review with any laborHours value → 0.00", () => {
+    const result = applyPostGuards("inspection", {
+      issueType: CUSTOM_REVIEW_ISSUE_TYPE,
+      laborHours: "0.25",
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "0.00");
+  });
+});
+
+describe("POST labor floor — billable service capture keeps the 0.25 floor", () => {
+  it("laborHours 0 → floor to 0.25 (service + repairedInField)", () => {
+    const result = applyPostGuards("service", {
+      issueType: "broken_head",
+      repairedInField: true,
+      partId: 1,
+      laborHours: "0",
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "0.25");
+  });
+
+  it("laborHours 0 (blank) → floor to 0.25 (service + repairedInField)", () => {
+    const result = applyPostGuards("service", {
+      issueType: "broken_head",
+      repairedInField: true,
+      partId: 1,
+      laborHours: "0.0",
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "0.25");
+  });
+
+  it("laborHours 1.1 → quantized to 1.00 with floor preserved", () => {
+    const result = applyPostGuards("service", {
+      issueType: "broken_head",
+      repairedInField: true,
+      partId: 1,
+      laborHours: "1.1",
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "1.00");
+  });
+});
+
+describe("POST labor floor — inspection mode allows 0 labor (no floor)", () => {
+  it("inspection: laborHours 0 → stored as 0.00 (no floor applied)", () => {
+    const result = applyPostGuards("inspection", {
+      issueType: "broken_head",
+      laborHours: "0",
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "0.00");
+  });
+
+  it("inspection: laborHours 1.6 → quantized to 1.50 (nearest 0.25, no floor)", () => {
+    const result = applyPostGuards("inspection", {
+      issueType: "broken_head",
+      laborHours: "1.6",
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "1.50");
+  });
+
+  it("inspection: NaN laborHours → 400", () => {
+    const result = applyPostGuards("inspection", {
+      issueType: "broken_head",
+      laborHours: "not-a-number",
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.message, /labor hours/i);
+  });
+
+  it("inspection: negative laborHours → 400", () => {
+    const result = applyPostGuards("inspection", {
+      issueType: "broken_head",
+      laborHours: "-0.5",
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.message, /labor hours/i);
+  });
+});
+
+describe("PATCH labor floor — custom_review (stored or effective) forces 0.00", () => {
+  const customStoredSnap: FindingSnapshot = {
+    issueType: CUSTOM_REVIEW_ISSUE_TYPE,
+    resolution: "pending",
+    partId: null,
+    noPartNeeded: false,
+  };
+  const nonCustomPendingSnap: FindingSnapshot = {
+    issueType: "broken_head",
+    resolution: "pending",
+    partId: null,
+    noPartNeeded: false,
+  };
+
+  it("PATCH on already-custom finding: body omits issueType → effective custom, labor forced 0.00", () => {
+    const result = applyPatchGuard1("service", customStoredSnap, { laborHours: "0.5" });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "0.00");
+  });
+
+  it("notes-only PATCH on already-custom finding (no laborHours in body) → labor still forced 0.00", () => {
+    // Regression for the code-review finding: a notes-only PATCH that omits laborHours
+    // must still ensure the patch carries labor=0.00. The helper returns quantizedLabor="0.00"
+    // unconditionally for custom findings, mirroring the always-force in the route.
+    const result = applyPatchGuard1("service", customStoredSnap, {});
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "0.00");
+  });
+
+  it("notes-only PATCH on already-custom finding in inspection mode: labor still 0.00", () => {
+    const result = applyPatchGuard1("inspection", customStoredSnap, {});
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "0.00");
+  });
+
+  it("PATCH converting non-custom to custom_review: body sets issueType → labor forced 0.00", () => {
+    const result = applyPatchGuard1("service", nonCustomPendingSnap, {
+      issueType: CUSTOM_REVIEW_ISSUE_TYPE,
+      repairedInField: false,
+      laborHours: "0.75",
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "0.00");
+  });
+
+  it("PATCH on already-custom finding in inspection mode: labor forced 0.00", () => {
+    const result = applyPatchGuard1("inspection", customStoredSnap, { laborHours: "1.0" });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "0.00");
+  });
+});
+
+describe("PATCH labor floor — billable service (stored resolution=repaired_in_field) keeps floor", () => {
+  const completedSnap: FindingSnapshot = {
+    issueType: "broken_head",
+    resolution: "repaired_in_field",
+    partId: 42,
+    noPartNeeded: false,
+  };
+
+  it("manager edits labor on a completed service finding: 0 → floored to 0.25", () => {
+    const result = applyPatchGuard1("service", completedSnap, { laborHours: "0" });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "0.25");
+  });
+
+  it("manager edits labor on a completed service finding: 1.4 → 1.50", () => {
+    const result = applyPatchGuard1("service", completedSnap, { laborHours: "1.4" });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "1.50");
+  });
+});
+
+describe("PATCH labor floor — inspection mode allows 0 labor (no floor)", () => {
+  const nonCustomPendingSnap: FindingSnapshot = {
+    issueType: "broken_head",
+    resolution: "pending",
+    partId: null,
+    noPartNeeded: false,
+  };
+
+  it("inspection PATCH: labor 0 → 0.00 (no floor)", () => {
+    const result = applyPatchGuard1("inspection", nonCustomPendingSnap, { laborHours: "0" });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "0.00");
+  });
+
+  it("inspection PATCH: labor 1.6 → 1.50 (quantized, no floor)", () => {
+    const result = applyPatchGuard1("inspection", nonCustomPendingSnap, { laborHours: "1.6" });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "1.50");
+  });
+});
+
+describe("Regression (Task #1735 service guards unchanged by Task #1757)", () => {
+  it("service POST: non-custom without repairedInField still 400", () => {
+    const result = applyPostGuards("service", { issueType: "broken_head", partId: 1 });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.status, 400);
+  });
+
+  it("service POST: billable service finding with 0 labor → floor to 0.25", () => {
+    const result = applyPostGuards("service", {
+      issueType: "broken_head",
+      repairedInField: true,
+      partId: 1,
+      laborHours: "0",
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.quantizedLabor, "0.25");
   });
 });
