@@ -701,7 +701,7 @@ export default function InvoicesPage() {
           <FileText className="w-3.5 h-3.5 mr-2" />
           View PDF
         </DropdownMenuItem>
-        {canMarkSent && invoice.status === "draft" && (
+        {canMarkSent && invoice.status === "generated" && (
           <DropdownMenuItem
             disabled={markSentMutation.isPending && markSentMutation.variables === invoice.id}
             onSelect={(e) => {
@@ -783,8 +783,8 @@ export default function InvoicesPage() {
             Re-sync to QuickBooks
           </DropdownMenuItem>
         )}
-        {/* Task #1710 — Correct / Reissue. Only available on issued invoices. */}
-        {canCorrect && ["sent", "paid", "overdue"].includes(invoice.status) && (
+        {/* Task #1710 — Correct / Reissue. Available on generated and sent invoices. */}
+        {canCorrect && ["generated", "sent"].includes(invoice.status) && (
           <DropdownMenuItem
             onSelect={(e) => {
               e.preventDefault();

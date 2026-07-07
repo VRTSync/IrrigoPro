@@ -2,9 +2,9 @@
 // POST /api/invoices/:id/mark-unsent.
 //
 // Mounts the routes against in-memory storage stubs and exercises the role
-// guard, company scoping, the status preconditions (only draft → sent, only
-// sent → draft), and the happy paths (status + sentAt are written through
-// storage.updateInvoice).
+// guard, company scoping, the status preconditions (only generated → sent,
+// only sent → generated), and the happy paths (status + sentAt are written
+// through storage.updateInvoice).
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -83,7 +83,7 @@ function invoice(overrides: Record<string, any> = {}) {
     companyId: 1,
     invoiceMonth: 6,
     invoiceYear: 2026,
-    status: "draft",
+    status: "generated",
     sentAt: null,
     partsSubtotal: "100.00",
     laborSubtotal: "200.00",
@@ -135,9 +135,9 @@ describe("POST /api/invoices/:id/mark-sent", () => {
     }
   });
 
-  it("flips a draft invoice to sent and stamps sentAt", async () => {
+  it("flips a generated invoice to sent and stamps sentAt", async () => {
     try {
-      const calls = stubStorage({ 1: invoice({ status: "draft" }) });
+      const calls = stubStorage({ 1: invoice({ status: "generated" }) });
       const app = buildApp("billing_manager");
       const { status, body } = await post(app, "/api/invoices/1/mark-sent");
       assert.equal(status, 200);
@@ -150,8 +150,8 @@ describe("POST /api/invoices/:id/mark-sent", () => {
     }
   });
 
-  it("rejects a non-draft invoice with 400 (no write)", async () => {
-    for (const st of ["sent", "paid", "cancelled"]) {
+  it("rejects a non-generated invoice with 400 (no write)", async () => {
+    for (const st of ["draft", "sent", "paid", "cancelled"]) {
       try {
         const calls = stubStorage({ 1: invoice({ status: st }) });
         const app = buildApp("company_admin");
@@ -199,7 +199,7 @@ describe("POST /api/invoices/:id/mark-unsent", () => {
     }
   });
 
-  it("reverts a sent invoice to draft and clears sentAt", async () => {
+  it("reverts a sent invoice to generated and clears sentAt", async () => {
     try {
       const calls = stubStorage({
         1: invoice({ status: "sent", sentAt: new Date() }),
@@ -207,9 +207,9 @@ describe("POST /api/invoices/:id/mark-unsent", () => {
       const app = buildApp("billing_manager");
       const { status, body } = await post(app, "/api/invoices/1/mark-unsent");
       assert.equal(status, 200);
-      assert.equal(body.status, "draft");
+      assert.equal(body.status, "generated");
       assert.equal(calls.length, 1);
-      assert.equal(calls[0].patch.status, "draft");
+      assert.equal(calls[0].patch.status, "generated");
       assert.equal(calls[0].patch.sentAt, null);
     } finally {
       restoreAll();
@@ -217,7 +217,7 @@ describe("POST /api/invoices/:id/mark-unsent", () => {
   });
 
   it("rejects a non-sent invoice with 400 (no write)", async () => {
-    for (const st of ["draft", "paid", "cancelled"]) {
+    for (const st of ["draft", "generated", "paid", "cancelled"]) {
       try {
         const calls = stubStorage({ 1: invoice({ status: st }) });
         const app = buildApp("company_admin");

@@ -1,11 +1,11 @@
 // Task #1438 — Record manual delivery of an invoice.
 //
-// POST /api/invoices/:id/mark-sent   — flip a draft invoice to `sent` and
+// POST /api/invoices/:id/mark-sent   — flip a generated invoice to `sent` and
 //   stamp `sentAt = now()`. Does NOT email anything; it only records that
 //   the invoice was delivered out-of-band (printed, hand-delivered, sent
-//   from a personal mailbox). Only `draft` invoices are eligible.
+//   from a personal mailbox). Only `generated` invoices are eligible.
 // POST /api/invoices/:id/mark-unsent — undo a mistaken mark-sent: revert a
-//   `sent` invoice back to `draft` and clear `sentAt`. Only valid from
+//   `sent` invoice back to `generated` and clear `sentAt`. Only valid from
 //   `sent`.
 //
 // Both are company-scoped (getInvoiceById under the caller's company) and
@@ -46,10 +46,10 @@ export function registerInvoiceMarkSentRoutes(
           res.status(404).json({ message: "Invoice not found" });
           return;
         }
-        if (invoice.status !== "draft") {
+        if (invoice.status !== "generated") {
           res
             .status(400)
-            .json({ message: "Only draft invoices can be marked as sent" });
+            .json({ message: "Only generated invoices can be marked as sent." });
           return;
         }
         const updated = await storage.updateInvoice(id, {
@@ -91,7 +91,7 @@ export function registerInvoiceMarkSentRoutes(
           return;
         }
         const updated = await storage.updateInvoice(id, {
-          status: "draft",
+          status: "generated",
           sentAt: null,
         });
         res.json(updated);
