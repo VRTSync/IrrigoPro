@@ -3,12 +3,14 @@ import { repairWoMatchEstimateMigration } from './repair-wo-match-estimate';
 import { reconcileInspectionPassMigration } from './reconcile-inspection-pass';
 import { invoiceRevisionBackfillMigration } from './invoice-revision-backfill';
 import { repairTicketTotalDriftMigration } from './repair-ticket-total-drift';
+import { backfillMergedInvoiceStatusMigration } from './backfill-merged-invoice-status';
 
 const REGISTRY = new Map<string, MigrationDefinition>([
   [repairTicketTotalDriftMigration.id, repairTicketTotalDriftMigration],
   [repairWoMatchEstimateMigration.id, repairWoMatchEstimateMigration],
   [reconcileInspectionPassMigration.id, reconcileInspectionPassMigration],
   [invoiceRevisionBackfillMigration.id, invoiceRevisionBackfillMigration],
+  [backfillMergedInvoiceStatusMigration.id, backfillMergedInvoiceStatusMigration],
 ]);
 
 export function listMigrations(): MigrationDefinition[] {

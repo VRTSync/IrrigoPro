@@ -103,6 +103,7 @@ interface Invoice {
   dueDate?: string | null;
   quickbooksInvoiceId?: string;
   supersededByInvoiceId?: number | null;
+  mergedIntoInvoiceId?: number | null;
 }
 
 const MONTH_NAMES = [
@@ -201,6 +202,12 @@ function getStatusBadge(status: string) {
       return <Badge className="bg-emerald-100 text-emerald-800">Paid</Badge>;
     case "overdue":
       return <Badge className="bg-red-100 text-red-800">Overdue</Badge>;
+    case "superseded":
+      return <Badge className="bg-amber-100 text-amber-700">Superseded</Badge>;
+    case "merged":
+      return <Badge className="bg-purple-100 text-purple-700">Merged in</Badge>;
+    case "cancelled":
+      return <Badge className="bg-gray-100 text-gray-500">Cancelled</Badge>;
     default:
       return <Badge className="bg-gray-100 text-gray-800">{status}</Badge>;
   }
@@ -951,33 +958,48 @@ export default function InvoicesPage() {
         {/* Grouped invoice list */}
         <div className="space-y-8">
           {groups.map((group) => {
-            // Superseded invoices are excluded from the group total; they appear
-            // as collapsed version history beneath their replacement.
-            const activeInvoices = group.invoices.filter((inv) => inv.status !== "superseded");
-            const supersededInvoices = group.invoices.filter((inv) => inv.status === "superseded");
-            // Build a predecessor map keyed by the NEW invoice id that superseded each entry.
-            // supersededInvoice.supersededByInvoiceId points at the invoice that replaced it.
+            // Terminal invoices (superseded, merged) are excluded from the
+            // group total and collapsed as version history beneath their survivor.
+            const activeInvoices = group.invoices.filter(
+              (inv) => inv.status !== "superseded" && inv.status !== "merged",
+            );
+            const terminalInvoices = group.invoices.filter(
+              (inv) => inv.status === "superseded" || inv.status === "merged",
+            );
+            // Build a unified predecessor map keyed by the survivor/replacement
+            // invoice id. Supports both correction chains (supersededByInvoiceId)
+            // and merge chains (mergedIntoInvoiceId).
             const predecessorMap = new Map<number, Invoice[]>();
-            for (const inv of supersededInvoices) {
-              if (inv.supersededByInvoiceId != null) {
-                const arr = predecessorMap.get(inv.supersededByInvoiceId) ?? [];
+            for (const inv of terminalInvoices) {
+              const linkId = inv.supersededByInvoiceId ?? inv.mergedIntoInvoiceId ?? null;
+              if (linkId != null) {
+                const arr = predecessorMap.get(linkId) ?? [];
                 arr.push(inv);
-                predecessorMap.set(inv.supersededByInvoiceId, arr);
+                predecessorMap.set(linkId, arr);
               }
             }
             const groupTotal = activeInvoices.reduce((s, inv) => s + parseFloat(inv.totalAmount), 0);
-            // Walk the supersededByInvoiceId FK chain backward to collect all predecessors
-            // for a given active invoice id. Handles multi-revision chains (R1 → R2 → R3)
-            // without any invoice-number string parsing.
+            // Collect all terminal predecessors for a given active invoice id.
+            // Correction chains are linear (R1 → R2 → R3): follow prevs[0] each step.
+            // Merge chains are fan-in (N absorbed → 1 survivor): all N are at the
+            // first level, so push them all and stop walking (absorbed invoices have
+            // no further predecessors of their own).
             const predecessorsFor = (activeId: number): Invoice[] => {
               const result: Invoice[] = [];
               let currentId = activeId;
               while (true) {
                 const prevs = predecessorMap.get(currentId) ?? [];
                 if (prevs.length === 0) break;
-                const prev = prevs[0];
-                result.push(prev);
-                currentId = prev.id;
+                // Fan-in case (merges): all predecessors link directly to the same
+                // survivor. Push them all and stop — absorbed invoices don't have
+                // further predecessors in the map.
+                if (prevs.length > 1) {
+                  result.push(...prevs);
+                  break;
+                }
+                // Linear correction chain: push the single predecessor and keep walking.
+                result.push(prevs[0]);
+                currentId = prevs[0].id;
               }
               return result;
             };
@@ -1041,6 +1063,14 @@ export default function InvoicesPage() {
                                 Rev {invoice.revision}
                               </span>
                             )}
+                            {(() => {
+                              const mergedCount = history.filter((p) => p.status === "merged").length;
+                              return mergedCount > 0 ? (
+                                <span className="text-xs font-medium text-purple-700 bg-purple-100 px-1 py-0.5 rounded">
+                                  Merged from {mergedCount}
+                                </span>
+                              ) : null;
+                            })()}
                             {history.length > 0 && (
                               <button
                                 type="button"

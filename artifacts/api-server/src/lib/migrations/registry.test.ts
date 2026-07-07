@@ -37,6 +37,14 @@ describe("migration registry — static shape", () => {
     );
   });
 
+  it("contains backfill-merged-invoice-status-v1", () => {
+    const ids = listMigrations().map((m) => m.id);
+    assert.ok(
+      ids.includes("backfill-merged-invoice-status-v1"),
+      "missing backfill-merged-invoice-status-v1",
+    );
+  });
+
   it("does NOT contain reconcile-billing-sheet-invoice-totals-v1 (superseded)", () => {
     const ids = new Set(listMigrations().map((m) => m.id));
     assert.ok(

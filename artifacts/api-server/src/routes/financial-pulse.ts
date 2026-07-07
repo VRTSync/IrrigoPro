@@ -64,6 +64,7 @@ import {
   type WetCheckBillingBillableLike,
   type WetCheckBillingLike,
   type PulseWetCheckBillingLike,
+  INVOICE_EXCLUDED_STATUSES,
 } from "../financial-pulse-math";
 
 const ALLOWED_ROLES = new Set([
@@ -584,7 +585,7 @@ export function registerFinancialPulseRoutes(
         const marginWindow = period === "ytd" ? ytd : mtd;
         const invoiceIdsInWindow = allInvoices
           .filter((inv) => {
-            if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded")
+            if (INVOICE_EXCLUDED_STATUSES.has(inv.status))
               return false;
             const d = inv.createdAt instanceof Date
               ? inv.createdAt
@@ -809,7 +810,7 @@ export function registerFinancialPulseRoutes(
         ]);
         const invoiceIdsInWindow = allInvoices
           .filter((inv) => {
-            if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded")
+            if (INVOICE_EXCLUDED_STATUSES.has(inv.status))
               return false;
             const d = inv.createdAt instanceof Date
               ? inv.createdAt
@@ -979,7 +980,7 @@ export function registerFinancialPulseRoutes(
         const allInvoices = await loadInvoicesForCustomers(customerIds);
         const invoiceIdsInWindow = allInvoices
           .filter((inv) => {
-            if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded")
+            if (INVOICE_EXCLUDED_STATUSES.has(inv.status))
               return false;
             const d = inv.createdAt instanceof Date
               ? inv.createdAt
@@ -1057,7 +1058,7 @@ export function registerFinancialPulseRoutes(
         const allInvoices = await loadInvoicesForCustomers(customerIds);
         const invoiceIdsInWindow = allInvoices
           .filter((inv) => {
-            if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded")
+            if (INVOICE_EXCLUDED_STATUSES.has(inv.status))
               return false;
             const d = inv.createdAt instanceof Date
               ? inv.createdAt
@@ -1350,7 +1351,7 @@ export function registerFinancialPulseRoutes(
         // non-draft/cancelled invoice for this customer.
         let lastInvoiceAt: string | null = null;
         for (const inv of allInvoices) {
-          if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+          if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
           const d = inv.createdAt instanceof Date
             ? inv.createdAt
             : new Date(inv.createdAt as unknown as string);
@@ -1369,7 +1370,7 @@ export function registerFinancialPulseRoutes(
         let monthSpend = 0;
         let yearSpend = 0;
         for (const inv of allInvoices) {
-          if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+          if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
           const d = inv.createdAt instanceof Date
             ? inv.createdAt
             : new Date(inv.createdAt as unknown as string);
@@ -1492,8 +1493,7 @@ export function registerFinancialPulseRoutes(
           lastCycleValue = computeBilledForCycle(allInvoices, lastCycle);
           lastCycleInvoiceCount = allInvoices.filter(
             (inv) =>
-              inv.status !== "draft" &&
-              inv.status !== "cancelled" &&
+              !INVOICE_EXCLUDED_STATUSES.has(inv.status) &&
               inv.invoiceYear === lastCycle.year &&
               inv.invoiceMonth === lastCycle.month,
           ).length;
@@ -1543,7 +1543,7 @@ export function registerFinancialPulseRoutes(
         // invoicedYtd + inFlightTotal avoids any double-count. (Task #814)
         let invoicedYtd = 0;
         for (const inv of allInvoices) {
-          if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+          if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
           if ((inv.invoiceYear ?? 0) !== currentYear) continue;
           invoicedYtd += toNum(inv.totalAmount);
         }

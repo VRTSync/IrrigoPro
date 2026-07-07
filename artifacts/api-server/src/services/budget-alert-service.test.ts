@@ -170,6 +170,8 @@ function makeInvoice(over: Partial<StubInvoice> = {}): StubInvoice {
     quickbooksSyncToken: null as any,
     revision: 1,
     supersededByInvoiceId: null as any,
+    mergedIntoInvoiceId: null as any,
+    qbNote: null as any,
     createdAt: now,
     updatedAt: now,
   };

@@ -167,6 +167,12 @@ export function getPrevYearYtdWindow(now: Date) {
   return { start, end };
 }
 
+// Task #1756 — canonical set of terminal/excluded statuses for every financial
+// rollup. Extend this constant rather than duplicating the tuple.
+export const INVOICE_EXCLUDED_STATUSES = new Set([
+  "draft", "cancelled", "superseded", "merged", "failed",
+]);
+
 export function computeBilled(
   invoices: InvoiceLike[],
   start: Date,
@@ -174,7 +180,7 @@ export function computeBilled(
 ): number {
   let sum = 0;
   for (const inv of invoices) {
-    if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     const d = toDate(inv.createdAt);
     if (!inWindow(d, start, end)) continue;
     sum += toNum(inv.totalAmount);
@@ -193,7 +199,7 @@ export function computeCollected(
   // Reconciliation contract is in docs/financial-metrics.md.
   let sum = 0;
   for (const inv of invoices) {
-    if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     const d = toDate(inv.paidAt ?? null);
     if (!inWindow(d, start, end)) continue;
     sum += toNum(inv.totalAmount);
@@ -204,12 +210,7 @@ export function computeCollected(
 export function computeOutstandingAr(invoices: InvoiceLike[]): number {
   let sum = 0;
   for (const inv of invoices) {
-    if (
-      inv.status === "draft" ||
-      inv.status === "cancelled" ||
-      inv.status === "paid" ||
-      inv.status === "superseded"
-    )
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status) || inv.status === "paid")
       continue;
     if (inv.paidAt) continue;
     sum += toNum(inv.totalAmount);
@@ -261,7 +262,7 @@ export function getDistinctBillingCycles(
 ): Array<{ year: number; month: number }> {
   const seen = new Map<number, { year: number; month: number }>();
   for (const inv of invoices) {
-    if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     if (inv.invoiceMonth == null || inv.invoiceYear == null) continue;
     const key = inv.invoiceYear * 100 + inv.invoiceMonth;
     if (!seen.has(key)) {
@@ -281,7 +282,7 @@ export function computeBilledForCycle(
 ): number {
   let sum = 0;
   for (const inv of invoices) {
-    if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     if (inv.invoiceYear === cycle.year && inv.invoiceMonth === cycle.month) {
       sum += toNum(inv.totalAmount);
     }
@@ -313,7 +314,7 @@ export function computeAllBillableYtd(
 ): number {
   let sum = 0;
   for (const inv of invoices) {
-    if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     if (inv.invoiceYear !== currentYear) continue;
     sum += toNum(inv.totalAmount);
   }
@@ -389,7 +390,7 @@ export function computeGrossMargin(input: {
   const invoiceIdsInWindow = new Set<number>();
   let revenue = 0;
   for (const inv of invoices) {
-    if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     const d = toDate(inv.createdAt);
     if (!inWindow(d, window.start, window.end)) continue;
     invoiceIdsInWindow.add(inv.id);
@@ -496,7 +497,7 @@ export function bucketMonthlyRevenue(
   }));
   const idx = new Map(buckets.map((b, i) => [b.month, i]));
   for (const inv of invoices) {
-    if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     const d = toDate(inv.createdAt);
     if (!d) continue;
     const i = idx.get(monthKey(d));
@@ -542,12 +543,7 @@ export function computeArAging(
   ];
   const MS = 24 * 60 * 60 * 1000;
   for (const inv of invoices) {
-    if (
-      inv.status === "draft" ||
-      inv.status === "cancelled" ||
-      inv.status === "paid" ||
-      inv.status === "superseded"
-    )
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status) || inv.status === "paid")
       continue;
     if (inv.paidAt) continue;
     const created = toDate(inv.createdAt);
@@ -634,7 +630,7 @@ export function computeTopCustomers(input: {
   const ninetyAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
 
   for (const inv of invoices) {
-    if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     const d = toDate(inv.createdAt);
     if (!d) continue;
     const total = toNum(inv.totalAmount);
@@ -774,7 +770,7 @@ export function computeByTechnician(input: {
   const invoiceIdsInWindow = new Set<number>();
   const invoiceById = new Map<number, InvoiceLike>();
   for (const inv of invoices) {
-    if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     const d = toDate(inv.createdAt);
     if (!inWindow(d, window.start, window.end)) continue;
     invoiceIdsInWindow.add(inv.id);
@@ -885,7 +881,7 @@ export function computeByServiceType(input: {
   const { invoices, items, customersById, window } = input;
   const inWin: InvoiceLike[] = [];
   for (const inv of invoices) {
-    if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     const d = toDate(inv.createdAt);
     if (!inWindow(d, window.start, window.end)) continue;
     inWin.push(inv);
@@ -981,7 +977,7 @@ export function computeRevenueMix(input: {
   let contract = 0;
   let adhoc = 0;
   for (const inv of invoices) {
-    if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     const d = toDate(inv.createdAt);
     if (!inWindow(d, window.start, window.end)) continue;
     invoiceIdsInWindow.add(inv.id);

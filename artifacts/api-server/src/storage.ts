@@ -6864,7 +6864,7 @@ export class DatabaseStorage implements IStorage {
     const conditions = [
       gte(invoices.createdAt, monthStart),
       sql`${invoices.createdAt} < ${nextMonthStart}`,
-      sql`${invoices.status} NOT IN ('draft','cancelled','superseded')`,
+      sql`${invoices.status} NOT IN ('draft','cancelled','superseded','merged','failed')`,
     ];
     if (companyId !== null) {
       conditions.push(eq(customers.companyId, companyId));
@@ -7059,20 +7059,49 @@ export class DatabaseStorage implements IStorage {
         .where(eq(invoices.id, survivingId))
         .returning();
 
+      // Task #1756 — set merged status and link to survivor (not "cancelled",
+      // so genuine cancels remain distinguishable). Stored totals are left
+      // intact; nothing is zeroed on the absorbed invoice rows.
       await tx
         .update(invoices)
-        .set({ status: "cancelled", updatedAt: new Date() })
+        .set({ status: "merged", mergedIntoInvoiceId: survivingId, updatedAt: new Date() } as any)
         .where(inArray(invoices.id, mergedOnlyIds));
 
       // Drop the survivor's stale cached PDF metadata so the next view
       // regenerates against the merged line items.
       await tx.delete(invoicePdfs).where(eq(invoicePdfs.invoiceId, survivingId));
 
+      // Task #1756 — clear the QB ids from absorbed invoices and stamp a
+      // qbNote so billing managers know what to clean up manually. The "never-
+      // auto-void" convention is preserved — no QB API call is made here.
+      // Use `rows` (full Drizzle result) not `merged` (MergeCandidate subset)
+      // because MergeCandidate intentionally omits QB fields.
+      const absorbedRowsWithQb = rows.filter(
+        (r) => mergedOnlyIds.includes(r.id) && r.quickbooksInvoiceId,
+      );
+      if (absorbedRowsWithQb.length > 0) {
+        for (const absorbedRow of absorbedRowsWithQb) {
+          await tx
+            .update(invoices)
+            .set({
+              quickbooksInvoiceId: null,
+              quickbooksSyncToken: null,
+              qbNote: `Manually delete QB invoice ${absorbedRow.quickbooksInvoiceId} — this invoice was absorbed into merge survivor #${surviving.invoiceNumber}.` as any,
+              updatedAt: new Date(),
+            } as any)
+            .where(eq(invoices.id, absorbedRow.id));
+        }
+      }
+
+      // Task #1756 — audit event on the survivor (`invoice_merge_in`): records
+      // which invoices were absorbed and the resulting combined totals. This is
+      // the NEW canonical action name; the legacy `invoice.merged` name is only
+      // used by the backfill migration to find historical events.
       await recordAuditEvent(
         null,
         {
           actionType: "invoice",
-          action: "invoice.merged",
+          action: "invoice_merge_in",
           severity: "info",
           actorUserId: audit?.actorUserId ?? null,
           actorLabel: audit?.actorLabel ?? null,
@@ -7098,6 +7127,37 @@ export class DatabaseStorage implements IStorage {
         },
         { tx, strict: true },
       );
+
+      // Task #1756 — one audit event per absorbed invoice so its Activity tab
+      // also shows the merge event (targetId points at the absorbed invoice).
+      for (const absorbedInv of merged) {
+        await recordAuditEvent(
+          null,
+          {
+            actionType: "invoice",
+            action: "invoice_merged",
+            severity: "info",
+            actorUserId: audit?.actorUserId ?? null,
+            actorLabel: audit?.actorLabel ?? null,
+            actorRole: audit?.actorRole ?? null,
+            actorCompanyId: audit?.actorCompanyId ?? null,
+            targetType: "invoice",
+            targetId: String(absorbedInv.id),
+            summary: `Merged into #${surviving.invoiceNumber}`,
+            details: {
+              survivorId: survivingId,
+              survivorNumber: surviving.invoiceNumber,
+              absorbedId: absorbedInv.id,
+              absorbedNumber: absorbedInv.invoiceNumber,
+              customerId: surviving.customerId,
+              partsSubtotal: String(absorbedInv.partsSubtotal),
+              laborSubtotal: String(absorbedInv.laborSubtotal),
+              totalAmount: String(absorbedInv.totalAmount),
+            },
+          },
+          { tx, strict: false },
+        );
+      }
 
       return {
         survivingInvoice,

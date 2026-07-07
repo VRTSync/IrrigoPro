@@ -888,6 +888,17 @@ export const invoices = pgTable("invoices", {
   // `status` flips to 'superseded'. The base invoiceNumber never changes;
   // `revision` increments (1 → 2 → …) to track correction iterations.
   supersededByInvoiceId: integer("superseded_by_invoice_id"),
+  // Task #1756 — Invoice Merge: when an invoice is absorbed into a merge
+  // survivor its status flips to 'merged' and this FK points at the survivor.
+  // Distinct from 'cancelled' (genuine voids) and 'superseded' (corrections).
+  // No .references() — self-referencing FKs on the same table cause TS7022
+  // circular-inference errors (same pattern as supersededByInvoiceId above).
+  mergedIntoInvoiceId: integer("merged_into_invoice_id"),
+  // Task #1756 — freeform note explaining a pending QuickBooks manual action
+  // (e.g. "Manually delete QB invoice INV-123 — this invoice was absorbed into
+  // a merge"). Null on most rows; populated on merged/superseded invoices whose
+  // QB records need manual cleanup.
+  qbNote: text("qb_note"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
