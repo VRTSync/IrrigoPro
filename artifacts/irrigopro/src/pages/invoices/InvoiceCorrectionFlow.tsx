@@ -42,6 +42,17 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
+function parseApiErrorCode(err: Error): string | null {
+  try {
+    const colon = err.message.indexOf(': ');
+    if (colon < 0) return null;
+    const body = JSON.parse(err.message.slice(colon + 2));
+    return typeof body?.code === 'string' ? body.code : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface Invoice {
@@ -685,6 +696,7 @@ function ReissueStep({
   isReissuing,
   qbSyncState,
   qbSyncError,
+  qbSyncCode,
   onQbSync,
   isQbSyncing,
 }: {
@@ -695,6 +707,7 @@ function ReissueStep({
   isReissuing: boolean;
   qbSyncState: "idle" | "synced" | "failed";
   qbSyncError: string | null;
+  qbSyncCode: string | null;
   onQbSync: () => void;
   isQbSyncing: boolean;
 }) {
@@ -722,10 +735,27 @@ function ReissueStep({
           </div>
         ) : qbSyncState === "failed" ? (
           <div className="space-y-2">
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 text-left">
-              <strong>QuickBooks update failed.</strong>{" "}
-              {qbSyncError ?? "Unknown error."} The app-side reissue is saved — retry when ready.
-            </div>
+            {qbSyncCode === "QB_AUTH_EXPIRED" ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800 text-left space-y-2">
+                <div className="flex gap-2 items-start">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>QuickBooks session expired.</strong> Reconnect QuickBooks in Settings, then retry the update here.
+                  </span>
+                </div>
+                <a
+                  href="/quickbooks"
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-900 underline underline-offset-2 hover:text-amber-700"
+                >
+                  Go to QuickBooks Settings →
+                </a>
+              </div>
+            ) : (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 text-left">
+                <strong>QuickBooks update failed.</strong>{" "}
+                {qbSyncError ?? "Unknown error."} The app-side reissue is saved — retry when ready.
+              </div>
+            )}
             <Button
               onClick={onQbSync}
               disabled={isQbSyncing}
@@ -848,6 +878,7 @@ export function InvoiceCorrectionFlow({
   } | null>(null);
   const [qbSyncState, setQbSyncState] = useState<"idle" | "synced" | "failed">("idle");
   const [qbSyncError, setQbSyncError] = useState<string | null>(null);
+  const [qbSyncCode, setQbSyncCode] = useState<string | null>(null);
 
   // Fetch tickets for this invoice.
   const { data: ticketsData, isLoading: ticketsLoading } = useQuery<{
@@ -884,6 +915,7 @@ export function InvoiceCorrectionFlow({
       setReissuedInvoice(null);
       setQbSyncState("idle");
       setQbSyncError(null);
+      setQbSyncCode(null);
     }
   }, [open]);
 
@@ -946,11 +978,13 @@ export function InvoiceCorrectionFlow({
     onSuccess: () => {
       setQbSyncState("synced");
       setQbSyncError(null);
+      setQbSyncCode(null);
       queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
     },
     onError: (err: Error) => {
       setQbSyncState("failed");
       setQbSyncError(err.message);
+      setQbSyncCode(parseApiErrorCode(err));
     },
   });
 
@@ -1105,6 +1139,7 @@ export function InvoiceCorrectionFlow({
                 isReissuing={reissueMutation.isPending}
                 qbSyncState={qbSyncState}
                 qbSyncError={qbSyncError}
+                qbSyncCode={qbSyncCode}
                 onQbSync={() => qbSyncMutation.mutate()}
                 isQbSyncing={qbSyncMutation.isPending}
               />

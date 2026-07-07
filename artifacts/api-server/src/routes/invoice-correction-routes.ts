@@ -36,6 +36,7 @@ import {
 import { storage as storageModule } from "../storage";
 import { recordAuditEvent } from "./audit-log";
 import { computeBillingSheetTotal } from "../billing-sheet-total";
+import { InvoiceSyncError } from "./invoice-sync-quickbooks-route";
 
 export interface RegisterInvoiceCorrectionRoutesDeps {
   requireAuthentication: RequestHandler;
@@ -1031,7 +1032,14 @@ export function registerInvoiceCorrectionRoutes(
             updatedAt: new Date(),
           })
           .where(eq(invoiceCorrections.id, parseInt(String(req.params.id))));
-        res.status(502).json({ message: err?.message ?? "QB sync failed. Retry the endpoint once the issue is resolved." });
+        const isAuthError = err instanceof InvoiceSyncError && err.httpStatus === 401;
+        // Use 400 (not 401) for QB credential errors so the client's global
+        // session-expired redirect does not fire for an integration failure.
+        const httpStatus = isAuthError ? 400 : 502;
+        res.status(httpStatus).json({
+          message: err?.message ?? "QB sync failed. Retry the endpoint once the issue is resolved.",
+          ...(isAuthError ? { code: "QB_AUTH_EXPIRED" } : {}),
+        });
       }
     },
   );

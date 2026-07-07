@@ -104,7 +104,13 @@ export function registerInvoiceSyncQuickbooksRoutes(
         });
       } catch (err) {
         if (err instanceof InvoiceSyncError) {
-          res.status(err.httpStatus).json({ message: err.message });
+          const isAuthError = err.httpStatus === 401;
+          // Use 400 (not 401) for QB credential errors so the client's global
+          // session-expired redirect does not fire for an integration failure.
+          res.status(isAuthError ? 400 : err.httpStatus).json({
+            message: err.message,
+            ...(isAuthError ? { code: "QB_AUTH_EXPIRED" } : {}),
+          });
           return;
         }
         req.log?.error?.({ err }, "invoice QuickBooks sync failed");

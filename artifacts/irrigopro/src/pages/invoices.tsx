@@ -58,7 +58,19 @@ import { InvoiceAuditModal } from "@/components/billing/invoice-audit-modal";
 import { FinancialPulseWidget } from "@/components/financial-pulse/financial-pulse-widget";
 import { exportSingleInvoiceCsv } from "@/lib/invoice-csv";
 import { safeGet } from "@/utils/safeStorage";
+
 import { InvoiceCorrectionFlow } from "@/pages/invoices/InvoiceCorrectionFlow";
+
+function parseApiErrorCode(err: Error): string | null {
+  try {
+    const colon = err.message.indexOf(': ');
+    if (colon < 0) return null;
+    const body = JSON.parse(err.message.slice(colon + 2));
+    return typeof body?.code === 'string' ? body.code : null;
+  } catch {
+    return null;
+  }
+}
 
 const CSV_EXPORT_ROLES = new Set([
   "company_admin",
@@ -410,6 +422,9 @@ export default function InvoicesPage() {
   // Task #1443 — invoice queued for a confirmed QuickBooks re-sync (it already
   // carries a quickbooksInvoiceId, so this forces a fresh QB invoice).
   const [resyncInvoice, setResyncInvoice] = useState<Invoice | null>(null);
+  // Task #1767 — track QB auth expiry inside the resync modal so we can show an
+  // inline reconnect CTA instead of closing the dialog on error.
+  const [resyncQbAuthError, setResyncQbAuthError] = useState(false);
   // Task #1710 — Invoice Correction & Reissue.
   const [correctionInvoice, setCorrectionInvoice] = useState<Invoice | null>(null);
   const canCorrect = !!userRole && MERGE_ROLES.has(userRole);
@@ -480,7 +495,21 @@ export default function InvoicesPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
     },
     onError: (err: Error) => {
-      toast({ title: "QuickBooks sync failed", description: err.message, variant: "destructive" });
+      if (parseApiErrorCode(err) === "QB_AUTH_EXPIRED") {
+        if (resyncInvoice != null) {
+          // Resync dialog is open — keep it open and show inline reconnect banner.
+          setResyncQbAuthError(true);
+        } else {
+          // Plain "Sync to QuickBooks" table action — no dialog, show a toast.
+          toast({
+            title: "QuickBooks not connected",
+            description: "Your QuickBooks session has expired. Go to QuickBooks Settings to reconnect.",
+            variant: "destructive",
+          });
+        }
+      } else {
+        toast({ title: "QuickBooks sync failed", description: err.message, variant: "destructive" });
+      }
     },
   });
 
@@ -1409,7 +1438,10 @@ export default function InvoicesPage() {
       <Dialog
         open={resyncInvoice != null}
         onOpenChange={(open) => {
-          if (!open) setResyncInvoice(null);
+          if (!open) {
+            setResyncInvoice(null);
+            setResyncQbAuthError(false);
+          }
         }}
       >
         <DialogContent className="sm:max-w-lg">
@@ -1421,17 +1453,35 @@ export default function InvoicesPage() {
                 : ""}
             </DialogDescription>
           </DialogHeader>
+          {resyncQbAuthError && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800 space-y-2 mx-1">
+              <div className="flex gap-2 items-start">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  <strong>QuickBooks not connected.</strong> Your session has expired — reconnect QuickBooks in Settings and retry.
+                </span>
+              </div>
+              <a
+                href="/quickbooks"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-900 underline underline-offset-2 hover:text-amber-700"
+              >
+                Go to QuickBooks Settings →
+              </a>
+            </div>
+          )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setResyncInvoice(null)}>
-              Cancel
+            <Button variant="outline" onClick={() => { setResyncInvoice(null); setResyncQbAuthError(false); }}>
+              {resyncQbAuthError ? "Close" : "Cancel"}
             </Button>
+            {!resyncQbAuthError && (
             <Button
               disabled={syncMutation.isPending}
               onClick={() => {
                 if (!resyncInvoice) return;
+                setResyncQbAuthError(false);
                 syncMutation.mutate(
                   { id: resyncInvoice.id, force: true },
-                  { onSettled: () => setResyncInvoice(null) },
+                  { onSuccess: () => setResyncInvoice(null) },
                 );
               }}
             >
@@ -1447,6 +1497,7 @@ export default function InvoicesPage() {
                 </>
               )}
             </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
