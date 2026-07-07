@@ -181,13 +181,21 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
         .where(eq(wetCheckBillings.invoiceId, stray.id));
     }
 
+    // Clear invoice_corrections.reissuedInvoiceId FK BEFORE deleting the stray.
+    // This is unconditional (keyed on stray.id, not originalId) because the FK
+    // constraint fires at delete time regardless of whether we found the original.
+    await db
+      .update(invoiceCorrections)
+      .set({ reissuedInvoiceId: null, updatedAt: new Date() } as any)
+      .where(eq(invoiceCorrections.reissuedInvoiceId, stray.id));
+
     // Delete invoice_pdfs for the stray (they belong to R1, not the original).
     await db.delete(invoicePdfs).where(eq(invoicePdfs.invoiceId, stray.id));
 
     // Delete the stray reissue's invoice_items (FK child).
     await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, stray.id));
 
-    // Delete the stray reissue invoice itself.
+    // Delete the stray reissue invoice itself — all FKs pointing at it are now cleared.
     await db.delete(invoices).where(eq(invoices.id, stray.id));
 
     if (originalId) {
@@ -197,10 +205,10 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
         .set({ status: 'generated', supersededByInvoiceId: null, updatedAt: new Date() } as any)
         .where(eq(invoices.id, originalId));
 
-      // Reset any reissued correction that pointed to the stray.
+      // Flip the correction status back to draft now that reissuedInvoiceId is cleared.
       await db
         .update(invoiceCorrections)
-        .set({ status: 'draft', reissuedInvoiceId: null, updatedAt: new Date() } as any)
+        .set({ status: 'draft', updatedAt: new Date() } as any)
         .where(
           and(
             eq(invoiceCorrections.originalInvoiceId, originalId),
