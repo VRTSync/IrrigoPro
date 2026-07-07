@@ -1,0 +1,70 @@
+# Wet Check — Force Complete-or-Flag at Finding Save (Close the Needs-Review Fallback)
+
+**What & Why**
+The "Custom — Flag for Manager" redesign made a finding *either* a concrete fix (tech handles it, auto-bills) *or* a Custom flag (routes to the manager). But the field capture still has a **third path**: a tech can save a concrete finding with Mark Complete **unchecked**, and it lands in the manager triage queue as `needs_review` — without a description or photo requirement, without being a Custom flag. The helper text on the toggle explicitly invites this: *"Leave unchecked to send to the manager for routing"* (`FindingSheet.tsx:503-504`).
+
+**Randy's model (confirmed 2026-07-07):** a Needs Work finding is either **completed in the field** or **custom-flagged for the manager**. Nothing else should arrive in triage. This slice closes the fallback.
+
+**Also confirmed:** manager triage stays exactly as-is — all four decisions (Send to estimate / Queue as work order / Document only / Already repaired — bill it) remain. This slice touches only what the *tech* can save.
+
+---
+
+## Slice 1 — FindingSheet: Save requires Complete, with a Flag escape route
+
+### Files
+- `artifacts/irrigopro/src/pages/wet-checks/FindingSheet.tsx` (Mark Complete toggle 492-507, save button 534-544)
+- `artifacts/irrigopro/src/pages/wet-checks/ZoneScreen.tsx` (opens FindingSheet; owns the Custom Finding form entry)
+- `artifacts/irrigopro/src/lib/finding-save-payload.ts` (payload builder; `techDisposition` derivation :107)
+
+### Changes
+- **Save Finding is disabled until Mark Complete is checked.** The concrete-fix form can only produce `repairedInField: true` / `techDisposition: "completed_in_field"`.
+- **Save is also disabled until the finding is billable** — the same predicate the server's auto-bill uses (`canAutoBill`): a part is selected, **or** "No part needed (labor only)" is explicitly ticked, **or** the issue type is inherently labor-only (auto-injects `noPartNeeded`). Today the no-part confirmation is shown but not enforced (`FindingSheet.tsx:513-532`) — that's the gap that feeds the Task #1535 safety net with *new* data. After this slice, a finding that requires a part cannot be saved without one; a partless fix cannot be saved without the explicit labor-only confirmation. The gate state is shown inline (red "select a part or confirm labor-only" → green "ready to bill on submit").
+- **Replace the toggle helper text.** Remove "Leave unchecked to send to the manager for routing." New copy under a disabled Save: *"Finished the work? Mark complete. Can't complete it? Flag it for your manager instead."*
+- **Add an escape action on the sheet:** a secondary button **"Flag for Manager instead"** that switches this capture to the Custom Finding form (`issueType = custom_review`):
+  - Carry over anything already entered: notes prefill the required description; already-attached/pending photos carry over and count toward the ≥1-photo requirement; issue type and selected part name are appended to the description as context (e.g. "Started as: Bad Solenoid — Rain Bird DV-100").
+  - Part / qty / labor fields are dropped (Custom findings have none — established invariant).
+  - The Custom form's existing gates apply unchanged (description + ≥1 photo required).
+- **Edit mode:** same gate. Editing a legacy non-custom `needs_review` finding requires the tech to either Mark Complete or convert it via "Flag for Manager instead" before saving. Untouched legacy rows are not migrated (they remain triage-eligible; the manager queue already handles them).
+- Task #468 behavior (edits to an already-completed finding keep `repairedInField: true`) is unchanged and now structurally guaranteed — the form can no longer demote a finding to pending.
+
+## Slice 2 — Server enforcement
+
+### Files
+- `artifacts/api-server/src/routes/routes.ts` (finding create/patch body + derivation, ~17098-17134)
+
+### Changes
+- **POST create finding:** when `issueType !== "custom_review"` and `repairedInField !== true` → **400** with an instructional message ("Mark the finding complete, or flag it for your manager"). Company scoping on the route is unchanged (existing `requireCompanyId` + wet-check ownership assertions — Rule 1 holds).
+- **POST/PATCH also enforce billability at capture time** (same `canAutoBill` predicate, moved up from submit): `repairedInField: true` with `partId == null && !noPartNeeded && !LABOR_ONLY_ISSUE_TYPES.has(issueType)` → **400** ("Select the part used, or confirm this was a labor-only fix"). Additionally validate what submit currently validates too late (`storage.ts:8810-8840`): `quantity >= 1` when a part is set; `laborHours >= 0.25`, quantized to 0.25. The rule: **a record that cannot produce a valid billing line never gets persisted as complete.**
+- **PATCH finding (tech path):** same guards, with one exception — a PATCH that converts the finding to `custom_review` (flag escape route) is allowed with `repairedInField: false`; the server then stamps `resolution = "pending"` + `techDisposition = "needs_review"` and clears part/qty/labor fields, mirroring the client conversion.
+- **Do not touch:** the manager routing endpoint (`PATCH /wet-checks/findings/:id/route`) and its five resolutions.
+- **Demote the Task #1535 reroute from flow to tripwire.** The submit-hardening reroute (`storage.ts:8606-8673`) stays — offline-queue replays and legacy rows can still produce divergent data — but after this slice nothing created through the normal capture path should ever hit it. Make each firing visible instead of silent: record a lifecycle audit event (`wet_check.finding_rerouted_unbillable`, with findingId + reason) whenever it reroutes a finding, so drift shows up in the audit log rather than being absorbed quietly.
+
+## Slice 3 — Copy & affordance cleanup
+
+### Files
+- `artifacts/irrigopro/src/pages/wet-checks/ZoneScreen.tsx` (issue chip list / Custom chip helper text)
+
+### Changes
+- Custom chip helper text updated to reflect that it is now the **only** road to the manager: *"Use this when you can't complete the work in the field. You'll add a description and photo, and your manager will decide what happens next."*
+- Verify no other field surface offers a "send to manager" affordance for concrete findings (audit `ZoneScreen.tsx` finding cards — the old disposition toggle was removed in the Custom Flag slices; confirm nothing regressed).
+
+## Tests
+- FindingSheet: Save disabled while Mark Complete unchecked (create and edit modes); Save disabled when marked complete with no part and no labor-only confirmation; enabled once part selected OR noPartNeeded ticked OR issue type is labor-only.
+- Server: POST marked-complete finding with no part / no noPartNeeded / non-labor-only type → 400; qty 0 with a part → 400; negative laborHours → 400.
+- Task #1535 tripwire: a divergent row that reaches submit is still rerouted (not thrown), and a `finding_rerouted_unbillable` audit event is recorded.
+- "Flag for Manager instead" converts to the Custom form with notes/photos carried over and part context appended to the description; saved row is `custom_review` + `pending` + `needs_review` with no part/qty/labor.
+- Server: POST non-custom finding with `repairedInField: false` → 400; POST `custom_review` without repairedInField → 201; PATCH conversion to `custom_review` allowed and clears part fields.
+- Regression: submit-hardening reroute (unbillable completed → needs_review) still works; manager wizard still shows all four decision cards; triage queue membership predicate `isNeedsReview()` unchanged.
+- After this slice, a fresh wet check can only deliver two kinds of findings to triage: `custom_review` flags and Task #1535 safety-net reroutes.
+
+## Out of scope
+- Manager triage actions and the five-value `resolution` enum — **unchanged by confirmed decision (2026-07-07)**.
+- Migration of existing non-custom `needs_review` rows (grandfathered; edited rows converge via the edit-mode gate).
+- The Expo mobile app (`artifacts/irrigopro-mobile`) — it has no finding-capture surface today.
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/wet-checks/FindingSheet.tsx` (toggle 492-507, save 534-544)
+- `artifacts/irrigopro/src/lib/finding-save-payload.ts` (`buildFindingSavePayload` :94-113, `isNeedsReview` :40-51, `CUSTOM_REVIEW_ISSUE_TYPE` :17)
+- `artifacts/api-server/src/routes/routes.ts` (finding create ~17098-17134)
+- `artifacts/api-server/src/storage.ts` (submit hardening ~8606-8624 — reference only, do not change)
+- Prior spec: `Wet Check - Custom Flag-for-Manager Finding (Replace Manager-Review Toggle).md`
