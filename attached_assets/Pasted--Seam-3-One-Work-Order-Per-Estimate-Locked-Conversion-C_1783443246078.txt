@@ -1,0 +1,65 @@
+# Seam 3 — One Work Order Per Estimate (Locked Conversion, CAS Token Approval, Unique Index, Tenancy)
+
+**What & Why**
+The estimate→WO hook is the last unhardened door in the duplication story. The two prior bugs are fixed in current code (wet-check convert row lock, storage.ts:9799-9801; completion replace-not-append, routes.ts:9538/9586). What remains, verified 2026-07-07:
+
+1. **`createWorkOrderFromEstimate` (storage.ts:3726) is check-then-insert with no transaction and no lock.** Two concurrent callers — a double-click on Convert to Work Order, or the button racing the customer's token approval — both read zero existing WOs and both insert. Its writes (WO header → item loop → estimate back-link) also aren't atomic: a mid-loop failure leaves a WO with partial items and an unstamped estimate.
+2. **No DB-level invariant.** `work_orders.estimateId` carries only a non-unique index (schema.ts:812). "One WO per estimate" is enforced nowhere the database can see; every fix so far has been application-level hope.
+3. **Token approve AND reject are not CAS-guarded** (estimate-routes.ts: approve ~2246, reject ~2533). Both do a read gate (`status !== 'pending'` → 409) followed by a **plain** `updateEstimate`. Two concurrent submissions both pass the gate. Contrast the manager path `approveEstimateAndCreateWorkOrder` (storage.ts:3851), which does it right: row lock + status-gated UPDATE + prior-WO check in one transaction — that's the pattern to replicate, not invent.
+4. **Rule 1 gap:** `POST /api/estimates/:id/convert-to-work-order` (estimate-routes.ts:2713) has `requireAuthentication` only — no company-ownership check on the estimate, and `createWorkOrderFromEstimate` takes no companyId (its internal existing-WO lookup passes `companyId=null`, storage.ts:3736).
+
+**Mode/origin scope (Rule 5):** this spec covers the estimate→WO conversion surface for **all estimates** (inspection-origin and manually drafted alike — they share the pipeline; that's the lineage design working as intended). Wet-check **service** paths are untouched: deferred-findings WOs (`WO-WC-…`) are created with `estimateId=NULL` and never pass through `createWorkOrderFromEstimate`, so the partial unique index and the conversion lock don't touch them. WCB/snapshot/triage: unaffected.
+
+**Pre-flight check — DONE, result recorded.** Randy ran the duplicate check against production on 2026-07-07 (`SELECT estimate_id, COUNT(*) FROM work_orders WHERE estimate_id IS NOT NULL GROUP BY estimate_id HAVING COUNT(*) > 1`): **zero rows.** No duplicate WOs per estimate exist. No data migration is needed anywhere in this spec — do not build one, do not re-run the check. The unique index lands directly. Four build slices follow.
+
+---
+
+## Slice 1 — Schema: partial unique index
+
+### Files
+- `lib/db/src/schema/schema.ts` (`work_orders` indexes, :801-814) + migration.
+
+### Changes
+- `CREATE UNIQUE INDEX work_orders_estimate_unique_idx ON work_orders (estimate_id) WHERE estimate_id IS NOT NULL` (the existing non-unique `estimateIdx` can be dropped in the same schema change since the unique index covers its lookups).
+- Nullable by design: direct/maintenance/deferred-findings WOs (`estimateId=NULL`) are unlimited.
+- This is the invariant: after this slice, duplicate WOs per estimate are a database error, not a code-review hope. (Production verified clean 2026-07-07, so the index creation cannot fail on existing data.)
+
+## Slice 2 — Harden `createWorkOrderFromEstimate` (storage.ts:3726)
+
+### Changes
+- Wrap the entire body in `db.transaction`: `SELECT … FOR UPDATE` on the estimate row first, then re-check `getWorkOrdersByEstimate` **inside** the transaction, then WO insert + item loop + estimate back-link update (`status='converted_to_work_order'`, `workOrderId`) — one atomic unit, mirroring `approveEstimateAndCreateWorkOrder` (storage.ts:3851-3890).
+- Keep the idempotent contract: existing WO found under lock → return it (both callers depend on this — token auto-convert and the convert button).
+- **Belt-and-braces:** catch unique-index violation (23505) from Slice 1, re-read, return the existing WO. Record a lifecycle audit event (`work_order.duplicate_create_blocked`, estimateId + caller context) whenever either the lock re-check or the index catch fires — Rule 4 tripwire: drift is visible, never silent.
+- Add a `companyId` parameter (nullable for super_admin/internal callers) and scope the estimate load + existing-WO lookup with it; both route callers pass the caller's company.
+
+## Slice 3 — CAS the token approve and reject (estimate-routes.ts ~2246, ~2533)
+
+### Changes
+- Replace both plain `updateEstimate` calls with conditional updates: `WHERE id = ? AND status = 'pending'`, `.returning()`. Zero rows → respond 409 `already_responded` (same body shape the read gate already produces — the client sees no new error type).
+- Order unchanged: approve persists first, then auto-convert (which is now atomic + idempotent per Slice 2, so the existing try/catch tolerance for WO-creation failure stays valid).
+- Scope: token routes only; the manager PATCH approve already does this correctly and is untouched.
+
+## Slice 4 — Tenancy + role guard on the convert route (estimate-routes.ts:2713)
+
+### Changes
+- Add `estimateOwnershipMatches(req, estimate.companyId)` → 404 on mismatch (not 403 — Rule 1 existence-leak convention), before conversion. Load the estimate once and pass it through rather than re-reading.
+- Add the same role guard the approve/send routes use (`requireEstimateApprovalAccess`) — converting an approved estimate into schedulable work is a manager-tier action. Replit: if any legitimate non-manager caller exists (check client call sites), surface it before narrowing.
+- Pass the caller's companyId into `createWorkOrderFromEstimate` (Slice 2 parameter).
+
+## Tests
+- **Race:** two concurrent `convert-to-work-order` calls → exactly one WO, second returns the same WO; concurrent token-approve + convert-button → one WO; audit event recorded when a duplicate attempt is blocked.
+- **Atomicity:** forced failure mid-item-insert → no WO row, no items, estimate unstamped (transaction rolled back).
+- **CAS:** two concurrent token approvals → one 200 + one 409; approve/reject racing each other → one winner, loser 409; the winner's state is never overwritten.
+- **Index:** direct insert of a second WO with the same `estimateId` → DB error (23505); multiple `estimateId=NULL` WOs → fine.
+- **Rule 1:** company A user cannot convert company B's estimate (404).
+- **Rule 5 regression:** deferred-findings WO creation (`WO-WC-…`, service mode) unchanged; WCB approve/billing unchanged; inspection hand-off (#1738 flow) → send → token approve → auto-WO still green end-to-end.
+
+## Out of scope
+- Re-approve after unapprove when a WO already exists (`approveEstimateAndCreateWorkOrder` throws "already exists" — pre-existing behavior, separate discussion).
+- Invoice/billing chain, WO completion (already hardened), the #1738 inspection hand-off spec.
+
+## Relevant files
+- `artifacts/api-server/src/storage.ts` — `createWorkOrderFromEstimate` :3726 (unlocked), `getWorkOrdersByEstimate` :3661/:3736 (null-company call), `approveEstimateAndCreateWorkOrder` :3851 (the pattern to mirror)
+- `artifacts/api-server/src/routes/estimate-routes.ts` — token approve ~:2246, token reject ~:2533, convert route :2713 (anchor on function/route names, not line offsets — branch drift observed on #1738)
+- `lib/db/src/schema/schema.ts` — `work_orders` indexes :801-814 (non-unique `estimateIdx`), `workOrderItems` :817-851
+- History: `Work Order Items Duplication (#1698)…`, `BUILD - Fix Work Order Duplication + Close Remaining Drift (Sequenced)`, `BUILD - Repair Estimate-Origin WO Duplication (Rebuild From Estimate) + Stop Recurrence`
