@@ -9920,6 +9920,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Delete an unbilled WCB — billing_manager | company_admin only.
+  // Guards: company-scope (404 if not owned), invoiced WCB returns 409.
+  // Cascades: clears wetCheckBillingId / convertedAt / resolution on findings.
+  app.delete("/api/wet-check-billings/:id", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    const role = req.authenticatedUserRole;
+    if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin") {
+      res.status(403).json({ message: "Forbidden" }); return;
+    }
+    const rawId = req.params.id;
+    const id = parseInt(rawId, 10);
+    if (!Number.isFinite(id)) {
+      res.status(400).json({ message: "Invalid wet check billing id" }); return;
+    }
+    try {
+      const wcb = await storage.getWetCheckBillingById(id, cid);
+      if (!wcb) {
+        res.status(404).json({ message: "Wet check billing not found" }); return;
+      }
+      if (wcb.invoiceId != null) {
+        res.status(409).json({
+          message: `WC Snapshot ${wcb.billingNumber} is already on invoice #${wcb.invoiceId} and cannot be deleted. Remove it from the invoice first.`,
+          code: "WCB_ALREADY_INVOICED",
+          invoiceId: wcb.invoiceId,
+        }); return;
+      }
+      await storage.deleteWetCheckBilling(id);
+      res.json({ ok: true });
+    } catch (error) {
+      logger.error({ err: error }, "DELETE /api/wet-check-billings/:id failed");
+      res.status(500).json({ message: "Failed to delete WC Snapshot — please retry" });
+    }
+  });
+
   // Task #891 — billing-manager-tier zone repair labor edit on a finalised WCB.
   // Body: { zoneRecordId: number, repairLaborHours: string }
   // Updates the zone record and recomputes the WCB totals in a transaction.

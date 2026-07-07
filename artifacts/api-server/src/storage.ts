@@ -5045,7 +5045,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteWetCheckBilling(id: number): Promise<void> {
-    await db.delete(wetCheckBillings).where(eq(wetCheckBillings.id, id));
+    await db.transaction(async (tx) => {
+      // Clear finding links before removing the WCB row (FK constraint order).
+      await tx
+        .update(wetCheckFindings)
+        .set({ wetCheckBillingId: null, convertedAt: null, resolution: "pending" })
+        .where(eq(wetCheckFindings.wetCheckBillingId, id));
+      await tx.delete(wetCheckBillings).where(eq(wetCheckBillings.id, id));
+    });
   }
 
   async createBillingSheet(billingSheetData: InsertBillingSheet & { items?: InsertBillingSheetItem[]; companyId: number }): Promise<BillingSheet> {
