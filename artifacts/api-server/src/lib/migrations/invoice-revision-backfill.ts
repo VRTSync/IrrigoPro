@@ -32,24 +32,25 @@ const MIGRATION_ID = 'invoice-revision-backfill-v1';
 const APP_KEY = 'invoiceRevisionBackfill';
 
 async function columnExists(): Promise<boolean> {
-  const rows = await db.execute(sql`
+  const result = await db.execute(sql`
     SELECT 1 FROM information_schema.columns
     WHERE table_name = 'invoices' AND column_name = 'revision'
     LIMIT 1
   `);
-  return (rows as unknown as any[]).length > 0;
+  return ((result as any).rows ?? (result as unknown as any[])).length > 0;
 }
 
 async function findStrayReissues(): Promise<Array<{ id: number; invoiceNumber: string; status: string; originalId: number | null }>> {
   if (!(await columnExists())) return [];
-  const rows = await db.execute(sql`
+  const result = await db.execute(sql`
     SELECT id, invoice_number, status, superseded_by_invoice_id
     FROM invoices
     WHERE invoice_number ~ '-R[0-9]+$'
       AND status NOT IN ('superseded', 'cancelled')
     ORDER BY id
   `);
-  return (rows as unknown as any[]).map((r: any) => ({
+  const rows = (result as any).rows ?? (result as unknown as any[]);
+  return rows.map((r: any) => ({
     id: r.id,
     invoiceNumber: r.invoice_number,
     status: r.status,
@@ -138,8 +139,9 @@ async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
   // ── Step 2: Count backfill (informational) ───────────────────────────────
   const t2 = Date.now();
   emit({ step: 'count-backfill', status: 'running' });
-  const countRows = await db.execute(sql`SELECT COUNT(*) AS n FROM invoices WHERE revision = 1`);
-  const count = parseInt(String((countRows as unknown as any[])[0]?.n ?? '0'));
+  const countResult = await db.execute(sql`SELECT COUNT(*) AS n FROM invoices WHERE revision = 1`);
+  const countRowsArr = (countResult as any).rows ?? (countResult as unknown as any[]);
+  const count = parseInt(String(countRowsArr[0]?.n ?? '0'));
   emit({ step: 'count-backfill', status: 'success', rowsAffected: count });
   results.push({ id: 'count-backfill', status: 'success', durationMs: Date.now() - t2, rowsAffected: count });
 
