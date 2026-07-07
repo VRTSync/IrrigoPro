@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, Flag, Loader2 } from "lucide-react";
 import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,7 @@ import { LaborHoursStepper } from "@/components/ui/labor-hours-stepper";
 import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
-import { buildFindingSavePayload } from "@/lib/finding-save-payload";
+import { buildFindingSavePayload, CUSTOM_REVIEW_ISSUE_TYPE, isCustomReview } from "@/lib/finding-save-payload";
 import {
   createFinding as offlineCreateFinding,
   updateFinding as offlineUpdateFinding,
@@ -67,6 +67,8 @@ export function FindingSheet({
   customerId,
   photos,
   readOnly,
+  onSwitchToCustom,
+  wetCheckMode,
 }: {
   state: FindingSheetState;
   onClose: () => void;
@@ -77,6 +79,10 @@ export function FindingSheet({
   customerId: number;
   photos: WetCheckPhoto[];
   readOnly: boolean;
+  onSwitchToCustom?: (prefillNotes: string, pendingPhotos: WetCheckPhoto[]) => void;
+  /** "service" (default) or "inspection". Inspection wet checks are document-only:
+   * Save is always enabled and the "Flag for Manager" path is hidden. */
+  wetCheckMode?: "service" | "inspection";
 }) {
   const { toast } = useToast();
   const open = state.open;
@@ -166,6 +172,19 @@ export function FindingSheet({
   useEffect(() => {
     if (hasPartSelected && noPartNeeded) setNoPartNeeded(false);
   }, [hasPartSelected, noPartNeeded]);
+
+  // Whether this is a custom-review (flag-for-manager) finding.
+  const isCustomFinding = isCustomReview(issueType);
+
+  // A non-custom finding is billable when: part selected, OR "No part needed"
+  // confirmed, OR the issue type is inherently labor-only.
+  const canAutoBill = !!(cfg?.laborOnly || hasPartSelected || noPartNeeded);
+
+  // Save is blocked for non-custom findings until the tech marks complete
+  // and the finding is billable. In edit mode, a legacy needs_review row
+  // must also be resolved before saving.
+  // Inspection wet checks are document-only: Save is never blocked there.
+  const isSaveBlocked = wetCheckMode !== "inspection" && !isCustomFinding && !(repairedInField && canAutoBill);
 
   type SaveResult = { id: number; clientId: string };
   const saveMut = useMutation<SaveResult, Error, void>({
@@ -308,6 +327,19 @@ export function FindingSheet({
     }
   };
 
+  // "Flag for Manager instead" — converts the in-progress capture to the
+  // Custom Finding form. Notes and pending photos are carried over.
+  const handleFlagForManager = () => {
+    const contextParts: string[] = [];
+    const issueLabel = cfg?.displayLabel ?? issueType.replace(/_/g, " ");
+    const partLabel = (selectedPart?.name ?? partFromEdit?.name) ?? null;
+    if (issueLabel) contextParts.push(`Started as: ${issueLabel}${partLabel ? ` — ${partLabel}` : ""}`);
+    const prefill = [notes.trim(), ...contextParts].filter(Boolean).join("\n\n");
+    onSwitchToCustom?.(prefill, pendingPhotos);
+    setPendingPhotos([]);
+    onClose();
+  };
+
   const renderPartButton = (p: Part) => {
     const effId = selectedPart?.id ?? partFromEdit?.id ?? null;
     const isSel = effId === p.id;
@@ -375,46 +407,50 @@ export function FindingSheet({
           </SheetTitle>
         </SheetHeader>
         <div className="space-y-4 py-4">
-          <div>
-            <div className="text-sm font-medium mb-1">Part {cfg?.partCategoryFilter ? `(${cfg.partCategoryFilter})` : ""}</div>
-            <Input placeholder="Search parts..." value={search} onChange={(e) => setSearch(e.target.value)} className="h-11 text-base" data-testid="finding-part-search" />
-            <div className="max-h-48 sm:max-h-64 overflow-y-auto mt-2 space-y-2 border rounded p-1">
-              {filtered.length === 0 && <div className="text-center text-xs text-gray-500 py-4">No parts</div>}
-              {recentParts.length > 0 && (
-                <div data-testid="parts-recent-section">
-                  <div className="text-[10px] uppercase tracking-wide text-gray-500 px-1 pt-1">Recent at this property</div>
-                  {recentParts.map(renderPartButton)}
-                </div>
-              )}
-              {otherParts.length > 0 && (
-                <div>
-                  {recentParts.length > 0 && (
-                    <div className="text-[10px] uppercase tracking-wide text-gray-500 px-1 pt-2 border-t mt-1">All parts</div>
-                  )}
-                  {otherParts.map(renderPartButton)}
-                </div>
-              )}
-            </div>
-            {partFromEdit && !selectedPart && partFromEdit.id && (
-              <div className="text-xs text-gray-500 mt-1">Currently: {partFromEdit.name}</div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
+          {!isCustomFinding && (
             <div>
-              <div className="text-sm font-medium mb-1">Quantity</div>
-              <Input type="number" inputMode="numeric" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className="h-11 text-base" data-testid="finding-qty" />
+              <div className="text-sm font-medium mb-1">Part {cfg?.partCategoryFilter ? `(${cfg.partCategoryFilter})` : ""}</div>
+              <Input placeholder="Search parts..." value={search} onChange={(e) => setSearch(e.target.value)} className="h-11 text-base" data-testid="finding-part-search" />
+              <div className="max-h-48 sm:max-h-64 overflow-y-auto mt-2 space-y-2 border rounded p-1">
+                {filtered.length === 0 && <div className="text-center text-xs text-gray-500 py-4">No parts</div>}
+                {recentParts.length > 0 && (
+                  <div data-testid="parts-recent-section">
+                    <div className="text-[10px] uppercase tracking-wide text-gray-500 px-1 pt-1">Recent at this property</div>
+                    {recentParts.map(renderPartButton)}
+                  </div>
+                )}
+                {otherParts.length > 0 && (
+                  <div>
+                    {recentParts.length > 0 && (
+                      <div className="text-[10px] uppercase tracking-wide text-gray-500 px-1 pt-2 border-t mt-1">All parts</div>
+                    )}
+                    {otherParts.map(renderPartButton)}
+                  </div>
+                )}
+              </div>
+              {partFromEdit && !selectedPart && partFromEdit.id && (
+                <div className="text-xs text-gray-500 mt-1">Currently: {partFromEdit.name}</div>
+              )}
             </div>
-            <div data-testid="finding-labor-stepper">
-              <LaborHoursStepper
-                label="Labor hours"
-                value={laborHours}
-                onChange={setLaborHours}
-                min="0.25"
-                disabled={readOnly}
-              />
+          )}
+
+          {!isCustomFinding && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <div className="text-sm font-medium mb-1">Quantity</div>
+                <Input type="number" inputMode="numeric" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className="h-11 text-base" data-testid="finding-qty" />
+              </div>
+              <div data-testid="finding-labor-stepper">
+                <LaborHoursStepper
+                  label="Labor hours"
+                  value={laborHours}
+                  onChange={setLaborHours}
+                  min="0.25"
+                  disabled={readOnly}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           <div>
             <div className="text-sm font-medium mb-1">Notes</div>
@@ -489,28 +525,30 @@ export function FindingSheet({
             )
           )}
 
-          <label className="flex items-start gap-2 text-sm" data-testid="finding-repaired-toggle">
-            <input
-              type="checkbox"
-              checked={repairedInField}
-              onChange={(e) => setRepairedInField(e.target.checked)}
-              className="h-4 w-4 mt-0.5"
-            />
-            <span>
-              <span className="font-medium">Mark complete — wet check work completed in field</span>
-              <span className="block text-xs text-gray-500">
-                {autoBillEnabled
-                  ? "Will auto-bill on submit. Leave unchecked to send to the manager for routing."
-                  : "Marks this finding as wet check work completed in the field. Leave unchecked to send to the manager for routing."}
+          {!isCustomFinding && (
+            <label className="flex items-start gap-2 text-sm" data-testid="finding-repaired-toggle">
+              <input
+                type="checkbox"
+                checked={repairedInField}
+                onChange={(e) => setRepairedInField(e.target.checked)}
+                className="h-4 w-4 mt-0.5"
+              />
+              <span>
+                <span className="font-medium">Mark complete — wet check work completed in field</span>
+                <span className="block text-xs text-gray-500">
+                  {autoBillEnabled
+                    ? "Will auto-bill on submit."
+                    : "Completed in the field."}
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+          )}
 
           {/* Task #464 — labor-only confirmation. Only meaningful while
               the finding is being marked complete with no part chosen
               (e.g. clearing a clogged nozzle, tightening a fitting).
               Picking a part automatically clears this. */}
-          {repairedInField && !hasPartSelected && (
+          {!isCustomFinding && repairedInField && !hasPartSelected && (
             <label
               className="flex items-start gap-2 text-sm rounded border border-amber-200 bg-amber-50 p-2"
               data-testid="finding-no-part-needed-toggle"
@@ -531,17 +569,46 @@ export function FindingSheet({
             </label>
           )}
 
-          <Button
-            className="w-full min-h-[48px]"
-            size="lg"
-            disabled={saveMut.isPending || (mode === "create" && !zoneRecordId && !(isOfflineQueueEnabled() && zoneRecordClientId))}
-            onClick={() => saveMut.mutate()}
-            data-testid="finding-save"
-          >
-            {saveMut.isPending
-              ? <Loader2 className="animate-spin" />
-              : mode === "edit" ? "Save Changes" : "Save Finding"}
-          </Button>
+          {/* "Flag for Manager instead" — visible on non-custom findings when
+              the tech cannot or doesn't want to complete the work in the field.
+              Hidden in inspection mode (document-only; no disposition controls). */}
+          {wetCheckMode !== "inspection" && !isCustomFinding && !readOnly && onSwitchToCustom && (
+            <button
+              type="button"
+              className="w-full text-left flex items-center gap-2 text-sm text-rose-700 border border-rose-200 rounded-lg px-3 py-2.5 hover:bg-rose-50 active:bg-rose-100 transition-colors"
+              onClick={handleFlagForManager}
+              data-testid="finding-flag-for-manager"
+            >
+              <Flag className="w-4 h-4 shrink-0" aria-hidden />
+              <span>
+                <span className="font-medium">Flag for Manager instead</span>
+                <span className="block text-xs text-rose-600">Can't complete this? Flag it and your manager will decide what to do.</span>
+              </span>
+            </button>
+          )}
+
+          <div>
+            <Button
+              className="w-full min-h-[48px]"
+              size="lg"
+              disabled={
+                saveMut.isPending ||
+                isSaveBlocked ||
+                (mode === "create" && !zoneRecordId && !(isOfflineQueueEnabled() && zoneRecordClientId))
+              }
+              onClick={() => saveMut.mutate()}
+              data-testid="finding-save"
+            >
+              {saveMut.isPending
+                ? <Loader2 className="animate-spin" />
+                : mode === "edit" ? "Save Changes" : "Save Finding"}
+            </Button>
+            {!isCustomFinding && isSaveBlocked && (
+              <p className="text-xs text-gray-500 text-center mt-1.5" data-testid="finding-save-blocked-hint">
+                Finished the work? Mark complete. Can't complete it? Flag it for your manager instead.
+              </p>
+            )}
+          </div>
         </div>
       </SheetContent>
     </Sheet>

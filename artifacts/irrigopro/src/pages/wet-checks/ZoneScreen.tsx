@@ -57,6 +57,7 @@ function InlineFindingEditor({
   wetCheckMode,
   onSaved,
   onCancel,
+  onSwitchToCustom,
 }: {
   issueType: string;
   editing: WetCheckFinding | null;
@@ -70,6 +71,7 @@ function InlineFindingEditor({
   wetCheckMode?: "service" | "inspection";
   onSaved: () => void;
   onCancel: () => void;
+  onSwitchToCustom?: (prefillNotes: string) => void;
 }) {
   const { toast } = useToast();
   const mode = editing ? "edit" : "create";
@@ -145,6 +147,15 @@ function InlineFindingEditor({
   useEffect(() => {
     if (hasPartSelected && noPartNeeded) setNoPartNeeded(false);
   }, [hasPartSelected, noPartNeeded]);
+
+  // A finding is billable when a part is selected, "no part needed" is checked,
+  // or the issue type is inherently labor-only.
+  const canAutoBill = !!(cfg?.laborOnly || hasPartSelected || noPartNeeded);
+
+  // For service-mode (non-inspection) findings, Save is blocked until the tech
+  // marks the finding complete AND it is billable. Inspection-mode findings are
+  // saved as assessments only — the billability gate does not apply there.
+  const isSaveBlocked = wetCheckMode !== "inspection" && !(repairedInField && canAutoBill);
 
   const saveMut = useMutation<{ id: number; clientId: string }, Error, void>({
     mutationFn: async () => {
@@ -445,32 +456,64 @@ function InlineFindingEditor({
         </label>
       )}
 
-      <div className="flex gap-2">
-        <Button
-          variant="outline"
-          className="flex-1 min-h-[48px]"
-          onClick={onCancel}
-          disabled={saveMut.isPending}
+      {/* "Flag for Manager instead" — shown in service mode when the tech
+          cannot complete the work in the field. Carries notes over to the
+          Custom Finding form and closes this editor. */}
+      {wetCheckMode !== "inspection" && !readOnly && onSwitchToCustom && (
+        <button
+          type="button"
+          className="w-full text-left flex items-center gap-2 text-sm text-rose-700 border border-rose-200 rounded-lg px-3 py-2.5 hover:bg-rose-50 active:bg-rose-100 transition-colors"
+          onClick={() => {
+            const issueLabel = cfg?.displayLabel ?? issueType.replace(/_/g, " ");
+            const partLabel = (selectedPart?.name ?? partFromEdit?.name) ?? null;
+            const contextParts: string[] = [`Started as: ${issueLabel}${partLabel ? ` — ${partLabel}` : ""}`];
+            const prefill = [notes.trim(), ...contextParts].filter(Boolean).join("\n\n");
+            onSwitchToCustom(prefill);
+          }}
+          data-testid="inline-finding-flag-for-manager"
         >
-          Cancel
-        </Button>
-        <Button
-          className="flex-1 min-h-[48px]"
-          disabled={
-            saveMut.isPending ||
-            (mode === "create" && !zoneRecordId && !(isOfflineQueueEnabled() && zoneRecordClientId))
-          }
-          onClick={() => saveMut.mutate()}
-          data-testid="inline-finding-save"
-        >
-          {saveMut.isPending ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : mode === "edit" ? (
-            "Save changes"
-          ) : (
-            "Add finding"
-          )}
-        </Button>
+          <span className="text-base" aria-hidden>🚩</span>
+          <span>
+            <span className="font-medium">Flag for Manager instead</span>
+            <span className="block text-xs text-rose-600">Can't complete this? Flag it and your manager will decide what to do.</span>
+          </span>
+        </button>
+      )}
+
+      <div className="space-y-1">
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            className="flex-1 min-h-[48px]"
+            onClick={onCancel}
+            disabled={saveMut.isPending}
+          >
+            Cancel
+          </Button>
+          <Button
+            className="flex-1 min-h-[48px]"
+            disabled={
+              saveMut.isPending ||
+              isSaveBlocked ||
+              (mode === "create" && !zoneRecordId && !(isOfflineQueueEnabled() && zoneRecordClientId))
+            }
+            onClick={() => saveMut.mutate()}
+            data-testid="inline-finding-save"
+          >
+            {saveMut.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : mode === "edit" ? (
+              "Save changes"
+            ) : (
+              "Add finding"
+            )}
+          </Button>
+        </div>
+        {isSaveBlocked && (
+          <p className="text-xs text-gray-500 text-center" data-testid="inline-finding-save-blocked-hint">
+            Finished the work? Mark complete. Can't complete it? Flag it for your manager instead.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -529,6 +572,7 @@ function CustomFindingEditor({
   onSaved,
   onCancel,
   onOptimisticPhoto,
+  initialDescription,
 }: {
   editing: WetCheckFinding | null;
   zoneRecordId: number | null;
@@ -539,9 +583,10 @@ function CustomFindingEditor({
   onSaved: () => void;
   onCancel: () => void;
   onOptimisticPhoto: (p: WetCheckPhoto) => void;
+  initialDescription?: string;
 }) {
   const { toast } = useToast();
-  const [description, setDescription] = useState(editing?.notes ?? "");
+  const [description, setDescription] = useState(initialDescription ?? editing?.notes ?? "");
 
   // Pre-generate a stable clientId for the not-yet-created finding.
   // Photos uploaded before save use this as findingClientId for linking.
@@ -816,6 +861,9 @@ export function ZoneScreen({
   // Inline finding state: which issue type is being added, or which finding is being edited
   const [inlineIssueType, setInlineIssueType] = useState<string | null>(null);
   const [inlineEditing, setInlineEditing] = useState<WetCheckFinding | null>(null);
+  // When InlineFindingEditor's "Flag for Manager instead" is clicked, we store the
+  // carried-over notes here so CustomFindingEditor can pre-populate its description.
+  const [customPrefillDescription, setCustomPrefillDescription] = useState("");
   // Show chip selector when there are no findings yet; "Add another finding" sets it true.
   // Uses zoneRecord (prop) directly — avoids TDZ since `findings` is declared later.
   const [showChipSelector, setShowChipSelector] = useState(() => asArray(zoneRecord?.findings).length === 0);
@@ -1550,14 +1598,18 @@ export function ZoneScreen({
                           <div className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-1.5">
                             Flag for Review
                           </div>
-                          <div className="flex flex-wrap gap-2">
+                          <div className="space-y-1.5">
                             <button
                               type="button"
-                              className="px-3 py-2 rounded-full border-2 border-rose-300 bg-rose-50 text-sm font-medium text-rose-700 hover:border-rose-500 hover:bg-rose-100 active:bg-rose-200 transition-colors min-h-[44px] inline-flex items-center gap-1.5"
+                              className="w-full text-left px-3 py-2 rounded-xl border-2 border-rose-300 bg-rose-50 text-sm font-medium text-rose-700 hover:border-rose-500 hover:bg-rose-100 active:bg-rose-200 transition-colors min-h-[44px] flex items-start gap-2"
                               onClick={() => setInlineIssueType(CUSTOM_REVIEW_ISSUE_TYPE)}
                               data-testid="chip-custom_review"
                             >
-                              🚩 Custom — Flag for Manager
+                              <span className="text-base mt-0.5" aria-hidden>🚩</span>
+                              <span>
+                                <span className="block">Custom — Flag for Manager</span>
+                                <span className="block text-xs font-normal text-rose-600">Use this when you can't complete the work in the field. Add a description and photo — your manager will decide what happens next.</span>
+                              </span>
                             </button>
                           </div>
                         </div>
@@ -1575,11 +1627,16 @@ export function ZoneScreen({
                         wetCheckId={wetCheckId}
                         wetCheckClientId={wetCheckClientId}
                         photos={mergedPhotos}
+                        initialDescription={customPrefillDescription}
                         onSaved={() => {
                           setInlineIssueType(null);
                           setShowChipSelector(false);
+                          setCustomPrefillDescription("");
                         }}
-                        onCancel={() => setInlineIssueType(null)}
+                        onCancel={() => {
+                          setInlineIssueType(null);
+                          setCustomPrefillDescription("");
+                        }}
                         onOptimisticPhoto={onOptimisticPhoto}
                       />
                     ) : (
@@ -1599,6 +1656,10 @@ export function ZoneScreen({
                         setShowChipSelector(false);
                       }}
                       onCancel={() => setInlineIssueType(null)}
+                      onSwitchToCustom={(prefillNotes) => {
+                        setCustomPrefillDescription(prefillNotes);
+                        setInlineIssueType(CUSTOM_REVIEW_ISSUE_TYPE);
+                      }}
                     />
                   ))}
 
@@ -1630,6 +1691,11 @@ export function ZoneScreen({
                         wetCheckMode={wetCheckMode}
                         onSaved={() => setInlineEditing(null)}
                         onCancel={() => setInlineEditing(null)}
+                        onSwitchToCustom={(prefillNotes) => {
+                          setCustomPrefillDescription(prefillNotes);
+                          setInlineEditing(null);
+                          setInlineIssueType(CUSTOM_REVIEW_ISSUE_TYPE);
+                        }}
                       />
                     )
                   )}

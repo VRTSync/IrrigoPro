@@ -11,6 +11,7 @@ import {
   WetCheckFindingNotFoundError,
   WetCheckFindingNotEditableError,
   WetCheckFindingAlreadyConvertedError,
+  LABOR_ONLY_ISSUE_TYPES,
 } from "../storage";
 import { classifyAndLog as _classifyAndLog } from "./route-error-helpers";
 import { registerWetCheckPhotoAttachRoutes } from "./wet-check-photo-attach-route";
@@ -17145,6 +17146,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const parsed = findingCreateBody.safeParse(req.body ?? {});
     if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     const body = parsed.data;
+
+    // Task #1735 — enforce complete-or-flag at save time.
+    // Guards apply only when the parent wet check is in "service" mode.
+    // Inspection wet checks are document-only; their findings save without
+    // repairedInField and are exempt from the complete-or-flag requirement.
+    const zoneRecordId = parseInt(req.params.id);
+    let wcMode: string | null = null;
+    try {
+      wcMode = await storage.getWetCheckModeForZoneRecord(zoneRecordId, cid);
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "getWetCheckModeForZoneRecord",
+        ctx: { cid, zoneRecordId },
+        fallbackMessage: "Couldn't load wet check — please retry",
+      });
+      res.status(status).json({ message });
+      return;
+    }
+    if (wcMode == null) { res.status(404).json({ message: "Zone record not found" }); return; }
+
+    if (wcMode === "service") {
+      // Non-custom findings MUST be marked complete in the field.
+      // custom_review findings (Flag for Manager) are saved as needs_review and are exempt.
+      const isCustomFinding = body.issueType === "custom_review";
+      if (!isCustomFinding) {
+        if (!body.repairedInField) {
+          res.status(400).json({
+            message: "Non-custom findings must be marked complete. Finished the work? Mark complete. Can't complete it? Flag it for your manager instead.",
+          });
+          return;
+        }
+        // Billability: need a part, noPartNeeded, or labor-only issue type.
+        const isLaborOnly = LABOR_ONLY_ISSUE_TYPES.has(body.issueType);
+        const hasPartId = body.partId != null;
+        const noPartNeeded = body.noPartNeeded ?? false;
+        if (!hasPartId && !noPartNeeded && !isLaborOnly) {
+          res.status(400).json({
+            message: "Select a part or confirm no part needed before saving.",
+          });
+          return;
+        }
+      }
+    }
+    // Snap laborHours to the nearest 0.25h, floor 0.25. Reject NaN/negative.
+    // Applies in both service and inspection modes.
+    const rawLaborNum = parseFloat(String(body.laborHours));
+    if (!isFinite(rawLaborNum) || rawLaborNum < 0) {
+      res.status(400).json({ message: "Labor hours must be a non-negative number." });
+      return;
+    }
+    const quantizedLaborHours = Math.max(0.25, Math.round(rawLaborNum * 4) / 4).toFixed(2);
+
     try {
       const userId = req.authenticatedUserId ?? null;
       const created = await storage.createWetCheckFinding(parseInt(req.params.id), cid, {
@@ -17154,7 +17207,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         partName: body.partName ?? null,
         partPrice: body.partPrice != null ? String(body.partPrice) : null,
         quantity: body.quantity,
-        laborHours: String(body.laborHours),
+        laborHours: quantizedLaborHours,
         notes: body.notes ?? null,
         // Tech can mark "fixed it on the spot" — finding is documented but
         // already resolved (no manager routing required).
@@ -17192,9 +17245,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const findingId = parseInt(req.params.id);
     if (Number.isNaN(findingId)) { res.status(400).json({ message: "Invalid id" }); return; }
     const role = req.authenticatedUserRole;
-    let wcStatus: string | null = null;
+    let wcInfo: { status: string; mode: string } | null = null;
     try {
-      wcStatus = await storage.getWetCheckStatusForFinding(findingId, cid);
+      wcInfo = await storage.getWetCheckStatusForFinding(findingId, cid);
     } catch (e: any) {
       const { status, message } = classifyAndLog(req, e, {
         op: "getWetCheckStatusForFinding",
@@ -17204,7 +17257,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(status).json({ message });
       return;
     }
-    if (wcStatus == null) { res.status(404).json({ message: "Not found" }); return; }
+    if (wcInfo == null) { res.status(404).json({ message: "Not found" }); return; }
+    const wcStatus = wcInfo.status;
+    const wcMode = wcInfo.mode;
     if (wcStatus === "in_progress") {
       if (!isFieldRole(role)) { res.status(403).json({ message: "Forbidden" }); return; }
     } else if (wcStatus === "submitted" || wcStatus === "partially_converted") {
@@ -17216,8 +17271,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const parsed = findingPatchBody.safeParse(req.body ?? {});
     if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     const body = parsed.data;
+
+    // Task #1735 — enforce complete-or-flag + billability on PATCH.
+    // Guards apply only in "service" mode. Inspection wet checks are document-only
+    // and their findings may be saved without repairedInField at any time.
+    if (wcMode === "service") {
+      // Fetch finding snapshot once — needed by both guards below.
+      let snapshot: { issueType: string; resolution: string; partId: number | null; noPartNeeded: boolean } | null = null;
+      try {
+        snapshot = await storage.getWetCheckFindingSnapshot(findingId, cid);
+      } catch (e: any) {
+        const { status, message } = classifyAndLog(req, e, {
+          op: "getWetCheckFindingSnapshot",
+          ctx: { cid, findingId },
+          fallbackMessage: "Couldn't load finding — please retry",
+        });
+        res.status(status).json({ message });
+        return;
+      }
+      if (snapshot == null) { res.status(404).json({ message: "Not found" }); return; }
+
+      // Effective issue type: body override wins; otherwise use the stored value.
+      // A client that omits issueType while sending repairedInField:false on an
+      // already-custom_review finding must still be treated as custom and allowed.
+      const effectiveIssueType = body.issueType ?? snapshot.issueType;
+      const effectiveIsCustom = effectiveIssueType === "custom_review";
+
+      // Guard 1: explicit repairedInField: false on a non-custom finding → reject.
+      // Conversion to custom_review (flag for manager) is the only allowed path.
+      if (body.repairedInField === false && !effectiveIsCustom) {
+        res.status(400).json({
+          message: "Non-custom findings cannot be saved without marking them complete. Mark it complete, or flag it for your manager instead.",
+        });
+        return;
+      }
+
+      // Guard 2: merge-state billability — only fires when the patch touches a
+      // billability-relevant field (repairedInField, partId, noPartNeeded, issueType).
+      // Notes-only / metadata-only PATCHes on legacy unbillable completed rows
+      // pass through unchanged, preserving backward-compatibility.
+      const isTouchingBillability =
+        body.repairedInField !== undefined ||
+        body.partId !== undefined ||
+        body.noPartNeeded !== undefined ||
+        body.issueType !== undefined;
+
+      if (isTouchingBillability && !effectiveIsCustom) {
+        const resultResolution =
+          body.repairedInField === true ? "repaired_in_field"
+          : body.repairedInField === false ? "pending"
+          : snapshot.resolution;
+        const resultPartId = body.partId !== undefined ? body.partId : snapshot.partId;
+        const resultNoPartNeeded = body.noPartNeeded !== undefined ? body.noPartNeeded : snapshot.noPartNeeded;
+
+        if (resultResolution === "repaired_in_field") {
+          const isLaborOnly = LABOR_ONLY_ISSUE_TYPES.has(effectiveIssueType);
+          if (!resultPartId && !resultNoPartNeeded && !isLaborOnly) {
+            res.status(400).json({
+              message: "Select a part or confirm no part needed before saving.",
+            });
+            return;
+          }
+        }
+      }
+    }
+    // Quantize laborHours on PATCH when explicitly provided.
+    // Reject NaN or negative — snap to nearest 0.25h, floor 0.25.
+    if (body.laborHours !== undefined) {
+      const rawPatchLabor = parseFloat(String(body.laborHours));
+      if (!isFinite(rawPatchLabor) || rawPatchLabor < 0) {
+        res.status(400).json({ message: "Labor hours must be a non-negative number." });
+        return;
+      }
+      (body as any).laborHours = Math.max(0.25, Math.round(rawPatchLabor * 4) / 4).toFixed(2);
+    }
+
     const userId = req.authenticatedUserId ?? null;
     const patch = buildFindingPatchFromBody(body, userId);
+    // Task #1735 — when converting a finding to custom_review, force-clear
+    // billing fields so no orphan part/qty/labor survives the conversion.
+    if (body.issueType === "custom_review" && body.repairedInField === false) {
+      patch.partId = null;
+      patch.partName = null;
+      patch.partPrice = null;
+      patch.quantity = 1;
+      patch.laborHours = "0.25";
+      patch.noPartNeeded = false;
+    }
     try {
       const updated = await storage.updateWetCheckFinding(parseInt(req.params.id), cid, patch);
       if (!updated) { res.status(404).json({ message: "Not found" }); return; }

@@ -1007,7 +1007,21 @@ export interface IStorage {
   }>>;
   // Cheap status lookup used by the route layer to choose role policy
   // for a finding edit (tech vs manager) without a full join.
-  getWetCheckStatusForFinding(findingId: number, companyId: number): Promise<string | null>;
+  // Returns both `status` (for role gating) and `mode` (service | inspection)
+  // so callers can skip complete-or-flag guards on inspection wet checks.
+  getWetCheckStatusForFinding(findingId: number, companyId: number): Promise<{ status: string; mode: string } | null>;
+  // Cheap mode lookup for zone-record-scoped POST /findings. Used to skip
+  // the complete-or-flag server guard on inspection wet checks.
+  getWetCheckModeForZoneRecord(zoneRecordId: number, companyId: number): Promise<string | null>;
+  // Minimal finding snapshot used by the PATCH route for merge-state billability
+  // validation. Returns only the fields needed to compute the resulting state
+  // (issueType, resolution, partId, noPartNeeded) without a full finding load.
+  getWetCheckFindingSnapshot(findingId: number, companyId: number): Promise<{
+    issueType: string;
+    resolution: string;
+    partId: number | null;
+    noPartNeeded: boolean;
+  } | null>;
   // Canonical estimate-creation service shared by POST /api/estimates
   // and the wet-check conversion engine.
   createEstimateFromPayload(
@@ -8403,15 +8417,48 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async getWetCheckStatusForFinding(findingId: number, companyId: number): Promise<string | null> {
-    const [row] = await db.select({ status: wetChecks.status })
+  async getWetCheckStatusForFinding(findingId: number, companyId: number): Promise<{ status: string; mode: string } | null> {
+    const [row] = await db.select({ status: wetChecks.status, mode: wetChecks.mode })
       .from(wetCheckFindings)
       .innerJoin(wetChecks, eq(wetChecks.id, wetCheckFindings.wetCheckId))
       .where(and(
         eq(wetCheckFindings.id, findingId),
         eq(wetChecks.companyId, companyId),
       ));
-    return row?.status ?? null;
+    return row ?? null;
+  }
+
+  async getWetCheckModeForZoneRecord(zoneRecordId: number, companyId: number): Promise<string | null> {
+    const [row] = await db.select({ mode: wetChecks.mode })
+      .from(wetCheckZoneRecords)
+      .innerJoin(wetChecks, eq(wetChecks.id, wetCheckZoneRecords.wetCheckId))
+      .where(and(
+        eq(wetCheckZoneRecords.id, zoneRecordId),
+        eq(wetChecks.companyId, companyId),
+      ));
+    return row?.mode ?? null;
+  }
+
+  async getWetCheckFindingSnapshot(findingId: number, companyId: number): Promise<{
+    issueType: string;
+    resolution: string;
+    partId: number | null;
+    noPartNeeded: boolean;
+  } | null> {
+    const [row] = await db
+      .select({
+        issueType: wetCheckFindings.issueType,
+        resolution: wetCheckFindings.resolution,
+        partId: wetCheckFindings.partId,
+        noPartNeeded: wetCheckFindings.noPartNeeded,
+      })
+      .from(wetCheckFindings)
+      .innerJoin(wetChecks, eq(wetChecks.id, wetCheckFindings.wetCheckId))
+      .where(and(
+        eq(wetCheckFindings.id, findingId),
+        eq(wetChecks.companyId, companyId),
+      ));
+    return row ?? null;
   }
 
   async getWetCheck(id: number, companyId: number): Promise<WetCheckWithDetails | undefined> {
@@ -8626,6 +8673,20 @@ export class DatabaseStorage implements IStorage {
         await tx.update(wetCheckFindings)
           .set({ resolution: "pending", techDisposition: "needs_review" })
           .where(inArray(wetCheckFindings.id, repairedUnbillable.map(f => f.id)));
+        // Task #1735 — audit each rerouted finding so the manager can see why
+        // it landed in needs_review instead of auto-billed.
+        await Promise.all(repairedUnbillable.map(f =>
+          recordAuditEvent(null, {
+            action: "wet_check.finding_rerouted_unbillable",
+            targetType: "wet_check_finding",
+            targetId: String(f.id),
+            details: {
+              findingId: f.id,
+              issueType: f.issueType,
+              reason: "repaired_unbillable_at_submit",
+            },
+          }).catch(() => { /* fire-and-forget; submit must not fail over audit */ }),
+        ));
       }
       // Count the re-routed findings as pending for the return value.
       const effectivePendingCount = pendingCount + repairedUnbillable.length;
@@ -8662,6 +8723,19 @@ export class DatabaseStorage implements IStorage {
         await tx.update(wetCheckFindings)
           .set({ resolution: "pending", techDisposition: "needs_review" })
           .where(inArray(wetCheckFindings.id, completedUnbillable.map(f => f.id)));
+        // Task #1735 — audit each rerouted finding.
+        await Promise.all(completedUnbillable.map(f =>
+          recordAuditEvent(null, {
+            action: "wet_check.finding_rerouted_unbillable",
+            targetType: "wet_check_finding",
+            targetId: String(f.id),
+            details: {
+              findingId: f.id,
+              issueType: f.issueType,
+              reason: "completed_unbillable_at_submit",
+            },
+          }).catch(() => { /* fire-and-forget */ }),
+        ));
       }
       if (completedBillable.length > 0) {
         const [custForRoute] = await tx.select().from(customers)
