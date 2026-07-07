@@ -11,6 +11,9 @@
 //   (e) Two syncs in a row for same invoice → idempotent, no duplicate
 //   (f) No prior quickbooksInvoiceId → creates fresh (fallback via buildAndPostQbInvoice)
 //   (g) Confirmation copy regression: no "-R1", no "manual QB" in ReissueStep pre-reissue text
+//   (h) 5xx QB error → throws retryable error (never silently falls through to create)
+//   (i) Network throw from makeRequest → propagates to caller (never swallowed as "not found")
+//   (j) 404 response → returns null (explicit "not found", falls through to create safely)
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -94,21 +97,51 @@ describe("lookupQbInvoiceByDocNumber", () => {
     assert.equal(result, "auth_error");
   });
 
-  it("returns null on non-401 error (treats as not-found rather than hard-fail)", async () => {
+  it("(j) returns null on a 404 response — explicit not-found falls through to create safely", async () => {
+    const makeRequest: QbMakeRequestFn = async () =>
+      makeJsonResponse({ message: "Object Not Found" }, 404);
+
+    const result = await lookupQbInvoiceByDocNumber(makeRequest, API_BASE, INTEGRATION, "04723");
+    assert.equal(result, null, "404 must return null (not-found), not throw");
+  });
+
+  it("(h) throws a retryable error on a 5xx QB response — must not silently return null", async () => {
     const makeRequest: QbMakeRequestFn = async () =>
       makeJsonResponse({ Fault: { Error: [{ code: "500" }] } }, 500);
 
-    const result = await lookupQbInvoiceByDocNumber(makeRequest, API_BASE, INTEGRATION, "04723");
-    assert.equal(result, null);
+    await assert.rejects(
+      () => lookupQbInvoiceByDocNumber(makeRequest, API_BASE, INTEGRATION, "04723"),
+      (err: Error) => {
+        assert.ok(err instanceof Error, "must throw an Error");
+        assert.ok(
+          err.message.includes("500"),
+          `error message must include the HTTP status, got: ${err.message}`,
+        );
+        assert.ok(
+          err.message.toLowerCase().includes("retry"),
+          `error message must mention retry, got: ${err.message}`,
+        );
+        return true;
+      },
+    );
   });
 
-  it("returns null when makeRequest throws (network error)", async () => {
+  it("(i) propagates network errors from makeRequest — must not swallow as null", async () => {
     const makeRequest: QbMakeRequestFn = async () => {
-      throw new Error("Network error");
+      throw new Error("Network timeout");
     };
 
-    const result = await lookupQbInvoiceByDocNumber(makeRequest, API_BASE, INTEGRATION, "04723");
-    assert.equal(result, null);
+    await assert.rejects(
+      () => lookupQbInvoiceByDocNumber(makeRequest, API_BASE, INTEGRATION, "04723"),
+      (err: Error) => {
+        assert.ok(err instanceof Error, "must throw an Error");
+        assert.ok(
+          err.message.includes("Network timeout"),
+          `original network error must propagate, got: ${err.message}`,
+        );
+        return true;
+      },
+    );
   });
 
 });

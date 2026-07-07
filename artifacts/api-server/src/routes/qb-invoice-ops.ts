@@ -74,11 +74,12 @@ function extractQbFaultCode(body: string): string | undefined {
  *
  * Returns:
  *   `{ id, syncToken }` — invoice found; use these values for an in-place update.
- *   `null`              — invoice not found in QB; caller should create a fresh one.
+ *   `null`              — invoice not found in QB (empty QueryResponse); caller should create.
  *   `"auth_error"`      — 401 response; QB token is expired; caller must prompt reconnect.
  *
- * Any other network/server error returns `null` (treat as "not found" rather than hard-fail,
- * so the caller can still attempt a create or surface the error upstream).
+ * Throws on any non-401 HTTP error (5xx, 429, etc.) or network failure.
+ * This prevents a transient QB outage from silently falling through to a duplicate-create path.
+ * The caller is responsible for surfacing the thrown error as a retryable failure.
  */
 export async function lookupQbInvoiceByDocNumber(
   makeRequest: QbMakeRequestFn,
@@ -86,40 +87,56 @@ export async function lookupQbInvoiceByDocNumber(
   integration: { realmId: string; accessToken: string },
   docNumber: string,
 ): Promise<QbDocNumberLookupResult> {
-  try {
-    const query = encodeURIComponent(`SELECT Id, SyncToken FROM Invoice WHERE DocNumber = '${docNumber}'`);
-    const resp = await makeRequest(
-      `${apiBase}/v3/company/${integration.realmId}/query?query=${query}&minorversion=73`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${integration.accessToken}`,
-          Accept: "application/json",
-        },
+  const query = encodeURIComponent(`SELECT Id, SyncToken FROM Invoice WHERE DocNumber = '${docNumber}'`);
+  // Network errors thrown by makeRequest propagate to the caller — do not swallow them.
+  const resp = await makeRequest(
+    `${apiBase}/v3/company/${integration.realmId}/query?query=${query}&minorversion=73`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${integration.accessToken}`,
+        Accept: "application/json",
       },
-      "QB DocNumber lookup",
-      integration.realmId,
-    );
+    },
+    "QB DocNumber lookup",
+    integration.realmId,
+  );
 
-    if (resp.status === 401) {
-      return "auth_error";
-    }
+  if (resp.status === 401) {
+    return "auth_error";
+  }
 
-    if (!resp.ok) {
-      return null;
-    }
-
-    const data = (await resp.json()) as {
-      QueryResponse?: { Invoice?: Array<{ Id?: string; SyncToken?: string }> };
-    };
-    const first = data?.QueryResponse?.Invoice?.[0];
-    if (!first?.Id) {
-      return null;
-    }
-    return { id: first.Id, syncToken: first.SyncToken ?? "0" };
-  } catch {
+  if (resp.status === 404) {
+    // 404 is an explicit "this invoice does not exist in QB" response — fall through to create.
     return null;
   }
+
+  if (!resp.ok) {
+    // Non-401, non-404 HTTP error (5xx, 429, etc.): do NOT treat as "not found".
+    // Silently falling through to create would risk duplicating the QB invoice.
+    // Throw so the caller can surface a retryable error instead.
+    const errorText = await resp.text().catch(() => "");
+    const intuitTid = resp.headers.get("intuit_tid");
+    console.warn(
+      `[QB] DocNumber lookup failed with ${resp.status} — aborting sync to avoid duplicate invoice` +
+        (intuitTid ? ` [TID: ${intuitTid}]` : ""),
+      errorText.slice(0, 200),
+    );
+    throw new Error(
+      `QuickBooks DocNumber lookup failed: ${resp.status} ${resp.statusText}` +
+        (intuitTid ? ` [TID: ${intuitTid}]` : "") +
+        ". Retry the sync.",
+    );
+  }
+
+  const data = (await resp.json()) as {
+    QueryResponse?: { Invoice?: Array<{ Id?: string; SyncToken?: string }> };
+  };
+  const first = data?.QueryResponse?.Invoice?.[0];
+  if (!first?.Id) {
+    return null;
+  }
+  return { id: first.Id, syncToken: first.SyncToken ?? "0" };
 }
 
 /**
