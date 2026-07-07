@@ -32,12 +32,12 @@ const APP_KEY = 'backfillMergedInvoiceStatus';
 
 // Check whether the mergedIntoInvoiceId column already exists (DDL must be pushed).
 async function columnExists(): Promise<boolean> {
-  const rows = await db.execute(sql`
+  const result = await db.execute(sql`
     SELECT 1 FROM information_schema.columns
     WHERE table_name = 'invoices' AND column_name = 'merged_into_invoice_id'
     LIMIT 1
   `);
-  return (rows as unknown as any[]).length > 0;
+  return ((result as any).rows ?? (result as unknown as any[])).length > 0;
 }
 
 interface MergeCandidate {
@@ -54,7 +54,7 @@ interface MergeCandidate {
 // We join on the cancelled invoice rows to filter to only those still at
 // status='cancelled' (idempotent: already-repaired rows are skipped).
 async function findMergeCandidates(): Promise<MergeCandidate[]> {
-  const rows = await db.execute(sql`
+  const result = await db.execute(sql`
     SELECT
       absorbed.id             AS cancelled_id,
       absorbed.invoice_number  AS cancelled_number,
@@ -75,7 +75,8 @@ async function findMergeCandidates(): Promise<MergeCandidate[]> {
     WHERE al.action = 'invoice.merged'
     ORDER BY survivor.company_id, survivor.id, absorbed.id
   `);
-  return (rows as unknown as any[]).map((r: any) => ({
+  const rows = (result as any).rows ?? (result as unknown as any[]);
+  return rows.map((r: any) => ({
     cancelledId: Number(r.cancelled_id),
     cancelledNumber: String(r.cancelled_number),
     survivorId: Number(r.survivor_id),
