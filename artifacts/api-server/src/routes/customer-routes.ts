@@ -6,6 +6,7 @@
 import type { Express, Request, RequestHandler } from "express";
 import { z } from "zod/v4";
 import { insertCustomerSchema } from "@workspace/db";
+import { withDbRetry } from "@workspace/db";
 import { storage } from "../storage";
 
 export interface RegisterCustomerRoutesDeps {
@@ -13,6 +14,19 @@ export interface RegisterCustomerRoutesDeps {
   requireCompanyAdminAccess: RequestHandler;
   requireCustomerEditAccess: RequestHandler;
   applyBillingNotesVisibility: <T>(req: Request, data: T) => T;
+}
+
+function extractPgFields(error: unknown): {
+  pgCode: string | null;
+  pgMessage: string | null;
+  pgDetail: string | null;
+} {
+  const cause = (error as { cause?: { code?: string; message?: string; detail?: string } })?.cause;
+  return {
+    pgCode: cause?.code ?? null,
+    pgMessage: cause?.message ?? null,
+    pgDetail: cause?.detail ?? null,
+  };
 }
 
 export function registerCustomerRoutes(
@@ -50,11 +64,12 @@ export function registerCustomerRoutes(
       const customer = await storage.createCustomer(customerData);
       res.status(201).json(customer);
     } catch (error) {
-      console.error('Customer creation error:', error);
       if (error instanceof z.ZodError) {
         res.status(400).json({ message: "Invalid customer data", errors: error.issues });
         return;
       }
+      const { pgCode, pgMessage, pgDetail } = extractPgFields(error);
+      req.log.error({ err: error, pgCode, pgMessage, pgDetail, route: "POST /api/customers" }, "customer write failed");
       res.status(500).json({ message: "Failed to create customer" });
     }
   });
@@ -68,18 +83,19 @@ export function registerCustomerRoutes(
         const { billingNotes, ...rest } = customerData;
         customerData = rest;
       }
-      const customer = await storage.updateCustomer(id, customerData);
+      const customer = await withDbRetry(() => storage.updateCustomer(id, customerData));
       if (!customer) {
         res.status(404).json({ message: "Customer not found" });
         return;
       }
       res.json(applyBillingNotesVisibility(req, customer));
     } catch (error) {
-      console.error(error);
       if (error instanceof z.ZodError) {
         res.status(400).json({ message: "Invalid customer data", errors: error.issues });
         return;
       }
+      const { pgCode, pgMessage, pgDetail } = extractPgFields(error);
+      req.log.error({ err: error, pgCode, pgMessage, pgDetail, route: "PUT /api/customers/:id" }, "customer write failed");
       res.status(500).json({ message: "Failed to update customer" });
     }
   });
@@ -93,18 +109,19 @@ export function registerCustomerRoutes(
         const { billingNotes, ...rest } = customerData;
         customerData = rest;
       }
-      const customer = await storage.updateCustomer(id, customerData);
+      const customer = await withDbRetry(() => storage.updateCustomer(id, customerData));
       if (!customer) {
         res.status(404).json({ message: "Customer not found" });
         return;
       }
       res.json(applyBillingNotesVisibility(req, customer));
     } catch (error) {
-      console.error(error);
       if (error instanceof z.ZodError) {
         res.status(400).json({ message: "Invalid customer data", errors: error.issues });
         return;
       }
+      const { pgCode, pgMessage, pgDetail } = extractPgFields(error);
+      req.log.error({ err: error, pgCode, pgMessage, pgDetail, route: "PATCH /api/customers/:id" }, "customer write failed");
       res.status(500).json({ message: "Failed to update customer" });
     }
   });
@@ -124,18 +141,19 @@ export function registerCustomerRoutes(
       const updateData: { laborRate?: string; emergencyLaborRate?: string } = {};
       if (parsed.laborRate !== undefined) updateData.laborRate = String(parsed.laborRate);
       if (parsed.emergencyLaborRate !== undefined) updateData.emergencyLaborRate = String(parsed.emergencyLaborRate);
-      const customer = await storage.updateCustomer(id, updateData);
+      const customer = await withDbRetry(() => storage.updateCustomer(id, updateData));
       if (!customer) {
         res.status(404).json({ message: "Customer not found" });
         return;
       }
       res.json(customer);
     } catch (error) {
-      console.error(error);
       if (error instanceof z.ZodError) {
         res.status(400).json({ message: "Invalid labor rate data", errors: error.issues });
         return;
       }
+      const { pgCode, pgMessage, pgDetail } = extractPgFields(error);
+      req.log.error({ err: error, pgCode, pgMessage, pgDetail, route: "PATCH /api/customers/:id/labor-rates" }, "customer write failed");
       res.status(500).json({ message: "Failed to update labor rates" });
     }
   });
@@ -143,14 +161,15 @@ export function registerCustomerRoutes(
   app.delete("/api/customers/:id", requireCompanyAdminAccess, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id));
-      const success = await storage.deleteCustomer(id);
+      const success = await withDbRetry(() => storage.deleteCustomer(id));
       if (!success) {
         res.status(404).json({ message: "Customer not found" });
         return;
       }
       res.json({ message: "Customer deleted successfully" });
     } catch (error) {
-      console.error(error);
+      const { pgCode, pgMessage, pgDetail } = extractPgFields(error);
+      req.log.error({ err: error, pgCode, pgMessage, pgDetail, route: "DELETE /api/customers/:id" }, "customer write failed");
       res.status(500).json({ message: "Failed to delete customer" });
     }
   });
