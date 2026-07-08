@@ -8389,6 +8389,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     docNumber: string;
     qbLines: { amount: number; description: string }[];
     operation: string;
+    txnDate?: Date | string;
+    dueDate?: Date | string | null;
   }): Promise<{ quickbooksId?: string; qbDocNumber?: string; quickbooksSyncToken?: string; quickbooksError?: string }> {
     const apiBase = process.env.NODE_ENV === 'production'
       ? 'https://quickbooks.api.intuit.com'
@@ -8401,6 +8403,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       qbLines: params.qbLines,
       operation: params.operation,
       serviceItemName: QB_SERVICE_ITEM_NAME,
+      txnDate: params.txnDate,
+      dueDate: params.dueDate,
     });
   }
 
@@ -8546,7 +8550,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return { quickbooksId: updateResult.quickbooksId ?? docLookup.id };
     }
 
-    // DocNumber not found in QB → create a fresh QB invoice and store the new id/token.
+    // DocNumber not found in QB → create a fresh QB invoice.
+    // Resolve the stable invoice date: the earliest revision's createdAt for this
+    // (companyId, invoiceNumber) pair.  A corrected reissue (Rev 2) must reproduce
+    // the original QB TxnDate (Rev 1's createdAt) rather than stamping today.
+    // Fall back to the current invoice's own createdAt when it is the first revision.
+    let txnDate: Date = invoice.createdAt;
+    if (companyId) {
+      const [earliestRow] = await db
+        .select({ createdAt: invoices.createdAt })
+        .from(invoices)
+        .where(and(eq(invoices.companyId, companyId), eq(invoices.invoiceNumber, invoice.invoiceNumber)))
+        .orderBy(asc(invoices.revision))
+        .limit(1);
+      if (earliestRow?.createdAt) {
+        txnDate = earliestRow.createdAt;
+      }
+    }
+
+    // DueDate: use the stored due date when present; otherwise net-30 off the resolved txnDate.
+    const dueDate: Date | null = invoice.dueDate
+      ? new Date(invoice.dueDate)
+      : null;
+
     let result: { quickbooksId?: string; qbDocNumber?: string; quickbooksSyncToken?: string; quickbooksError?: string };
     try {
       result = await buildAndPostQbInvoice({
@@ -8555,6 +8581,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         docNumber: invoice.invoiceNumber,
         qbLines,
         operation: 'Invoice Sync Creation',
+        txnDate,
+        dueDate,
       });
     } catch (err: any) {
       // Precondition / connection errors thrown by the create core (missing

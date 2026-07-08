@@ -394,3 +394,149 @@ describe("ReissueStep copy regression — no stale UI text", () => {
   });
 
 });
+
+// ─── Invoice date preservation on the create path ────────────────────────────
+//
+// Covers Task #1774: re-syncing a corrected invoice (Rev 2) must use the
+// earliest-revision createdAt as TxnDate, not today.
+
+describe("buildAndPostQbInvoice — TxnDate / DueDate preservation", () => {
+
+  it("recreate path (Rev 2): TxnDate uses supplied txnDate, not today", async () => {
+    let capturedBody: Record<string, unknown> = {};
+    const makeRequest: QbMakeRequestFn = async (_url, options) => {
+      capturedBody = JSON.parse(options?.body as string);
+      return makeJsonResponse({
+        Invoice: { Id: "55100", SyncToken: "0", DocNumber: "04723" },
+      });
+    };
+
+    // Rev 1 createdAt = 2026-05-01 (the original QB date for #04723)
+    const originalDate = new Date("2026-05-01T00:00:00.000Z");
+
+    const result = await buildAndPostQbInvoice(makeRequest, MOCK_SERVICE_ITEM, {
+      apiBase: API_BASE,
+      integration: INTEGRATION,
+      customer: MOCK_CUSTOMER,
+      docNumber: "04723",
+      qbLines: QB_LINES,
+      operation: "Invoice Sync Creation",
+      serviceItemName: "Irrigation Services",
+      txnDate: originalDate,
+    });
+
+    assert.ok(!result.quickbooksError, `unexpected error: ${result.quickbooksError}`);
+    assert.equal(capturedBody.TxnDate, "2026-05-01", "TxnDate must be the original invoice date, not today");
+  });
+
+  it("first-ever sync: TxnDate uses the invoice's own createdAt", async () => {
+    let capturedBody: Record<string, unknown> = {};
+    const makeRequest: QbMakeRequestFn = async (_url, options) => {
+      capturedBody = JSON.parse(options?.body as string);
+      return makeJsonResponse({
+        Invoice: { Id: "55200", SyncToken: "0", DocNumber: "09999" },
+      });
+    };
+
+    const invoiceCreatedAt = new Date("2026-06-15T00:00:00.000Z");
+
+    const result = await buildAndPostQbInvoice(makeRequest, MOCK_SERVICE_ITEM, {
+      apiBase: API_BASE,
+      integration: INTEGRATION,
+      customer: MOCK_CUSTOMER,
+      docNumber: "09999",
+      qbLines: QB_LINES,
+      operation: "Invoice Sync Creation",
+      serviceItemName: "Irrigation Services",
+      txnDate: invoiceCreatedAt,
+    });
+
+    assert.ok(!result.quickbooksError, `unexpected error: ${result.quickbooksError}`);
+    assert.equal(capturedBody.TxnDate, "2026-06-15", "TxnDate must equal invoice createdAt for first-ever sync");
+  });
+
+  it("DueDate: uses stored dueDate when provided", async () => {
+    let capturedBody: Record<string, unknown> = {};
+    const makeRequest: QbMakeRequestFn = async (_url, options) => {
+      capturedBody = JSON.parse(options?.body as string);
+      return makeJsonResponse({
+        Invoice: { Id: "55300", SyncToken: "0", DocNumber: "04723" },
+      });
+    };
+
+    const result = await buildAndPostQbInvoice(makeRequest, MOCK_SERVICE_ITEM, {
+      apiBase: API_BASE,
+      integration: INTEGRATION,
+      customer: MOCK_CUSTOMER,
+      docNumber: "04723",
+      qbLines: QB_LINES,
+      operation: "Invoice Sync Creation",
+      serviceItemName: "Irrigation Services",
+      txnDate: new Date("2026-05-01T00:00:00.000Z"),
+      dueDate: new Date("2026-05-31T00:00:00.000Z"),
+    });
+
+    assert.ok(!result.quickbooksError, `unexpected error: ${result.quickbooksError}`);
+    assert.equal(capturedBody.DueDate, "2026-05-31", "DueDate must be the stored dueDate when provided");
+  });
+
+  it("DueDate: defaults to txnDate + 30 days (net-30) when no dueDate provided", async () => {
+    let capturedBody: Record<string, unknown> = {};
+    const makeRequest: QbMakeRequestFn = async (_url, options) => {
+      capturedBody = JSON.parse(options?.body as string);
+      return makeJsonResponse({
+        Invoice: { Id: "55400", SyncToken: "0", DocNumber: "04723" },
+      });
+    };
+
+    const txnDate = new Date("2026-05-01T00:00:00.000Z");
+
+    const result = await buildAndPostQbInvoice(makeRequest, MOCK_SERVICE_ITEM, {
+      apiBase: API_BASE,
+      integration: INTEGRATION,
+      customer: MOCK_CUSTOMER,
+      docNumber: "04723",
+      qbLines: QB_LINES,
+      operation: "Invoice Sync Creation",
+      serviceItemName: "Irrigation Services",
+      txnDate,
+    });
+
+    assert.ok(!result.quickbooksError, `unexpected error: ${result.quickbooksError}`);
+    // net-30 off 2026-05-01 = 2026-05-31
+    assert.equal(capturedBody.DueDate, "2026-05-31", "DueDate must be txnDate + 30 days when no dueDate stored");
+  });
+
+  it("in-place update: sparse update body omits TxnDate (regression guard)", async () => {
+    let capturedBodies: Array<Record<string, unknown>> = [];
+    const makeRequest: QbMakeRequestFn = async (_url, options) => {
+      if (options?.body) {
+        capturedBodies.push(JSON.parse(options.body as string));
+      }
+      return makeJsonResponse({
+        Invoice: { Id: "48408", SyncToken: "3", DocNumber: "04723" },
+      });
+    };
+
+    await updateQbInvoiceInPlace(makeRequest, MOCK_SERVICE_ITEM, {
+      apiBase: API_BASE,
+      integration: INTEGRATION,
+      customer: MOCK_CUSTOMER,
+      docNumber: "04723",
+      qbLines: QB_LINES,
+      operation: "In-Place Update",
+      serviceItemName: "Irrigation Services",
+      quickbooksInvoiceId: "48408",
+      quickbooksSyncToken: "2",
+    });
+
+    // Every body sent to QB on the update path must omit TxnDate.
+    for (const body of capturedBodies) {
+      assert.ok(
+        !("TxnDate" in body),
+        `Sparse update must not send TxnDate — found it in: ${JSON.stringify(body)}`,
+      );
+    }
+  });
+
+});

@@ -173,6 +173,11 @@ export async function fetchQbSyncToken(
 /**
  * Build and POST a new QB invoice (create path).
  * Returns `quickbooksSyncToken` alongside `quickbooksId` and `qbDocNumber`.
+ *
+ * `txnDate` — the invoice date to stamp on the QB `TxnDate` field. Should be
+ *   the earliest-revision `createdAt` for corrected invoices so a recreate
+ *   preserves the original QB date. Defaults to today only as a last resort.
+ * `dueDate`  — the QB `DueDate`. Defaults to `txnDate` + 30 days (net-30).
  */
 export async function buildAndPostQbInvoice(
   makeRequest: QbMakeRequestFn,
@@ -185,6 +190,10 @@ export async function buildAndPostQbInvoice(
     qbLines: QbLineInput[];
     operation: string;
     serviceItemName: string;
+    /** Original invoice date (earliest-revision createdAt). Defaults to today. */
+    txnDate?: Date | string;
+    /** Due date. Defaults to txnDate + 30 days (net-30). */
+    dueDate?: Date | string | null;
   },
 ): Promise<QbBuildResult> {
   const { apiBase, integration, customer, docNumber, qbLines, operation, serviceItemName } = params;
@@ -206,13 +215,22 @@ export async function buildAndPostQbInvoice(
 
   const qbLineItems = buildQbLineItems(qbLines, qbServiceItem);
 
-  const currentDate = new Date();
+  // Resolve TxnDate: use the caller-supplied date (original invoice date) or fall
+  // back to today only as a last resort (should not happen for a real invoice).
+  const txnDateObj = params.txnDate ? new Date(params.txnDate) : new Date();
+  const txnDateStr = txnDateObj.toISOString().split("T")[0];
+
+  // Resolve DueDate: use stored due date if provided, otherwise net-30 off txnDate.
+  const dueDateStr = params.dueDate
+    ? new Date(params.dueDate).toISOString().split("T")[0]
+    : new Date(txnDateObj.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
   const invoiceData = {
     Line: qbLineItems,
     CustomerRef: { value: customer.quickbooksId },
     DocNumber: docNumber,
-    TxnDate: currentDate.toISOString().split("T")[0],
-    DueDate: new Date(currentDate.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+    TxnDate: txnDateStr,
+    DueDate: dueDateStr,
   };
 
   const resp = await makeRequest(
