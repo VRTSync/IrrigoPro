@@ -22,6 +22,29 @@ export const newClientId = (): string => {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 };
 
+// Retry a single async call up to `maxAttempts` times with exponential
+// back-off. Returns the resolved value or throws the last error. Shared by
+// the finding editors' post-save photo-link path so a single dropped packet
+// or transient 5xx doesn't strand a photo as "loose" on the server.
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxAttempts = 3,
+  baseDelayMs = 400,
+): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt < maxAttempts - 1) {
+        await new Promise<void>((r) => setTimeout(r, baseDelayMs * 2 ** attempt));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 export function getCurrentUser(): { id: number; role: string; name?: string } | null {
   const raw = safeGet("user");
   if (!raw) return null;

@@ -24,31 +24,10 @@ import type {
   IssueTypeConfig,
   Part,
 } from "@workspace/db/schema";
-import { newClientId } from "./helpers";
+import { newClientId, withRetry } from "./helpers";
 import { PhotoCaptureButton } from "./PhotoCaptureButton";
 import { PhotoThumb } from "./PhotoThumb";
 import { PendingPhotosGrid } from "./PendingPhotosGrid";
-
-// Retry a single async call up to `maxAttempts` times with exponential
-// back-off. Returns the resolved value or throws the last error.
-async function withRetry<T>(
-  fn: () => Promise<T>,
-  maxAttempts = 3,
-  baseDelayMs = 400,
-): Promise<T> {
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      if (attempt < maxAttempts - 1) {
-        await new Promise<void>((r) => setTimeout(r, baseDelayMs * 2 ** attempt));
-      }
-    }
-  }
-  throw lastErr;
-}
 
 export type FindingSheetState =
   | { open: false }

@@ -1,5 +1,6 @@
 - [Testable route extraction pattern](route-extraction-pattern.md) — extract inline handlers to separate modules for storage-spy tests; never mirror handler logic in tests.
 - [offline-photo-FK-anchor](offline-photo-FK-anchor.md) — queuePhotoUpload body must include zoneRecordId/findingId; absence causes every photo to land loose.
+- [Finding-create photo linking](finding-photo-linking.md) — every finding-create path (FindingSheet + ZoneScreen CustomFindingEditor) must re-link pre-uploaded photos or they land loose (findingId=NULL).
 - [express session typing](session-typing.md) — custom session fields go on express-session's SessionData augmentation, never a manual session prop on Express.Request.
 - [billing-sheet/invoice total sync](billing-sheet-invoice-total-sync.md) — every BS item write must resync sheet total AND propagate delta to parent invoice or the PDF guard blocks render.
 - [api-server test suite shared dev DB](api-server-test-shared-db.md) — full suite is slow (>110s) and integration tests share one dev DB; exact-count assertions fail on leftover data, not your change.

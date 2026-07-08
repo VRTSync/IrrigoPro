@@ -37,7 +37,7 @@ import type {
   IssueTypeConfig,
   Part,
 } from "@workspace/db/schema";
-import { newClientId } from "./helpers";
+import { newClientId, withRetry } from "./helpers";
 import { PhotoCaptureButton } from "./PhotoCaptureButton";
 import { PhotoThumb } from "./PhotoThumb";
 import { LoosePhotosSection } from "./LoosePhotosSection";
@@ -626,28 +626,106 @@ function CustomFindingEditor({
         laborHours:      "0.00",
         noPartNeeded:    false,
       };
+      const findingClientId = pendingClientId;
+      // Snapshot the photos captured before the finding existed. These were
+      // uploaded with findingId=null (only findingClientId matches), so the
+      // server stored them loose — they must be PATCH-linked to the real
+      // finding id once we have it, or they never "stick" to the flag.
+      const photosToLink = photos.filter((p) => {
+        const ph = p as { findingId?: number | null; findingClientId?: string | null };
+        return ph.findingId == null && ph.findingClientId === findingClientId;
+      });
+
+      let createdId: number | null = null;
+      let unlinked = 0;
+
       if (isOfflineQueueEnabled() && zoneRecordClientId) {
         const res = await offlineCreateFinding({
           zoneRecordClientId,
           zoneRecordId: zoneRecordId ?? undefined,
           wetCheckId,
           payload,
-          clientId: pendingClientId,
+          clientId: findingClientId,
         });
-        return { id: res.id ?? null };
-      }
-      if (zoneRecordId != null) {
+        createdId = res.id ?? null;
+        // Queue the link PATCH through the engine; its {{f}} placeholder
+        // resolves once the finding-create mutation drains.
+        await Promise.all(
+          photosToLink
+            .filter((p) => (p as { clientId?: string | null }).clientId)
+            .map((p) =>
+              offlineLinkPhotoToFinding({
+                photoClientId: (p as { clientId: string }).clientId,
+                photoId: p.id > 0 ? p.id : undefined,
+                findingClientId,
+              }),
+            ),
+        );
+      } else if (zoneRecordId != null) {
         const res = await apiRequest(
           `/api/wet-checks/zone-records/${zoneRecordId}/findings`,
           "POST",
-          { ...payload, clientId: pendingClientId },
+          { ...payload, clientId: findingClientId },
         ) as { id: number; clientId: string | null };
-        return { id: res.id };
+        createdId = res.id;
+        if (photosToLink.length > 0 && createdId != null) {
+          if (isOfflineQueueEnabled()) {
+            // Seed the finding mirror with the id we just got so queued
+            // links can resolve {{f}} immediately, then route each link
+            // through the engine (waits for each upload to complete).
+            const db = await openOfflineDB();
+            await putFindingMirror(db, {
+              clientId: findingClientId,
+              id: createdId,
+              zoneRecordClientId: zoneRecordClientId ?? `server-zr-${zoneRecordId}`,
+              zoneRecordId: zoneRecordId ?? undefined,
+              wetCheckId,
+              data: { ...payload, id: createdId, clientId: findingClientId },
+              updatedAt: Date.now(),
+            });
+            await Promise.all(
+              photosToLink
+                .filter((p) => (p as { clientId?: string | null }).clientId)
+                .map((p) =>
+                  offlineLinkPhotoToFinding({
+                    photoClientId: (p as { clientId: string }).clientId,
+                    photoId: p.id > 0 ? p.id : undefined,
+                    findingClientId,
+                    findingId: createdId,
+                  }),
+                ),
+            );
+          } else {
+            // Direct online PATCH with retry — recovers from single-packet
+            // drops / transient 5xx without stranding the photo as loose.
+            const results = await Promise.allSettled(
+              photosToLink.map((p) =>
+                withRetry(
+                  () => apiRequest(`/api/wet-checks/photos/${p.id}`, "PATCH", { findingId: createdId }),
+                  3,
+                  400,
+                ),
+              ),
+            );
+            unlinked = results.filter((r) => r.status === "rejected").length;
+          }
+        }
+      } else {
+        throw new Error("Zone not yet synced — please try again in a moment.");
       }
-      throw new Error("Zone not yet synced — please try again in a moment.");
+      return { id: createdId, unlinked };
     },
     onSuccess: (res) => {
       setSavedId(res.id ?? null);
+      if (res.unlinked > 0) {
+        // The photos uploaded but couldn't be linked after retries. They're
+        // visible in the wet check's loose-photos section for manual attach.
+        toast({
+          title: "Some photos didn't attach",
+          description: `${res.unlinked} photo(s) couldn't be linked to this flag — attach them from the loose photos section.`,
+          variant: "destructive",
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
       onSaved();
     },
