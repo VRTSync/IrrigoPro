@@ -32,10 +32,10 @@ function extractLetter(name: string): string {
 
 interface IrrigationSystemCardProps {
   customer: Customer;
-  canEdit: boolean;
+  canManageControllers: boolean;
 }
 
-export function IrrigationSystemCard({ customer, canEdit }: IrrigationSystemCardProps) {
+export function IrrigationSystemCard({ customer, canManageControllers }: IrrigationSystemCardProps) {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const customerId = customer.id;
@@ -106,7 +106,7 @@ export function IrrigationSystemCard({ customer, canEdit }: IrrigationSystemCard
               <span className="font-semibold text-gray-900">{totalZones}</span>{" "}
               {totalZones === 1 ? "zone" : "zones"}
             </div>
-            {canEdit && (
+            {canManageControllers && (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-500">Controllers</span>
                 <Select
@@ -173,7 +173,8 @@ export function IrrigationSystemCard({ customer, canEdit }: IrrigationSystemCard
           <IrrigationControllerGrid
             controllers={controllers}
             customerId={customerId}
-            canEdit={canEdit}
+            canManageControllers={canManageControllers}
+            canEditZones={canManageControllers}
             onRefreshList={() => refetch()}
           />
         )}

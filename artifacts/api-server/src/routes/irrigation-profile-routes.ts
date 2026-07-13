@@ -689,9 +689,6 @@ export function registerIrrigationProfileRoutes(
       if (!canWrite(role)) {
         return res.status(403).json({ message: "Forbidden" });
       }
-      if (role === "field_tech") {
-        return res.status(403).json({ message: "Field technicians cannot update zones" });
-      }
 
       const callerCompanyId = getCallerCompanyId(req);
 
@@ -1530,7 +1527,7 @@ export function registerIrrigationProfileRoutes(
       if (!id) return badId(res, "backflow");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!isManagerRole(role) && role !== "field_tech") {
+      if (!canWrite(role)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 

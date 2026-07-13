@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { safeGet } from "@/utils/safeStorage";
+import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -210,27 +210,21 @@ export default function IrrigationProfile() {
     enabled: !!customerId,
   });
 
-  const [userRole, setUserRole] = useState("");
-  useEffect(() => {
-    const saved = safeGet("user");
-    if (saved) {
-      try {
-        setUserRole(JSON.parse(saved).role ?? "");
-      } catch {}
-    }
-  }, []);
+  const { user } = useAuth();
+  const userRole = user?.role ?? "";
 
-  const canWrite =
-    userRole === "company_admin" ||
-    userRole === "super_admin" ||
-    userRole === "irrigation_manager" ||
-    userRole === "field_tech";
-
-  // CSV import is manager/admin-only — field_tech and billing_manager cannot import
-  const canImport =
+  const canManageControllers =
     userRole === "company_admin" ||
     userRole === "super_admin" ||
     userRole === "irrigation_manager";
+
+  const canEditZones = canManageControllers || userRole === "field_tech";
+
+  const canLogBackflowTest = canEditZones;
+
+  const canReport = canManageControllers || userRole === "billing_manager";
+
+  const canImport = canManageControllers;
 
   const totalZoneCount = controllers.reduce((sum, c) => sum + (c.totalZones ?? 0), 0);
   const lastUpdated = controllers
@@ -399,7 +393,7 @@ export default function IrrigationProfile() {
               </div>
             </div>
             <div className="flex gap-2 shrink-0">
-              {canWrite && (
+              {canManageControllers && (
                 <Button
                   size="sm"
                   onClick={() => setShowAddController(true)}
@@ -409,7 +403,7 @@ export default function IrrigationProfile() {
                   <Plus className="w-4 h-4" /> Add Controller
                 </Button>
               )}
-              <DropdownMenu>
+              {canReport && <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     size="sm"
@@ -450,7 +444,7 @@ export default function IrrigationProfile() {
                     Send report
                   </DropdownMenuItem>
                 </DropdownMenuContent>
-              </DropdownMenu>
+              </DropdownMenu>}
               {canImport && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -524,13 +518,13 @@ export default function IrrigationProfile() {
           <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
           <p className="font-medium">No controllers yet</p>
           <p className="text-sm mt-1">
-            {canWrite
+            {canManageControllers
               ? "Add a controller to start building this property's irrigation profile."
               : "No controllers have been added to this property's irrigation profile yet."}
           </p>
-          {(canWrite || canImport) && (
+          {(canManageControllers || canImport) && (
             <div className="flex justify-center gap-2 mt-4">
-              {canWrite && (
+              {canManageControllers && (
                 <Button className="gap-1.5" onClick={() => setShowAddController(true)}>
                   <Plus className="w-4 h-4" /> Add Controller
                 </Button>
@@ -550,7 +544,8 @@ export default function IrrigationProfile() {
         <IrrigationControllerGrid
           controllers={controllers}
           customerId={parseInt(customerId!)}
-          canEdit={canWrite}
+          canManageControllers={canManageControllers}
+          canEditZones={canEditZones}
           onRefreshList={() => refetchControllers()}
         />
       )}
@@ -560,12 +555,8 @@ export default function IrrigationProfile() {
         <CardContent className="pt-4 pb-4">
           <BackflowSection
             customerId={parseInt(customerId!)}
-            canManage={
-              userRole === "company_admin" ||
-              userRole === "super_admin" ||
-              userRole === "irrigation_manager"
-            }
-            canLogTest={canWrite}
+            canManage={canManageControllers}
+            canLogTest={canLogBackflowTest}
           />
         </CardContent>
       </Card>

@@ -480,9 +480,11 @@ function SnapshotView({
 function SettingsPhoto({
   controller,
   onUploaded,
+  canUploadPhoto,
 }: {
   controller: ControllerWithDetail;
   onUploaded: (url: string) => void;
+  canUploadPhoto: boolean;
 }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
@@ -529,41 +531,45 @@ function SettingsPhoto({
           <p className="text-xs text-gray-400">No photo yet</p>
         </div>
       )}
-      <input
-        ref={cameraRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={onPick}
-      />
-      <input ref={libraryRef} type="file" accept="image/*" className="hidden" onChange={onPick} />
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="outline" type="button" disabled={busy} className="gap-1.5">
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
-            {controller.settingsPhotoUrl ? "Replace Photo" : "Add Photo"}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuItem
-            onSelect={(e) => {
-              e.preventDefault();
-              cameraRef.current?.click();
-            }}
-          >
-            <Camera className="w-4 h-4 mr-2" /> Take Photo
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={(e) => {
-              e.preventDefault();
-              libraryRef.current?.click();
-            }}
-          >
-            <ImageIcon className="w-4 h-4 mr-2" /> Choose from Library
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {canUploadPhoto && (
+        <>
+          <input
+            ref={cameraRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={onPick}
+          />
+          <input ref={libraryRef} type="file" accept="image/*" className="hidden" onChange={onPick} />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" type="button" disabled={busy} className="gap-1.5">
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+                {controller.settingsPhotoUrl ? "Replace Photo" : "Add Photo"}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem
+                onSelect={(e) => {
+                  e.preventDefault();
+                  cameraRef.current?.click();
+                }}
+              >
+                <Camera className="w-4 h-4 mr-2" /> Take Photo
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={(e) => {
+                  e.preventDefault();
+                  libraryRef.current?.click();
+                }}
+              >
+                <ImageIcon className="w-4 h-4 mr-2" /> Choose from Library
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      )}
     </div>
   );
 }
@@ -576,12 +582,14 @@ function ProgramCard({
   onSaved,
   onDeleted,
   onDraftChange,
+  canManagePrograms,
 }: {
   program: IrrigationProgram;
   controllerId: number;
   onSaved: () => void;
   onDeleted: () => void;
   onDraftChange?: (draft: IrrigationProgram) => void;
+  canManagePrograms: boolean;
 }) {
   const { toast } = useToast();
   const [editing, setEditing] = useState(false);
@@ -632,7 +640,7 @@ function ProgramCard({
     },
   });
 
-  if (!editing) {
+  if (!editing || !canManagePrograms) {
     return (
       <div
         className={`border rounded-lg p-3 space-y-2 ${
@@ -648,16 +656,18 @@ function ProgramCard({
               </Badge>
             )}
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setDraft({ ...program });
-              setEditing(true);
-            }}
-          >
-            Edit
-          </Button>
+          {canManagePrograms && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setDraft({ ...program });
+                setEditing(true);
+              }}
+            >
+              Edit
+            </Button>
+          )}
         </div>
         <div className="text-xs text-gray-600 space-y-0.5">
           {(program.wateringDays ?? []).length > 0 && (
@@ -749,14 +759,16 @@ function ProgramCard({
         <Button size="sm" variant="ghost" onClick={() => setEditing(false)} className="gap-1.5">
           <X className="w-3.5 h-3.5" /> Cancel
         </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="ml-auto text-red-600 hover:text-red-700 hover:bg-red-50 gap-1.5"
-          onClick={() => setConfirmDelete(true)}
-        >
-          <Trash2 className="w-3.5 h-3.5" /> Delete
-        </Button>
+        {canManagePrograms && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="ml-auto text-red-600 hover:text-red-700 hover:bg-red-50 gap-1.5"
+            onClick={() => setConfirmDelete(true)}
+          >
+            <Trash2 className="w-3.5 h-3.5" /> Delete
+          </Button>
+        )}
       </div>
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
@@ -790,7 +802,8 @@ function ZoneRow({
   onSaved,
   onDeleted,
   onDraftChange,
-  canWrite,
+  canEditZone,
+  canDeleteZone,
 }: {
   zone: IrrigationProfileZone;
   programs: IrrigationProgram[];
@@ -798,7 +811,8 @@ function ZoneRow({
   onSaved: () => void;
   onDeleted: () => void;
   onDraftChange?: (draft: IrrigationProfileZone) => void;
-  canWrite: boolean;
+  canEditZone: boolean;
+  canDeleteZone: boolean;
 }) {
   const { toast } = useToast();
   const [editing, setEditing] = useState(false);
@@ -884,7 +898,7 @@ function ZoneRow({
           {zone.notes || "—"}
         </td>
         <td className="px-2 py-2 border border-gray-200">
-          {canWrite && (
+          {canEditZone && (
             <Button
               variant="ghost"
               size="sm"
@@ -1055,14 +1069,16 @@ function ZoneRow({
           <Button size="sm" variant="ghost" onClick={() => setEditing(false)} className="gap-1.5">
             <X className="w-3.5 h-3.5" /> Cancel
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="ml-auto text-red-600 hover:text-red-700 hover:bg-red-50 gap-1.5"
-            onClick={() => setConfirmDelete(true)}
-          >
-            <Trash2 className="w-3.5 h-3.5" /> Delete
-          </Button>
+          {canDeleteZone && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="ml-auto text-red-600 hover:text-red-700 hover:bg-red-50 gap-1.5"
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Delete
+            </Button>
+          )}
         </div>
         <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
           <AlertDialogContent>
@@ -1268,7 +1284,8 @@ function AddZoneRow({
 interface ControllerGridTileProps {
   controller: IrrigationController;
   customerId: number;
-  canEdit: boolean;
+  canManageControllers: boolean;
+  canEditZones: boolean;
   isExpanded: boolean;
   onToggle: () => void;
   onRefreshList: () => void;
@@ -1277,7 +1294,8 @@ interface ControllerGridTileProps {
 function ControllerGridTile({
   controller,
   customerId,
-  canEdit,
+  canManageControllers,
+  canEditZones,
   isExpanded,
   onToggle,
   onRefreshList,
@@ -1464,7 +1482,7 @@ function ControllerGridTile({
           </button>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {canEdit && !isExpanded && (
+            {canManageControllers && !isExpanded && (
               <>
                 <Button
                   type="button"
@@ -1551,13 +1569,13 @@ function ControllerGridTile({
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-medium text-sm text-gray-700">Controller Details</h3>
                   <div className="flex gap-2">
-                    {canEdit && !editingDetails && (
+                    {canManageControllers && !editingDetails && (
                       <Button variant="outline" size="sm" onClick={startEditDetails}>
                         Edit Details
                       </Button>
                     )}
                     <HistoryDrawer controllerId={controller.id} />
-                    {canEdit && (
+                    {canManageControllers && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -1733,6 +1751,7 @@ function ControllerGridTile({
                 {detail && (
                   <SettingsPhoto
                     controller={detail}
+                    canUploadPhoto={canEditZones}
                     onUploaded={() => {
                       queryClient.invalidateQueries({
                         queryKey: [`/api/customers/${customerId}/controllers-profile`],
@@ -1746,7 +1765,7 @@ function ControllerGridTile({
               <section>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-medium text-sm text-gray-700">Programs</h3>
-                  {canEdit && (
+                  {canManageControllers && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -1777,6 +1796,7 @@ function ControllerGridTile({
                         onSaved={() => {}}
                         onDeleted={() => {}}
                         onDraftChange={handleProgramDraftChange}
+                        canManagePrograms={canManageControllers}
                       />
                     ))}
                   </div>
@@ -1786,7 +1806,7 @@ function ControllerGridTile({
               {/* ── Zones table ── */}
               <section>
                 <h3 className="font-medium text-sm text-gray-700 mb-3">Zones</h3>
-                {zones.length === 0 && !canEdit ? (
+                {zones.length === 0 && !canEditZones ? (
                   <p className="text-sm text-gray-400 italic">No zones configured.</p>
                 ) : (
                   <div className="overflow-x-auto -mx-1">
@@ -1814,10 +1834,11 @@ function ControllerGridTile({
                             onSaved={() => {}}
                             onDeleted={() => {}}
                             onDraftChange={handleZoneDraftChange}
-                            canWrite={canEdit}
+                            canEditZone={canEditZones}
+                            canDeleteZone={canManageControllers}
                           />
                         ))}
-                        {canEdit && (
+                        {canEditZones && (
                           <AddZoneRow
                             controllerId={controller.id}
                             programs={programs}
@@ -1875,14 +1896,16 @@ function ControllerGridTile({
 export interface IrrigationControllerGridProps {
   controllers: IrrigationController[];
   customerId: number;
-  canEdit: boolean;
+  canManageControllers: boolean;
+  canEditZones: boolean;
   onRefreshList?: () => void;
 }
 
 export function IrrigationControllerGrid({
   controllers,
   customerId,
-  canEdit,
+  canManageControllers,
+  canEditZones,
   onRefreshList,
 }: IrrigationControllerGridProps) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -1905,7 +1928,8 @@ export function IrrigationControllerGrid({
           <ControllerGridTile
             controller={ctrl}
             customerId={customerId}
-            canEdit={canEdit}
+            canManageControllers={canManageControllers}
+            canEditZones={canEditZones}
             isExpanded={expandedId === ctrl.id}
             onToggle={() => handleToggle(ctrl.id)}
             onRefreshList={onRefreshList ?? (() => {})}

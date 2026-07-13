@@ -757,7 +757,7 @@ export default function CustomerProfile() {
 
           {/* ── Irrigation System Tab ────────────────────────────────────── */}
           <TabsContent value="irrigation" className="mt-0">
-            <IrrigationSystemCard customer={customer} canEdit={canEditIrrigation} />
+            <IrrigationSystemCard customer={customer} canManageControllers={canEditIrrigation} />
           </TabsContent>
         </div>
       </Tabs>

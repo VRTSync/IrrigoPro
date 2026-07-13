@@ -1344,3 +1344,187 @@ describe("CSV import — transaction rollback on mid-import failure", () => {
     }
   });
 });
+
+// ── Permission-matrix tests ────────────────────────────────────────────────────
+//
+// Verifies that each role receives exactly the HTTP status the permission matrix
+// specifies for the three guard-sensitive endpoints touched by Task #1778:
+//
+//   PUT  /api/irrigation-zones/:id            → canEditZones (all non-billing roles)
+//   POST /api/backflows/:id/log-test          → canWrite (admin + manager + tech)
+//   POST /api/customers/:id/controllers-profile → canManageControllers (admin + manager only)
+//
+// Tests use isolated in-memory controller + zone so they don't depend on
+// earlier suites' created IDs.
+
+describe("Irrigation Profile routes — permission matrix", () => {
+  let zoneId: number;
+  // The backflow log-test route guard fires before any DB lookup, so we can
+  // use a sentinel ID. Permitted roles get 404 (entity not found), blocked
+  // roles get 403. Both outcomes are correct for the matrix assertion.
+  const BACKFLOW_SENTINEL_ID = 999_999_999;
+
+  before(async () => {
+    await setupCompanies();
+
+    // Create one controller + zone via the admin-role test server so the PUT
+    // zone tests have a real row to target. The backflow/log-test guard fires
+    // before any DB lookup so no real backflow row is needed.
+    const adminSrv = makeTestServer({ role: "company_admin", companyId: companyAId, userId: managerAUserId });
+    try {
+      const ctrlR = await hit(
+        adminSrv.base,
+        "POST",
+        `/api/customers/${customerAId}/controllers-profile`,
+        { name: `PermMatrix_${Date.now()}`, brand: "Hunter", model: "Pro-C", totalZones: 4 },
+      );
+      createdControllerIds.push(ctrlR.body.id);
+
+      const zoneR = await hit(
+        adminSrv.base,
+        "POST",
+        `/api/irrigation-zones`,
+        { controllerId: ctrlR.body.id, companyId: companyAId, zoneNumber: 1, name: "Z1", zoneType: "rotor", runTimeMinutes: 10 },
+      );
+      zoneId = zoneR.body.id;
+    } finally {
+      await adminSrv.close();
+    }
+  });
+
+  after(async () => {
+    await cleanupControllers();
+  });
+
+  // Helper: attempt a PUT to an irrigation zone and return the status code.
+  async function putZone(role: string, companyId: number | null) {
+    const s = makeTestServer({ role, companyId, userId: managerAUserId });
+    try {
+      const r = await hit(s.base, "PUT", `/api/irrigation-zones/${zoneId}`, { name: "Updated" });
+      return r.status;
+    } finally {
+      await s.close();
+    }
+  }
+
+  // Helper: attempt POST /api/backflows/:id/log-test and return the status code.
+  // Uses a sentinel ID — the auth guard fires before any DB lookup so permitted
+  // roles get 404 (non-entity) and blocked roles get 403.
+  async function logBackflowTest(role: string, companyId: number | null) {
+    const s = makeTestServer({ role, companyId, userId: managerAUserId });
+    try {
+      const r = await hit(s.base, "POST", `/api/backflows/${BACKFLOW_SENTINEL_ID}/log-test`, {
+        testDate: new Date().toISOString().slice(0, 10),
+        result: "pass",
+        testedBy: "Tester",
+      });
+      return r.status;
+    } finally {
+      await s.close();
+    }
+  }
+
+  // Helper: attempt POST /api/customers/:id/controllers-profile and return the status code.
+  async function postController(role: string, companyId: number | null) {
+    const s = makeTestServer({ role, companyId, userId: managerAUserId });
+    try {
+      const r = await hit(
+        s.base,
+        "POST",
+        `/api/customers/${customerAId}/controllers-profile`,
+        { name: `PermTest_${Date.now()}`, brand: "Rain Bird", model: "ESP", totalZones: 2 },
+      );
+      if (r.body?.id) createdControllerIds.push(r.body.id);
+      return r.status;
+    } finally {
+      await s.close();
+    }
+  }
+
+  // ── PUT /api/irrigation-zones/:id ─────────────────────────────────────────
+  // Allowed: super_admin, company_admin, irrigation_manager, field_tech → 200
+  // Denied:  billing_manager → 403
+
+  it("PUT irrigation-zones — super_admin is allowed (200)", async () => {
+    const status = await putZone("super_admin", null);
+    assert.equal(status, 200, `Expected 200 for super_admin, got ${status}`);
+  });
+
+  it("PUT irrigation-zones — company_admin is allowed (200)", async () => {
+    const status = await putZone("company_admin", companyAId);
+    assert.equal(status, 200, `Expected 200 for company_admin, got ${status}`);
+  });
+
+  it("PUT irrigation-zones — irrigation_manager is allowed (200)", async () => {
+    const status = await putZone("irrigation_manager", companyAId);
+    assert.equal(status, 200, `Expected 200 for irrigation_manager, got ${status}`);
+  });
+
+  it("PUT irrigation-zones — field_tech is allowed (200; Slice 1 fix)", async () => {
+    const status = await putZone("field_tech", companyAId);
+    assert.equal(status, 200, `Expected 200 for field_tech, got ${status}`);
+  });
+
+  it("PUT irrigation-zones — billing_manager is denied (403)", async () => {
+    const status = await putZone("billing_manager", companyAId);
+    assert.equal(status, 403, `Expected 403 for billing_manager, got ${status}`);
+  });
+
+  // ── POST /api/backflows/:id/log-test ──────────────────────────────────────
+  // Allowed: super_admin, company_admin, irrigation_manager, field_tech
+  // Denied:  billing_manager
+
+  it("POST backflows/log-test — super_admin is allowed", async () => {
+    const status = await logBackflowTest("super_admin", null);
+    assert.ok(status !== 403, `Expected non-403 for super_admin, got ${status}`);
+  });
+
+  it("POST backflows/log-test — company_admin is allowed", async () => {
+    const status = await logBackflowTest("company_admin", companyAId);
+    assert.ok(status !== 403, `Expected non-403 for company_admin, got ${status}`);
+  });
+
+  it("POST backflows/log-test — irrigation_manager is allowed", async () => {
+    const status = await logBackflowTest("irrigation_manager", companyAId);
+    assert.ok(status !== 403, `Expected non-403 for irrigation_manager, got ${status}`);
+  });
+
+  it("POST backflows/log-test — field_tech is allowed (Slice 1 fix)", async () => {
+    const status = await logBackflowTest("field_tech", companyAId);
+    assert.ok(status !== 403, `Expected non-403 for field_tech, got ${status}`);
+  });
+
+  it("POST backflows/log-test — billing_manager is denied", async () => {
+    const status = await logBackflowTest("billing_manager", companyAId);
+    assert.equal(status, 403, `Expected 403 for billing_manager, got ${status}`);
+  });
+
+  // ── POST /api/customers/:id/controllers-profile ───────────────────────────
+  // Allowed: super_admin, company_admin, irrigation_manager
+  // Denied:  field_tech, billing_manager
+
+  it("POST controllers-profile — super_admin is allowed", async () => {
+    const status = await postController("super_admin", null);
+    assert.ok(status !== 403, `Expected non-403 for super_admin, got ${status}`);
+  });
+
+  it("POST controllers-profile — company_admin is allowed", async () => {
+    const status = await postController("company_admin", companyAId);
+    assert.ok(status !== 403, `Expected non-403 for company_admin, got ${status}`);
+  });
+
+  it("POST controllers-profile — irrigation_manager is allowed", async () => {
+    const status = await postController("irrigation_manager", companyAId);
+    assert.ok(status !== 403, `Expected non-403 for irrigation_manager, got ${status}`);
+  });
+
+  it("POST controllers-profile — field_tech is denied", async () => {
+    const status = await postController("field_tech", companyAId);
+    assert.equal(status, 403, `Expected 403 for field_tech, got ${status}`);
+  });
+
+  it("POST controllers-profile — billing_manager is denied", async () => {
+    const status = await postController("billing_manager", companyAId);
+    assert.equal(status, 403, `Expected 403 for billing_manager, got ${status}`);
+  });
+});

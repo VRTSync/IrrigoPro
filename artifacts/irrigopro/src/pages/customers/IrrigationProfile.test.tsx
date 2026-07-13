@@ -1,5 +1,5 @@
 /**
- * IrrigationProfile.test.tsx — header redesign regression suite
+ * IrrigationProfile.test.tsx — header redesign + permission-matrix regression suite
  *
  * Covers:
  * - Title renders without "— Controllers & Zones" suffix and without wrap
@@ -9,7 +9,8 @@
  * - Report dropdown fires both handlers with correct disabled/loading states
  * - More button hidden for roles where canImport is false (field_tech, billing_manager)
  * - More button visible for roles where canImport is true (company_admin, irrigation_manager, super_admin)
- * - Add Controller regression: renders for canWrite roles, absent for billing_manager
+ * - Add Controller regression: renders for canManageControllers roles only (not field_tech or billing_manager)
+ * - Role-render matrix: each role sees exactly the intended action buttons
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -26,7 +27,7 @@ vi.mock("wouter", async () => {
     useLocation: () => ["/", vi.fn()],
   };
 });
-vi.mock("@/utils/safeStorage", () => ({ safeGet: vi.fn() }));
+vi.mock("@/utils/safeStorage", () => ({ safeGet: vi.fn(), safeSet: vi.fn(), safeRemove: vi.fn() }));
 vi.mock("@/components/customers/irrigation-controller-grid", () => ({
   IrrigationControllerGrid: () => <div data-testid="controller-grid" />,
 }));
@@ -44,6 +45,7 @@ vi.mock("@/lib/queryClient", async () => {
 });
 
 import { safeGet } from "@/utils/safeStorage";
+import { AuthProvider } from "@/lib/auth-context";
 import IrrigationProfile from "./IrrigationProfile";
 
 const mockSafeGet = safeGet as ReturnType<typeof vi.fn>;
@@ -62,7 +64,9 @@ const makeController = (overrides: Record<string, unknown> = {}) => ({
 });
 
 function setup(role: string, controllers: unknown[] = [makeController()]) {
-  mockSafeGet.mockReturnValue(JSON.stringify({ id: 1, role }));
+  // AuthProvider reads from safeGet("user") via readUserFromStorage — the mock
+  // injects the test role so useAuth() in IrrigationProfile receives it.
+  mockSafeGet.mockReturnValue(JSON.stringify({ id: 1, role, isActive: true, name: "Test", email: "t@t.com", username: "t" }));
 
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -72,7 +76,9 @@ function setup(role: string, controllers: unknown[] = [makeController()]) {
 
   return render(
     <QueryClientProvider client={qc}>
-      <IrrigationProfile />
+      <AuthProvider>
+        <IrrigationProfile />
+      </AuthProvider>
     </QueryClientProvider>,
   );
 }
@@ -161,7 +167,7 @@ describe("IrrigationProfile header — Updated by footer", () => {
 });
 
 describe("IrrigationProfile header — Report dropdown", () => {
-  it("Report trigger button is present", () => {
+  it("Report trigger button is present for company_admin", () => {
     setup("company_admin");
     expect(screen.getByRole("button", { name: /Report/i })).toBeInTheDocument();
   });
@@ -211,10 +217,12 @@ describe("IrrigationProfile header — More dropdown (canImport gate)", () => {
   });
 });
 
-describe("IrrigationProfile header — Add Controller regression", () => {
-  const writeRoles = ["company_admin", "super_admin", "irrigation_manager", "field_tech"] as const;
+describe("IrrigationProfile header — Add Controller gate", () => {
+  // canManageControllers = company_admin | super_admin | irrigation_manager
+  const managerRoles = ["company_admin", "super_admin", "irrigation_manager"] as const;
+  const nonManagerRoles = ["field_tech", "billing_manager"] as const;
 
-  for (const role of writeRoles) {
+  for (const role of managerRoles) {
     it(`Add Controller button is present for role: ${role}`, () => {
       setup(role);
       expect(
@@ -223,10 +231,73 @@ describe("IrrigationProfile header — Add Controller regression", () => {
     });
   }
 
-  it("Add Controller button is absent for billing_manager", () => {
+  for (const role of nonManagerRoles) {
+    it(`Add Controller button is absent for role: ${role}`, () => {
+      setup(role);
+      expect(
+        screen.queryByRole("button", { name: /Add Controller/i }),
+      ).toBeNull();
+    });
+  }
+});
+
+// ── Role-render matrix ─────────────────────────────────────────────────────────
+// Each describe block asserts exactly the buttons that should be visible for
+// that role per the intended permission matrix:
+//
+//   | Action                   | field_tech | billing_mgr | irrig_mgr | admin |
+//   |--------------------------|------------|-------------|-----------|-------|
+//   | Add Controller           |     ❌     |     ❌      |    ✅     |   ✅  |
+//   | Report dropdown          |     ❌     |     ✅      |    ✅     |   ✅  |
+//   | More (Import/Export)     |     ❌     |     ❌      |    ✅     |   ✅  |
+
+describe("IrrigationProfile — role-render matrix: field_tech", () => {
+  it("does NOT see Add Controller button", () => {
+    setup("field_tech");
+    expect(screen.queryByRole("button", { name: /Add Controller/i })).toBeNull();
+  });
+
+  it("does NOT see Report dropdown button", () => {
+    setup("field_tech");
+    expect(screen.queryByRole("button", { name: /Report/i })).toBeNull();
+  });
+
+  it("does NOT see More (Import/Export) button", () => {
+    setup("field_tech");
+    expect(screen.queryByRole("button", { name: /More actions/i })).toBeNull();
+  });
+});
+
+describe("IrrigationProfile — role-render matrix: billing_manager", () => {
+  it("does NOT see Add Controller button", () => {
     setup("billing_manager");
-    expect(
-      screen.queryByRole("button", { name: /Add Controller/i }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add Controller/i })).toBeNull();
+  });
+
+  it("DOES see Report dropdown button", () => {
+    setup("billing_manager");
+    expect(screen.getByRole("button", { name: /Report/i })).toBeInTheDocument();
+  });
+
+  it("does NOT see More (Import/Export) button", () => {
+    setup("billing_manager");
+    expect(screen.queryByRole("button", { name: /More actions/i })).toBeNull();
+  });
+});
+
+describe("IrrigationProfile — role-render matrix: irrigation_manager", () => {
+  it("DOES see Add Controller button", () => {
+    setup("irrigation_manager");
+    expect(screen.getByRole("button", { name: /Add Controller/i })).toBeInTheDocument();
+  });
+
+  it("DOES see Report dropdown button", () => {
+    setup("irrigation_manager");
+    expect(screen.getByRole("button", { name: /Report/i })).toBeInTheDocument();
+  });
+
+  it("DOES see More (Import/Export) button", () => {
+    setup("irrigation_manager");
+    expect(screen.getByRole("button", { name: /More actions/i })).toBeInTheDocument();
   });
 });
