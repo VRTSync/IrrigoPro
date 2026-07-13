@@ -32,7 +32,7 @@ interface WorkOrderItemLike {
   controllerLetter?: string | null;
   zoneNumber?: number | null;
   issueType?: string | null;
-  completedAt?: string | null;
+  completedAt?: string | Date | null;
 }
 
 interface ZonePhoto {

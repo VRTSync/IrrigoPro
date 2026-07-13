@@ -82,6 +82,12 @@ interface UsedPart {
   totalCost: number;
   source: 'estimate' | 'field_added';
   laborHours: string;
+  // Slice 2 (client) — id of the prior work_order_items row this UsedPart was
+  // prefilled from. Lets the server do an exact-id lookup instead of the
+  // stacking-by-partId heuristic, which fixes the cross-wire bug when the
+  // same part appears in two different zones and one is removed.
+  // null on field-added parts; undefined on legacy rows (treated as null).
+  sourceItemId?: number | null;
 }
 
 interface WorkOrderCompletionProps {
@@ -308,6 +314,9 @@ export function WorkOrderCompletion({
         totalCost: parseFloat(item.totalPrice),
         source: 'estimate' as const,
         laborHours: String(item.laborHours ?? '0.00'),
+        // Slice 2 (client) — stamp the prior row's db id so the server can
+        // match by exact id instead of the stacking-by-partId heuristic.
+        sourceItemId: typeof item.id === 'number' ? item.id : null,
       }));
 
       setUsedParts(prefilledParts);
@@ -349,17 +358,23 @@ export function WorkOrderCompletion({
   });
 
   const addUsedPart = (part: Part) => {
-    const existingPart = usedParts.find(up => up.partId === part.id);
-    
-    if (existingPart) {
-      setUsedParts(prev => prev.map(up => 
-        up.partId === part.id 
-          ? { 
-              ...up, 
+    // Only merge into an existing row if it is field_added (sourceItemId is null).
+    // Estimate-origin rows (sourceItemId set) must stay as their own origin even
+    // when they share a partId with the new field-added part — merging them would
+    // silently clobber the zone lineage carried on the estimate row.
+    const existingFieldAdded = usedParts.find(
+      up => up.partId === part.id && up.source === 'field_added' && !up.sourceItemId,
+    );
+
+    if (existingFieldAdded) {
+      setUsedParts(prev => prev.map(up =>
+        up.id === existingFieldAdded.id
+          ? {
+              ...up,
               quantity: up.quantity + 1,
-              totalCost: (up.quantity + 1) * parseFloat(part.price)
+              totalCost: (up.quantity + 1) * parseFloat(part.price),
             }
-          : up
+          : up,
       ));
     } else {
       const newUsedPart: UsedPart = {
@@ -371,6 +386,7 @@ export function WorkOrderCompletion({
         totalCost: parseFloat(part.price),
         source: 'field_added',
         laborHours: '0.00',
+        sourceItemId: null,
       };
       setUsedParts(prev => [...prev, newUsedPart]);
     }
@@ -456,6 +472,9 @@ export function WorkOrderCompletion({
           laborHours: up.laborHours,
           quantity: up.quantity,
           totalCost: up.totalCost.toFixed(2),
+          // Slice 2 (client) — carry the db id of the prior row so the server
+          // can do an exact-id lookup. null for field-added parts.
+          sourceItemId: up.sourceItemId ?? null,
         })),
         photos: photos.map(photo => photo.url),
         totalPartsCost: getTotalPartsCost().toFixed(2),

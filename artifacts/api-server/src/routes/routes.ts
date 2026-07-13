@@ -9677,18 +9677,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // last in a simple Map.  Each incoming part shifts() the first queued
         // prior off the stack; once exhausted, remaining incoming entries are
         // treated as field-added (catalog-price lookup path).
+        // Slice 2 (server) — id-keyed lookup for sourceItemId matching.
+        // When the client stamps sourceItemId on prefill rows we can match by
+        // the exact prior id instead of the stacking-by-partId heuristic.
+        // This is the primary fix for the cross-wire bug (same part, two zones).
+        const priorsById = new Map<number, (typeof priorItemsForGuard)[number]>();
+        for (const it of priorItemsForGuard) {
+          priorsById.set(it.id, it);
+        }
+
         const priorsByPartId = new Map<number | null, (typeof priorItemsForGuard)>();
         for (const it of priorItemsForGuard) {
           const list = priorsByPartId.get(it.partId) ?? [];
           list.push(it);
           priorsByPartId.set(it.partId, list);
         }
+
+        // Track prior row IDs that have already been claimed by a sourceItemId
+        // match so the partId stack-map fallback path never double-consumes them.
+        const consumedPriorIds = new Set<number>();
+
         const finalItems: Parameters<typeof storage.replaceWorkOrderItemsWithResync>[1] = [];
         for (const part of incomingParts) {
-          const priorList = part.partId != null ? priorsByPartId.get(part.partId) : undefined;
-          const prior = priorList?.shift(); // consume one prior row per match
+          let prior: (typeof priorItemsForGuard)[number] | undefined;
+
+          // Slice 2 (server) — try exact-id match first when sourceItemId is present.
+          const rawSourceItemId = (part as any).sourceItemId;
+          if (rawSourceItemId != null) {
+            const sid = Number(rawSourceItemId);
+            if (Number.isFinite(sid)) {
+              const candidate = priorsById.get(sid);
+              if (candidate && !consumedPriorIds.has(candidate.id)) {
+                prior = candidate;
+                consumedPriorIds.add(candidate.id);
+                // Remove from partId stack so it is not double-consumed.
+                const list = priorsByPartId.get(candidate.partId) ?? [];
+                const idx = list.indexOf(candidate);
+                if (idx >= 0) list.splice(idx, 1);
+              }
+              // Miss (stale id after replace, foreign id): fall through to stack-map.
+            }
+          }
+
+          // Fallback: partId stack-map (legacy / offline payloads without sourceItemId).
+          if (!prior) {
+            const priorList = part.partId != null ? priorsByPartId.get(part.partId) : undefined;
+            // Skip any row already claimed by a sourceItemId match above.
+            while (priorList && priorList.length > 0 && consumedPriorIds.has(priorList[0].id)) {
+              priorList.shift();
+            }
+            const candidate = priorList?.shift();
+            if (candidate) {
+              prior = candidate;
+              consumedPriorIds.add(candidate.id);
+            }
+          }
+
           if (prior) {
             // Preserve snapshotted price + lineage from the existing WO item.
+            // Slice 1: also carry zone columns (controllerLetter, zoneNumber,
+            // issueType) and the prior check-off state (completedAt) so an
+            // inspection WO round-trip keeps its zone grouping and check-off state.
             const unitPrice = money(prior.partPrice);
             finalItems.push({
               workOrderId,
@@ -9699,6 +9748,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
               totalPrice: (money(part.quantity) * unitPrice).toFixed(2),
               laborHours: prior.laborHours ?? "0",
               findingId: (prior as any).findingId ?? null,
+              controllerLetter: (prior as any).controllerLetter ?? null,
+              zoneNumber: (prior as any).zoneNumber ?? null,
+              issueType: (prior as any).issueType ?? null,
+              completedAt: (prior as any).completedAt ?? null,
             });
           } else {
             // Field-added part: use payload snapshot values as primary source so
@@ -9722,7 +9775,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               workOrderId,
               partId: part.partId,
               partName: resolvedName,
-              partPrice: resolvedPrice,
+              partPrice: String(resolvedPrice),
               quantity: part.quantity,
               totalPrice: (money(part.quantity) * unitPrice).toFixed(2),
               laborHours: payloadLaborHours != null ? String(payloadLaborHours) : "0",
