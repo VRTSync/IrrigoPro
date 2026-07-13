@@ -1,0 +1,50 @@
+# BUILD — Remove the Pending Estimates List from Manager Workspace (Keep the Launchpad Tile)
+
+**What & Why**
+The Manager Workspace page currently renders a full "Pending Estimates" list inside the Needs Approval card (Task #1581), and folds the estimate count into the card's total. Estimates should not live here — they belong on the Estimates page only. Remove the estimates **list** and its contribution to the Needs Approval count from Manager Workspace, while **keeping the small "Estimates" launchpad tile** (a quick-link shortcut with a count that jumps to the Estimates page). Estimates remain fully reachable via their own nav (`Estimates → /estimates`, `Estimates Pending Approval → /estimates/pending-approval`), so nothing is orphaned (Rule 3). Frontend-only change.
+
+## Current state (confirmed in `artifacts/irrigopro/src/pages/manager-workspace.tsx`)
+- **Estimates list section** rendered inside the Needs Approval card — `:631–644` (`PendingEstimatesSection`), component defined at `:212–~360`.
+- **Estimate count folded into the card total** — `:528–531` (`totalCount = workOrders + billingSheets + (canSeeEstimates ? pendingEstimates.length : 0)`).
+- **Loading gate mixes in estimates** — `:622` (`approvalLoading || (canSeeEstimates && estimatesLoading)`).
+- **Row actions + modal** — approve/send mutations (`:470–514`), `estimateActionInProgress`, `selectedEstimateId`, and `EstimateDetailModal` (`:763–771`) exist only to drive the list rows.
+- **Launchpad tile (KEEP)** — `:722–728`, an "Estimates" quick-link to `/estimates/command-center` whose badge is `count={pendingEstimates.length}`. This is the piece to preserve.
+- The tile's count is sourced from the `/api/estimates/pending-approval` query (`:446–460`), so that query stays — but only to feed the tile's badge.
+
+## The change
+**Remove from Manager Workspace:**
+- The `PendingEstimatesSection` render block (`:631–644`) — the whole `canSeeEstimates && (…)` sub-section, including the trailing divider.
+- The estimates addend in `totalCount` (`:531`) so the Needs Approval badge counts **work orders + billing sheets only**.
+- `estimatesLoading` from the Needs Approval header loading gate (`:622`) → leave just `approvalLoading`.
+- The now-unused `PendingEstimatesSection` component definition (`:212–~360`) and the `EstimateApprovalRow` type — delete, don't leave dead (Rule 7).
+- The estimate row-action machinery that only served the list: the approve/send mutations (`:470–514`), `estimateActionInProgress` state, and the `EstimateDetailModal` + `selectedEstimateId` (`:411`, `:763–771`).
+- Now-unused imports (`sendEstimateEmail`, `EstimateDetailModal`, and any icons only the section used). Keep the `Estimate` type import — the retained count query still uses it.
+
+**Keep (must not regress):**
+- The `/api/estimates/pending-approval` query — but reduce its use to just a **count** for the tile badge (drop the `pendingEstimates` row-mapping; use the raw array length). `canSeeEstimates` stays to gate the tile.
+- The "Estimates" launchpad tile (`:722–728`) with its count badge and link to the Estimates page, unchanged in behavior.
+
+## Done looks like
+- Manager Workspace shows **no Pending Estimates list** anywhere on the page.
+- The Needs Approval count reflects only work orders + billing sheets (no estimates).
+- The "Estimates" launchpad tile still appears, still shows the pending-estimates count, and still links to the Estimates page.
+- Estimates remain fully reachable and actionable on the Estimates page (approve/send happens there now, not on Manager Workspace).
+- No dead code left behind (the section component, row mutations, and estimate detail modal are removed, not just unrendered).
+
+## Tests
+- Update `manager-workspace.test.tsx` / `manager-workspace-slice1.test.tsx`: assert the Pending Estimates section/rows are **absent**; assert the Needs Approval count excludes estimates; assert the Estimates launchpad tile is **present** with its count.
+- A manager with pending estimates sees the tile count but no list on Manager Workspace.
+- Roles that never saw estimates (field_tech) are unchanged.
+
+## Definition of Done (attach proof — Rule 7)
+- [ ] `file:line` for: removed section render, removed count addend, removed loading gate, deleted `PendingEstimatesSection` component + `EstimateApprovalRow`, removed mutations/state/modal, removed unused imports; and the retained tile + count query.
+- [ ] Screenshot: Manager Workspace with no estimates list and the Estimates tile still present (with count).
+- [ ] Screenshot: the Estimates page still showing/approving those estimates.
+- [ ] Test output for the updated Manager Workspace tests.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/manager-workspace.tsx` (all edits above)
+- `artifacts/irrigopro/src/pages/manager-workspace.test.tsx`, `manager-workspace-slice1.test.tsx` (assertions)
+- `artifacts/irrigopro/src/components/estimates/estimate-detail-modal.tsx` (import removed here; component itself stays for the Estimates page)
+- Reference only (do not change): `components/layout/nav-config.ts` (estimates nav entries prove Rule 3 reachability)

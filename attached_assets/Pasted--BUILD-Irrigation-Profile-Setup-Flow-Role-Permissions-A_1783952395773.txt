@@ -1,0 +1,104 @@
+# BUILD — Irrigation Profile: Setup Flow + Role Permissions (Align Backend Rules and UI)
+
+**What & Why**
+The irrigation system profile (customer profile → Irrigation tab) lets a company build out a property's irrigation: controllers, programs, zones, photos, backflow devices, CSV import/export, and a PDF report. Permissions are **enforced server-side** in `irrigation-profile-routes.ts` (good), but (a) two role rules don't match the intended model, and (b) the **frontend gate is looser than the backend and reads role from `localStorage`**, so some roles see buttons that then fail with a 403. This ticket sets the intended per-role permission model, makes the two backend rule changes, and aligns the UI so each role sees only the actions it can actually perform. Multi-tenancy is unchanged: every route is company-scoped, `companyId` comes from auth (never the body), super_admin bypasses to all companies, and a cross-company row returns 404.
+
+## The setup flow (for reference)
+On the customer's Irrigation tab (`pages/customers/IrrigationProfile.tsx`):
+1. **Add Controller** — name, location, brand, model, total zones, notes (`POST /api/customers/:id/controllers-profile`). `irrigation_controllers` is the canonical store.
+2. **Programs** (optional) under a controller — watering days, start times, seasonal adjust (`POST /api/irrigation-controllers/:id/programs`).
+3. **Zones** under a controller — zone number, type, runtime, program link (`POST /api/irrigation-controllers/:id/zones`; edit `PUT /api/irrigation-zones/:id`).
+4. **Photos** — controller settings photos (`POST /api/irrigation-controllers/:id/photo`).
+5. **Backflow devices** — add/edit/delete + log annual test (`/api/customers/:id/backflows`, `/api/backflows/:id`, `/api/backflows/:id/log-test`).
+6. **CSV import/export** and **PDF report** generate/send.
+
+## Current state — enforced backend rules (confirmed, `irrigation-profile-routes.ts`)
+Role helpers: `MANAGER_ROLES` = {company_admin, super_admin, irrigation_manager, billing_manager}; `WRITE_ROLES` = {company_admin, super_admin, irrigation_manager}; `canWrite` = WRITE_ROLES ∪ {field_tech}.
+
+| Action | field_tech | billing_manager | irrigation_manager | company_admin / super_admin | Guard (line) |
+|---|---|---|---|---|---|
+| View profile / controllers / zones / history / backflows | ✅ | ✅ | ✅ | ✅ | `isManagerRole ∥ field_tech` |
+| Company rollup dashboard | ❌ | ❌ | ❌ | ✅ | `:154` admin-only |
+| Create controller | ❌ | ❌ | ✅ | ✅ | `:299` canWrite, FT 403 `:303` |
+| Edit / delete controller | ❌ | ❌ | ✅ | ✅ | `:419` / `:461` |
+| Attach controller photo | ✅ | ❌ | ✅ | ✅ | `:799` canWrite |
+| Create zone | ✅ | ❌ | ✅ | ✅ | `:639` canWrite |
+| **Edit zone** | **❌** | ❌ | ✅ | ✅ | `:689` canWrite, **FT 403 `:692`** |
+| Delete zone | ❌ | ❌ | ✅ | ✅ | `:731` |
+| Programs create/edit/delete | ❌ | ❌ | ✅ | ✅ | `:521/:567/:606` |
+| Backflow create/edit/delete | ❌ | ❌ | ✅ | ✅ | `:1388/:1457/:1499` |
+| **Log backflow test** | ✅ | **✅** | ✅ | ✅ | `:1533` `isManagerRole ∥ field_tech` |
+| CSV import / export | ❌ | ❌ | ✅ | ✅ | `:1007` / `:843` |
+| Generate / send report | ❌ | ✅ | ✅ | ✅ | `:1153` / `:1232` isManagerRole |
+
+**Frontend mismatches (`IrrigationProfile.tsx`, `irrigation-controller-grid.tsx`):**
+- `canWrite` (`:223`) grants **field_tech** the same `canEdit` passed to the grid (`:553`), so field techs see **Edit/Delete controller** and **Edit/Delete zone** buttons the server rejects.
+- Report buttons (`:412–453`) have **no role gate** (only `controllers.length === 0`), so field_tech sees Generate/Send but the endpoint 403s.
+- Role is read from `localStorage` (`safeGet("user").role`, `:213–221`) — stale and client-editable; the UI should read role from the authenticated session, not localStorage.
+
+## Intended permission model (target)
+Two changes from current: **field_tech gains Edit Zone**; **billing_manager loses Log-Test**. Everything else stays.
+
+| Action | field_tech | billing_manager | irrigation_manager | company_admin / super_admin |
+|---|---|---|---|---|
+| View everything in the profile | ✅ | ✅ | ✅ | ✅ |
+| Create / edit / delete controller | ❌ | ❌ | ✅ | ✅ |
+| Attach controller photo | ✅ | ❌ | ✅ | ✅ |
+| Create zone | ✅ | ❌ | ✅ | ✅ |
+| **Edit zone** | **✅ (new)** | ❌ | ✅ | ✅ |
+| Delete zone | ❌ | ❌ | ✅ | ✅ |
+| Programs (create/edit/delete) | ❌ | ❌ | ✅ | ✅ |
+| Backflow create / edit / delete | ❌ | ❌ | ✅ | ✅ |
+| Log backflow test | ✅ | **❌ (changed)** | ✅ | ✅ |
+| CSV import / export | ❌ | ❌ | ✅ | ✅ |
+| Generate / send report | ❌ | ✅ | ✅ | ✅ |
+
+Field techs get create **and** edit on zones + photos + backflow tests (they're the ones in the field), but not delete and not controllers/programs. Billing managers are read-only plus reports only — no field actions.
+
+## Slice 1 — Backend rule changes (`irrigation-profile-routes.ts`)
+- **Allow field_tech to edit a zone.** In `PUT /api/irrigation-zones/:id` (`:688–693`), remove the `role === "field_tech"` 403 so the guard is just `canWrite(role)`. (Create already allows field_tech; this closes the create-but-not-edit gap.) Delete zone stays manager-only.
+- **Remove billing_manager from log-test.** In `POST /api/backflows/:id/log-test` (`:1532–1534`), change the guard from `isManagerRole(role) ∥ field_tech` to **`canWrite(role) ∥ field_tech`** (i.e. WRITE_ROLES + field_tech) so billing_manager is excluded but field techs and managers keep it. (Report generate/send stay `isManagerRole`, so billing_manager keeps reports.)
+- Leave all other guards as-is; they already match the target.
+
+## Slice 2 — Frontend: replace the single `canWrite` with granular capability flags that mirror the backend
+In `IrrigationProfile.tsx`, derive per-capability booleans and thread them down instead of one `canWrite`:
+- `canManageControllers` = {company_admin, super_admin, irrigation_manager} — Add Controller, edit/delete controller, programs, backflow create/edit/delete, CSV import/export.
+- `canEditZones` = canManageControllers ∪ {field_tech} — create + edit zone, attach photo.
+- `canDeleteZones` = canManageControllers — delete zone.
+- `canLogBackflowTest` = canManageControllers ∪ {field_tech} — log-test button (NOT billing_manager).
+- `canReport` = canManageControllers ∪ {billing_manager} — Generate/Send report.
+Apply them:
+- **Add Controller** button + empty-state (`:402`, `:531–544`): gate on `canManageControllers` (remove field_tech).
+- **Report** dropdown (`:412–453`): gate on `canReport` (hide from field_tech).
+- **Import/Export** menu (`:454`): already `canImport` = managers — keep, rename to `canManageControllers` for consistency.
+- **Controller grid** (`irrigation-controller-grid.tsx`): split the single `canEdit` prop into `canManageControllers` (controller edit/delete, add program, zone delete) and `canEditZones` (add/edit zone, add photo). Field techs see add/edit-zone + photo affordances only; no controller edit/delete, no zone delete, no program edit.
+- **Backflow section** (`BackflowSection.tsx`): manage (add/edit/delete) on `canManageControllers`; the log-test action on `canLogBackflowTest` (field_tech + managers, not billing).
+
+## Slice 3 — Read role from the authenticated session, not `localStorage`
+Replace the `safeGet("user").role` read (`IrrigationProfile.tsx:213–221`) with the app's authenticated-user/role source (the same identity the server authorizes against, e.g. the auth context/`/api/me`), so the UI can't drift from — or be trivially spoofed out of sync with — the server. The server remains the enforcement point regardless; this just keeps the affordances honest.
+
+## Done looks like
+- Field techs can create **and** edit zones, attach photos, and log backflow tests — and no longer see controller edit/delete, zone delete, program, import/export, or report buttons.
+- Billing managers can view and generate/send reports only — no create/edit/delete anywhere, and **no** backflow test logging.
+- Irrigation managers and admins retain full control.
+- No role sees an irrigation-profile button that returns a 403; the two backend rule changes and the UI gating agree exactly with the intended matrix.
+
+## Tests
+- **Backend, per role × per action** matrix test against the intended table (extend `irrigation-profile-routes.test.ts`): assert field_tech `PUT zone` → 200 and `DELETE zone`/`create controller` → 403; billing_manager `log-test` → 403 but `report/send` → 200; managers/admins → 200 across the board; field_tech `log-test` → 200.
+- Company isolation still holds on the changed handlers (cross-company → 404).
+- **Frontend**: render the profile as each role; assert the visible action buttons match the intended matrix (field_tech: add/edit zone + photo + log-test; billing_manager: report only; managers/admins: everything).
+- Regression: field_tech creating then editing a zone round-trips; billing_manager sees no test-log button.
+
+## Definition of Done (attach proof — Rule 7)
+- [ ] `file:line` for: the `PUT zone` field_tech allowance; the `log-test` billing_manager exclusion; the granular capability flags in `IrrigationProfile.tsx`; the grid prop split; the backflow section gating; the role-source change.
+- [ ] Screenshots: the profile as field_tech, billing_manager, and irrigation_manager, each showing exactly the intended buttons.
+- [ ] Test output for the per-role backend matrix + the frontend role-render tests.
+- [ ] A self-audit table mapping each intended-matrix cell → handler guard + UI gate.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+- `artifacts/api-server/src/routes/irrigation-profile-routes.ts` (guards; Slice 1 changes at `:688–693` and `:1532–1534`)
+- `artifacts/api-server/src/routes/irrigation-profile-routes.test.ts` (per-role matrix tests)
+- `artifacts/irrigopro/src/pages/customers/IrrigationProfile.tsx` (capability flags, button gating, role source)
+- `artifacts/irrigopro/src/components/customers/irrigation-controller-grid.tsx` (split `canEdit` → `canManageControllers` / `canEditZones` / `canDeleteZones`)
+- `artifacts/irrigopro/src/components/customers/BackflowSection.tsx` (manage vs log-test gating)
