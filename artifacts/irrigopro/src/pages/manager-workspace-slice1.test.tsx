@@ -214,6 +214,72 @@ describe("Approval action row — locked record disables buttons", () => {
   });
 });
 
+// ── Task #1777 — Pending Estimates removed from Needs Approval ────────────────
+
+describe("ManagerWorkspacePage — Pending Estimates removal", () => {
+  it("renders no estimate-approval-row elements", () => {
+    const qc = makeQc({ workOrders: [], billingSheets: [] });
+    // seed pending-approval with two estimates — the section should not render
+    qc.setQueryData(["/api/estimates/pending-approval"], [
+      { id: 99, estimateNumber: "EST-099", internalStatus: "pending_approval",
+        lifecycle: "pending_review", totalAmount: "1000.00", createdAt: new Date().toISOString() },
+      { id: 100, estimateNumber: "EST-100", internalStatus: "approved_internal",
+        lifecycle: "sent", totalAmount: "2000.00", createdAt: new Date().toISOString() },
+    ]);
+    render(<ManagerWorkspacePage />, { wrapper: wrap(qc) });
+    expect(screen.queryByTestId("estimate-approval-row-99")).toBeNull();
+    expect(screen.queryByTestId("estimate-approval-row-100")).toBeNull();
+  });
+
+  it("Needs Approval badge counts only WO + BS (not estimates)", async () => {
+    const qc = makeQc({
+      workOrders: [
+        { id: 1, workOrderNumber: "WO-001", customerName: "Acme",
+          status: "pending_manager_review", totalAmount: "500.00",
+          invoiceId: null, createdAt: old },
+      ],
+      billingSheets: [
+        { id: 10, billingSheetNumber: "BS-010", customerName: "Beta",
+          status: "submitted", totalAmount: "400.00",
+          invoiceId: null, createdAt: old },
+      ],
+    });
+    // seed 3 pending estimates — should NOT add to the badge
+    qc.setQueryData(["/api/estimates/pending-approval"], [
+      { id: 50, estimateNumber: "EST-050", internalStatus: "pending_approval",
+        lifecycle: "pending_review", totalAmount: "100.00", createdAt: old },
+      { id: 51, estimateNumber: "EST-051", internalStatus: "pending_approval",
+        lifecycle: "pending_review", totalAmount: "200.00", createdAt: old },
+      { id: 52, estimateNumber: "EST-052", internalStatus: "pending_approval",
+        lifecycle: "pending_review", totalAmount: "300.00", createdAt: old },
+    ]);
+    render(<ManagerWorkspacePage />, { wrapper: wrap(qc) });
+    // Badge in the Needs Approval card header must exist and show 2 (1 WO + 1 BS), not 5
+    const card = screen.getByTestId("needs-approval-card");
+    const badge = card.querySelector("[data-slot='badge']") as HTMLElement | null;
+    expect(badge).not.toBeNull();
+    expect(badge!.textContent?.trim()).toBe("2");
+  });
+
+  it("Estimates launchpad tile is present, links to command-center, and shows pending count", () => {
+    const qc = makeQc({ workOrders: [], billingSheets: [] });
+    qc.setQueryData(["/api/estimates/pending-approval"], [
+      { id: 55, estimateNumber: "EST-055", internalStatus: "pending_approval",
+        lifecycle: "pending_review", totalAmount: "750.00", createdAt: old },
+      { id: 56, estimateNumber: "EST-056", internalStatus: "pending_approval",
+        lifecycle: "pending_review", totalAmount: "850.00", createdAt: old },
+    ]);
+    render(<ManagerWorkspacePage />, { wrapper: wrap(qc) });
+    const tile = screen.getByTestId("launchpad-estimates");
+    expect(tile).toBeTruthy();
+    expect(tile.closest("a")?.getAttribute("href")).toBe("/estimates/command-center");
+    // badge inside the tile should reflect the 2 seeded pending estimates
+    const tileBadge = tile.querySelector("[data-slot='badge']") as HTMLElement | null;
+    expect(tileBadge).not.toBeNull();
+    expect(tileBadge!.textContent?.trim()).toBe("2");
+  });
+});
+
 // ── Return for Correction path ────────────────────────────────────────────────
 
 describe("Return for Correction — uses /return-for-correction not /kickback", () => {

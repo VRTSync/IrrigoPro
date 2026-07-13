@@ -1,22 +1,14 @@
 // Task #1258 — Manager Workspace Simplification (Slice 1)
 //
 // Replaces the five-lane stage cockpit with a lightweight hub:
-//   1. Needs Approval list — Work Orders + Billing Sheets + Estimates awaiting
-//      manager action
+//   1. Needs Approval list — Work Orders + Billing Sheets awaiting manager action
 //   2. Launchpad tiles — Wet Checks · Work Orders · Billing Sheets · Estimates
-//      quick-nav
-//
-// Task #1581 — Pending estimates queue for irrigation managers
-//
-// irrigation_manager is in ESTIMATE_APPROVAL_ROLES so it can already call
-// GET /api/estimates/pending-approval.  This page now fetches that endpoint
-// and surfaces a "Pending Estimates" sub-section with per-row
-// "Approve & Send" inline action + click-to-view via EstimateDetailModal.
+//      quick-nav (Estimates tile shows pending count; detail is on Estimates page)
 
 import irrigoLogoUrl from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 import { useState } from "react";
 import { Link } from "wouter";
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
   CheckCircle2,
@@ -26,22 +18,17 @@ import {
   Droplets,
   FileText,
   Loader2,
-  Send,
   Wrench,
   ArrowRight,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { adaptiveRefetchInterval, apiRequest } from "@/lib/queryClient";
-import { sendEstimateEmail } from "@/lib/email";
 import { FinancialPulseWidget } from "@/components/financial-pulse/financial-pulse-widget";
 import { useAuth } from "@/lib/auth-context";
 import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
-import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
-import { useToast } from "@/hooks/use-toast";
 import type { WorkOrder, BillingSheet, Estimate } from "@workspace/db/schema";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -209,162 +196,6 @@ function NeedsApprovalSection({
   );
 }
 
-// ── Pending Estimates section ────────────────────────────────────────────────
-
-interface EstimateApprovalRow {
-  id: number;
-  number: string;
-  customerName: string | null;
-  lifecycle: string;
-  total: string | null;
-  age: number | null;
-  // Drives which inline action is shown:
-  //   pending_approval  → "Approve & Send" (internal-approve then email)
-  //   approved_internal → "Send" (already approved, just email the customer)
-  internalStatus: string;
-}
-
-function PendingEstimatesSection({
-  items,
-  loading,
-  onSelect,
-  onApproveAndSend,
-  onSend,
-  actionInProgress,
-}: {
-  items: EstimateApprovalRow[];
-  loading: boolean;
-  onSelect: (id: number) => void;
-  onApproveAndSend: (id: number) => void;
-  onSend: (id: number) => void;
-  actionInProgress: number | null;
-}) {
-  return (
-    <div>
-      <div className="px-4 py-2 flex items-center gap-2 bg-gray-50 border-b border-gray-100">
-        <FileText className="w-3.5 h-3.5 text-green-600" />
-        <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-          Estimates
-        </span>
-        <Badge variant="outline" className="ml-auto text-xs">
-          {loading ? "…" : items.length}
-        </Badge>
-      </div>
-
-      {loading ? (
-        <div className="p-3 space-y-2">
-          {[0, 1].map((i) => (
-            <Skeleton key={i} className="h-10 w-full rounded" />
-          ))}
-        </div>
-      ) : items.length === 0 ? (
-        <div
-          className="px-4 py-5 text-center text-sm text-gray-400"
-          data-testid="empty-estimates"
-        >
-          No estimates awaiting approval
-        </div>
-      ) : (
-        <ul className="divide-y divide-gray-50">
-          {items.map((row) => {
-            const isPendingApproval = row.internalStatus === "pending_approval";
-            const isApprovedInternal = row.internalStatus === "approved_internal";
-            const inProgress = actionInProgress === row.id;
-
-            return (
-              <li key={row.id}>
-                <div
-                  className="px-4 py-3 flex items-center gap-3"
-                  data-testid={`estimate-approval-row-${row.id}`}
-                >
-                  <button
-                    className="flex-1 min-w-0 text-left hover:text-blue-600 transition-colors group"
-                    onClick={() => onSelect(row.id)}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-gray-900 truncate group-hover:text-blue-600">
-                        {row.number}
-                      </span>
-                      <Badge className="text-[10px] px-1.5 py-0.5 shrink-0 bg-amber-100 text-amber-800 border-0">
-                        {statusLabel(row.lifecycle)}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-3 mt-0.5">
-                      {row.customerName && (
-                        <span className="text-xs text-gray-500 truncate">{row.customerName}</span>
-                      )}
-                      {row.age !== null && (
-                        <span className="text-xs text-gray-400 flex items-center gap-0.5 shrink-0">
-                          <Clock className="w-3 h-3" />
-                          {row.age}d old
-                        </span>
-                      )}
-                    </div>
-                  </button>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-sm font-medium text-gray-700">
-                      {fmtMoney(row.total)}
-                    </span>
-
-                    {/* pending_approval: approve internally then email the customer */}
-                    {isPendingApproval && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 px-2 text-xs border-green-200 text-green-700 hover:bg-green-50 hover:text-green-800"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onApproveAndSend(row.id);
-                        }}
-                        disabled={inProgress}
-                        data-testid={`estimate-approve-btn-${row.id}`}
-                      >
-                        {inProgress ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <>
-                            <Send className="w-3 h-3 mr-1" />
-                            Approve & Send
-                          </>
-                        )}
-                      </Button>
-                    )}
-
-                    {/* approved_internal: already approved, just deliver to customer */}
-                    {isApprovedInternal && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 px-2 text-xs border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSend(row.id);
-                        }}
-                        disabled={inProgress}
-                        data-testid={`estimate-send-btn-${row.id}`}
-                      >
-                        {inProgress ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <>
-                            <Send className="w-3 h-3 mr-1" />
-                            Send
-                          </>
-                        )}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 function LaunchpadTile({
   label,
   icon,
@@ -403,19 +234,11 @@ function LaunchpadTile({
 export default function ManagerWorkspacePage() {
   const qc = useQueryClient();
   const { user } = useAuth();
-  const { toast } = useToast();
 
   // Modal state
   const [selectedWo, setSelectedWo] = useState<WorkOrder | null>(null);
   const [selectedBs, setSelectedBs] = useState<BillingSheet | null>(null);
-  const [selectedEstimateId, setSelectedEstimateId] = useState<number | null>(null);
-  // Tracks which estimate row action is in-flight (approve-and-send or send)
-  const [estimateActionInProgress, setEstimateActionInProgress] = useState<number | null>(null);
 
-  // ── Roles that can see the pending-estimates queue ──────────────────────
-  // irrigation_manager, company_admin, and super_admin are all in
-  // ESTIMATE_APPROVAL_ROLES. billing_manager is too but their focus
-  // is billing sheets so we include them as well for consistency.
   const canSeeEstimates = !!user?.role && user.role !== "field_tech";
 
   const { data: approval, isLoading: approvalLoading } = useQuery<NeedsApprovalResponse | null>({
@@ -442,78 +265,14 @@ export default function ManagerWorkspacePage() {
     enabled: user?.role !== "billing_manager",
   });
 
-  // ── Pending estimates (Task #1581) ──────────────────────────────────────
-  const { data: pendingEstimatesRaw = [], isLoading: estimatesLoading } = useQuery<Estimate[]>({
+  // ── Pending estimates — count only, for the launchpad tile ─────────────
+  const { data: pendingEstimatesRaw = [] } = useQuery<Estimate[]>({
     queryKey: ["/api/estimates/pending-approval"],
     refetchInterval: adaptiveRefetchInterval(30_000),
     enabled: canSeeEstimates,
   });
 
-  const pendingEstimates: EstimateApprovalRow[] = pendingEstimatesRaw.map((e) => ({
-    id: e.id,
-    number: (e as any).estimateNumber ?? `#${e.id}`,
-    customerName: (e as any).customerName ?? null,
-    lifecycle: e.lifecycle ?? e.internalStatus ?? "pending_review",
-    total: e.totalAmount,
-    age: ageDays((e as any).estimateDate ?? (e as any).createdAt),
-    internalStatus: e.internalStatus,
-  }));
-
-  const invalidatePendingEstimates = () => {
-    qc.invalidateQueries({ queryKey: ["/api/estimates/pending-approval"] });
-    qc.invalidateQueries({ queryKey: ["/api/estimates"] });
-  };
-
-  // ── Approve & Send mutation — for pending_approval rows ─────────────────
-  // Chains internal-approve → email, matching the command-center flow.
-  const approveMutation = useMutation({
-    mutationFn: async (id: number) => {
-      setEstimateActionInProgress(id);
-      await apiRequest(`/api/estimates/${id}/internal-approve`, "PATCH", {});
-      await sendEstimateEmail(id);
-    },
-    onSuccess: () => {
-      toast({
-        title: "Approved & sent",
-        description: "Estimate approved and emailed to the customer.",
-      });
-      setEstimateActionInProgress(null);
-      invalidatePendingEstimates();
-    },
-    onError: () => {
-      toast({
-        title: "Failed to approve & send",
-        description: "Please try again, or open the estimate to send manually.",
-        variant: "destructive",
-      });
-      setEstimateActionInProgress(null);
-    },
-  });
-
-  // ── Send mutation — for approved_internal rows ───────────────────────────
-  // The estimate is already internally approved; just email the customer.
-  const sendMutation = useMutation({
-    mutationFn: async (id: number) => {
-      setEstimateActionInProgress(id);
-      await sendEstimateEmail(id);
-    },
-    onSuccess: () => {
-      toast({
-        title: "Estimate sent",
-        description: "Estimate emailed to the customer.",
-      });
-      setEstimateActionInProgress(null);
-      invalidatePendingEstimates();
-    },
-    onError: () => {
-      toast({
-        title: "Failed to send estimate",
-        description: "Please try again, or open the estimate to send manually.",
-        variant: "destructive",
-      });
-      setEstimateActionInProgress(null);
-    },
-  });
+  const pendingEstimatesCount = pendingEstimatesRaw.length;
 
   const invalidateQueue = () => {
     qc.invalidateQueries({
@@ -525,10 +284,7 @@ export default function ManagerWorkspacePage() {
 
   const workOrders = approval?.workOrders ?? [];
   const billingSheets = approval?.billingSheets ?? [];
-  const totalCount =
-    workOrders.length +
-    billingSheets.length +
-    (canSeeEstimates ? pendingEstimates.length : 0);
+  const totalCount = workOrders.length + billingSheets.length;
 
   // QB status bar styles
   const qbState = strip?.quickbooks?.state ?? "unknown";
@@ -619,7 +375,7 @@ export default function ManagerWorkspacePage() {
           <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-blue-600" />
             <h2 className="text-sm font-semibold text-gray-900">Needs Approval</h2>
-            {approvalLoading || (canSeeEstimates && estimatesLoading) ? (
+            {approvalLoading ? (
               <Loader2 className="w-3 h-3 animate-spin text-gray-400 ml-auto" />
             ) : (
               <Badge variant="outline" className="ml-auto text-xs">
@@ -627,21 +383,6 @@ export default function ManagerWorkspacePage() {
               </Badge>
             )}
           </div>
-
-          {/* Pending Estimates sub-section (irrigation_manager + admins) */}
-          {canSeeEstimates && (
-            <>
-              <PendingEstimatesSection
-                items={pendingEstimates}
-                loading={estimatesLoading}
-                onSelect={(id) => setSelectedEstimateId(id)}
-                onApproveAndSend={(id) => approveMutation.mutate(id)}
-                onSend={(id) => sendMutation.mutate(id)}
-                actionInProgress={estimateActionInProgress}
-              />
-              <div className="border-t border-gray-100" />
-            </>
-          )}
 
           {/* Work Orders sub-section */}
           <NeedsApprovalSection
@@ -724,7 +465,7 @@ export default function ManagerWorkspacePage() {
             label="Estimates"
             icon={<FileText className="w-6 h-6 text-green-600" />}
             href="/estimates/command-center"
-            count={pendingEstimates.length}
+            count={pendingEstimatesCount}
             colorClass="border-l-green-500"
           />
         )}
@@ -760,17 +501,6 @@ export default function ManagerWorkspacePage() {
         />
       )}
 
-      {/* Estimate detail modal (Task #1581) */}
-      <EstimateDetailModal
-        open={selectedEstimateId !== null}
-        onOpenChange={(open) => {
-          if (!open) setSelectedEstimateId(null);
-        }}
-        estimateId={selectedEstimateId}
-        onEdit={() => {
-          setSelectedEstimateId(null);
-        }}
-      />
     </div>
   );
 }

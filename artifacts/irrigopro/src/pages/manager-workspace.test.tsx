@@ -337,4 +337,55 @@ describe("manager-workspace.tsx — source-level assertions", () => {
       'missing data-testid="view-record-button" in waiting_on_tech read-only panel',
     );
   });
+
+  // ── Task #1777 — Pending Estimates removal ───────────────────────────────
+
+  it("PendingEstimatesSection component is not defined in the source", () => {
+    assert.ok(
+      !MW_SRC.includes("PendingEstimatesSection"),
+      "PendingEstimatesSection must be removed from manager-workspace.tsx",
+    );
+  });
+
+  it("EstimateApprovalRow type is not defined in the source", () => {
+    assert.ok(
+      !MW_SRC.includes("EstimateApprovalRow"),
+      "EstimateApprovalRow type must be removed from manager-workspace.tsx",
+    );
+  });
+
+  it("EstimateDetailModal is not imported", () => {
+    assert.ok(
+      !MW_SRC.includes("EstimateDetailModal"),
+      "EstimateDetailModal import must be removed from manager-workspace.tsx",
+    );
+  });
+
+  it("sendEstimateEmail is not imported", () => {
+    assert.ok(
+      !MW_SRC.includes("sendEstimateEmail"),
+      "sendEstimateEmail import must be removed from manager-workspace.tsx",
+    );
+  });
+
+  it("totalCount does not include an estimates addend", () => {
+    assert.ok(
+      !MW_SRC.includes("pendingEstimates.length"),
+      "totalCount must not reference pendingEstimates.length — estimates are not counted in Needs Approval",
+    );
+  });
+
+  it("Estimates launchpad tile is still present", () => {
+    assert.ok(
+      MW_SRC.includes('href="/estimates/command-center"'),
+      "Estimates launchpad tile link to /estimates/command-center must remain",
+    );
+  });
+
+  it("pending-approval query is retained for the tile badge count", () => {
+    assert.ok(
+      MW_SRC.includes("/api/estimates/pending-approval"),
+      "/api/estimates/pending-approval query must remain for the launchpad tile count",
+    );
+  });
 });
