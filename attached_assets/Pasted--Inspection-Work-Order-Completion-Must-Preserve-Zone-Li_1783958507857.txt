@@ -1,0 +1,57 @@
+# Inspection Work Order — Completion Must Preserve Zone Lineage and Check-Off State
+
+**What & Why**
+The completion replace (Slice 1B of the duplication fix) is money-safe, but it **rebuilds `work_order_items` without the zone columns**. The handler builds `finalItems` carrying partId / partName / partPrice / quantity / totalPrice / laborHours / findingId (`routes.ts:9658-9703`) — omitting `controllerLetter`, `zoneNumber`, `issueType`, and `completedAt`, all of which the prior row (already fetched for price preservation) has, and all of which `replaceWorkOrderItemsWithResync` would persist (it spreads `...item`; schema supports them, `schema.ts:835-841`).
+
+Two user-visible breaks on inspection-origin WOs (verified 2026-07-07):
+
+1. **Completion erases the zone story.** `isInspectionOriginWorkOrder()` keys off items having zone tags (`inspection-zone-checklist.tsx:57-64`). After completion, the manager's zone-grouped completed-work review (`completed-work-detail-modal.tsx:1750`) collapses to a flat parts list — on the current Woodglenn job, ~90 parts across 60+ zones with no grouping, at exactly the review step. Per-zone billing detail degrades the same way. The tech's per-item `completedAt` audit is deleted with the rows.
+2. **Return-for-correction destroys the checklist.** Manager returns the WO → `in_progress` → items have no zone tags → the zone checklist no longer renders and every check-off is gone. The tech re-faces a flat list with no record of what was done. Rule 4 in reverse: the field captured it; the system threw it away.
+
+**Scope (Rule 5):** the fix applies to the shared completion path for **all** WOs. Non-inspection WOs have null zone fields on their prior rows, so carrying them is a no-op. No mode branching needed — but the regression test must cover a plain service/direct WO to prove byte-for-byte equivalence.
+
+## Slice 1 — Server: carry the prior row's lineage through the replace
+
+### Files
+- `artifacts/api-server/src/routes/routes.ts` — completion replace block (`finalItems` build, ~9658-9703; anchor on the "Build the final item list" comment)
+
+### Changes
+- In the **prior-match branch** (existing WO item found for the incoming part), additionally carry:
+  `controllerLetter: prior.controllerLetter ?? null`, `zoneNumber: prior.zoneNumber ?? null`, `issueType: prior.issueType ?? null`, `completedAt: prior.completedAt ?? null`.
+- **Field-added branch:** all four stay null (a field-added part has no originating zone/finding; if a zone picker is ever added to the completion form, that's a separate slice).
+- No change to pricing, quantity, findingId, or the skip/preserve guards — this is additive columns only.
+
+## Slice 2 — Match priors by item id, not just partId order (fixes the cross-wire)
+
+The current stack-map consumes prior rows per partId **in insertion order** (`routes.ts:9652-9661`). If the same part appears in two zones and the tech removes or reorders one on the completion form, the surviving incoming row can consume the *other* zone's prior — cross-wiring `findingId` and (after Slice 1) the zone tag between findings.
+
+### Files
+- `artifacts/irrigopro/src/components/work-orders/work-order-completion.tsx` — prefill (:301-313), `usedParts` payload build (:452-460)
+- `artifacts/api-server/src/routes/routes.ts` — completion body schema + prior matching
+
+### Changes
+- **Client:** prefill stamps each `UsedPart` with `sourceItemId: item.id` (the WO item it came from); field-added parts have `sourceItemId: null`. Include it in the completion payload. Existing merge-by-partId behavior on "add part" must NOT merge into a row with a different `sourceItemId` origin — adding the same part the estimate already has should still merge into that estimate row (one origin), which preserves current UX.
+- **Server:** when an incoming part carries `sourceItemId`, match its prior row by id **within this WO's prior set** (the lookup is scoped, so a foreign id resolves to nothing). **On a miss — stale id, foreign id, or absent field — fall back to the partId stack-map for that row. Never 400.** Rationale: a successful replace deletes the old rows and inserts new ids; a lost-response retry replays the same payload with now-stale `sourceItemId`s, and it must still succeed idempotently (this is the exact path the offline queue exists for). The scoped lookup already provides the integrity a 400 would have.
+
+## Tests
+- Complete an inspection-origin WO → every rebuilt item retains controllerLetter / zoneNumber / issueType / findingId / completedAt from its source row; snapshot prices still preserved; totals unchanged.
+- Zone-grouped rendering: `isInspectionOriginWorkOrder()` still true after completion; completed-work detail modal groups by zone.
+- Return-for-correction round trip: complete → return → checklist renders zone-grouped with prior check-offs intact → re-complete → no duplication, totals stable.
+- Cross-wire: same part in two zones, tech removes zone A's row on the form → zone B's rebuilt item keeps zone B's findingId/zone tag (matched by `sourceItemId`).
+- Payload without `sourceItemId` (legacy/offline) → partId stack-map fallback works as today.
+- **Stale-id retry:** complete successfully, then replay the same payload (its `sourceItemId`s now point at deleted rows) → succeeds via fallback, single item set, unchanged totals — no 400.
+- **Rule 5 regression:** completing a non-inspection (direct/service) WO — identical behavior to today, null zone fields throughout.
+- Money regression: double-submit completion → single item set, unchanged totals (existing behavior preserved).
+
+## Out of scope
+- Zone picker for field-added parts on the completion form.
+- Prefill hours heuristic (Σ laborHours × qty vs the estimate's flat hours) — tech-editable suggestion, separate discussion if it bothers anyone.
+- Manager-side divergence review (actuals vs estimate) — unchanged.
+
+## Relevant files
+- `artifacts/api-server/src/routes/routes.ts` (finalItems build ~9658-9703; priorsByPartId stack ~9652)
+- `artifacts/api-server/src/storage.ts` (`replaceWorkOrderItemsWithResync` — no changes needed; spreads `...item`)
+- `lib/db/src/schema/schema.ts` (`workOrderItems` zone/lineage columns :835-846)
+- `artifacts/irrigopro/src/components/work-orders/work-order-completion.tsx` (prefill :301, payload :452)
+- `artifacts/irrigopro/src/components/work-orders/inspection-zone-checklist.tsx` (`isInspectionOriginWorkOrder` :57)
+- `artifacts/irrigopro/src/components/billing/completed-work-detail-modal.tsx` (:1750 zone-grouped completed view)
