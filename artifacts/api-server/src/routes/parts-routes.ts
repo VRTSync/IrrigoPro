@@ -7,6 +7,7 @@ import type { Express, Request, RequestHandler } from "express";
 import { z } from "zod/v4";
 import { insertPartSchema } from "@workspace/db";
 import { storage } from "../storage";
+import { registerPartsExportRoute } from "./parts-export-route";
 
 export interface RegisterPartRoutesDeps {
   requireAuthentication: RequestHandler;
@@ -86,6 +87,12 @@ export function registerPartRoutes(
       res.status(500).json({ message: "Failed to fetch pending parts" });
     }
   });
+
+  // ── CSV Export ────────────────────────────────────────────────────────────
+  // GET /api/parts/export-csv — extracted to parts-export-route.ts for
+  // testability. Must be registered before /api/parts/:id so "export-csv"
+  // is not treated as a numeric part id.
+  registerPartsExportRoute(app, { requireAuthentication, applyPricingVisibility, storage });
 
   app.get("/api/parts/:id", async (req, res) => {
     try {

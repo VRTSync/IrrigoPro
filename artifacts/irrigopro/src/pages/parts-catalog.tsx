@@ -16,7 +16,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings, Calculator, Filter, DollarSign, Clock, ChevronDown, ChevronRight, Layers, X, TrendingUp } from "lucide-react";
+import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings, Calculator, Filter, DollarSign, Clock, ChevronDown, ChevronRight, Layers, X, TrendingUp, Download, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useState, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
@@ -1026,7 +1026,8 @@ export default function PartsCatalog() {
   const [selectedPart, setSelectedPart] = useState<Part | undefined>();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
-  
+  const [exportCsvLoading, setExportCsvLoading] = useState(false);
+
   // Assembly state
   const [selectedAssembly, setSelectedAssembly] = useState<AssemblyWithParts | undefined>();
   const [isAssemblyFormOpen, setIsAssemblyFormOpen] = useState(false);
@@ -1164,6 +1165,39 @@ export default function PartsCatalog() {
     setCollapsedSections(newCollapsed);
   };
 
+  async function handleExportCsv() {
+    setExportCsvLoading(true);
+    try {
+      const response = await fetch("/api/parts/export-csv", { credentials: "include" });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error((err as any)?.message ?? "Failed to export CSV");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      // Derive filename from Content-Disposition header; fall back to client-generated name
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const match = disposition.match(/filename="([^"]+)"/);
+      const date = new Date().toISOString().slice(0, 10);
+      a.download = match ? match[1] : `parts-catalog-${date}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast({ title: "CSV exported" });
+    } catch (err: any) {
+      toast({
+        title: "Export failed",
+        description: err?.message ?? "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setExportCsvLoading(false);
+    }
+  }
+
   // Show full page skeleton while loading (after all hooks)
   if (isLoading || isLoadingAssemblies) {
     return <PartsListSkeleton />;
@@ -1178,6 +1212,22 @@ export default function PartsCatalog() {
             Manage your irrigation parts inventory and pre-configured assemblies
           </p>
         </div>
+        {canImport && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 shrink-0"
+            onClick={handleExportCsv}
+            disabled={exportCsvLoading || parts.length === 0}
+          >
+            {exportCsvLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            Export CSV
+          </Button>
+        )}
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
