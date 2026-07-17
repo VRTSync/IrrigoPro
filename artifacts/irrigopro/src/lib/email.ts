@@ -11,6 +11,9 @@ export interface SendEstimateEmailInput {
   cc?: string[];
   bcc?: string[];
   note?: string;
+  // Task #1791 — when true, the server generates a PDF and attaches it
+  // to the outgoing estimate email.
+  attachPdf?: boolean;
 }
 
 export const sendEstimateEmail = async (

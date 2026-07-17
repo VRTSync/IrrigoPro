@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, X, Mail } from "lucide-react";
+import { Loader2, X, Mail, Paperclip } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -13,10 +13,12 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_RECIPIENTS = 5;
 const MAX_NOTE = 2000;
+const ATTACH_PDF_KEY = "irrigopro:estimateSendAttachPdf";
 
 const isValidEmail = (v: string): boolean => EMAIL_RE.test(v.trim());
 
@@ -25,6 +27,8 @@ export interface SendEstimatePayload {
   cc: string[];
   bcc: string[];
   note?: string;
+  // Task #1791 — opt-in PDF attachment.
+  attachPdf?: boolean;
 }
 
 interface SendEstimateDialogProps {
@@ -121,6 +125,22 @@ function ChipList({
   );
 }
 
+function readAttachPdfPref(): boolean {
+  try {
+    return localStorage.getItem(ATTACH_PDF_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writeAttachPdfPref(value: boolean): void {
+  try {
+    localStorage.setItem(ATTACH_PDF_KEY, value ? "true" : "false");
+  } catch {
+    // Ignore — localStorage may be unavailable in some environments.
+  }
+}
+
 export function SendEstimateDialog({
   open,
   onOpenChange,
@@ -136,8 +156,16 @@ export function SendEstimateDialog({
   const [bcc, setBcc] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const [toError, setToError] = useState<string | null>(null);
+  // Task #1791 — persist the checkbox state across dialog opens via localStorage.
+  const [attachPdf, setAttachPdf] = useState<boolean>(false);
 
-  // Reset state every time the dialog reopens for a (possibly) new estimate.
+  // Load the persisted preference once on mount.
+  useEffect(() => {
+    setAttachPdf(readAttachPdfPref());
+  }, []);
+
+  // Reset per-send fields every time the dialog reopens for a (possibly) new estimate.
+  // The attachPdf preference is NOT reset — it persists across opens.
   useEffect(() => {
     if (open) {
       setTo((customerEmail ?? "").trim());
@@ -147,6 +175,11 @@ export function SendEstimateDialog({
       setToError(null);
     }
   }, [open, customerEmail]);
+
+  const handleAttachPdfChange = (checked: boolean) => {
+    setAttachPdf(checked);
+    writeAttachPdfPref(checked);
+  };
 
   const toValid = useMemo(() => isValidEmail(to), [to]);
   const noteOver = note.length > MAX_NOTE;
@@ -162,6 +195,7 @@ export function SendEstimateDialog({
       cc,
       bcc,
       note: note.trim() ? note.trim() : undefined,
+      attachPdf,
     });
   };
 
@@ -225,6 +259,24 @@ export function SendEstimateDialog({
             <div className={`text-xs ${noteOver ? "text-red-600" : "text-gray-500"}`}>
               {note.length}/{MAX_NOTE}
             </div>
+          </div>
+
+          {/* Task #1791 — Attach PDF opt-in. Preference is persisted to
+              localStorage so managers who always attach don't re-tick every time. */}
+          <div className="flex items-center gap-2.5 pt-1">
+            <Checkbox
+              id="send-estimate-attach-pdf"
+              checked={attachPdf}
+              onCheckedChange={(checked) => handleAttachPdfChange(Boolean(checked))}
+              data-testid="send-estimate-attach-pdf"
+            />
+            <label
+              htmlFor="send-estimate-attach-pdf"
+              className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer select-none"
+            >
+              <Paperclip className="w-3.5 h-3.5 text-gray-500" />
+              Attach PDF
+            </label>
           </div>
         </div>
 

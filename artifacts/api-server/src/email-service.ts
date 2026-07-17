@@ -72,6 +72,15 @@ export interface EstimateEmailData {
   cc?: string[];
   bcc?: string[];
   note?: string;
+  // Task #1791 — optional PDF attachment (base64-encoded PDF buffer).
+  // When present, the attachment is forwarded to SendGrid as a file
+  // attachment so the customer receives the estimate as a PDF document.
+  attachments?: Array<{
+    content: string;
+    filename: string;
+    type: string;
+    disposition: 'attachment';
+  }>;
 }
 
 export class EmailService {
@@ -164,7 +173,11 @@ export class EmailService {
           estimateId: data.estimateId.toString(),
           estimateNumber: data.estimateNumber,
           companyId: data.companyId.toString()
-        }
+        },
+        // Task #1791 — forward PDF attachment when the caller provides one.
+        ...(data.attachments && data.attachments.length > 0
+          ? { attachments: data.attachments }
+          : {}),
       });
 
       console.log(`Estimate approval email sent to ${toAddr}${ccList.length ? ` (cc ${ccList.join(', ')})` : ''}${bccList.length ? ` (bcc ${bccList.join(', ')})` : ''}`);

@@ -975,6 +975,8 @@ export function registerEstimateRoutes(
               .trim()
               .max(2000, "Note is too long (max 2000 chars)")
               .optional(),
+            // Task #1791 — opt-in PDF attachment.
+            attachPdf: z.boolean().optional(),
           })
           .strict();
         const parsed = sendSchema.safeParse(req.body ?? {});
@@ -992,6 +994,7 @@ export function registerEstimateRoutes(
           cc: parsed.data.cc,
           bcc: parsed.data.bcc,
           note: parsed.data.note,
+          attachPdf: parsed.data.attachPdf,
           req,
         });
 
@@ -1540,6 +1543,9 @@ export function registerEstimateRoutes(
       cc?: string[];
       bcc?: string[];
       note?: string;
+      // Task #1791 — when true, generate the estimate PDF and attach it to
+      // the outgoing SendGrid email as a base64-encoded PDF file.
+      attachPdf?: boolean;
       req?: any;
     } = {},
   ) {
@@ -1573,6 +1579,37 @@ export function registerEstimateRoutes(
     const { EmailService, } = await import("../email-service");
     const { isInspectionOriginEstimate } = await import("../estimate-pdf-html");
     const isInspectionOrigin = isInspectionOriginEstimate(items);
+
+    // Task #1791 — generate PDF buffer for attachment when opted in.
+    let pdfAttachments: Array<{
+      content: string;
+      filename: string;
+      type: string;
+      disposition: 'attachment';
+    }> | undefined;
+    if (opts.attachPdf) {
+      try {
+        const { generateEstimatePdfForEmail } = await import("../estimate-pdf-service");
+        const pdfResult = await generateEstimatePdfForEmail(
+          storage as import("../storage").IStorage,
+          estimateId,
+        );
+        if (pdfResult) {
+          pdfAttachments = [{
+            content: pdfResult.buffer.toString('base64'),
+            filename: pdfResult.filename,
+            type: 'application/pdf',
+            disposition: 'attachment',
+          }];
+          console.log(`[estimate-email] PDF attached: ${pdfResult.filename} (${pdfResult.buffer.length} bytes)`);
+        }
+      } catch (pdfErr) {
+        // Non-fatal — log and proceed without attachment rather than
+        // blocking the email send.
+        console.error('[estimate-email] PDF generation failed, sending without attachment:', pdfErr instanceof Error ? pdfErr.message : pdfErr);
+      }
+    }
+
     await EmailService.sendEstimateApprovalEmail({
       estimateId: estimateWithItems.id,
       estimateNumber: estimateWithItems.estimateNumber,
@@ -1600,6 +1637,7 @@ export function registerEstimateRoutes(
       cc: resolvedCc,
       bcc: resolvedBcc,
       note: opts.note,
+      attachments: pdfAttachments,
       items: items.map((item) => ({
         description: item.description || item.partName,
         partName: item.partName,
