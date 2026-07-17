@@ -1,0 +1,57 @@
+# BUILD — Parts Catalog CSV Export
+
+**What & Why**
+The parts catalog can be bulk-**imported** from CSV but there's no way to **export** it. Add a full CSV export: a button at the top of the Parts Catalog page that downloads every part for the company as a CSV. The file should be complete (all part fields) and **round-trip importable** — its core columns use the exact header names the existing bulk-import already recognizes, so an exported file can be edited and re-imported without remapping. Company-scoped and pricing-visibility-aware like the rest of the parts API.
+
+## Current state (confirmed)
+- **Parts model** (`schema.ts:205`): `name`, `description`, `price`, `cost`, `sku`, `category`, `material`, `size`, `brand`, `fittingType`, `detail`, `quickbooksId`, `isActive`, `approvalStatus`, `approvedAt`, `createdAt` (+ `companyId`, timestamps).
+- **Import exists**: `POST /api/parts/bulk-import` (`parts-routes.ts:365`). Its "enhanced format" detector keys off headers **`Part Type`** (→category), **`Product/Service Name`** (→name), **`Price`** (→price), **`Sales Description`** (→description), and optionally **`Cost`** (→cost). Export should reuse these exact header names for round-trip compatibility.
+- **Pricing visibility**: parts reads run through `applyPricingVisibility` (injected into `parts-routes.ts`), which hides cost/price for roles not permitted to see them. Export must apply the same rule so it can't leak cost/price.
+- **Page**: `parts-catalog.tsx` — header at `:1174–1181` ("Parts Catalog" title) has an empty right side (the row is `justify-between`), the natural place for the button. `canImport = company_admin || super_admin` (`:1052`); the BulkImport control is gated by it (`:1663`). Role is read from the stored user (`currentUser.role`).
+
+## Slice 1 — Backend export endpoint
+Add `GET /api/parts/export-csv` to `parts-routes.ts` (alongside the other parts routes), `requireAuthentication` + the same `applyPricingVisibility` treatment as the other reads.
+- **Scope**: return all parts for the caller's company (`companyId` from auth, never the body). super_admin follows the same cross-tenant behavior as the other parts reads. Include active **and** inactive **and** pending parts (a full export), ordered by `category` then `name` for readability.
+- **Columns** (header row, in this order):
+  `Part Type, Product/Service Name, SKU, Sales Description, Price, Cost, Brand, Size, Material, Fitting Type, Detail, Active, Approval Status, QuickBooks ID`
+  - The first five reuse the import-recognized names so the file re-imports cleanly; the rest are additional full-catalog fields.
+  - `Active` → `Yes`/`No` from `isActive`; `Approval Status` → `approvalStatus`.
+  - **Pricing visibility**: if the caller isn't permitted to see cost/price, blank the `Cost` (and `Price` if applicable) cells — same masking `applyPricingVisibility` performs elsewhere. Never emit values the API would otherwise hide.
+- **CSV correctness**: quote any field containing a comma, quote, or newline, and escape embedded quotes (`"` → `""`). UTF-8. One header row + one row per part.
+- **Response**: `Content-Type: text/csv; charset=utf-8` and `Content-Disposition: attachment; filename="parts-catalog-<company>-<YYYY-MM-DD>.csv"`. Mirror the streaming/blob pattern used by the irrigation-profile export (`GET /api/customers/:id/irrigation-profile/export-csv`).
+
+## Slice 2 — Export button in the catalog header
+In `parts-catalog.tsx`, add an **Export CSV** button on the right side of the header row (`:1174`), next to the title.
+- On click: `fetch("/api/parts/export-csv", { credentials: "include" })`, read the blob, trigger a download with the filename from the response (or a client fallback). Show a spinner while in flight and an error toast on failure. Reuse the exact pattern from `IrrigationProfile.tsx`'s `handleExportCsv` (blob → object URL → anchor click → revoke).
+- **Empty state**: disable the button when there are no parts (`parts.length === 0`).
+- **Role gate (decision)**: recommend gating to the same roles as import — **company_admin / super_admin** (`canImport`) — for consistency. Export is lower-risk than import, so if you'd rather let irrigation managers export too, widen it to include `irrigation_manager`. Pick one; the backend still enforces pricing visibility regardless.
+
+## Decision flag
+- **Full catalog vs. current view**: this exports the **entire** catalog (all parts), not the on-screen filtered/searched subset. If you'd prefer the button to honor the active category/search filters, that's a small addition (pass the same filters to the endpoint) — flag if you want it; default is full export.
+
+## Done looks like
+- A button at the top of the Parts Catalog page downloads a CSV of every part for the company.
+- The file opens cleanly in Excel/Sheets, with all part fields and correct escaping.
+- The exported file can be re-imported through the existing bulk-import without remapping (core headers match).
+- Roles that can't see cost/price get those columns blanked, not populated.
+- Company isolation holds — a user only ever exports their own company's parts.
+
+## Tests
+- Export returns a well-formed CSV with the header row + one row per company part; fields with commas/quotes are correctly quoted/escaped.
+- A part with `isActive=false` / `approvalStatus=pending` is included and rendered correctly.
+- Pricing-visibility role → `Cost`/`Price` columns blank; permitted role → populated.
+- Company isolation: company A's export contains no company B parts; super_admin behavior matches other parts reads.
+- Round-trip: export → bulk-import the same file → parts match (no duplicate columns / remap needed).
+- Frontend: button disabled when catalog empty; downloads a file named `parts-catalog-<company>-<date>.csv`; error toast on a failed fetch.
+
+## Definition of Done (attach proof — Rule 7)
+- [ ] `file:line` for the new endpoint, the pricing-visibility masking, and the header button.
+- [ ] Screenshot of the button in the catalog header and a sample exported CSV opened in a spreadsheet.
+- [ ] Test output for the CSV-formatting, pricing-visibility, company-isolation, and round-trip cases.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+- `artifacts/api-server/src/routes/parts-routes.ts` (new `GET /api/parts/export-csv`; reuse `applyPricingVisibility`; mirror bulk-import header names)
+- `artifacts/irrigopro/src/pages/parts-catalog.tsx` (header button `:1174`, `canImport` gate `:1052`, download handler)
+- Reference: `artifacts/irrigopro/src/pages/customers/IrrigationProfile.tsx` (`handleExportCsv` download pattern) and the irrigation-profile `export-csv` route (streaming/attachment pattern)
+- `lib/db/src/schema/schema.ts` (`parts` columns `:205`)
