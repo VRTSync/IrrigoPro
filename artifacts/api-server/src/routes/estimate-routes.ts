@@ -1825,9 +1825,25 @@ export function registerEstimateRoutes(
         });
         return;
       }
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const overrideTo =
+        typeof body.to === "string" ? body.to.trim() || undefined : undefined;
+      const overrideCc = Array.isArray(body.cc)
+        ? (body.cc as unknown[]).filter((s): s is string => typeof s === "string")
+        : [];
+      const overrideBcc = Array.isArray(body.bcc)
+        ? (body.bcc as unknown[]).filter((s): s is string => typeof s === "string")
+        : [];
+      const overrideNote =
+        typeof body.note === "string" ? body.note.trim() || undefined : undefined;
+
       await _sendEstimateApprovalEmailFlow(id, {
         resetEstimateDate: isExpiredResend,
         isSentRedelivery,
+        to: overrideTo,
+        cc: overrideCc,
+        bcc: overrideBcc,
+        note: overrideNote,
         req,
       });
       const fresh = await storage.getEstimate(id);

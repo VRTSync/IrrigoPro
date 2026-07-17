@@ -37,13 +37,10 @@ export function EstimateBoardExpiredStrip({
 
   if (estimates.length === 0) return null;
 
-  const handleConfirmResend = async () => {
+  const handleConfirmResend = async (payload: Parameters<typeof resendEstimate>[1]) => {
     if (!resendDialogEstimate) return;
     try {
-      await resendEstimate(
-        resendDialogEstimate.id,
-        resendDialogEstimate.customerEmail ?? "",
-      );
+      await resendEstimate(resendDialogEstimate.id, payload);
       setResendDialogEstimate(null);
     } catch {
       // Error toast surfaced by hook; keep dialog open for retry.

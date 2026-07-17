@@ -1,36 +1,32 @@
-import * as React from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Loader2, Mail } from "lucide-react";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { ChipList } from "./chip-list";
 import type { Estimate } from "@workspace/db/schema";
+import type { ResendPayload } from "@/hooks/use-estimate-resend";
 
-// AlertDialogContent's public type omits onPointerDownOutside / onInteractOutside,
-// but the underlying primitive still forwards them — re-expose them via a single
-// typed alias so we keep the existing close-on-outside-interaction behavior.
-type AlertDialogContentExtraProps = {
-  onPointerDownOutside?: (event: Event) => void;
-  onInteractOutside?: (event: Event) => void;
-};
-const AlertDialogContentTyped = AlertDialogContent as React.ComponentType<
-  React.ComponentProps<typeof AlertDialogContent> & AlertDialogContentExtraProps
->;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_NOTE = 2000;
+
+const isValidEmail = (v: string): boolean => EMAIL_RE.test(v.trim());
 
 interface ResendConfirmDialogProps {
   estimate: Estimate | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
+  onConfirm: (payload: ResendPayload) => void;
   isResending: boolean;
-  // Task #365 — true when the estimate is expired (date reset + new token);
-  // false when it's a re-delivery of a non-expired sent estimate (no date reset).
   isExpiredResend?: boolean;
 }
 
@@ -42,76 +38,143 @@ export function ResendConfirmDialog({
   isResending,
   isExpiredResend = true,
 }: ResendConfirmDialogProps) {
-  const email = estimate?.customerEmail?.trim() ?? "";
-  const hasEmail = email.length > 0;
+  const [to, setTo] = useState("");
+  const [cc, setCc] = useState<string[]>([]);
+  const [bcc, setBcc] = useState<string[]>([]);
+  const [note, setNote] = useState("");
+  const [toError, setToError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setTo((estimate?.customerEmail ?? "").trim());
+      setCc([]);
+      setBcc([]);
+      setNote("");
+      setToError(null);
+    }
+  }, [open, estimate?.customerEmail]);
+
+  const toValid = useMemo(() => isValidEmail(to), [to]);
+  const noteOver = note.length > MAX_NOTE;
+  const canSend = toValid && !noteOver && !isResending;
+
+  const submit = () => {
+    if (!toValid) {
+      setToError("Please enter a valid email address");
+      return;
+    }
+    onConfirm({
+      to: to.trim(),
+      cc,
+      bcc,
+      note: note.trim() || undefined,
+    });
+  };
+
   const customerName = estimate?.customerName ?? "this customer";
+  const title = isExpiredResend ? "Resend estimate" : "Re-deliver estimate";
+  const description = isExpiredResend
+    ? `Send ${customerName} a fresh approval link. The estimate date will be reset and the 30-day window restarted.`
+    : `Re-deliver the approval email to ${customerName}. The estimate date and approval link remain unchanged.`;
 
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContentTyped
-        onPointerDownOutside={() => onOpenChange(false)}
-        onInteractOutside={() => onOpenChange(false)}
-      >
-        {hasEmail ? (
-          <>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Resend estimate?</AlertDialogTitle>
-              <AlertDialogDescription>
-                {isExpiredResend ? (
-                  <>
-                    This will email {customerName} at <strong>{email}</strong> with a
-                    fresh approval link and reset the 30-day expiration window.
-                  </>
-                ) : (
-                  <>
-                    This will re-deliver the approval email to {customerName} at{" "}
-                    <strong>{email}</strong>. The estimate date and approval link
-                    remain unchanged.
-                  </>
-                )}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel data-testid="resend-dialog-cancel">
-                Cancel
-              </AlertDialogCancel>
-              <AlertDialogAction
-                data-testid="resend-dialog-confirm"
-                disabled={isResending}
-                onClick={(e) => {
-                  e.preventDefault();
-                  onConfirm();
-                }}
-              >
-                {isResending ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Resending…
-                  </>
-                ) : (
-                  "Resend"
-                )}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </>
-        ) : (
-          <>
-            <AlertDialogHeader>
-              <AlertDialogTitle>No customer email on file</AlertDialogTitle>
-              <AlertDialogDescription>
-                {customerName} doesn't have an email address saved, so this
-                estimate can't be resent. Add an email to the customer record
-                and try again.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel data-testid="resend-dialog-cancel">
-                Cancel
-              </AlertDialogCancel>
-            </AlertDialogFooter>
-          </>
-        )}
-      </AlertDialogContentTyped>
-    </AlertDialog>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg" data-testid="resend-confirm-dialog">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Mail className="w-5 h-5 text-blue-600" />
+            {title}
+          </DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="resend-to" className="text-sm font-medium text-gray-700">
+              To
+            </Label>
+            <Input
+              id="resend-to"
+              type="email"
+              value={to}
+              onChange={(e) => {
+                setTo(e.target.value);
+                if (toError) setToError(null);
+              }}
+              placeholder="customer@example.com"
+              data-testid="resend-dialog-to"
+            />
+            {toError && <p className="text-xs text-red-600">{toError}</p>}
+            {!toError && !toValid && to.length > 0 && (
+              <p className="text-xs text-red-600">Please enter a valid email address</p>
+            )}
+            {!toError && to.length === 0 && (
+              <p className="text-xs text-gray-500">
+                No email on file — enter an address to send to.
+              </p>
+            )}
+          </div>
+
+          <ChipList
+            label="Cc (optional)"
+            values={cc}
+            onChange={setCc}
+            testIdPrefix="resend-cc"
+          />
+          <ChipList
+            label="Bcc (optional)"
+            values={bcc}
+            onChange={setBcc}
+            testIdPrefix="resend-bcc"
+          />
+
+          <div className="space-y-1.5">
+            <Label htmlFor="resend-note" className="text-sm font-medium text-gray-700">
+              Note (optional)
+            </Label>
+            <Textarea
+              id="resend-note"
+              rows={3}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Add a short message that will appear above the estimate summary in the email."
+              data-testid="resend-dialog-note"
+            />
+            <div className={`text-xs ${noteOver ? "text-red-600" : "text-gray-500"}`}>
+              {note.length}/{MAX_NOTE}
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isResending}
+            data-testid="resend-dialog-cancel"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={submit}
+            disabled={!canSend}
+            className="bg-blue-600 hover:bg-blue-700"
+            data-testid="resend-dialog-confirm"
+          >
+            {isResending ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                {isExpiredResend ? "Resending…" : "Re-delivering…"}
+              </>
+            ) : (
+              <>
+                <Mail className="w-4 h-4 mr-2" />
+                {isExpiredResend ? "Resend" : "Re-deliver"}
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

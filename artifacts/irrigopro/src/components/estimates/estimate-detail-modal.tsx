@@ -260,10 +260,10 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     }
   };
 
-  const handleConfirmResend = async () => {
-    if (!estimate || !estimateId) return;
+  const handleConfirmResend = async (payload: Parameters<typeof resendEstimate>[1]) => {
+    if (!estimateId) return;
     try {
-      await resendEstimate(estimateId, estimate.customerEmail ?? "");
+      await resendEstimate(estimateId, payload);
       setShowResendDialog(false);
       queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
     } catch {

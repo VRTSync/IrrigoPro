@@ -55,13 +55,10 @@ export function EstimateList({ estimates, filters, onOpen, onEdit }: Props) {
   const [resendDialogEstimate, setResendDialogEstimate] = useState<Estimate | null>(null);
   const { resendEstimate, isResending } = useEstimateResend();
 
-  const handleConfirmResend = async () => {
+  const handleConfirmResend = async (payload: Parameters<typeof resendEstimate>[1]) => {
     if (!resendDialogEstimate) return;
     try {
-      await resendEstimate(
-        resendDialogEstimate.id,
-        resendDialogEstimate.customerEmail ?? "",
-      );
+      await resendEstimate(resendDialogEstimate.id, payload);
       setResendDialogEstimate(null);
     } catch {
       // Error toast surfaced by hook; keep dialog open for retry.
