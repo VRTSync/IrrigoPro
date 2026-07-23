@@ -533,7 +533,6 @@ export interface IStorage {
   searchParts(query: string): Promise<Part[]>;
   createPart(part: InsertPart): Promise<Part>;
   updatePart(id: number, part: Partial<InsertPart>): Promise<Part | undefined>;
-  deletePart(id: number): Promise<boolean>;
   syncPartsFromGoogleDocs(docUrl: string): Promise<void>;
 
   // Estimates
@@ -2302,18 +2301,14 @@ export class DatabaseStorage implements IStorage {
 
   async updatePart(id: number, part: Partial<InsertPart>): Promise<Part | undefined> {
     try {
-      const [updatedPart] = await db.update(parts).set(toDrizzleInsert<Partial<DrizzlePartInsert>>(part)).where(eq(parts.id, id)).returning();
+      const payload = { ...toDrizzleInsert<Partial<DrizzlePartInsert>>(part), updatedAt: new Date() };
+      const [updatedPart] = await db.update(parts).set(payload).where(eq(parts.id, id)).returning();
       return updatedPart || undefined;
     } catch (error) {
       console.error(`Database error in updatePart for ID ${id}:`, error);
       console.error(`Data being updated:`, part);
       throw error; // Re-throw to let calling code handle it
     }
-  }
-
-  async deletePart(id: number): Promise<boolean> {
-    const result = await db.delete(parts).where(eq(parts.id, id));
-    return (result.rowCount || 0) > 0;
   }
 
   // Assembly methods

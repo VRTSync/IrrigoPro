@@ -1126,8 +1126,8 @@ export function registerPartRoutes(
         return;
       }
 
-      const success = await storage.deletePart(id);
-      if (!success) {
+      const updated = await storage.updatePart(id, { isActive: false });
+      if (!updated) {
         res.status(404).json({ message: "Part not found" });
         return;
       }

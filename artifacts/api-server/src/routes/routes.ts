@@ -371,6 +371,8 @@ import { recordAuditEvent } from "./audit-log";
 import { paginate } from "./pagination";
 import { registerSiteMapRoutes } from "./site-map-routes";
 import { registerPartRoutes } from "./parts-routes";
+import { requireApiKey } from "./external-auth";
+import { registerExternalPartsRoute } from "./external-parts-route";
 import { registerBillingWorkspaceRoutes, ACTIVE_WCB, PENDING_REVIEW_WCB } from "./billing-workspace-routes";
 import { registerBillingWorkspaceBulkApproveRoutes } from "./billing-workspace-bulk-approve";
 import { registerManagerWorkspaceRoutes, ACTIVE_WC, APPROVED_WC } from "./manager-workspace-routes";
@@ -15378,42 +15380,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================
   
   // Create work order via external API with API key authentication
-  app.post("/api/external/work-orders", async (req, res) => {
+  app.post("/api/external/work-orders", requireApiKey, async (req, res) => {
     try {
-      const authHeader = req.headers.authorization;
-      
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        res.status(401).json({ 
-          error: "UNAUTHORIZED",
-          message: "API key required. Use Authorization: Bearer <your-api-key>" 
-        });
-        return;
-      }
-
-      const apiKeyValue = authHeader.substring(7); // Remove 'Bearer ' prefix
-      
-      // Validate the API key
-      const apiKey = await storage.getApiKeyByKey(apiKeyValue);
-      
-      if (!apiKey) {
-        res.status(401).json({ 
-          error: "INVALID_API_KEY",
-          message: "Invalid or inactive API key" 
-        });
-        return;
-      }
-
-      // Check if key has expired
-      if (apiKey.expiresAt && new Date(apiKey.expiresAt) < new Date()) {
-        res.status(401).json({ 
-          error: "API_KEY_EXPIRED",
-          message: "API key has expired" 
-        });
-        return;
-      }
-
-      // Update last used timestamp
-      await storage.updateApiKeyLastUsed(apiKey.id);
 
       // Parse and validate the request body
       const externalWorkOrderSchema = z.object({
@@ -15450,7 +15418,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { customer, workOrder } = validationResult.data;
-      const companyId = apiKey.companyId;
+      const companyId = req.apiKeyCompanyId!;
 
       // Find or create the customer
       let existingCustomer = null;
@@ -15554,34 +15522,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get work order status via external API
-  app.get("/api/external/work-orders/:workOrderId", async (req, res) => {
+  app.get("/api/external/work-orders/:workOrderId", requireApiKey, async (req, res) => {
     try {
-      const authHeader = req.headers.authorization;
-      
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        res.status(401).json({ 
-          error: "UNAUTHORIZED",
-          message: "API key required" 
-        });
-        return;
-      }
-
-      const apiKeyValue = authHeader.substring(7);
-      const apiKey = await storage.getApiKeyByKey(apiKeyValue);
-      
-      if (!apiKey) {
-        res.status(401).json({ 
-          error: "INVALID_API_KEY",
-          message: "Invalid or inactive API key" 
-        });
-        return;
-      }
-
-      // Update last used timestamp
-      await storage.updateApiKeyLastUsed(apiKey.id);
-
-      const workOrderId = parseInt(req.params.workOrderId);
-      const workOrder = await storage.getWorkOrder(workOrderId, apiKey.companyId ?? null);
+      const workOrderId = parseInt(String(req.params.workOrderId));
+      const workOrder = await storage.getWorkOrder(workOrderId, req.apiKeyCompanyId ?? null);
 
       if (!workOrder) {
         res.status(404).json({ 
@@ -15593,7 +15537,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Verify the work order belongs to the API key's company through customer
       const customer = await storage.getCustomer(workOrder.customerId);
-      if (!customer || customer.companyId !== apiKey.companyId) {
+      if (!customer || customer.companyId !== req.apiKeyCompanyId) {
         res.status(403).json({ 
           error: "FORBIDDEN",
           message: "Access denied to this work order" 
@@ -15627,6 +15571,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
   });
+
+  // External Parts Catalog API (CRM delta-poll endpoint)
+  registerExternalPartsRoute(app, { requireApiKey });
 
   if (process.env.NODE_ENV !== 'production') {
     app.post("/api/dev/seed-billing-month", async (req, res) => {

@@ -222,8 +222,10 @@ export const parts = pgTable("parts", {
   approvalStatus: text("approval_status").notNull().default("approved"), // pending | approved
   approvedAt: timestamp("approved_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdateFn(() => new Date()),
+}, (table) => ({
+  companyUpdatedIdx: index("parts_company_updated_idx").on(table.companyId, table.updatedAt),
+}));
 
 // Standalone billing sheets for work without work orders
 export const billingSheets = pgTable("billing_sheets", {

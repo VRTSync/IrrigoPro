@@ -23,6 +23,9 @@ declare global {
       // Populated by requireSameCompanyAsWorkOrder middleware so downstream
       // handlers can reuse the loaded row without a second DB round-trip.
       tenantScopedWorkOrder?: Record<string, unknown>;
+      // Populated by requireApiKey middleware (external API routes).
+      apiKeyCompanyId?: number;
+      apiKeyId?: number;
     }
   }
 }
