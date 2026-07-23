@@ -188,9 +188,13 @@ export default function ZoneDetailScreen() {
   const [findingError, setFindingError] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [localPhotos, setLocalPhotos] = useState<LocalPhoto[]>([]);
-  // True while pickZonePhotoFromLibrary is running its sequential
-  // compress + resize loop so the tech can see the app isn't frozen.
-  const [processingLibrary, setProcessingLibrary] = useState(false);
+  // Counter shown while pickZonePhotoFromLibrary is compressing photos so the
+  // tech can see "Processing X of Y…" instead of a frozen screen. null = idle.
+  const [processingLibrary, setProcessingLibrary] = useState<{ done: number; total: number } | null>(null);
+  // Tracks how many photos in the current batch are still awaiting onSuccess so
+  // we can fire a single queryClient.invalidateQueries after the last one
+  // instead of one per photo (which causes a re-render storm on 50-photo batches).
+  const pendingBatchCountRef = React.useRef(0);
 
   // Surface 409s discovered by background queue drains in the same
   // conflict banner as inline-mutation conflicts.
@@ -538,13 +542,33 @@ export default function ZoneDetailScreen() {
       setLocalPhotos((prev) =>
         prev.filter((p) => p.clientId !== photo.clientId),
       );
-      if (wetCheckId != null) {
-        queryClient.invalidateQueries({
-          queryKey: wetCheckDetailQueryKey(wetCheckId),
-        });
+      // Batch-aware invalidation: when multiple photos are queued at once,
+      // decrement the counter and only invalidate after the last one settles
+      // so a 50-photo upload doesn't cause 50 sequential re-renders.
+      if (pendingBatchCountRef.current > 1) {
+        pendingBatchCountRef.current -= 1;
+      } else {
+        pendingBatchCountRef.current = 0;
+        if (wetCheckId != null) {
+          queryClient.invalidateQueries({
+            queryKey: wetCheckDetailQueryKey(wetCheckId),
+          });
+        }
       }
     },
     onError: (err, photo) => {
+      // Count an error as "settled" so the final invalidation still fires
+      // even when some uploads in a batch fail.
+      if (pendingBatchCountRef.current > 1) {
+        pendingBatchCountRef.current -= 1;
+      } else {
+        pendingBatchCountRef.current = 0;
+        if (wetCheckId != null) {
+          queryClient.invalidateQueries({
+            queryKey: wetCheckDetailQueryKey(wetCheckId),
+          });
+        }
+      }
       setLocalPhotos((prev) =>
         prev.filter((p) => p.clientId !== photo.clientId),
       );
@@ -615,12 +639,13 @@ export default function ZoneDetailScreen() {
         return;
       }
       let photos: LocalPhoto[] = [];
-      setProcessingLibrary(true);
       try {
         photos = await pickZonePhotoFromLibrary({
           wetCheckId,
           zoneRecordId,
           findingId: null,
+          onProgress: (done, total) =>
+            setProcessingLibrary({ done, total }),
         });
       } catch (err) {
         setPhotoError(
@@ -628,9 +653,10 @@ export default function ZoneDetailScreen() {
         );
         return;
       } finally {
-        setProcessingLibrary(false);
+        setProcessingLibrary(null);
       }
       if (photos.length === 0) return;
+      pendingBatchCountRef.current = photos.length;
       setLocalPhotos((prev) => [...prev, ...photos]);
       for (const photo of photos) {
         addPhotoMutation.mutate(photo);
@@ -709,12 +735,13 @@ export default function ZoneDetailScreen() {
           return;
         }
         let photos: LocalPhoto[] = [];
-        setProcessingLibrary(true);
         try {
           photos = await pickZonePhotoFromLibrary({
             wetCheckId,
             zoneRecordId,
             findingId,
+            onProgress: (done, total) =>
+              setProcessingLibrary({ done, total }),
           });
         } catch (err) {
           setPhotoError(
@@ -722,9 +749,10 @@ export default function ZoneDetailScreen() {
           );
           return;
         } finally {
-          setProcessingLibrary(false);
+          setProcessingLibrary(null);
         }
         if (photos.length === 0) return;
+        pendingBatchCountRef.current = photos.length;
         setLocalPhotos((prev) => [...prev, ...photos]);
         for (const photo of photos) {
           addPhotoMutation.mutate(photo);
@@ -1072,11 +1100,11 @@ export default function ZoneDetailScreen() {
                   onDismiss={() => setPhotoError(null)}
                 />
               ) : null}
-              {processingLibrary ? (
+              {processingLibrary != null ? (
                 <View style={styles.processingBanner}>
                   <ActivityIndicator size="small" color={colors.primary} />
                   <Text style={[styles.processingBannerText, { color: colors.mutedForeground }]}>
-                    Processing photos…
+                    Processing {processingLibrary.done} of {processingLibrary.total}…
                   </Text>
                 </View>
               ) : null}

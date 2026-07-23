@@ -71,10 +71,15 @@ function billingSheetPhotoDirectory(scopeKey: string): Directory {
 // the server-side variants stay in the same neighbourhood. Returns a
 // LocalPhoto[] (empty array when the user cancels) so each selected asset
 // becomes its own upload queue entry, preserving the existing retry/cancel UI.
+//
+// `onProgress(done, total)` is called after each image is compressed so
+// callers can show a "Processing X of Y…" counter during the sequential
+// compress + resize loop (which blocks the UI on large batches).
 export async function pickZonePhotoFromLibrary(opts: {
   wetCheckId: number;
   zoneRecordId: number | null;
   findingId: number | null;
+  onProgress?: (done: number, total: number) => void;
 }): Promise<LocalPhoto[]> {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: "images",
@@ -85,12 +90,14 @@ export async function pickZonePhotoFromLibrary(opts: {
   if (result.canceled || !result.assets || result.assets.length === 0) {
     return [];
   }
+  const total = result.assets.length;
   const dir = wetCheckPhotoDirectory(opts.wetCheckId);
   if (!dir.exists) {
     dir.create({ intermediates: true });
   }
   const photos: LocalPhoto[] = [];
-  for (const asset of result.assets) {
+  for (let i = 0; i < total; i++) {
+    const asset = result.assets[i];
     const w = asset.width ?? 0;
     const h = asset.height ?? 0;
     const needsResize = w > MAX_EDGE || h > MAX_EDGE;
@@ -122,6 +129,7 @@ export async function pickZonePhotoFromLibrary(opts: {
       zoneRecordId: opts.zoneRecordId,
       findingId: opts.findingId,
     });
+    opts.onProgress?.(i + 1, total);
   }
   return photos;
 }
