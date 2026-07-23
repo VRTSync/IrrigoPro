@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useSearch } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -50,7 +50,19 @@ import {
   ChevronsUpDown,
   MoreHorizontal,
   Edit3,
+  RotateCcw,
+  Trash2,
+  CheckSquare,
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
@@ -113,6 +125,7 @@ interface Invoice {
   createdAt: string;
   sentAt?: string | null;
   dueDate?: string | null;
+  notes?: string | null;
   quickbooksInvoiceId?: string;
   supersededByInvoiceId?: number | null;
   mergedIntoInvoiceId?: number | null;
@@ -206,6 +219,8 @@ function buildInvoicesCsv(invoices: Invoice[]) {
 
 function getStatusBadge(status: string) {
   switch (status.toLowerCase()) {
+    case "draft":
+      return <Badge className="bg-yellow-100 text-yellow-800 border border-yellow-300">Draft</Badge>;
     case "generated":
       return <Badge className="bg-blue-100 text-blue-800">Generated</Badge>;
     case "sent":
@@ -412,6 +427,8 @@ export default function InvoicesPage() {
   const canMerge = !!userRole && MERGE_ROLES.has(userRole);
   // Task #1438 — same billing-capable role set as merge/export.
   const canMarkSent = !!userRole && MERGE_ROLES.has(userRole);
+  // Task #1811 — invoice editability (same role set as billing).
+  const canBillingEdit = !!userRole && MERGE_ROLES.has(userRole);
 
   // Task #1425 — invoice merge selection. `selectedIds` holds the invoices
   // ticked for merging; `survivingId` is the chosen survivor in the confirm
@@ -428,6 +445,74 @@ export default function InvoicesPage() {
   // Task #1710 — Invoice Correction & Reissue.
   const [correctionInvoice, setCorrectionInvoice] = useState<Invoice | null>(null);
   const canCorrect = !!userRole && MERGE_ROLES.has(userRole);
+  // Task #1811 — Invoice editability state.
+  const [editMetadataInvoice, setEditMetadataInvoice] = useState<Invoice | null>(null);
+  const [editNotes, setEditNotes] = useState("");
+  const [editDueDate, setEditDueDate] = useState("");
+  const [editPeriodStart, setEditPeriodStart] = useState("");
+  const [editPeriodEnd, setEditPeriodEnd] = useState("");
+  const [voidConfirmInvoice, setVoidConfirmInvoice] = useState<Invoice | null>(null);
+  const [voidQbAction, setVoidQbAction] = useState<"void" | "unlink" | null>(null);
+  // Draft ticket editor sheet
+  const [draftEditorInvoice, setDraftEditorInvoice] = useState<Invoice | null>(null);
+  const [addTicketType, setAddTicketType] = useState<"billing_sheet" | "work_order" | "wet_check_billing">("billing_sheet");
+  const [addTicketId, setAddTicketId] = useState("");
+  // Draft period metadata fields (populated when the draft editor opens)
+  const [draftPeriodStart, setDraftPeriodStart] = useState("");
+  const [draftPeriodEnd, setDraftPeriodEnd] = useState("");
+  const [draftDueDate, setDraftDueDate] = useState("");
+  const [draftNotes, setDraftNotes] = useState("");
+
+  // Populate draft period fields when the editor opens on a new invoice
+  useEffect(() => {
+    if (draftEditorInvoice) {
+      setDraftPeriodStart(toIsoDate(draftEditorInvoice.periodStart));
+      setDraftPeriodEnd(toIsoDate(draftEditorInvoice.periodEnd));
+      setDraftDueDate(toIsoDate(draftEditorInvoice.dueDate));
+      setDraftNotes(draftEditorInvoice.notes ?? "");
+    }
+  }, [draftEditorInvoice?.id]);
+
+  // Metadata save from within the draft editor (same PATCH endpoint; no dialog close needed)
+  const draftMetaSaveMutation = useMutation({
+    mutationFn: (vars: { id: number; notes?: string; dueDate?: string | null; periodStart?: string; periodEnd?: string }) => {
+      const { id: invoiceId, ...body } = vars;
+      return apiRequest(`/api/invoices/${invoiceId}`, "PATCH", body);
+    },
+    onSuccess: (data: any) => {
+      toast({ title: "Period metadata saved" });
+      if (data && draftEditorInvoice) {
+        setDraftEditorInvoice((prev) =>
+          prev ? { ...prev, totalAmount: data.totalAmount ?? prev.totalAmount, periodStart: data.periodStart ?? prev.periodStart, periodEnd: data.periodEnd ?? prev.periodEnd, dueDate: data.dueDate ?? prev.dueDate, notes: data.notes ?? prev.notes } : prev
+        );
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Save failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  // Fetch live invoice items when the draft editor is open
+  const { data: draftItemsData, isLoading: draftItemsLoading } = useQuery<{ items: Array<{
+    id: number;
+    sourceType: string;
+    billingSheetId: number | null;
+    workOrderId: number | null;
+    wetCheckBillingId: number | null;
+    description: string;
+    totalPrice: string;
+  }> }>({
+    queryKey: ["/api/invoices", draftEditorInvoice?.id, "items"],
+    queryFn: async () => {
+      const r = await fetch(`/api/invoices/${draftEditorInvoice!.id}/items`, { credentials: "include" });
+      if (!r.ok) throw new Error("Failed to load items");
+      return r.json();
+    },
+    enabled: draftEditorInvoice != null,
+  });
+  const draftItems = draftItemsData?.items ?? [];
+
   // Version-chain history toggle: key is the active invoice id; value true = expanded.
   const [expandedHistory, setExpandedHistory] = useState<Set<number>>(new Set());
   const toggleHistory = (id: number) =>
@@ -537,6 +622,134 @@ export default function InvoicesPage() {
       toast({ title: "Couldn't mark invoice unsent", description: err.message, variant: "destructive" });
     },
   });
+
+  // Task #1811 — Invoice editability mutations.
+  const returnToDraftMutation = useMutation({
+    mutationFn: (invoiceId: number) =>
+      apiRequest(`/api/invoices/${invoiceId}/return-to-draft`, "POST"),
+    onSuccess: () => {
+      toast({ title: "Invoice returned to draft" });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Couldn't return to draft", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const finalizeMutation = useMutation({
+    mutationFn: (invoiceId: number) =>
+      apiRequest(`/api/invoices/${invoiceId}/finalize`, "POST", {}),
+    onSuccess: () => {
+      toast({ title: "Invoice finalized" });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Couldn't finalize invoice", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const metadataPatchMutation = useMutation({
+    mutationFn: (vars: {
+      id: number;
+      notes?: string;
+      dueDate?: string | null;
+      periodStart?: string;
+      periodEnd?: string;
+    }) => {
+      const { id: invoiceId, ...body } = vars;
+      return apiRequest(`/api/invoices/${invoiceId}`, "PATCH", body);
+    },
+    onSuccess: () => {
+      toast({ title: "Invoice updated" });
+      setEditMetadataInvoice(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Update failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const voidMutation = useMutation({
+    mutationFn: (vars: { id: number; qbAction?: "void" | "unlink" }) =>
+      apiRequest(`/api/invoices/${vars.id}/void`, "POST", vars.qbAction ? { qbAction: vars.qbAction } : {}),
+    onSuccess: () => {
+      toast({ title: "Invoice voided and tickets released" });
+      setVoidConfirmInvoice(null);
+      setVoidQbAction(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Void failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const addTicketMutation = useMutation({
+    mutationFn: (vars: {
+      invoiceId: number;
+      ticketType: "billing_sheet" | "work_order" | "wet_check_billing";
+      ticketId: number;
+    }) =>
+      apiRequest(`/api/invoices/${vars.invoiceId}/tickets`, "POST", {
+        ticketType: vars.ticketType,
+        ticketId: vars.ticketId,
+      }),
+    onSuccess: (data: any) => {
+      toast({ title: "Ticket added" });
+      setAddTicketId("");
+      if (data && draftEditorInvoice) {
+        setDraftEditorInvoice((prev) => prev ? { ...prev, totalAmount: data.totalAmount, partsSubtotal: data.partsSubtotal, laborSubtotal: data.laborSubtotal } : prev);
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      if (draftEditorInvoice) {
+        queryClient.invalidateQueries({ queryKey: ["/api/invoices", draftEditorInvoice.id, "items"] });
+      }
+    },
+    onError: (err: Error) => {
+      toast({ title: "Couldn't add ticket", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const removeTicketMutation = useMutation({
+    mutationFn: (vars: {
+      invoiceId: number;
+      ticketType: string;
+      ticketId: number;
+    }) =>
+      apiRequest(`/api/invoices/${vars.invoiceId}/tickets/${vars.ticketType}:${vars.ticketId}`, "DELETE"),
+    onSuccess: (data: any) => {
+      toast({ title: "Ticket removed" });
+      if (data && draftEditorInvoice) {
+        setDraftEditorInvoice((prev) => prev ? { ...prev, totalAmount: data.totalAmount, partsSubtotal: data.partsSubtotal, laborSubtotal: data.laborSubtotal } : prev);
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      if (draftEditorInvoice) {
+        queryClient.invalidateQueries({ queryKey: ["/api/invoices", draftEditorInvoice.id, "items"] });
+      }
+    },
+    onError: (err: Error) => {
+      toast({ title: "Couldn't remove ticket", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const openEditMetadata = (invoice: Invoice) => {
+    setEditNotes(invoice.notes ?? "");
+    setEditDueDate(toIsoDate(invoice.dueDate));
+    setEditPeriodStart(toIsoDate(invoice.periodStart));
+    setEditPeriodEnd(toIsoDate(invoice.periodEnd));
+    setEditMetadataInvoice(invoice);
+  };
+
+  const openVoidConfirm = (invoice: Invoice) => {
+    setVoidQbAction(invoice.quickbooksInvoiceId ? null : "unlink");
+    setVoidConfirmInvoice(invoice);
+  };
+
+  const confirmVoid = () => {
+    if (!voidConfirmInvoice) return;
+    const hasQb = !!voidConfirmInvoice.quickbooksInvoiceId;
+    if (hasQb && !voidQbAction) return;
+    voidMutation.mutate({ id: voidConfirmInvoice.id, qbAction: voidQbAction ?? undefined });
+  };
 
   // Task #1425 — merge mutation. Body is the surviving id plus the rest of
   // the selected ids as the merged set. On success the merged invoices are
@@ -845,6 +1058,83 @@ export default function InvoicesPage() {
           >
             <Edit3 className="w-3.5 h-3.5 mr-2" />
             Correct / Reissue
+          </DropdownMenuItem>
+        )}
+        {/* Task #1811 — Edit metadata. Available on generated or sent (not draft — use the manage-tickets sheet for draft). */}
+        {canBillingEdit && ["generated", "sent"].includes(invoice.status) && (
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              openEditMetadata(invoice);
+            }}
+            data-testid={`button-edit-invoice-metadata-${invoice.id}`}
+          >
+            <Edit3 className="w-3.5 h-3.5 mr-2" />
+            Edit invoice
+          </DropdownMenuItem>
+        )}
+        {/* Task #1811 — Manage tickets: add/remove tickets. Draft only. */}
+        {canBillingEdit && invoice.status === "draft" && (
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setAddTicketId("");
+              setDraftEditorInvoice(invoice);
+            }}
+            data-testid={`button-manage-tickets-invoice-${invoice.id}`}
+          >
+            <ClipboardList className="w-3.5 h-3.5 mr-2" />
+            Manage tickets
+          </DropdownMenuItem>
+        )}
+        {/* Task #1811 — Return to draft. Only from generated. */}
+        {canBillingEdit && invoice.status === "generated" && (
+          <DropdownMenuItem
+            disabled={returnToDraftMutation.isPending && returnToDraftMutation.variables === invoice.id}
+            onSelect={(e) => {
+              e.preventDefault();
+              returnToDraftMutation.mutate(invoice.id);
+            }}
+            data-testid={`button-return-to-draft-invoice-${invoice.id}`}
+          >
+            {returnToDraftMutation.isPending && returnToDraftMutation.variables === invoice.id ? (
+              <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
+            ) : (
+              <RotateCcw className="w-3.5 h-3.5 mr-2" />
+            )}
+            Return to draft
+          </DropdownMenuItem>
+        )}
+        {/* Task #1811 — Finalize draft → generated. Only from draft. */}
+        {canBillingEdit && invoice.status === "draft" && (
+          <DropdownMenuItem
+            disabled={finalizeMutation.isPending && finalizeMutation.variables === invoice.id}
+            onSelect={(e) => {
+              e.preventDefault();
+              finalizeMutation.mutate(invoice.id);
+            }}
+            data-testid={`button-finalize-invoice-${invoice.id}`}
+          >
+            {finalizeMutation.isPending && finalizeMutation.variables === invoice.id ? (
+              <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
+            ) : (
+              <CheckSquare className="w-3.5 h-3.5 mr-2" />
+            )}
+            Finalize invoice
+          </DropdownMenuItem>
+        )}
+        {/* Task #1811 — Void & Release. Available on any unpaid invoice: draft, generated, or sent. */}
+        {canBillingEdit && ["draft", "generated", "sent"].includes(invoice.status) && (
+          <DropdownMenuItem
+            className="text-red-600 focus:text-red-600"
+            onSelect={(e) => {
+              e.preventDefault();
+              openVoidConfirm(invoice);
+            }}
+            data-testid={`button-void-invoice-${invoice.id}`}
+          >
+            <Trash2 className="w-3.5 h-3.5 mr-2" />
+            Void &amp; release
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
@@ -1510,6 +1800,430 @@ export default function InvoicesPage() {
           onClose={() => setCorrectionInvoice(null)}
         />
       )}
+
+      {/* Task #1811 — Draft ticket editor sheet */}
+      <Sheet
+        open={draftEditorInvoice != null}
+        onOpenChange={(open) => { if (!open) setDraftEditorInvoice(null); }}
+      >
+        <SheetContent className="sm:max-w-xl w-full overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>
+              Edit draft invoice #{draftEditorInvoice?.invoiceNumber}
+            </SheetTitle>
+            <SheetDescription>
+              Add or remove tickets, then finalize to generate the invoice.
+            </SheetDescription>
+          </SheetHeader>
+
+          {draftEditorInvoice && (
+            <div className="mt-6 space-y-6">
+              {/* Live total */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 flex items-center justify-between">
+                <span className="text-sm text-gray-500">Current total</span>
+                <span className="text-lg font-semibold text-gray-900">
+                  ${parseFloat(draftEditorInvoice.totalAmount).toFixed(2)}
+                </span>
+              </div>
+
+              {/* Period metadata fields — editable on draft invoices */}
+              <div className="space-y-3 border border-gray-200 rounded-lg p-4">
+                <h3 className="text-sm font-medium text-gray-700">Period & labels</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs text-gray-500">Period start</label>
+                    <Input
+                      type="date"
+                      className="h-8 text-xs"
+                      value={draftPeriodStart}
+                      onChange={(e) => setDraftPeriodStart(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-gray-500">Period end</label>
+                    <Input
+                      type="date"
+                      className="h-8 text-xs"
+                      value={draftPeriodEnd}
+                      onChange={(e) => setDraftPeriodEnd(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-gray-500">Due date</label>
+                    <Input
+                      type="date"
+                      className="h-8 text-xs"
+                      value={draftDueDate}
+                      onChange={(e) => setDraftDueDate(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-gray-500">Notes</label>
+                  <textarea
+                    className="w-full text-xs border border-input rounded-md px-3 py-2 min-h-[60px] resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+                    value={draftNotes}
+                    onChange={(e) => setDraftNotes(e.target.value)}
+                    placeholder="Internal notes…"
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs"
+                  disabled={draftMetaSaveMutation.isPending}
+                  onClick={() => {
+                    if (!draftEditorInvoice) return;
+                    draftMetaSaveMutation.mutate({
+                      id: draftEditorInvoice.id,
+                      ...(draftPeriodStart ? { periodStart: draftPeriodStart } : {}),
+                      ...(draftPeriodEnd ? { periodEnd: draftPeriodEnd } : {}),
+                      dueDate: draftDueDate || null,
+                      notes: draftNotes,
+                    });
+                  }}
+                >
+                  {draftMetaSaveMutation.isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
+                  ) : null}
+                  Save metadata
+                </Button>
+              </div>
+
+              {/* Attached tickets — live item list with per-row Remove */}
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium text-gray-700">Attached tickets</h3>
+                {draftItemsLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-gray-400 py-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Loading…
+                  </div>
+                ) : draftItems.length === 0 ? (
+                  <p className="text-xs text-gray-400">No tickets attached yet.</p>
+                ) : (
+                  <ul className="divide-y divide-gray-100 border border-gray-200 rounded-lg overflow-hidden">
+                    {draftItems.map((item) => {
+                      const typeLabel =
+                        item.sourceType === "billing_sheet" ? "BS"
+                        : item.sourceType === "work_order" ? "WO"
+                        : "WCB";
+                      const ticketId =
+                        item.billingSheetId ?? item.workOrderId ?? item.wetCheckBillingId ?? 0;
+                      const isRemoving =
+                        removeTicketMutation.isPending &&
+                        removeTicketMutation.variables?.ticketId === ticketId &&
+                        removeTicketMutation.variables?.ticketType === item.sourceType;
+                      const isLast = draftItems.length === 1;
+                      return (
+                        <li
+                          key={item.id}
+                          className="flex items-center justify-between gap-3 px-3 py-2 bg-white text-sm"
+                        >
+                          <span className="shrink-0 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-600">
+                            {typeLabel} #{ticketId}
+                          </span>
+                          <span className="flex-1 text-xs text-gray-700 truncate" title={item.description}>
+                            {item.description}
+                          </span>
+                          <span className="shrink-0 text-xs font-medium text-gray-900">
+                            ${parseFloat(item.totalPrice || "0").toFixed(2)}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 shrink-0"
+                            disabled={isRemoving || isLast}
+                            title={isLast ? "Cannot remove the last ticket — void the invoice instead" : "Remove ticket"}
+                            onClick={() => {
+                              if (!draftEditorInvoice) return;
+                              removeTicketMutation.mutate({
+                                invoiceId: draftEditorInvoice.id,
+                                ticketType: item.sourceType as "billing_sheet" | "work_order" | "wet_check_billing",
+                                ticketId,
+                              });
+                            }}
+                          >
+                            {isRemoving ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                          </Button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+
+              {/* Add a ticket */}
+              <div className="space-y-3 border border-blue-100 bg-blue-50 rounded-lg p-4">
+                <h3 className="text-sm font-medium text-blue-800 flex items-center gap-1.5">
+                  <CheckSquare className="w-3.5 h-3.5" />
+                  Add a ticket
+                </h3>
+                <p className="text-xs text-blue-700">
+                  Ticket must belong to the same customer and not be attached to another invoice.
+                </p>
+                <div className="flex gap-2">
+                  <Select
+                    value={addTicketType}
+                    onValueChange={(v) => setAddTicketType(v as typeof addTicketType)}
+                  >
+                    <SelectTrigger className="w-44 text-xs h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="billing_sheet">Billing Sheet</SelectItem>
+                      <SelectItem value="work_order">Work Order</SelectItem>
+                      <SelectItem value="wet_check_billing">WC Billing</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    className="w-24 text-xs h-8"
+                    placeholder="ID"
+                    value={addTicketId}
+                    onChange={(e) => setAddTicketId(e.target.value)}
+                    type="number"
+                    min={1}
+                  />
+                  <Button
+                    size="sm"
+                    className="h-8"
+                    disabled={!addTicketId || isNaN(parseInt(addTicketId)) || addTicketMutation.isPending}
+                    onClick={() => {
+                      const tid = parseInt(addTicketId);
+                      if (!tid || !draftEditorInvoice) return;
+                      addTicketMutation.mutate({
+                        invoiceId: draftEditorInvoice.id,
+                        ticketType: addTicketType,
+                        ticketId: tid,
+                      });
+                    }}
+                  >
+                    {addTicketMutation.isPending ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      "Add"
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Finalize */}
+              <div className="pt-2 border-t border-gray-200">
+                <Button
+                  className="w-full"
+                  disabled={finalizeMutation.isPending}
+                  onClick={() => {
+                    if (!draftEditorInvoice) return;
+                    finalizeMutation.mutate(draftEditorInvoice.id, {
+                      onSuccess: () => setDraftEditorInvoice(null),
+                    });
+                  }}
+                  data-testid="button-finalize-from-draft-editor"
+                >
+                  {finalizeMutation.isPending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Finalizing…
+                    </>
+                  ) : (
+                    <>
+                      <CheckSquare className="w-4 h-4 mr-2" />
+                      Finalize invoice
+                    </>
+                  )}
+                </Button>
+                <p className="text-xs text-gray-400 text-center mt-2">
+                  Recomputes totals and syncs to QuickBooks.
+                </p>
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* Task #1811 — Edit invoice metadata dialog */}
+      <Dialog
+        open={editMetadataInvoice != null}
+        onOpenChange={(open) => { if (!open) setEditMetadataInvoice(null); }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit invoice #{editMetadataInvoice?.invoiceNumber}</DialogTitle>
+            <DialogDescription>
+              Update notes, due date, or billing period. Changes do not re-sync to QuickBooks automatically.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-notes">Notes</Label>
+              <Textarea
+                id="edit-notes"
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+                placeholder="Internal notes visible on the invoice…"
+                rows={3}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-due-date">Due date</Label>
+              <Input
+                id="edit-due-date"
+                type="date"
+                value={editDueDate}
+                onChange={(e) => setEditDueDate(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-period-start">Period start</Label>
+                <Input
+                  id="edit-period-start"
+                  type="date"
+                  value={editPeriodStart}
+                  onChange={(e) => setEditPeriodStart(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-period-end">Period end</Label>
+                <Input
+                  id="edit-period-end"
+                  type="date"
+                  value={editPeriodEnd}
+                  onChange={(e) => setEditPeriodEnd(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditMetadataInvoice(null)}
+              disabled={metadataPatchMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={metadataPatchMutation.isPending}
+              onClick={() => {
+                if (!editMetadataInvoice) return;
+                metadataPatchMutation.mutate({
+                  id: editMetadataInvoice.id,
+                  notes: editNotes || undefined,
+                  dueDate: editDueDate || null,
+                  periodStart: editPeriodStart || undefined,
+                  periodEnd: editPeriodEnd || undefined,
+                });
+              }}
+              data-testid="button-save-invoice-metadata"
+            >
+              {metadataPatchMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                "Save changes"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Task #1811 — Void & Release confirmation dialog */}
+      <Dialog
+        open={voidConfirmInvoice != null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setVoidConfirmInvoice(null);
+            setVoidQbAction(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-red-700">
+              Void invoice #{voidConfirmInvoice?.invoiceNumber}?
+            </DialogTitle>
+            <DialogDescription>
+              This will cancel the invoice and release all attached tickets back to the billing queue.
+              This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+
+          {voidConfirmInvoice?.quickbooksInvoiceId && (
+            <div className="space-y-3 border border-amber-200 bg-amber-50 rounded-lg p-3">
+              <p className="text-sm font-medium text-amber-800 flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                This invoice is synced to QuickBooks. How should we handle it?
+              </p>
+              <RadioGroup
+                value={voidQbAction ?? ""}
+                onValueChange={(v) => setVoidQbAction(v as "void" | "unlink")}
+                className="space-y-2"
+              >
+                <label
+                  htmlFor="qb-void"
+                  className="flex items-start gap-2 cursor-pointer"
+                >
+                  <RadioGroupItem value="void" id="qb-void" className="mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">Acknowledge QB void</p>
+                    <p className="text-xs text-gray-500">Mark that the QB invoice will be voided manually in QuickBooks Online.</p>
+                  </div>
+                </label>
+                <label
+                  htmlFor="qb-unlink"
+                  className="flex items-start gap-2 cursor-pointer"
+                >
+                  <RadioGroupItem value="unlink" id="qb-unlink" className="mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">Unlink only (leave QB untouched)</p>
+                    <p className="text-xs text-gray-500">Cancel only in IrrigoPro. The QuickBooks invoice remains unchanged.</p>
+                  </div>
+                </label>
+              </RadioGroup>
+            </div>
+          )}
+
+          <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+            All {voidConfirmInvoice?.quickbooksInvoiceId ? "QB-synced " : ""}tickets will be released back to "Approved — passed to billing" status.
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => { setVoidConfirmInvoice(null); setVoidQbAction(null); }}
+              disabled={voidMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={
+                voidMutation.isPending ||
+                (!!voidConfirmInvoice?.quickbooksInvoiceId && !voidQbAction)
+              }
+              onClick={confirmVoid}
+              data-testid="button-confirm-void-invoice"
+            >
+              {voidMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Voiding…
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Void invoice
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

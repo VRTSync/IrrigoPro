@@ -393,6 +393,7 @@ import {
 } from "./qb-invoice-ops";
 import { registerInvoiceMarkSentRoutes } from "./invoice-mark-sent-routes";
 import { registerInvoiceCorrectionRoutes } from "./invoice-correction-routes";
+import { registerInvoiceEditabilityRoutes } from "./invoice-editability-routes";
 import { registerAdminMigrationsRoutes } from "./admin-migrations-routes";
 import { registerWcLaborBackfillRoutes } from "./admin-wc-labor-backfill-routes";
 import { registerInspectionZoneBackfillRoutes } from "./admin-inspection-zone-backfill-routes";
@@ -7547,6 +7548,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // syncInvoiceToQb: inject the local closure so the qb-sync endpoint can
   // call updateQbInvoiceInPlace without duplicating QB plumbing here.
   registerInvoiceCorrectionRoutes(app, {
+    requireAuthentication,
+    requireBillingAccess,
+    syncInvoiceToQb: createQuickBooksInvoiceForInvoice,
+  });
+  // Task #1811 — Invoice Editability & Walk-Back (metadata PATCH, return-to-draft,
+  // membership edit, finalize, void & release).
+  registerInvoiceEditabilityRoutes(app, {
     requireAuthentication,
     requireBillingAccess,
     syncInvoiceToQb: createQuickBooksInvoiceForInvoice,
