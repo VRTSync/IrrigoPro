@@ -188,6 +188,9 @@ export default function ZoneDetailScreen() {
   const [findingError, setFindingError] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [localPhotos, setLocalPhotos] = useState<LocalPhoto[]>([]);
+  // True while pickZonePhotoFromLibrary is running its sequential
+  // compress + resize loop so the tech can see the app isn't frozen.
+  const [processingLibrary, setProcessingLibrary] = useState(false);
 
   // Surface 409s discovered by background queue drains in the same
   // conflict banner as inline-mutation conflicts.
@@ -612,6 +615,7 @@ export default function ZoneDetailScreen() {
         return;
       }
       let photos: LocalPhoto[] = [];
+      setProcessingLibrary(true);
       try {
         photos = await pickZonePhotoFromLibrary({
           wetCheckId,
@@ -623,6 +627,8 @@ export default function ZoneDetailScreen() {
           friendlyErrorMessage(err, "Couldn't open the photo library"),
         );
         return;
+      } finally {
+        setProcessingLibrary(false);
       }
       if (photos.length === 0) return;
       setLocalPhotos((prev) => [...prev, ...photos]);
@@ -635,7 +641,7 @@ export default function ZoneDetailScreen() {
       { text: "Cancel", style: "cancel" },
       { text: "Take Photo", onPress: captureFromCamera },
       {
-        text: "Choose from Library (tap to select multiple)",
+        text: "Choose from Library (select multiple)",
         onPress: pickFromLibrary,
       },
     ]);
@@ -702,9 +708,10 @@ export default function ZoneDetailScreen() {
           );
           return;
         }
-        let photo: LocalPhoto | null = null;
+        let photos: LocalPhoto[] = [];
+        setProcessingLibrary(true);
         try {
-          photo = await pickZonePhotoFromLibrary({
+          photos = await pickZonePhotoFromLibrary({
             wetCheckId,
             zoneRecordId,
             findingId,
@@ -714,10 +721,14 @@ export default function ZoneDetailScreen() {
             friendlyErrorMessage(err, "Couldn't open the photo library"),
           );
           return;
+        } finally {
+          setProcessingLibrary(false);
         }
-        if (!photo) return;
-        setLocalPhotos((prev) => [...prev, photo!]);
-        addPhotoMutation.mutate(photo);
+        if (photos.length === 0) return;
+        setLocalPhotos((prev) => [...prev, ...photos]);
+        for (const photo of photos) {
+          addPhotoMutation.mutate(photo);
+        }
       };
 
       Alert.alert("Add Finding Photo", undefined, [
@@ -1060,6 +1071,14 @@ export default function ZoneDetailScreen() {
                   message={photoError}
                   onDismiss={() => setPhotoError(null)}
                 />
+              ) : null}
+              {processingLibrary ? (
+                <View style={styles.processingBanner}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={[styles.processingBannerText, { color: colors.mutedForeground }]}>
+                    Processing photos…
+                  </Text>
+                </View>
               ) : null}
               {zonePhotos.length === 0 && localPhotos.length === 0 ? (
                 <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
@@ -1990,6 +2009,13 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   addPhotoText: { fontSize: 16, fontWeight: "700" },
+  processingBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+  },
+  processingBannerText: { fontSize: 13 },
   issueTypeList: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 8,
