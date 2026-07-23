@@ -44,7 +44,7 @@ const WRITE_ROLES = new Set([
   "company_admin",
   "super_admin",
   "irrigation_manager",
-  // field_tech: can create zones and attach photos (special-cased in handlers)
+  // field_tech: can create and edit zones, attach photos, and log backflow tests
 ]);
 
 function isManagerRole(role: string | undefined): boolean {

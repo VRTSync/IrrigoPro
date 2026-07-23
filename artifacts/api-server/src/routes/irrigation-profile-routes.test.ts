@@ -1383,9 +1383,10 @@ describe("Irrigation Profile routes — permission matrix", () => {
       const zoneR = await hit(
         adminSrv.base,
         "POST",
-        `/api/irrigation-zones`,
-        { controllerId: ctrlR.body.id, companyId: companyAId, zoneNumber: 1, name: "Z1", zoneType: "rotor", runTimeMinutes: 10 },
+        `/api/irrigation-controllers/${ctrlR.body.id}/zones`,
+        { zoneNumber: 1, name: "Z1", zoneType: "rotor", runTimeMinutes: 10 },
       );
+      assert.equal(zoneR.status, 201, `Zone seed for permission matrix: ${JSON.stringify(zoneR.body)}`);
       zoneId = zoneR.body.id;
     } finally {
       await adminSrv.close();

@@ -29,13 +29,13 @@ vi.mock("wouter", async () => {
 });
 vi.mock("@/utils/safeStorage", () => ({ safeGet: vi.fn(), safeSet: vi.fn(), safeRemove: vi.fn() }));
 vi.mock("@/components/customers/irrigation-controller-grid", () => ({
-  IrrigationControllerGrid: () => <div data-testid="controller-grid" />,
+  IrrigationControllerGrid: vi.fn(() => <div data-testid="controller-grid" />),
 }));
 vi.mock("@/components/customers/IrrigationCsvImportModal", () => ({
   IrrigationCsvImportModal: () => null,
 }));
 vi.mock("@/components/customers/BackflowSection", () => ({
-  BackflowSection: () => <div data-testid="backflow-section" />,
+  BackflowSection: vi.fn(() => <div data-testid="backflow-section" />),
 }));
 vi.mock("@/lib/queryClient", async () => {
   const actual = await vi.importActual<typeof import("@/lib/queryClient")>(
@@ -47,6 +47,8 @@ vi.mock("@/lib/queryClient", async () => {
 import { safeGet } from "@/utils/safeStorage";
 import { AuthProvider } from "@/lib/auth-context";
 import IrrigationProfile from "./IrrigationProfile";
+import { IrrigationControllerGrid } from "@/components/customers/irrigation-controller-grid";
+import { BackflowSection } from "@/components/customers/BackflowSection";
 
 const mockSafeGet = safeGet as ReturnType<typeof vi.fn>;
 
@@ -299,5 +301,89 @@ describe("IrrigationProfile — role-render matrix: irrigation_manager", () => {
   it("DOES see More (Import/Export) button", () => {
     setup("irrigation_manager");
     expect(screen.getByRole("button", { name: /More actions/i })).toBeInTheDocument();
+  });
+});
+
+// ── Prop-flow matrix ───────────────────────────────────────────────────────────
+//
+// Verifies that the capability flags computed in IrrigationProfile are passed
+// correctly into the child component boundaries. These complement the header-
+// button checks above: a flag could be correct in the header but wrong in the
+// prop passed to the grid / backflow section.
+//
+// IrrigationControllerGrid and BackflowSection are already mocked as vi.fn()
+// so we can inspect their most-recent call arguments.
+
+const MockGrid = IrrigationControllerGrid as unknown as ReturnType<typeof vi.fn>;
+const MockSection = BackflowSection as unknown as ReturnType<typeof vi.fn>;
+
+beforeEach(() => {
+  MockGrid.mockClear();
+  MockSection.mockClear();
+});
+
+describe("IrrigationProfile — prop flow: field_tech", () => {
+  it("passes canEditZones=true to IrrigationControllerGrid", () => {
+    setup("field_tech");
+    const props = MockGrid.mock.calls[MockGrid.mock.calls.length - 1]?.[0] ?? {};
+    expect(props.canEditZones).toBe(true);
+  });
+
+  it("passes canManageControllers=false to IrrigationControllerGrid", () => {
+    setup("field_tech");
+    const props = MockGrid.mock.calls[MockGrid.mock.calls.length - 1]?.[0] ?? {};
+    expect(props.canManageControllers).toBe(false);
+  });
+
+  it("passes canLogTest=true to BackflowSection", () => {
+    setup("field_tech");
+    const props = MockSection.mock.calls[MockSection.mock.calls.length - 1]?.[0] ?? {};
+    expect(props.canLogTest).toBe(true);
+  });
+
+  it("passes canManage=false to BackflowSection", () => {
+    setup("field_tech");
+    const props = MockSection.mock.calls[MockSection.mock.calls.length - 1]?.[0] ?? {};
+    expect(props.canManage).toBe(false);
+  });
+});
+
+describe("IrrigationProfile — prop flow: billing_manager", () => {
+  it("passes canLogTest=false to BackflowSection (billing_manager cannot log tests)", () => {
+    setup("billing_manager");
+    const props = MockSection.mock.calls[MockSection.mock.calls.length - 1]?.[0] ?? {};
+    expect(props.canLogTest).toBe(false);
+  });
+
+  it("passes canManage=false to BackflowSection", () => {
+    setup("billing_manager");
+    const props = MockSection.mock.calls[MockSection.mock.calls.length - 1]?.[0] ?? {};
+    expect(props.canManage).toBe(false);
+  });
+
+  it("passes canEditZones=false to IrrigationControllerGrid", () => {
+    setup("billing_manager");
+    const props = MockGrid.mock.calls[MockGrid.mock.calls.length - 1]?.[0] ?? {};
+    expect(props.canEditZones).toBe(false);
+  });
+});
+
+describe("IrrigationProfile — prop flow: irrigation_manager", () => {
+  it("passes canEditZones=true to IrrigationControllerGrid", () => {
+    setup("irrigation_manager");
+    const props = MockGrid.mock.calls[MockGrid.mock.calls.length - 1]?.[0] ?? {};
+    expect(props.canEditZones).toBe(true);
+  });
+
+  it("passes canManageControllers=true to IrrigationControllerGrid", () => {
+    setup("irrigation_manager");
+    const props = MockGrid.mock.calls[MockGrid.mock.calls.length - 1]?.[0] ?? {};
+    expect(props.canManageControllers).toBe(true);
+  });
+
+  it("passes canLogTest=true to BackflowSection", () => {
+    setup("irrigation_manager");
+    const props = MockSection.mock.calls[MockSection.mock.calls.length - 1]?.[0] ?? {};
+    expect(props.canLogTest).toBe(true);
   });
 });
