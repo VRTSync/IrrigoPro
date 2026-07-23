@@ -211,7 +211,7 @@ function LaunchpadTile({
 }) {
   return (
     <Link href={href}>
-      <a
+      <div
         className={`flex flex-col items-center justify-center gap-2 rounded-xl border-l-4 ${colorClass} bg-white shadow-sm p-4 hover:shadow-md transition-shadow cursor-pointer min-h-[100px]`}
         data-testid={`launchpad-${label.toLowerCase().replace(/\s+/g, "-")}`}
       >
@@ -222,7 +222,7 @@ function LaunchpadTile({
             {count}
           </Badge>
         )}
-      </a>
+      </div>
     </Link>
   );
 }

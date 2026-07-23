@@ -13,9 +13,7 @@
 //   9. Outer wrapper uses max-w-5xl mx-auto py-4 px-4 space-y-4.
 //  10. Task #1777 — Pending Estimates removal assertions (intact).
 
-import { describe, it } from "node:test";
-import assert from "node:assert/strict";
-
+import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -25,138 +23,81 @@ const MW_SRC = readFileSync(
 );
 
 describe("manager-workspace.tsx — source-level assertions", () => {
-  it("outer wrapper has data-testid=\"manager-workspace\"", () => {
-    assert.ok(
-      MW_SRC.includes('data-testid="manager-workspace"'),
-      'missing data-testid="manager-workspace" on outer wrapper',
-    );
+  it('outer wrapper has data-testid="manager-workspace"', () => {
+    expect(MW_SRC.includes('data-testid="manager-workspace"')).toBe(true);
   });
 
   it("needs-approval card testId is present", () => {
-    assert.ok(
-      MW_SRC.includes('data-testid="needs-approval-card"'),
-      'missing data-testid="needs-approval-card"',
-    );
+    expect(MW_SRC.includes('data-testid="needs-approval-card"')).toBe(true);
   });
 
   it("launchpad testId is present", () => {
-    assert.ok(
-      MW_SRC.includes('data-testid="launchpad"'),
-      'missing data-testid="launchpad"',
-    );
+    expect(MW_SRC.includes('data-testid="launchpad"')).toBe(true);
   });
 
   it("launchpad tile links to /wet-checks/pending-review", () => {
-    assert.ok(
-      MW_SRC.includes('href="/wet-checks/pending-review"'),
-      "Wet Checks launchpad tile must link to /wet-checks/pending-review",
-    );
+    expect(MW_SRC.includes('href="/wet-checks/pending-review"')).toBe(true);
   });
 
   it("launchpad tile links to /work-orders", () => {
-    assert.ok(
-      MW_SRC.includes('href="/work-orders"'),
-      "Work Orders launchpad tile must link to /work-orders",
-    );
+    expect(MW_SRC.includes('href="/work-orders"')).toBe(true);
   });
 
   it("launchpad tile links to /billing-sheets", () => {
-    assert.ok(
-      MW_SRC.includes('href="/billing-sheets"'),
-      "Billing Sheets launchpad tile must link to /billing-sheets",
-    );
+    expect(MW_SRC.includes('href="/billing-sheets"')).toBe(true);
   });
 
   it("needs-approval endpoint is /api/manager-workspace/needs-approval", () => {
-    assert.ok(
-      MW_SRC.includes("/api/manager-workspace/needs-approval"),
-      "needs-approval query must point to /api/manager-workspace/needs-approval",
-    );
+    expect(MW_SRC.includes("/api/manager-workspace/needs-approval")).toBe(true);
   });
 
   it("status-strip URL uses /api/manager-workspace/status-strip", () => {
-    assert.ok(
-      MW_SRC.includes("/api/manager-workspace/status-strip"),
-      "status-strip URL must point to manager-workspace endpoint",
-    );
+    expect(MW_SRC.includes("/api/manager-workspace/status-strip")).toBe(true);
   });
 
   it("header uses bg-gradient-brand", () => {
-    assert.ok(
-      MW_SRC.includes("bg-gradient-brand"),
-      "header should use bg-gradient-brand",
-    );
+    expect(MW_SRC.includes("bg-gradient-brand")).toBe(true);
   });
 
-  it("FinancialPulseWidget billing-header variant is rendered", () => {
-    assert.ok(
-      MW_SRC.includes('variant="billing-header"'),
-      'FinancialPulseWidget must use variant="billing-header"',
-    );
+  it('FinancialPulseWidget billing-header variant is rendered', () => {
+    expect(MW_SRC.includes('variant="billing-header"')).toBe(true);
   });
 
   it("outer wrapper uses max-w-5xl mx-auto py-4 px-4 space-y-4", () => {
-    assert.ok(
-      MW_SRC.includes("max-w-5xl mx-auto py-4 px-4 space-y-4"),
-      "outer wrapper chrome class must match standard layout (max-w-5xl)",
-    );
+    expect(MW_SRC.includes("max-w-5xl mx-auto py-4 px-4 space-y-4")).toBe(true);
   });
 
   it("approval-row testId pattern is present for list items", () => {
-    assert.ok(
-      MW_SRC.includes("approval-row-"),
-      'missing data-testid="approval-row-{id}" pattern for needs-approval list items',
-    );
+    expect(MW_SRC.includes("approval-row-")).toBe(true);
   });
 
   // ── Task #1777 — Pending Estimates removal ───────────────────────────────
 
   it("PendingEstimatesSection component is not defined in the source", () => {
-    assert.ok(
-      !MW_SRC.includes("PendingEstimatesSection"),
-      "PendingEstimatesSection must be removed from manager-workspace.tsx",
-    );
+    expect(MW_SRC.includes("PendingEstimatesSection")).toBe(false);
   });
 
   it("EstimateApprovalRow type is not defined in the source", () => {
-    assert.ok(
-      !MW_SRC.includes("EstimateApprovalRow"),
-      "EstimateApprovalRow type must be removed from manager-workspace.tsx",
-    );
+    expect(MW_SRC.includes("EstimateApprovalRow")).toBe(false);
   });
 
   it("EstimateDetailModal is not imported", () => {
-    assert.ok(
-      !MW_SRC.includes("EstimateDetailModal"),
-      "EstimateDetailModal import must be removed from manager-workspace.tsx",
-    );
+    expect(MW_SRC.includes("EstimateDetailModal")).toBe(false);
   });
 
   it("sendEstimateEmail is not imported", () => {
-    assert.ok(
-      !MW_SRC.includes("sendEstimateEmail"),
-      "sendEstimateEmail import must be removed from manager-workspace.tsx",
-    );
+    expect(MW_SRC.includes("sendEstimateEmail")).toBe(false);
   });
 
   it("totalCount does not include an estimates addend", () => {
-    assert.ok(
-      !MW_SRC.includes("pendingEstimates.length"),
-      "totalCount must not reference pendingEstimates.length — estimates are not counted in Needs Approval",
-    );
+    expect(MW_SRC.includes("pendingEstimates.length")).toBe(false);
   });
 
   it("Estimates launchpad tile is still present", () => {
-    assert.ok(
-      MW_SRC.includes('href="/estimates/command-center"'),
-      "Estimates launchpad tile link to /estimates/command-center must remain",
-    );
+    expect(MW_SRC.includes('href="/estimates/command-center"')).toBe(true);
   });
 
   it("pending-approval query is retained for the tile badge count", () => {
-    assert.ok(
-      MW_SRC.includes("/api/estimates/pending-approval"),
-      "/api/estimates/pending-approval query must remain for the launchpad tile count",
-    );
+    expect(MW_SRC.includes("/api/estimates/pending-approval")).toBe(true);
   });
 });
