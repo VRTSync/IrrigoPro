@@ -323,6 +323,10 @@ export class PDFGenerator {
       ...wetCheckBillings.map((wcb, i) => ticketPageWCB(wcb, invoice.invoiceNumber, wcbPhotoMaps[i] ?? [], vm.company.logoDataUri, vm.company.name, brandColors, wcbZonePhotoGroupMaps[i])),
     ].join('');
 
+    // Task #1809 — standalone invoices skip the reconciliation summary page
+    // (it adds no value for a single-ticket bill and duplicates the ticket detail).
+    const reconcSection = invoice.billingType === 'standalone' ? '' : reconciliationPage(vm);
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -333,7 +337,7 @@ export class PDFGenerator {
 <body>
   <div class="container">
     ${coverPage(vm)}
-    ${reconciliationPage(vm)}
+    ${reconcSection}
     ${ticketPages}
   </div>
 </body>

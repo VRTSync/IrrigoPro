@@ -7254,6 +7254,273 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
 
+  // Task #1809 — "Bill Separately": create a standalone invoice for a single ticket.
+  // Guard: requireAuthentication + requireBillingAccess (same as monthly endpoint).
+  // Body: { ticketType: 'work_order' | 'billing_sheet' | 'wet_check_billing', ticketId: number }
+  // Returns: the created invoice record.
+  app.post("/api/invoices/bill-separately", requireAuthentication, requireBillingAccess, async (req, res) => {
+    try {
+      const bodySchema = z.object({
+        ticketType: z.enum(['work_order', 'billing_sheet', 'wet_check_billing']),
+        ticketId: z.number().int().positive(),
+      });
+      const parsed = bodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ message: "Invalid request body", issues: parsed.error.issues });
+        return;
+      }
+      const { ticketType, ticketId } = parsed.data;
+
+      const callerRole = req.authenticatedUserRole;
+      const callerCompanyId = req.authenticatedUserCompanyId ?? null;
+      const isSuperAdmin = callerRole === 'super_admin';
+      const currentDate = new Date();
+
+      // ── Resolve ticket and verify ownership ──────────────────────────────
+      let workDate: Date;
+      let laborSubtotal: number;
+      let partsSubtotal: number;
+      let totalAmount: number;
+      let description: string;
+      let customerId: number;
+      let ticketInvoiceId: number | null | undefined;
+
+      if (ticketType === 'work_order') {
+        const wo = await storage.getWorkOrder(ticketId, isSuperAdmin ? null : callerCompanyId);
+        if (!wo) { res.status(404).json({ message: "Work order not found" }); return; }
+        if (wo.status !== 'approved_passed_to_billing') {
+          res.status(409).json({ message: "Work order is not approved and ready to bill" }); return;
+        }
+        ticketInvoiceId = wo.invoiceId;
+        workDate = wo.completedAt ? new Date(wo.completedAt) : currentDate;
+        laborSubtotal = parseFloat(wo.laborSubtotal || '0');
+        partsSubtotal = parseFloat(wo.totalPartsCost || '0');
+        totalAmount = parseFloat(wo.totalAmount || '0');
+        description = `Work Order ${wo.workOrderNumber}`;
+        customerId = wo.customerId!;
+      } else if (ticketType === 'billing_sheet') {
+        // getBillingSheetById already scopes to callerCompanyId — no secondary check needed.
+        const bs = await storage.getBillingSheetById(ticketId, isSuperAdmin ? null : callerCompanyId);
+        if (!bs) { res.status(404).json({ message: "Billing sheet not found" }); return; }
+        if (bs.status !== 'approved_passed_to_billing') {
+          res.status(409).json({ message: "Billing sheet is not approved and ready to bill" }); return;
+        }
+        ticketInvoiceId = bs.invoiceId;
+        workDate = new Date(bs.workDate);
+        laborSubtotal = parseFloat(bs.laborSubtotal || '0');
+        partsSubtotal = parseFloat(bs.partsSubtotal || '0');
+        totalAmount = parseFloat(bs.totalAmount || '0');
+        description = `Billing Sheet ${bs.billingNumber}`;
+        customerId = bs.customerId!;
+      } else {
+        // wet_check_billing — getWetCheckBillingById already scopes to callerCompanyId.
+        const wcb = await storage.getWetCheckBillingById(ticketId, isSuperAdmin ? null : callerCompanyId);
+        if (!wcb) { res.status(404).json({ message: "Wet check billing not found" }); return; }
+        // Inline eligibility: status must be approved_passed_to_billing and not yet invoiced.
+        if (wcb.status !== 'approved_passed_to_billing' || wcb.invoiceId != null) {
+          res.status(409).json({ message: "Wet check billing is not eligible for invoicing" }); return;
+        }
+        ticketInvoiceId = wcb.invoiceId;
+        workDate = new Date(wcb.workDate);
+        laborSubtotal = parseFloat(wcb.laborSubtotal || '0');
+        partsSubtotal = parseFloat(wcb.partsSubtotal || '0');
+        totalAmount = parseFloat(wcb.totalAmount || '0');
+        description = `WC Billing ${wcb.billingNumber}`;
+        customerId = wcb.customerId!;
+      }
+
+      // ── Double-billing guard ─────────────────────────────────────────────
+      if (ticketInvoiceId) {
+        res.status(409).json({ message: "This item is already on an invoice" });
+        return;
+      }
+
+      // ── Customer lookup ──────────────────────────────────────────────────
+      const customer = await storage.getCustomerById(customerId);
+      if (!customer) { res.status(404).json({ message: "Customer not found" }); return; }
+
+      // ── Create the standalone invoice ────────────────────────────────────
+      const invoiceNumber = `${Date.now().toString().slice(-5)}`;
+      // Period = the ticket's work date (start of day → end of day)
+      const periodStart = new Date(workDate.getFullYear(), workDate.getMonth(), workDate.getDate());
+      const periodEnd = new Date(workDate.getFullYear(), workDate.getMonth(), workDate.getDate(), 23, 59, 59);
+
+      let invoice = await storage.createInvoice({
+        invoiceNumber,
+        customerId,
+        companyId: customer.companyId!,
+        customerName: customer.name,
+        customerEmail: customer.email,
+        customerPhone: customer.phone ?? null,
+        invoiceMonth: periodStart.getMonth() + 1,
+        invoiceYear: periodStart.getFullYear(),
+        periodStart,
+        periodEnd,
+        laborSubtotal: laborSubtotal.toFixed(2),
+        partsSubtotal: partsSubtotal.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
+        status: 'generated',
+        billingType: 'standalone',
+      } as any);
+
+      if (!invoice) { throw new Error("Failed to create standalone invoice"); }
+
+      // ── Create invoice item ──────────────────────────────────────────────
+      if (ticketType === 'work_order') {
+        const wo = await storage.getWorkOrder(ticketId, isSuperAdmin ? null : callerCompanyId);
+        await storage.createInvoiceItem({
+          invoiceId: invoice.id,
+          sourceType: 'work_order',
+          sourceId: ticketId,
+          workOrderId: ticketId,
+          description: `${description} - ${wo?.projectName ?? ''}`,
+          workDate: periodStart,
+          laborHours: String(parseFloat(wo?.totalHours || '0')),
+          laborRate: String(parseFloat(wo?.appliedLaborRate || wo?.laborRate || '0')),
+          laborTotal: String(laborSubtotal),
+          quantity: '1',
+          unitPrice: String(totalAmount),
+          totalPrice: String(totalAmount),
+        });
+      } else if (ticketType === 'billing_sheet') {
+        const bs = await storage.getBillingSheetById(ticketId, isSuperAdmin ? null : callerCompanyId);
+        await storage.createInvoiceItem({
+          invoiceId: invoice.id,
+          sourceType: 'billing_sheet',
+          sourceId: ticketId,
+          billingSheetId: ticketId,
+          description: `${description} - ${bs?.workDescription ?? ''}`,
+          workDate: periodStart,
+          laborHours: String(parseFloat(bs?.totalHours || '0')),
+          laborRate: String(parseFloat(bs?.laborRate || '0')),
+          laborTotal: String(laborSubtotal),
+          quantity: '1',
+          unitPrice: String(totalAmount),
+          totalPrice: String(totalAmount),
+        });
+      } else {
+        const wcb = await storage.getWetCheckBillingById(ticketId, isSuperAdmin ? null : callerCompanyId);
+        await storage.createInvoiceItem({
+          invoiceId: invoice.id,
+          sourceType: 'wet_check_billing',
+          sourceId: ticketId,
+          wetCheckBillingId: ticketId,
+          description,
+          workDate: periodStart,
+          laborHours: String(parseFloat(wcb?.totalHours || '0')),
+          laborRate: String(parseFloat(wcb?.appliedLaborRate || wcb?.laborRate || '0')),
+          laborTotal: String(laborSubtotal),
+          quantity: '1',
+          unitPrice: String(totalAmount),
+          totalPrice: String(totalAmount),
+        });
+      }
+
+      // ── QuickBooks sync (non-blocking — follows same pattern as monthly) ──
+      let quickbooksId: string | null = null;
+      let quickbooksError: string | null = null;
+      try {
+        const userCompanyIdStr = callerCompanyId ? String(callerCompanyId) : null;
+        const qbLookup = userCompanyIdStr ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyIdStr) : null;
+        const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
+        if (integration && integration.accessToken && integration.connectionStatus !== 'reconnect_required') {
+          const qbLines: { amount: number; description: string }[] = [];
+          if (totalAmount > 0) {
+            qbLines.push({ amount: totalAmount, description });
+          }
+          const qbResult = await buildAndPostQbInvoice({
+            integration,
+            customer,
+            docNumber: invoiceNumber,
+            qbLines,
+            operation: 'Standalone Invoice Creation',
+          });
+          if (qbResult.quickbooksError) {
+            quickbooksError = qbResult.quickbooksError;
+          } else {
+            quickbooksId = qbResult.quickbooksId ?? null;
+            const qbUpdateFields: Record<string, any> = {};
+            if (quickbooksId) qbUpdateFields.quickbooksInvoiceId = quickbooksId;
+            if (qbResult.quickbooksSyncToken) qbUpdateFields.quickbooksSyncToken = qbResult.quickbooksSyncToken;
+            if (qbResult.qbDocNumber) qbUpdateFields.invoiceNumber = qbResult.qbDocNumber;
+            if (Object.keys(qbUpdateFields).length > 0) {
+              const updated = await storage.updateInvoice(invoice.id, qbUpdateFields);
+              if (updated) invoice = updated;
+            }
+          }
+        }
+      } catch (qbErr: any) {
+        quickbooksError = `QuickBooks sync error: ${qbErr.message}`;
+      }
+
+      // If QB sync hard-failed, roll back invoice
+      if (quickbooksError && quickbooksId === null) {
+        try {
+          await storage.deleteInvoiceItemsByInvoiceId(invoice.id);
+          await storage.deleteInvoice(invoice.id);
+        } catch { /* ignore rollback errors */ }
+        res.status(502).json({ message: "Failed to sync to QuickBooks. No items were billed.", quickbooksError });
+        return;
+      }
+
+      // ── Stamp the ticket as billed ───────────────────────────────────────
+      if (ticketType === 'work_order') {
+        await storage.updateWorkOrder(ticketId, { invoiceId: invoice.id, billedAt: currentDate, status: 'billed' });
+        void recordLifecycleAudit(req, {
+          resource: "work_order", action: "work_order.billed", targetId: ticketId,
+          before: { status: 'approved_passed_to_billing' }, after: { status: 'billed' },
+          extra: { invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, billingType: 'standalone' },
+          summary: `Work order ${ticketId} billed standalone on invoice ${invoice.invoiceNumber}`,
+        });
+      } else if (ticketType === 'billing_sheet') {
+        await storage.updateBillingSheet(ticketId, { invoiceId: invoice.id, billedAt: currentDate, status: 'billed' });
+        void recordLifecycleAudit(req, {
+          resource: "billing_sheet", action: "billing_sheet.billed", targetId: ticketId,
+          before: { status: 'approved_passed_to_billing' }, after: { status: 'billed' },
+          extra: { invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, billingType: 'standalone' },
+          summary: `Billing sheet ${ticketId} billed standalone on invoice ${invoice.invoiceNumber}`,
+        });
+      } else {
+        await storage.updateWetCheckBilling(ticketId, { invoiceId: invoice.id, billedAt: currentDate, status: 'billed' });
+        void recordLifecycleAudit(req, {
+          resource: "wet_check_billing", action: "wet_check_billing.billed", targetId: ticketId,
+          before: { status: 'approved_passed_to_billing' }, after: { status: 'billed' },
+          extra: { invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, billingType: 'standalone' },
+          summary: `Wet check billing ${ticketId} billed standalone on invoice ${invoice.invoiceNumber}`,
+        });
+      }
+
+      // ── Budget alerts (fire-and-forget) ──────────────────────────────────
+      void (async () => {
+        try {
+          const { checkBudgetThresholds } = await import("../services/budget-alert-service");
+          await checkBudgetThresholds(invoice);
+        } catch (alertErr) {
+          logger.warn({ err: alertErr, invoiceId: invoice.id }, "Budget alerts failed for standalone invoice");
+        }
+      })();
+
+      // ── PDF generation (background) ──────────────────────────────────────
+      const pdfService = new InvoicePdfService(storage);
+      pdfService.generateAndSaveInvoicePdf(invoice.id).catch(err =>
+        logger.error({ err, invoiceId: invoice.id }, "Standalone invoice PDF generation failed")
+      );
+
+      res.json({
+        message: "Standalone invoice created successfully",
+        invoice,
+        invoiceNumber: invoice.invoiceNumber,
+        totalAmount: totalAmount.toFixed(2),
+        quickbooksId,
+        quickbooksSuccess: !!quickbooksId,
+        quickbooksError,
+      });
+    } catch (error) {
+      logger.error({ err: error }, "Error creating standalone invoice");
+      res.status(500).json({ message: "Failed to create standalone invoice" });
+    }
+  });
+
   // Customer CRUD — extracted to ./customer-routes.ts
   registerCustomerRoutes(app, {
     requireAuthentication,

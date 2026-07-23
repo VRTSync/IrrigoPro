@@ -453,6 +453,36 @@ export default function CustomerBilling() {
     return selectedWorkOrderIds.size > 0 || selectedBillingSheetIds.size > 0 || selectedWetCheckBillingIds.size > 0;
   };
 
+  // Bill Separately — confirm dialog state
+  const [billSeparatelyItem, setBillSeparatelyItem] = useState<{
+    ticketType: 'work_order' | 'billing_sheet' | 'wet_check_billing';
+    ticketId: number;
+    label: string;
+    amount: number;
+  } | null>(null);
+
+  const billSeparatelyMutation = useMutation({
+    mutationFn: (body: { ticketType: string; ticketId: number }) =>
+      apiRequest("/api/invoices/bill-separately", "POST", body),
+    onSuccess: (data) => {
+      setBillSeparatelyItem(null);
+      toast({
+        title: "Standalone Invoice Created",
+        description: `Invoice ${data.invoiceNumber} created for ${data.totalAmount}`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing", billingMonth] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to bill separately",
+        description: error.message || "An error occurred.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const deleteWorkOrderMutation = useMutation({
     mutationFn: (id: number) => apiRequest(`/api/work-orders/${id}`, "DELETE"),
     onSuccess: () => {
@@ -2358,6 +2388,21 @@ export default function CustomerBilling() {
                                       <div className="text-xs text-gray-400 italic">Breakdown unavailable</div>
                                     )}
                                   </div>
+                                  {(userRole === 'billing_manager' || userRole === 'company_admin' || userRole === 'super_admin') && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setBillSeparatelyItem({
+                                        ticketType: 'work_order',
+                                        ticketId: wo.id,
+                                        label: `Work Order #${wo.id}`,
+                                        amount: parseFloat(wo.totalAmount || '0'),
+                                      })}
+                                      className="h-6 px-2 text-xs hover:bg-indigo-50 text-indigo-700"
+                                    >
+                                      Bill Separately
+                                    </Button>
+                                  )}
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -2436,6 +2481,21 @@ export default function CustomerBilling() {
                                   <div className="text-sm font-medium text-orange-700">
                                     {formatCurrency(bs.laborCost + bs.partsCost)}
                                   </div>
+                                  {(userRole === 'billing_manager' || userRole === 'company_admin' || userRole === 'super_admin') && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setBillSeparatelyItem({
+                                        ticketType: 'billing_sheet',
+                                        ticketId: bs.id,
+                                        label: `Billing Sheet #${bs.id}`,
+                                        amount: bs.laborCost + bs.partsCost,
+                                      })}
+                                      className="h-6 px-2 text-xs hover:bg-indigo-50 text-indigo-700"
+                                    >
+                                      Bill Separately
+                                    </Button>
+                                  )}
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -2509,6 +2569,21 @@ export default function CustomerBilling() {
                                   <div className="text-sm font-medium text-jobtype-wcb">
                                     {formatCurrency(wcb.laborCost + wcb.partsCost)}
                                   </div>
+                                  {(userRole === 'billing_manager' || userRole === 'company_admin' || userRole === 'super_admin') && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setBillSeparatelyItem({
+                                        ticketType: 'wet_check_billing',
+                                        ticketId: wcb.id,
+                                        label: wcb.billingNumber,
+                                        amount: wcb.laborCost + wcb.partsCost,
+                                      })}
+                                      className="h-6 px-2 text-xs hover:bg-indigo-50 text-indigo-700"
+                                    >
+                                      Bill Separately
+                                    </Button>
+                                  )}
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -3237,6 +3312,43 @@ export default function CustomerBilling() {
           onSaved={handleModalSaved}
         />
       )}
+
+      {/* Bill Separately Confirmation Dialog */}
+      <Dialog open={!!billSeparatelyItem} onOpenChange={(open) => { if (!open) setBillSeparatelyItem(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Bill Separately?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600">
+            Create a standalone invoice for <strong>{billSeparatelyItem?.label}</strong>?{' '}
+            {billSeparatelyItem && (
+              <>Amount: <strong>{formatCurrency(billSeparatelyItem.amount)}</strong>.</>
+            )}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            This ticket will be billed immediately on its own invoice and removed from the unbilled queue.
+          </p>
+          <div className="flex justify-end gap-3 mt-4">
+            <Button variant="outline" onClick={() => setBillSeparatelyItem(null)} disabled={billSeparatelyMutation.isPending}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (billSeparatelyItem) {
+                  billSeparatelyMutation.mutate({
+                    ticketType: billSeparatelyItem.ticketType,
+                    ticketId: billSeparatelyItem.ticketId,
+                  });
+                }
+              }}
+              disabled={billSeparatelyMutation.isPending}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              {billSeparatelyMutation.isPending ? "Creating…" : "Create Invoice"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={!!itemToDelete} onOpenChange={(open) => { if (!open) setItemToDelete(null); }}>

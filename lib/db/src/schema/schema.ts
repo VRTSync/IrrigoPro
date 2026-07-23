@@ -883,6 +883,10 @@ export const invoices = pgTable("invoices", {
   paidAt: timestamp("paid_at"),
   quickbooksInvoiceId: text("quickbooks_invoice_id"),
   quickbooksSyncToken: text("quickbooks_sync_token"),
+  // Task #1809 — billing type. 'monthly' is the historical default (consolidated
+  // multi-ticket invoice). 'standalone' marks a single-ticket invoice created
+  // via the "Bill Separately" action. Existing rows default to 'monthly'.
+  billingType: text("billing_type").notNull().default("monthly"),
   // Invoice Correction: revision tracking. When an invoice is superseded by a
   // corrected reissue, `supersededByInvoiceId` links to the new invoice and
   // `status` flips to 'superseded'. The base invoiceNumber never changes;

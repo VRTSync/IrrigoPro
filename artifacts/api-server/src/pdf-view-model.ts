@@ -20,6 +20,8 @@ export interface PdfInvoiceHeader {
   customerName: string;
   customerEmail: string;
   customerPhone: string;
+  /** Task #1809 — 'monthly' (default) or 'standalone' (single-ticket). */
+  billingType?: string;
 }
 
 export interface PdfWorkOrderItemRow {
@@ -259,6 +261,7 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
     customerName: safeStr(invoice.customerName),
     customerEmail: safeStr(invoice.customerEmail),
     customerPhone: safeStr(invoice.customerPhone),
+    billingType: safeStr((invoice as any).billingType, 'monthly'),
   };
 
   const workOrderRows: PdfWorkOrderRow[] = (rawWorkOrders ?? []).map(({ workOrder, items }) => {

@@ -21,6 +21,7 @@ interface Invoice {
   status: string;
   createdAt: string;
   quickbooksInvoiceId?: string;
+  billingType?: string;
 }
 
 const MONTH_NAMES = [
@@ -151,6 +152,9 @@ export function InvoiceList({ customerId, limit = 20, onOpenPdf }: InvoiceListPr
               </div>
               <div className="flex flex-col items-end gap-1">
                 {getStatusBadge(invoice.status)}
+                {invoice.billingType === 'standalone' && (
+                  <Badge className="bg-indigo-100 text-indigo-800 text-xs">Standalone</Badge>
+                )}
                 {invoice.quickbooksInvoiceId && (
                   <Badge className="bg-purple-100 text-purple-800 text-xs">
                     <CheckCircle2 className="w-3 h-3 mr-1" />

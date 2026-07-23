@@ -194,6 +194,61 @@ export function coverPage(
     ? `<li><strong>Work Photos</strong> — site and field photos attached to completed tickets</li>`
     : '';
 
+  // ── Standalone invoice cover (Task #1809) ───────────────────────────────
+  // Single-ticket invoice: no stat tiles, no branch summary, no exec summary.
+  if (invoice.billingType === 'standalone') {
+    // Service date: periodStart equals the ticket work date
+    const serviceDate = formatDate(invoice.periodStart);
+    return `
+  <div class="cover-page">
+    ${watermarkHtml}
+
+    <div class="cover-brand-band" style="background:${navy};">
+      ${logoTile}
+      <div class="cover-brand-company">
+        <div class="cover-brand-name">${company.name}</div>
+        ${company.address ? `<div class="cover-brand-line">${company.address}</div>` : ''}
+        ${company.phone ? `<div class="cover-brand-line">${company.phone}</div>` : ''}
+        ${company.email ? `<div class="cover-brand-line">${company.email}</div>` : ''}
+      </div>
+    </div>
+
+    <div class="cover-title-block">
+      <div class="cover-doc-title">Service Invoice</div>
+      <div class="cover-subtitle">Service documentation for ${invoice.customerName}</div>
+      <div class="cover-meta-row">
+        <span class="cover-billing-period">Service Date: ${serviceDate}</span>
+        <span class="cover-invoice-chip">INVOICE #${invoice.invoiceNumber}</span>
+      </div>
+      <div class="cover-prepared-for">Prepared for: <strong>${invoice.customerName}</strong></div>
+    </div>
+
+    <div class="cover-total-card">
+      <div class="cover-total-card-header">Invoice Total</div>
+      <div class="cover-total-card-amount">${formatCurrency(totals.grandTotal)}</div>
+      <div class="cover-total-card-breakdown">
+        <div class="cover-total-card-sub">
+          <span class="cover-total-card-sub-label">Labor</span>
+          <span class="cover-total-card-sub-value">${formatCurrency(totals.laborSubtotal)}</span>
+        </div>
+        <div class="cover-total-card-sep"></div>
+        <div class="cover-total-card-sub">
+          <span class="cover-total-card-sub-label">Parts</span>
+          <span class="cover-total-card-sub-value">${formatCurrency(totals.partsSubtotal)}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="cover-included">
+      <div class="cover-included-heading">What\u2019s Included</div>
+      <ol class="cover-included-list">
+        <li><strong>Service Ticket Detail</strong> — technician notes, parts, and labor for this service visit</li>
+        ${photosItem}
+      </ol>
+    </div>
+  </div>`;
+  }
+
   return `
   <div class="cover-page">
     ${watermarkHtml}

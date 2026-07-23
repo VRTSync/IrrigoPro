@@ -172,6 +172,7 @@ function makeInvoice(over: Partial<StubInvoice> = {}): StubInvoice {
     supersededByInvoiceId: null as any,
     mergedIntoInvoiceId: null as any,
     qbNote: null as any,
+    billingType: 'monthly',
     createdAt: now,
     updatedAt: now,
   };
