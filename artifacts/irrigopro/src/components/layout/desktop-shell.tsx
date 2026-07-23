@@ -400,7 +400,9 @@ function DesktopSidebar({
     [navConfig, location],
   );
   const brandThemed =
-    userRole === "company_admin" || userRole === "billing_manager";
+    userRole === "company_admin" ||
+    userRole === "billing_manager" ||
+    userRole === "irrigation_manager";
   return (
     <Sidebar
       collapsible="icon"
