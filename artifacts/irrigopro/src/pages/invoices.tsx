@@ -412,6 +412,7 @@ export default function InvoicesPage() {
     setAgingFilter((prev) => (prev === next ? prev : next));
   }, [search]);
   const [sort, setSort] = useState<SortState | null>(null);
+  const [cancelledExpanded, setCancelledExpanded] = useState(false);
   const toggleSort = (key: SortKey) => {
     setSort((prev) => {
       if (!prev || prev.key !== key) return { key, dir: "asc" };
@@ -803,15 +804,28 @@ export default function InvoicesPage() {
     return result;
   }, [invoices, searchTerm, monthFilter, agingFilter]);
 
-  const groups = useMemo(() => groupByBillingPeriod(filteredInvoices), [filteredInvoices]);
+  // Split into active (non-cancelled) and cancelled for separate display.
+  // Cancelled invoices are excluded from all totals and the main table;
+  // they appear in a collapsible drawer at the bottom for audit access.
+  const activeFilteredInvoices = useMemo(
+    () => filteredInvoices.filter((inv) => inv.status !== "cancelled"),
+    [filteredInvoices],
+  );
+  const cancelledInvoices = useMemo(
+    () => filteredInvoices.filter((inv) => inv.status === "cancelled"),
+    [filteredInvoices],
+  );
+
+  const groups = useMemo(() => groupByBillingPeriod(activeFilteredInvoices), [activeFilteredInvoices]);
 
   // Sorting is applied within each month group so the outer
   // most-recent-first month structure stays intact (Task #1423).
   const sortedInvoices = (items: Invoice[]) => sortInvoices(items, sort);
 
-  // Superseded invoices are kept in filteredInvoices so they can be shown as
+  // Superseded invoices are kept in activeFilteredInvoices so they can be shown as
   // version history beneath their replacement; exclude them from every total.
-  const totalBilled = filteredInvoices
+  // Cancelled invoices are already excluded by activeFilteredInvoices.
+  const totalBilled = activeFilteredInvoices
     .filter((inv) => inv.status !== "superseded")
     .reduce((sum, inv) => sum + parseFloat(inv.totalAmount), 0);
 
@@ -821,8 +835,8 @@ export default function InvoicesPage() {
   const isMergeable = (inv: Invoice) => inv.status !== "cancelled";
 
   const selectedInvoices = useMemo(
-    () => filteredInvoices.filter((inv) => selectedIds.has(inv.id)),
-    [filteredInvoices, selectedIds],
+    () => activeFilteredInvoices.filter((inv) => selectedIds.has(inv.id)),
+    [activeFilteredInvoices, selectedIds],
   );
 
   // A selection is valid for merge when 2+ invoices share the SAME customer
@@ -882,9 +896,9 @@ export default function InvoicesPage() {
   };
 
   const handleExportCsv = () => {
-    if (filteredInvoices.length === 0) return;
+    if (activeFilteredInvoices.length === 0) return;
     try {
-      const csv = buildInvoicesCsv(filteredInvoices);
+      const csv = buildInvoicesCsv(activeFilteredInvoices);
       const today = new Date().toISOString().slice(0, 10);
       const filename =
         monthFilter !== "all"
@@ -1189,17 +1203,17 @@ export default function InvoicesPage() {
                 variant="outline"
                 size="sm"
                 onClick={handleExportCsv}
-                disabled={filteredInvoices.length === 0}
+                disabled={activeFilteredInvoices.length === 0}
                 data-testid="button-export-csv"
               >
                 <Download className="w-4 h-4 mr-2" />
                 Export CSV
               </Button>
-              {filteredInvoices.length > 0 && (
+              {activeFilteredInvoices.length > 0 && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-right">
                   <div className="text-xs text-blue-600 font-medium">Total Billed</div>
                   <div className="text-lg font-bold text-blue-800">{formatCurrency(totalBilled)}</div>
-                  <div className="text-xs text-blue-500">{filteredInvoices.length} invoice{filteredInvoices.length !== 1 ? "s" : ""}</div>
+                  <div className="text-xs text-blue-500">{activeFilteredInvoices.length} invoice{activeFilteredInvoices.length !== 1 ? "s" : ""}</div>
                 </div>
               )}
             </div>
@@ -1569,6 +1583,61 @@ export default function InvoicesPage() {
                 <>Load more invoices</>
               )}
             </Button>
+          </div>
+        )}
+
+        {/* Cancelled invoices — collapsible audit drawer, hidden from main list and totals */}
+        {cancelledInvoices.length > 0 && (
+          <div className="mt-8 border border-gray-200 rounded-lg bg-white overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setCancelledExpanded((v) => !v)}
+              className="w-full flex items-center justify-between px-4 py-3 text-left bg-gray-50 hover:bg-gray-100 transition-colors"
+              data-testid="button-cancelled-drawer-toggle"
+              aria-expanded={cancelledExpanded}
+            >
+              <div className="flex items-center gap-2">
+                <ChevronDown
+                  className={`w-4 h-4 text-gray-500 transition-transform ${cancelledExpanded ? "rotate-180" : ""}`}
+                />
+                <span className="text-sm font-medium text-gray-700">
+                  Cancelled ({cancelledInvoices.length})
+                </span>
+              </div>
+              <span className="text-xs text-gray-400">Audit view — read only</span>
+            </button>
+            {cancelledExpanded && (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-50 hover:bg-gray-50">
+                      <TableHead>Invoice #</TableHead>
+                      <TableHead>Customer</TableHead>
+                      <TableHead>Period</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {cancelledInvoices.map((invoice) => (
+                      <TableRow key={invoice.id} className="text-gray-400 italic">
+                        <TableCell className="whitespace-nowrap text-xs">
+                          #{invoice.invoiceNumber}
+                        </TableCell>
+                        <TableCell className="text-xs max-w-[200px] truncate">
+                          {invoice.customerName}
+                        </TableCell>
+                        <TableCell className="text-xs whitespace-nowrap">
+                          {periodLabelOf(invoice)}
+                        </TableCell>
+                        <TableCell className="text-right text-xs whitespace-nowrap line-through">
+                          {formatCurrency(invoice.totalAmount)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </div>
         )}
       </div>

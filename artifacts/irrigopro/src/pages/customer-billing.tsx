@@ -748,10 +748,13 @@ export default function CustomerBilling() {
     },
   });
 
-  // Compute the latest billing month from all invoices
+  // Compute the latest billing month from all non-cancelled invoices.
+  // Cancelled invoices are excluded from the "Invoices Sent Recently" panel
+  // so they don't inflate counts or distort the billing month shown.
   const recentInvoiceMonth = useMemo(() => {
-    if (recentInvoicesAll.length === 0) return null;
-    const latest = recentInvoicesAll.reduce((best: any, inv: any) => {
+    const active = recentInvoicesAll.filter((inv: any) => inv.status !== "cancelled");
+    if (active.length === 0) return null;
+    const latest = active.reduce((best: any, inv: any) => {
       if (!best) return inv;
       const bestKey = best.invoiceYear * 100 + best.invoiceMonth;
       const invKey = inv.invoiceYear * 100 + inv.invoiceMonth;
@@ -763,7 +766,10 @@ export default function CustomerBilling() {
   const recentMonthInvoices = useMemo(() => {
     if (!recentInvoiceMonth) return [];
     return recentInvoicesAll.filter(
-      (inv: any) => inv.invoiceYear === recentInvoiceMonth.year && inv.invoiceMonth === recentInvoiceMonth.month
+      (inv: any) =>
+        inv.status !== "cancelled" &&
+        inv.invoiceYear === recentInvoiceMonth.year &&
+        inv.invoiceMonth === recentInvoiceMonth.month
     );
   }, [recentInvoicesAll, recentInvoiceMonth]);
 

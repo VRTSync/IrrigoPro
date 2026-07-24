@@ -138,9 +138,25 @@ export function InvoiceList({ customerId, limit = 20, onOpenPdf }: InvoiceListPr
     );
   }
 
+  // Cancelled invoices are excluded from the customer Invoices tab;
+  // they are accessible on the main Invoices page in the audit drawer.
+  const visibleInvoices = invoices.filter((inv) => inv.status !== "cancelled");
+
+  if (visibleInvoices.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-8 text-center">
+          <Calendar className="w-10 h-10 mx-auto mb-3 text-gray-300" />
+          <p className="text-sm font-medium text-gray-500">No monthly invoices yet</p>
+          <p className="text-xs text-gray-400 mt-1">Invoices will appear here once billing periods are completed.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      {invoices.map((invoice) => (
+      {visibleInvoices.map((invoice) => (
         <Card key={invoice.id} className="border border-gray-200 hover:shadow-md transition-shadow">
           <CardContent className="p-5">
             <div className="flex items-start justify-between mb-3">
