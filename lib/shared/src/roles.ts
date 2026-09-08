@@ -190,6 +190,7 @@ export const CAN_VIEW_BUDGETS = new Set<Role>([
   "super_admin",
   "company_admin",
   "billing_manager",
+  "irrigation_manager",
 ]);
 
 /** Preview and apply annual budget goals in bulk. */

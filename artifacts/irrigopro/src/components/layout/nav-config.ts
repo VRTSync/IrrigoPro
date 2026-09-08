@@ -151,6 +151,7 @@ export const billingManagerNav: NavConfig = {
       defaultOpen: true,
       items: [
         { type: "leaf", label: "Manager Workspace", path: "/manager-workspace", icon: LayoutDashboard, badgeKey: "awaitingApproval" },
+        { type: "leaf", label: "Budget Status", path: "/budget-status", icon: BarChart3 },
         { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
         { type: "leaf", label: "Command Center", path: "/billing/command-center", icon: ClipboardList },
         { type: "leaf", label: "Billing Sheets", path: "/billing-sheets", icon: ClipboardList },
@@ -256,6 +257,7 @@ export const bookkeeperNav: NavConfig = {
 export const managerNav: NavConfig = {
   items: [
     { type: "leaf", label: "Manager Workspace", path: "/manager-workspace", icon: ClipboardCheck },
+    { type: "leaf", label: "Budget Status", path: "/budget-status", icon: BarChart3 },
     locationReportGroup,
     wetCheckGroup,
     {
@@ -363,6 +365,7 @@ export const companyAdminNav: NavConfig = {
       icon: DollarSign,
       items: [
         { type: "leaf", label: "Manager Workspace", path: "/manager-workspace", icon: LayoutDashboard, badgeKey: "awaitingApproval" },
+        { type: "leaf", label: "Budget Status", path: "/budget-status", icon: BarChart3 },
         { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
         { type: "leaf", label: "Command Center", path: "/billing/command-center", icon: ClipboardList },
         {

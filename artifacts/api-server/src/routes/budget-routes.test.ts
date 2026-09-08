@@ -159,9 +159,19 @@ describe("GET /api/customers/:id/budget-usage", () => {
     server = undefined;
   });
 
-  it("denies irrigation_manager with 403 (slice 1 scope: company_admin/billing_manager/super_admin only)", async () => {
+  it("allows irrigation_manager with 200 through the shared budget capability", async () => {
     setSeed();
     const { app } = makeApp("irrigation_manager", 10);
+    ({ server, base } = await startServer(app));
+    const res = await fetch(`${base}/api/customers/1/budget-usage`);
+    assert.equal(res.status, 200);
+    await new Promise<void>((r) => server!.close(() => r()));
+    server = undefined;
+  });
+
+  it("denies bookkeeper with 403", async () => {
+    setSeed();
+    const { app } = makeApp("bookkeeper", 10);
     ({ server, base } = await startServer(app));
     const res = await fetch(`${base}/api/customers/1/budget-usage`);
     assert.equal(res.status, 403);

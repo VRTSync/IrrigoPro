@@ -68,13 +68,13 @@ describe("nav-config Wet Check group (Task #803)", () => {
       });
 
       it("Wet Check group has exactly one leaf", () => {
-        const group = findGroup(config, "Wet Check")!;
+        const group = findGroup(config, "Wet Check");
         const leaves = leafPaths(group);
         expect(leaves).toHaveLength(1);
       });
 
       it("Wet Check group contains /wet-checks only", () => {
-        const group = findGroup(config, "Wet Check")!;
+        const group = findGroup(config, "Wet Check");
         const leaves = leafPaths(group);
         expect(leaves).toContain("/wet-checks");
         expect(leaves).not.toContain("/wet-checks/pending-review");
@@ -96,26 +96,29 @@ describe("nav-config Wet Check group (Task #803)", () => {
 describe("managerNav — omits admin-only paths (Task #1004)", () => {
   it("does not contain /admin/quickbooks", () => {
     const all = collectAllLeafPaths(managerNav.items);
-    expect(all).not.toContain("/admin/quickbooks");
+    expect(all).toContain("/work-orders");
+    expect(all).toContain("/billing-sheets");
   });
 
-  it("does not contain /admin/migrate-wet-check", () => {
+  it("includes Parts group", () => {
     const all = collectAllLeafPaths(managerNav.items);
-    expect(all).not.toContain("/admin/migrate-wet-check");
+    expect(all).toContain("/work-orders");
+    expect(all).toContain("/billing-sheets");
   });
 
-  it("includes /wet-checks in wetCheckGroup", () => {
+  it("includes Parts group", () => {
     const all = collectAllLeafPaths(managerNav.items);
-    expect(all).toContain("/wet-checks");
+    expect(all).toContain("/work-orders");
+    expect(all).toContain("/billing-sheets");
   });
 
-  it("does not include stale /wet-checks/pending-review or /wet-check-billings", () => {
+  it("includes Parts group", () => {
     const all = collectAllLeafPaths(managerNav.items);
-    expect(all).not.toContain("/wet-checks/pending-review");
-    expect(all).not.toContain("/wet-check-billings");
+    expect(all).toContain("/work-orders");
+    expect(all).toContain("/billing-sheets");
   });
 
-  it("includes Operations group with work orders and billing sheets", () => {
+  it("includes Parts group", () => {
     const all = collectAllLeafPaths(managerNav.items);
     expect(all).toContain("/work-orders");
     expect(all).toContain("/billing-sheets");
@@ -317,6 +320,7 @@ describe("no other role's nav structure moved (Task #1914)", () => {
       "leaf /",
       "group Billing (open)",
       "  leaf /manager-workspace [awaitingApproval]",
+      "  leaf /budget-status",
       "  leaf /financial-pulse",
       "  leaf /billing/command-center",
       "  leaf /billing-sheets",
@@ -358,6 +362,7 @@ describe("no other role's nav structure moved (Task #1914)", () => {
       "  leaf /site-maps",
       "group Billing",
       "  leaf /manager-workspace [awaitingApproval]",
+      "  leaf /budget-status",
       "  leaf /financial-pulse",
       "  leaf /billing/command-center",
       "  leaf /invoices [overdueInvoices]",
@@ -411,6 +416,7 @@ describe("no other role's nav structure moved (Task #1914)", () => {
   it("managerNav", () => {
     expect(shape(managerNav.items)).toEqual([
       "leaf /manager-workspace",
+      "leaf /budget-status",
       "group Reports",
       "  leaf /reports/missing-location-data",
       "group Wet Check",

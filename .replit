@@ -184,6 +184,14 @@ args = "bulk-budget-goals-frontend"
 task = "workflow.run"
 args = "bulk-budget-goals-types"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "budget-route-nav-parity"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "budget-bookkeeper-exclusion"
+
 [[workflows.workflow]]
 name = "auth-middleware-coverage"
 author = "agent"
@@ -642,6 +650,28 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/shared typecheck && pnpm --filter @workspace/api-server typecheck && pnpm --filter @workspace/irrigopro typecheck"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "budget-route-nav-parity"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/irrigopro exec vitest run src/components/layout/budget-route-nav-parity.test.ts src/components/layout/nav-config.test.ts src/pages/budget-status.test.tsx src/components/budget/BudgetBar.test.tsx"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "budget-bookkeeper-exclusion"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/routes/budget-status-1866.test.ts src/routes/budget-routes.test.ts src/routes/bookkeeper-role-matrix.test.ts"
 
 [workflows.workflow.metadata]
 isValidation = true

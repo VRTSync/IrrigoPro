@@ -75,6 +75,7 @@ const WetCheckInspectionSummaryPage = lazyPage(() => import("@/pages/wet-checks/
 const ManagerWetCheckDetailPage = lazyPage(() => import("@/pages/wet-checks/ManagerWetCheckDetailPage"));
 const CombinedReviewPage = lazyPage(() => import("@/pages/wet-checks/CombinedReviewPage"));
 
+const BudgetStatusPage = lazyPage(() => import("@/pages/budget-status"));
 const SiteMapsPage = lazyPage(() => import("@/pages/site-maps"));
 const AdminMigrationsPage = lazyPage(() => import("@/pages/admin/migrations"));
 const AdminWcLaborBackfillPage = lazyPage(() => import("@/pages/admin-wc-labor-backfill"));
@@ -300,6 +301,7 @@ function Router() {
                 <Switch>
                   <Route path="/" component={ManagerWorkspace} />
                   <Route path="/manager-workspace" component={ManagerWorkspace} />
+                  <Route path="/budget-status" component={BudgetStatusPage} />
                   <Route path="/manager-dashboard" component={RedirectToManagerWorkspace} />
                   <Route path="/manager" component={RedirectToManagerWorkspace} />
                   <Route path="/estimates" component={Estimates} />
@@ -409,6 +411,7 @@ function Router() {
                 <Switch>
                   <Route path="/" component={ManagerWorkspace} />
                   <Route path="/manager-workspace" component={ManagerWorkspace} />
+                  <Route path="/budget-status" component={BudgetStatusPage} />
                   <Route path="/billing-workspace" component={RedirectToBillingWorkspace} />
                   <Route path="/billing" component={RedirectToBillingWorkspace} />
                   <Route path="/billing/dashboard" component={RedirectToBillingWorkspace} />
@@ -474,6 +477,7 @@ function Router() {
                   <Route path="/" component={RedirectToAppHealth} />
                   <Route path="/super-admin" component={SuperAdminAppHealthPage} />
                   <Route path="/manager-workspace" component={ManagerWorkspace} />
+                  <Route path="/budget-status" component={BudgetStatusPage} />
                   <Route path="/billing-workspace" component={RedirectToBillingWorkspace} />
                   <Route path="/manager/wet-checks" component={RedirectToWetChecks} />
                   <Route path="/manager/wet-checks/:id/confirm">
