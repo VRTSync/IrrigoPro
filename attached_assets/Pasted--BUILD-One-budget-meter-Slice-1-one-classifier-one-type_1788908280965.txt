@@ -1,0 +1,93 @@
+# BUILD — One budget meter, Slice 1: one classifier, one type, one palette
+
+## What & Why
+
+Before six budget renderers can be collapsed into one, the three things underneath them have to be single: the rule that turns a percentage into a status, the type that names the four states, and the colours that paint them. All three are currently duplicated, and one of the duplicates is a latent bug.
+
+**Nothing visible changes in this slice.** It is groundwork, it is low risk, and it can ship on its own. Slice 2 does the visible consolidation.
+
+## The three duplications
+
+### 1. Two classifiers, two unit conventions
+
+`artifacts/api-server/src/budget-status.ts:38` — `classifyBudgetPercent(percent, soft, hard)` takes `percent` as a **ratio** (0–1) and multiplies by 100 internally.
+
+`artifacts/irrigopro/src/components/budget/BudgetBar.tsx:52` — `classifyStatus(fillPercent, soft, hard)` compares its argument **directly** against the thresholds, so it expects **percentage points** (0–100).
+
+Same boundary semantics — `>= hard` is over, `>= soft` is approaching — but opposite input units. They agree only for as long as every caller gets the unit right by hand. A caller that passes 0.85 to the client function reads "healthy" for a customer at 85%; a caller that passes 85 to the server function reads "over" for the same customer.
+
+There is a third: `previewStatus` inside `customer-form.tsx:1313`, which re-implements the rule again with its own `pct * 100 >= hard` conversion, because the form preview must classify **unsaved** form values live and cannot use a server-supplied status.
+
+### 2. Four copies of the type
+
+`BudgetStatus` is hand-declared as the same four-string union in four files: `BudgetBar.tsx:23`, `customer-form.tsx:856`, `customer-profile.tsx:923`, `financial-pulse.tsx:128`. `BudgetBucket` is declared twice: `financial-pulse-widget.tsx:117`, `customer-profile.tsx:953`.
+
+### 3. Semantic colours the app cannot actually use
+
+`index.css` defines `--success` (89 50% 45%) and `--warning` (38 92% 50%), but `tailwind.config.ts` registers **only `destructive`** as a colour. There is no `bg-success` or `bg-warning` class. So every budget renderer reaches for raw palette classes instead — `green-500` here, `emerald-500` there, `rose-500` somewhere else — and the semantic tokens sit unused.
+
+`--success-foreground` and `--warning-foreground` are both white, meant for text *on* a solid fill. The status pills need the opposite: dark ink on a pale tint. Those shades do not exist as tokens, which is why the pills use `green-800`, `amber-800`, `rose-800`.
+
+## Done looks like
+
+- One classifier, in the shared package, imported by both the server and the client.
+- One documented unit convention, stated in the function's own doc comment.
+- One `BudgetStatus` type, imported everywhere it is used.
+- `bg-success` and `bg-warning` exist as Tailwind classes, matching how `destructive` already works.
+- Pill ink tokens exist for all three states, with contrast that passes on the pale tint.
+- **No visible change anywhere in the app**, and no behaviour change: every customer classifies to the same status before and after.
+
+## Out of scope
+
+- Consolidating the renderers themselves — Slice 2.
+- Changing threshold semantics, the 75 / 100 defaults, or per-customer overrides.
+- Changing any endpoint or response shape.
+- Any colour a user actually sees. This slice makes the tokens available; Slice 2 switches the component onto them.
+- The wet-check status pills (`WetCheckDetail.tsx:854`, `ZoneScreen.tsx:1470`) — different concept, leave alone.
+
+## Steps
+
+1. **Create `lib/shared/src/budget-status.ts`.** Export the `BudgetStatus` union (`"unset" | "healthy" | "approaching" | "over"`) and one classifier. The classifier takes a **ratio** — `spend / cap`, 0–1 — because that is what the server already uses and what avoids a lossy round-trip through percentage points. Say so in the doc comment, in one line, so the next reader cannot get it wrong. Keep the boundary semantics exactly as they are today: `>= hard` is over, `>= soft` is approaching, below soft is healthy, and a null or non-positive cap is unset. Export it through the package index, following `budget-goal.ts` from Task #2002.
+
+2. **Point the server at it.** `artifacts/api-server/src/budget-status.ts` imports the shared classifier instead of defining `classifyBudgetPercent`. Re-export under the old name if that keeps the diff small, but there must be exactly one implementation. Its existing tests must pass unchanged — that is the proof the rule did not move.
+
+3. **Point `BudgetBar` at it.** Delete `classifyStatus` (:52). The component currently computes `rawPercent` in percentage points; convert at the call site so the shared classifier still receives a ratio, and leave the display maths alone.
+
+4. **Delete the three duplicate `BudgetStatus` unions** in `customer-form.tsx:856`, `customer-profile.tsx:923` and `financial-pulse.tsx:128`, and the one in `BudgetBar.tsx:23`, importing the shared type in all four.
+
+5. **Consolidate `BudgetBucket`.** It describes an API response shape, not a component prop. Keep one declaration — the `financial-pulse-widget.tsx:117` version — move it beside the shared type, and delete the copy in `customer-profile.tsx:953`.
+
+6. **Register the semantic colours.** Add `success` and `warning` to `tailwind.config.ts` in the same shape `destructive` already uses — `DEFAULT: "hsl(var(--success))"` plus `foreground`. Nothing uses these classes today, so nothing can break.
+
+7. **Add pill ink tokens.** The pills need dark text on a pale tint, and `--success-foreground` / `--warning-foreground` / `--destructive-foreground` are all white. Add `--success-ink`, `--warning-ink` and `--destructive-ink` to `:root` in `index.css` at roughly the lightness of the `-800` Tailwind steps the pills use today, so contrast on the tint is unchanged. Add matching values to the `.dark` block. Register them in `tailwind.config.ts` alongside their base colours.
+
+8. **Leave `previewStatus` alone in this slice.** It is deleted in Slice 2, when the form preview stops rendering its own row. Removing it now would leave that surface with no classifier at all.
+
+9. **Tests, registered as validation commands.** The shared classifier at every boundary: below soft, exactly soft, between, exactly hard, above hard, and a null or zero cap. Non-default per-customer thresholds. **A unit-convention test** asserting the classifier reads a ratio — that 0.85 with soft 75 / hard 100 is `approaching`, and that 85 is not silently accepted as the same thing. The server's existing budget-status tests pass unchanged. `BudgetBar.test.tsx` passes unchanged. Register as validation commands, not workflows — this repo is past its workflow cap.
+
+## Notes for the executor
+
+- **The unit convention is the whole point of step 1.** Two functions agreeing on boundaries but disagreeing on units is worse than two functions that obviously differ, because it looks correct in review. Whichever unit is chosen, only one may survive, and the doc comment must name it.
+- `lib/shared` is imported by both the API server and the web client — that is how `roles.ts` and `budget-goal.ts` work. Nothing React-specific may go in this module.
+- The server's `computePeriodUsage` (`budget-status.ts:49`) calls the classifier and does the ratio division itself. It should keep doing that; only the classification rule moves.
+- Adding colours to `tailwind.config.ts` changes generated CSS. Confirm the build output still contains the existing classes and that no unrelated page shifts.
+
+## Definition of Done (attach proof — Rule 7)
+
+- [ ] `file:line` for the shared module, the server's import, `BudgetBar`'s import, each deleted type declaration, the Tailwind registrations and the new ink tokens.
+- [ ] **Grep proof** that exactly one budget classifier and one `BudgetStatus` declaration exist in the repo, and that `classifyStatus` and the three duplicate unions are gone.
+- [ ] Test output for every classifier boundary plus the unit-convention test.
+- [ ] The server's existing budget-status suite and `BudgetBar.test.tsx` both passing unchanged.
+- [ ] Screenshots of the Budget Status page and the customer profile before and after, showing **no visible difference** — this slice is invisible by design.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+
+- `lib/shared/src/budget-status.ts` (new), `lib/shared/src/index.ts`, `lib/shared/src/budget-goal.ts` (the convention to follow)
+- `artifacts/api-server/src/budget-status.ts` (`classifyBudgetPercent` :38, `computePeriodUsage` :49)
+- `artifacts/irrigopro/src/components/budget/BudgetBar.tsx` (`BudgetStatus` :23, `classifyStatus` :52)
+- `artifacts/irrigopro/src/components/customer-form.tsx` (`BudgetStatus` :856)
+- `artifacts/irrigopro/src/pages/customer-profile.tsx` (`BudgetStatus` :923, `BudgetBucket` :953)
+- `artifacts/irrigopro/src/pages/financial-pulse.tsx` (`BudgetStatus` :128)
+- `artifacts/irrigopro/src/components/financial-pulse/financial-pulse-widget.tsx` (`BudgetBucket` :117)
+- `artifacts/irrigopro/tailwind.config.ts` (`destructive` :40 — the pattern), `artifacts/irrigopro/src/index.css` (:54–59 light, :86–87 dark)

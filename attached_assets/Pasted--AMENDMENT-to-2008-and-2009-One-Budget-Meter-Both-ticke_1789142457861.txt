@@ -1,0 +1,85 @@
+# AMENDMENT to #2008 and #2009 — One Budget Meter
+
+Both tickets are better than the specs they came from. Their corrections were checked against HEAD and all of them hold:
+
+- **#2008 is right about a fourth classifier.** `financial-pulse-math.ts:610` declares its own `BudgetStatus` and `:612` its own `classifyStatus`, used at `:733`, `:737` and `:1204`. The source spec named three; there are four.
+- **#2008 is right about the null-cap divergence**, and it is the one place consolidation can silently change a status. Naming it is the correct call.
+- **#2008 is right about `field-tech-dashboard.tsx:14`** — it imports `type BudgetStatus` from `BudgetBar`, so deleting the local declaration without re-pointing that import breaks the build.
+- **#2009 is right that `manager-workspace.tsx` contains no `BudgetBar`.** It mounts `BudgetStatusCard` at `:440`; the real call site is `BudgetStatusCard.tsx:136`.
+- **#2009 is right that the Budget Status page has three bars** — `budget-status.tsx:156`, `:202`, `:214` — and that `:214` is the only user of the boolean `thin`.
+- **#2009 is right that the Financial Pulse row carries real cap and spend** for both columns, so both move to amounts mode.
+
+Three additions.
+
+---
+
+## 1. `hidePercent` must also gate the accessibility attribute — the crew view leaks the percentage today
+
+#2009 says splitting `hidePercent` out of `hideDollars` "must not change what the crew view renders." That is correct as far as it goes, and it is not far enough.
+
+`hideDollars` currently gates three things in `BudgetBar`:
+
+- `:134` — whether the "over" pill reads `Stop — 116%` instead of `Stop`
+- `:157` and `:162` — the dollar amounts row
+- `:214` — the segment legend
+
+It does **not** gate `:175`:
+
+```
+aria-valuenow={rawPercent !== null ? Math.round(Math.min(rawPercent, 100)) : undefined}
+```
+
+On the crew view, `rawPercent` is `(fillPercent / 100) * 100` — the fill percentage itself, because that surface fakes `allocation={100}`. So a screen reader on a field tech's phone announces the exact budget percentage, on the one surface designed so that no percentage is shown. Task #1866's rule was explicit: no dollar figure, and no percentage, because a percentage of a hidden number is a leak by inference.
+
+**Required:** `hidePercent` gates `aria-valuenow` as well as the visible percentage. When it is on, omit the attribute rather than passing a rounded value. The `aria-label` already reads from `pillLabel`, so it is safe once the pill percentage is suppressed — confirm that rather than assume it.
+
+**Add to the crew-view step:** assert on the rendered output that neither a visible percentage nor `aria-valuenow` is present. A test that only checks visible text passes this bug.
+
+---
+
+## 2. Five call sites, not four
+
+#2009's corrections say "four existing `BudgetBar` call sites in three files", then separately and correctly says the Budget Status page has three bars. The arithmetic does not close. Verified count:
+
+| File | Call sites |
+|---|---|
+| `components/budget/BudgetStatusCard.tsx` | `:136` |
+| `pages/budget-status.tsx` | `:156`, `:202`, `:214` |
+| `pages/field-tech-dashboard.tsx` | `:73` |
+
+**Five call sites across three files.** The step that migrates existing callers onto the `size` prop must touch all five, and the grep proof must count five.
+
+---
+
+## 3. Neither ticket has a Definition of Done
+
+Rule 7: a commit message is a claim, not evidence. Both tickets carry a behavioural "Done looks like" and no proof checklist. Add these.
+
+### #2008 — one classifier and colour tokens
+
+- [ ] `file:line` for the shared module, the api-server import, the financial-pulse-math import, `BudgetBar`'s import, the customer-form import, the re-pointed `field-tech-dashboard` type import, each deleted declaration, the Tailwind registrations and the new ink tokens.
+- [ ] **Grep proof** that exactly one budget classifier and one `BudgetStatus` declaration exist in the repo, and that `classifyStatus` in `financial-pulse-math.ts`, `classifyStatus` in `BudgetBar.tsx` and `previewStatus` in `customer-form.tsx` are gone.
+- [ ] Test output for every classifier boundary, non-default thresholds, every `unset` input, and the unit-convention test.
+- [ ] **A before/after status table for the null-cap contract**: for each of the four former call sites, the status produced for a null cap before the change and after. They must match.
+- [ ] Built-stylesheet evidence that `bg-success`, `text-success`, `bg-warning`, `text-warning` and the three ink classes each generate a rule, in light and dark.
+- [ ] The api-server budget-status, budget-routes, `budget-status.tsx`, `BudgetBar` and customer-form budget-preview suites all passing unchanged.
+- [ ] Screenshots of the Budget Status page and the customer profile before and after showing **no visible difference** — this task is invisible by design.
+- [ ] Deployed; commit message matches the diff.
+
+### #2009 — consolidate the six renderers
+
+- [ ] `file:line` for the two input modes, the single label map, the colour mapping, and each of the five migrated renderers plus the five re-pointed `BudgetBar` call sites.
+- [ ] **Grep proof** that exactly one budget renderer exists, and that `BudgetBucketRow`, both `BudgetMeter` definitions, `statusColor`, `statusPill`, both `statusTone` functions, `previewStatus` and `PreviewRow` are gone.
+- [ ] **Grep proof** that no call site passes a synthetic allocation, and that the boolean `thin` no longer exists.
+- [ ] Before-and-after screenshots of all six surfaces for the same customer, showing identical numbers.
+- [ ] Screenshot of one customer in each of the four states through the shared component.
+- [ ] Captured crew-endpoint response, plus a rendered-output assertion proving no dollar figure, no visible percentage and no `aria-valuenow` reaches the crew view.
+- [ ] Confirmation that the Budget Status page, Manager Workspace card and crew view are visually unchanged.
+- [ ] Test output for both input modes, the both-at-once failure, threshold boundaries, clamping, unset from either input, `forcedStatus`, `pillOnly` and both tones.
+- [ ] Deployed; commit message matches the diff.
+
+---
+
+## Note on sequencing
+
+#2008 is invisible by design and #2009 is where every visible change lands. Do not merge them into one task to save a round trip — the whole value of splitting them is that if a customer's status moves, it is unambiguous which change did it.

@@ -1,0 +1,98 @@
+# FIX — Financial Pulse: Split Billed YTD, Fix Last Cycle
+
+**What & Why**
+Financial Pulse reports three different year-to-date numbers and shows two of them, both badged "YTD", on two tabs of the same page. Captured 2026-09-11:
+
+- Accounting tab, **"Billed YTD": $546,855**
+- Pulse tab, **"Year to Date": $333,093** ("Invoiced + in-flight", with In-Flight Pipeline at $23,624, so invoiced-only is about $309,469)
+
+`Billed YTD` is 1.77x the invoiced figure. The $237,000 gap is work orders and billing sheets counted **on top of** the invoices that already contain them. A tile named "Billed" reports roughly double what was billed.
+
+Separately, "Billed Last Cycle" does not mean the last closed cycle, and today it shows the identical $47,782 as "Billed MTD" with a different delta beside it (-36.4% against -4.3%), which reads as a contradiction.
+
+## Current state (confirmed in code)
+
+**The double count.** `computeAllBillableYtd` (`financial-pulse-math.ts:338`) sums invoices with `invoiceYear = currentYear`, then **all** non-cancelled work orders created this year (`:353`) and **all** non-cancelled billing sheets created this year (`:360`) — invoiced or not — then uninvoiced wet-check billings only (`:369`). Three record types of the same kind, two opposite rules. The wet-check leg is the correct one.
+
+**The delta is uninterpretable.** `pctDelta(billedYtd, billedPrevYearYtd)` (`financial-pulse.ts:737`) compares that inflated figure against `computeBilled` over the prior-year window (`:656`) — invoices only. The current year is inflated by construction and the prior year is not, so the tile reports a large positive "vs last year" every year regardless of performance.
+
+**Mixed date bases.** The three legs bucket by `invoiceYear`, by `createdAt`, and by `workDate`, inside one total.
+
+**"Last Cycle" means "highest cycle".** `getDistinctBillingCycles(...)[0]` (`financial-pulse.ts:622`) takes `max(invoiceYear * 100 + invoiceMonth)` with no exclusion of the current month. It reads "August 2026" today only because this company bills a month in arrears with an explicit period. `POST /api/invoices/bill-separately` (`routes.ts:7146`) stamps `invoiceMonth` from the **ticket's own `workDate`** (`:7240`), so a single standalone invoice for current-month work flips the tile to a partial September and compares that one invoice against the whole of August.
+
+**The Pulse tab's YTD has no year bound on half its value.** `yearToDate.value = invoicedYtd + inFlightTotal` (`financial-pulse.ts:1692`), where `inFlightTotal` (`:1617–1638`) is every uninvoiced row across all time. Work from two years ago sits inside a tile badged YTD.
+
+## Slice 1 — Two honest YTD tiles
+
+Replace the single `Billed YTD` tile with two, and delete `computeAllBillableYtd`.
+
+- **`invoicedYtd`** — invoices only, `invoiceYear = currentYear`, `INVOICE_EXCLUDED_STATUSES` applied. This is realised revenue. Tile label **"Invoiced YTD"**, badge YTD.
+- **`workBookedYtd`** — `invoicedYtd` **plus** uninvoiced work booked this year: work orders and billing sheets where `isUnbilledWorkRow` holds (`financial-pulse-math.ts:381`) and `createdAt` falls in the current year, plus wet-check billings with `invoiceId` null and `workDate` in the current year. No row is ever counted twice. Tile label **"Work Booked YTD"**, badge YTD, helper line "Invoiced + not yet invoiced".
+
+**Like-for-like deltas.** `invoicedYtd` compares against the prior year computed **the same way** — invoices by `invoiceYear = currentYear - 1`, calendar-day aligned to today. `workBookedYtd` carries no delta in this ticket rather than a misleading one; a prior-year booked figure needs its own definition and is not worth guessing at here.
+
+## Slice 2 — The Pulse tab reuses the same number
+
+The Pulse tab's "Year to Date" tile becomes `workBookedYtd` — the identical value the Accounting tab shows, from the same helper. That collapses three YTD definitions into two and removes the unbounded in-flight component.
+
+- The **"In-Flight Pipeline" tile is unchanged** and stays all-time. "What is on the books right now" is the question it answers, and a year bound would make it wrong.
+- Only the YTD tile's uninvoiced component is year-bounded.
+- The Pulse tab's per-customer and per-technician `ytd` columns keep using `invoiceYear`, which already matches `invoicedYtd`.
+
+## Slice 3 — Last Cycle means the last closed cycle
+
+- `getDistinctBillingCycles` gains an optional `before: { year, month }` argument, or the route filters its result. Either way the selected cycle must be **strictly earlier than the current calendar month**, so an invoice stamped with the current month can never be presented as a closed cycle.
+- When no closed cycle exists, the tile shows "—" with the helper "No closed billing cycle yet", not a zero.
+- The delta compares the selected closed cycle against the closed cycle before it — unchanged logic, correct input.
+- Apply the same change to `/pulse-summary` (`financial-pulse.ts:1585`), which repeats the `cycles[0]` selection for the Pulse tab's "Last Cycle Billed" tile.
+- Add a helper line to **Billed MTD** distinguishing it: it counts invoices *created* this month whatever period they bill, which is why it can equal Last Cycle exactly. Two tiles showing the same figure needs an explanation on the tile, not in a doc.
+
+## Out of scope
+
+- Changing how `invoiceMonth` is stamped at generation, including the `bill-separately` behaviour. It is defensible — the work happened in that month — and changing it would restate history. This ticket makes the tile robust to it instead.
+- A prior-year comparator for Work Booked YTD.
+- The revenue trend chart's date basis, handled in the charts ticket (7 of 8).
+
+## Decisions
+
+- Billed YTD splits into Invoiced YTD and Work Booked YTD. Both numbers survive; each becomes interpretable. (decided)
+- No row is counted twice in any tile, ever. The previous "full contracted scope" framing is retired. (decided)
+- Deltas compare like with like or are not shown.
+- In-Flight Pipeline stays all-time; only YTD figures are year-bounded.
+
+## Done looks like
+
+- No tile on Financial Pulse double-counts invoiced work.
+- The Accounting tab's Work Booked YTD and the Pulse tab's Year to Date show the same number, from the same helper.
+- Invoiced YTD's year-over-year delta compares invoices to invoices.
+- "Billed Last Cycle" never shows the current, in-progress month.
+- `computeAllBillableYtd` is deleted, not left unused.
+
+## Tests
+
+- A work order invoiced this year is counted once, in `invoicedYtd`, and contributes nothing extra to `workBookedYtd`. Before this fix it was counted in both legs — this is the regression test for the $237,000 gap.
+- An uninvoiced work order created this year appears in `workBookedYtd` and not in `invoicedYtd`.
+- An uninvoiced work order created **last** year appears in neither.
+- `workBookedYtd` from `/kpis` equals `yearToDate.value` from `/pulse-summary` for the same fixture.
+- With invoices stamped for the current month present, "Billed Last Cycle" still reports the prior closed cycle and its invoice count excludes the current-month rows.
+- A company whose only invoices are current-month: the tile shows "—", not $0.
+- A `merged` invoice is excluded from both YTD figures.
+- Tenancy (Rule 1): both figures cover only the caller's company.
+
+## Definition of Done (attach proof — Rule 7)
+
+- [ ] `file:line` for both new KPI fields, the closed-cycle selection in both routes, and the deleted `computeAllBillableYtd`.
+- [ ] Grep proof that `computeAllBillableYtd` has no remaining callers and is removed.
+- [ ] Screenshot of the Accounting tab and the Pulse tab showing the same Work Booked YTD figure, plus Invoiced YTD beside it.
+- [ ] A stated before/after for this company: the old $546,855 against the new Invoiced YTD and Work Booked YTD, with the difference explained.
+- [ ] Test output for the invoiced-work-counted-once regression and the closed-cycle selection.
+- [ ] Tenancy test passing.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+
+- `artifacts/api-server/src/financial-pulse-math.ts` (`computeAllBillableYtd` :338, `getDistinctBillingCycles` :291, `computeBilledForCycle` :310, `isUnbilledWorkRow` :381)
+- `artifacts/api-server/src/routes/financial-pulse.ts` (`/kpis` YTD :649 and delta :737, cycle selection :622, pulse cycle :1585, pulse YTD :1692, in-flight :1617–1638)
+- `artifacts/irrigopro/src/pages/financial-pulse.tsx` (Billed YTD tile :1904, Billed Last Cycle tile :1861, Billed MTD tile :1843, Pulse YTD tile :760, tooltips :302–320)
+- `artifacts/api-server/src/routes/routes.ts` (`bill-separately` :7146, its `invoiceMonth` stamp :7240)
+- Tests: `financial-pulse.test.ts`, `financial-pulse-math.test.ts`, `financial-pulse-cycle-labels.test.tsx`, `financial-pulse-slice3.test.ts`

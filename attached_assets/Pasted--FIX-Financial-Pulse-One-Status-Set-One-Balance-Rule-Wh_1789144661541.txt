@@ -1,0 +1,103 @@
+# FIX — Financial Pulse: One Status Set, One Balance Rule
+
+**What & Why**
+The invoices page currently renders **two "Money Owed by Age" cards, stacked directly on top of each other, showing different numbers.** Captured 2026-09-11:
+
+| Bucket | Financial Pulse card (top) | Invoice list strip (below it) |
+|---|---|---|
+| Current | $58,972 · 28 invoices | $58,972.06 · 28 invoices |
+| 0–29 days overdue | **$21,874 · 10 invoices** | **$20,983.20 · 9 invoices** |
+| 30–59 days overdue | **$6,550 · 5 invoices** | **$6,553.87 · 4 invoices** |
+| 60+ days overdue | $7,780 · 4 invoices | $7,796.45 · 4 invoices |
+| **Total** | **$95,176** | **$94,305.58** |
+
+$870 and two invoices apart, in one screenshot. The Financial Pulse "Money Owed" tile reads $95,176, so a bookkeeper who clicks a bucket to chase the money lands on a list that totals something else.
+
+There are two causes, plus a duplicated card that makes both visible at once.
+
+## Current state (confirmed in code)
+
+**Different balance rules over the same invoices.**
+
+- Financial Pulse (`computeOutstandingAr` `financial-pulse-math.ts:233`, `computeArAging` `:569`) uses `inv.balance` **only when `paymentStatus === "partially_paid"`**. Otherwise it uses `totalAmount`.
+- The invoice list uses `resolveBalanceDue` (`lib/shared/src/invoice-aging.ts:244`), which uses `inv.balance` **whenever a payment sync has run and balance is non-null**, whatever the payment status.
+
+An invoice QuickBooks reports with a reduced balance but still flagged `unpaid` — a credit memo, a payment QBO has not reclassified — counts at full face value in Financial Pulse and at its real balance in the list. The invoice population is already identical (`isOpenAr` `invoice-list-routes.ts:497` selects exactly what `computeOutstandingAr` selects); only the money differs.
+
+**Two inline copies of the excluded-status list.** `INVOICE_EXCLUDED_STATUSES` (`financial-pulse-math.ts:195`) is `draft, cancelled, superseded, merged, failed`, and carries the comment "Extend this constant rather than duplicating the tuple." `computePulseCustomers` (`:1164`) and `computePulseTechnicians` (`:1236`) each re-declare it inline as `draft || cancelled || superseded` — **dropping `merged` and `failed`**. Merged invoices are the harmful case: their amounts already live on the surviving invoice (`storage.ts:7787`), so the Pulse tab counts them twice while the Accounting tab does not.
+
+**Buckets that cannot sum to the tile.** `computeArAging` skips any invoice whose `createdAt` will not parse (`:587`); `computeOutstandingAr` does not. Such a row is in the KPI and in no bucket. And for a partially-paid row with a non-positive balance, `computeOutstandingAr` adds nothing and counts nothing (`:243`) while aging adds zero but still increments `count` (`:596`) — so a bucket can report more invoices than its dollars represent. Both are visible above as the 10-vs-9 and 5-vs-4 count differences.
+
+## Slice 1 — One balance rule
+
+- Import `resolveBalanceDue` from `@workspace/shared` into `financial-pulse-math.ts` and use it for the amount in both `computeOutstandingAr` (`:233`) and `computeArAging` (`:569`). Delete the `paymentStatus === "partially_paid"` special case from both.
+- `InvoiceLike` gains `paymentSyncedAt`, which `resolveBalanceDue` needs via `isBalanceFallback` (`invoice-aging.ts:236`). Add it to the projection in `loadInvoicesForCustomers` (`financial-pulse.ts:222`).
+- The boundaries in `invoice-aging.ts` are frozen and this ticket does not touch them. It adopts them.
+
+## Slice 2 — One status set
+
+- `financial-pulse-math.ts:1164` and `:1236` — delete both inline tuples; call `INVOICE_EXCLUDED_STATUSES.has(inv.status)`. Pulse-tab per-customer and per-technician YTD figures will drop by the value of any merged or failed invoices, which is the fix.
+
+## Slice 3 — The buckets sum to the tile
+
+- `computeArAging` — stop skipping rows with an unparseable `createdAt`. `computeEffectiveDueDate` already falls back to payment terms; a row with no usable creation date lands in `days90` under the existing `NaN` rule (`invoice-aging.ts:129`), which is documented and deliberate. It must not vanish.
+- Only increment `count` when the row contributes a positive amount, so a bucket's count and its dollars describe the same set.
+- Add an assertion-style test, not a runtime check: for any fixture, the four bucket amounts sum to `computeOutstandingAr` to the cent.
+
+## Slice 4 — One aging card on the invoices page (Rule 3)
+
+The page has its own aging strip, which is filter-aware and drives the list below it. The Financial Pulse widget above it is a second, static copy of the same concept.
+
+- `invoices.tsx:2204` — remove `<FinancialPulseWidget variant="ar-aging" />`.
+- Delete the now-unused `ar-aging` variant from `financial-pulse-widget.tsx` (`ArAgingVariant` :580, its entry in `FinancialPulseVariant` and the union, and `AGING_TO_QUERY` :574). Rule 3: deprecated means removed, not labelled.
+- Keep the "View on Financial Pulse" affordance on the page's own strip so the route out of the list still exists.
+
+## Out of scope
+
+- The frozen aging boundaries and the day-zero rule in `lib/shared/src/invoice-aging.ts`.
+- `overdueSummary` in `billing-workspace-routes.ts`, which carries a third balance rule. It is deleted wholesale in the companion ticket (8 of 8).
+- Any change to which invoices count as open A/R. `isOpenAr` and `computeOutstandingAr` already agree and both stay.
+
+## Decisions
+
+- `resolveBalanceDue` is the single balance rule for every surface that reports money owed. (decided)
+- The invoices page keeps its own aging strip; the Financial Pulse widget copy is removed rather than reconciled. Two cards showing the same concept is the defect, even once the numbers match. (decided)
+
+## Done looks like
+
+- Financial Pulse "Money Owed", the "Money Owed by Age" card on Financial Pulse, and the invoice list's aging strip report the same dollars and the same invoice counts for the same company on the same day.
+- Clicking a bucket lands on a list whose total matches the bucket.
+- The four buckets sum to the Money Owed tile, to the cent.
+- Merged and failed invoices are excluded on the Pulse tab exactly as they are on the Accounting tab.
+- The invoices page shows one aging card.
+
+## Tests
+
+- An invoice with `paymentStatus: "unpaid"`, `balance` 800, `totalAmount` 1000, `paymentSyncedAt` set: A/R counts 800. Before this fix it counted 1000 — this is the regression test for the $870 gap.
+- An invoice with no `paymentSyncedAt`: counts `totalAmount`, and the invoice list agrees.
+- A partially-paid invoice with `balance` null: counts `totalAmount` on both surfaces.
+- Bucket-sum invariant: over a mixed fixture, the four `computeArAging` amounts sum exactly to `computeOutstandingAr`.
+- A row with a non-positive balance increments neither count nor amount.
+- A `merged` invoice is excluded from `computePulseCustomers` and `computePulseTechnicians`; a `failed` one likewise (regression — both were counted).
+- Cross-surface: the same fixture through `/api/financial-pulse/ar-aging` and `/api/invoices/aging-summary` returns matching bucket totals and counts.
+- Tenancy (Rule 1): buckets contain only the caller's company; a company B invoice never appears for a company A caller.
+
+## Definition of Done (attach proof — Rule 7)
+
+- [ ] `file:line` for the `resolveBalanceDue` adoption in both helpers and the two deleted inline status tuples.
+- [ ] Grep proof that no financial rollup re-declares an excluded-status list, and that `financial-pulse-math.ts` contains no `partially_paid` balance branch.
+- [ ] Screenshot of the invoices page showing **one** aging card whose totals match the Financial Pulse card, side by side with a Financial Pulse screenshot from the same minute.
+- [ ] Test output for the unpaid-with-synced-balance regression and the bucket-sum invariant.
+- [ ] Grep proof that `variant="ar-aging"` has no remaining usages and the variant is deleted.
+- [ ] Tenancy test passing.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+
+- `artifacts/api-server/src/financial-pulse-math.ts` (`computeOutstandingAr` :233, `computeArAging` :569, inline tuples :1164 and :1236, constant :195)
+- `lib/shared/src/invoice-aging.ts` (`resolveBalanceDue` :244, `isBalanceFallback` :236, boundaries :129)
+- `artifacts/api-server/src/routes/financial-pulse.ts` (invoice projection :222, `/ar-aging` :1199)
+- `artifacts/api-server/src/routes/invoice-list-routes.ts` (`isOpenAr` :497, `summarizeAging` :691)
+- `artifacts/irrigopro/src/pages/invoices.tsx` (duplicate widget :2204)
+- `artifacts/irrigopro/src/components/financial-pulse/financial-pulse-widget.tsx` (`ArAgingVariant` :580, `AGING_TO_QUERY` :574)
+- Tests: `financial-pulse-math.test.ts`, `financial-pulse-cross-surface.test.ts`, `invoice-list-routes.test.ts`
