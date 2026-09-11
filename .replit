@@ -625,12 +625,12 @@ isValidation = true
 name = "bulk-budget-goals-backend"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/shared exec node --import tsx --test --test-reporter=spec src/budget-goal.test.ts && pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/lib/budget-goal-bulk.test.ts src/routes/budget-goal-bulk-apply.test.ts src/routes/budget-goal-role-guard.test.ts src/seasonal-budget.test.ts src/routes/auth-middleware-coverage.test.ts"
-
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/shared exec node --import tsx --test --test-reporter=spec src/budget-goal.test.ts src/budget-status.test.ts && pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/budget-status.test.ts src/lib/budget-goal-bulk.test.ts src/routes/budget-goal-bulk-apply.test.ts src/routes/budget-goal-role-guard.test.ts src/seasonal-budget.test.ts src/routes/auth-middleware-coverage.test.ts"
 
 [[workflows.workflow]]
 name = "bulk-budget-goals-frontend"

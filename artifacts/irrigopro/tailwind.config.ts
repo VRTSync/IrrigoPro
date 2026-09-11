@@ -37,9 +37,33 @@ export default {
           DEFAULT: "hsl(var(--accent))",
           foreground: "hsl(var(--accent-foreground))",
         },
+        // Task #2008 — semantic status colours. `--success` and `--warning`
+        // were already defined in index.css but never registered here, so
+        // `bg-success` and `text-warning` silently generated nothing at all.
+        // Registering them makes the semantic vocabulary real; nothing is
+        // re-pointed onto it in this change.
+        //
+        // `ink` is the readable text tone for a status — dark enough in light
+        // mode to sit on its own `/10` tint at the same contrast as the
+        // hardcoded `text-green-800` / `text-amber-800` / `text-red-800` pills
+        // it will eventually replace, and light enough in dark mode to do the
+        // same on a dark card. Opacity modifiers (`bg-success/10`) resolve
+        // against these `hsl(var(--x))` values the same way they already do
+        // for every other token above.
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
+          ink: "hsl(var(--destructive-ink))",
+        },
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          foreground: "hsl(var(--success-foreground))",
+          ink: "hsl(var(--success-ink))",
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
+          ink: "hsl(var(--warning-ink))",
         },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

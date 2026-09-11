@@ -4,8 +4,17 @@
 // the future alert-firing path (Slice 2). Kept side-effect free so unit
 // tests can exercise the threshold math without HTTP or a DB.
 
+// Task #2008 — the classifier and the BudgetStatus union now live in
+// lib/shared/src/budget-status.ts so the API server, Financial Pulse, the
+// BudgetBar component and the customer form's live preview all bucket a
+// customer identically. Re-exported here so existing importers of this module
+// keep working. NOTE the unit convention: `classifyBudgetPercent` takes
+// spend / cap as a RATIO and thresholds as 0-to-100 percentages.
+import { classifyBudgetPercent, type BudgetStatus } from "@workspace/shared";
+export { classifyBudgetPercent } from "@workspace/shared";
+export type { BudgetStatus } from "@workspace/shared";
+
 export type BudgetPeriod = "monthly" | "annual";
-export type BudgetStatus = "unset" | "healthy" | "approaching" | "over";
 
 export interface BudgetPeriodUsage {
   /** The cap for this period, or null when the user hasn't set one. */
@@ -21,29 +30,6 @@ export interface BudgetPeriodUsage {
   status: BudgetStatus;
   /** Bucket key — 'YYYY-MM' for monthly, 'YYYY' for annual. */
   periodKey: string;
-}
-
-/**
- * Map (percent, soft, hard) to the four-state status bucket.
- *
- * Boundary semantics matter for alerts later:
- *   - `percent < soft`              → healthy
- *   - `soft <= percent < hard`      → approaching
- *   - `percent >= hard`             → over
- *
- * That is, hitting the soft threshold exactly enters `approaching`, and
- * hitting the hard threshold exactly enters `over`. This matches the
- * common-sense reading of "we've reached 100% of cap" → over.
- */
-export function classifyBudgetPercent(
-  percent: number,
-  softPercent: number,
-  hardPercent: number,
-): Exclude<BudgetStatus, "unset"> {
-  const pctOfCap = percent * 100;
-  if (pctOfCap >= hardPercent) return "over";
-  if (pctOfCap >= softPercent) return "approaching";
-  return "healthy";
 }
 
 export function computePeriodUsage(

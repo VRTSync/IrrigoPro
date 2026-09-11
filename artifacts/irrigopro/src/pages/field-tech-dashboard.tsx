@@ -11,9 +11,12 @@ import type { WorkOrder } from "@workspace/db/schema";
 import { Link } from "wouter";
 import { BilledBadge } from "@/components/ui/billed-indicator";
 import { BillingSheetWizard } from "@/components/billing/billing-sheet-wizard";
-import { BudgetBar, type BudgetStatus } from "@/components/budget/BudgetBar";
+import { BudgetBar } from "@/components/budget/BudgetBar";
+// Task #2008 — BudgetStatus now lives in the shared library alongside the one
+// budget classifier, not on the BudgetBar component.
+import type { BudgetStatus } from "@workspace/shared";
 
-/** Map the server's string status to the BudgetBar's BudgetStatus enum. */
+/** Map the server's string status to the shared BudgetStatus enum. */
 function serverStatusToBudgetStatus(s: "Go" | "Slow down" | "Stop" | "Unset"): BudgetStatus {
   switch (s) {
     case "Go":        return "healthy";

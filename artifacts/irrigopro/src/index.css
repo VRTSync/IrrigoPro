@@ -58,6 +58,16 @@
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 100%;
 
+  /* Task #2008 — "ink" is the readable text tone for a status, sized to sit
+     on that status' own /10 tint. Lightness picked to match the contrast the
+     hardcoded pills achieve today, so swapping them over is imperceptible:
+       text-green-800 on bg-green-100 = 6.49:1  →  --success-ink     6.48:1
+       text-amber-800 on bg-amber-100 = 6.37:1  →  --warning-ink     6.43:1
+       text-red-800   on bg-red-100   = 6.80:1  →  --destructive-ink 6.85:1 */
+  --success-ink: 89 60% 24%;
+  --warning-ink: 38 85% 26%;
+  --destructive-ink: 0 70% 37%;
+
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
@@ -85,6 +95,18 @@
   --accent-foreground: 222 47% 6%;
   --destructive: 0 62% 50%;
   --destructive-foreground: 0 0% 100%;
+  /* Task #2008 — success and warning previously inherited their light-mode
+     values here, which is why they read as flat, over-bright fills on a dark
+     card. Given dark-appropriate values the same way --destructive already
+     is, with a dark foreground because both fills are light. The ink tones
+     invert: light text on the status' own /10 tint over the dark card. */
+  --success: 89 45% 50%;
+  --success-foreground: 222 47% 6%;
+  --warning: 38 85% 55%;
+  --warning-foreground: 222 47% 6%;
+  --success-ink: 89 55% 70%;
+  --warning-ink: 38 85% 70%;
+  --destructive-ink: 0 80% 75%;
   --border: 217 33% 17%;
   --input: 217 33% 17%;
   --ring: 201 70% 70%;

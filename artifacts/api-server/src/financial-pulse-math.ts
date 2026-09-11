@@ -12,9 +12,11 @@ import {
   AGING_BUCKET_LABELS,
   agingBucketRank,
   classifyAgingBucket,
+  classifyBudgetPercent,
   computeEffectiveDueDate,
   daysOverdue,
   type AgingBucketKey,
+  type BudgetStatus,
 } from "@workspace/shared";
 
 export interface InvoiceLike {
@@ -607,19 +609,13 @@ export interface BudgetFields {
   budgetHardThresholdPercent?: number | null;
 }
 
-export type BudgetStatus = "unset" | "healthy" | "approaching" | "over";
-
-export function classifyStatus(
-  percent: number | null,
-  soft: number,
-  hard: number,
-): BudgetStatus {
-  if (percent == null) return "unset";
-  const p = percent * 100;
-  if (p >= hard) return "over";
-  if (p >= soft) return "approaching";
-  return "healthy";
-}
+// Task #2008 — the budget classifier and the BudgetStatus union live in
+// lib/shared/src/budget-status.ts (imported at the top of this file). The
+// local copies that used to sit here are gone; re-exported so existing
+// importers of this module keep working. `classifyBudgetPercent` takes
+// spend / cap as a RATIO (null when there is no usable cap) and thresholds as
+// 0-to-100 percentages — the same convention the deleted local copy used.
+export type { BudgetStatus } from "@workspace/shared";
 
 export interface TopCustomerRow {
   customerId: number;
@@ -730,11 +726,11 @@ export function computeTopCustomers(input: {
       monthlyCap: mCap,
       monthlySpend: monthSpend,
       monthlyUsedPct: mPct,
-      monthlyStatus: classifyStatus(mPct, soft, hard),
+      monthlyStatus: classifyBudgetPercent(mPct, soft, hard),
       annualCap: aCap,
       annualSpend: yearSpend,
       annualUsedPct: aPct,
-      annualStatus: classifyStatus(aPct, soft, hard),
+      annualStatus: classifyBudgetPercent(aPct, soft, hard),
       avgDaysToPay:
         r && r.payDays.n > 0 ? r.payDays.sum / r.payDays.n : null,
       lastInvoiceAt: r?.lastInvoiceAt ? r.lastInvoiceAt.toISOString() : null,
@@ -1201,7 +1197,7 @@ export function computePulseCustomers(input: {
       name: c.name ?? `Customer #${c.id}`,
       inFlight: inFlightByCust.get(c.id) ?? 0,
       ytd: ytdByCust.get(c.id) ?? 0,
-      budgetStatus: classifyStatus(mPct, soft, hard),
+      budgetStatus: classifyBudgetPercent(mPct, soft, hard),
       monthlyCap: capN,
       monthlySpend,
     });

@@ -19,8 +19,11 @@
 // opacity, not just hue.
 
 import { cn } from "@/lib/utils";
-
-export type BudgetStatus = "healthy" | "approaching" | "over" | "unset";
+// Task #2008 — one budget classifier for every surface. It takes spend / cap
+// as a RATIO (null when there is no usable allocation) and thresholds as
+// 0-to-100 percentages, so this component classifies the underlying ratio
+// rather than the 0-to-100 `rawPercent` it uses for the track width.
+import { classifyBudgetPercent, type BudgetStatus } from "@workspace/shared";
 
 export interface BudgetBarProps {
   /** Invoiced (billed) portion of the monthly spend. */
@@ -47,17 +50,6 @@ export interface BudgetBarProps {
   hideDollars?: boolean;
   /** Extra CSS on the outermost wrapper. */
   className?: string;
-}
-
-function classifyStatus(
-  fillPercent: number | null,
-  soft: number,
-  hard: number,
-): BudgetStatus {
-  if (fillPercent === null) return "unset";
-  if (fillPercent >= hard) return "over";
-  if (fillPercent >= soft) return "approaching";
-  return "healthy";
 }
 
 const STATUS_PILL_CLASSES: Record<BudgetStatus, string> = {
@@ -113,10 +105,15 @@ export function BudgetBar({
   // fillPercent: null when unset; clamped at 100% for display purposes only.
   // The true (unclamped) value drives the pill label.
   let rawPercent: number | null = null;
+  // usageRatio is the same quantity in the shared classifier's unit:
+  // spend / allocation, where 1 === 100% of cap. rawPercent is that ratio
+  // scaled to 0-to-100 for the track and the pill text.
+  let usageRatio: number | null = null;
   let invoicedPct = 0;
   let pendingPct = 0;
   if (allocation !== null && allocation > 0) {
-    rawPercent = (totalSpend / allocation) * 100;
+    usageRatio = totalSpend / allocation;
+    rawPercent = usageRatio * 100;
     const clampedTotal = Math.min(totalSpend, allocation);
     invoicedPct = Math.min((invoicedAmount / allocation) * 100, 100);
     // Pending fills up to the cap; cannot push total beyond track width.
@@ -127,7 +124,9 @@ export function BudgetBar({
   // forcedStatus overrides the locally-computed status. The crew view uses
   // this to pass the server-derived status (which reflects each customer's
   // custom soft/hard thresholds) without re-deriving it at 75/100% defaults.
-  const status = forcedStatus ?? classifyStatus(rawPercent, softThresholdPercent, hardThresholdPercent);
+  const status =
+    forcedStatus ??
+    classifyBudgetPercent(usageRatio, softThresholdPercent, hardThresholdPercent);
 
   // Build pill label: for "over", show clamped percentage.
   let pillLabel = STATUS_LABEL[status];

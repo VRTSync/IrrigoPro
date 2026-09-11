@@ -46,3 +46,4 @@
 - [Preset seed reconcile contract](preset-seed-reconcile-contract.md) — a source-file-owned seed must correct drifted rows on re-run, never write the retired/active column.
 - [Work type selection vs resolution](work-type-selection-vs-resolution.md) — retired presets must still resolve rule+label everywhere; only selection and the fail-open count read active rows.
 - [Radix Select blank trigger](radix-select-sentinel-blank-trigger.md) — a sentinel value with no rendered item shows neither value nor placeholder; unseeded tenant option lists read as "won't open".
+- [A colour token is two halves](tailwind-token-proof.md) — a CSS variable with no Tailwind `colors` entry compiles to nothing; register both halves and prove the class generates.

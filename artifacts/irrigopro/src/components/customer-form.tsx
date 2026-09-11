@@ -21,7 +21,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { insertCustomerSchema } from "@workspace/db/schema";
 import type { Customer, User } from "@workspace/db/schema";
 import { composeStructuredAddress } from "@/lib/customer-address";
-import { parseBudgetGoalInput } from "@workspace/shared";
+import { parseBudgetGoalInput, classifyBudgetPercent, type BudgetStatus } from "@workspace/shared";
 
 const moneyOrBlank = z
   .string()
@@ -853,8 +853,6 @@ interface BudgetSectionProps {
   customer?: Customer;
 }
 
-type BudgetStatus = "unset" | "healthy" | "approaching" | "over";
-
 interface BudgetUsageResponse {
   customerId: number;
   softThresholdPercent: number;
@@ -1310,20 +1308,24 @@ function LiveBudgetPreview({ customer, form }: { customer: Customer; form: Budge
     );
   }
 
-  const previewStatus = (capNum: number | null, spend: number) => {
-    if (capNum == null || capNum <= 0) return { status: "unset" as const, percent: null };
-    const pct = spend / capNum;
+  // Classifies the values the user is typing right now, client-side, against
+  // the shared rule (Task #2008). `classifyBudgetPercent` wants spend / cap as
+  // a RATIO — which is exactly what `percent` is here — and the thresholds as
+  // 0-to-100 percentages, so no conversion is needed at this call site.
+  const previewBucket = (
+    capNum: number | null,
+    spend: number,
+  ): { status: BudgetStatus; percent: number | null } => {
+    const percent = capNum == null || capNum <= 0 ? null : spend / capNum;
     const soft = Number(softPct) || 75;
     const hard = Number(hardPct) || 100;
-    if (pct * 100 >= hard) return { status: "over" as const, percent: pct };
-    if (pct * 100 >= soft) return { status: "approaching" as const, percent: pct };
-    return { status: "healthy" as const, percent: pct };
+    return { status: classifyBudgetPercent(percent, soft, hard), percent };
   };
 
   const monthlyCap = data.monthlyAllocation ?? data.monthlyCap;
   const annualCap = parseBudgetGoalInput(annualGoal) ?? data.annualGoal ?? data.annualCap;
-  const monthly = previewStatus(monthlyCap, data.monthlySpend);
-  const annual = previewStatus(annualCap, data.annualSpend);
+  const monthly = previewBucket(monthlyCap, data.monthlySpend);
+  const annual = previewBucket(annualCap, data.annualSpend);
 
   return (
     <div className="space-y-2" data-testid="budget-preview">
