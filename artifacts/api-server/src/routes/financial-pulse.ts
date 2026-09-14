@@ -667,9 +667,6 @@ export function registerFinancialPulseRoutes(
         const outstandingAr = computeOutstandingAr(allInvoices);
         const avgDaysToPay = computeAvgDaysToPay(allInvoices, now);
 
-        // Task #726 — unbilledExposure must be computed BEFORE projectedMonthEnd
-        // because projection now uses the unbilled pipeline as the forecast base
-        // instead of billedMtd run-rate.
         // Task #1898 — derived from allWos/allBss/allWcbs, which were just
         // loaded above for the same customer scope. This used to be four more
         // queries against the same three tables.
@@ -680,10 +677,10 @@ export function registerFinancialPulseRoutes(
           allWcbs,
         );
 
-        // Task #726 — Tile 4: Projected Month-End now uses unbilled pipeline
-        // (uninvoiced work ÷ days elapsed × days in month) rather than billed
-        // invoice run-rate.
-        const projectedMonthEnd = computeProjectedMonthEnd(unbilledExposure, now);
+        // Tile 4: Projected Month-End — billed MTD ÷ days elapsed × days in
+        // month. Identical call to the one /projections makes, so the tile and
+        // the Month-End Projection card cannot drift apart.
+        const projectedMonthEnd = computeProjectedMonthEnd(billedMtd, now);
 
         // Gross margin scope follows the period selector.
         const marginWindow = period === "ytd" ? ytd : mtd;

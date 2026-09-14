@@ -597,22 +597,12 @@ describe("Task #726 — Unbilled Pipeline includes all uninvoiced statuses excep
   });
 });
 
-// Task #726 — regression: Projected Month-End uses unbilled pipeline, not billed MTD
-describe("Task #726 — Projected Month-End uses unbilled pipeline as base", () => {
-  it("projection formula uses the provided pipeline base, not a billed invoice amount", () => {
-    // May 20, 2026: 20 days elapsed, 31 days in month
-    const now = new Date(2026, 4, 20);
-    const unbilledPipeline = 2000;
-    const billedMtd = 5000;
-    const projFromPipeline = computeProjectedMonthEnd(unbilledPipeline, now);
-    const projFromBilled = computeProjectedMonthEnd(billedMtd, now);
-    // Both use the same formula — difference is the base passed in.
-    assert.equal(Math.round(projFromPipeline), Math.round((2000 / 20) * 31)); // 3100
-    assert.equal(Math.round(projFromBilled), Math.round((5000 / 20) * 31));   // 7750
-    // Confirm they differ — the tile should use unbilledPipeline, not billedMtd.
-    assert.notEqual(Math.round(projFromPipeline), Math.round(projFromBilled));
-  });
-});
+// The "Projected Month-End uses unbilled pipeline as base" regression that
+// used to live here encoded a defect: it asserted the tile projected from the
+// uninvoiced pipeline while the Month-End Projection card projected from
+// billed MTD, so the same figure appeared twice on one screen ~2x apart. The
+// surviving contract — the projection base is billed-to-date — is proven in
+// financial-pulse-one-projection.test.ts.
 
 // Sanity: yet-to-be-used helper exports stay importable.
 void getPrevMonthWindow;

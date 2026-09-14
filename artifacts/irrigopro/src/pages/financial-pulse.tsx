@@ -313,7 +313,7 @@ export const INFO_TIPS = {
   unbilledExposure:
     "Work orders + billing sheets with no invoice yet, regardless of status (except cancelled) · excludes customers hidden from billing.",
   projectedMonthEnd:
-    "Work Not Yet Billed ÷ days elapsed × days in month — forecast based on current uninvoiced work.",
+    "Billed month-to-date ÷ days elapsed × days in month — assumes the rest of the month bills at the same daily pace as the days so far.",
   avgDaysToPay:
     "Average (paidAt − createdAt) across invoices paid in the last 90 days. Requires QuickBooks payment sync.",
   grossMargin:
@@ -1899,6 +1899,7 @@ function KpiBand({
         label="Projected by Month-End"
         value={data?.projectedMonthEnd.value ?? null}
         format="currency"
+        windowBadge="MTD"
         helper="Run-rate projection"
         deltaGoodDirection="up"
         isLoading={isLoading}

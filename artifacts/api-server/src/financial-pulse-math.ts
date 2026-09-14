@@ -271,8 +271,12 @@ export function computeAvgDaysToPay(
   return n === 0 ? null : total / n;
 }
 
+// Month-end run-rate projection: billed month-to-date extrapolated at the
+// current daily pace. `billedToDate` is always a billed figure — never the
+// uninvoiced pipeline, which is a point-in-time balance and cannot be
+// extrapolated by the day of the month.
 export function computeProjectedMonthEnd(
-  pipelineBase: number,
+  billedToDate: number,
   now: Date,
 ): number {
   const day = now.getDate();
@@ -281,8 +285,7 @@ export function computeProjectedMonthEnd(
     now.getMonth() + 1,
     0,
   ).getDate();
-  if (day <= 0) return pipelineBase;
-  return (pipelineBase / day) * daysInMonth;
+  return (billedToDate / day) * daysInMonth;
 }
 
 // Task #726 — Tile 1: Billed Last Cycle.
