@@ -46,6 +46,7 @@ import {
 
 import { db } from "../db";
 import {
+  checkEstimateBranchGate,
   processEstimatePayload,
   resolveCreateLaborRate,
   resolvePutLaborRate,
@@ -58,7 +59,10 @@ import {
   type LifecycleAuditOpts,
 } from "./audit-log";
 import { paginate } from "./pagination";
-import { ESTIMATE_PENDING_DELETE_ROLES } from "./estimate-role-guards";
+import {
+  ESTIMATE_PENDING_DELETE_ROLES,
+  requireEstimateBranchForSend,
+} from "./estimate-role-guards";
 import { UnapproveEstimateConflictError } from "../storage";
 import { deriveLifecycleForWrite } from "@workspace/shared";
 
@@ -324,6 +328,36 @@ export function registerEstimateRoutes(
   const recordLifecycleAudit =
     deps.recordLifecycleAudit ?? (async () => {});
   const recordAuditEvent = deps.recordAuditEvent ?? defaultRecordAuditEvent;
+  // Task #2010 — branch gate for every authenticated door that sends an
+  // estimate to the customer or pushes it forward into a work order.
+  // Imported from the canonical role-guards module — NOT re-implemented
+  // beside the local duplicate approval guard in this file (consolidating
+  // that duplication is a separate task). Always registered AFTER the
+  // approval access guard so an unauthorised caller gets 403, not a 400
+  // that would leak whether the estimate has a branch.
+  const requireBranchForSend = requireEstimateBranchForSend(storage);
+
+  // Task #2010 — `resend` carries no approval-access guard (that question is
+  // deliberately left open; see the follow-up task). It does its own inline
+  // role check, but as a *handler* statement that check ran after the branch
+  // middleware, so an unauthorised same-company user got a branch-state
+  // dependent 400 instead of the 403 they used to get. Guard ordering is a
+  // security property: lift the identical role set into a middleware that
+  // runs before the branch gate. Deliberately NOT the shared approval guard
+  // and deliberately not widened — same three roles as the inline check it
+  // replaces. Params stay loose so this cannot re-type the route's own.
+  const requireResendRole = (req: any, res: any, next: any) => {
+    const role = req.authenticatedUserRole;
+    const canResend =
+      role === "irrigation_manager" || role === "company_admin" || role === "super_admin";
+    if (!canResend) {
+      res.status(403).json({
+        message: "Access denied. Resending requires irrigation manager or admin role.",
+      });
+      return;
+    }
+    next();
+  };
   // processEstimatePayload is shared with the Wet Check conversion engine
   // (server/storage.ts → convertWetCheck) so both code paths compute prices
   // and totals identically. See server/estimate-payload.ts for details.
@@ -513,8 +547,27 @@ export function registerEstimateRoutes(
       const customerId = (parsed.estimate as { customerId?: number | null }).customerId ?? null;
       if (customerId != null) {
         const customer = await storage.getCustomer(customerId);
-        if (!customer) {
+        // Task #2010 — `getCustomer` is global, so without this an estimate
+        // could be created against another tenant's customer, and the branch
+        // gate below would leak whether that customer has branches. Collapse
+        // "foreign" into the same 400 as "missing" so neither is probeable.
+        if (!customer || !estimateOwnershipMatches(req, customer.companyId)) {
           res.status(400).json({ message: `Customer ${customerId} not found` });
+          return;
+        }
+        // Task #2010 — capture-at-the-source: a multi-branch customer's
+        // estimate must name its branch. Unconditional, drafts included —
+        // "Save as draft" is only reachable from the wizard's final step,
+        // which sits behind the step-1 branch gate, so no legitimate draft
+        // save can be blocked, and exempting drafts would leave a writable
+        // path that still produces branch-less estimates.
+        const branchGateError = checkEstimateBranchGate(
+          customer.branches,
+          (parsed.estimate as { branchName?: string | null }).branchName,
+          "in_wizard",
+        );
+        if (branchGateError) {
+          res.status(400).json({ message: branchGateError });
           return;
         }
         const masterRate = resolveCreateLaborRate(customer.laborRate);
@@ -583,6 +636,16 @@ export function registerEstimateRoutes(
         res.status(404).json({ message: "Estimate not found" });
         return null;
       }
+      // Task #2010 — cross-company ownership. This shared handler backs both
+      // PUT /api/estimates/:id and POST /:id/submit-for-review, and neither
+      // checked ownership: a company-A user who knew a company-B estimate id
+      // could rewrite that row. Answer 404 (never 403) so the response cannot
+      // be used to probe for existence, and check it before the draft-state
+      // 409 below so a cross-tenant caller cannot distinguish states either.
+      if (!estimateOwnershipMatches(req, existing.companyId)) {
+        res.status(404).json({ message: "Estimate not found" });
+        return null;
+      }
       // Submit-for-review only makes sense for a draft. Bouncing any
       // other internal status with a 409 keeps the manager/admin lists
       // honest: we never re-flip an already-reviewed estimate back to
@@ -597,13 +660,25 @@ export function registerEstimateRoutes(
       }
       const newCustomerId = (parsed.estimate as { customerId?: number | null }).customerId ?? null;
       const customerChanged = newCustomerId != null && newCustomerId !== existing.customerId;
+      // Task #2010 — the branch gate is judged against the *effective*
+      // customer and the *effective* branch: an update that omits
+      // `branchName` keeps whatever is already on the row, so a plain
+      // content edit of a branched estimate is not blocked, while a legacy
+      // branch-less row for a multi-branch customer 400s on its next save.
+      let effectiveCustomer: Customer | undefined;
       let resolvedRate: string;
       if (customerChanged) {
         const customer = await storage.getCustomer(newCustomerId!);
-        if (!customer) {
+        // Task #2010 — `getCustomer` is not company-scoped, so an estimate
+        // must not be repointed at another tenant's customer. Answer with the
+        // same "not found" as a genuinely missing id: distinguishing the two
+        // would turn the branch gate into an oracle for whether a foreign
+        // customer exists and whether it has branches configured.
+        if (!customer || !estimateOwnershipMatches(req, customer.companyId)) {
           res.status(400).json({ message: `Customer ${newCustomerId} not found` });
           return null;
         }
+        effectiveCustomer = customer;
         resolvedRate = resolvePutLaborRate({
           customerChanged: true,
           newCustomerLaborRate: customer.laborRate,
@@ -622,6 +697,28 @@ export function registerEstimateRoutes(
           existingAppliedLaborRate: existing.appliedLaborRate,
           existingLaborRate: existing.laborRate,
         });
+        // Only query here — on the customer-changed branch the record is
+        // already in hand above and must not be fetched twice.
+        effectiveCustomer =
+          existing.customerId != null
+            ? await storage.getCustomer(existing.customerId)
+            : undefined;
+      }
+      {
+        const incomingBranch = (parsed.estimate as { branchName?: string | null }).branchName;
+        const effectiveBranch =
+          incomingBranch === undefined
+            ? ((existing as unknown as { branchName?: string | null }).branchName ?? null)
+            : incomingBranch;
+        const branchGateError = checkEstimateBranchGate(
+          effectiveCustomer?.branches,
+          effectiveBranch,
+          "in_wizard",
+        );
+        if (branchGateError) {
+          res.status(400).json({ message: branchGateError });
+          return null;
+        }
       }
       (parsed.estimate as { laborRate: string }).laborRate = resolvedRate;
       (parsed.estimate as { appliedLaborRate?: string | null }).appliedLaborRate = resolvedRate;
@@ -927,6 +1024,7 @@ export function registerEstimateRoutes(
     "/api/estimates/:id/email",
     requireAuthentication,
     requireEstimateApprovalAccess,
+    requireBranchForSend,
     async (req: any, res) => {
       try {
         const id = parseInt(String(req.params.id));
@@ -1025,6 +1123,7 @@ export function registerEstimateRoutes(
     "/api/estimates/:id/approve",
     requireAuthentication,
     requireEstimateApprovalAccess,
+    requireBranchForSend,
     async (req: any, res) => {
       try {
         const id = parseInt(String(req.params.id));
@@ -1323,6 +1422,7 @@ export function registerEstimateRoutes(
     "/api/estimates/:id/internal-approve",
     requireAuthentication,
     requireEstimateApprovalAccess,
+    requireBranchForSend,
     async (req: any, res) => {
       try {
         const id = parseInt(String(req.params.id));
@@ -1378,6 +1478,7 @@ export function registerEstimateRoutes(
     "/api/estimates/:id/approve",
     requireAuthentication,
     requireEstimateApprovalAccess,
+    requireBranchForSend,
     async (req: any, res) => {
       try {
         const id = parseInt(String(req.params.id));
@@ -1631,6 +1732,8 @@ export function registerEstimateRoutes(
       customerEmail: estimateWithItems.customerEmail,
       projectName: estimateWithItems.projectName,
       projectAddress: estimateWithItems.projectAddress || undefined,
+      // Task #2010 — branch location on the approval email.
+      branchName: (estimateWithItems as unknown as { branchName?: string | null }).branchName ?? null,
       workLocationLat: estimateWithItems.workLocationLat ?? null,
       workLocationLng: estimateWithItems.workLocationLng ?? null,
       workLocationAddress: estimateWithItems.workLocationAddress ?? null,
@@ -1735,6 +1838,7 @@ export function registerEstimateRoutes(
     "/api/estimates/:id/send-approval-email",
     requireAuthentication,
     requireEstimateApprovalAccess,
+    requireBranchForSend,
     async (req: any, res) => {
       try {
         const id = parseInt(String(req.params.id));
@@ -1804,89 +1908,89 @@ export function registerEstimateRoutes(
   // resent; the underlying flow resets `estimateDate`, mints a new
   // approval token, and sends the customer email through the shared
   // `_sendEstimateApprovalEmailFlow` helper.
-  app.post("/api/estimates/:id/resend", requireAuthentication, async (req: any, res) => {
-    try {
-      const id = parseInt(String(req.params.id));
-      if (isNaN(id) || id <= 0) {
-        res.status(400).json({ message: "Invalid estimate ID" });
-        return;
-      }
-      const estimate = await storage.getEstimate(id);
-      if (!estimate) {
-        res.status(404).json({ message: "Estimate not found" });
-        return;
-      }
-      if (!estimateOwnershipMatches(req, estimate.companyId)) {
-        res.status(404).json({ message: "Estimate not found" });
-        return;
-      }
-      const role = req.authenticatedUserRole;
-      const canResend =
-        role === "irrigation_manager" || role === "company_admin" || role === "super_admin";
-      if (!canResend) {
-        res.status(403).json({
-          message: "Access denied. Resending requires irrigation manager or admin role.",
-        });
-        return;
-      }
-      // Task #365 — widen to also allow `sent` (awaiting customer reply)
-      // so managers can re-deliver the approval email without needing
-      // to wait for the estimate to expire first. Draft / approved /
-      // rejected / converted estimates are still rejected.
-      const lc = estimate.lifecycleStatus;
-      const isExpiredResend = lc === "expired";
-      const isSentRedelivery = lc === "sent";
-      if (!isExpiredResend && !isSentRedelivery) {
-        const stateLabel = lc ?? estimate.internalStatus ?? "unknown";
-        res.status(400).json({
-          message: `Cannot resend a ${stateLabel} estimate. Only sent or expired estimates may be resent.`,
-        });
-        return;
-      }
-      const body = (req.body ?? {}) as Record<string, unknown>;
-      const overrideTo =
-        typeof body.to === "string" ? body.to.trim() || undefined : undefined;
-      const overrideCc = Array.isArray(body.cc)
-        ? (body.cc as unknown[]).filter((s): s is string => typeof s === "string")
-        : [];
-      const overrideBcc = Array.isArray(body.bcc)
-        ? (body.bcc as unknown[]).filter((s): s is string => typeof s === "string")
-        : [];
-      const overrideNote =
-        typeof body.note === "string" ? body.note.trim() || undefined : undefined;
+  app.post(
+    "/api/estimates/:id/resend",
+    requireAuthentication,
+    requireResendRole,
+    requireBranchForSend,
+    async (req: any, res) => {
+      try {
+        const id = parseInt(String(req.params.id));
+        if (isNaN(id) || id <= 0) {
+          res.status(400).json({ message: "Invalid estimate ID" });
+          return;
+        }
+        const estimate = await storage.getEstimate(id);
+        if (!estimate) {
+          res.status(404).json({ message: "Estimate not found" });
+          return;
+        }
+        if (!estimateOwnershipMatches(req, estimate.companyId)) {
+          res.status(404).json({ message: "Estimate not found" });
+          return;
+        }
+        // Role is enforced by `requireResendRole` ahead of the branch guard
+        // (Task #2010) — same three roles, just hoisted so an unauthorised
+        // caller gets 403 before any branch state is evaluated.
+        // Task #365 — widen to also allow `sent` (awaiting customer reply)
+        // so managers can re-deliver the approval email without needing
+        // to wait for the estimate to expire first. Draft / approved /
+        // rejected / converted estimates are still rejected.
+        const lc = estimate.lifecycleStatus;
+        const isExpiredResend = lc === "expired";
+        const isSentRedelivery = lc === "sent";
+        if (!isExpiredResend && !isSentRedelivery) {
+          const stateLabel = lc ?? estimate.internalStatus ?? "unknown";
+          res.status(400).json({
+            message: `Cannot resend a ${stateLabel} estimate. Only sent or expired estimates may be resent.`,
+          });
+          return;
+        }
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const overrideTo =
+          typeof body.to === "string" ? body.to.trim() || undefined : undefined;
+        const overrideCc = Array.isArray(body.cc)
+          ? (body.cc as unknown[]).filter((s): s is string => typeof s === "string")
+          : [];
+        const overrideBcc = Array.isArray(body.bcc)
+          ? (body.bcc as unknown[]).filter((s): s is string => typeof s === "string")
+          : [];
+        const overrideNote =
+          typeof body.note === "string" ? body.note.trim() || undefined : undefined;
 
-      await _sendEstimateApprovalEmailFlow(id, {
-        resetEstimateDate: isExpiredResend,
-        isSentRedelivery,
-        to: overrideTo,
-        cc: overrideCc,
-        bcc: overrideBcc,
-        note: overrideNote,
-        req,
-      });
-      const fresh = await storage.getEstimate(id);
-      // Task #641 — audit the resend so the Activity tab shows it.
-      await recordLifecycleAudit(req, {
-        resource: "estimate",
-        action: "estimate.resent",
-        targetId: id,
-        companyId: estimate.companyId ?? null,
-        before: { status: estimate.status, internalStatus: estimate.internalStatus },
-        after: { status: fresh?.status, internalStatus: fresh?.internalStatus },
-        summary: isExpiredResend
-          ? `Estimate ${estimate.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : id} resent after expiration`
-          : `Estimate ${estimate.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : id} re-delivered to customer`,
-      });
-      res.json({ message: "Estimate resent to customer", estimate: fresh });
-    } catch (error) {
-      if (error instanceof EstimateSendConflictError) {
-        res.status(409).json({ message: error.message });
-        return;
+        await _sendEstimateApprovalEmailFlow(id, {
+          resetEstimateDate: isExpiredResend,
+          isSentRedelivery,
+          to: overrideTo,
+          cc: overrideCc,
+          bcc: overrideBcc,
+          note: overrideNote,
+          req,
+        });
+        const fresh = await storage.getEstimate(id);
+        // Task #641 — audit the resend so the Activity tab shows it.
+        await recordLifecycleAudit(req, {
+          resource: "estimate",
+          action: "estimate.resent",
+          targetId: id,
+          companyId: estimate.companyId ?? null,
+          before: { status: estimate.status, internalStatus: estimate.internalStatus },
+          after: { status: fresh?.status, internalStatus: fresh?.internalStatus },
+          summary: isExpiredResend
+            ? `Estimate ${estimate.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : id} resent after expiration`
+            : `Estimate ${estimate.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : id} re-delivered to customer`,
+        });
+        res.json({ message: "Estimate resent to customer", estimate: fresh });
+      } catch (error) {
+        if (error instanceof EstimateSendConflictError) {
+          res.status(409).json({ message: error.message });
+          return;
+        }
+        console.error("Estimate resend error:", error);
+        res.status(500).json({ message: "Failed to resend estimate" });
       }
-      console.error("Estimate resend error:", error);
-      res.status(500).json({ message: "Failed to resend estimate" });
-    }
-  });
+    },
+  );
 
   // ── POST /api/estimates/:id/mark-sent ─────────────────────────────────
   // Task #680 — Mark an estimate as sent **without** sending an email.
@@ -2154,6 +2258,8 @@ export function registerEstimateRoutes(
           customerName: full.customerName,
           customerEmail: full.customerEmail,
           customerPhone: full.customerPhone,
+          // Task #2010 — branch location for the customer-facing page.
+          branchName: (full as unknown as { branchName?: string | null }).branchName ?? null,
           estimateDate: full.estimateDate,
           workDescription: full.workDescription,
           locationNotes: full.locationNotes,
@@ -2394,6 +2500,53 @@ export function registerEstimateRoutes(
             message: `Work order ${workOrder.workOrderNumber} for ${estimate.customerName} has been auto-assigned to you from approved estimate.`,
             isRead: false,
           });
+
+          // Task #2010 — audited tripwire. The customer token path is
+          // never gated: refusing a customer's approval over an internal
+          // data field is not acceptable, and the customer cannot supply
+          // a branch. So when a pre-existing branch-less estimate for a
+          // multi-branch customer auto-converts and auto-assigns with no
+          // human in the loop, the assigned manager is told and the work
+          // order carries an audit trail of why. Exposure is finite and
+          // shrinking — only estimates created before the wizard gate
+          // shipped can reach here.
+          const estimateBranch =
+            (estimate as unknown as { branchName?: string | null }).branchName ?? null;
+          if (!estimateBranch && estimate.customerId != null) {
+            const tokenCustomer = await storage.getCustomer(Number(estimate.customerId));
+            const customerBranches = Array.isArray(tokenCustomer?.branches)
+              ? (tokenCustomer!.branches as string[])
+              : [];
+            if (customerBranches.length > 0) {
+              await storage.createNotification!({
+                userId: irrigationManager.id,
+                type: "work_order_missing_branch",
+                title: "Work Order Missing Branch",
+                message: `Work order ${workOrder.workOrderNumber} for ${estimate.customerName} was created from estimate ${formatEstimateNumber(estimate.estimateNumber)}, which has no branch. Set the branch before scheduling.`,
+                relatedEntityType: "work_order",
+                relatedEntityId: workOrder.id,
+                isRead: false,
+              });
+              await recordAuditEvent(req, {
+                actorLabel: estimate.customerName,
+                actorCompanyId: estimate.companyId ?? null,
+                actionType: "work_order",
+                action: "work_order.missing_branch",
+                severity: "warning",
+                targetType: "work_order",
+                targetId: String(workOrder.id),
+                summary: `Work order ${workOrder.workOrderNumber} created from branch-less estimate ${formatEstimateNumber(estimate.estimateNumber)} on the customer approval path`,
+                details: {
+                  estimateId: estimate.id,
+                  estimateNumber: estimate.estimateNumber,
+                  customerId: estimate.customerId,
+                  customerName: estimate.customerName,
+                  availableBranches: customerBranches,
+                  approvalSource: "email_link",
+                },
+              });
+            }
+          }
         }
       } catch (workOrderError) {
         req.log.warn(
@@ -2833,6 +2986,7 @@ export function registerEstimateRoutes(
     // Seam 3 — role guard: only billing-tier and manager roles may convert.
     // Mirrors the guard on the approve/send routes (requireEstimateApprovalAccess).
     requireEstimateApprovalAccess,
+    requireBranchForSend,
     async (req, res) => {
       try {
         const id = parseInt(String(req.params.id));

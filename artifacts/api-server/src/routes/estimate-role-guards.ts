@@ -9,6 +9,7 @@
 // sites is a behavior change and will surface as a failing test.
 
 import type { Request, RequestHandler } from "express";
+import { checkEstimateBranchGate } from "../estimate-payload";
 
 // ─── Role constants ───────────────────────────────────────────────────────────
 
@@ -126,6 +127,104 @@ export const requireEstimatePdfAccess: RequestHandler = (req, res, next) => {
   }
   next();
 };
+
+// Task #2010 — branch gate on every authenticated door that sends an
+// estimate to the customer or pushes it forward into a work order.
+//
+// Gating only the three write paths would leave the forcing function as
+// "a branch-less estimate 400s on its next save" — but an estimate does
+// not have to be saved to leave. A legacy branch-less row can be
+// approved straight out of the queue by a manager who never opens the
+// wizard, and the conversion then carries a null branch into the work
+// order. This middleware closes that for every pre-existing row.
+//
+// It is async and needs storage (unlike the synchronous role guards it
+// sits beside), hence the factory: storage is passed in so this module
+// stays free of a storage import. The gate itself is NOT reimplemented
+// here — it calls the single `checkEstimateBranchGate` helper the three
+// write paths call, with the open-the-estimate message variant.
+//
+// Ordering is a security property: register this AFTER the approval
+// access guard so an unauthorised caller gets 403, never a 400 that
+// would reveal whether the estimate has a branch. A missing estimate
+// falls through to `next()` so the handler's own 404 still stands.
+
+// Minimal structural surface — deliberately narrower than
+// `EstimateRoutesStorage` so this module keeps no dependency on it.
+export interface EstimateBranchGateStorage {
+  getEstimate(
+    id: number,
+    opts?: { includeDeleted?: boolean },
+  ): Promise<
+    | {
+        companyId?: number | null;
+        customerId?: number | null;
+        branchName?: string | null;
+      }
+    | undefined
+  >;
+  getCustomer(id: number): Promise<{ branches?: unknown } | undefined>;
+}
+
+export function requireEstimateBranchForSend(
+  storage: EstimateBranchGateStorage,
+): RequestHandler {
+  // `req` is left loosely typed on purpose — typing this as a
+  // parameterised RequestHandler re-types req.params and breaks
+  // unrelated routes that share the file.
+  return async (req, res, next) => {
+    try {
+      const id = parseInt(String((req.params as Record<string, string>).id));
+      if (!Number.isFinite(id) || id <= 0) {
+        next();
+        return;
+      }
+      const estimate = await storage.getEstimate(id);
+      // Unknown estimate — let the handler answer with its own 404.
+      if (!estimate) {
+        next();
+        return;
+      }
+      // Tenancy: an estimate belonging to another company must fall
+      // through to the handler's own ownership check, which answers 404.
+      // Answering 400 here would confirm the row exists and leak its
+      // branch state across the tenant boundary. super_admin has a null
+      // company scope and legitimately sees every row.
+      const callerCompanyId = (
+        req as unknown as { authenticatedUserCompanyId?: number | null }
+      ).authenticatedUserCompanyId;
+      if (
+        callerCompanyId != null &&
+        estimate.companyId != null &&
+        estimate.companyId !== callerCompanyId
+      ) {
+        next();
+        return;
+      }
+      if (estimate.customerId == null) {
+        next();
+        return;
+      }
+      const customer = await storage.getCustomer(Number(estimate.customerId));
+      if (!customer) {
+        next();
+        return;
+      }
+      const message = checkEstimateBranchGate(
+        customer.branches,
+        estimate.branchName ?? null,
+        "open_estimate",
+      );
+      if (message) {
+        res.status(400).json({ message });
+        return;
+      }
+      next();
+    } catch (err) {
+      next(err);
+    }
+  };
+}
 
 // Per-action role rules for POST /api/estimates/:id/transition. The
 // /transition endpoint dispatches three actions and each has a

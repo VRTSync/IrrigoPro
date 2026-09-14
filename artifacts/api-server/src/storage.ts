@@ -10894,6 +10894,15 @@ export class DatabaseStorage implements IStorage {
               customerPhone: cust.phone ?? null,
               projectName: `Wet check follow-up (#${id})`,
               projectAddress: wc.propertyAddress ?? null,
+              // Task #2010 — carry the wet check's branch onto the
+              // estimate. The estimate → work-order conversion below
+              // already claims to read it "from the originating wet
+              // check", but nothing ever wrote it here, so a branch wet
+              // check produced a branch-less estimate and then a
+              // branch-less work order. This path bypasses the route
+              // branch gates, but POST /api/wet-checks already refuses a
+              // branch-less multi-branch wet check, so no hole is left.
+              branchName: wc.branchName ?? null,
               createdBy: manager.name,
               createdByUserId: manager.id,
               estimateDate: now,

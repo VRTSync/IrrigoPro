@@ -281,10 +281,14 @@ describe("buildEstimateFromInspectionWetCheck — findings with no catalog part 
   function makeFakeTx(
     findings: any[],
     capturedItems: any[],
+    capturedEstimates?: any[],
   ): any {
     const STUB_WC = {
       id: 7, companyId: 10, customerId: 55, mode: "inspection",
       status: "submitted", propertyAddress: null,
+      // Task #2010 — the source wet check is on a branch. The conversion
+      // must carry it onto the estimate it builds.
+      branchName: "North Campus",
     };
     const STUB_CUSTOMER = {
       id: 55, name: "Test Customer", email: "test@example.com",
@@ -316,6 +320,9 @@ describe("buildEstimateFromInspectionWetCheck — findings with no catalog part 
                 if (table === schemaEstimateItems) {
                   capturedItems.push({ ...arr[0] });
                 }
+                if (table === schemaEstimates && capturedEstimates) {
+                  capturedEstimates.push({ ...arr[0] });
+                }
                 return Promise.resolve([row]);
               },
             };
@@ -340,14 +347,15 @@ describe("buildEstimateFromInspectionWetCheck — findings with no catalog part 
   async function withFakeTx(
     findings: any[],
     fn: () => Promise<any>,
-  ): Promise<{ result: any; capturedItems: any[] }> {
+  ): Promise<{ result: any; capturedItems: any[]; capturedEstimates: any[] }> {
     const capturedItems: any[] = [];
+    const capturedEstimates: any[] = [];
     const origTransaction = dbObj.transaction.bind(dbObj);
     (dbObj as any).transaction = (cb: (tx: any) => Promise<any>) =>
-      cb(makeFakeTx(findings, capturedItems));
+      cb(makeFakeTx(findings, capturedItems, capturedEstimates));
     try {
       const result = await fn();
-      return { result, capturedItems };
+      return { result, capturedItems, capturedEstimates };
     } finally {
       (dbObj as any).transaction = origTransaction;
     }
@@ -374,6 +382,117 @@ describe("buildEstimateFromInspectionWetCheck — findings with no catalog part 
     assert.equal(item.partPrice, "0.00", "partPrice must be $0.00 for no-catalog-part finding");
     assert.equal(item.totalPrice, "0.00", "totalPrice must be $0.00");
     assert.equal(item.laborHours, "0.00", "per-line laborHours is always 0.00 in flat mode");
+  });
+
+  // ── Task #2010 — branch carry-through ─────────────────────────────────
+  //
+  // The schema comment on work_orders.branch_name claims the estimate
+  // "got it from the originating wet check", but the wet check →
+  // estimate conversion never wrote the field, so a branch wet check
+  // produced a branch-less estimate and then a branch-less work order
+  // billed to the parent. These pin both legs of that chain.
+
+  it("(p5) a branch wet check produces an estimate carrying that branch", async () => {
+    const findings = [
+      {
+        id: 1, wetCheckId: 7, partId: null, partName: "Hunter PGP Head",
+        issueType: "broken-head", partPrice: null, quantity: 1,
+        notes: null, laborHours: "0.25", estimateId: null,
+      },
+    ];
+
+    const { capturedEstimates } = await withFakeTx(findings, () =>
+      storageInst.buildEstimateFromInspectionWetCheck(7, 10, { id: 1, name: "Test Mgr" }),
+    );
+
+    assert.equal(capturedEstimates.length, 1, "exactly one estimates insert");
+    assert.equal(
+      capturedEstimates[0].branchName,
+      "North Campus",
+      "the wet check's branch must land on the estimate — this path bypasses the route branch gates",
+    );
+  });
+
+  it("(p6) approving that estimate produces a work order carrying the same branch", async () => {
+    // Second leg: estimate → work order. Exercised against the real
+    // conversion with a fake TX so the branch is proven end to end
+    // rather than assumed from the schema comment.
+    const capturedWorkOrders: any[] = [];
+    const STUB_ESTIMATE = {
+      id: 31, companyId: 10, customerId: 55, status: "approved",
+      customerName: "Test Customer", customerEmail: "test@example.com",
+      customerPhone: null, projectName: "Wet check follow-up (#7)",
+      projectAddress: null, locationNotes: null, accessInstructions: null,
+      workDescription: null, workLocationLat: null, workLocationLng: null,
+      workLocationAddress: null, controllerLetter: null, zoneNumber: null,
+      laborRate: "65.00", appliedLaborRate: "65.00", laborMode: "flat",
+      totalLaborHours: "0.25", originWetCheckId: 7,
+      branchName: "North Campus",
+    };
+
+    const schemaModule = await import("@workspace/db/schema");
+    const schemaWorkOrders = (schemaModule as any).workOrders;
+    const schemaEstimateItemsRef = (schemaModule as any).estimateItems;
+    const schemaEstimatesRef = (schemaModule as any).estimates;
+
+    const fakeTx: any = {
+      select() {
+        return {
+          from: (table: any) => {
+            const chain: any = {
+              where: (_c: any) => chain,
+              orderBy: (_c: any) => Promise.resolve([]),
+              limit: (_n: number) => Promise.resolve([]),
+              for: (_m: string) => chain,
+              then: (resolve: any) =>
+                Promise.resolve(
+                  table === schemaEstimatesRef
+                    ? [STUB_ESTIMATE]
+                    : table === schemaEstimateItemsRef
+                      ? []
+                      : [],
+                ).then(resolve),
+            };
+            return chain;
+          },
+        };
+      },
+      insert(table: any) {
+        return {
+          values(data: any) {
+            const row = { ...data, id: 99 };
+            if (table === schemaWorkOrders) capturedWorkOrders.push({ ...data });
+            return {
+              returning: () => Promise.resolve([row]),
+              then: (resolve: any) => Promise.resolve([row]).then(resolve),
+            };
+          },
+        };
+      },
+      update(_table: any) {
+        return {
+          set(_d: any) {
+            return { where: (_c: any) => Promise.resolve() };
+          },
+        };
+      },
+      execute: (_s: any) => Promise.resolve({ rows: [] }),
+    };
+
+    const origTransaction = dbObj.transaction.bind(dbObj);
+    (dbObj as any).transaction = (cb: (tx: any) => Promise<any>) => cb(fakeTx);
+    try {
+      await storageInst.createWorkOrderFromEstimate(31, 10);
+    } finally {
+      (dbObj as any).transaction = origTransaction;
+    }
+
+    assert.equal(capturedWorkOrders.length, 1, "exactly one work_orders insert");
+    assert.equal(
+      capturedWorkOrders[0].branchName,
+      "North Campus",
+      "the work order must carry the estimate's branch, not bill to the parent",
+    );
   });
 
   it("(p2) explicit partName with no partId is preserved through the real function", async () => {

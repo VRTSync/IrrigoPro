@@ -5,6 +5,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { CustomerSelector } from "@/components/ui/customer-selector";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
 import {
   User,
@@ -13,6 +20,7 @@ import {
   MapPin,
   Pencil,
   Briefcase,
+  Building2,
   ClipboardList,
 } from "lucide-react";
 import type { Customer } from "@workspace/db/schema";
@@ -27,6 +35,9 @@ export interface CustomerStepValue {
   customer: Customer | null;
   customerEmail: string;
   customerPhone: string;
+  // Task #2010 — branch location for multi-branch customers. Empty
+  // string when the customer is single-location (persisted as NULL).
+  branchName: string;
   projectName: string;
   projectAddress: string;
   useDifferentAddress: boolean;
@@ -77,6 +88,15 @@ export function EstimateWizardCustomerStep({
     }
   }, [value.customer?.id]);
 
+  // Task #2010 — branch list read straight off the already company-scoped
+  // customer record (no extra query), exactly as the billing sheet wizard
+  // does. A customer with no branches configured is single-location and
+  // sees no branch card at all.
+  const branches: string[] = Array.isArray(value.customer?.branches)
+    ? (value.customer!.branches as string[])
+    : [];
+  const branchRequired = branches.length > 0;
+
   const handleSelectCustomer = (c: Customer) => {
     const nextAddress = c.address || "";
     onChange({
@@ -84,6 +104,9 @@ export function EstimateWizardCustomerStep({
       customer: c,
       customerEmail: c.email ?? "",
       customerPhone: c.phone ?? "",
+      // Task #2010 — a branch belongs to one customer; changing the
+      // customer must never carry the previous customer's branch over.
+      branchName: "",
       projectAddress: nextAddress,
       useDifferentAddress: false,
       workLocation: null,
@@ -96,7 +119,10 @@ export function EstimateWizardCustomerStep({
     setShowCustomerPicker(false);
   };
 
-  const canContinue = !!value.customer && value.projectName.trim().length > 0;
+  const canContinue =
+    !!value.customer &&
+    value.projectName.trim().length > 0 &&
+    (!branchRequired || !!value.branchName);
 
   return (
     <div className="space-y-4">
@@ -183,6 +209,37 @@ export function EstimateWizardCustomerStep({
           ) : null}
         </CardContent>
       </Card>
+
+      {/* Branch Location — Task #2010. Same card, icon, heading, required
+          marker and placeholder as the billing sheet creator so the two
+          flows look and behave identically for the same customer. */}
+      {value.customer && branchRequired && (
+        <Card>
+          <CardContent className="p-4 sm:p-5 space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="bg-blue-50 p-2 rounded-md">
+                <Building2 className="w-4 h-4 text-blue-600" />
+              </div>
+              <h2 className="text-base font-semibold text-gray-900">
+                Branch Location <span className="text-red-500">*</span>
+              </h2>
+            </div>
+            <Select
+              value={value.branchName || ""}
+              onValueChange={(v) => onChange({ ...value, branchName: v })}
+            >
+              <SelectTrigger data-testid="wizard-branch-name">
+                <SelectValue placeholder="Select branch location..." />
+              </SelectTrigger>
+              <SelectContent>
+                {branches.map((b) => (
+                  <SelectItem key={b} value={b}>{b}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Scope of Work */}
       {value.customer && (

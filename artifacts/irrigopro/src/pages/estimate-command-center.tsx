@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useArrayQuery, apiRequest } from "@/lib/queryClient";
+import { useArrayQuery, apiRequest, parseApiError } from "@/lib/queryClient";
 import { sendEstimateEmail } from "@/lib/email";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -224,10 +224,17 @@ export default function EstimateCommandCenter() {
       qc.invalidateQueries({ queryKey: ["/api/estimates"] });
       qc.invalidateQueries({ queryKey: ["/api/estimates/summary"] });
     },
-    onError: () => {
+    onError: (err) => {
+      // Surface the server's own message when it has one. The branch gate
+      // (Task #2010) answers with "open the estimate and choose a branch
+      // first" — advice the generic "please try again" copy would throw
+      // away, leaving the manager retrying an action that can never pass.
       toast({
         title: "Failed to approve & send",
-        description: "Please try again, or use the detail view to send manually.",
+        description: parseApiError(
+          err,
+          "Please try again, or use the detail view to send manually.",
+        ),
         variant: "destructive",
       });
     },

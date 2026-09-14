@@ -70,6 +70,7 @@ type EstimateView = {
     customerName: string;
     customerEmail: string;
     customerPhone: string | null;
+    branchName: string | null;
     estimateDate: string | Date;
     workDescription: string | null;
     locationNotes: string | null;
@@ -758,6 +759,12 @@ export default function EstimateApproval() {
           <div className="text-gray-900 font-medium">{estimate.projectName}</div>
           {estimate.projectAddress && (
             <div className="text-gray-600 text-sm">{estimate.projectAddress}</div>
+          )}
+          {/* Task #2010 — branch location; omitted when the estimate has none. */}
+          {estimate.branchName && (
+            <div className="text-gray-600 text-sm" data-testid="approval-branch-name">
+              Branch: {estimate.branchName}
+            </div>
           )}
         </section>
 

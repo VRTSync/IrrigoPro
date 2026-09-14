@@ -16,13 +16,24 @@ vi.mock("@/components/ui/customer-selector", () => ({
   }: {
     onSelectCustomer: (c: Customer) => void;
   }) => (
-    <button
-      type="button"
-      data-testid="mock-customer-row"
-      onClick={() => onSelectCustomer(FIXTURE_CUSTOMER)}
-    >
-      Pick {FIXTURE_CUSTOMER.name}
-    </button>
+    <>
+      <button
+        type="button"
+        data-testid="mock-customer-row"
+        onClick={() => onSelectCustomer(FIXTURE_CUSTOMER)}
+      >
+        Pick {FIXTURE_CUSTOMER.name}
+      </button>
+      {/* Task #2010 — second row so a test can swap to a multi-branch
+          customer (and back) through the real selection path. */}
+      <button
+        type="button"
+        data-testid="mock-branch-customer-row"
+        onClick={() => onSelectCustomer(BRANCH_CUSTOMER)}
+      >
+        Pick {BRANCH_CUSTOMER.name}
+      </button>
+    </>
   ),
 }));
 
@@ -35,6 +46,15 @@ import {
   type CustomerStepValue,
 } from "./estimate-wizard-customer-step";
 
+// Task #2010 — Radix Select drives open/close off pointer capture, which
+// jsdom does not implement. Without these shims opening the branch select
+// throws an unhandled error alongside a confusing waitFor failure.
+const proto = Element.prototype as any;
+proto.hasPointerCapture ??= () => false;
+proto.setPointerCapture ??= () => {};
+proto.releasePointerCapture ??= () => {};
+proto.scrollIntoView ??= () => {};
+
 const FIXTURE_CUSTOMER: Customer = {
   id: "cust-1",
   name: "Acme Landscapes",
@@ -45,18 +65,40 @@ const FIXTURE_CUSTOMER: Customer = {
   // subset, so cast through unknown for the test fixture.
 } as unknown as Customer;
 
+// Task #2010 — a multi-branch customer. `branches` is what makes the
+// Branch Location card required; a customer with an empty/absent list is
+// single-location and must see no branch control at all.
+const BRANCH_CUSTOMER: Customer = {
+  id: "cust-2",
+  name: "Northside Properties",
+  email: "ops@northside.example",
+  phone: "(555) 987-6543",
+  address: "9 Orchard Rd, Springfield, IL 62704",
+  branches: ["North Campus", "South Campus"],
+} as unknown as Customer;
+
 const EMPTY_VALUE: CustomerStepValue = {
   customer: null,
   customerEmail: "",
   customerPhone: "",
+  branchName: "",
   projectName: "",
   projectAddress: "",
   useDifferentAddress: false,
   locationNotes: "",
   accessInstructions: "",
+  // The fixture had drifted behind CustomerStepValue — the Scope of Work
+  // card's AI expand button calls `.trim()` on workDescription, so an
+  // absent field crashed the render for every case in this file.
+  workDescription: "",
   workLocation: null,
   controllerLetter: null,
   zoneNumber: null,
+  fieldWorkType: null,
+  fieldWorkTypeDetails: "",
+  workLocationSource: null,
+  workLocationAccuracyM: null,
+  workLocationGpsError: null,
 };
 
 function Harness({
@@ -295,5 +337,77 @@ describe("EstimateWizardCustomerStep — one-click customer selection", () => {
     expect(
       await screen.findByDisplayValue(FIXTURE_CUSTOMER.address!),
     ).toBeInTheDocument();
+  });
+
+  // ── Task #2010 — Branch Location gate ─────────────────────────────────
+  //
+  // The estimate builder was the only ticket-creation flow that never
+  // captured a branch: pick a multi-branch customer here and the wizard
+  // went straight to Scope of Work, saving against the parent. These
+  // pin the same contract the billing sheet creator already enforces.
+
+  it("shows the required Branch Location card for a multi-branch customer and keeps Continue disabled until a branch is picked", async () => {
+    const user = userEvent.setup();
+    renderHarness();
+
+    await user.click(await screen.findByTestId("mock-branch-customer-row"));
+    await screen.findByTestId("wizard-customer-name");
+
+    // The card is present with the required marker.
+    expect(screen.getByText("Branch Location")).toBeInTheDocument();
+    const trigger = screen.getByTestId("wizard-branch-name");
+    expect(trigger).toBeInTheDocument();
+
+    // A project name alone is NOT enough for a branch-required customer.
+    await user.type(screen.getByTestId("wizard-project-name"), "Backflow repair");
+    expect(screen.getByTestId("wizard-continue-1")).toBeDisabled();
+
+    // Pick a branch — Continue unlocks.
+    await user.click(trigger);
+    await user.click(await screen.findByText("South Campus"));
+    await waitFor(() => {
+      expect(screen.getByTestId("wizard-continue-1")).toBeEnabled();
+    });
+  });
+
+  it("renders no branch control at all for a single-location customer and enables Continue on project name alone", async () => {
+    const user = userEvent.setup();
+    renderHarness();
+
+    await user.click(await screen.findByTestId("mock-customer-row"));
+    await screen.findByTestId("wizard-customer-name");
+
+    expect(screen.queryByTestId("wizard-branch-name")).not.toBeInTheDocument();
+    expect(screen.queryByText("Branch Location")).not.toBeInTheDocument();
+
+    expect(screen.getByTestId("wizard-continue-1")).toBeDisabled();
+    await user.type(screen.getByTestId("wizard-project-name"), "Head replacement");
+    await waitFor(() => {
+      expect(screen.getByTestId("wizard-continue-1")).toBeEnabled();
+    });
+  });
+
+  it("clears the chosen branch when the customer changes", async () => {
+    const user = userEvent.setup();
+    const onChangeCalls: CustomerStepValue[] = [];
+    renderHarness((next) => onChangeCalls.push(next));
+
+    await user.click(await screen.findByTestId("mock-branch-customer-row"));
+    await screen.findByTestId("wizard-customer-name");
+    await user.click(screen.getByTestId("wizard-branch-name"));
+    await user.click(await screen.findByText("North Campus"));
+    await waitFor(() => {
+      expect(onChangeCalls[onChangeCalls.length - 1]!.branchName).toBe("North Campus");
+    });
+
+    // Swap to the single-location customer — the branch must not carry over.
+    await user.click(screen.getByTestId("wizard-change-customer"));
+    await user.click(await screen.findByTestId("mock-customer-row"));
+    await waitFor(() => {
+      const latest = onChangeCalls[onChangeCalls.length - 1]!;
+      expect(latest.customer?.id).toBe(FIXTURE_CUSTOMER.id);
+      expect(latest.branchName).toBe("");
+    });
+    expect(screen.queryByTestId("wizard-branch-name")).not.toBeInTheDocument();
   });
 });

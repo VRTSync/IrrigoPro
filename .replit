@@ -192,6 +192,10 @@ args = "budget-route-nav-parity"
 task = "workflow.run"
 args = "budget-bookkeeper-exclusion"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "estimate-branch-gate"
+
 [[workflows.workflow]]
 name = "auth-middleware-coverage"
 author = "agent"
@@ -672,6 +676,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/routes/budget-status-1866.test.ts src/routes/budget-routes.test.ts src/routes/bookkeeper-role-matrix.test.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "estimate-branch-gate"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/routes/estimate-branch-gate.test.ts"
 
 [workflows.workflow.metadata]
 isValidation = true

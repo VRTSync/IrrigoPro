@@ -134,6 +134,52 @@ export function resolveCreateLaborRate(
 //     regardless of what the client sent. We use appliedLaborRate ?? laborRate
 //     so legacy records where the two diverged stay in sync with the read-time
 //     totals computed by storage.getEstimate.
+// ─── Task #2010 — estimate branch gate ───────────────────────────────────────
+//
+// A customer with branches configured is multi-branch: every ticket raised
+// against them must name the branch it belongs to, or the work bills to the
+// parent. Billing sheets, work orders and wet checks already enforce this at
+// their create routes; estimates never did, so `estimates.branch_name` (which
+// the PDF, the estimate → work-order conversion and the schema all read) was
+// never written by any UI path.
+//
+// This is the ONE implementation of that rule on the estimate paths. It lives
+// here because both estimate write paths (POST /api/estimates and the shared
+// update handler behind PUT / submit-for-review) already import this module
+// for labor-rate resolution, and the send/approve guard middleware imports it
+// too. There is deliberately no second copy anywhere.
+
+// Shown when the user is inside the estimate wizard with the Branch Location
+// card in front of them — matches the billing sheet creator's wording verbatim
+// so the same customer produces the same sentence in both flows.
+export const ESTIMATE_BRANCH_REQUIRED_IN_WIZARD_MESSAGE =
+  "Branch is required for this customer. Please select a branch before submitting.";
+
+// Shown on the send / approve / convert paths, where the user is on a list or
+// detail modal and the branch cannot be fixed from there. The estimate wizard
+// is the estimate's only editor, so the message points them at it.
+export const ESTIMATE_BRANCH_REQUIRED_OPEN_ESTIMATE_MESSAGE =
+  "Branch is required for this customer. Open the estimate and choose a branch before sending or approving it.";
+
+export type EstimateBranchGateVariant = "in_wizard" | "open_estimate";
+
+// Returns the caller's chosen message when the customer has branches
+// configured and no branch was supplied, and null otherwise. A customer with
+// no branches (single-location) is never gated, and an empty / whitespace-only
+// branch counts as absent.
+export function checkEstimateBranchGate(
+  customerBranches: unknown,
+  branchName: string | null | undefined,
+  variant: EstimateBranchGateVariant,
+): string | null {
+  const branches = Array.isArray(customerBranches) ? customerBranches : [];
+  if (branches.length === 0) return null;
+  if (typeof branchName === "string" && branchName.trim() !== "") return null;
+  return variant === "in_wizard"
+    ? ESTIMATE_BRANCH_REQUIRED_IN_WIZARD_MESSAGE
+    : ESTIMATE_BRANCH_REQUIRED_OPEN_ESTIMATE_MESSAGE;
+}
+
 export function resolvePutLaborRate(opts: {
   customerChanged: boolean;
   newCustomerLaborRate?: string | number | null;

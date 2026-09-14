@@ -22,6 +22,9 @@ interface EstimateWizardReviewStepProps {
   customer: Customer | null;
   customerEmail: string;
   customerPhone: string;
+  // Task #2010 — branch location for multi-branch customers; omitted
+  // entirely from the review card when the customer is single-location.
+  branchName?: string | null;
   projectName: string;
   projectAddress: string;
   workDescription?: string;
@@ -75,6 +78,7 @@ export function EstimateWizardReviewStep({
   customer,
   customerEmail,
   customerPhone,
+  branchName,
   projectName,
   projectAddress,
   workDescription,
@@ -170,6 +174,7 @@ export function EstimateWizardReviewStep({
           </div>
           <div className="text-sm text-gray-700">
             <div className="font-semibold text-gray-900">{customer?.name}</div>
+            {branchName && <div data-testid="review-branch-name">Branch: {branchName}</div>}
             {customerEmail && <div>{customerEmail}</div>}
             {customerPhone && <div>{customerPhone}</div>}
           </div>

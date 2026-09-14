@@ -43,6 +43,9 @@ interface EstimateApiPayloadEstimate {
   customerName: string;
   customerEmail: string;
   customerPhone: string;
+  // Task #2010 — branch location for multi-branch customers. Null for
+  // single-location customers (stored as NULL, never an empty string).
+  branchName: string | null;
   projectName: string;
   projectAddress: string;
   locationNotes: string;
@@ -141,6 +144,17 @@ interface PersistedDraft {
   attachments: UploadedFile[];
 }
 
+// Task #2010 — `branchName` was added to CustomerStepValue after
+// DRAFT_STORAGE_VERSION 2 shipped. Bumping the version would silently
+// discard every in-flight draft on deploy, so instead the missing field
+// is normalised to "" on restore. The step-1 branch gate then forces the
+// user to fill it before they can continue.
+function normalizeDraftCustomerStep(
+  cs: CustomerStepValue | undefined,
+): CustomerStepValue {
+  return { ...(cs as CustomerStepValue), branchName: cs?.branchName ?? "" };
+}
+
 function loadDraft(estimateId?: number | null): PersistedDraft | null {
   if (typeof window === "undefined") return null;
   try {
@@ -171,7 +185,7 @@ function loadDraft(estimateId?: number | null): PersistedDraft | null {
         version: DRAFT_STORAGE_VERSION,
         savedAt: Number(parsed.savedAt ?? Date.now()),
         step: (parsed.step ?? 1) as Step,
-        customerStep: parsed.customerStep as CustomerStepValue,
+        customerStep: normalizeDraftCustomerStep(parsed.customerStep),
         items: rawItems.map((it) => ({ ...it, laborHours: 0 })),
         laborRate: Number(parsed.laborRate ?? 45),
         flatTotalHours: collapsedHours,
@@ -183,6 +197,7 @@ function loadDraft(estimateId?: number | null): PersistedDraft | null {
     if (parsed.version !== DRAFT_STORAGE_VERSION) return null;
     return {
       ...(parsed as PersistedDraft),
+      customerStep: normalizeDraftCustomerStep(parsed.customerStep),
       items: rawItems,
       flatTotalHours: Number(parsed.flatTotalHours ?? 0),
     };
@@ -218,6 +233,9 @@ interface DraftSnapshot {
   customerId: number | null;
   customerEmail: string;
   customerPhone: string;
+  // Task #2010 — a branch-only edit must register as unsaved so the
+  // close-without-saving guard fires.
+  branchName: string;
   projectName: string;
   projectAddress: string;
   locationNotes: string;
@@ -273,6 +291,7 @@ function snapshot(
     customerId: cs.customer?.id ?? null,
     customerEmail: cs.customerEmail.trim(),
     customerPhone: cs.customerPhone.trim(),
+    branchName: (cs.branchName ?? "").trim(),
     projectName: cs.projectName.trim(),
     projectAddress: cs.projectAddress.trim(),
     locationNotes: cs.locationNotes.trim(),
@@ -315,6 +334,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     customer: null,
     customerEmail: "",
     customerPhone: "",
+    branchName: "",
     projectName: "",
     projectAddress: "",
     useDifferentAddress: false,
@@ -374,6 +394,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
           customer: null,
           customerEmail: "",
           customerPhone: "",
+          branchName: "",
           projectName: "",
           projectAddress: "",
           useDifferentAddress: false,
@@ -488,6 +509,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       customer: cust,
       customerEmail: existing.customerEmail ?? "",
       customerPhone: existing.customerPhone ?? "",
+      // Task #2010 — pre-select a branch already stored on the estimate.
+      branchName: (existing as unknown as { branchName?: string | null }).branchName ?? "",
       projectName: existing.projectName ?? "",
       projectAddress: existing.projectAddress ?? "",
       useDifferentAddress: usingDifferent,
@@ -786,6 +809,9 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       customerName: customerStep.customer.name,
       customerEmail: customerStep.customerEmail.trim(),
       customerPhone: customerStep.customerPhone.trim(),
+      // Task #2010 — store NULL (not "") for a single-location customer,
+      // matching the wet-check and work-order convention.
+      branchName: customerStep.branchName.trim() || null,
       projectName: customerStep.projectName.trim(),
       projectAddress: customerStep.projectAddress.trim() || "",
       locationNotes: customerStep.locationNotes.trim() || "",
@@ -870,6 +896,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
   const headerContextLine = useMemo(() => {
     const parts: string[] = [];
     if (customerStep.customer?.name) parts.push(customerStep.customer.name);
+    // Task #2010 — the header reads "Customer · Branch" when a branch is set.
+    if (customerStep.branchName.trim()) parts.push(customerStep.branchName.trim());
     if (customerStep.projectName.trim()) parts.push(customerStep.projectName.trim());
     if (step >= 3 && items.length > 0) {
       const totals = computeTotals(items, laborRate, flatTotalHours);
@@ -882,7 +910,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       );
     }
     return parts.length ? parts.join(" · ") : null;
-  }, [customerStep.customer?.name, customerStep.projectName, items, laborRate, flatTotalHours, step]);
+  }, [customerStep.customer?.name, customerStep.branchName, customerStep.projectName, items, laborRate, flatTotalHours, step]);
 
   const stickyMobileFooter = (
     <div className="sm:hidden sticky bottom-0 -mx-4 px-4 py-2 bg-white border-t z-10 flex flex-col gap-1.5">
@@ -903,7 +931,15 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
           <Button
             type="button"
             onClick={() => setStep(2)}
-            disabled={!customerStep.customer || !customerStep.projectName.trim()}
+            disabled={
+              !customerStep.customer ||
+              !customerStep.projectName.trim() ||
+              // Task #2010 — a multi-branch customer must pick a branch
+              // before leaving step 1, same rule as the desktop Continue.
+              (Array.isArray(customerStep.customer.branches) &&
+                (customerStep.customer.branches as string[]).length > 0 &&
+                !customerStep.branchName.trim())
+            }
             className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
           >
             Continue
@@ -1105,6 +1141,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                 customer={customerStep.customer}
                 customerEmail={customerStep.customerEmail}
                 customerPhone={customerStep.customerPhone}
+                branchName={customerStep.branchName}
                 projectName={customerStep.projectName}
                 projectAddress={customerStep.projectAddress}
                 workDescription={customerStep.workDescription}

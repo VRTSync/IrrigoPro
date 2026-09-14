@@ -745,6 +745,16 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                     <span className="font-medium text-gray-700">Customer Name:</span>
                     <p className="text-gray-900">{estimate.customerName}</p>
                   </div>
+                  {/* Task #2010 — branch location, omitted entirely for a
+                      single-location customer. */}
+                  {(estimate as { branchName?: string | null }).branchName && (
+                    <div data-testid="estimate-detail-branch">
+                      <span className="font-medium text-gray-700">Branch:</span>
+                      <p className="text-gray-900">
+                        {(estimate as { branchName?: string | null }).branchName}
+                      </p>
+                    </div>
+                  )}
                   <div>
                     <span className="font-medium text-gray-700">Email:</span>
                     <p className="text-gray-900">{estimate.customerEmail}</p>

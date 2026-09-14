@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bell, X, CheckCircle, Clock, FileText, XCircle, Receipt } from "lucide-react";
+import { Bell, X, Building2, CheckCircle, Clock, FileText, XCircle, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -99,6 +99,10 @@ export function NotificationSystem({ userId }: NotificationSystemProps) {
         return <Receipt className="h-4 w-4 text-orange-600" />;
       case "estimate_pending_approval":
         return <FileText className="h-4 w-4 text-orange-600" />;
+      // Task #2010 — branch-less work order from a customer token
+      // approval. Its own treatment so it doesn't read as a generic bell.
+      case "work_order_missing_branch":
+        return <Building2 className="h-4 w-4 text-yellow-700" />;
       case "part_pending_approval":
       case "manual_part_pending_review":
         return <Receipt className="h-4 w-4 text-amber-600" />;
@@ -121,6 +125,8 @@ export function NotificationSystem({ userId }: NotificationSystemProps) {
         return "bg-orange-50 border-orange-200";
       case "estimate_pending_approval":
         return "bg-orange-50 border-orange-200";
+      case "work_order_missing_branch":
+        return "bg-yellow-50 border-yellow-300";
       case "part_pending_approval":
       case "manual_part_pending_review":
         return "bg-amber-50 border-amber-200";

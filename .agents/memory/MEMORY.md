@@ -49,3 +49,5 @@
 - [DB-free route fixture tests](db-free-route-fixture-tests.md) — stub db.select per table (drizzle queryChunks are introspectable) and freeze Date with node:test mock.timers.
 - [Radix Select blank trigger](radix-select-sentinel-blank-trigger.md) — a sentinel value with no rendered item shows neither value nor placeholder; unseeded tenant option lists read as "won't open".
 - [A colour token is two halves](tailwind-token-proof.md) — a CSS variable with no Tailwind `colors` entry compiles to nothing; register both halves and prove the class generates.
+- [A gate message needs a surface](gate-message-needs-a-surface.md) — hardcoded error toasts discard server wording; grep onError and use parseApiError before calling a guard done.
+- [A new gate on an unscoped route is an oracle](gate-without-tenancy-is-an-oracle.md) — check ownership exists before adding validation; collapse foreign into not-found, order it first.

@@ -91,10 +91,10 @@ function makeStorageStub(): StorageStub {
   return stub;
 }
 
-function makeCustomer(id: number, laborRate: string | null): Customer {
+function makeCustomer(id: number, laborRate: string | null, companyId = 1): Customer {
   return {
     id,
-    companyId: 1,
+    companyId,
     name: `Customer ${id}`,
     contactName: null,
     email: null,
@@ -119,10 +119,16 @@ function makeExistingEstimate(opts: {
   laborRate: string;
   appliedLaborRate: string | null;
   laborMode?: "flat" | "per_part";
+  companyId?: number;
 }): EstimateWithItems {
   return {
     id: opts.id,
     customerId: opts.customerId,
+    // `customers.company_id` and `estimates.company_id` are both NOT NULL in
+    // the schema, and the update path now enforces cross-company ownership
+    // (Task #2010), so a fixture without a company is not a row that can
+    // exist. Default to the same company `startServer` authenticates as.
+    companyId: opts.companyId ?? 1,
     laborRate: opts.laborRate,
     appliedLaborRate: opts.appliedLaborRate,
     laborMode: opts.laborMode ?? "flat",
@@ -984,7 +990,10 @@ describe("POST /api/estimates — companyId guard", () => {
 
   it("stamps companyId from auth context onto the estimate payload", async () => {
     const stub = makeStorageStub();
-    stub.customers.set(1, makeCustomer(1, "50.00"));
+    // The customer must belong to the same company the caller is
+    // authenticated as — the create route refuses a foreign customer
+    // (Task #2010) — so this fixture asserts stamping, not tenancy.
+    stub.customers.set(1, makeCustomer(1, "50.00", 42));
     // Company 42 from auth — the payload must not be trusted for this field.
     const { baseUrl, close } = await startServer(stub, { companyId: 42 });
     try {

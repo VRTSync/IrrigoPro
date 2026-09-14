@@ -112,4 +112,62 @@ describe("submitEstimate — atomic wizard submit (Task #606)", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("/api/estimates/11/submit-for-review");
   });
+
+  // ── Task #2010 — branch carried on the outgoing payload ───────────────
+  //
+  // The estimate builder never captured a branch, so a repair estimate
+  // for a customer's north branch approved into a work order with no
+  // branch and billed to the parent. The wizard now puts
+  // `estimate.branchName` on the payload it hands to submitEstimate —
+  // a trimmed name for a multi-branch customer, and NULL (never "") for
+  // a single-location one, matching the wet-check / work-order
+  // convention. These pin that the value survives every save shape.
+
+  it("carries the chosen branch on the create payload for a multi-branch customer", async () => {
+    const { calls, apiRequest } = recorder(() => ({ id: 200 }));
+    await submitEstimate(
+      { estimate: { customerId: 2, branchName: "North Campus" }, items: [] },
+      "submit",
+      { isEdit: false, isDraftEdit: false, estimateId: null },
+      apiRequest,
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("/api/estimates");
+    expect((calls[0].body as any).estimate.branchName).toBe("North Campus");
+  });
+
+  it("sends NULL — not an empty string — for a single-location customer", async () => {
+    const { calls, apiRequest } = recorder(() => ({ id: 201 }));
+    await submitEstimate(
+      { estimate: { customerId: 1, branchName: null }, items: [] },
+      "submit",
+      { isEdit: false, isDraftEdit: false, estimateId: null },
+      apiRequest,
+    );
+    const branch = (calls[0].body as any).estimate.branchName;
+    expect(branch).toBeNull();
+    expect(branch).not.toBe("");
+  });
+
+  it("carries the branch through the PUT and submit-for-review shapes too", async () => {
+    const put = recorder();
+    await submitEstimate(
+      { estimate: { branchName: "South Campus" }, items: [] },
+      "draft",
+      { isEdit: true, isDraftEdit: true, estimateId: 12 },
+      put.apiRequest,
+    );
+    expect(put.calls[0].method).toBe("PUT");
+    expect((put.calls[0].body as any).estimate.branchName).toBe("South Campus");
+
+    const review = recorder();
+    await submitEstimate(
+      { estimate: { branchName: "South Campus" }, items: [] },
+      "submit",
+      { isEdit: true, isDraftEdit: true, estimateId: 12 },
+      review.apiRequest,
+    );
+    expect(review.calls[0].url).toBe("/api/estimates/12/submit-for-review");
+    expect((review.calls[0].body as any).estimate.branchName).toBe("South Campus");
+  });
 });

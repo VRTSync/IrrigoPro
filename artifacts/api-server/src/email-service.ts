@@ -32,6 +32,9 @@ export interface EstimateEmailData {
   customerEmail: string;
   projectName: string;
   projectAddress?: string;
+  // Task #2010 — branch location for a multi-branch customer; omitted
+  // from both bodies when the estimate has none.
+  branchName?: string | null;
   workLocationLat?: string | null;
   workLocationLng?: string | null;
   workLocationAddress?: string | null;
@@ -606,6 +609,12 @@ export class EmailService {
           </td>
         </tr>
         ` : ''}
+        ${data.branchName ? `
+        <tr>
+          <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Branch:</td>
+          <td style="padding: 8px 0; color: #1f2937;">${this.escapeHtml(data.branchName)}</td>
+        </tr>
+        ` : ''}
         ${data.controllerLetter || data.zoneNumber ? `
         <tr>
           <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Controller / Zone:</td>
@@ -730,6 +739,7 @@ ESTIMATE DETAILS:
 - Project: ${data.projectName}
 ${data.projectAddress ? `- Location: ${data.projectAddress}` : ''}
 ${data.workLocationLat && data.workLocationLng ? `- Pinned spot: ${data.workLocationAddress ? `${data.workLocationAddress} ` : ''}(${parseFloat(String(data.workLocationLat)).toFixed(6)}, ${parseFloat(String(data.workLocationLng)).toFixed(6)}) — https://www.google.com/maps/search/?api=1&query=${data.workLocationLat},${data.workLocationLng}` : ''}
+${data.branchName ? `- Branch: ${data.branchName}` : ''}
 ${data.controllerLetter || data.zoneNumber ? `- Controller/Zone: ${data.controllerLetter ? `Controller ${data.controllerLetter}` : ''}${data.controllerLetter && data.zoneNumber ? ' · ' : ''}${data.zoneNumber ? `Zone ${data.zoneNumber}` : ''}` : ''}
 - Date: ${data.estimateDate}
 - Prepared by: ${data.createdBy}
