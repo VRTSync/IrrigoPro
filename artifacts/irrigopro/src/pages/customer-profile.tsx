@@ -7,7 +7,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
+import { BudgetBar } from "@/components/budget/BudgetBar";
+import type { BudgetStatus } from "@workspace/shared";
 import {
   ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt, DollarSign,
   Bell, Droplets, Wrench, Calendar, Package, ChevronDown, ChevronRight, User,
@@ -920,7 +921,10 @@ function SiteMapsSection({
 }
 
 // ─── Budget & Alerts cards (billing roles only) ──────────────────────────────
-type BudgetStatus = "unset" | "healthy" | "approaching" | "over";
+// Task #2009 — this card used to draw its own bucket meter, which meant the
+// profile showed two differently-coloured meters for one budget: this one and
+// the embedded Financial Pulse widget's. Both now render through the one
+// shared BudgetBar, so they cannot disagree.
 interface BudgetUsage {
   customerId: number;
   softThresholdPercent: number;
@@ -929,68 +933,21 @@ interface BudgetUsage {
   currentYearKey: string;
   monthlyCap: number | null;
   monthlySpend: number;
+  monthlyInvoiced: number;
+  monthlyPendingNotBilled: number;
   monthlyPercent: number | null;
   monthlyStatus: BudgetStatus;
   annualCap: number | null;
   annualSpend: number;
+  annualInvoiced: number;
+  annualPendingNotBilled: number;
   annualPercent: number | null;
   annualStatus: BudgetStatus;
 }
 
-function statusBadge(status: BudgetStatus) {
-  switch (status) {
-    case "over":        return <Badge className="bg-red-600 text-white">Over cap</Badge>;
-    case "approaching": return <Badge className="bg-amber-500 text-white">Approaching cap</Badge>;
-    case "healthy":     return <Badge className="bg-emerald-600 text-white">On track</Badge>;
-    default:            return <Badge variant="outline">No cap set</Badge>;
-  }
-}
-
-function fmtCurrency(n: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
-}
-
-interface BudgetBucket {
-  cap: number | null;
-  spend: number;
-  percent: number | null;
-  status: BudgetStatus;
-  periodKey: string;
-}
-
-const BUCKET_ACCENT: Record<BudgetStatus, string> = {
-  healthy:    "border-l-4 border-emerald-400 bg-emerald-50/40",
-  approaching:"border-l-4 border-amber-400 bg-amber-50/40",
-  over:       "border-l-4 border-rose-400 bg-rose-50/40",
-  unset:      "",
-};
-
-function BudgetBucketRow({ label, bucket }: { label: string; bucket: BudgetBucket }) {
-  const pct = bucket.percent != null ? Math.min(100, Math.round(bucket.percent * 100)) : 0;
-  return (
-    <div className={`rounded-md border p-3 bg-white shadow-sm ${BUCKET_ACCENT[bucket.status] ?? ""}`}>
-      <div className="flex items-center justify-between mb-2">
-        <span className="font-medium text-sm text-gray-700">
-          {label} <span className="text-xs text-gray-400">({bucket.periodKey})</span>
-        </span>
-        {statusBadge(bucket.status)}
-      </div>
-      {bucket.cap == null ? (
-        <p className="text-xs text-gray-500">Spent {fmtCurrency(bucket.spend)} — no cap configured.</p>
-      ) : (
-        <>
-          <Progress value={pct} />
-          <p className="text-xs text-gray-600 mt-1">
-            {fmtCurrency(bucket.spend)} of {fmtCurrency(bucket.cap)}
-            {bucket.percent != null && ` (${Math.round(bucket.percent * 100)}%)`}
-          </p>
-        </>
-      )}
-    </div>
-  );
-}
-
-function BudgetCard({ customerId }: { customerId: number }) {
+// Exported so the shared-renderer parity suite can mount the real card with a
+// budget-usage fixture and read the figures it prints (Task #2009).
+export function BudgetCard({ customerId }: { customerId: number }) {
   const [, setLocation] = useLocation();
   // Task #1911 — isError must be surfaced. The budget-usage route now 500s
   // when the spend lookup fails instead of quietly reporting zero spend, and
@@ -1025,8 +982,6 @@ function BudgetCard({ customerId }: { customerId: number }) {
     );
   }
   if (!data) return null;
-  const monthlyBucket: BudgetBucket = { cap: data.monthlyCap, spend: data.monthlySpend, percent: data.monthlyPercent, status: data.monthlyStatus, periodKey: data.currentMonthKey };
-  const annualBucket: BudgetBucket  = { cap: data.annualCap,  spend: data.annualSpend,  percent: data.annualPercent,  status: data.annualStatus,  periodKey: data.currentYearKey };
   const bothUnset = data.monthlyStatus === "unset" && data.annualStatus === "unset";
   return (
     <Card>
@@ -1042,8 +997,34 @@ function BudgetCard({ customerId }: { customerId: number }) {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <BudgetBucketRow label="This month" bucket={monthlyBucket} />
-            <BudgetBucketRow label="This year"  bucket={annualBucket} />
+            <div className="rounded-md border p-3 bg-white shadow-sm">
+              <BudgetBar
+                label={`This month (${data.currentMonthKey})`}
+                invoicedAmount={data.monthlyInvoiced}
+                pendingAmount={data.monthlyPendingNotBilled}
+                allocation={data.monthlyCap}
+                softThresholdPercent={data.softThresholdPercent}
+                hardThresholdPercent={data.hardThresholdPercent}
+                size="md"
+                showPercent
+                showSpendWhenUnset
+                data-testid="customer-budget-month"
+              />
+            </div>
+            <div className="rounded-md border p-3 bg-white shadow-sm">
+              <BudgetBar
+                label={`This year (${data.currentYearKey})`}
+                invoicedAmount={data.annualInvoiced}
+                pendingAmount={data.annualPendingNotBilled}
+                allocation={data.annualCap}
+                softThresholdPercent={data.softThresholdPercent}
+                hardThresholdPercent={data.hardThresholdPercent}
+                size="md"
+                showPercent
+                showSpendWhenUnset
+                data-testid="customer-budget-year"
+              />
+            </div>
           </div>
         )}
       </CardContent>

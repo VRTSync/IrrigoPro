@@ -664,7 +664,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/irrigopro exec vitest run src/components/layout/budget-route-nav-parity.test.ts src/components/layout/nav-config.test.ts src/pages/budget-status.test.tsx src/components/budget/BudgetBar.test.tsx"
+args = "pnpm --filter @workspace/irrigopro exec vitest run src/components/layout/budget-route-nav-parity.test.ts src/components/layout/nav-config.test.ts src/pages/budget-status.test.tsx src/components/budget/BudgetBar.test.tsx src/components/customer-form-budget-preview.test.tsx"
 
 [workflows.workflow.metadata]
 isValidation = true

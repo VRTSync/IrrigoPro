@@ -156,6 +156,7 @@ function RollupHeader({ rollup, year, month }: {
         <BudgetBar
           invoicedAmount={rollup.totalInvoiced}
           pendingAmount={rollup.totalPending}
+          size="md"
           allocation={rollup.totalAllocation > 0 ? rollup.totalAllocation : null}
           softThresholdPercent={75}
           hardThresholdPercent={100}
@@ -203,6 +204,7 @@ function CustomerRow({ row }: { row: BudgetStatusRow }) {
           invoicedAmount={row.invoicedAmount}
           pendingAmount={row.pendingAmount}
           allocation={row.allocation}
+          size="md"
           softThresholdPercent={row.softThresholdPercent}
           hardThresholdPercent={row.hardThresholdPercent}
         />
@@ -217,7 +219,7 @@ function CustomerRow({ row }: { row: BudgetStatusRow }) {
               allocation={row.seasonToDateTarget > 0 ? row.seasonToDateTarget : null}
               softThresholdPercent={row.softThresholdPercent}
               hardThresholdPercent={row.hardThresholdPercent}
-              thin
+              size="sm"
             />
             {row.annualGoal !== null && (
               <p className="text-[10px] text-gray-400 mt-1">

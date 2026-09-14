@@ -36,7 +36,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Progress } from "@/components/ui/progress";
+import { BudgetBar } from "@/components/budget/BudgetBar";
+import type { BudgetStatus } from "@workspace/shared";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -125,8 +126,6 @@ interface MixResponse {
 }
 
 // ─── Slice 3 (Task #692) ──────────────────────────────────────────────────
-type BudgetStatus = "unset" | "healthy" | "approaching" | "over";
-
 interface TopCustomerRow {
   customerId: number;
   name: string;
@@ -1013,68 +1012,51 @@ function PulseTab({
 
 // ─── Slice 3 components ───────────────────────────────────────────────────
 
-const PERCENT0 = new Intl.NumberFormat("en-US", {
-  style: "percent",
-  maximumFractionDigits: 0,
-});
 const PERCENT1 = new Intl.NumberFormat("en-US", {
   style: "percent",
   maximumFractionDigits: 1,
 });
 
-function statusTone(s: BudgetStatus): string {
-  switch (s) {
-    case "over":
-      return "bg-red-50 text-red-800 border-red-200";
-    case "approaching":
-      return "bg-amber-50 text-amber-800 border-amber-200";
-    case "healthy":
-      return "bg-emerald-50 text-emerald-800 border-emerald-200";
-    default:
-      return "bg-gray-50 text-gray-600 border-gray-200";
-  }
-}
-function statusLabel(s: BudgetStatus): string {
-  if (s === "over") return "Over cap";
-  if (s === "approaching") return "Approaching";
-  if (s === "healthy") return "On track";
-  return "Unset";
-}
+// Task #2009 — the pill is the one shared renderer in pill-only form. The
+// analytic vocabulary (Healthy / Approaching / Over / —) is the right register
+// for a revenue table a bookkeeper reads; the crew-facing "Go / Slow down /
+// Stop" wording lives in the same map on the same component.
 function StatusPill({ status }: { status: BudgetStatus }) {
   return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${statusTone(status)}`}
+    <BudgetBar
+      pillOnly
+      tone="analytic"
+      forcedStatus={status}
       data-testid={`status-pill-${status}`}
-    >
-      {statusLabel(status)}
-    </span>
+    />
   );
 }
 
-function BudgetMeter({
-  pct,
+// Task #2009 — the table's budget cell. A props adapter over the shared
+// renderer, not a second renderer: it owns no markup, no colours and no words
+// of its own. Exported so the parity suite can mount the real cell.
+export function CustomerBudgetCell({
+  cap,
+  spend,
   status,
+  testId,
 }: {
-  pct: number | null;
+  cap: number | null;
+  spend: number;
   status: BudgetStatus;
+  testId: string;
 }) {
-  if (pct == null) {
-    return <span className="text-gray-400 text-sm">—</span>;
-  }
-  const display = Math.min(100, Math.max(0, pct * 100));
-  const cls =
-    status === "over"
-      ? "[&>div]:bg-red-500"
-      : status === "approaching"
-        ? "[&>div]:bg-amber-500"
-        : "[&>div]:bg-emerald-500";
   return (
-    <div className="flex items-center gap-2 min-w-[120px]">
-      <Progress value={display} className={`h-2 w-24 ${cls}`} />
-      <span className="text-xs text-gray-600 tabular-nums">
-        {PERCENT0.format(pct)}
-      </span>
-    </div>
+    <BudgetBar
+      spentAmount={spend}
+      allocation={cap}
+      forcedStatus={status}
+      tone="analytic"
+      size="sm"
+      layout="inline"
+      showPercent
+      data-testid={testId}
+    />
   );
 }
 
@@ -1366,10 +1348,24 @@ function CustomersTab({ period }: { period: Period }) {
                     <Sparkline data={r.monthlySpark} />
                   </TableCell>
                   <TableCell>
-                    <BudgetMeter pct={r.monthlyUsedPct} status={r.monthlyStatus} />
+                    {/* Task #2009 — amounts mode. The row carries the real cap
+                        and spend for both columns, so the shared component
+                        classifies and clamps the same figures every other
+                        surface uses instead of a pre-divided percentage. */}
+                    <CustomerBudgetCell
+                      cap={r.monthlyCap}
+                      spend={r.monthlySpend}
+                      status={r.monthlyStatus}
+                      testId={`customer-monthly-meter-${r.customerId}`}
+                    />
                   </TableCell>
                   <TableCell>
-                    <BudgetMeter pct={r.annualUsedPct} status={r.annualStatus} />
+                    <CustomerBudgetCell
+                      cap={r.annualCap}
+                      spend={r.annualSpend}
+                      status={r.annualStatus}
+                      testId={`customer-annual-meter-${r.customerId}`}
+                    />
                   </TableCell>
                   <TableCell>
                     <StatusPill status={r.monthlyStatus} />

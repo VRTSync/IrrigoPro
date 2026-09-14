@@ -73,12 +73,17 @@ function CrewBudgetSection() {
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium text-gray-800 truncate">{row.customerName}</span>
               </div>
+              {/* Task #2009 — proportion mode. The crew endpoint returns no
+                  monetary field at all, so this passes the ratio it actually
+                  has instead of faking an allocation of 100. hidePercent
+                  keeps the percentage out of the pill AND out of
+                  aria-valuenow — a percentage of a hidden cap is a leak. */}
               <BudgetBar
-                invoicedAmount={row.fillPercent !== null ? row.fillPercent : 0}
-                pendingAmount={0}
-                allocation={row.fillPercent !== null ? 100 : null}
+                fillPercent={row.fillPercent}
                 forcedStatus={serverStatusToBudgetStatus(row.status)}
+                size="md"
                 hideDollars
+                hidePercent
               />
             </li>
           ))}

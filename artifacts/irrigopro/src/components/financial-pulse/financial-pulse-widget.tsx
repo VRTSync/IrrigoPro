@@ -15,10 +15,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
 import { ChevronRight, AlertCircle, TrendingUp } from "lucide-react";
 import { MetricTile } from "@/components/financial-pulse/metric-tile";
 import { adaptiveRefetchInterval } from "@/lib/queryClient";
+import { BudgetBar } from "@/components/budget/BudgetBar";
 import { cn } from "@/lib/utils";
 import { AGING_BUCKET_LABELS } from "@workspace/shared";
 
@@ -463,49 +463,6 @@ const CUSTOMER_DETAIL_TIPS = {
     "Average days from invoice creation to payment · measured over the last 90 days · shows '—' when no paid invoices exist in that window.",
 } as const;
 
-function statusColor(status: BudgetBucket["status"]): string {
-  switch (status) {
-    case "over":
-      return "bg-rose-500";
-    case "approaching":
-      return "bg-amber-500";
-    case "healthy":
-      return "bg-emerald-500";
-    default:
-      return "bg-gray-300";
-  }
-}
-
-function BudgetMeter({ bucket }: { bucket: BudgetBucket }) {
-  if (bucket.status === "unset" || bucket.cap == null) {
-    return (
-      <div
-        className="text-xs text-gray-500"
-        data-testid="fp-widget-budget-meter-unset"
-      >
-        No monthly budget set
-      </div>
-    );
-  }
-  const pct = Math.max(0, Math.min(100, (bucket.percent ?? 0) * 100));
-  return (
-    <div data-testid="fp-widget-budget-meter">
-      <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-        <span>
-          {formatCurrency(bucket.spend)} of {formatCurrency(bucket.cap)} this month
-        </span>
-        <span className="font-medium">{pct.toFixed(0)}%</span>
-      </div>
-      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-        <div
-          className={cn("h-full transition-all", statusColor(bucket.status))}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
 function CustomerDetailVariant({ customerId }: { customerId: number }) {
   const url = `/api/financial-pulse/customer/${customerId}/summary`;
   const { data, isLoading, error } = useFinancialPulseData<CustomerSummary>(
@@ -562,7 +519,32 @@ function CustomerDetailVariant({ customerId }: { customerId: number }) {
               infoTip={CUSTOMER_DETAIL_TIPS.avgTimeToPay}
             />
           </div>
-          {data?.monthly && <BudgetMeter bucket={data.monthly} />}
+          {/* Task #2009 — the one shared budget renderer. The profile page
+              shows this widget beside its own Budget & Alerts card; both now
+              draw the same customer's month through BudgetBar, so they can no
+              longer disagree on colour or wording. The server already
+              classified with this customer's thresholds, which the widget
+              does not receive, so the status is forced rather than
+              re-derived. */}
+          {data?.monthly &&
+            (data.monthly.status === "unset" || data.monthly.cap == null ? (
+              <div
+                className="text-xs text-gray-500"
+                data-testid="fp-widget-budget-meter-unset"
+              >
+                No monthly budget set
+              </div>
+            ) : (
+              <BudgetBar
+                label="This month"
+                spentAmount={data.monthly.spend}
+                allocation={data.monthly.cap}
+                forcedStatus={data.monthly.status}
+                size="md"
+                showPercent
+                data-testid="fp-widget-budget-meter"
+              />
+            ))}
         </div>
       )}
     </WidgetCard>
@@ -646,33 +628,6 @@ function ArAgingVariant() {
 
 // ─── Variant: top-customers-compact ───────────────────────────────────────
 
-function statusPill(status: BudgetBucket["status"]) {
-  switch (status) {
-    case "over":
-      return (
-        <Badge className="bg-rose-100 text-rose-800 hover:bg-rose-100">Over</Badge>
-      );
-    case "approaching":
-      return (
-        <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">
-          Approaching
-        </Badge>
-      );
-    case "healthy":
-      return (
-        <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
-          Healthy
-        </Badge>
-      );
-    default:
-      return (
-        <Badge variant="outline" className="text-gray-500">
-          —
-        </Badge>
-      );
-  }
-}
-
 function TopCustomersCompactVariant({ limit = 5 }: { limit?: number }) {
   const url = `/api/financial-pulse/top-customers?sort=revenue&period=mtd&limit=${limit}`;
   const [, setLocation] = useLocation();
@@ -727,18 +682,30 @@ function TopCustomersCompactVariant({ limit = 5 }: { limit?: number }) {
                   {pct == null ? (
                     <span className="text-xs text-gray-400">—</span>
                   ) : (
-                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div
-                        className={cn(
-                          "h-full",
-                          statusColor(r.monthlyStatus),
-                        )}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
+                    /* Task #2009 — proportion mode: this row carries a used
+                       percentage and a cap, but no spend figure, so it passes
+                       the ratio it has rather than inventing an allocation. */
+                    <BudgetBar
+                      fillPercent={pct}
+                      forcedStatus={r.monthlyStatus}
+                      tone="analytic"
+                      size="sm"
+                      hideLabel
+                      hideDollars
+                      hidePercent
+                    />
                   )}
                 </div>
-                <div className="shrink-0">{statusPill(r.monthlyStatus)}</div>
+                <div className="shrink-0">
+                  {/* Analytic vocabulary — this is a revenue table a
+                      bookkeeper reads, not an instruction to a crew. */}
+                  <BudgetBar
+                    pillOnly
+                    tone="analytic"
+                    forcedStatus={r.monthlyStatus}
+                    data-testid={`fp-top-customer-status-${r.customerId}`}
+                  />
+                </div>
               </li>
             );
           })}

@@ -15,13 +15,13 @@ import { CalendarIcon, DollarSign, Percent, FileText, Tag, Plus, X, Building2, B
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
+import { BudgetBar } from "@/components/budget/BudgetBar";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { insertCustomerSchema } from "@workspace/db/schema";
 import type { Customer, User } from "@workspace/db/schema";
 import { composeStructuredAddress } from "@/lib/customer-address";
-import { parseBudgetGoalInput, classifyBudgetPercent, type BudgetStatus } from "@workspace/shared";
+import { parseBudgetGoalInput, type BudgetStatus } from "@workspace/shared";
 
 const moneyOrBlank = z
   .string()
@@ -862,6 +862,8 @@ interface BudgetUsageResponse {
   monthlyAllocation: number | null;
   monthlyCap: number | null;
   monthlySpend: number;
+  monthlyInvoiced: number;
+  monthlyPendingNotBilled: number;
   monthlyPercent: number | null;
   monthlyStatus: BudgetStatus;
   annualCap: number | null;
@@ -869,28 +871,10 @@ interface BudgetUsageResponse {
   seasonToDateTarget: number;
   seasonToDateSpend: number;
   annualSpend: number;
+  annualInvoiced: number;
+  annualPendingNotBilled: number;
   annualPercent: number | null;
   annualStatus: BudgetStatus;
-}
-
-function statusTone(status: BudgetStatus): string {
-  switch (status) {
-    case "over":
-      return "bg-red-50 text-red-800 border-red-200";
-    case "approaching":
-      return "bg-amber-50 text-amber-800 border-amber-200";
-    case "healthy":
-      return "bg-emerald-50 text-emerald-800 border-emerald-200";
-    default:
-      return "bg-gray-50 text-gray-600 border-gray-200";
-  }
-}
-
-function statusLabel(status: BudgetStatus): string {
-  if (status === "over") return "Over cap";
-  if (status === "approaching") return "Approaching cap";
-  if (status === "healthy") return "On track";
-  return "No cap set";
 }
 
 function formatCurrency(n: number): string {
@@ -1284,7 +1268,9 @@ function BudgetAndAlertsCard({ form, customer }: BudgetSectionProps) {
   );
 }
 
-function LiveBudgetPreview({ customer, form }: { customer: Customer; form: BudgetSectionProps["form"] }) {
+// Exported so the budget-preview suite can mount the real preview with a
+// budget-usage fixture and read the figures it prints (Task #2009).
+export function LiveBudgetPreview({ customer, form }: { customer: Customer; form: BudgetSectionProps["form"] }) {
   const annualGoal = form.watch("annualBudgetGoal");
   const softPct = form.watch("budgetSoftThresholdPercent");
   const hardPct = form.watch("budgetHardThresholdPercent");
@@ -1308,42 +1294,47 @@ function LiveBudgetPreview({ customer, form }: { customer: Customer; form: Budge
     );
   }
 
-  // Classifies the values the user is typing right now, client-side, against
-  // the shared rule (Task #2008). `classifyBudgetPercent` wants spend / cap as
-  // a RATIO — which is exactly what `percent` is here — and the thresholds as
-  // 0-to-100 percentages, so no conversion is needed at this call site.
-  const previewBucket = (
-    capNum: number | null,
-    spend: number,
-  ): { status: BudgetStatus; percent: number | null } => {
-    const percent = capNum == null || capNum <= 0 ? null : spend / capNum;
-    const soft = Number(softPct) || 75;
-    const hard = Number(hardPct) || 100;
-    return { status: classifyBudgetPercent(percent, soft, hard), percent };
-  };
-
+  // Task #2009 — this surface previews UNSAVED values, so it hands the shared
+  // renderer the cap the user is typing plus the typed thresholds and lets it
+  // classify. It must never take a server-computed status: the server has not
+  // seen these numbers yet, and a forced status would stop the preview
+  // previewing.
   const monthlyCap = data.monthlyAllocation ?? data.monthlyCap;
   const annualCap = parseBudgetGoalInput(annualGoal) ?? data.annualGoal ?? data.annualCap;
-  const monthly = previewBucket(monthlyCap, data.monthlySpend);
-  const annual = previewBucket(annualCap, data.annualSpend);
+  const softThreshold = Number(softPct) || 75;
+  const hardThreshold = Number(hardPct) || 100;
 
   return (
     <div className="space-y-2" data-testid="budget-preview">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <PreviewRow
-          label={`This month (${data.currentMonthKey})`}
-          spend={data.monthlySpend}
-          cap={monthlyCap}
-          status={monthly.status}
-          percent={monthly.percent}
-        />
-        <PreviewRow
-          label={`This year (${data.currentYearKey})`}
-          spend={data.annualSpend}
-          cap={annualCap}
-          status={annual.status}
-          percent={annual.percent}
-        />
+        <div className="rounded-md border p-3 bg-white">
+          <BudgetBar
+            label={`This month (${data.currentMonthKey})`}
+            invoicedAmount={data.monthlyInvoiced}
+            pendingAmount={data.monthlyPendingNotBilled}
+            allocation={monthlyCap}
+            softThresholdPercent={softThreshold}
+            hardThresholdPercent={hardThreshold}
+            size="md"
+            showPercent
+            showSpendWhenUnset
+            data-testid="budget-preview-month"
+          />
+        </div>
+        <div className="rounded-md border p-3 bg-white">
+          <BudgetBar
+            label={`This year (${data.currentYearKey})`}
+            invoicedAmount={data.annualInvoiced}
+            pendingAmount={data.annualPendingNotBilled}
+            allocation={annualCap}
+            softThresholdPercent={softThreshold}
+            hardThresholdPercent={hardThreshold}
+            size="md"
+            showPercent
+            showSpendWhenUnset
+            data-testid="budget-preview-year"
+          />
+        </div>
       </div>
       {data.seasonToDateTarget > 0 && (
         <div className="rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
@@ -1352,45 +1343,6 @@ function LiveBudgetPreview({ customer, form }: { customer: Customer; form: Budge
           {formatCurrency(data.seasonToDateTarget)} target (Apr–now)
         </div>
       )}
-    </div>
-  );
-}
-
-function PreviewRow({
-  label,
-  spend,
-  cap,
-  status,
-  percent,
-}: {
-  label: string;
-  spend: number;
-  cap: number | null;
-  status: "unset" | "healthy" | "approaching" | "over";
-  percent: number | null;
-}) {
-  return (
-    <div className={`rounded-md border p-3 text-sm ${statusTone(status)}`}>
-      <div className="flex items-center justify-between">
-        <span className="font-medium">{label}</span>
-        <Badge variant="outline" className="bg-white">{statusLabel(status)}</Badge>
-      </div>
-      <div className="mt-1 text-xs">
-        {cap == null ? (
-          <span>Spent {formatCurrency(spend)} — no cap set</span>
-        ) : (
-          <>
-            <Progress
-              value={percent != null ? Math.min(100, Math.round(percent * 100)) : 0}
-              className="mt-1"
-            />
-            <span className="block mt-1">
-              {formatCurrency(spend)} of {formatCurrency(cap)}
-              {percent != null && ` (${Math.round(percent * 100)}%)`}
-            </span>
-          </>
-        )}
-      </div>
     </div>
   );
 }

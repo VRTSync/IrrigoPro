@@ -139,6 +139,7 @@ function BudgetStatusCardInner({ companyId }: { companyId: string | null }) {
                   allocation={row.allocation}
                   softThresholdPercent={row.softThresholdPercent}
                   hardThresholdPercent={row.hardThresholdPercent}
+                  size="md"
                 />
               </li>
             ))}
