@@ -261,11 +261,19 @@ describe("customer-profile Billing Details tab visibility", () => {
 
   it("does not render or query Financial Pulse for a role denied it", () => {
     // Financial Pulse routes allow only super_admin, company_admin, and
-    // billing_manager. Rendering the widget or firing its query for anyone
-    // else produces a background 403 the user never sees but the server logs.
-    expect(guardBefore('<FinancialPulseWidget variant="ar-aging" />')).toContain(
-      "canViewCosts",
-    );
+    // billing_manager. Linking there, or firing its query, for anyone else
+    // produces either a 403 page or a background 403 the user never sees but
+    // the server logs.
+    //
+    // Task #2013 — the invoices page used to carry the Financial Pulse A/R
+    // aging widget, and this assertion pointed at its JSX. The widget is gone
+    // (the page's own aging strip showed the same buckets), so the guarantee
+    // now points at the strip's "View on Financial Pulse" link, which is the
+    // page's only remaining Financial Pulse affordance. The page fires no
+    // Financial Pulse query at all any more.
+    expect(INVOICES_SRC).not.toContain("FinancialPulseWidget");
+    expect(INVOICES_SRC).not.toContain("/api/financial-pulse/");
+    expect(guardBefore('"/financial-pulse"')).toContain("canViewCosts");
     const summaryQuery = PROFILE_SRC.slice(
       PROFILE_SRC.indexOf("queryKey: [`/api/financial-pulse/customer/"),
     ).slice(0, 220);

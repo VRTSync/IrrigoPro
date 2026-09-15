@@ -13,7 +13,8 @@
  * paginated.
  */
 
-import { Loader2 } from "lucide-react";
+import { ChevronRight, Loader2 } from "lucide-react";
+import { Link } from "wouter";
 import { formatCurrency } from "@/lib/format-currency";
 import type { AgingFilter } from "@/lib/invoice-ar-query";
 
@@ -83,6 +84,7 @@ export function InvoiceAgingStrip({
   isError,
   active,
   onSelect,
+  financialPulseHref,
 }: {
   summary: AgingSummary | undefined;
   isLoading: boolean;
@@ -90,14 +92,39 @@ export function InvoiceAgingStrip({
   /** The `?aging=` value currently in the URL. */
   active: AgingFilter;
   onSelect: (value: AgingFilter) => void;
+  /**
+   * Task #2013 — where "View on Financial Pulse" goes, or absent when the
+   * caller's role cannot reach Financial Pulse. This strip replaced the
+   * Financial Pulse aging widget that used to sit above it, and that widget
+   * carried the page's only link out to Financial Pulse; the link has to
+   * survive the deletion, under the same capability gate it sat behind, so a
+   * role that would get a 403 is never shown it.
+   */
+  financialPulseHref?: string;
 }) {
+  const pulseLink = financialPulseHref ? (
+    <div className="mb-2 flex justify-end">
+      <Link href={financialPulseHref}>
+        <a
+          className="flex items-center gap-0.5 text-xs text-blue-600 hover:underline"
+          data-testid="ar-aging-strip-financial-pulse-link"
+        >
+          View on Financial Pulse <ChevronRight className="h-3.5 w-3.5" />
+        </a>
+      </Link>
+    </div>
+  ) : null;
+
   if (isError) {
     return (
-      <div
-        className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
-        data-testid="ar-aging-strip-error"
-      >
-        Aging totals could not be loaded. The list below is unaffected.
+      <div className="mb-6">
+        {pulseLink}
+        <div
+          className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+          data-testid="ar-aging-strip-error"
+        >
+          Aging totals could not be loaded. The list below is unaffected.
+        </div>
       </div>
     );
   }
@@ -105,12 +132,14 @@ export function InvoiceAgingStrip({
   const buckets = summary?.buckets ?? [];
 
   return (
-    <div
-      className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4"
-      data-testid="ar-aging-strip"
-      role="group"
-      aria-label="Outstanding balance by age"
-    >
+    <div className="mb-6">
+      {pulseLink}
+      <div
+        className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+        data-testid="ar-aging-strip"
+        role="group"
+        aria-label="Outstanding balance by age"
+      >
       {isLoading && buckets.length === 0
         ? [0, 1, 2, 3].map((i) => (
             <div
@@ -158,6 +187,7 @@ export function InvoiceAgingStrip({
               </button>
             );
           })}
+      </div>
     </div>
   );
 }

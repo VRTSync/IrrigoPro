@@ -188,7 +188,9 @@ describe("FinancialPulseWidget — billing-header variant (Task #711)", () => {
     expect(adminTile.textContent ?? "").toMatch(/\$4,500/);
   });
 
-  it("smoke: the four pre-existing variants still render without throwing", async () => {
+  // Task #2013 — the `ar-aging` variant was deleted; the invoices page's own
+  // aging strip is the one card now, so there is no variant to smoke here.
+  it("smoke: the pre-existing variants still render without throwing", async () => {
     fetchSpy.mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -217,7 +219,6 @@ describe("FinancialPulseWidget — billing-header variant (Task #711)", () => {
 
     for (const variant of [
       "admin-dashboard",
-      "ar-aging",
       "top-customers-compact",
     ] as const) {
       const { unmount } = render(

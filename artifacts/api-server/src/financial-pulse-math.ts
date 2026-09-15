@@ -15,6 +15,7 @@ import {
   classifyBudgetPercent,
   computeEffectiveDueDate,
   daysOverdue,
+  resolveBalanceDue,
   type AgingBucketKey,
   type BudgetStatus,
 } from "@workspace/shared";
@@ -42,6 +43,10 @@ export interface InvoiceLike {
   balance?: string | number | null;
   dueDate?: Date | string | null;
   paymentTerms?: string | null;
+  // Task #2013 — `resolveBalanceDue` reads this to decide whether `balance` is
+  // a real synced figure or the invoice total standing in for one. Optional so
+  // existing fixtures keep compiling; absent degrades to the invoice total.
+  paymentSyncedAt?: Date | string | null;
 }
 
 // Task #726 — lightweight shapes used only by computeAllBillableYtd so the
@@ -232,21 +237,28 @@ export function computeCollected(
   return sum;
 }
 
+/**
+ * Task #2013 — what one outstanding invoice contributes to A/R, under the one
+ * balance rule the invoice list already uses: the balance QuickBooks last
+ * reported when a payment sync has run, otherwise the invoice total. Clamped
+ * at zero so a credit-memo overpayment never subtracts from the total.
+ *
+ * `computeOutstandingAr` and `computeArAging` both call this, which is what
+ * makes the four buckets sum to the Money Owed tile.
+ */
+export function arAmountDue(inv: InvoiceLike): number {
+  return Math.max(0, resolveBalanceDue(inv));
+}
+
 export function computeOutstandingAr(invoices: InvoiceLike[]): number {
   let sum = 0;
   for (const inv of invoices) {
     if (INVOICE_EXCLUDED_STATUSES.has(inv.status) || inv.status === "paid")
       continue;
     if (inv.paidAt) continue;
-    // Task #1831 — use remaining balance for partially-paid invoices
     const ps = inv.paymentStatus ?? "unpaid";
     if (ps === "paid") continue;
-    if (ps === "partially_paid" && inv.balance != null) {
-      const bal = toNum(inv.balance);
-      if (bal > 0) sum += bal;
-      continue;
-    }
-    sum += toNum(inv.totalAmount);
+    sum += arAmountDue(inv);
   }
   return sum;
 }
@@ -585,17 +597,23 @@ export function computeArAging(
     if (INVOICE_EXCLUDED_STATUSES.has(inv.status) || inv.status === "paid")
       continue;
     if (inv.paidAt) continue;
-    // Task #1831 — skip fully-paid rows, use balance for partially-paid
+    // Task #1831 — skip fully-paid rows.
     const ps = inv.paymentStatus ?? "unpaid";
     if (ps === "paid") continue;
-    const created = toDate(inv.createdAt);
-    if (!created) continue;
+    // Task #2013 — an unparseable `createdAt` must NOT drop the row: it is in
+    // the Money Owed tile, so it has to be in a bucket. The effective-due-date
+    // helper yields an invalid date, daysOverdue yields NaN, and the frozen
+    // NaN fallthrough puts the row in the oldest bucket.
+    const created = toDate(inv.createdAt) ?? new Date(NaN);
     // Bucket by effective due date: dueDate if set, else createdAt + customer
     // payment terms (net_30=30d, net_15=15d, due_on_receipt=0d; default net_30).
     const due = computeEffectiveDueDate(inv.dueDate, created, inv.paymentTerms);
     const bucket = classifyAgingBucket(daysOverdue(due, now));
     const i = agingBucketRank(bucket);
-    const amount = ps === "partially_paid" && inv.balance != null ? Math.max(0, toNum(inv.balance)) : toNum(inv.totalAmount);
+    const amount = arAmountDue(inv);
+    // Task #2013 — count only the rows whose dollars this bucket reports, so a
+    // bucket's count and its amount describe the same set of invoices.
+    if (amount <= 0) continue;
     buckets[i].amount += amount;
     buckets[i].count += 1;
   }
@@ -1160,7 +1178,10 @@ export function computePulseCustomers(input: {
   const monthlySpendByCust = new Map<number, number>();
 
   for (const inv of invoices) {
-    if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+    // Task #2013 — one excluded-status set, shared with the Accounting tab.
+    // `merged` and `failed` were missing here, so merged invoices were counted
+    // twice: once on themselves, once on the surviving invoice.
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     const amt = toNum(inv.totalAmount);
     if ((inv.invoiceYear ?? 0) === currentYear) {
       ytdByCust.set(inv.customerId, (ytdByCust.get(inv.customerId) ?? 0) + amt);
@@ -1232,7 +1253,8 @@ export function computePulseTechnicians(input: {
 
   const ytdInvoiceAmount = new Map<number, number>();
   for (const inv of invoices) {
-    if (inv.status === "draft" || inv.status === "cancelled" || inv.status === "superseded") continue;
+    // Task #2013 — one excluded-status set, shared with the Accounting tab.
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     if ((inv.invoiceYear ?? 0) !== currentYear) continue;
     ytdInvoiceAmount.set(inv.id, toNum(inv.totalAmount));
   }

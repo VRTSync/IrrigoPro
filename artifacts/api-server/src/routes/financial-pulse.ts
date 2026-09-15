@@ -235,6 +235,11 @@ async function loadInvoicesForCustomers(
       paymentStatus: invoices.paymentStatus,
       balance: invoices.balance,
       dueDate: invoices.dueDate,
+      // Task #2013 — `resolveBalanceDue` needs this to tell a real synced
+      // balance from the invoice-total fallback. This is the single loader
+      // behind every Financial Pulse endpoint; without the field the A/R math
+      // silently falls back to invoice totals instead of failing.
+      paymentSyncedAt: invoices.paymentSyncedAt,
       paymentTerms: customers.paymentTerms,
     })
     .from(invoices)
@@ -254,6 +259,7 @@ async function loadInvoicesForCustomers(
     paymentStatus: i.paymentStatus,
     balance: i.balance,
     dueDate: i.dueDate,
+    paymentSyncedAt: i.paymentSyncedAt,
     paymentTerms: i.paymentTerms,
   }));
 }

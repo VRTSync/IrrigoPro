@@ -20,13 +20,11 @@ import { MetricTile } from "@/components/financial-pulse/metric-tile";
 import { adaptiveRefetchInterval } from "@/lib/queryClient";
 import { BudgetBar } from "@/components/budget/BudgetBar";
 import { cn } from "@/lib/utils";
-import { AGING_BUCKET_LABELS } from "@workspace/shared";
 
 export type FinancialPulseVariant =
   | "admin-dashboard"
   | "billing-header"
   | "customer-detail"
-  | "ar-aging"
   | "top-customers-compact"
   | "billing-header";
 
@@ -44,9 +42,6 @@ interface CustomerDetailProps extends BaseProps {
   variant: "customer-detail";
   customerId: number;
 }
-interface ArAgingProps extends BaseProps {
-  variant: "ar-aging";
-}
 interface TopCustomersCompactProps extends BaseProps {
   variant: "top-customers-compact";
   limit?: number;
@@ -58,7 +53,6 @@ export type FinancialPulseWidgetProps =
   | AdminDashboardProps
   | BillingHeaderProps
   | CustomerDetailProps
-  | ArAgingProps
   | TopCustomersCompactProps
   | BillingHeaderProps;
 
@@ -119,17 +113,6 @@ interface BudgetBucket {
   spend: number;
   percent: number | null;
   status: "unset" | "healthy" | "approaching" | "over";
-}
-
-interface AgingBucket {
-  key: "current" | "days30" | "days60" | "days90";
-  label: string;
-  amount: number;
-  count: number;
-}
-interface ArAgingResponse {
-  buckets: AgingBucket[];
-  total: number;
 }
 
 interface TopCustomerRow {
@@ -551,81 +534,6 @@ function CustomerDetailVariant({ customerId }: { customerId: number }) {
   );
 }
 
-// ─── Variant: ar-aging ────────────────────────────────────────────────────
-
-const AGING_TO_QUERY: Record<
-  AgingBucket["key"],
-  "current" | "days30" | "days60" | "days90Plus"
-> = {
-  current: "current",
-  days30: "days30",
-  days60: "days60",
-  days90: "days90Plus",
-};
-
-function ArAgingVariant() {
-  const url = "/api/financial-pulse/ar-aging?period=mtd";
-  const [, setLocation] = useLocation();
-  const { data, isLoading, error } = useFinancialPulseData<ArAgingResponse>(
-    "ar-aging",
-    url,
-  );
-  if (!isLoading && data == null && !error) return null;
-  const buckets =
-    data?.buckets ??
-    ([
-      // Task #1890 — labels come from the shared aging module so this
-      // placeholder cannot disagree with what the server sends.
-      { key: "current", label: AGING_BUCKET_LABELS.current, amount: 0, count: 0 },
-      { key: "days30", label: AGING_BUCKET_LABELS.days30, amount: 0, count: 0 },
-      { key: "days60", label: AGING_BUCKET_LABELS.days60, amount: 0, count: 0 },
-      { key: "days90", label: AGING_BUCKET_LABELS.days90, amount: 0, count: 0 },
-    ] as AgingBucket[]);
-  return (
-    <WidgetCard
-      title="Money Owed by Age"
-      href="/financial-pulse"
-      testId="fp-widget-ar-aging"
-    >
-      {error ? (
-        <ErrorState testId="fp-widget-ar-aging" />
-      ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {buckets.map((b) => (
-            <button
-              key={b.key}
-              type="button"
-              onClick={() => setLocation(`/invoices?aging=${AGING_TO_QUERY[b.key]}`)}
-              className="text-left"
-              data-testid={`fp-aging-bucket-${b.key}`}
-            >
-              <Card className="h-full hover:shadow-md transition-shadow cursor-pointer">
-                <CardContent className="pt-5 pb-4">
-                  <p className="text-xs sm:text-sm font-medium text-gray-500">
-                    {b.label}
-                  </p>
-                  <div className="mt-1">
-                    {isLoading ? (
-                      <Skeleton className="h-8 w-24" />
-                    ) : (
-                      <p className="text-2xl font-bold text-gray-900">
-                        {formatCurrency(b.amount)}
-                      </p>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-400 mt-1">
-                    {b.count} invoice{b.count === 1 ? "" : "s"}
-                  </p>
-                </CardContent>
-              </Card>
-            </button>
-          ))}
-        </div>
-      )}
-    </WidgetCard>
-  );
-}
-
 // ─── Variant: top-customers-compact ───────────────────────────────────────
 
 function TopCustomersCompactVariant({ limit = 5 }: { limit?: number }) {
@@ -725,8 +633,6 @@ export function FinancialPulseWidget(props: FinancialPulseWidgetProps) {
       return <BillingHeaderVariant className={props.className} />;
     case "customer-detail":
       return <CustomerDetailVariant customerId={props.customerId} />;
-    case "ar-aging":
-      return <ArAgingVariant />;
     case "top-customers-compact":
       return <TopCustomersCompactVariant limit={props.limit} />;
   }

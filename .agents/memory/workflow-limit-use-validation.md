@@ -18,3 +18,10 @@ room, which silently removes a check that a past task deliberately installed.
 **How to apply:** default to a validation command for any new test suite here.
 Reserve workflows for long-running processes — artifact services already own
 theirs and must be restarted with the workflow tool, never reconfigured.
+
+**A new api-server test file is not automatically validated.** The package test
+script globs `src/**/*.test.ts`, so a new file joins the full suite for free —
+but the registered validation commands name their test files **explicitly**.
+A file added only to the glob runs in a suite nobody invokes as a gate. When a
+new test belongs to an existing gate, re-register that command with the file
+appended to its argument list (`setValidationCommand` upserts by name).

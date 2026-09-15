@@ -96,7 +96,6 @@ import {
   type InvoiceLineItem,
 } from "@/components/billing/invoice-line-items";
 import { BatchReminderDialog } from "@/components/billing/batch-reminder-dialog";
-import { FinancialPulseWidget } from "@/components/financial-pulse/financial-pulse-widget";
 // Task #1942 — the AR-first layout. Each of these owns one band of the page:
 // the header's totals, the aging strip, the collapsed filter bar, and the one
 // named action on a row.
@@ -2196,24 +2195,21 @@ export default function InvoicesPage() {
           }
         />
 
-        {/* Task #708 — A/R Aging widget. Bucket clicks deep-link
-            back to this page with `?aging=<key>`, which hydrates the
-            aging filter below. */}
-        {canViewCosts && (
-          <div className="mb-6">
-            <FinancialPulseWidget variant="ar-aging" />
-          </div>
-        )}
-
         {/* Task #1942 — the aging strip. Server-computed totals per bucket;
             clicking a card writes the same `?aging=` the Financial Pulse
-            widget deep-links with, so the two agree by construction. */}
+            deep links use, so the two agree by construction.
+            Task #2013 — this is now the page's only aging card: the Financial
+            Pulse A/R aging widget that used to sit above it showed the same
+            buckets under a different balance rule. Its link out to Financial
+            Pulse lives here instead, behind the same capability gate, so a
+            role that cannot reach Financial Pulse is not sent into a 403. */}
         <InvoiceAgingStrip
           summary={agingSummary}
           isLoading={agingSummaryLoading}
           isError={!!agingSummaryError}
           active={arQuery.aging}
           onSelect={(value) => patchArQuery({ aging: value })}
+          financialPulseHref={canViewCosts ? "/financial-pulse" : undefined}
         />
 
         {/* Task #1890 — every filter is in the query string, so this whole

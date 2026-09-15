@@ -697,7 +697,14 @@ export function summarizeAging(rows: AnnotatedInvoice[]): AgingSummary {
     if (!isOpenAr(row)) continue;
     const slot = totals.get(row.agingBucket);
     if (!slot) continue;
-    slot.balance += parseFloat(row.balanceDue) || 0;
+    // Task #2013 — a bucket's count must describe exactly the rows its dollars
+    // describe, and it must agree with Financial Pulse's `computeArAging`,
+    // which applies the same rule. A row that owes nothing (a zero balance, or
+    // a credit-memo overpayment) is not money to chase, so it belongs in
+    // neither half of the card.
+    const balance = parseFloat(row.balanceDue) || 0;
+    if (balance <= 0) continue;
+    slot.balance += balance;
     slot.count += 1;
   }
 

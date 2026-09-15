@@ -45,6 +45,7 @@
 - [Gates over an empty tenant registry](gate-fail-open-empty-registry.md) — a requirement the tenant cannot satisfy is an outage; fail open on a confirmed-empty count and audit the skip.
 - [Preset seed reconcile contract](preset-seed-reconcile-contract.md) — a source-file-owned seed must correct drifted rows on re-run, never write the retired/active column.
 - [Work type selection vs resolution](work-type-selection-vs-resolution.md) — retired presets must still resolve rule+label everywhere; only selection and the fail-open count read active rows.
+- [A tile and its breakdown](tile-and-its-breakdown.md) — one shared amount helper for the total and its buckets; count only the rows whose dollars a bucket reports.
 - [One number on two surfaces](one-number-two-surfaces.md) — two endpoints feeding one figure must share the call; never run-rate a point-in-time balance by day-of-month.
 - [DB-free route fixture tests](db-free-route-fixture-tests.md) — stub db.select per table (drizzle queryChunks are introspectable) and freeze Date with node:test mock.timers.
 - [Radix Select blank trigger](radix-select-sentinel-blank-trigger.md) — a sentinel value with no rendered item shows neither value nor placeholder; unseeded tenant option lists read as "won't open".
