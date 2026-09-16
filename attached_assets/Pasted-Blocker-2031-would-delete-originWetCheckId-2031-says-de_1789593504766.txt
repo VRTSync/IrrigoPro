@@ -1,0 +1,45 @@
+Blocker — #2031 would delete originWetCheckId
+
+#2031 says delete lib/db/src/schema/schema.ts:839-848. Here's what's actually at 839:
+
+839  // the WO was created from an estimate that itself has originWetCheckId.
+840  // No backfill on existing rows.
+841  originWetCheckId: integer("origin_wet_check_id").references(() => wetChecks.id),
+842  // Task #1935 — follow-up work order link. ...
+848  parentWorkOrderId: integer("parent_work_order_id"),
+
+Lines 839-841 are originWetCheckId — the field that stamps which work orders came from a wet check inspection. It's read in 20 files, and it's the marker the whole punch-list ticket depends on. Deleting it takes out the one thing that already knows a punch list from a repair.
+
+Correct range is :842-848. This is my fault — the first version of the spec said 839-848, I corrected it to 842-848 yesterday, and #2031 was generated from the older copy.
+
+#2031's deploy gate is misframed
+
+Both my spec and #2031 say schema auto-applies on deploy. It doesn't. .replit [deployment.postBuild] runs only pnpm store prune, and the root build script is typecheck plus per-package build. Nothing pushes schema.
+
+#2031 step 4 is right that a plain push can silently no-op — scripts/post-merge.sh documents exactly that, with push-force as the remedy on dev and a note that production schema is owned by the Replit publish flow, which surfaces destructive changes for confirmation.
+
+But that changes where the gate sits. Merging #2031 is harmless. Running the push is the irreversible step, and that's what must not happen until #2029 is done and verified. The ticket should say so in those terms instead of "must not deploy."
+
+The three phantoms are a snapshot, not an inventory
+
+All four tickets hardcode the same three work order numbers, and #2028 aborts if fewer than three resolve — with no path for more than three. Those three are what I found on the Aug 21 screenshots. The mechanism has been live ever since, so any estimate-based completion with a substituted parts list in the last three-plus weeks could have produced another one.
+
+If a fourth exists, #2028 skips it and #2031 then drops the lineage column, leaving an unexplained pending work order sitting in a customer's active queue with nothing to say where it came from.
+
+Fix is small: #2028's preview should list every work order with a non-null parent_work_order_id, not just the three by number, and report anything beyond the named set as a finding rather than ignoring it. Keep cancellation limited to the named three so the blast radius stays fixed, but make the preview tell you the truth about what's out there.
+
+Two things the tickets got right that my spec had wrong
+
+Worth keeping, not correcting:
+
+#2028 moving the registry swap and the create-woodglenn-followup.ts deletion into Slice 1. My spec put the swap in Slice 1 but listed the file deletion under Slice 2, which was inconsistent. The ticket's reasoning is correct — that migration imports computeDeferredItems, so it has to be gone before #2030 deletes the module, and doing it there makes #2028 deployable on its own.
+
+#2030 narrowing the grep gate. My DoD demanded zero hits on all eleven terms at Slice 2, which is impossible while the schema still defines the column. The ticket correctly carves out parentWorkOrderId / parent_work_order_id until #2031 and says to call it out rather than work around it.
+
+Two small ones
+
+Rule 1 dropped out of #2030 and #2031 entirely. They're pure removals that add no tenancy surface, but the rule says every spec — the completion report should state that rather than say nothing.
+
+And #2029 is a human task: it's you at the Super Admin DB Migrations page, not Replit. Worth marking on the ticket so it doesn't sit in a build queue waiting for someone to pick it up.
+
+Want me to write these as an amendment file at the project root, or are you editing the tickets directly on the board?

@@ -1,0 +1,83 @@
+# BUILD — Manager mobile: Today's Schedule becomes the Action Board
+
+## What & Why
+
+The manager plans his day on his phone before 6am. The mobile app already has a manager mode, and it already has a button for exactly this — it just goes nowhere.
+
+`app/(tabs)/index.tsx` splits on role and renders `ManagerTodayScreen` for `irrigation_manager`, `company_admin` and `super_admin`. That screen offers four action buttons. **Two of them are dead:** `app/schedule.tsx` ("Today's Schedule") and `app/work-order/assign.tsx` ("Assign Technician") each render a "Coming soon" card and a Go Back button. The comment at the top of the first reads `routes-todo: Full "Today's schedule" screen — wire up in a future slice`.
+
+Today's Schedule was always meant to be the manager's morning plan. It has been an empty screen waiting for data that did not exist. The Action Board is that data. This ticket fills the stub rather than adding a fifth button beside it.
+
+**Assign Technician stays a stub in this ticket.** It is the natural next step once the board says which properties, but it is a write path onto work orders and belongs in its own slice.
+
+## Prerequisites
+
+- **Action Board Slice 1** — the `/api/action-board` endpoint. This screen is a second consumer of it, not a new read.
+- **Action Board Slice 2** — the plan generator, if the plan is to render here. If Slice 2 has not landed, ship the lanes and add the plan when it does.
+
+## Done looks like
+
+- A manager taps **Today's Schedule** on his phone and gets the day's properties in three lanes, not a "Coming soon" card.
+- Each row carries the property, its do-not-exceed amount, its open work orders, and its wet check state — the same three facts the desktop board shows.
+- The plan text is reachable in one more tap, with Copy and the platform share action.
+- A field tech tapping anything reachable from their own screen never sees budget figures.
+- The screen works offline-degraded the way the rest of the manager screens do: last-known data with the app's existing sync indicator, not a crash or a blank.
+- No new tab is added. Today, Wet Checks and Profile are unchanged.
+
+## Out of scope
+
+- **A fourth tab.** A "Properties" tab is a real possibility later; not until the two stubs are filled and the manager has been observed reaching for something the tabs do not give him.
+- **Assign Technician.** Still a stub after this ticket. Its own slice.
+- **Any write path.** This screen reads. It does not create wet checks, assign techs, or set scheduled dates.
+- **The field tech's screen.** `FieldTechTodayScreen` is untouched.
+- **New endpoints.** If the mobile app needs a differently shaped payload, shape it in the existing `/api/action-board` response rather than adding a parallel route.
+- **Push notifications** for the morning plan.
+
+## Steps
+
+1. **Replace the stub.** `app/schedule.tsx` currently renders "Coming soon". Replace its body with the board. Keep the route path and the existing button that reaches it — the entry point already works and must not move.
+
+2. **Consume the existing endpoint.** Query `/api/action-board` with the same `apiRequest` helper and TanStack Query conventions `ManagerTodayScreen` already uses for the status strip: a stale time in the tens of seconds and a refetch interval, so a manager who opens it twice in five minutes does not refetch needlessly but does see the day change.
+
+3. **Render the three lanes** as native cards, following the phone artboards in the mockup: property name, do-not-exceed amount, a line for work orders, a line for the wet check state, and the budget bar. Coloured left borders per lane, matching the app's `border-l-4` card idiom.
+
+4. **Add the plan screen.** A second screen reachable from a primary button at the bottom of the board, showing the generated text with Copy and the platform share sheet. Copy must work from a user gesture on iOS.
+
+5. **Guard the screen by role, server-side and in the client.** The endpoint's own gate is authoritative; the client must also not route a field tech here. Keep the two in agreement — a client that shows a screen the API refuses is the same defect that left the manager staring at a Financial Pulse error.
+
+6. **Handle empty and offline.** Before goals are entered, say so plainly and name the fix. Offline, show the last fetched board with the app's existing sync pill rather than an error.
+
+7. **Update the button's label if it no longer fits.** "Today's Schedule" is the right name for a plan of where crews go. Keep it unless the manager's own vocabulary differs — his words are "the plan".
+
+8. **Tests, registered as validation commands.** The screen renders each lane from a fixture; a field tech is refused; the empty state renders when no customer has an allocation; the plan screen renders the generator's output; copy is invoked from a gesture handler. Assert that `app/schedule.tsx` no longer contains "Coming soon" — this ticket's whole point is that a live button stops lying.
+
+9. **Verify on a real device or simulator** at phone width, signed in as an irrigation manager, reaching the screen by tapping the existing button.
+
+## Notes for the executor
+
+- `ManagerTodayScreen` (`components/manager-today-screen.tsx`) is the pattern to copy for layout, query conventions and the action-tile idiom. Its `FIELD_ACTIONS` array at :56 is where the four buttons are defined; the route it points at is `/schedule`.
+- The mobile app renders through `expo-router` with both a native-tabs and a classic-tabs layout depending on `isLiquidGlassAvailable()`. Adding a screen inside the existing stack avoids that branch entirely; adding a tab would not.
+- The mobile app does not read work types at all today. Do not assume any shared client helper from the web app exists here — this is a separate artifact with its own components.
+- jsdom mounts both the desktop and mobile shells in some suites, duplicating testids; scope queries accordingly.
+- Do not delete `app/work-order/assign.tsx`. It stays a stub, and removing it would break the fourth button.
+
+## Definition of Done (attach proof — Rule 7)
+
+- [ ] `file:line` for the replaced screen, the query, the lane rendering, the plan screen, and the role guard.
+- [ ] Screenshot of the board on a phone-width device, reached by tapping the existing Today's Schedule button, with real budget goals entered.
+- [ ] Screenshot of the plan screen and of the text pasted into a real message app.
+- [ ] Screenshot of the empty state.
+- [ ] Grep proof that "Coming soon" no longer appears in `app/schedule.tsx`, and that it still does in `app/work-order/assign.tsx`.
+- [ ] Proof a field tech is refused, from the response body.
+- [ ] Test output for lane rendering, the empty state, and the role guard.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+
+- `artifacts/irrigopro-mobile/app/schedule.tsx` (the stub being replaced)
+- `artifacts/irrigopro-mobile/app/(tabs)/index.tsx` (`MANAGER_ROLES` role split)
+- `artifacts/irrigopro-mobile/components/manager-today-screen.tsx` (`FIELD_ACTIONS` :56, query conventions :160-175 — the pattern)
+- `artifacts/irrigopro-mobile/app/(tabs)/_layout.tsx` (tabs — not changed, listed so it is not changed by accident)
+- `artifacts/irrigopro-mobile/app/work-order/assign.tsx` (stays a stub)
+- `artifacts/api-server/src/routes/manager-workspace-routes.ts` (`/api/action-board` from Slice 1)
+- `attached_assets/` — the pasted Action Board mockup HTML, phone artboards 1 and 2
