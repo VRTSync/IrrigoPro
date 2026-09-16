@@ -91,6 +91,10 @@ interface KpiTile {
 interface MarginTile extends KpiTile {
   missingWageTechCount?: number;
   estimatedLaborCostShortfall?: number;
+  // Task #2014 — parts-side gaps, reported the same way as the labor ones.
+  missingCostPartLineCount?: number;
+  estimatedPartsCostShortfall?: number;
+  laborCost?: number;
 }
 interface BilledLastCycleTile extends KpiTile {
   monthLabel: string;
@@ -278,6 +282,61 @@ const CURRENCY = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0,
 });
 
+// Task #2014 — the Profit Margin warning names BOTH gaps in the cost base:
+// technicians with no hourly wage (labor) and invoice part lines with no
+// catalog cost (parts), plus the combined dollars that were estimated rather
+// than known. When every dollar of labor cost came from the fallback wage the
+// margin is not a number with a caveat, so it is worded as an estimate end to
+// end.
+export function buildMarginWarning(
+  tile: MarginTile | undefined,
+): string | undefined {
+  if (!tile) return undefined;
+  const techCount = tile.missingWageTechCount ?? 0;
+  const partLineCount = tile.missingCostPartLineCount ?? 0;
+  const laborEstimated = tile.estimatedLaborCostShortfall ?? 0;
+  const partsEstimated = tile.estimatedPartsCostShortfall ?? 0;
+  const totalEstimated = laborEstimated + partsEstimated;
+  if (
+    techCount === 0 &&
+    partLineCount === 0 &&
+    totalEstimated === 0
+  ) {
+    return undefined;
+  }
+
+  const gaps: string[] = [];
+  if (techCount > 0) {
+    gaps.push(
+      `${techCount} technician${techCount === 1 ? "" : "s"} with no hourly wage set`,
+    );
+  }
+  if (partLineCount > 0) {
+    gaps.push(
+      `${partLineCount} part line${partLineCount === 1 ? "" : "s"} with no catalog cost`,
+    );
+  }
+  const gapText = gaps.length > 0 ? gaps.join(" and ") : "missing cost data";
+  const dollarText =
+    totalEstimated > 0
+      ? ` ${CURRENCY.format(totalEstimated)} of the cost base is estimated, not known.`
+      : "";
+
+  const laborCost = tile.laborCost ?? 0;
+  const allLaborEstimated = laborCost > 0 && laborEstimated >= laborCost;
+  if (allLaborEstimated) {
+    return (
+      `This margin is an estimate end to end — every dollar of labor cost uses ` +
+      `the fallback wage (${gapText}).${dollarText} ` +
+      `Set technician wages and catalog part costs before trusting the number.`
+    );
+  }
+  return (
+    `Margin partly estimated: ${gapText}.${dollarText} ` +
+    `Fill those in for a more accurate number.`
+  );
+}
+
 function formatRelative(iso: string | null): string {
   if (!iso) return "—";
   const then = new Date(iso).getTime();
@@ -316,7 +375,7 @@ export const INFO_TIPS = {
   avgDaysToPay:
     "Average (paidAt − createdAt) across invoices paid in the last 90 days. Requires QuickBooks payment sync.",
   grossMargin:
-    "(Revenue − parts cost − labor cost) ÷ revenue for invoices created this period.",
+    "(Revenue − parts cost − labor cost) ÷ revenue for invoices created this period. Parts cost comes from each invoice line's catalog cost; labor cost from technician hourly wages. Billed prices are never used as costs — where a catalog cost or a wage is missing the value is estimated and the tile flags it.",
 } as const;
 
 function useUserRole(): string | null {
@@ -1949,18 +2008,7 @@ function KpiBand({
         isError={isError}
         infoTip={INFO_TIPS.grossMargin}
         accent="violet"
-        warning={
-          data?.grossMarginPct.missingWageTechCount &&
-          data.grossMarginPct.missingWageTechCount > 0
-            ? `Margin uses fallback wage for ${data.grossMarginPct.missingWageTechCount} technician${
-                data.grossMarginPct.missingWageTechCount === 1 ? "" : "s"
-              } with no hourly rate set${
-                data.grossMarginPct.estimatedLaborCostShortfall
-                  ? ` (${CURRENCY.format(data.grossMarginPct.estimatedLaborCostShortfall)} of labor cost is estimated)`
-                  : ""
-              }. Set their wages for a more accurate number.`
-            : undefined
-        }
+        warning={buildMarginWarning(data?.grossMarginPct)}
       />
     </div>
   );

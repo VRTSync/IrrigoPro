@@ -76,11 +76,20 @@ export interface WetCheckBillingBillableLike {
 }
 
 // Task #814 — wet_check_billings shape for computeGrossMargin and
-// computeByTechnician. Has pre-computed subtotals (no hours × wage needed
-// for gross margin — task specifies adding laborSubtotal directly).
+// computeByTechnician.
+//
+// Task #2014 — `partsSubtotal` / `laborSubtotal` are BILLED PRICES and are no
+// longer read by computeGrossMargin. Wet-check labor cost now runs through the
+// same technicianId × totalHours × wage path as work orders and billing
+// sheets, and wet-check parts cost comes from the invoice's own line items.
+// The two subtotal fields stay on the shape only because other (revenue-side)
+// callers and fixtures still carry them; nothing on the cost side may read
+// them again.
 export interface WetCheckBillingLike {
   invoiceId?: number | null;
+  /** @deprecated billed price — never a cost input. */
   partsSubtotal?: string | number | null;
+  /** @deprecated billed price — never a cost input. */
   laborSubtotal?: string | number | null;
   technicianId?: number | null;
   totalHours?: string | number | null;
@@ -103,6 +112,12 @@ export interface CustomerLike {
 export interface WorkOrderLike {
   invoiceId?: number | null;
   totalHours?: string | number | null;
+  /**
+   * @deprecated Task #2014 — a real cost, but a sheet-level snapshot rather
+   * than a line-level one. Parts cost is now derived line by line from the
+   * invoice's own items, one rule for all three source types, so this is no
+   * longer read by computeGrossMargin.
+   */
   totalPartsCost?: string | number | null;
   assignedTechnicianId?: number | null;
   completedByUserId?: number | null;
@@ -111,10 +126,22 @@ export interface WorkOrderLike {
 export interface BillingSheetLike {
   invoiceId?: number | null;
   totalHours?: string | number | null;
+  /** @deprecated billed price — never a cost input (Task #2014). */
   partsSubtotal?: string | number | null;
   technicianId?: number | null;
 }
 
+export interface InvoiceLineCostLike {
+  invoiceId: number | null;
+  partId?: number | null;
+  quantity?: string | number | null;
+  /** Billed total for the line (parts + labor for ticket-level summary rows). */
+  totalPrice?: string | number | null;
+  /** Billed labor portion of the line; excluded from the parts estimate. */
+  laborTotal?: string | number | null;
+  /** Catalog `parts.cost`, or null when no usable cost could be resolved. */
+  partCost?: string | number | null;
+}
 export interface UserLike {
   id: number;
   hourlyWage?: string | number | null;
@@ -412,18 +439,44 @@ export interface GrossMarginResult {
    * wage (both missing-wage techs and unknown techs). Exposed on the tile
    * warning so users understand the magnitude of the estimate. */
   estimatedLaborCostShortfall: number;
+  /** Task #2014 — total dollar amount of parts cost charged as a percentage of
+   * the billed price because no catalog cost could be resolved for the line. */
+  estimatedPartsCostShortfall: number;
+  /** Task #2014 — how many invoice line items carried billed parts dollars but
+   * no usable catalog cost. */
+  missingCostPartLineCount: number;
 }
 
+/**
+ * Task #2014 — one cost rule behind all three legs.
+ *
+ * Parts cost is the sum over the in-window invoices' OWN line items of
+ * `quantity × parts.cost`. It is never a `partsSubtotal`, a `totalPartsCost`
+ * snapshot, or any other billed-price column, and there is deliberately no
+ * fallback chain back to one: when a line has no usable catalog cost the line
+ * is charged `partsCostPct` of its billed parts price and the estimate is
+ * reported separately so the tile can flag it.
+ *
+ * Labor cost is technician hours × wage for all three legs — work orders,
+ * billing sheets and wet checks alike — so wet-check labor participates in the
+ * missing-wage count and the labor shortfall like everything else.
+ */
 export function computeGrossMargin(input: {
   invoices: InvoiceLike[];
   workOrders: WorkOrderLike[];
   billingSheets: BillingSheetLike[];
   // Task #814 — wet check billings linked to invoices in the window.
-  // partsSubtotal added to partsCost; laborSubtotal added directly to
-  // laborCost (WCBs already carry a computed rate-based subtotal).
+  // Task #2014 — contribute labor HOURS only; their billed subtotals are
+  // prices and never enter the cost base.
   wetCheckBillings?: WetCheckBillingLike[];
+  // Task #2014 — line items of the invoices in the window, each carrying the
+  // catalog cost of its part (null when unresolvable). The sole source of
+  // parts cost.
+  invoiceLineItems?: InvoiceLineCostLike[];
   usersById: Map<number, UserLike>;
   fallbackHourlyWage: number;
+  /** Percent of billed parts price charged when catalog cost is unknown. */
+  partsCostPct?: number;
   window: { start: Date; end: Date };
 }): GrossMarginResult {
   const {
@@ -431,10 +484,15 @@ export function computeGrossMargin(input: {
     workOrders,
     billingSheets,
     wetCheckBillings = [],
+    invoiceLineItems = [],
     usersById,
     fallbackHourlyWage,
     window,
   } = input;
+  const partsCostPct =
+    Number.isFinite(input.partsCostPct) && (input.partsCostPct as number) >= 0
+      ? (input.partsCostPct as number)
+      : DEFAULT_PARTS_COST_PCT;
   const invoiceIdsInWindow = new Set<number>();
   let revenue = 0;
   for (const inv of invoices) {
@@ -448,6 +506,8 @@ export function computeGrossMargin(input: {
   let partsCost = 0;
   let laborCost = 0;
   let estimatedLaborCostShortfall = 0;
+  let estimatedPartsCostShortfall = 0;
+  let missingCostPartLineCount = 0;
   const missingWageTechs = new Set<number>();
   const usedFallbackForUnknownTech = { flag: false };
 
@@ -475,9 +535,9 @@ export function computeGrossMargin(input: {
     }
   };
 
+  // ── Labor cost: hours × wage, identically for all three legs ─────────────
   for (const wo of workOrders) {
     if (wo.invoiceId == null || !invoiceIdsInWindow.has(wo.invoiceId)) continue;
-    partsCost += toNum(wo.totalPartsCost);
     tally(
       wo.assignedTechnicianId ?? wo.completedByUserId ?? null,
       toNum(wo.totalHours),
@@ -485,15 +545,36 @@ export function computeGrossMargin(input: {
   }
   for (const bs of billingSheets) {
     if (bs.invoiceId == null || !invoiceIdsInWindow.has(bs.invoiceId)) continue;
-    partsCost += toNum(bs.partsSubtotal);
     tally(bs.technicianId ?? null, toNum(bs.totalHours));
   }
-  // Task #814 — wet check billings linked to invoices in the window.
-  // Use pre-computed subtotals directly (labor rate already baked in).
+  // Task #2014 — wet checks used to add their billed `laborSubtotal`
+  // (hours × the CUSTOMER's labor rate) straight to labor cost. That is a
+  // price. They now go through the same wage path as everything else.
   for (const wcb of wetCheckBillings) {
     if (wcb.invoiceId == null || !invoiceIdsInWindow.has(wcb.invoiceId)) continue;
-    partsCost += toNum(wcb.partsSubtotal);
-    laborCost += toNum(wcb.laborSubtotal);
+    tally(wcb.technicianId ?? null, toNum(wcb.totalHours));
+  }
+
+  // ── Parts cost: quantity × catalog cost, line by line ────────────────────
+  //
+  // A line's billed PARTS price is its total less its billed labor, so a
+  // ticket-level summary line (one row carrying a whole work order's labor and
+  // parts) cannot have its labor charged a second time here — that labor is
+  // already priced above through the wage path. For a real part line
+  // `laborTotal` is zero and this is simply the line total.
+  for (const li of invoiceLineItems) {
+    if (li.invoiceId == null || !invoiceIdsInWindow.has(li.invoiceId)) continue;
+    const catalogCost = toNum(li.partCost, NaN);
+    if (li.partId != null && Number.isFinite(catalogCost) && catalogCost >= 0) {
+      partsCost += toNum(li.quantity) * catalogCost;
+      continue;
+    }
+    const billedParts = toNum(li.totalPrice) - toNum(li.laborTotal);
+    if (!(billedParts > 0)) continue;
+    const estimated = billedParts * (partsCostPct / 100);
+    partsCost += estimated;
+    estimatedPartsCostShortfall += estimated;
+    missingCostPartLineCount += 1;
   }
 
   const pct =
@@ -505,6 +586,8 @@ export function computeGrossMargin(input: {
     laborCost,
     missingWageTechCount: missingWageTechs.size,
     estimatedLaborCostShortfall,
+    estimatedPartsCostShortfall,
+    missingCostPartLineCount,
   };
 }
 
@@ -1353,3 +1436,11 @@ export function computePulseTechnicians(input: {
   out.sort((a, b) => b.inFlight - a.inFlight);
   return out;
 }
+
+/**
+ * Task #2014 — percentage of a line's billed parts price charged as cost when
+ * the catalog cost is unknown. Overridable with the `DEFAULT_PARTS_COST_PCT`
+ * env var, mirroring `DEFAULT_HOURLY_WAGE`. Every dollar estimated this way is
+ * reported back on the margin result so the tile can flag it.
+ */
+export const DEFAULT_PARTS_COST_PCT = 65;

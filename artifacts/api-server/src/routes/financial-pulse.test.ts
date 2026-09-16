@@ -309,77 +309,13 @@ describe("Task #688 — gross margin fallback when techs lack hourlyWage", () =>
     [11, { id: 11, hourlyWage: null }],
   ]);
 
-  it("uses tech.hourlyWage when present", () => {
-    const r = computeGrossMargin({
-      invoices,
-      workOrders: [
-        {
-          invoiceId: 100,
-          totalHours: "10",
-          totalPartsCost: "100",
-          assignedTechnicianId: 10,
-        },
-      ],
-      billingSheets: [],
-      usersById,
-      fallbackHourlyWage: 25,
-      window: win,
-    });
-    // revenue 1000, partsCost 100, laborCost 10*50 = 500 -> margin 40%
-    assert.equal(r.revenue, 1000);
-    assert.equal(r.partsCost, 100);
-    assert.equal(r.laborCost, 500);
-    assert.equal(Math.round(r.pct ?? 0), 40);
-    assert.equal(r.missingWageTechCount, 0);
-  });
-
-  it("falls back when a tech has no hourlyWage and reports missingWageTechCount", () => {
-    const r = computeGrossMargin({
-      invoices,
-      workOrders: [
-        {
-          invoiceId: 100,
-          totalHours: "10",
-          totalPartsCost: "100",
-          assignedTechnicianId: 11, // no wage
-        },
-      ],
-      billingSheets: [],
-      usersById,
-      fallbackHourlyWage: 25,
-      window: win,
-    });
-    // labor: 10 * 25 = 250 (fallback). margin = (1000-100-250)/1000 = 65%
-    assert.equal(r.laborCost, 250);
-    assert.equal(Math.round(r.pct ?? 0), 65);
-    assert.equal(r.missingWageTechCount, 1);
-  });
-
-  it("blended margin pulls from both work orders and billing sheets", () => {
-    const r = computeGrossMargin({
-      invoices,
-      workOrders: [
-        {
-          invoiceId: 100,
-          totalHours: "4",
-          totalPartsCost: "60",
-          assignedTechnicianId: 10,
-        },
-      ],
-      billingSheets: [
-        { invoiceId: 100, totalHours: "6", partsSubtotal: "40", technicianId: 11 },
-      ],
-      usersById,
-      fallbackHourlyWage: 25,
-      window: win,
-    });
-    // partsCost = 60 + 40 = 100; laborCost = 4*50 + 6*25 = 200 + 150 = 350
-    // margin = (1000 - 100 - 350)/1000 = 55%
-    assert.equal(r.partsCost, 100);
-    assert.equal(r.laborCost, 350);
-    assert.equal(Math.round(r.pct ?? 0), 55);
-    assert.equal(r.missingWageTechCount, 1);
-  });
+  // Task #2014 — three cases were removed here. They asserted a parts-cost
+  // basis that no longer exists: `work_orders.totalPartsCost` as a work
+  // order's parts cost, and `billing_sheets.partsSubtotal` (a billed PRICE)
+  // as a billing sheet's. Parts cost is now derived line by line from the
+  // invoice's own items against the catalog. The wage-fallback behaviour they
+  // also exercised is covered by the Task #730 shortfall block below and, on
+  // the new basis, by financial-pulse-margin-costs.test.ts.
 
   it("returns null margin when there is no revenue in the window", () => {
     const r = computeGrossMargin({

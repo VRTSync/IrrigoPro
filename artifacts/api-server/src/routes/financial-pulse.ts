@@ -21,6 +21,10 @@ import {
   customerBudgetMonths,
   invoiceItems,
   invoices,
+  parts,
+  billingSheetItems,
+  workOrderItems,
+  wetCheckFindings,
   users,
   wetCheckBillings,
   workOrders,
@@ -37,6 +41,7 @@ import {
   computeCollected,
   computeGrossMargin,
   computeOutstandingAr,
+  DEFAULT_PARTS_COST_PCT,
   computeProjectedMonthEnd,
   computeRevenueMix,
   computeTopCustomers,
@@ -63,6 +68,7 @@ import {
   type BillingSheetLike,
   type CustomerLike,
   type InvoiceItemLike,
+  type InvoiceLineCostLike,
   type TopCustomerRow,
   type TechnicianRow,
   type ServiceTypeRow,
@@ -91,6 +97,12 @@ function fallbackHourlyWage(): number {
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_FALLBACK_HOURLY_WAGE;
 }
 
+function fallbackPartsCostPct(): number {
+  const raw = process.env.DEFAULT_PARTS_COST_PCT;
+  if (!raw) return DEFAULT_PARTS_COST_PCT;
+  const n = parseFloat(raw);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : DEFAULT_PARTS_COST_PCT;
+}
 export interface ResolvedScope {
   status: 200 | 400 | 403;
   body?: { message: string };
@@ -344,16 +356,134 @@ async function loadInvoiceItemsForInvoices(
   }));
 }
 
+interface SourcePartRow {
+  sourceId: number;
+  itemId: number | null;
+  partId: number | null;
+  partCompanyId: number | null;
+  quantity: string | number | null;
+  unitPrice: string | null;
+  partCost: string | null;
+}
+
+export async function loadInvoiceLineCostsForInvoices(
+  invoiceIds: number[],
+): Promise<InvoiceLineCostLike[]> {
+  if (invoiceIds.length === 0) return [];
+  const rows = await db
+    .select({
+      invoiceId: invoiceItems.invoiceId,
+      companyId: invoices.companyId,
+      partId: invoiceItems.partId,
+      quantity: invoiceItems.quantity,
+      totalPrice: invoiceItems.totalPrice,
+      laborTotal: invoiceItems.laborTotal,
+      sourceType: invoiceItems.sourceType,
+      sourceId: invoiceItems.sourceId,
+      partCost: parts.cost,
+    })
+    .from(invoiceItems)
+    .innerJoin(invoices, eq(invoiceItems.invoiceId, invoices.id))
+    .leftJoin(
+      parts,
+      and(eq(parts.id, invoiceItems.partId), eq(parts.companyId, invoices.companyId)),
+    )
+    .where(inArray(invoiceItems.invoiceId, invoiceIds));
+
+  // Invoices generated from tickets carry ONE summary row per ticket — no
+  // partId, the whole ticket total in totalPrice. The parts those tickets
+  // actually billed live on the ticket's own item rows, so a summary row is
+  // expanded into them; that is what keeps a generated invoice on real catalog
+  // cost instead of the estimate, and it is also why the reissue path dropping
+  // laborTotal cannot reintroduce a labor double-count: an expanded line
+  // carries parts dollars only.
+  const summaries = rows.filter((r) => r.partId == null && r.sourceId != null);
+  const idsByType = new Map<string, Set<number>>();
+  for (const s of summaries) {
+    if (!s.sourceType) continue;
+    const set = idsByType.get(s.sourceType) ?? new Set<number>();
+    set.add(s.sourceId as number);
+    idsByType.set(s.sourceType, set);
+  }
+  const ids = (t: string) => Array.from(idsByType.get(t) ?? []);
+  const [woLines, bsLines, wcbLines] = await Promise.all([
+    loadWorkOrderPartLines(ids("work_order")),
+    loadBillingSheetPartLines(ids("billing_sheet")),
+    loadWetCheckBillingPartLines(ids("wet_check_billing")),
+  ]);
+  const bySource = new Map<string, SourcePartRow[]>();
+  const record = (type: string, list: SourcePartRow[]) => {
+    for (const r of list) {
+      const key = `${type}:${r.sourceId}`;
+      const arr = bySource.get(key) ?? [];
+      arr.push(r);
+      bySource.set(key, arr);
+    }
+  };
+  record("work_order", woLines);
+  record("billing_sheet", bsLines);
+  record("wet_check_billing", wcbLines);
+
+  const out: InvoiceLineCostLike[] = [];
+  for (const r of rows) {
+    if (r.partId != null) {
+      out.push({
+        invoiceId: r.invoiceId,
+        partId: r.partId,
+        quantity: r.quantity ?? null,
+        totalPrice: r.totalPrice ?? null,
+        laborTotal: r.laborTotal ?? null,
+        partCost: r.partCost ?? null,
+      });
+      continue;
+    }
+    const sourceRows =
+      r.sourceType && r.sourceId != null
+        ? bySource.get(`${r.sourceType}:${r.sourceId}`)
+        : undefined;
+    if (sourceRows == null) {
+      // The ticket this line came from could not be resolved (or the line has
+      // no ticket at all — a hand-entered line). Fall back to the line's own
+      // billed parts dollars, which is its total less the labor it states.
+      out.push({
+        invoiceId: r.invoiceId,
+        partId: null,
+        quantity: r.quantity ?? null,
+        totalPrice: r.totalPrice ?? null,
+        laborTotal: r.laborTotal ?? null,
+        partCost: null,
+      });
+      continue;
+    }
+    // The ticket resolved. Its part rows are authoritative — including the
+    // case of none at all, which means the ticket billed no parts and there is
+    // nothing to cost or to estimate.
+    for (const s of sourceRows) {
+      if (s.itemId == null) continue;
+      const qty = num(s.quantity);
+      out.push({
+        invoiceId: r.invoiceId,
+        partId: s.partId,
+        quantity: String(qty),
+        totalPrice: String(num(s.unitPrice) * qty),
+        laborTotal: "0",
+        partCost: costForTenant(s, r.companyId ?? null),
+      });
+    }
+  }
+  return out;
+}
 async function loadWorkOrdersForInvoices(
   invoiceIds: number[],
 ): Promise<WorkOrderLike[]> {
   if (invoiceIds.length === 0) return [];
   // Task #1898 — projected (was `select()`); work_orders is a wide table.
+  // Task #2014 — `totalPartsCost` dropped: parts cost is derived line by line
+  // from the invoice's own items now, so nothing reads the sheet-level snapshot.
   const rows = await db
     .select({
       invoiceId: workOrders.invoiceId,
       totalHours: workOrders.totalHours,
-      totalPartsCost: workOrders.totalPartsCost,
       assignedTechnicianId: workOrders.assignedTechnicianId,
       completedByUserId: workOrders.completedByUserId,
     })
@@ -362,7 +492,6 @@ async function loadWorkOrdersForInvoices(
   return rows.map((w) => ({
     invoiceId: w.invoiceId,
     totalHours: w.totalHours ?? null,
-    totalPartsCost: w.totalPartsCost ?? null,
     assignedTechnicianId: w.assignedTechnicianId ?? null,
     completedByUserId: w.completedByUserId ?? null,
   }));
@@ -373,11 +502,12 @@ async function loadBillingSheetsForInvoices(
 ): Promise<BillingSheetLike[]> {
   if (invoiceIds.length === 0) return [];
   // Task #1898 — projected (was `select()`).
+  // Task #2014 — `partsSubtotal` dropped; it is a billed price and no cost
+  // figure may originate from it.
   const rows = await db
     .select({
       invoiceId: billingSheets.invoiceId,
       totalHours: billingSheets.totalHours,
-      partsSubtotal: billingSheets.partsSubtotal,
       technicianId: billingSheets.technicianId,
     })
     .from(billingSheets)
@@ -385,7 +515,6 @@ async function loadBillingSheetsForInvoices(
   return rows.map((b) => ({
     invoiceId: b.invoiceId,
     totalHours: b.totalHours ?? null,
-    partsSubtotal: b.partsSubtotal ?? null,
     technicianId: b.technicianId ?? null,
   }));
 }
@@ -419,11 +548,12 @@ async function loadWetCheckBillingsForInvoices(
   invoiceIds: number[],
 ): Promise<WetCheckBillingLike[]> {
   if (invoiceIds.length === 0) return [];
+  // Task #2014 — `partsSubtotal` / `laborSubtotal` dropped. Both are billed
+  // prices; wet-check labor cost is now hours × the technician's wage and
+  // wet-check parts cost comes from the invoice's own line items.
   const rows = await db
     .select({
       invoiceId: wetCheckBillings.invoiceId,
-      partsSubtotal: wetCheckBillings.partsSubtotal,
-      laborSubtotal: wetCheckBillings.laborSubtotal,
       technicianId: wetCheckBillings.technicianId,
       totalHours: wetCheckBillings.totalHours,
     })
@@ -431,8 +561,6 @@ async function loadWetCheckBillingsForInvoices(
     .where(inArray(wetCheckBillings.invoiceId, invoiceIds));
   return rows.map((w) => ({
     invoiceId: w.invoiceId,
-    partsSubtotal: w.partsSubtotal ?? null,
-    laborSubtotal: w.laborSubtotal ?? null,
     technicianId: w.technicianId ?? null,
     totalHours: w.totalHours ?? null,
   }));
@@ -704,11 +832,13 @@ export function registerFinancialPulseRoutes(
             return d >= marginWindow.start && d < marginWindow.end;
           })
           .map((i) => i.id);
-        const [wos, bss, wcbsForMargin, techs] = await Promise.all([
+        const [wos, bss, wcbsForMargin, lineCosts, techs] = await Promise.all([
           loadWorkOrdersForInvoices(invoiceIdsInWindow),
           loadBillingSheetsForInvoices(invoiceIdsInWindow),
           // Task #814 — WCBs linked to invoices in the margin window.
           loadWetCheckBillingsForInvoices(invoiceIdsInWindow),
+          // Task #2014 — line-level part costs for those same invoices.
+          loadInvoiceLineCostsForInvoices(invoiceIdsInWindow),
           loadTechs(scope.companyId),
         ]);
         const usersById = new Map(techs.map((u) => [u.id, u]));
@@ -717,8 +847,10 @@ export function registerFinancialPulseRoutes(
           workOrders: wos,
           billingSheets: bss,
           wetCheckBillings: wcbsForMargin,
+          invoiceLineItems: lineCosts,
           usersById,
           fallbackHourlyWage: fallbackHourlyWage(),
+          partsCostPct: fallbackPartsCostPct(),
           window: marginWindow,
         });
 
@@ -774,6 +906,10 @@ export function registerFinancialPulseRoutes(
             comparedTo: "prevMonth",
             missingWageTechCount: margin.missingWageTechCount,
             estimatedLaborCostShortfall: margin.estimatedLaborCostShortfall,
+            // Task #2014 — parts-side equivalents of the labor shortfall so
+            // the tile can name both gaps.
+            missingCostPartLineCount: margin.missingCostPartLineCount,
+            estimatedPartsCostShortfall: margin.estimatedPartsCostShortfall,
             revenue: margin.revenue,
             partsCost: margin.partsCost,
             laborCost: margin.laborCost,
@@ -1943,4 +2079,115 @@ function serviceTypeCsv(rows: ServiceTypeRow[]): string {
     ]),
   );
   return [header, ...body].join("\n") + "\n";
+}
+
+function costForTenant(
+  row: SourcePartRow,
+  invoiceCompanyId: number | null,
+): string | null {
+  if (row.partCost == null) return null;
+  if (row.partCompanyId == null || row.partCompanyId !== invoiceCompanyId) {
+    return null;
+  }
+  return row.partCost;
+}
+
+function num(v: string | number | null | undefined, fallback = 0): number {
+  if (v == null) return fallback;
+  const n = typeof v === "number" ? v : parseFloat(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+async function loadWorkOrderPartLines(ids: number[]): Promise<SourcePartRow[]> {
+  if (ids.length === 0) return [];
+  const rows = await db
+    .select({
+      sourceId: workOrders.id,
+      itemId: workOrderItems.id,
+      partId: workOrderItems.partId,
+      partCompanyId: parts.companyId,
+      quantity: workOrderItems.quantity,
+      actualQuantity: workOrderItems.actualQuantityUsed,
+      unitPrice: workOrderItems.partPrice,
+      partCost: parts.cost,
+    })
+    .from(workOrders)
+    .leftJoin(workOrderItems, eq(workOrderItems.workOrderId, workOrders.id))
+    .leftJoin(parts, eq(parts.id, workOrderItems.partId))
+    .where(inArray(workOrders.id, ids));
+  return rows.map((r) => ({
+    sourceId: r.sourceId,
+    itemId: r.itemId ?? null,
+    partId: r.partId ?? null,
+    partCompanyId: r.partCompanyId ?? null,
+    quantity: r.actualQuantity ?? r.quantity ?? null,
+    unitPrice: r.unitPrice ?? null,
+    partCost: r.partCost ?? null,
+  }));
+}
+
+async function loadWetCheckBillingPartLines(
+  ids: number[],
+): Promise<SourcePartRow[]> {
+  if (ids.length === 0) return [];
+  // Wet check billings have no items table of their own; their parts are the
+  // findings routed onto the billing.
+  const rows = await db
+    .select({
+      sourceId: wetCheckBillings.id,
+      itemId: wetCheckFindings.id,
+      partId: wetCheckFindings.partId,
+      partCompanyId: parts.companyId,
+      quantity: wetCheckFindings.quantity,
+      unitPrice: wetCheckFindings.partPrice,
+      partCost: parts.cost,
+    })
+    .from(wetCheckBillings)
+    .leftJoin(
+      wetCheckFindings,
+      eq(wetCheckFindings.wetCheckBillingId, wetCheckBillings.id),
+    )
+    .leftJoin(parts, eq(parts.id, wetCheckFindings.partId))
+    .where(inArray(wetCheckBillings.id, ids));
+  return rows.map((r) => ({
+    sourceId: r.sourceId,
+    itemId: r.itemId ?? null,
+    partId: r.partId ?? null,
+    partCompanyId: r.partCompanyId ?? null,
+    quantity: r.quantity ?? null,
+    unitPrice: r.unitPrice ?? null,
+    partCost: r.partCost ?? null,
+  }));
+}
+
+async function loadBillingSheetPartLines(
+  ids: number[],
+): Promise<SourcePartRow[]> {
+  if (ids.length === 0) return [];
+  const rows = await db
+    .select({
+      sourceId: billingSheets.id,
+      itemId: billingSheetItems.id,
+      partId: billingSheetItems.partId,
+      partCompanyId: parts.companyId,
+      quantity: billingSheetItems.quantity,
+      unitPrice: billingSheetItems.unitPrice,
+      partCost: parts.cost,
+    })
+    .from(billingSheets)
+    .leftJoin(
+      billingSheetItems,
+      eq(billingSheetItems.billingSheetId, billingSheets.id),
+    )
+    .leftJoin(parts, eq(parts.id, billingSheetItems.partId))
+    .where(inArray(billingSheets.id, ids));
+  return rows.map((r) => ({
+    sourceId: r.sourceId,
+    itemId: r.itemId ?? null,
+    partId: r.partId ?? null,
+    partCompanyId: r.partCompanyId ?? null,
+    quantity: r.quantity ?? null,
+    unitPrice: r.unitPrice ?? null,
+    partCost: r.partCost ?? null,
+  }));
 }
