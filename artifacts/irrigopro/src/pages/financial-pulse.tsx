@@ -103,11 +103,22 @@ interface MarginTile extends KpiTile {
 interface BilledLastCycleTile extends KpiTile {
   monthLabel: string;
   monthIso: string;
+  /**
+   * Task #2012 — false when no CLOSED billing cycle exists yet. The current,
+   * in-progress calendar month is never presented as a closed cycle, so a
+   * company whose only invoices carry this month has no last cycle at all and
+   * the tile shows "—" instead of $0.
+   */
+  hasClosedCycle?: boolean;
 }
 interface KpisResponse {
   billedMtd: KpiTile;
   billedLastCycle: BilledLastCycleTile;
-  billedYtd: KpiTile;
+  // Task #2012 — the old `billedYtd` counted invoiced work twice. Invoiced YTD
+  // is realised revenue; Work Booked YTD adds only work booked this year that
+  // is not invoiced yet.
+  invoicedYtd: KpiTile;
+  workBookedYtd: KpiTile;
   collectedMtd: KpiTile;
   outstandingAr: KpiTile;
   unbilledExposure: KpiTile;
@@ -216,10 +227,12 @@ type PulseTabKey = "pulse" | "accounting";
 type PulseSortKey = "name" | "inFlight" | "ytd";
 
 interface PulseLastCycle {
-  value: number;
+  /** Task #2012 — null when no closed billing cycle exists yet. */
+  value: number | null;
   monthLabel: string;
   monthIso: string;
   invoiceCount: number;
+  hasClosedCycle?: boolean;
 }
 interface PulseInFlight {
   value: number;
@@ -332,15 +345,20 @@ const ALLOWED_ROLES = new Set([
 // `docs/financial-metrics.md`; if you change one, change the doc.
 export const INFO_TIPS = {
   billedMtd:
-    "From invoices · current month-to-date by createdAt · excludes draft, cancelled · includes tax and markup.",
+    "From invoices · current month-to-date by createdAt · excludes draft, cancelled · includes tax and markup. Counts invoices CREATED this month whatever period they bill, so a month of arrears billing can equal Billed Last Cycle.",
   billedLastCycle:
-    "From invoices · most recent billing cycle by invoiceMonth/invoiceYear · excludes draft, cancelled · includes tax and markup. April invoices created in May still land in the April cycle.",
+    "From invoices · most recent CLOSED billing cycle by invoiceMonth/invoiceYear · excludes draft, cancelled · includes tax and markup. April invoices created in May still land in the April cycle. The current calendar month is still in progress and is never shown here.",
   collectedMtd:
     "From invoices · current month-to-date by paidAt · excludes draft, cancelled · includes tax and markup. Reflects QuickBooks payment sync — may show $0 without an active QBO connection.",
   outstandingAr:
     "From invoices · point-in-time snapshot · excludes draft, cancelled, paid · live from this app. Accuracy depends on QuickBooks payment sync.",
-  billedYtd:
-    "All billable work this year — invoice totals (by billing month) plus work order and billing sheet amounts whether invoiced or not, excluding cancelled. Invoiced work appears in both the invoice total and the WO/BS total to show full contracted scope alongside realized revenue.",
+  // Task #2012 — the single "Billed YTD" tip used to describe and justify
+  // counting invoiced work twice. Both halves are now separate tiles and no
+  // row is counted twice in either.
+  invoicedYtd:
+    "From invoices · this billing year by invoiceMonth/invoiceYear · excludes draft, cancelled, merged · includes tax and markup. Realized revenue only. The comparison is against the same day of last year, invoices to invoices.",
+  workBookedYtd:
+    "Invoiced YTD plus work booked this year that has no invoice yet — work orders and billing sheets created this year, and wet check billings worked this year, excluding cancelled and customers hidden from billing. Nothing is counted twice: once work is invoiced it counts through the invoice only.",
   unbilledExposure:
     "Work orders + billing sheets with no invoice yet, regardless of status (except cancelled) · excludes customers hidden from billing.",
   projectedMonthEnd:
@@ -730,13 +748,13 @@ function PulseTab({
               pulse.data?.lastCycle.monthLabel && pulse.data.lastCycle.monthIso
                 ? `${pulse.data.lastCycle.monthLabel} · ${pulse.data.lastCycle.invoiceCount} invoices`
                 : pulse.data
-                ? "No cycles yet"
+                ? "No closed billing cycle yet"
                 : undefined
             }
             deltaGoodDirection="up"
             isLoading={isLoading}
             isError={isError}
-            infoTip="Total billed in the most recent billing cycle. Click to view those invoices."
+            infoTip="Total billed in the most recent CLOSED billing cycle, by invoiceMonth/invoiceYear. The current calendar month is still in progress and is never shown here. Click to view those invoices."
             accent="blue"
           />
         </div>
@@ -783,16 +801,20 @@ function PulseTab({
           className="cursor-pointer hover:opacity-90 transition-opacity"
           data-testid="pulse-tile-ytd"
         >
+          {/* Task #2012 — the same Work Booked YTD figure the Accounting tab
+              shows, from the same shared helper. It used to be invoiced YTD
+              plus the all-time in-flight pipeline, which pulled in uninvoiced
+              work booked in previous years. */}
           <MetricTile
             label="Year to Date"
             value={pulse.data?.yearToDate.value ?? null}
             format="currency"
-            helper="Invoiced + in-flight"
+            helper="Invoiced + not yet invoiced"
             deltaGoodDirection="up"
             isLoading={isLoading}
             isError={isError}
             windowBadge="YTD"
-            infoTip="Invoiced this calendar year plus current in-flight pipeline. Click to see full accounting metrics."
+            infoTip="Work booked this year: invoiced this billing year plus work orders, billing sheets and wet check billings from this year that have no invoice yet. Nothing is counted twice. Matches Work Booked YTD on the Accounting tab. Click to see full accounting metrics."
             accent="emerald"
           />
         </div>
@@ -1875,18 +1897,26 @@ function KpiBand({
         isLoading={isLoading}
         isError={isError}
         windowBadge="MTD"
+        // Task #2012 — says why this can read the same as Billed Last Cycle.
+        helper="Invoices created this month"
         infoTip={INFO_TIPS.billedMtd}
         accent="blue"
       />
       <MetricTile
         testId="kpi-billed-last-cycle"
         label="Billed Last Cycle"
+        // Task #2012 — null (rendered "—") when no CLOSED cycle exists yet;
+        // $0 would read as "we billed nothing last cycle".
         value={data?.billedLastCycle.value ?? null}
         format="currency"
         deltaPct={data?.billedLastCycle.deltaPct ?? null}
         deltaLabel="vs prior month"
         deltaGoodDirection="up"
-        helper={data?.billedLastCycle.monthLabel}
+        helper={
+          data && data.billedLastCycle.hasClosedCycle === false
+            ? "No closed billing cycle yet"
+            : data?.billedLastCycle.monthLabel
+        }
         isLoading={isLoading}
         isError={isError}
         infoTip={INFO_TIPS.billedLastCycle}
@@ -1930,18 +1960,36 @@ function KpiBand({
         infoTip={INFO_TIPS.projectedMonthEnd}
         accent="indigo"
       />
+      {/* Task #2012 — two honest YTD tiles. "Billed YTD" summed invoices plus
+          the work orders and billing sheets those invoices already contained,
+          so a tile named "Billed" reported roughly double what was billed. */}
       <MetricTile
-        testId="kpi-billed-ytd"
-        label="Billed YTD"
-        value={data?.billedYtd.value ?? null}
+        testId="kpi-invoiced-ytd"
+        label="Invoiced YTD"
+        value={data?.invoicedYtd.value ?? null}
         format="currency"
-        deltaPct={data?.billedYtd.deltaPct ?? null}
+        deltaPct={data?.invoicedYtd.deltaPct ?? null}
         deltaLabel="vs last year"
         deltaGoodDirection="up"
         isLoading={isLoading}
         isError={isError}
         windowBadge="YTD"
-        infoTip={INFO_TIPS.billedYtd}
+        infoTip={INFO_TIPS.invoicedYtd}
+        accent="blue"
+      />
+      <MetricTile
+        testId="kpi-work-booked-ytd"
+        label="Work Booked YTD"
+        value={data?.workBookedYtd.value ?? null}
+        format="currency"
+        // No delta: a prior-year comparator for booked work needs its own
+        // definition, and the invoices-only one would mislead.
+        deltaGoodDirection="up"
+        helper="Invoiced + not yet invoiced"
+        isLoading={isLoading}
+        isError={isError}
+        windowBadge="YTD"
+        infoTip={INFO_TIPS.workBookedYtd}
         accent="blue"
       />
       <MetricTile

@@ -33,7 +33,6 @@ import {
 } from "@workspace/db/schema";
 import {
   bucketMonthlyRevenue,
-  computeAllBillableYtd,
   computeArAging,
   computeAvgDaysToPay,
   computeBilled,
@@ -42,7 +41,10 @@ import {
   computeByTechnician,
   computeCollected,
   computeGrossMargin,
+  computeInvoicedYtd,
   computeOutstandingAr,
+  computeWorkBookedYtd,
+  countInvoicesForCycle,
   DEFAULT_PARTS_COST_PCT,
   computeProjectedMonthEnd,
   computeRevenueMix,
@@ -283,7 +285,7 @@ async function loadInvoicesForCustomers(
 }
 
 // Task #726 — load all work orders / billing sheets for a customer scope so
-// computeAllBillableYtd can include uninvoiced pipeline in the YTD tile.
+// the YTD helpers can include the uninvoiced pipeline in Work Booked YTD.
 // Task #1898 — `customerId` is carried through so computeUnbilledExposure can
 // re-scope these same rows to non-hidden customers instead of re-querying.
 type WorkOrderBillableRow = WorkOrderBillableLike & { customerId: number | null };
@@ -760,13 +762,18 @@ export function registerFinancialPulseRoutes(
         // April invoices created in early May are attributed to the April cycle.
         // Fallback to the previous calendar month is provided so monthLabel /
         // monthIso are always non-empty strings (required by the HTTP contract).
+        //
+        // Task #2012 — `closedAsOf: now` drops the current, in-progress
+        // calendar month. A standalone invoice stamped with current-month work
+        // used to flip this tile to a partial September and compare it against
+        // the whole of August; "last cycle" now always means a finished cycle.
         const prevFullMonth = getPrevFullMonthWindow(now);
-        const cycles = getDistinctBillingCycles(allInvoices);
+        const cycles = getDistinctBillingCycles(allInvoices, { closedAsOf: now });
         const lastCycle = cycles[0] ?? null;
         const prevCycle = cycles[1] ?? null;
         const billedLastCycle = lastCycle
           ? computeBilledForCycle(allInvoices, lastCycle)
-          : 0;
+          : null;
         const billedCycleBeforeLast = prevCycle
           ? computeBilledForCycle(allInvoices, prevCycle)
           : 0;
@@ -784,21 +791,31 @@ export function registerFinancialPulseRoutes(
           lastCycleDate.getMonth() + 1,
         ).padStart(2, "0")}`;
 
-        // Task #726 — Tile 5: Billed YTD.
-        // Sums all invoiced revenue (by invoiceYear) + uninvoiced WO/BS pipeline
-        // created this year, so the tile captures all billable work regardless of
-        // whether an invoice has been issued yet.
-        // Task #814 — uninvoiced WCBs (by workDate) also included.
-        const billedYtd = computeAllBillableYtd(
-          allInvoices,
-          allWos,
-          allBss,
-          now.getFullYear(),
-          allWcbs,
+        // Task #2012 — two honest YTD tiles in place of one inflated "Billed
+        // YTD". Invoiced YTD is realised revenue; Work Booked YTD adds only the
+        // work booked this year that is NOT invoiced yet, so no row is counted
+        // twice. The uninvoiced legs exclude hidden-from-billing customers —
+        // the same set the Pulse tab hands the same helper, which is what makes
+        // the two tabs agree.
+        const hiddenFromBillingIds = new Set(
+          cust.filter((c) => c.hiddenFromBilling).map((c) => c.id),
         );
-        const billedPrevYearYtd = computeBilled(
+        const invoicedYtd = computeInvoicedYtd(allInvoices, now.getFullYear());
+        const workBookedYtd = computeWorkBookedYtd({
+          invoices: allInvoices,
+          workOrders: allWos,
+          billingSheets: allBss,
+          wetCheckBillings: allWcbs,
+          currentYear: now.getFullYear(),
+          hiddenCustomerIds: hiddenFromBillingIds,
+        });
+        // Invoices vs invoices, calendar-day aligned: the prior year's invoices
+        // through the same day of the year. The old comparator measured an
+        // invoices-plus-work-orders figure against an invoices-only one, so it
+        // reported a large positive "vs last year" every year.
+        const invoicedPrevYearYtd = computeInvoicedYtd(
           allInvoices,
-          prevYearYtd.start,
+          now.getFullYear() - 1,
           prevYearYtd.end,
         );
         const collectedMtd = computeCollected(allInvoices, mtd.start, mtd.end);
@@ -867,8 +884,16 @@ export function registerFinancialPulseRoutes(
           },
           billedLastCycle: {
             value: billedLastCycle,
-            deltaPct: pctDelta(billedLastCycle, billedCycleBeforeLast),
+            deltaPct:
+              billedLastCycle == null
+                ? null
+                : pctDelta(billedLastCycle, billedCycleBeforeLast),
             comparedTo: "prevCycle",
+            // Task #2012 — false when no CLOSED cycle exists yet (a brand-new
+            // company, or one whose only invoices carry the current month).
+            // The tile renders "—" rather than a $0 that reads as "we billed
+            // nothing last cycle".
+            hasClosedCycle: lastCycle != null,
             // Task #726 — label derived from actual billing cycle
             // (invoiceMonth/invoiceYear); falls back to previous calendar
             // month when no invoices exist so the field is always a
@@ -876,10 +901,19 @@ export function registerFinancialPulseRoutes(
             monthLabel: lastCycleMonthLabel,
             monthIso: lastCycleMonthIso,
           },
-          billedYtd: {
-            value: billedYtd,
-            deltaPct: pctDelta(billedYtd, billedPrevYearYtd),
+          // Task #2012 — `billedYtd` is gone. It summed invoices plus the work
+          // orders and billing sheets those invoices already contained.
+          invoicedYtd: {
+            value: invoicedYtd,
+            deltaPct: pctDelta(invoicedYtd, invoicedPrevYearYtd),
             comparedTo: "prevYearYtd",
+          },
+          workBookedYtd: {
+            value: workBookedYtd,
+            // No delta: a prior-year comparator for booked work needs its own
+            // definition, and a borrowed invoices-only one would mislead.
+            deltaPct: null,
+            comparedTo: null,
           },
           collectedMtd: {
             value: collectedMtd,
@@ -1753,21 +1787,20 @@ export function registerFinancialPulseRoutes(
           ]);
 
         // ── Last Cycle ─────────────────────────────────────────────────────
-        const cycles = getDistinctBillingCycles(allInvoices);
+        // Task #2012 — same closed-cycle rule as /kpis: the current calendar
+        // month is in progress and can never be presented as a closed cycle,
+        // however an invoice happens to be stamped. `null` (not 0) when no
+        // closed cycle exists so the tile can render "—".
+        const cycles = getDistinctBillingCycles(allInvoices, { closedAsOf: now });
         const lastCycle = cycles[0] ?? null;
-        let lastCycleValue = 0;
+        let lastCycleValue: number | null = null;
         let lastCycleInvoiceCount = 0;
         let lastCycleMonthLabel = "No billing cycles";
         let lastCycleMonthIso = "";
 
         if (lastCycle) {
           lastCycleValue = computeBilledForCycle(allInvoices, lastCycle);
-          lastCycleInvoiceCount = allInvoices.filter(
-            (inv) =>
-              !INVOICE_EXCLUDED_STATUSES.has(inv.status) &&
-              inv.invoiceYear === lastCycle.year &&
-              inv.invoiceMonth === lastCycle.month,
-          ).length;
+          lastCycleInvoiceCount = countInvoicesForCycle(allInvoices, lastCycle);
           const d = new Date(lastCycle.year, lastCycle.month - 1, 1);
           lastCycleMonthLabel = d.toLocaleDateString("en-US", {
             month: "long",
@@ -1809,15 +1842,21 @@ export function registerFinancialPulseRoutes(
           if (wcb.technicianId) inFlightTechIds.add(wcb.technicianId);
         }
 
-        // ── Year-to-Date (invoiced YTD + in-flight) ───────────────────────
-        // inFlightTotal already includes uninvoiced WCBs (added above), so
-        // invoicedYtd + inFlightTotal avoids any double-count. (Task #814)
-        let invoicedYtd = 0;
-        for (const inv of allInvoices) {
-          if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
-          if ((inv.invoiceYear ?? 0) !== currentYear) continue;
-          invoicedYtd += toNum(inv.totalAmount);
-        }
+        // ── Year-to-Date ───────────────────────────────────────────────────
+        // Task #2012 — the same shared helper the Accounting tab calls, with
+        // the same hidden-from-billing input, so the two tabs report one
+        // number. This used to be `invoicedYtd + inFlightTotal`, which pulled
+        // in uninvoiced work booked in PREVIOUS years (In-Flight is all-time
+        // by design) and so could never equal the Accounting tab's YTD.
+        // In-Flight itself is untouched and stays all-time.
+        const workBookedYtd = computeWorkBookedYtd({
+          invoices: allInvoices,
+          workOrders: allWos,
+          billingSheets: allBss,
+          wetCheckBillings: allWcbsPulse,
+          currentYear,
+          hiddenCustomerIds: hiddenIds,
+        });
 
         // ── Per-customer + per-tech breakdown ─────────────────────────────
         // Prefilter WOs/BSs/WCBs to visible customers only so technician in-flight
@@ -1852,6 +1891,9 @@ export function registerFinancialPulseRoutes(
             monthLabel: lastCycleMonthLabel,
             monthIso: lastCycleMonthIso,
             invoiceCount: lastCycleInvoiceCount,
+            // Task #2012 — false when no closed cycle exists yet; the tile
+            // renders "—" rather than $0.
+            hasClosedCycle: lastCycle != null,
           },
           inFlight: {
             value: inFlightTotal,
@@ -1859,10 +1901,9 @@ export function registerFinancialPulseRoutes(
             techCount: inFlightTechIds.size,
           },
           yearToDate: {
-            // Task #814 — include uninvoiced WCB amounts in the YTD total
-            // (invoiced WCBs flow through invoicedYtd via invoice totals).
-            // inFlightTotal already includes uninvoiced WCBs — no separate addend needed. (Task #814)
-            value: invoicedYtd + inFlightTotal,
+            // Task #2012 — the shared Work Booked YTD figure, identical to the
+            // Accounting tab's tile of the same name.
+            value: workBookedYtd,
           },
           customers: pulseCustomers.sort((a, b) => b.inFlight - a.inFlight),
           technicians: pulseTechs,

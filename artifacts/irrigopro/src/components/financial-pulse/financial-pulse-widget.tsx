@@ -75,7 +75,12 @@ interface KpiTile {
 }
 interface KpisResponse {
   billedMtd: KpiTile;
-  billedYtd: KpiTile;
+  /**
+   * Task #2012 — the server split this into `invoicedYtd` + `workBookedYtd`
+   * because it counted invoiced work twice. No tile here reads it; kept
+   * optional so older cached responses still type-check.
+   */
+  billedYtd?: KpiTile;
   // Task #720 — preferred source for the Collected MTD tile. Older
   // server responses without this field fall back to the derive helper
   // below so we don't regress existing fixtures.

@@ -55,3 +55,4 @@
 - [Exposing a shared verdict](shared-verdict-exposure.md) — attach it to each page's existing request, not the concept's capability-gated endpoint; rank unknown statuses as degraded, never 0.
 - [A new gate on an unscoped route is an oracle](gate-without-tenancy-is-an-oracle.md) — check ownership exists before adding validation; collapse foreign into not-found, order it first.
 - [Batching a per-customer helper](batching-a-per-customer-helper.md) — a leg left unscoped for one validated id becomes an oracle in a batch; wrap the single call, split the test seams.
+- [Closed-period tiles](closed-period-tiles.md) — exclude the in-progress period at selection; "no closed period yet" travels as null + a flag, never 0.

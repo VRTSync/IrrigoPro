@@ -93,9 +93,19 @@ describe("Task #723 — static-source guards for the rename", () => {
     expect(tile).toMatch(/label="Billed Last Cycle"/);
     expect(tile).toMatch(/data\?\.billedLastCycle\.value/);
     expect(tile).toMatch(/deltaLabel="vs prior month"/);
-    expect(tile).toMatch(/helper=\{data\?\.billedLastCycle\.monthLabel\}/);
+    expect(tile).toMatch(/data\?\.billedLastCycle\.monthLabel/);
     expect(tile).not.toMatch(/windowBadge="MTD"/);
     expect(tile).not.toMatch(/INFO_TIPS\.billedMtd/);
+  });
+
+  // Task #2012 — the current, in-progress calendar month is never presented as
+  // a closed cycle, so a company can have no last cycle at all. That state is
+  // its own helper line, not a $0 tile.
+  it("renders the no-closed-cycle helper instead of falling back to a month label", () => {
+    const tileStart = SRC.indexOf('testId="kpi-billed-last-cycle"');
+    const tile = SRC.slice(tileStart, SRC.indexOf("/>", tileStart));
+    expect(tile).toMatch(/hasClosedCycle === false/);
+    expect(tile).toMatch(/No closed billing cycle yet/);
   });
 
   it("unbilled-exposure tile uses the 'Work Not Yet Billed' label (Task #730 rename)", () => {

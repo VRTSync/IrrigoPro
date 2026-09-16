@@ -29,7 +29,7 @@ export interface InvoiceLike {
   status: string;
   createdAt: Date | string;
   paidAt?: Date | string | null;
-  // Task #726 — billing-cycle fields for computeBilledForCycle / computeAllBillableYtd.
+  // Task #726 — billing-cycle fields for computeBilledForCycle / computeInvoicedYtd.
   // Optional so existing fixtures without these fields keep compiling.
   invoiceMonth?: number | null;
   invoiceYear?: number | null;
@@ -49,8 +49,8 @@ export interface InvoiceLike {
   paymentSyncedAt?: Date | string | null;
 }
 
-// Task #726 — lightweight shapes used only by computeAllBillableYtd so the
-// YTD helper stays pure (no Drizzle / Postgres dependency).
+// Task #726 — lightweight billable-row shapes so the YTD helpers stay pure
+// (no Drizzle / Postgres dependency).
 export interface WorkOrderBillableLike {
   invoiceId?: number | null;
   totalAmount?: string | number | null;
@@ -65,7 +65,7 @@ export interface BillingSheetBillableLike {
   createdAt?: Date | string | null;
 }
 
-// Task #814 — wet_check_billings shape for computeAllBillableYtd.
+// Task #814 — wet_check_billings shape for the YTD helpers.
 // Uses workDate (logical work date) for year bucketing, parallel to
 // billing_sheets.createdAt / work_orders.createdAt patterns.
 export interface WetCheckBillingBillableLike {
@@ -332,14 +332,26 @@ export function computeProjectedMonthEnd(
 // most-recent-first. Each entry is { year, month } matching the invoice
 // invoiceYear / invoiceMonth columns. Invoices missing these columns are
 // skipped.
+//
+// Task #2012 — pass `closedAsOf` to drop the current (in-progress) calendar
+// month and anything after it. A single standalone invoice stamped with
+// current-month work otherwise becomes "the most recent cycle", and a partial
+// September gets presented as a closed cycle and compared against the whole of
+// August. "Last cycle" must mean a cycle that has finished.
 export function getDistinctBillingCycles(
   invoices: InvoiceLike[],
+  opts?: { closedAsOf?: Date | null },
 ): Array<{ year: number; month: number }> {
+  const closedAsOf = opts?.closedAsOf ?? null;
+  const cutoffKey = closedAsOf
+    ? closedAsOf.getFullYear() * 100 + (closedAsOf.getMonth() + 1)
+    : null;
   const seen = new Map<number, { year: number; month: number }>();
   for (const inv of invoices) {
     if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     if (inv.invoiceMonth == null || inv.invoiceYear == null) continue;
     const key = inv.invoiceYear * 100 + inv.invoiceMonth;
+    if (cutoffKey != null && key >= cutoffKey) continue;
     if (!seen.has(key)) {
       seen.set(key, { year: inv.invoiceYear, month: inv.invoiceMonth });
     }
@@ -347,6 +359,21 @@ export function getDistinctBillingCycles(
   return Array.from(seen.values()).sort(
     (a, b) => (b.year * 100 + b.month) - (a.year * 100 + a.month),
   );
+}
+
+// Task #2012 — how many invoices make up one billing cycle. Shares the
+// excluded-status rule with computeBilledForCycle so the count on the tile and
+// the dollars on the tile always describe the same rows.
+export function countInvoicesForCycle(
+  invoices: InvoiceLike[],
+  cycle: { year: number; month: number },
+): number {
+  let n = 0;
+  for (const inv of invoices) {
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
+    if (inv.invoiceYear === cycle.year && inv.invoiceMonth === cycle.month) n++;
+  }
+  return n;
 }
 
 // Sums non-draft, non-cancelled invoices that belong to the given
@@ -365,54 +392,107 @@ export function computeBilledForCycle(
   return sum;
 }
 
-// Task #726 — Tile 5: Billed YTD (all billable activity this year).
+// Task #2012 — Invoiced YTD: realised revenue for the current billing year.
 //
-// Formula:
-//   invoices where invoiceYear = currentYear, status ≠ draft/cancelled
-//   + ALL work_orders where status ≠ cancelled, createdAt year = currentYear
-//     (invoiced OR uninvoiced — both count)
-//   + ALL billing_sheets where status ≠ cancelled, createdAt year = currentYear
-//     (invoiced OR uninvoiced — both count)
-//   + uninvoiced wet_check_billings where workDate year = currentYear
-//     (invoiced ones already flow through the invoices leg above)
+// Invoices at `year` on their invoiceYear column (so a December cycle invoiced
+// in January still belongs to December's year), excluded statuses applied.
 //
-// This intentionally includes WOs/BSs that have already been invoiced alongside
-// the invoice totals, giving a complete picture of all billable work contracted
-// this year per the task-#726 definition ("invoiced or not").
-export function computeAllBillableYtd(
+// `createdOnOrBefore` exists for the year-over-year comparator: passing the
+// same calendar instant one year back turns this into the prior year's
+// invoices through the same day, which is the only like-for-like comparison
+// available for a partial year. Invoices for the current year are always
+// created on or before now, so the current-year call needs no bound.
+export function computeInvoicedYtd(
   invoices: InvoiceLike[],
-  workOrders: WorkOrderBillableLike[],
-  billingSheets: BillingSheetBillableLike[],
-  currentYear: number,
-  // Task #814 — uninvoiced wet check billings bucketed by workDate.
-  wetCheckBillings: WetCheckBillingBillableLike[] = [],
+  year: number,
+  createdOnOrBefore?: Date | null,
 ): number {
   let sum = 0;
   for (const inv of invoices) {
     if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
-    if (inv.invoiceYear !== currentYear) continue;
+    if (inv.invoiceYear !== year) continue;
+    if (createdOnOrBefore) {
+      const created = toDate(inv.createdAt);
+      if (!created || created > createdOnOrBefore) continue;
+    }
     sum += toNum(inv.totalAmount);
   }
+  return sum;
+}
+
+/** A billable row carrying the customer it belongs to, so hidden-from-billing
+ *  customers can be excluded from the uninvoiced legs. */
+type WithCustomer<T> = T & { customerId?: number | null };
+
+export interface WorkBookedYtdInput {
+  invoices: InvoiceLike[];
+  workOrders: Array<WithCustomer<WorkOrderBillableLike>>;
+  billingSheets: Array<WithCustomer<BillingSheetBillableLike>>;
+  wetCheckBillings?: Array<WithCustomer<WetCheckBillingBillableLike>>;
+  currentYear: number;
+  /**
+   * Customers flagged `hiddenFromBilling`. The UNINVOICED legs exclude them,
+   * matching In-Flight and Work Not Yet Billed; the invoiced leg filters
+   * nobody, matching every other invoiced figure on the page. Both the
+   * Accounting tab and the Pulse tab hand in the same set — that is what lets
+   * the two tiles agree on a company that uses the flag.
+   */
+  hiddenCustomerIds?: ReadonlySet<number>;
+}
+
+// Task #2012 — Work Booked YTD: invoiced this year, plus work booked this year
+// that has not been invoiced yet. Every row is counted once.
+//
+// Formula:
+//   computeInvoicedYtd(invoices, currentYear)
+//   + work_orders with no invoice, not cancelled, createdAt year = currentYear
+//   + billing_sheets with no invoice, not cancelled, createdAt year = currentYear
+//   + wet_check_billings with no invoice, workDate year = currentYear
+//
+// This replaces `computeAllBillableYtd`, which added ALL non-cancelled work
+// orders and billing sheets on top of the invoices that already contained
+// them — roughly doubling a tile named "Billed". The uninvoiced legs reuse
+// `isUnbilledWorkRow`, so "not billed yet" stays defined in exactly one place.
+//
+// Rows with no customerId are skipped on the uninvoiced legs: they cannot be
+// checked against the hidden-from-billing set, and the Pulse tab's loaders
+// drop them outright, so counting them here would make the two tabs disagree.
+export function computeWorkBookedYtd(input: WorkBookedYtdInput): number {
+  const {
+    invoices,
+    workOrders,
+    billingSheets,
+    wetCheckBillings = [],
+    currentYear,
+    hiddenCustomerIds,
+  } = input;
+
+  const visible = (row: { customerId?: number | null }): boolean => {
+    if (row.customerId == null) return false;
+    return !hiddenCustomerIds?.has(row.customerId);
+  };
+  const bookedThisYear = (d: Date | string | null | undefined): boolean => {
+    const parsed = toDate(d ?? null);
+    return parsed != null && parsed.getFullYear() === currentYear;
+  };
+
+  let sum = computeInvoicedYtd(invoices, currentYear);
+
   for (const wo of workOrders) {
-    // invoiced or not — include all except cancelled
-    if (wo.status === "cancelled") continue;
-    const d = toDate(wo.createdAt ?? null);
-    if (!d || d.getFullYear() !== currentYear) continue;
+    if (!visible(wo) || !isUnbilledWorkRow(wo)) continue;
+    if (!bookedThisYear(wo.createdAt)) continue;
     sum += toNum(wo.totalAmount);
   }
   for (const bs of billingSheets) {
-    if (bs.status === "cancelled") continue;
-    const d = toDate(bs.createdAt ?? null);
-    if (!d || d.getFullYear() !== currentYear) continue;
+    if (!visible(bs) || !isUnbilledWorkRow(bs)) continue;
+    if (!bookedThisYear(bs.createdAt)) continue;
     sum += toNum(bs.totalAmount);
   }
-  // Task #814 — uninvoiced WCBs only (invoiced ones already in the invoices
-  // leg above). wet_check_billings has no cancelled status so no exclusion
-  // needed beyond the invoiceId check.
+  // wet_check_billings has no cancelled status, so the invoiceId check is the
+  // whole "not billed yet" rule here; bucketed by workDate, not createdAt.
   for (const wcb of wetCheckBillings) {
-    if (wcb.invoiceId != null) continue; // already in invoice totals
-    const d = toDate(wcb.workDate ?? null);
-    if (!d || d.getFullYear() !== currentYear) continue;
+    if (!visible(wcb) || wcb.invoiceId != null) continue;
+    if (!bookedThisYear(wcb.workDate)) continue;
     sum += toNum(wcb.totalAmount);
   }
   return sum;

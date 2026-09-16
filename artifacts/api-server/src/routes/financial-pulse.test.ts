@@ -15,7 +15,6 @@ import {
 } from "./financial-pulse";
 import {
   bucketMonthlyRevenue,
-  computeAllBillableYtd,
   computeAvgDaysToPay,
   computeBilled,
   computeBilledForCycle,
@@ -442,60 +441,12 @@ describe("Task #726 — Billed Last Cycle uses billing cycle, not createdAt", ()
   });
 });
 
-// Task #726 — regression: Billed YTD includes all WO/BS activity (invoiced or not)
-describe("Task #726 — Billed YTD includes all billable work this year", () => {
-  it("uninvoiced WO from January is included in Billed YTD", () => {
-    const invoices: InvoiceLike[] = [
-      { id: 10, customerId: 1, totalAmount: "3000", status: "sent", createdAt: new Date(2026, 3, 1), invoiceMonth: 4, invoiceYear: 2026 },
-    ];
-    const wos: WorkOrderBillableLike[] = [
-      // Uninvoiced WO from January — must be picked up by YTD
-      { invoiceId: null, totalAmount: "800", status: "work_completed", createdAt: new Date(2026, 0, 15) },
-    ];
-    const bss: BillingSheetBillableLike[] = [];
-    const ytd = computeAllBillableYtd(invoices, wos, bss, 2026);
-    // Should be: 3000 (invoice) + 800 (uninvoiced WO)
-    assert.equal(ytd, 3800);
-  });
-
-  it("invoiced WO is also included in Billed YTD alongside the invoice total", () => {
-    // Per task-#726 definition: "every WO and billing sheet … invoiced or not"
-    const invoices: InvoiceLike[] = [
-      { id: 10, customerId: 1, totalAmount: "3000", status: "sent", createdAt: new Date(2026, 3, 1), invoiceMonth: 4, invoiceYear: 2026 },
-    ];
-    const wos: WorkOrderBillableLike[] = [
-      // Invoiced WO — still counted in YTD alongside the invoice total
-      { invoiceId: 10, totalAmount: "2800", status: "approved_passed_to_billing", createdAt: new Date(2026, 3, 1) },
-    ];
-    const bss: BillingSheetBillableLike[] = [];
-    const ytd = computeAllBillableYtd(invoices, wos, bss, 2026);
-    // Should be: 3000 (invoice) + 2800 (invoiced WO — also included)
-    assert.equal(ytd, 5800);
-  });
-
-  it("cancelled WOs are excluded from Billed YTD regardless of invoiceId", () => {
-    const invoices: InvoiceLike[] = [];
-    const wos: WorkOrderBillableLike[] = [
-      { invoiceId: null, totalAmount: "1500", status: "work_completed", createdAt: new Date(2026, 1, 10) },
-      { invoiceId: null, totalAmount: "999", status: "cancelled", createdAt: new Date(2026, 1, 15) },
-      { invoiceId: 5, totalAmount: "500", status: "cancelled", createdAt: new Date(2026, 1, 20) },
-    ];
-    const bss: BillingSheetBillableLike[] = [];
-    const ytd = computeAllBillableYtd(invoices, wos, bss, 2026);
-    assert.equal(ytd, 1500); // both cancelled rows excluded
-  });
-
-  it("prior-year WOs are excluded from Billed YTD", () => {
-    const invoices: InvoiceLike[] = [];
-    const wos: WorkOrderBillableLike[] = [
-      { invoiceId: null, totalAmount: "2000", status: "work_completed", createdAt: new Date(2026, 6, 1) },
-      { invoiceId: null, totalAmount: "500", status: "work_completed", createdAt: new Date(2025, 11, 15) }, // prior year
-    ];
-    const bss: BillingSheetBillableLike[] = [];
-    const ytd = computeAllBillableYtd(invoices, wos, bss, 2026);
-    assert.equal(ytd, 2000); // 2025 WO excluded
-  });
-});
+// Task #2012 — the "Billed YTD includes all billable work this year" block that
+// lived here asserted the double count: invoiced work orders summed on top of
+// the invoices that already contained them. Billed YTD is now two tiles,
+// Invoiced YTD and Work Booked YTD, and no row is counted twice. The surviving
+// behaviour (uninvoiced work counts, cancelled excluded, prior-year excluded)
+// is proven against the new helpers in financial-pulse-ytd-split.test.ts.
 
 // Task #726 — regression: Tile 6 Unbilled Pipeline includes all statuses except cancelled
 describe("Task #726 — Unbilled Pipeline includes all uninvoiced statuses except cancelled", () => {
@@ -520,17 +471,9 @@ describe("Task #726 — Unbilled Pipeline includes all uninvoiced statuses excep
     assert.equal(CANCELLED, "cancelled");
   });
 
-  it("computeAllBillableYtd (used for Billed YTD) mirrors the all-status-except-cancelled rule", () => {
-    // A draft WO with no invoiceId created this year must count toward YTD
-    const wos: WorkOrderBillableLike[] = [
-      { invoiceId: null, totalAmount: "400", status: "draft", createdAt: new Date(2026, 2, 10) },
-      { invoiceId: null, totalAmount: "600", status: "in_progress", createdAt: new Date(2026, 3, 5) },
-      { invoiceId: null, totalAmount: "999", status: "cancelled", createdAt: new Date(2026, 3, 6) },
-    ];
-    const ytd = computeAllBillableYtd([], wos, [], 2026);
-    // draft + in_progress included; cancelled excluded
-    assert.equal(ytd, 1000);
-  });
+  // Task #2012 — the YTD half of this rule (a draft or in-progress uninvoiced
+  // WO counts, a cancelled one does not) now belongs to Work Booked YTD and is
+  // asserted in financial-pulse-ytd-split.test.ts.
 });
 
 // The "Projected Month-End uses unbilled pipeline as base" regression that

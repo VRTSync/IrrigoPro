@@ -136,7 +136,7 @@ describe("Task #688 — /api/financial-pulse/* role matrix", () => {
 });
 
 describe("Task #688 — /api/financial-pulse/kpis response shape", () => {
-  it("returns all 8 KPI tiles with the documented contract", async () => {
+  it("returns all 9 KPI tiles with the documented contract", async () => {
     const { base } = await spin("super_admin", null);
     const r = await fetch(`${base}/api/financial-pulse/kpis`);
     assert.equal(r.status, 200);
@@ -144,7 +144,10 @@ describe("Task #688 — /api/financial-pulse/kpis response shape", () => {
     for (const k of [
       "billedMtd",
       "billedLastCycle",
-      "billedYtd",
+      // Task #2012 — `billedYtd` split into these two. It summed invoices plus
+      // the work orders and billing sheets those invoices already contained.
+      "invoicedYtd",
+      "workBookedYtd",
       "collectedMtd",
       "outstandingAr",
       "unbilledExposure",
@@ -154,6 +157,13 @@ describe("Task #688 — /api/financial-pulse/kpis response shape", () => {
     ]) {
       assert.ok(k in body, `missing tile ${k}`);
     }
+    assert.ok(
+      !("billedYtd" in body),
+      "billedYtd must be gone, not left beside its replacements",
+    );
+    // Work Booked YTD shows no delta: a prior-year comparator for booked work
+    // needs its own definition, and an invoices-only one would mislead.
+    assert.equal(body.workBookedYtd.deltaPct, null);
     assert.ok("missingWageTechCount" in body.grossMarginPct);
     assert.equal(body.grossMarginPct.missingWageTechCount, 0);
     // Task #723 — billedLastCycle carries value + monthLabel + monthIso.
