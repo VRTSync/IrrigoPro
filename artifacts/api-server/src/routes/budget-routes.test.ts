@@ -85,6 +85,10 @@ import { storage } from "../storage";
 };
 (storage as any).getInvoicesByCustomer = async (customerId: number) =>
   state.invoices.filter((i) => i.customerId === customerId);
+// Task #2017 — computeCustomerSpend is a wrapper over the batch, whose invoice
+// leg reads this method. Same in-memory rows, one query for a list of ids.
+(storage as any).getInvoicesByCustomerIds = async (customerIds: number[]) =>
+  state.invoices.filter((i) => customerIds.includes(i.customerId));
 
 function makeApp(role: string, companyId: number | null): { app: Express } {
   const app = express();

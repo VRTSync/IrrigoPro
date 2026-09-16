@@ -660,17 +660,32 @@ export interface CustomerWithBudget extends CustomerLike, BudgetFields {
   hiddenFromBilling?: boolean | null;
 }
 
+/**
+ * Task #2017 — `monthSpendByCustomer` / `yearSpendByCustomer` are the canonical
+ * spend totals from `computeCustomerSpendBatch`, keyed by customer id. This
+ * helper no longer accumulates budget spend itself: it used to sum invoices
+ * only, so uninvoiced wet-check work was invisible here while it counted on the
+ * customer's own profile, and it used its own `now + 1ms` windows instead of
+ * the full calendar month / year every other surface uses. Missing ids mean
+ * zero spend. `revenue` is NOT budget spend — it keeps following the caller's
+ * MTD/YTD period selector on the invoice creation date.
+ */
 export function computeTopCustomers(input: {
   customers: CustomerWithBudget[];
   invoices: InvoiceLike[];
   window: { start: Date; end: Date };
   now: Date;
+  monthSpendByCustomer: Map<number, number>;
+  yearSpendByCustomer: Map<number, number>;
 }): TopCustomerRow[] {
-  const { customers: custs, invoices, window, now } = input;
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const monthEnd = new Date(now.getTime() + 1);
-  const yearStart = new Date(now.getFullYear(), 0, 1);
-  const yearEnd = new Date(now.getTime() + 1);
+  const {
+    customers: custs,
+    invoices,
+    window,
+    now,
+    monthSpendByCustomer,
+    yearSpendByCustomer,
+  } = input;
   const sparkStarts = getMonthStarts(now, 7);
   const sparkKeys = sparkStarts.map(
     (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
@@ -681,8 +696,6 @@ export function computeTopCustomers(input: {
     number,
     {
       revenue: number;
-      monthSpend: number;
-      yearSpend: number;
       spark: number[];
       lastInvoiceAt: Date | null;
       payDays: { sum: number; n: number };
@@ -699,8 +712,6 @@ export function computeTopCustomers(input: {
     if (!row) {
       row = {
         revenue: 0,
-        monthSpend: 0,
-        yearSpend: 0,
         spark: new Array(sparkStarts.length).fill(0),
         lastInvoiceAt: null,
         payDays: { sum: 0, n: 0 },
@@ -708,8 +719,6 @@ export function computeTopCustomers(input: {
       byCust.set(inv.customerId, row);
     }
     if (d >= window.start && d < window.end) row.revenue += total;
-    if (d >= monthStart && d < monthEnd) row.monthSpend += total;
-    if (d >= yearStart && d < yearEnd) row.yearSpend += total;
     const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     const idx = sparkIdx.get(k);
     if (idx != null) row.spark[idx] += total;
@@ -728,8 +737,9 @@ export function computeTopCustomers(input: {
   for (const c of custs) {
     if (c.hiddenFromBilling) continue;
     const r = byCust.get(c.id);
-    const monthSpend = r?.monthSpend ?? 0;
-    const yearSpend = r?.yearSpend ?? 0;
+    // Task #2017 — the one shared spend number, handed in by the endpoint.
+    const monthSpend = monthSpendByCustomer.get(c.id) ?? 0;
+    const yearSpend = yearSpendByCustomer.get(c.id) ?? 0;
     const mCap = c.monthlyAllocation ??
       (c.monthlyBudgetCap == null || c.monthlyBudgetCap === "" ? null : toNum(c.monthlyBudgetCap));
     const annualRaw = c.annualBudgetGoal ?? c.annualBudgetCap;
@@ -1169,13 +1179,32 @@ export function computePulseCustomers(input: {
   // Task #814 — uninvoiced WCBs contribute to inFlight per customer.
   wetCheckBillings?: PulseWetCheckBillingLike[];
   currentYear: number;
+  /**
+   * Task #2017 — `now` is no longer read here: monthly spend arrives already
+   * computed for the canonical calendar-month window. Kept on the input so the
+   * Pulse and Accounting call sites stay symmetrical.
+   */
   now: Date;
+  /**
+   * Task #2017 — canonical monthly spend per customer from
+   * `computeCustomerSpendBatch`. This helper no longer accumulates it: the
+   * loop it replaces summed invoices only (so uninvoiced wet-check work was
+   * invisible) over a month window with no upper bound (so a future-dated
+   * invoice counted against the current month). Missing ids mean zero spend.
+   */
+  monthSpendByCustomer: Map<number, number>;
 }): PulseCustomerRow[] {
-  const { customers: custs, invoices, workOrders, billingSheets, wetCheckBillings = [], currentYear, now } = input;
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const {
+    customers: custs,
+    invoices,
+    workOrders,
+    billingSheets,
+    wetCheckBillings = [],
+    currentYear,
+    monthSpendByCustomer,
+  } = input;
 
   const ytdByCust = new Map<number, number>();
-  const monthlySpendByCust = new Map<number, number>();
 
   for (const inv of invoices) {
     // Task #2013 — one excluded-status set, shared with the Accounting tab.
@@ -1185,10 +1214,6 @@ export function computePulseCustomers(input: {
     const amt = toNum(inv.totalAmount);
     if ((inv.invoiceYear ?? 0) === currentYear) {
       ytdByCust.set(inv.customerId, (ytdByCust.get(inv.customerId) ?? 0) + amt);
-    }
-    const d = inv.createdAt instanceof Date ? inv.createdAt : new Date(inv.createdAt as string);
-    if (!Number.isNaN(d.getTime()) && d >= monthStart) {
-      monthlySpendByCust.set(inv.customerId, (monthlySpendByCust.get(inv.customerId) ?? 0) + amt);
     }
   }
 
@@ -1212,7 +1237,8 @@ export function computePulseCustomers(input: {
     if (c.hiddenFromBilling) continue;
     const capN = c.monthlyAllocation ??
       (c.monthlyBudgetCap == null || c.monthlyBudgetCap === "" ? null : toNum(c.monthlyBudgetCap));
-    const monthlySpend = monthlySpendByCust.get(c.id) ?? 0;
+    // Task #2017 — the one shared spend number, handed in by the endpoint.
+    const monthlySpend = monthSpendByCustomer.get(c.id) ?? 0;
     const mPct = capN != null && capN > 0 ? monthlySpend / capN : null;
     const soft = c.budgetSoftThresholdPercent ?? 75;
     const hard = c.budgetHardThresholdPercent ?? 100;

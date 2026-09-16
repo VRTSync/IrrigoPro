@@ -53,3 +53,4 @@
 - [A colour token is two halves](tailwind-token-proof.md) — a CSS variable with no Tailwind `colors` entry compiles to nothing; register both halves and prove the class generates.
 - [A gate message needs a surface](gate-message-needs-a-surface.md) — hardcoded error toasts discard server wording; grep onError and use parseApiError before calling a guard done.
 - [A new gate on an unscoped route is an oracle](gate-without-tenancy-is-an-oracle.md) — check ownership exists before adding validation; collapse foreign into not-found, order it first.
+- [Batching a per-customer helper](batching-a-per-customer-helper.md) — a leg left unscoped for one validated id becomes an oracle in a batch; wrap the single call, split the test seams.

@@ -463,6 +463,7 @@ describe("Task #2013 — merged and failed invoices leave the Pulse-tab rollups"
         billingSheets: [],
         currentYear: YEAR,
         now: NOW,
+        monthSpendByCustomer: new Map(),
       });
       assert.equal(rows.length, 1);
       assert.equal(rows[0].ytd, 500);

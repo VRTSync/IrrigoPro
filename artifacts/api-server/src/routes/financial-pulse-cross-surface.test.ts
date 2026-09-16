@@ -108,6 +108,8 @@ describe("Task #708 — FP cross-surface math invariants", () => {
       invoices: INVOICES,
       window: { start: ytd.start, end: ytd.end },
       now: NOW,
+      monthSpendByCustomer: new Map(),
+      yearSpendByCustomer: new Map(),
     });
     for (const row of rows) {
       const summaryBilledYtd = computeBilled(

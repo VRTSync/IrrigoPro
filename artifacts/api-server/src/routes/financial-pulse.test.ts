@@ -911,7 +911,14 @@ describe("Task #730 — cross-surface parity: per-customer summary billedMtd & u
     const perCustomerBilledMtd = computeBilled(custInvoices, MTD_START, MTD_END);
 
     // Top-customers path: computeTopCustomers with the full invoice list
-    const rows = computeTopCustomers({ customers, invoices, window: { start: MTD_START, end: MTD_END }, now: NOW });
+    const rows = computeTopCustomers({
+      customers,
+      invoices,
+      window: { start: MTD_START, end: MTD_END },
+      now: NOW,
+      monthSpendByCustomer: new Map(),
+      yearSpendByCustomer: new Map(),
+    });
     const topRow = rows.find((r) => r.customerId === 10);
 
     assert.ok(topRow, "customer 10 should appear in top-customers rows");
@@ -1138,6 +1145,7 @@ describe("Task #731 — computePulseCustomers", () => {
       billingSheets: bss,
       currentYear,
       now,
+      monthSpendByCustomer: new Map(),
     });
     assert.equal(rows.length, 1);
     assert.equal(rows[0].inFlight, 350);
@@ -1152,6 +1160,7 @@ describe("Task #731 — computePulseCustomers", () => {
       billingSheets: [],
       currentYear,
       now,
+      monthSpendByCustomer: new Map(),
     });
     assert.equal(rows.length, 0);
   });
@@ -1164,6 +1173,7 @@ describe("Task #731 — computePulseCustomers", () => {
       billingSheets: [],
       currentYear,
       now,
+      monthSpendByCustomer: new Map(),
     });
     assert.equal(rows[0].inFlight, 0);
   });
@@ -1194,6 +1204,7 @@ describe("Task #731 — computePulseCustomers", () => {
       billingSheets: [],
       currentYear,
       now,
+      monthSpendByCustomer: new Map(),
     });
     assert.equal(rows[0].ytd, 1000); // only current year
   });
@@ -1211,6 +1222,7 @@ describe("Task #731 — computePulseCustomers", () => {
       billingSheets: [],
       currentYear,
       now,
+      monthSpendByCustomer: new Map(),
     });
     const custTotal = rows.reduce((s, r) => s + r.inFlight, 0);
     assert.equal(custTotal, 800);
@@ -1319,6 +1331,7 @@ describe("Task #731 — pulse-summary payload contract: empty state", () => {
     billingSheets: [] as PulseBillingSheetLike[],
     currentYear: 2026,
     now: new Date("2026-05-20T12:00:00Z"),
+    monthSpendByCustomer: new Map<number, number>(),
   };
 
   it("computePulseCustomers returns [] when no customers", () => {
@@ -1373,6 +1386,7 @@ describe("Task #731 — pulse-summary payload contract: YTD = invoicedYtd + inFl
       billingSheets: [],
       currentYear: 2026,
       now: new Date("2026-05-20"),
+      monthSpendByCustomer: new Map(),
     });
     assert.equal(rows.length, 1);
     assert.equal(rows[0].inFlight, 200);

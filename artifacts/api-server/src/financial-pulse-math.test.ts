@@ -175,6 +175,8 @@ describe("computeTopCustomers — superseded exclusion", () => {
       customers,
       window,
       now: NOW,
+      monthSpendByCustomer: new Map(),
+      yearSpendByCustomer: new Map(),
     });
     const row = result.find((r) => r.customerId === 1);
     assert.ok(

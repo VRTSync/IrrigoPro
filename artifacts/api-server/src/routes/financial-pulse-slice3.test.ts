@@ -283,6 +283,10 @@ describe("Task #692 — sort=budget_risk ordering", () => {
       invoices,
       window: { start: monthStart, end: new Date(now.getTime() + 1) },
       now,
+      // Task #2017 — monthly spend is the canonical batched figure now, not an
+      // invoice sum this helper derives. Same dollars the fixture invoices carry.
+      monthSpendByCustomer: new Map([[1, 1500], [2, 800], [3, 200], [4, 999999], [5, 2000]]),
+      yearSpendByCustomer: new Map(),
     });
     const sorted = sortTopCustomers(rows, "budget_risk");
     const order = sorted.map((r) => r.customerId);
@@ -335,6 +339,8 @@ describe("Task #692 — sort=budget_risk ordering", () => {
       invoices,
       window: { start: monthStart, end: new Date(now.getTime() + 1) },
       now,
+      monthSpendByCustomer: new Map(),
+      yearSpendByCustomer: new Map(),
     });
     const sorted = sortTopCustomers(rows, "revenue");
     assert.deepEqual(sorted.map((r) => r.customerId), [2, 1]);

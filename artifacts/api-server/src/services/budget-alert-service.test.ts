@@ -62,6 +62,9 @@ const fakeState = {
 
 const originalGetCustomer = (storage as any).getCustomer.bind(storage);
 const originalGetInvoicesByCustomer = (storage as any).getInvoicesByCustomer.bind(storage);
+// Task #2017 — computeCustomerSpend is now a wrapper over the batch, whose
+// invoice leg reads getInvoicesByCustomerIds. Same seam, list-shaped.
+const originalGetInvoicesByCustomerIds = (storage as any).getInvoicesByCustomerIds.bind(storage);
 const originalCreateNotification = (storage as any).createNotification.bind(storage);
 const originalGetCompanyProfile = (storage as any).getCompanyProfile.bind(storage);
 const originalGetUser = (storage as any).getUser.bind(storage);
@@ -99,6 +102,8 @@ function installStubs() {
     fakeState.customer && fakeState.customer.id === id ? fakeState.customer : undefined;
   (storage as any).getInvoicesByCustomer = async (id: number) =>
     fakeState.invoices.filter((i) => i.customerId === id);
+  (storage as any).getInvoicesByCustomerIds = async (ids: number[]) =>
+    fakeState.invoices.filter((i) => ids.includes(i.customerId));
   (storage as any).createNotification = async (n: InsertNotification) => {
     fakeState.notifications.push(n);
     return { id: fakeState.notifications.length, ...n, createdAt: new Date() } as any;
@@ -110,6 +115,7 @@ function installStubs() {
 function restoreStubs() {
   (storage as any).getCustomer = originalGetCustomer;
   (storage as any).getInvoicesByCustomer = originalGetInvoicesByCustomer;
+  (storage as any).getInvoicesByCustomerIds = originalGetInvoicesByCustomerIds;
   (storage as any).createNotification = originalCreateNotification;
   (storage as any).getCompanyProfile = originalGetCompanyProfile;
   (storage as any).getUser = originalGetUser;
@@ -493,7 +499,11 @@ describe("budget-alert-service.checkBudgetThresholds", () => {
       get(_t, prop) {
         if (prop === "then") {
           return (resolve: (v: any[]) => void) =>
-            resolve([{ invoiceId: null, totalAmount: "850.00", workDate: new Date() }]);
+            // Task #2017 — the wet-check leg is batched, so a row must carry
+            // the customer it belongs to; the query joins customers for tenancy.
+            resolve([
+              { customerId, invoiceId: null, totalAmount: "850.00", workDate: new Date() },
+            ]);
         }
         return () => wcbProxy;
       },
@@ -535,18 +545,18 @@ describe("budget-alert-service.checkBudgetThresholds", () => {
   // Task #1864 — Company isolation: alert service must pass customer.companyId
   // (not null) when querying invoices, so a multi-tenant database leak cannot
   // read another company's invoices to inflate a customer's budget spend.
-  it("passes customer.companyId (not null) to getInvoicesByCustomer — company scoping", async () => {
+  it("passes customer.companyId (not null) to the invoice query — company scoping", async () => {
     const customerId = 70009; // reuse slot after clearAlertRows
     await clearAlertRows(customerId);
 
     let capturedCompanyId: number | null | undefined = undefined;
-    const originalGetInvoicesByCustomer = (storage as any).getInvoicesByCustomer;
-    (storage as any).getInvoicesByCustomer = async (
-      id: number,
+    const originalBatch = (storage as any).getInvoicesByCustomerIds;
+    (storage as any).getInvoicesByCustomerIds = async (
+      ids: number[],
       companyId: number | null,
     ) => {
       capturedCompanyId = companyId;
-      return fakeState.invoices.filter((i) => i.customerId === id);
+      return fakeState.invoices.filter((i) => ids.includes(i.customerId));
     };
 
     const COMPANY_ID = 55;
@@ -563,7 +573,7 @@ describe("budget-alert-service.checkBudgetThresholds", () => {
     );
 
     // Restore
-    (storage as any).getInvoicesByCustomer = originalGetInvoicesByCustomer;
+    (storage as any).getInvoicesByCustomerIds = originalBatch;
     await clearAlertRows(customerId);
   });
 
@@ -578,8 +588,8 @@ describe("budget-alert-service.checkBudgetThresholds", () => {
     await clearAlertRows(customerId);
     installDispatchers();
 
-    const originalGetInvoicesByCustomer = (storage as any).getInvoicesByCustomer;
-    (storage as any).getInvoicesByCustomer = async () => {
+    const originalBatch = (storage as any).getInvoicesByCustomerIds;
+    (storage as any).getInvoicesByCustomerIds = async () => {
       throw new Error("Failed query: timeout exceeded when trying to connect");
     };
 
@@ -613,7 +623,7 @@ describe("budget-alert-service.checkBudgetThresholds", () => {
           "suppress the real alert once the database recovers",
       );
     } finally {
-      (storage as any).getInvoicesByCustomer = originalGetInvoicesByCustomer;
+      (storage as any).getInvoicesByCustomerIds = originalBatch;
       await clearAlertRows(customerId);
     }
   });

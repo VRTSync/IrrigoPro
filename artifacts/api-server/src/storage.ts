@@ -428,6 +428,19 @@ function toDrizzleInsert<TDrizzle>(zodParsed: object): TDrizzle {
   return zodParsed as TDrizzle;
 }
 
+/**
+ * Task #2017 — the four invoice fields the canonical customer-spend
+ * calculation reads. Returned by `getInvoicesByCustomerIds`, the batch
+ * invoice leg behind `computeCustomerSpendBatch` in budget-spend.ts.
+ */
+export interface CustomerSpendInvoiceRow {
+  id: number;
+  customerId: number | null;
+  status: string;
+  totalAmount: string | number | null;
+  createdAt: Date | string | null;
+}
+
 export interface IStorage {
   // Companies
   getCompanies(): Promise<Company[]>;
@@ -7369,6 +7382,39 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(invoices)
       .where(cond)
       .orderBy(desc(invoices.createdAt));
+  }
+
+  // Task #2017 — batch sibling of getInvoicesByCustomer, used by the invoice
+  // leg of computeCustomerSpendBatch. The Accounting tab of Financial Pulse
+  // loads up to 500 customers across two windows, so one query per customer
+  // was hundreds of round trips.
+  //
+  // Two deliberate differences from the single-customer reader:
+  //   - projection only (spend reads four fields) — `select()` on the widest
+  //     rows in the schema times 500 customers is megabytes off the wire.
+  //   - no ORDER BY — spend is a sum, the order never mattered.
+  // The company predicate is identical: the invoice's OWN company column, via
+  // the same _companyScopeForInvoice helper, so the two readers can never
+  // disagree about tenancy. Like its sibling: no try/catch — a swallowed
+  // failure here computes to zero spend and reads as "under budget".
+  async getInvoicesByCustomerIds(
+    customerIds: number[],
+    companyId: number | null,
+  ): Promise<CustomerSpendInvoiceRow[]> {
+    if (customerIds.length === 0) return [];
+    const scope = this._companyScopeForInvoice(companyId);
+    const idsCond = inArray(invoices.customerId, customerIds);
+    const cond = scope ? and(idsCond, scope) : idsCond;
+    return await db
+      .select({
+        id: invoices.id,
+        customerId: invoices.customerId,
+        status: invoices.status,
+        totalAmount: invoices.totalAmount,
+        createdAt: invoices.createdAt,
+      })
+      .from(invoices)
+      .where(cond);
   }
 
   async getInvoices(companyId: number | null): Promise<Invoice[]> {

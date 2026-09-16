@@ -9,7 +9,11 @@
 import type { Express, Request, RequestHandler } from "express";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
-import { computeCustomerSpend } from "../budget-spend";
+import {
+  computeCustomerSpend,
+  computeCustomerSpendBatch,
+  spendTotals,
+} from "../budget-spend";
 import { getMonthWindow, getYearWindow } from "../budget-status";
 import {
   billingSheets,
@@ -1023,12 +1027,23 @@ export function registerFinancialPulseRoutes(
 
         const cust = await loadCustomers(scope.companyId);
         const customerIds = cust.map((c) => c.id);
-        const allInvoices = await loadInvoicesForCustomers(customerIds);
+        // Task #2017 — the budget meters and the Status pill read the one
+        // shared spend number (invoices + uninvoiced wet-check work), over the
+        // canonical calendar-month and calendar-year windows every other
+        // surface uses. Two batched queries per window, not one per customer.
+        // `window` above still drives the revenue column's period selector.
+        const [allInvoices, monthSpend, yearSpend] = await Promise.all([
+          loadInvoicesForCustomers(customerIds),
+          computeCustomerSpendBatch(customerIds, scope.companyId, getMonthWindow(now)),
+          computeCustomerSpendBatch(customerIds, scope.companyId, getYearWindow(now)),
+        ]);
         const rows = computeTopCustomers({
           customers: cust,
           invoices: allInvoices,
           window,
           now,
+          monthSpendByCustomer: spendTotals(monthSpend),
+          yearSpendByCustomer: spendTotals(yearSpend),
         });
         const sorted = sortTopCustomers(rows, sort).slice(0, limit);
 
@@ -1574,14 +1589,19 @@ export function registerFinancialPulseRoutes(
         const cust = await loadCustomers(scope.companyId);
         const customerIds = cust.map((c) => c.id);
 
-        const [allInvoices, allWos, allBss, allWcbsPulse, techs] = await Promise.all([
-          loadInvoicesForCustomers(customerIds),
-          loadPulseWorkOrdersForCustomers(customerIds),
-          loadPulseBillingSheetForCustomers(customerIds),
-          // Task #814 — WCBs for in-flight + tech attribution in pulse tab.
-          loadPulseWetCheckBillingsForCustomers(customerIds),
-          loadTechs(scope.companyId),
-        ]);
+        const [allInvoices, allWos, allBss, allWcbsPulse, techs, monthSpend] =
+          await Promise.all([
+            loadInvoicesForCustomers(customerIds),
+            loadPulseWorkOrdersForCustomers(customerIds),
+            loadPulseBillingSheetForCustomers(customerIds),
+            // Task #814 — WCBs for in-flight + tech attribution in pulse tab.
+            loadPulseWetCheckBillingsForCustomers(customerIds),
+            loadTechs(scope.companyId),
+            // Task #2017 — the budget pill reads the one shared spend number
+            // over the canonical calendar-month window. The Pulse tab renders
+            // no annual budget figure, so there is no year batch here.
+            computeCustomerSpendBatch(customerIds, scope.companyId, getMonthWindow(now)),
+          ]);
 
         // ── Last Cycle ─────────────────────────────────────────────────────
         const cycles = getDistinctBillingCycles(allInvoices);
@@ -1665,6 +1685,7 @@ export function registerFinancialPulseRoutes(
           wetCheckBillings: allWcbsPulse,
           currentYear,
           now,
+          monthSpendByCustomer: spendTotals(monthSpend),
         });
 
         const pulseTechs = computePulseTechnicians({

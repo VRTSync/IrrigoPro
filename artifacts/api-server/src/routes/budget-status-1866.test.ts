@@ -115,6 +115,18 @@ function _makeMockChain(fromTableName?: string): any {
       i.customerId === customerId &&
       (companyId === null || i.companyId === companyId),
   );
+// Task #2017 — the spend calculation is batched; its invoice leg reads this
+// method. Same company predicate as the single-customer reader: the invoice's
+// own companyId, so a company-scoped caller can never read across tenants.
+(storage as any).getInvoicesByCustomerIds = async (
+  customerIds: number[],
+  companyId: number | null,
+) =>
+  state.invoices.filter(
+    (i) =>
+      customerIds.includes(i.customerId) &&
+      (companyId === null || i.companyId === companyId),
+  );
 
 // ─── Harness ─────────────────────────────────────────────────────────────────
 

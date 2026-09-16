@@ -4,37 +4,75 @@
 // diverging hand-rolled loops in budget-routes, budget-alert-service, and
 // financial-pulse customer summary. The function has two I/O seams:
 //
-//   1. storage.getInvoicesByCustomer  — patched in-memory (no Postgres)
-//   2. db.select                      — proxied via a tiny chainable shim
+//   1. storage.getInvoicesByCustomerIds — patched in-memory (no Postgres)
+//   2. db.select                        — proxied via a tiny chainable shim
 //
-// The shim approach mirrors financial-pulse-customer-summary.test.ts which
-// uses the same technique. Each test controls what the shim returns.
+// Task #2017 — computeCustomerSpend is now a wrapper over
+// computeCustomerSpendBatch, which moved both seams: the invoice leg reads
+// the batch storage method, and the wet-check leg joins customers for tenancy.
+// The db shim is therefore TABLE-AWARE: it answers the wet-check query with
+// wet-check rows and refuses any other table, so an invoice row can never be
+// silently re-counted as a wet-check billing (the old single-row-set shim
+// would have answered both queries with the same rows).
 
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 
 // ── db shim must be installed BEFORE the module under test is imported ──
 import { db } from "./db";
+import { getTableName } from "drizzle-orm";
 
 // Configurable WCB rows returned by the db.select shim.
 let nextWcbRows: Array<{
+  customerId?: number;
   invoiceId: number | null;
   totalAmount: string;
   workDate: Date;
 }> = [];
+/** Every table the shim was asked to read, in order. */
+let selectedTables: string[] = [];
 
-const chain: any = new Proxy(
-  {},
-  {
-    get(_t, prop) {
-      if (prop === "then") {
-        return (resolve: (v: any) => void) => resolve(nextWcbRows);
-      }
-      return () => chain;
+function makeChain(fromTable?: string): any {
+  const chain: any = new Proxy(
+    {},
+    {
+      get(_t, prop) {
+        if (prop === "then") {
+          return (resolve: (v: any) => void, reject: (e: unknown) => void) => {
+            if (fromTable !== "wet_check_billings") {
+              // The batch must not reach any other table through db.select —
+              // the invoice leg goes through storage.
+              reject(
+                new Error(
+                  `unexpected db.select from ${fromTable ?? "<unknown>"} — the wet-check leg is the only direct query`,
+                ),
+              );
+              return;
+            }
+            resolve(
+              nextWcbRows.map((r) => ({ customerId: r.customerId ?? 1, ...r })),
+            );
+          };
+        }
+        if (prop === "from") {
+          return (table: any) => {
+            let name: string | undefined;
+            try {
+              name = getTableName(table);
+            } catch {
+              name = undefined;
+            }
+            if (name) selectedTables.push(name);
+            return makeChain(name);
+          };
+        }
+        return () => makeChain(fromTable);
+      },
     },
-  },
-);
-(db as any).select = () => chain;
+  );
+  return chain;
+}
+(db as any).select = () => makeChain();
 
 // ── storage shim ─────────────────────────────────────────────────────────────
 import { storage } from "./storage";
@@ -50,17 +88,26 @@ interface FakeInvoice {
 
 let nextInvoices: FakeInvoice[] = [];
 let capturedCompanyId: number | null | undefined = undefined;
+/** How many times the batch invoice query ran — one per spend call, always. */
+let invoiceQueryCount = 0;
 
-(storage as any).getInvoicesByCustomer = async (
-  customerId: number,
+(storage as any).getInvoicesByCustomerIds = async (
+  customerIds: number[],
   companyId: number | null,
 ) => {
   capturedCompanyId = companyId;
-  return nextInvoices.filter((i) => i.customerId === customerId);
+  invoiceQueryCount += 1;
+  // Mirrors the real reader: scope on the invoice's own company column.
+  return nextInvoices.filter(
+    (i) =>
+      customerIds.includes(i.customerId) &&
+      (companyId === null || i.companyId === companyId),
+  );
 };
 
 // ── module under test — imported AFTER shims ─────────────────────────────────
-const { computeCustomerSpend } = await import("./budget-spend");
+const { computeCustomerSpend, computeCustomerSpendBatch, spendTotals } =
+  await import("./budget-spend");
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const now = new Date();
@@ -186,7 +233,7 @@ describe("computeCustomerSpend", () => {
     assert.equal(r.pendingNotBilled, 0);
   });
 
-  it("company isolation: passes companyId to getInvoicesByCustomer (not null)", async () => {
+  it("company isolation: passes companyId to the batch invoice query (not null)", async () => {
     nextInvoices = [];
     nextWcbRows = [];
     capturedCompanyId = undefined;
@@ -206,7 +253,7 @@ describe("computeCustomerSpend", () => {
 // Task #1911 — budget regression guard. Do not delete these as duplicates of
 // the storage-reader tests: they pin the *consequence*, not the mechanism.
 //
-// getInvoicesByCustomer used to swallow database errors and return []. That
+// The invoice reader used to swallow database errors and return []. That
 // made the invoice leg of this calculation compute to zero, so a customer
 // already over their cap read as comfortably under it — the single most
 // dangerous way this function can be wrong, because nothing about the output
@@ -214,8 +261,8 @@ describe("computeCustomerSpend", () => {
 describe("computeCustomerSpend — an over-budget customer must never read as under budget", () => {
   it("propagates a failing invoice query instead of reporting zero invoiced", async () => {
     const dbDown = new Error("Failed query: timeout exceeded when trying to connect");
-    const prev = (storage as any).getInvoicesByCustomer;
-    (storage as any).getInvoicesByCustomer = async () => {
+    const prev = (storage as any).getInvoicesByCustomerIds;
+    (storage as any).getInvoicesByCustomerIds = async () => {
       throw dbDown;
     };
     nextWcbRows = [];
@@ -230,7 +277,7 @@ describe("computeCustomerSpend — an over-budget customer must never read as un
         "a failed invoice lookup must not resolve to a spend total",
       );
     } finally {
-      (storage as any).getInvoicesByCustomer = prev;
+      (storage as any).getInvoicesByCustomerIds = prev;
     }
   });
 
@@ -238,8 +285,8 @@ describe("computeCustomerSpend — an over-budget customer must never read as un
     // The specific bad outcome: $9,000 of invoices are invisible, $50 of
     // uninvoiced wet-check work is not, and the caller is handed $50 as if it
     // were this customer's whole spend.
-    const prev = (storage as any).getInvoicesByCustomer;
-    (storage as any).getInvoicesByCustomer = async () => {
+    const prev = (storage as any).getInvoicesByCustomerIds;
+    (storage as any).getInvoicesByCustomerIds = async () => {
       throw new Error("Failed query: connection terminated unexpectedly");
     };
     nextWcbRows = [wcb(null, "50.00")];
@@ -250,7 +297,7 @@ describe("computeCustomerSpend — an over-budget customer must never read as un
         "a partial total is worse than no total — it looks like a real number",
       );
     } finally {
-      (storage as any).getInvoicesByCustomer = prev;
+      (storage as any).getInvoicesByCustomerIds = prev;
     }
   });
 });
