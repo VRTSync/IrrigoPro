@@ -442,12 +442,12 @@ isValidation = true
 name = "invoice-ar-first-ui"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/irrigopro exec vitest run src/pages/invoices-ar-first-layout.test.tsx src/pages/invoices-ar-collections.test.tsx"
-
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/irrigopro exec vitest run src/pages/invoices-ar-first-layout.test.tsx src/pages/invoices-ar-collections.test.tsx src/lib/quickbooks-health.test.ts"
 
 [[workflows.workflow]]
 name = "invoice-aging-summary"
@@ -579,7 +579,7 @@ isValidation = true
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/routes/financial-pulse-cross-surface.test.ts src/routes/financial-pulse-customer-summary.test.ts src/routes/financial-pulse-slice3.test.ts src/routes/financial-pulse.test.ts src/routes/financial-pulse-one-projection.test.ts src/routes/financial-pulse-one-balance-rule.test.ts src/financial-pulse-shared-spend.test.ts src/routes/financial-pulse-margin-costs.test.ts"
+args = "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/routes/financial-pulse-cross-surface.test.ts src/routes/financial-pulse-customer-summary.test.ts src/routes/financial-pulse-slice3.test.ts src/routes/financial-pulse.test.ts src/routes/financial-pulse-one-projection.test.ts src/routes/financial-pulse-one-balance-rule.test.ts src/financial-pulse-shared-spend.test.ts src/routes/financial-pulse-margin-costs.test.ts src/routes/quickbooks-health-agreement.test.ts"
 
 [[workflows.workflow]]
 name = "retired-work-types"

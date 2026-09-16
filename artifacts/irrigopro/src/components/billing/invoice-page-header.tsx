@@ -13,37 +13,28 @@
 
 import type { ReactNode } from "react";
 import { Link } from "wouter";
-import { AlertTriangle, CheckCircle2, ChevronLeft, FileText, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronLeft, FileText, Loader2, MinusCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/format-currency";
+import {
+  qbHealthIsWarning,
+  qbHealthPillLabel,
+  qbHealthPillTitle,
+  type QuickBooksHealth,
+} from "@/lib/quickbooks-health";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** A sync older than this is reported as stale rather than as a tick. */
-export const QB_SYNC_STALE_AFTER_MS = DAY_MS;
-
-export type QbSyncState = "fresh" | "stale" | "never";
-
-export function qbSyncStateOf(
-  paymentSyncedAt: string | null | undefined,
-  now: Date,
-): QbSyncState {
-  if (!paymentSyncedAt) return "never";
-  const at = new Date(paymentSyncedAt).getTime();
-  if (Number.isNaN(at)) return "never";
-  return now.getTime() - at > QB_SYNC_STALE_AFTER_MS ? "stale" : "fresh";
-}
-
-function formatWhen(value: string): string {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "an unknown time";
-  return d.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
+// Task #2027 — the pill no longer decides company-level QuickBooks health.
+//
+// It used to run its own 24-hour clock over `lastPaymentSyncAt` and render the
+// result as "QuickBooks: out of date" — a verdict on QuickBooks, from a field
+// no other surface consulted, while Financial Pulse and the Manager Workspace
+// strip read the connection and could say the opposite in the same minute. The
+// inverse was worse: a dead token with a recent payment sweep read green.
+//
+// Payment-sync recency is now an input to the shared verdict rather than a
+// second definition of it (see api-server/src/routes/quickbooks-health.ts), so
+// the pill renders what the other two screens are showing, in fewer words. The
+// per-row "Stale sync" flags are untouched — those are per-invoice facts.
 
 export function InvoicePageHeader({
   outstandingBalance,
@@ -51,10 +42,9 @@ export function InvoicePageHeader({
   summaryLoading,
   canSeeQuickBooksStatus,
   canRunPaymentSync,
-  lastPaymentSyncAt,
+  quickBooksHealth,
   onRunPaymentSync,
   isSyncing,
-  now,
   actions,
 }: {
   /** Server-computed, for the whole filtered set. Null while it is loading. */
@@ -64,14 +54,15 @@ export function InvoicePageHeader({
   summaryLoading: boolean;
   canSeeQuickBooksStatus: boolean;
   canRunPaymentSync: boolean;
-  lastPaymentSyncAt: string | null;
+  /** The shared verdict from `/api/invoices/aging-summary`. */
+  quickBooksHealth: QuickBooksHealth | null;
   onRunPaymentSync: () => void;
   isSyncing: boolean;
-  now: Date;
   actions?: ReactNode;
 }) {
-  const syncState = qbSyncStateOf(lastPaymentSyncAt, now);
-  const warn = syncState !== "fresh";
+  const warn = quickBooksHealth ? qbHealthIsWarning(quickBooksHealth) : false;
+  const bad = quickBooksHealth?.state === "down";
+  const unknown = !quickBooksHealth || quickBooksHealth.state === "unknown";
 
   return (
     <div className="mb-6" data-testid="invoice-page-header">
@@ -108,33 +99,30 @@ export function InvoicePageHeader({
         <div className="flex flex-wrap items-center gap-2">
           {/* Gated by absence, not by disabling: a role that cannot manage the
               QuickBooks connection is not shown its health either. */}
-          {canSeeQuickBooksStatus && (
+          {canSeeQuickBooksStatus && quickBooksHealth && (
             <span
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
-                warn
-                  ? "border-amber-300 bg-amber-50 text-amber-800"
-                  : "border-emerald-200 bg-emerald-50 text-emerald-800"
+                bad
+                  ? "border-red-300 bg-red-50 text-red-800"
+                  : warn
+                    ? "border-amber-300 bg-amber-50 text-amber-800"
+                    : unknown
+                      ? "border-gray-200 bg-gray-50 text-gray-600"
+                      : "border-emerald-200 bg-emerald-50 text-emerald-800"
               }`}
               data-testid="qb-sync-pill"
-              data-sync-state={syncState}
-              title={
-                syncState === "never"
-                  ? "No QuickBooks payment sync has ever run for this company, so every balance below is the invoice total rather than what is actually owed."
-                  : syncState === "stale"
-                    ? `QuickBooks payments were last read on ${formatWhen(lastPaymentSyncAt!)} — more than 24 hours ago. Balances may be out of date.`
-                    : `QuickBooks payments last read on ${formatWhen(lastPaymentSyncAt!)}.`
-              }
+              data-qb-state={quickBooksHealth.state}
+              data-qb-reason={quickBooksHealth.reason}
+              title={qbHealthPillTitle(quickBooksHealth)}
             >
               {warn ? (
                 <AlertTriangle className="h-3.5 w-3.5" />
+              ) : unknown ? (
+                <MinusCircle className="h-3.5 w-3.5" />
               ) : (
                 <CheckCircle2 className="h-3.5 w-3.5" />
               )}
-              {syncState === "never"
-                ? "QuickBooks: never synced"
-                : syncState === "stale"
-                  ? "QuickBooks: out of date"
-                  : "QuickBooks: up to date"}
+              {qbHealthPillLabel(quickBooksHealth)}
             </span>
           )}
           {canRunPaymentSync && (

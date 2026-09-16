@@ -9,6 +9,8 @@
 import type { Express, Request, RequestHandler } from "express";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
+// Task #2027 — one QuickBooks verdict for every surface that shows one.
+import { loadQuickBooksHealth } from "./quickbooks-health";
 import {
   computeCustomerSpend,
   computeCustomerSpendBatch,
@@ -730,12 +732,15 @@ export function registerFinancialPulseRoutes(
         const customerIds = cust.map((c) => c.id);
 
         // Load invoices + all WOs/BSs/WCBs in parallel.
-        const [allInvoices, allWos, allBss, allWcbs] = await Promise.all([
+        const [allInvoices, allWos, allBss, allWcbs, qbHealth] = await Promise.all([
           loadInvoicesForCustomers(customerIds),
           loadAllWorkOrdersForCustomers(customerIds),
           loadAllBillingSheetsForCustomers(customerIds),
           // Task #814 — uninvoiced WCBs for YTD.
           loadAllWetCheckBillingsForCustomers(customerIds),
+          // Task #2027 — resolved through the page's own scope, so the verdict
+          // describes the same company as the money beside it.
+          loadQuickBooksHealth(req, { companyId: scope.companyId, now }),
         ]);
 
         const mtd = getMtdWindow(now);
@@ -916,6 +921,14 @@ export function registerFinancialPulseRoutes(
           },
           period,
           asOf: now.toISOString(),
+          // Task #2027 — the shared QuickBooks verdict, carried on a request
+          // the page already makes. The banner used to ask
+          // /api/quickbooks/connection, which is gated on
+          // CAN_MANAGE_QUICKBOOKS; an irrigation_manager got a 403, the client
+          // swallowed it, and the banner silently never showed. Every role
+          // allowed on this endpoint now receives a real verdict, and none of
+          // them needs a second network call to get it.
+          quickbooks: qbHealth,
         });
       } catch (err) {
         console.error("financial-pulse/kpis error", err);

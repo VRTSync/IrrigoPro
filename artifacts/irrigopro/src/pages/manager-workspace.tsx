@@ -28,6 +28,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { adaptiveRefetchInterval, apiRequest } from "@/lib/queryClient";
 import { FinancialPulseWidget } from "@/components/financial-pulse/financial-pulse-widget";
 import { useAuth } from "@/lib/auth-context";
+import {
+  qbHealthReasonPhrase,
+  type QuickBooksHealth,
+} from "@/lib/quickbooks-health";
 import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
 import type { WorkOrder, BillingSheet, Estimate } from "@workspace/db/schema";
@@ -47,13 +51,10 @@ interface StatusStripResponse {
     wosAwaitingApproval: number;
     approvedThisWeek: number;
   };
-  quickbooks: {
-    state: "ok" | "degraded" | "down" | "unknown";
-    lastSyncAt: string | null;
-    pendingSync: number;
-    connectionStatus: string | null;
-    recentErrorCount: number;
-  } | null;
+  /** Task #2027 — the shared verdict, identical to the one Financial Pulse
+   *  and the invoices header receive. This strip renders more of it than they
+   *  do; it does not decide any of it. */
+  quickbooks: QuickBooksHealth | null;
 }
 
 interface WetCheckCounts {
@@ -289,6 +290,8 @@ export default function ManagerWorkspacePage() {
 
   // QB status bar styles
   const qbState = strip?.quickbooks?.state ?? "unknown";
+  // Why, not just what — the strip already prints the timestamps and counts.
+  const qbReason = strip?.quickbooks ? qbHealthReasonPhrase(strip.quickbooks) : null;
   const qbBorderClass =
     qbState === "ok"
       ? "border-l-green-500"
@@ -341,9 +344,20 @@ export default function ManagerWorkspacePage() {
         >
           <DollarSign className="w-4 h-4 text-gray-400 shrink-0" />
           <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-600">
-            <span className="font-semibold capitalize">
+            <span className="font-semibold capitalize" data-qb-state={qbState}>
               QuickBooks: {qbState}
             </span>
+            {qbReason && (
+              <span className="text-gray-500" data-testid="qb-status-reason">
+                {qbReason}
+              </span>
+            )}
+            {strip.quickbooks.lastPaymentSyncAt && (
+              <span className="text-gray-400">
+                Payments read{" "}
+                {new Date(strip.quickbooks.lastPaymentSyncAt).toLocaleString()}
+              </span>
+            )}
             {strip.quickbooks.lastSyncAt && (
               <span className="text-gray-400">
                 Synced {new Date(strip.quickbooks.lastSyncAt).toLocaleString()}

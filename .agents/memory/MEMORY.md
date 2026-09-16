@@ -1,4 +1,3 @@
-// hint: Logic changed on both sides. Requires understanding intent of each change.
 - [Testable route extraction pattern](route-extraction-pattern.md) — extract inline handlers to separate modules for storage-spy tests; never mirror handler logic in tests.
 - [offline-photo-FK-anchor](offline-photo-FK-anchor.md) — queuePhotoUpload body must include zoneRecordId/findingId; absence causes every photo to land loose.
 - [Finding-create photo linking](finding-photo-linking.md) — every finding-create path (FindingSheet + ZoneScreen CustomFindingEditor) must re-link pre-uploaded photos or they land loose (findingId=NULL).
@@ -53,5 +52,6 @@
 - [A colour token is two halves](tailwind-token-proof.md) — a CSS variable with no Tailwind `colors` entry compiles to nothing; register both halves and prove the class generates.
 - [A gate message needs a surface](gate-message-needs-a-surface.md) — hardcoded error toasts discard server wording; grep onError and use parseApiError before calling a guard done.
 - [Invoice line items are two shapes](invoice-line-items-shape.md) — most invoice rows are a whole ticket collapsed into one line; derive per-part figures from the source ticket, not the line.
+- [Exposing a shared verdict](shared-verdict-exposure.md) — attach it to each page's existing request, not the concept's capability-gated endpoint; rank unknown statuses as degraded, never 0.
 - [A new gate on an unscoped route is an oracle](gate-without-tenancy-is-an-oracle.md) — check ownership exists before adding validation; collapse foreign into not-found, order it first.
 - [Batching a per-customer helper](batching-a-per-customer-helper.md) — a leg left unscoped for one validated id becomes an oracle in a batch; wrap the single call, split the test seams.

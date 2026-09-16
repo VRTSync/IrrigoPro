@@ -37,6 +37,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { BudgetBar } from "@/components/budget/BudgetBar";
+import {
+  qbHealthBannerMessage,
+  type QuickBooksHealth,
+} from "@/lib/quickbooks-health";
 import type { BudgetStatus } from "@workspace/shared";
 import {
   DropdownMenu,
@@ -112,6 +116,12 @@ interface KpisResponse {
   grossMarginPct: MarginTile;
   period: Period;
   asOf: string;
+  /**
+   * Task #2027 — the shared QuickBooks verdict, carried on the request this
+   * page already makes so every role allowed here gets one. Null only when the
+   * server could not read it.
+   */
+  quickbooks: QuickBooksHealth | null;
 }
 interface TrendPoint {
   month: string;
@@ -239,43 +249,6 @@ interface PulseSummaryResponse {
   technicians: PulseTechRow[];
   asOf: string;
 }
-
-// QuickBooks connection-status payload shape. Matches the
-// `/api/quickbooks/connection` contract used by
-// `components/quickbooks/quickbooks-integration.tsx` — see
-// `QbConnectionStatus` there. We treat the response as a partial
-// payload because the endpoint can return `{}` on transient failures
-// (queryFn catches the error above) and we don't want banner state
-// to flip when a field is missing.
-export interface QbStatusPayload {
-  isConnected?: boolean;
-  connectionStatus?: string;
-  reconnectRequiredReason?: string;
-}
-
-// Statuses that indicate sync is NOT healthy and the banner must show.
-// Mirrors the backend semantics in routes.ts where token-refresh
-// failures persist `reconnect_required`, and the integration UI which
-// treats `error` as a degraded state. `disconnected` / `expired` are
-// kept for back-compat with older responses.
-const QB_BAD_STATUSES = new Set([
-  "disconnected",
-  "error",
-  "expired",
-  "reconnect_required",
-]);
-
-// Pure helper so the banner logic is unit-testable. Exported for the
-// banner-visibility test below in
-// `pages/financial-pulse-qb-banner.test.tsx`.
-export function isQbUnhealthy(payload: QbStatusPayload | undefined): boolean {
-  if (!payload) return false;
-  if (payload.isConnected === false) return true;
-  if (payload.connectionStatus && QB_BAD_STATUSES.has(payload.connectionStatus))
-    return true;
-  return false;
-}
-
 const CURRENCY = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -519,20 +492,6 @@ function AccountingTab({ navigate }: { navigate: (path: string) => void }) {
     refetchOnWindowFocus: false,
   });
 
-  const qb = useQuery<QbStatusPayload>({
-    queryKey: ["/api/quickbooks/connection"],
-    queryFn: async () => {
-      try {
-        return await apiRequest("/api/quickbooks/connection", "GET");
-      } catch {
-        return {};
-      }
-    },
-    staleTime: 5 * 60_000,
-    refetchOnWindowFocus: false,
-    retry: false,
-  });
-
   const lastRefreshed = kpis.dataUpdatedAt
     ? new Date(kpis.dataUpdatedAt).toISOString()
     : null;
@@ -546,7 +505,10 @@ function AccountingTab({ navigate }: { navigate: (path: string) => void }) {
     });
   };
 
-  const qbUnhealthy = isQbUnhealthy(qb.data);
+  // No second network call and no local rule: the banner says exactly what the
+  // strip and the invoices pill say, in its own words.
+  const qbHealth = kpis.data?.quickbooks ?? null;
+  const qbBanner = qbHealthBannerMessage(qbHealth);
 
   return (
     <div className="space-y-6" data-testid="accounting-tab">
@@ -590,14 +552,20 @@ function AccountingTab({ navigate }: { navigate: (path: string) => void }) {
         </Button>
       </div>
 
-      {/* QB health banner */}
-      {qbUnhealthy && (
+      {/* QB health banner — one line, worded by what was actually detected. */}
+      {qbBanner && qbHealth && (
         <div
-          className="rounded-md border border-amber-300 bg-amber-50 text-amber-800 px-4 py-3 text-sm flex items-center gap-2"
+          className={`rounded-md border px-4 py-3 text-sm flex items-center gap-2 ${
+            qbHealth.state === "down"
+              ? "border-red-300 bg-red-50 text-red-800"
+              : "border-amber-300 bg-amber-50 text-amber-800"
+          }`}
           data-testid="qb-health-banner"
+          data-qb-state={qbHealth.state}
+          data-qb-reason={qbHealth.reason}
         >
-          <AlertTriangle className="w-4 h-4" />
-          QuickBooks sync is unhealthy — invoice totals may be out of date.
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          {qbBanner}
         </div>
       )}
 

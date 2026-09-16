@@ -16,6 +16,7 @@
 import { ChevronRight, Loader2 } from "lucide-react";
 import { Link } from "wouter";
 import { formatCurrency } from "@/lib/format-currency";
+import type { QuickBooksHealth } from "@/lib/quickbooks-health";
 import type { AgingFilter } from "@/lib/invoice-ar-query";
 
 export interface AgingBucketTotal {
@@ -33,10 +34,17 @@ export interface AgingSummary {
   overall: { balanceDue: string; count: number };
   /**
    * The company's last QuickBooks payment sync, computed server-side over
-   * every invoice in the company rather than the filtered set — the pill
-   * describes the connection, not the rows on screen.
+   * every invoice in the company rather than the filtered set — it describes
+   * the company, not the rows on screen.
    */
   lastPaymentSyncAt?: string | null;
+  /**
+   * Task #2027 — the shared QuickBooks verdict, the same object Financial
+   * Pulse and the Manager Workspace strip receive. The header pill renders it;
+   * it does not derive health from `lastPaymentSyncAt` above, which is now one
+   * input the server folds into that verdict.
+   */
+  quickbooks?: QuickBooksHealth | null;
 }
 
 /**

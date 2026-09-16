@@ -1708,11 +1708,17 @@ export default function InvoicesPage() {
 
   // Task #1942 — when payment data was last pulled from QuickBooks.
   //
-  // Company-level, from the aggregate: the pill is a statement about the
-  // connection, so it must not move when the reader filters the table. Taken
-  // from the loaded rows it would call a healthy connection stale the moment
-  // a search or a month filter excluded the most recently synced invoice.
-  const lastPaymentSyncAt = agingSummary?.lastPaymentSyncAt ?? null;
+  // Company-level, from the aggregate: the pill is a statement about the whole
+  // company, so it must not move when the reader filters the table. Taken from
+  // the loaded rows it would call a healthy connection stale the moment a
+  // search or a month filter excluded the most recently synced invoice.
+  //
+  // Task #2027 — the verdict itself is the server's, shared with Financial
+  // Pulse and the Manager Workspace strip. This page no longer turns
+  // `lastPaymentSyncAt` into a QuickBooks verdict of its own; that timestamp is
+  // one input the server folds in, because since #2013 it also drives the
+  // balance rule behind the money on this very page.
+  const quickBooksHealth = agingSummary?.quickbooks ?? null;
 
   const monthOptions = generateMonthOptions();
 
@@ -2177,10 +2183,9 @@ export default function InvoicesPage() {
           summaryLoading={agingSummaryLoading}
           canSeeQuickBooksStatus={canManageQuickBooks}
           canRunPaymentSync={canManageQuickBooks}
-          lastPaymentSyncAt={lastPaymentSyncAt}
+          quickBooksHealth={quickBooksHealth}
           onRunPaymentSync={() => paymentSyncMutation.mutate()}
           isSyncing={paymentSyncMutation.isPending}
-          now={nowForAr}
           actions={
             <Button
               variant="outline"

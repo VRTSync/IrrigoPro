@@ -25,6 +25,12 @@ import { paginate } from "./pagination";
 // Shared with the notes endpoints so the list hover preview and the thread can
 // never disagree about which note is latest or how it is truncated.
 import { arNotePreview } from "./invoice-ar-note-routes";
+// Task #2027 — one QuickBooks verdict for every surface that shows one.
+import {
+  loadQuickBooksHealth,
+  type QbHealthOptions,
+  type QuickBooksHealth,
+} from "./quickbooks-health";
 import {
   agingBucketRank,
   AGING_BUCKET_KEYS,
@@ -756,6 +762,11 @@ export interface RegisterInvoiceListRoutesDeps {
   };
   _loadPaymentTerms?: (customerIds: number[]) => Promise<Map<number, string | null>>;
   _now?: () => Date;
+  /** Task #2027 — the shared QuickBooks verdict. Test seam only. */
+  _loadQbHealth?: (
+    req: any,
+    opts: QbHealthOptions,
+  ) => Promise<QuickBooksHealth | null>;
 }
 
 async function loadPaymentTermsFromDb(
@@ -776,6 +787,7 @@ export function registerInvoiceListRoutes(
   const storage = deps._storageApi ?? storageModule;
   const loadPaymentTerms = deps._loadPaymentTerms ?? loadPaymentTermsFromDb;
   const nowFn = deps._now ?? (() => new Date());
+  const loadQbHealth = deps._loadQbHealth ?? loadQuickBooksHealth;
 
   app.get(
     "/api/invoices",
@@ -888,16 +900,29 @@ export function registerInvoiceListRoutes(
         );
         const filtered = annotated.filter((row) => matchesArFilters(row, q, now));
 
-        // The QuickBooks freshness pill reads `lastPaymentSyncAt` from here.
-        // It is deliberately computed over `all` — every invoice in the
-        // company, before any filter — because the pill is a statement about
-        // the connection, not about the rows on screen. Derived from the
-        // filtered set, a search or a month filter that happened to exclude
-        // the most recently synced invoice would report a healthy connection
-        // as stale.
+        // `lastPaymentSyncAt` is deliberately computed over `all` — every
+        // invoice in the company, before any filter — because it is a
+        // statement about the company's payment read, not about the rows on
+        // screen. Derived from the filtered set, a search or a month filter
+        // that happened to exclude the most recently synced invoice would
+        // report a fresh read as stale.
+        const lastPaymentSyncAt = latestPaymentSyncAt(all);
+
+        // Task #2027 — the header pill used to turn this one timestamp into a
+        // verdict on QuickBooks ("QuickBooks: out of date") while two other
+        // screens read the connection and said ok. It is now one input to the
+        // shared verdict, computed here and handed in so the pill and the
+        // timestamp printed beside it cannot come from two different reads.
+        const quickbooks = await loadQbHealth(req, {
+          companyId: scopeCompanyId,
+          lastPaymentSyncAt,
+          now,
+        });
+
         res.json({
           ...deps.applyPricingVisibility(req, summarizeAging(filtered)),
-          lastPaymentSyncAt: latestPaymentSyncAt(all),
+          lastPaymentSyncAt,
+          quickbooks,
         });
       } catch (error) {
         console.error("Error summarizing invoice aging:", error);

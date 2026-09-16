@@ -105,6 +105,26 @@ function eligibility(invoiceId: number, overrides: Row = {}): Row {
   };
 }
 
+/**
+ * Task #2027 — the aggregate now carries the shared QuickBooks verdict. The
+ * pill renders it; it no longer runs a 24-hour clock of its own over
+ * `lastPaymentSyncAt`, which is why these fixtures set the verdict rather than
+ * only the timestamp.
+ */
+function qbHealth(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    state: "ok",
+    reason: "healthy",
+    connectionStatus: "connected",
+    reconnectRequiredReason: null,
+    lastSyncAt: new Date(NOW - 60_000).toISOString(),
+    lastPaymentSyncAt: new Date(NOW - 60_000).toISOString(),
+    pendingSync: 0,
+    recentErrorCount: 0,
+    ...overrides,
+  };
+}
+
 function agingSummary(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     buckets: [
@@ -116,6 +136,7 @@ function agingSummary(overrides: Partial<Record<string, unknown>> = {}) {
     overall: { balanceDue: "10000.00", count: 14 },
     // Company-level, from the server — not derived from the loaded rows.
     lastPaymentSyncAt: new Date(NOW - 60_000).toISOString(),
+    quickbooks: qbHealth(),
     ...overrides,
   };
 }
@@ -344,30 +365,59 @@ describe("header totals", () => {
     expect(screen.getByTestId("invoice-header-outstanding")).toHaveTextContent("$3,000.00");
   });
 
-  it("warns when no payment sync has run inside the last day", async () => {
-    summaryForResponse = agingSummary({ lastPaymentSyncAt: new Date(NOW - 3 * DAY).toISOString() });
+  it("warns when the shared verdict reports a stale payment read", async () => {
+    summaryForResponse = agingSummary({
+      lastPaymentSyncAt: new Date(NOW - 3 * DAY).toISOString(),
+      quickbooks: qbHealth({
+        state: "degraded",
+        reason: "stale_payment_sync",
+        lastPaymentSyncAt: new Date(NOW - 3 * DAY).toISOString(),
+      }),
+    });
     renderInvoices();
 
     const pill = await screen.findByTestId("qb-sync-pill");
-    expect(pill).toHaveAttribute("data-sync-state", "stale");
+    expect(pill).toHaveAttribute("data-qb-state", "degraded");
+    expect(pill).toHaveAttribute("data-qb-reason", "stale_payment_sync");
+    expect(pill).toHaveTextContent("payments out of date");
   });
 
-  it("reads sync freshness from the company, so filtering the table cannot fake staleness", async () => {
-    // The pill describes the QuickBooks connection. Derived from the loaded
-    // rows, a search that happened to exclude the most recently synced
-    // invoice would report a healthy connection as never-synced.
-    summaryForResponse = agingSummary({ lastPaymentSyncAt: new Date(NOW - 60_000).toISOString() });
+  it("names the broken connection rather than calling it out of date", async () => {
+    // Task #2027 — the pill used to say "QuickBooks: out of date" whenever the
+    // payment read was old, and stayed green on a dead token as long as a
+    // sweep had run recently. It shows the same verdict as the banner now.
+    summaryForResponse = agingSummary({
+      quickbooks: qbHealth({
+        state: "down",
+        reason: "connection",
+        connectionStatus: "reconnect_required",
+        reconnectRequiredReason: "Refresh token expired",
+      }),
+    });
+    renderInvoices();
+
+    const pill = await screen.findByTestId("qb-sync-pill");
+    expect(pill).toHaveAttribute("data-qb-state", "down");
+    expect(pill).toHaveTextContent("needs reconnecting");
+  });
+
+  it("reads the verdict from the company, so filtering the table cannot fake staleness", async () => {
+    // The pill describes the whole company. Derived from the loaded rows, a
+    // search that happened to exclude the most recently synced invoice would
+    // report a healthy connection as never-synced.
+    summaryForResponse = agingSummary();
     rowsForResponse = [invoiceRow({ id: 1, paymentSyncedAt: null })];
     renderInvoices("/invoices?search=woodglenn");
 
     const pill = await screen.findByTestId("qb-sync-pill");
-    expect(pill).toHaveAttribute("data-sync-state", "fresh");
+    expect(pill).toHaveAttribute("data-qb-state", "ok");
   });
 
   it("calls the payment sync fresh when it ran minutes ago", async () => {
     renderInvoices();
     const pill = await screen.findByTestId("qb-sync-pill");
-    expect(pill).toHaveAttribute("data-sync-state", "fresh");
+    expect(pill).toHaveAttribute("data-qb-state", "ok");
+    expect(pill).toHaveTextContent("up to date");
   });
 
   it("re-asks the aggregate after a payment sync, so the totals cannot lag the rows", async () => {

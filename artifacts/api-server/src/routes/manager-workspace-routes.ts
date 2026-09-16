@@ -17,9 +17,11 @@ import {
 } from "@workspace/db/schema";
 import { db } from "../db";
 import { storage } from "../storage";
+// Task #2027 — the shared QuickBooks verdict. The strip renders more of it
+// than the other two surfaces do; it does not decide any of it.
+import { loadQuickBooksHealth } from "./quickbooks-health";
 import {
   scopedWetCheckBillings,
-  loadQbSyncStatus,
   ACTIVE_WCB,
   ACTIVE_WO,
   ACTIVE_BS,
@@ -1165,13 +1167,9 @@ export function registerManagerWorkspaceRoutes(
           return (now - oldest) / 3_600_000;
         };
 
-        // QuickBooks status (best-effort)
-        let qbStatus: Awaited<ReturnType<typeof loadQbSyncStatus>> | null = null;
-        try {
-          qbStatus = await loadQbSyncStatus(req);
-        } catch {
-          qbStatus = null;
-        }
+        // QuickBooks verdict (best-effort) — the same object Financial Pulse
+        // and the invoices header receive, not a second reading of it.
+        const qbHealth = await loadQuickBooksHealth(req);
 
         const stageCounts: Record<string, number | undefined> = {
           needsReview,
@@ -1192,15 +1190,7 @@ export function registerManagerWorkspaceRoutes(
             wcsPendingReview: oldestHours(activeWcs),
             wosAwaitingApproval: oldestHours(activeWos),
           },
-          quickbooks: qbStatus
-            ? {
-                state: qbStatus.state,
-                lastSyncAt: qbStatus.lastSyncAt,
-                pendingSync: qbStatus.pendingSync,
-                connectionStatus: qbStatus.connectionStatus,
-                recentErrorCount: qbStatus.recentErrors.length,
-              }
-            : null,
+          quickbooks: qbHealth,
         });
       } catch (error) {
         req.log?.error?.({ err: error }, "manager-workspace status-strip failed");
