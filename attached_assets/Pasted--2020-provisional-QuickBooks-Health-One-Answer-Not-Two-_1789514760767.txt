@@ -1,0 +1,79 @@
+# #2020 (provisional) — QuickBooks Health: One Answer, Not Two
+
+## What & Why
+
+Two screens disagree about whether QuickBooks is working, in the same minute, and one of them is wrong.
+
+Observed 2026-09-14 and still true on 2026-09-15:
+
+- **Financial Pulse** shows an amber banner: "QuickBooks sync is unhealthy — invoice totals may be out of date."
+- **Manager Workspace**, loaded seconds later, shows: "QuickBooks: Ok · Synced 9/14/2026, 8:25:04 AM".
+
+This is not cosmetic. The Financial Pulse banner's specific claim is that **invoice totals may be out of date** — the same totals behind Money Owed, Collected MTD, and the A/R aging buckets. A bookkeeper who checks the other screen is told the opposite, and has no way to decide whether the money figures can be trusted. It is the same defect class as the rest of this series: one concept, two implementations, no shared definition.
+
+## Current state (confirmed in code)
+
+Two independent derivations, from two endpoints, with two different notions of "healthy":
+
+| Surface | Endpoint | Derivation |
+|---|---|---|
+| Financial Pulse banner | `/api/quickbooks/connection` (`routes.ts:9073`) | `isQbUnhealthy` (`financial-pulse.tsx:267`) — fires when `isConnected === false`, or `connectionStatus` is one of `disconnected`, `error`, `expired`, `reconnect_required` |
+| Manager Workspace strip | `/api/manager-workspace/status-strip` | `loadQbSyncStatus` (`billing-workspace-routes.ts:320`), rendered as ok / degraded / down (`manager-workspace.tsx:291`) |
+
+`loadQbSyncStatus` is much the richer of the two. It ranks connection statuses across every integration in scope and takes the **worst** (`reconnect_required` > `error` > `disconnected` > `connected`), then folds in failed sync rows, pending sync rows and queued invoices, and resolves a last-successful-sync timestamp across token refreshes and per-estimate sync rows. `isQbUnhealthy` is a flat set membership test over one payload.
+
+So the two can disagree in both directions: a tenant whose connection reads `connected` but whose sync queue is backed up shows Ok on Financial Pulse and degraded on Manager Workspace; a tenant whose status string is outside the strip's mapping shows the reverse. Which of those is happening here is the first thing to find out.
+
+## Done looks like
+
+- One function decides whether QuickBooks is healthy. No surface applies its own status set.
+- Financial Pulse and Manager Workspace show the same verdict for the same company at the same moment, or one of them deliberately shows more detail than the other — never a different answer.
+- Whichever verdict is correct for this tenant today is the one both screens show, and the reason for it is visible rather than implied.
+- The Financial Pulse banner's wording matches what it actually detected — a stale sync queue and a broken connection are different problems and should not share one sentence.
+- Tenancy holds: the verdict covers the caller's own company, and a super_admin sees the cross-tenant rollup `loadQbSyncStatus` already builds.
+
+## Decisions already made — implement these, do not relitigate
+
+- **`loadQbSyncStatus` is the canonical derivation.** It already handles the multi-integration ranking, the sync backlog and the timestamp resolution that the flat check does not. The flat check is replaced by it, not merged with it.
+- **`isQbUnhealthy` and its `QB_BAD_STATUSES` set are deleted**, not kept as a fallback. A fallback here is a second definition wearing a different hat.
+- **Both surfaces keep their own presentation.** Manager Workspace keeps its detailed status bar; Financial Pulse keeps a one-line banner. Only the verdict is shared.
+
+## Steps
+
+1. **Diagnose before changing anything.** Determine which screen is telling the truth for this tenant right now: read the company's integration row and its sync queue, and establish why `isQbUnhealthy` fires while `loadQbSyncStatus` resolves to ok. Record the answer in the ticket. The point of this work is not to silence a banner — if sync really is degraded, the fix must leave a warning standing, and if it is not, the fix must clear it. Do not proceed to step 2 until this is written down.
+
+2. **Expose the canonical verdict to Financial Pulse.** `loadQbSyncStatus` already lives in a module that two route files import. Surface its derived state through the endpoint Financial Pulse already queries, so the page gains the shared verdict without a second network call and without importing the Manager Workspace strip. Keep the existing payload fields so nothing else that reads that endpoint breaks.
+
+3. **Delete the second definition.** Remove `isQbUnhealthy`, `QB_BAD_STATUSES` and the `QbStatusPayload` shape's role in the banner decision, and drive the banner from the shared state. Leave a grep-clean result: no client file decides QuickBooks health from a status string of its own.
+
+4. **Say what is actually wrong.** The banner currently asserts that invoice totals may be out of date whatever the cause. Split the copy by the state the shared function reports: a connection that needs reattention, versus a sync backlog, versus a stale last-sync timestamp. Where the cause is a stale sync, name the last successful sync time — Manager Workspace already shows it and Financial Pulse does not.
+
+5. **Tests.** Cover: a fixture where the connection reads `connected` but the sync queue is backed up — both surfaces report the same non-ok state, and Financial Pulse's banner names the backlog rather than the connection; a fixture with `reconnect_required` on one of several integrations — the worst status wins for a super_admin and both surfaces agree; a fully healthy fixture — no banner on either; and tenancy, so a company A caller's verdict is computed only from company A's integrations while a super_admin sees the cross-tenant rollup. Assert that the two surfaces return the same verdict for one fixture — that equality is the contract this ticket exists to create.
+
+## Proof to attach when done
+
+- The step 1 diagnosis, in writing: which screen was correct on the day, and why the other disagreed.
+- `file:line` for the shared verdict, its exposure to Financial Pulse, and the deleted flat check.
+- Grep output showing `isQbUnhealthy` and `QB_BAD_STATUSES` have no remaining references.
+- Screenshots of Financial Pulse and Manager Workspace loaded within a minute of each other, showing the same verdict.
+- Test output for the agreement test and the tenancy case.
+
+## Relevant files
+
+- `artifacts/irrigopro/src/pages/financial-pulse.tsx` — `QbStatusPayload` :246, `isQbUnhealthy` :267, the connection query :464, the banner gate :490
+- `artifacts/api-server/src/routes/billing-workspace-routes.ts` — `loadQbSyncStatus` :320
+- `artifacts/api-server/src/routes/manager-workspace-routes.ts` — strip handler, `loadQbSyncStatus` call :1171
+- `artifacts/irrigopro/src/pages/manager-workspace.tsx` — strip query :251, state mapping :291, status bar :337
+- `artifacts/api-server/src/routes/routes.ts` — `/api/quickbooks/connection` :9073
+
+Line numbers are current as of the #2011 merge and drift as the Financial Pulse series lands — locate by symbol, not by line.
+
+## Coordination
+
+- Not part of the nine-ticket Financial Pulse cluster and not in its wave plan. It touches the banner and the connection endpoint, not the KPI handler, the math module or the widget, so it can run beside any wave.
+- One ordering note: **#2013 changes what "money owed" depends on.** Its balance rule reads `paymentSyncedAt` through `isBalanceFallback`, so a stale or broken sync now silently changes A/R figures rather than only the banner. That makes an accurate health verdict more load-bearing after #2013 lands, not less — worth running this soon after it.
+- Do not edit `docs/financial-metrics.md`; task #2018 owns it.
+
+## Test placement
+
+Put this ticket's new backend tests in a file of its own and **add it to the relevant validation command in `.replit`** — those commands name their test files explicitly, so an unlisted file never runs in validation even though the package script globs `src/**/*.test.ts`. Do not add a workflow; this repo is past the workflow cap. Prefer assertions that do not depend on exact row counts: the api-server integration tests share one dev database, and leftover rows read as a regression in this ticket when they are not one.

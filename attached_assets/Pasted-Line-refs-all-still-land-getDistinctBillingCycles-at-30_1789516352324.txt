@@ -1,0 +1,27 @@
+Line refs all still land — getDistinctBillingCycles at 308, computeAllBillableYtd at 355, both inside your cited ranges; the two route ranges cover 627/655 and 1587/1596/1695. Coordination and Test placement are both the corrected versions. Two things in the Steps still need fixing before this runs.
+
+1. Step 5's claim about the metrics doc is false, and it now contradicts your own Coordination section.
+
+docs/financial-metrics.md exists — 10,084 bytes, tracked in git, referenced from six code locations including the comment directly above the INFO_TIPS block this step edits. Meanwhile Coordination says "#2018 owns it and runs last." So the ticket tells the executor the file doesn't exist and that another task owns it. That's the kind of contradiction an executor resolves by picking one at random.
+
+Replace the last sentence of step 5 with:
+
+The tips carry a comment pointing at docs/financial-metrics.md. That file exists and is the reconciliation contract, but do not edit it here — task #2018 owns it and rewrites it last, against what actually shipped.
+
+2. Step 6 needs to name the one test that must die.
+
+"Migrate, not delete wholesale" is the right general instruction — four of the five tests around that helper migrate cleanly. But one asserts the exact double count this ticket removes, and it's the one an executor will fight hardest to preserve, because it's titled as a deliberate definition with a task reference justifying it:
+
+financial-pulse.test.ts:525
+it("invoiced WO is also included in Billed YTD alongside the invoice total", () => {
+  // Per task-#726 definition: "every WO and billing sheet … invoiced or not"
+
+Under the new rule that fixture returns 3000, not 5800. Told only to "migrate," the executor either writes a failing test or bends the new helper to keep the double count. Add:
+
+Delete the single it at financial-pulse.test.ts:525 — it asserts the double count this ticket removes. The other four tests around computeAllBillableYtd describe behaviour that survives (uninvoiced work counts, cancelled excluded, prior-year excluded, all-statuses-except-cancelled) and migrate to the new helpers.
+
+3. Minor: step 6 and Test placement still disagree on where tests go. Step 6 says put them in files the validation command already runs or extend the list; Test placement says a file of its own plus extend the list. The second is what #2011 and #2013 both did successfully. Drop the first clause from step 6.
+
+One small range nudge: financial-pulse-math.ts:291-400 ends at 400 but isUnbilledWorkRow — which step 1 tells the executor to reuse — starts at 398. Make it 291-410 so the whole predicate is in view.
+
+Everything else reads ready. The hiddenFromBilling decision is still the subtlest and most valuable part of this ticket, and it's stated well.
