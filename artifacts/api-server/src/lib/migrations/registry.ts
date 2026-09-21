@@ -6,7 +6,7 @@ import { repairTicketTotalDriftMigration } from './repair-ticket-total-drift';
 import { backfillMergedInvoiceStatusMigration } from './backfill-merged-invoice-status';
 import { repairQbVoidMispaidMigration } from './repair-qb-void-mispaid';
 import { repairWoodglennWoHoursMigration } from './repair-woodglenn-wo-hours';
-import { createWoodglennFollowupMigration } from './create-woodglenn-followup';
+import { retireFollowupWorkOrdersMigration } from './retire-followup-work-orders';
 import { invoiceSentStatusBackfillMigration } from './invoice-sent-status-backfill';
 import { normalizeUsernamesMigration } from './normalize-usernames';
 import { seedFieldWorkTypesMigration } from './seed-field-work-types';
@@ -20,7 +20,7 @@ const REGISTRY = new Map<string, MigrationDefinition>([
   [backfillMergedInvoiceStatusMigration.id, backfillMergedInvoiceStatusMigration],
   [repairQbVoidMispaidMigration.id, repairQbVoidMispaidMigration],
   [repairWoodglennWoHoursMigration.id, repairWoodglennWoHoursMigration],
-  [createWoodglennFollowupMigration.id, createWoodglennFollowupMigration],
+  [retireFollowupWorkOrdersMigration.id, retireFollowupWorkOrdersMigration],
   [invoiceSentStatusBackfillMigration.id, invoiceSentStatusBackfillMigration],
   [normalizeUsernamesMigration.id, normalizeUsernamesMigration],
   [seedFieldWorkTypesMigration.id, seedFieldWorkTypesMigration],

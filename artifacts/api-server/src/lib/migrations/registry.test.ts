@@ -67,11 +67,11 @@ describe("migration registry — static shape", () => {
     );
   });
 
-  it("contains woodglenn-followup-v1", () => {
+  it("contains retire-followup-work-orders-v1", () => {
     const ids = listMigrations().map((m) => m.id);
     assert.ok(
-      ids.includes("woodglenn-followup-v1"),
-      "missing woodglenn-followup-v1",
+      ids.includes("retire-followup-work-orders-v1"),
+      "missing retire-followup-work-orders-v1",
     );
   });
 

@@ -196,6 +196,10 @@ args = "budget-bookkeeper-exclusion"
 task = "workflow.run"
 args = "estimate-branch-gate"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "retire-followup-migration"
+
 [[workflows.workflow]]
 name = "auth-middleware-coverage"
 author = "agent"
@@ -687,6 +691,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/routes/estimate-branch-gate.test.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "retire-followup-migration"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/lib/migrations/retire-followup-work-orders.test.ts src/lib/migrations/registry.test.ts"
 
 [workflows.workflow.metadata]
 isValidation = true
