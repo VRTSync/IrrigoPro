@@ -24,6 +24,7 @@
 - [TS7022 from assert.ok in a loop](ts7022-assert-in-loop.md) — an inferred const narrowed by assert inside a for-loop goes implicitly any; annotate it explicitly.
 - [Validation thread/PID exhaustion](validation-run-resource-exhaustion.md) — EAGAIN/pthread failures are the 1024-PID cap; retry once, then skip validation. Never loop.
 - [Merge gate vs publish path](merge-and-publish-type-gates.md) — post-merge is the only typecheck; publish builds each artifact's own script and never runs the root build.
+- [What production is actually running](deployed-commit-vs-main.md) — publishing lags merges; find the deployed commit before verifying or running anything "on production".
 - [Dev DB lags merged schema](dev-db-schema-drift.md) — 42P01 for a just-merged feature's table is environment drift, not your bug; don't adopt it into your diff.
 - [Follow-up WO idempotency pattern](follow-up-wo-idempotency.md) — partial unique index on parent_work_order_id (WHERE NOT NULL) + 23505 catch at the route is the correct pattern; app-level pre-check alone is not sufficient under concurrency.
 - [Control gate = endpoint guard](control-gate-matches-endpoint-guard.md) — gate a control on the route's own capability set; split pill/button rather than widening.
