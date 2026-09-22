@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 
 import {
   buildPdfViewModel,
+  resolveTicketPartsSubtotal,
   type InvoiceDetailData,
   type PdfWorkOrderRow,
   type PdfBillingSheetRow,
@@ -20,6 +21,7 @@ import {
   ticketPageWO,
   ticketPageBS,
 } from "./pdf-helpers";
+import { validateRows } from "./invoice-pdf-service";
 
 // ── Fixture builders ────────────────────────────────────────────────────────
 
@@ -391,6 +393,176 @@ describe("ticketPageBS — Clock/Zone header line (Task #1333)", () => {
 });
 
 // ── wetCheckView fixture extension (Task #757) ───────────────────────────────
+
+// ── Ticket Parts Subtotal vs its own line-item table ─────────────────────────
+
+/** Runs `fn` with console.log captured, returning the emitted [AUDIT] lines. */
+function withAuditLog(fn: () => void): string[] {
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  };
+  try {
+    fn();
+  } finally {
+    console.log = original;
+  }
+  return lines.filter((l) => l.includes("pdf_parts_subtotal_healed"));
+}
+
+function woItem(partName: string, quantity: number, partPrice: string, totalPrice: string): any {
+  return { partName, quantity, partPrice, laborHours: "0", totalPrice, notes: "" };
+}
+
+function bsItem(partName: string, quantity: number, unitPrice: string, totalPrice: string): any {
+  return { partName, partDescription: "", quantity, unitPrice, laborHours: "0", totalPrice, notes: "" };
+}
+
+function woWithItems(header: Record<string, unknown>, items: any[]): { workOrder: any; items: any[] } {
+  const base = makeWO("WO-PARTS", null, 0);
+  return { workOrder: { ...base.workOrder, ...header }, items };
+}
+
+function bsWithItems(header: Record<string, unknown>, items: any[]): { billingSheet: any; items: any[] } {
+  const base = makeBS("BS-PARTS", null, 0);
+  return { billingSheet: { ...base.billingSheet, ...header }, items };
+}
+
+describe("buildPdfViewModel — ticket Parts Subtotal agrees with its line items (Task #2045)", () => {
+  it("stored totalPartsCost '0.00' with items summing $3,131.70 renders $3,131.70 and reports healed", () => {
+    // The Woodglenn Squares regression: header said $0.00 while the table
+    // printed directly beneath it summed to $3,131.70.
+    let viewModel!: PdfViewModel;
+    const audit = withAuditLog(() => {
+      viewModel = buildPdfViewModel(
+        makeData({
+          invoice: makeInvoice({ invoiceNumber: "30210", totalAmount: "8401.70" }),
+          workOrders: [
+            woWithItems(
+              { partsSubtotal: null, totalPartsCost: "0.00", laborSubtotal: "5270.00", totalAmount: "8401.70" },
+              [woItem("Valve", 1, "3131.70", "3131.70")],
+            ),
+          ],
+        }),
+      ).viewModel;
+    });
+
+    assert.equal(viewModel.workOrders[0].partsSubtotal, 3131.7);
+    assert.equal(audit.length, 1);
+    assert.match(audit[0], /invoiceNumber=30210 workOrders=1 billingSheets=0 ticketsTotal=1/);
+    assert.deepEqual(
+      resolveTicketPartsSubtotal([null, "0.00"], [{ rowTotal: 3131.7 }]),
+      { value: 3131.7, healed: true },
+    );
+  });
+
+  it("prefers partsSubtotal over the legacy totalPartsCost and does not report healed when it agrees", () => {
+    let viewModel!: PdfViewModel;
+    const audit = withAuditLog(() => {
+      viewModel = buildPdfViewModel(
+        makeData({
+          invoice: makeInvoice({ totalAmount: "600" }),
+          workOrders: [
+            woWithItems(
+              { partsSubtotal: "500.00", totalPartsCost: "0.00", laborSubtotal: "100.00", totalAmount: "600" },
+              [woItem("Rotor", 2, "250.00", "500.00")],
+            ),
+          ],
+        }),
+      ).viewModel;
+    });
+
+    assert.equal(viewModel.workOrders[0].partsSubtotal, 500);
+    assert.deepEqual(audit, []);
+    assert.deepEqual(
+      resolveTicketPartsSubtotal(["500.00", "0.00"], [{ rowTotal: 500 }]),
+      { value: 500, healed: false },
+    );
+  });
+
+  it("a ticket with zero items and partsSubtotal '0.00' renders $0.00 and is not healed", () => {
+    let viewModel!: PdfViewModel;
+    const audit = withAuditLog(() => {
+      viewModel = buildPdfViewModel(
+        makeData({
+          invoice: makeInvoice({ totalAmount: "100" }),
+          workOrders: [
+            woWithItems(
+              { partsSubtotal: "0.00", totalPartsCost: "0.00", laborSubtotal: "100.00", totalAmount: "100" },
+              [],
+            ),
+          ],
+        }),
+      ).viewModel;
+    });
+
+    assert.equal(viewModel.workOrders[0].partsSubtotal, 0);
+    assert.deepEqual(audit, []);
+    assert.deepEqual(
+      resolveTicketPartsSubtotal(["0.00", "0.00"], []),
+      { value: 0, healed: false },
+    );
+  });
+
+  it("a billing sheet whose header and items agree renders unchanged and is not healed", () => {
+    let viewModel!: PdfViewModel;
+    const audit = withAuditLog(() => {
+      viewModel = buildPdfViewModel(
+        makeData({
+          invoice: makeInvoice({ totalAmount: "355" }),
+          billingSheets: [
+            bsWithItems(
+              { partsSubtotal: "100.00", laborSubtotal: "255.00", totalAmount: "355" },
+              [bsItem("Rotor Head", 2, "50.00", "100.00")],
+            ),
+          ],
+        }),
+      ).viewModel;
+    });
+
+    assert.equal(viewModel.billingSheets[0].partsSubtotal, 100);
+    assert.deepEqual(audit, []);
+  });
+});
+
+describe("InvoicePdfService preflight — a stale parts header must not block generation (Task #2045)", () => {
+  // generatePdfBuffer runs validateRows before buildPdfViewModel. If the
+  // preflight reads the header column alone, a Woodglenn-shaped row is
+  // rejected as "Invoice totals validation failed" and the fixed ticket page
+  // is never reached.
+  function staleWorkOrder(itemTotals: number[]) {
+    return {
+      workOrder: {
+        id: 1,
+        partsSubtotal: null,
+        totalPartsCost: "0.00",
+        laborSubtotal: "5270.00",
+        totalAmount: "8401.70",
+      } as any,
+      items: itemTotals.map((t, i) => ({
+        id: i + 1,
+        partName: `Part ${i + 1}`,
+        quantity: 1,
+        partPrice: t.toFixed(2),
+        totalPrice: t.toFixed(2),
+      })) as any[],
+    };
+  }
+
+  it("passes a work order whose items reconcile to its stored total despite a stale header", () => {
+    const failure = validateRows(30210, [staleWorkOrder([2000, 1131.7])], [], [], 8401.7);
+    assert.equal(failure, null);
+  });
+
+  it("still fails a work order whose items do not reconcile to its stored total", () => {
+    const failure = validateRows(30210, [staleWorkOrder([100])], [], [], 8401.7);
+    assert.ok(failure);
+    assert.equal(failure.rowErrors.length, 1);
+    assert.equal(failure.rowErrors[0].recordType, "work_order");
+    assert.equal(failure.rowErrors[0].partsSubtotal, 100);
+  });
+});
 
 describe("buildPdfViewModel — wetCheckView field passthrough (Task #757)", () => {
   it("non-wet-check billing sheets (wetCheckView=undefined) are unaffected", () => {

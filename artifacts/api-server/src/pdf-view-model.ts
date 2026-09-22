@@ -238,6 +238,9 @@ export interface BuildPdfViewModelResult {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+/** Currency comparison tolerance, in dollars. Shared by every money check here. */
+const TOLERANCE = 0.01;
+
 function safeNum(value: string | number | null | undefined, fallback = 0): number {
   if (value === null || value === undefined || value === '') return fallback;
   const n = typeof value === 'number' ? value : parseFloat(value);
@@ -251,6 +254,47 @@ function safeStr(value: string | null | undefined, fallback = ''): string {
 function safePhotos(value: string[] | null | undefined): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter(p => typeof p === 'string' && p.length > 0);
+}
+
+/**
+ * Resolve a ticket's Parts Subtotal. The line-item table is rendered on the
+ * same page from `itemRows`, so the header figure must agree with it or the
+ * page contradicts itself. When the ticket has items, the items win.
+ *
+ * `total_parts_cost` is the legacy column; `parts_subtotal` is the billed
+ * price and is preferred. Both are read with `??`, not `||`, so a genuine
+ * stored 0.00 is distinguishable from an absent value.
+ */
+export function resolveTicketPartsSubtotal(
+  headerCandidates: Array<string | number | null | undefined>,
+  itemRows: Array<{ rowTotal: number }>,
+): { value: number; healed: boolean } {
+  const header = headerCandidates.find(c => c !== null && c !== undefined && c !== '');
+  const headerNum = safeNum(header, NaN);
+  if (itemRows.length === 0) {
+    return { value: isNaN(headerNum) ? 0 : headerNum, healed: false };
+  }
+  const itemsTotal = itemRows.reduce((s, r) => s + r.rowTotal, 0);
+  const healed = isNaN(headerNum) || Math.abs(headerNum - itemsTotal) > TOLERANCE;
+  return { value: itemsTotal, healed };
+}
+
+/**
+ * Row total for one ticket line item, derived the same way for every consumer
+ * that needs to sum a ticket's items (the rendered table and the PDF service's
+ * preflight validation). Work-order items carry `partPrice`, billing-sheet
+ * items carry `unitPrice`; both fall back to unit × qty when `totalPrice` is
+ * absent.
+ */
+export function ticketItemRowTotal(item: {
+  totalPrice?: string | number | null;
+  partPrice?: string | number | null;
+  unitPrice?: string | number | null;
+  quantity?: string | number | null;
+}): number {
+  const unitPrice = safeNum(item.partPrice ?? item.unitPrice);
+  const qty = safeNum(item.quantity);
+  return safeNum(item.totalPrice, unitPrice * qty);
 }
 
 // ── Builder ─────────────────────────────────────────────────────────────────
@@ -280,6 +324,12 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
     billingType: safeStr((invoice as any).billingType, 'monthly'),
   };
 
+  // Counts of tickets whose stored Parts Subtotal disagreed with their own
+  // line-item table and was resolved from the items instead. Sizes the
+  // stored-data repair that follows this read-path fix.
+  let healedWorkOrders = 0;
+  let healedBillingSheets = 0;
+
   const workOrderRows: PdfWorkOrderRow[] = (rawWorkOrders ?? []).map(({ workOrder, items }) => {
     const totalHours = safeNum(workOrder.totalHours);
     const storedLaborSubtotal = safeNum(workOrder.laborSubtotal);
@@ -295,9 +345,8 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
 
     const itemRows: PdfWorkOrderItemRow[] = (items ?? []).map(item => {
       const unitPrice = safeNum(item.partPrice);
-      const qty = safeNum(item.quantity);
       const laborHours = safeNum(item.laborHours);
-      const rowTotal = safeNum(item.totalPrice, unitPrice * qty);
+      const rowTotal = ticketItemRowTotal(item);
       return {
         partName: safeStr(item.partName, 'Unknown Part'),
         partDescription: '',
@@ -311,7 +360,12 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
       };
     });
 
-    const partsSubtotal = safeNum(workOrder.totalPartsCost, itemRows.reduce((s, r) => s + r.rowTotal, 0));
+    const parts = resolveTicketPartsSubtotal(
+      [workOrder.partsSubtotal, workOrder.totalPartsCost],
+      itemRows,
+    );
+    const partsSubtotal = parts.value;
+    if (parts.healed) healedWorkOrders++;
     const laborSubtotal = safeNum(workOrder.laborSubtotal, totalHours * woLaborRate);
     const rowTotal = safeNum(workOrder.totalAmount, partsSubtotal + laborSubtotal);
 
@@ -355,9 +409,8 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
 
     const itemRows: PdfBillingSheetItemRow[] = (items ?? []).map(item => {
       const unitPrice = safeNum(item.unitPrice);
-      const qty = safeNum(item.quantity);
       const laborHours = safeNum(item.laborHours);
-      const rowTotal = safeNum(item.totalPrice, unitPrice * qty);
+      const rowTotal = ticketItemRowTotal(item);
       return {
         partName: safeStr(item.partName, 'Unknown Part'),
         partDescription: safeStr(item.partDescription),
@@ -369,7 +422,9 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
       };
     });
 
-    const partsSubtotal = safeNum(billingSheet.partsSubtotal, itemRows.reduce((s, r) => s + r.rowTotal, 0));
+    const parts = resolveTicketPartsSubtotal([billingSheet.partsSubtotal], itemRows);
+    const partsSubtotal = parts.value;
+    if (parts.healed) healedBillingSheets++;
     const laborSubtotal = safeNum(billingSheet.laborSubtotal, totalHours * bsLaborRate);
     const rowTotal = safeNum(billingSheet.totalAmount, partsSubtotal + laborSubtotal);
 
@@ -426,8 +481,15 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
     storedTotalAmount,
   };
 
+  if (healedWorkOrders + healedBillingSheets > 0) {
+    console.log(
+      `[AUDIT] pdf_parts_subtotal_healed invoiceNumber=${safeStr(invoice.invoiceNumber)} ` +
+        `workOrders=${healedWorkOrders} billingSheets=${healedBillingSheets} ` +
+        `ticketsTotal=${healedWorkOrders + healedBillingSheets}`,
+    );
+  }
+
   let validationWarning: string | null = null;
-  const TOLERANCE = 0.01;
   const delta = Math.abs(computedGrandTotal - storedTotalAmount);
   if (delta > TOLERANCE) {
     validationWarning =

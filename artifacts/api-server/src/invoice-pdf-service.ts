@@ -1,6 +1,6 @@
 import { PDFGenerator, fetchLogoAsBase64 } from './pdf-generator';
 import { resolveCompanyLogoUrl, pdfLogoBaseUrl } from './logo-url';
-import { buildPdfViewModel } from './pdf-view-model';
+import { buildPdfViewModel, resolveTicketPartsSubtotal, ticketItemRowTotal } from './pdf-view-model';
 import type { PdfBrandColors, PdfWetCheckBillingRow, PdfWcbZonePhotoGroup } from './pdf-view-model';
 import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
 import type { IStorage } from './storage';
@@ -181,7 +181,7 @@ export function logInvoiceTicketMetadataSummary(
   return missingCount;
 }
 
-function validateRows(
+export function validateRows(
   invoiceId: number,
   workOrders: Array<{ workOrder: WorkOrder; items: WorkOrderItem[] }>,
   billingSheets: Array<{ billingSheet: BillingSheet; items: BillingSheetItem[] }>,
@@ -192,7 +192,13 @@ function validateRows(
   const rowTotals: Array<{ recordType: string; recordId: number; rowTotal: number }> = [];
 
   for (const { workOrder, items } of workOrders) {
-    const parts = toNum(workOrder.partsSubtotal);
+    // Resolve parts exactly as the rendered ticket page does — items first when
+    // the ticket has any — so a stale header column cannot fail a packet whose
+    // line items reconcile to its stored total.
+    const parts = resolveTicketPartsSubtotal(
+      [workOrder.partsSubtotal, workOrder.totalPartsCost],
+      items.map(item => ({ rowTotal: ticketItemRowTotal(item) })),
+    ).value;
     const labor = toNum(workOrder.laborSubtotal);
     const stored = toNum(workOrder.totalAmount);
     const computed = parts + labor;
@@ -220,7 +226,10 @@ function validateRows(
   }
 
   for (const { billingSheet, items } of billingSheets) {
-    const parts = toNum(billingSheet.partsSubtotal);
+    const parts = resolveTicketPartsSubtotal(
+      [billingSheet.partsSubtotal],
+      items.map(item => ({ rowTotal: ticketItemRowTotal(item) })),
+    ).value;
     const labor = toNum(billingSheet.laborSubtotal);
     const stored = toNum(billingSheet.totalAmount);
     const computed = parts + labor;
