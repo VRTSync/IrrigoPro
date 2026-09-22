@@ -148,3 +148,33 @@ Signed off by: ______  Date: ______
 
 Only with all three above filled in may the schema-drop task push
 `parent_work_order_id` removal to production.
+
+---
+
+## 8. Schema drop — code landed, production push still gated
+
+The schema-drop task has removed `parentWorkOrderId` and
+`work_orders_follow_up_unique_idx` from `lib/db/src/schema/schema.ts`, and the drop
+is applied and verified on the **dev** database (column absent, follow-up index
+absent, `origin_wet_check_id` and the estimate / status-scheduled indexes intact).
+The DDL record carries it as `lib/db/migrations/0022_drop_work_order_parent_follow_up.sql`,
+an idempotent reversal of `0019`; `0019` itself stays, matching how
+`0018_document_controller_fk_drop_legacy.sql` recorded an earlier drop.
+
+**The production schema push has NOT happened and must not happen yet.** Sections 4
+through 7 above are still unfilled, so the gate is closed. Concretely, before
+anyone confirms a destructive production schema change that drops
+`parent_work_order_id`:
+
+1. Publish `main` so the deployed build carries `retire-followup-work-orders-v1`
+   (section 1 is still failing).
+2. Run and verify the migration on the deployed Super Admin → DB Migrations page
+   (sections 4–6).
+3. Confirm the extras decision for `WO-1787249305968-950` is still the recorded one
+   (section 3) — its lineage is written down here, which is what keeps the drop from
+   destroying the only explanation of that row.
+
+Note that the migration code itself intentionally still references
+`parent_work_order_id`: it reads the column through raw SQL and has an explicit
+"column no longer exists" branch, so it keeps working before *and* after the drop.
+That is not leftover retirement code and should not be deleted to satisfy a grep.

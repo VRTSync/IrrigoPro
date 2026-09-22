@@ -60,3 +60,4 @@
 - [Printed subtotal vs its table](printed-subtotal-vs-its-table.md) — when a page prints both a stored header figure and the items it summarizes, the items win; audit-count the disagreements.
 - [A parts diff is not completion evidence](parts-diff-is-not-completion-evidence.md) — never re-derive "undone work" from estimate-vs-WO parts; substitution is normal and completion is the trust signal.
 - [Named-record cleanup migrations](named-record-cleanup-migrations.md) — hand-enumerated targets are a snapshot: widen the preview to the whole population, keep the write set to the named rows.
+- [Retirement migration outlives its column](retirement-migration-outlives-its-column.md) — exempt it from the "zero grep hits" bar; the gate is the production schema push, never the merge.
