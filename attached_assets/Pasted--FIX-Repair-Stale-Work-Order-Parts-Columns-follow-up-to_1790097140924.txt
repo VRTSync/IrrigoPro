@@ -1,0 +1,122 @@
+# FIX — Repair Stale Work-Order Parts Columns (follow-up to #2045)
+
+## What & Why
+
+Task #2045 stopped the invoice PDF printing a Parts Subtotal that contradicts the line-item table beneath it, by making the items authoritative at render time. That fixes the document. It does not fix the data: on an unknown number of work orders, `work_orders.total_parts_cost` and/or `parts_subtotal` is stored as `0.00` while the ticket's line items sum to a real figure. Invoice #30210's two July tickets are confirmed — $3,131.70 and $972.50 of parts recorded as zero.
+
+**Three readers, three different precedence rules.**
+
+| Location | Expression | On a stored `"0.00"` |
+|---|---|---|
+| `storage.ts:6536`, `storage.ts:7002` | `wo.partsSubtotal ?? wo.totalPartsCost ?? 0` | returns 0 — correct only if `parts_subtotal` is right |
+| `routes.ts:6934` (QuickBooks line description) | `wo.partsSubtotal \|\| wo.totalPartsCost \|\| '0'` | `"0.00"` is truthy, so it returns it and never falls through |
+| `routes.ts:7182` (Bill Separately) | `parseFloat(wo.totalPartsCost \|\| '0')` | reads the legacy column alone — the defect #2045 removed from the PDF |
+
+`routes.ts:7182` is the serious one: it sets the `partsSubtotal` **persisted** onto a standalone invoice for a single ticket. That is not a display bug.
+
+**Three writers, and they disagree.** `routes.ts:13825` (single item add) writes both columns correctly and is the path to match. `routes.ts:13590` (bulk item replace) writes `total_parts_cost` only; the recompute at `13597-13612` writes `parts_subtotal` but is gated behind `freshWo.appliedLaborRate`, so a legacy record without it leaves the two columns drifted. `routes.ts:9827` (field completion) writes both from `money(totalPartsCost)` — the technician's form total — and the guard above it at `9780-9792` derives from items only when `usedParts` is empty and prior items exist. When parts arrive as line items **and** the form total is 0, both columns persist as zero. That is the shape of the Woodglenn records.
+
+**The interaction that constrains this ticket.** `repair-ticket-total-drift-v1` (`lib/migrations/repair-ticket-total-drift.ts`) treats `parts_subtotal + labor_subtotal` as canonical and uses add-parts-only semantics (`:223-224`): it repairs only where canonical **exceeds** stored `total_amount`. Today the Woodglenn rows are skipped, because with parts at 0 the canonical total ($5,270.00) is below stored ($8,401.70).
+
+Correcting parts upward changes that calculus, and the blast radius is larger than one ticket: when a repaired ticket is attached to an invoice, `recomputeInvoice` (`:146-157`) rewrites that **invoice's** `parts_subtotal`, `labor_subtotal` and `total_amount`. On an invoice already sent to an HOA — and in some cases already pushed to QuickBooks — that is an unrequested change to a billed figure.
+
+The confirmed Woodglenn rows are safe by arithmetic: `parts 0 → 3,131.70` makes canonical `$8,401.70`, exactly equal to stored, so the row becomes permanently zero-drift. The danger is confined to rows where `total_amount ≠ labor_subtotal + itemsTotal`.
+
+**Decisions (already made, do not relitigate):**
+
+1. **This ships as a registry `MigrationDefinition`,** not a script. `scripts/reconcile-billing-sheet-invoice-totals*` was superseded — `registry.test.ts:262` asserts its id is gone. A standalone script would have no caller.
+2. **Only rows where `total_amount` already equals `labor_subtotal + itemsTotal` (±$0.01) are written.** Every row this migration touches is, after the write, provably zero-drift and therefore invisible to `repair-ticket-total-drift-v1` forever. This is an invariant enforced in code, not a policy someone has to remember.
+3. **Rows that fail that equality are listed in the preview and skipped entirely.** Leaving their parts stale is cheap — #2045 already prints them correctly from items — and cheaper than a silent upward rewrite of an invoiced total.
+4. **The readers become items-aware,** so a stale header is harmless everywhere rather than only in the PDF. This decouples correctness from the data repair and is what makes decision 3 safe.
+5. `work_orders.parts_subtotal` is the authoritative billed-price column; `total_parts_cost` is legacy and must never again be written without `parts_subtotal` in the same statement. No column is dropped here — that is a schema change with its own ticket.
+
+## Done looks like
+
+- A preview at `/admin/migrations` lists every work order whose stored parts columns disagree with its item sum by more than $0.01, split into **repairable** and **skipped (total_amount mismatch)**, with company, WO number, both stored values, the item sum and the delta.
+- Running it repairs the repairable set; re-running reports zero. Regenerating invoice #30210 logs `pdf_parts_subtotal_healed` with a count of zero.
+- No `total_amount` on any ticket, and no invoice total, changes as a result of this migration. Only `parts_subtotal` and `total_parts_cost` move.
+- `repair-ticket-total-drift-v1`'s candidate set is unchanged in size after this runs — proven by capturing its preview before and after.
+- Bill Separately bills a work order with stale headers at its item-derived figure, not $0.00.
+- `routes.ts:13590` writes `parts_subtotal` on every path, including records with no `appliedLaborRate`.
+- A completion posting `totalPartsCost: 0` alongside non-empty `usedParts` persists the item-derived figure and logs that it did.
+
+## Out of scope
+
+- Any change to `repair-ticket-total-drift-v1`. It is correct for what it does; this ticket stays out of its way rather than editing it.
+- Dropping or renaming `total_parts_cost`, and any change to `lib/db/src/pricing-fields.ts:41-49` (both columns stay in the field_tech strip set).
+- Billing sheets and wet-check billings. `billing_sheets.parts_subtotal` is `.notNull()` and #2045's counter will confirm no drift.
+- The PDF read path — #2045 owns it and must ship first.
+- The work-order completion form UI and `work-order-completion.tsx:574`. The client may keep submitting `totalPartsCost`; the server stops trusting it as the sole source.
+- Re-pushing already-synced invoices to QuickBooks, and regenerating or re-sending any invoice. Regeneration is Randy's call, per customer, after the repair is verified.
+- A CLI entry point. The deps-injectable pattern already gives pure testability; an entry nothing calls is dead code.
+
+## Steps
+
+1. **Ship #2045 first and read its counter.** `pdf_parts_subtotal_healed` sizes the problem before a row is written. If a regeneration of recent invoices logs zero heals, stop and report — steps 2-3 become the whole ticket.
+
+2. **Make the two stale readers items-aware.**
+   - `routes.ts:7182` — replace `parseFloat(wo.totalPartsCost || '0')` with a resolution that prefers `wo.partsSubtotal ?? wo.totalPartsCost`, then overrides with the item sum when the work order has items and the header disagrees by more than $0.01. Same rule as `resolveTicketPartsSubtotal` in `pdf-view-model.ts`; import it if it can be imported without dragging the PDF module into the route, otherwise mirror it with a comment naming that file as the source of the rule. Do not invent a third precedence.
+   - `routes.ts:6934` — change `||` to `??` so a stored `"0.00"` is treated as a real value rather than falling through to the legacy column, and apply the same item override. This is a line description on a QB push; correctness here is cosmetic but the three readers must stop disagreeing.
+
+3. **Close the two writer gaps.**
+   - `routes.ts:13590` — after `replaceWorkOrderItemsInTransaction`, write `parts_subtotal` alongside `total_parts_cost` from `computedPartsCost`. Leave the labour recompute gated on `appliedLaborRate`; that gate is right for labour and only wrong for parts.
+   - `routes.ts:9780-9792` — extend the `skipReplace` guard: when the client submits `totalPartsCost` of 0 **and** the resolved items sum above 0, derive `partsCost` from the items and log `[AUDIT] work_order_completion_parts_derived workOrderId=<id> formValue=0 itemsTotal=<n>`. This is the defect that created these records; repairing data without closing it means repairing again next season.
+
+4. **Add `repair-work-order-parts-subtotal-v1` to the migration registry.** Copy the shape of `repair-woodglenn-wo-hours.ts` — same HOA, same financial-data risk profile. Specifically carry over:
+   - a `DONE_KEY` app-settings completion marker and `check()` reading it (`repair-woodglenn-wo-hours.ts:34, 362`);
+   - the `acknowledged=true` financial-data gate that fails closed before any write (`:222-228`);
+   - the cross-check-then-write-nothing property (`:9`) — if any per-row check fails, that row is not written;
+   - an exported deps-injectable pure runner alongside the DB-backed `run()` (`RepairWoodglennDeps:195`, `runRepairWoodglennWoHours:217`; the same pattern is `RepairDeps` at `repair-ticket-total-drift.ts:46`). This is how these migrations get unit-tested without a database — it is the "pure core" seam, and it means no separate `-core.ts` file is needed.
+
+5. **Enforce the invariant in `run()`, per row.** Compute `itemsTotal` from `work_order_items`. Write only when `Math.abs(money(totalAmount) - (money(laborSubtotal) + itemsTotal)) <= 0.01`. Then:
+
+```ts
+await tx.update(workOrders).set({
+  partsSubtotal: itemsTotal.toFixed(2),
+  totalPartsCost: itemsTotal.toFixed(2),
+}).where(and(eq(workOrders.id, id), eq(workOrders.companyId, companyId)));
+```
+
+   Never write `labor_subtotal` or `total_amount`. A row failing the equality is recorded `status: 'skipped'` with a reason, not repaired and not failed.
+
+6. **Make the preview state the risk in words.** Two sections — repairable, and skipped with `⚠ total_amount mismatch — would become a repair-ticket-total-drift candidate`, following the warning style already in `repair-woodglenn-wo-hours.ts:442-444`. The description field must say that this migration never changes a ticket or invoice total.
+
+7. **Emit a structured audit event per repaired row**, matching the `pricingAuditEvents` insert at `storage.ts:6592-6600`: `source: 'work_order'`, `kind: 'parts_subtotal_repair'`, `delta`, `itemCount`, `parentNumber`. Per Task #210, do not write an audit note into `work_orders.notes`.
+
+8. **Tests.**
+   - Pure-runner tests through the deps interface: header agrees (no-op); stale `"0.00"` with items (repaired); parts-free ticket with no items (untouched); `total_amount` mismatch (skipped, not repaired, not failed).
+   - **The invariant test:** a repaired row, fed into `repair-ticket-total-drift`'s candidate predicate, is not a candidate. This is the test that keeps decision 2 true if someone later relaxes the equality check.
+   - A tenancy test asserting every `select` and `update` carries `company_id`, and that another company's row is neither returned nor written. Note `repair-ticket-total-drift.ts:114-118` scopes at query time but omits `companyId` from its update `where` — do not copy that; include it.
+   - The acknowledge gate refuses to write when `acknowledged` is absent or false.
+   - Route tests for step 2 (a WO with `partsSubtotal: "500.00"`, `totalPartsCost: "0.00"` bills at $500.00) and step 3 (completion posting 0 with non-empty `usedParts` persists the item figure).
+   - Add the registry shape assertions in `registry.test.ts` alongside the existing ones at `:255-261`.
+
+## Notes for the executor
+
+- **Tenancy:** this is the ticket where it matters most — a second company is being onboarded and this writes money columns. `--all-companies` must be explicit, refused without `--confirm`, and must log a per-company breakdown.
+- **Additive, not duplicative:** no parallel resolver, no `-core.ts` beside the deps interface, no second migration id. One definition, registered once.
+- Run preview, attach it, get it reviewed, then run. The confirmed blast radius is two tickets on one HOA. If the preview returns hundreds of rows across many customers, stop and report before writing anything.
+- Capture `repair-ticket-total-drift-v1`'s preview before and after this runs and diff the candidate counts. That is the direct evidence decision 2 held.
+
+## Proof to attach when done
+
+- The preview output, before and after, both sections.
+- `repair-ticket-total-drift-v1` candidate counts before and after, unchanged.
+- `file:line` for the migration, its registry entry, the two reader fixes, the two writer fixes and the audit event.
+- Test output including the invariant test and the tenancy test.
+- The `pdf_parts_subtotal_healed` counter from a regeneration of invoice #30210, reading zero.
+- Confirmation that no `total_amount` and no invoice total changed, with the skipped list.
+
+## Relevant files
+
+- `artifacts/api-server/src/lib/migrations/repair-woodglenn-wo-hours.ts:9,34,195,217,222-228,362,442-444` — the template
+- `artifacts/api-server/src/lib/migrations/repair-ticket-total-drift.ts:46,114-118,146-157,223-224` — the interaction to stay clear of
+- `artifacts/api-server/src/lib/migrations/registry.ts` — register the new definition
+- `artifacts/api-server/src/lib/migrations/registry.test.ts:255-262` — shape assertions and the superseded-id assertion
+- `artifacts/api-server/src/routes/routes.ts:6934,7182,9780-9792,9827,13590,13597-13612,13825`
+- `artifacts/api-server/src/storage.ts:6536,7002,6592-6600`
+- `artifacts/api-server/src/pdf-view-model.ts` — `resolveTicketPartsSubtotal` from #2045; the precedence to reuse
+- `lib/db/src/schema/schema.ts:777-781`
+- `lib/db/src/pricing-fields.ts:41-49` — unchanged
+
+**Build order:** depends on #2045 for the resolver and for the counter that sizes the repair. Do not merge them into one task.

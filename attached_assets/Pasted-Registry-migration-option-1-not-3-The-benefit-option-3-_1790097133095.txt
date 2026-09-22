@@ -1,0 +1,11 @@
+Registry migration — option 1, not 3. The benefit option 3 is reaching for already exists here. repair-ticket-total-drift.ts:46 (RepairDeps) and repair-woodglenn-wo-hours.ts:195,217 both export a deps-injectable pure runner beside the DB-backed run(). That is the extracted core — it gets you unit tests with no database and no second file. A CLI entry on top would be an entry point nothing calls, and you'd be carrying it forever.
+
+repair-woodglenn-wo-hours.ts is the right template for a second reason beyond same-HOA: it has the acknowledged=true financial gate that fails closed before any write (:222-228) and the check-then-write-nothing property (:9). Both are what a money repair on already-invoiced rows needs.
+
+Skip the mismatched rows — option 1, and it's cheaper than it looks. #2045 already prints those rows correctly from items, so the customer-facing document is right whether or not the headers ever get fixed. You'd be leaving stale data that nothing customer-visible reads.
+
+But I'd restate the guard as an invariant rather than a skip list: write only rows where total_amount already equals labor_subtotal + itemsTotal. Every such row is zero-drift the instant the write lands, so repair-ticket-total-drift-v1 can never pick it up — not because someone remembered to exclude it, but by arithmetic. The spec includes a test that feeds a repaired row into the drift predicate and asserts it isn't a candidate, so the property survives someone later relaxing the equality check.
+
+One correction to your framing of the interaction — it's worse. recomputeInvoice at :146-157 doesn't just rewrite the ticket's total_amount; it rewrites the parent invoice's parts_subtotal, labor_subtotal and total_amount. So an unguarded repair wouldn't quietly raise a ticket — it would quietly raise a figure already sent to an HOA and in some cases already in QuickBooks.
+
+And the thing that makes skipping genuinely free: I added items-aware resolution to routes.ts:7182 and :6934. Without it, a skipped row still bills at $0.00 through Bill Separately — so "skip" would have meant "leave a live billing defect on exactly the rows we decided were too risky to touch." With it, stale headers are harmless everywhere and the data repair is pure hygiene.
