@@ -11,6 +11,7 @@ import { invoiceSentStatusBackfillMigration } from './invoice-sent-status-backfi
 import { normalizeUsernamesMigration } from './normalize-usernames';
 import { seedFieldWorkTypesMigration } from './seed-field-work-types';
 import { backfillSeasonalBudgetsMigration } from './backfill-seasonal-budgets';
+import { repairWorkOrderPartsMigration } from './repair-work-order-parts';
 
 const REGISTRY = new Map<string, MigrationDefinition>([
   [repairTicketTotalDriftMigration.id, repairTicketTotalDriftMigration],
@@ -25,6 +26,7 @@ const REGISTRY = new Map<string, MigrationDefinition>([
   [normalizeUsernamesMigration.id, normalizeUsernamesMigration],
   [seedFieldWorkTypesMigration.id, seedFieldWorkTypesMigration],
   [backfillSeasonalBudgetsMigration.id, backfillSeasonalBudgetsMigration],
+  [repairWorkOrderPartsMigration.id, repairWorkOrderPartsMigration],
 ]);
 
 export function listMigrations(): MigrationDefinition[] {

@@ -34,6 +34,7 @@ import { SmsService } from "../sms-service";
 import twilio from "twilio";
 import { ObjectStorageService } from "../objectStorage";
 import { InvoicePdfService } from "../invoice-pdf-service";
+import { resolveTicketPartsSubtotal, ticketItemRowTotal } from "../pdf-view-model";
 import { buildWorkDescriptionPrompt, buildExpandDescriptionPrompt, TEMPLATE_VERSION, CRITICAL_FIELDS, type WorkDescriptionInputs } from "../ai-prompt-templates";
 import { makeRequireSameCompanyAsWorkOrder } from "./work-order-tenant-guard";
 import { makeRequireSameCompanyAsBillingSheet } from "./billing-sheet-tenant-guard";
@@ -54,7 +55,6 @@ class QbCredentialMismatchError extends Error {
     this.name = "QbCredentialMismatchError";
   }
 }
-
 import {
   classifyQbRefreshError,
   withQbRefreshLock,
@@ -69,6 +69,7 @@ import {
 } from "../qb-token-utils";
 import { isUnroutedFinding, wcbIsEligible } from "../lib/finding-predicates";
 import { computeBillingSheetTotal } from "../billing-sheet-total";
+import { deriveCompletionPartsCost } from "../lib/work-order-parts";
 import {
   getWorkOrderLocationViolations,
   resolveWorkOrderLocationGate,
@@ -6930,7 +6931,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Use the stored totalAmount as the authoritative QB line amount
           const totalLineAmount = parseFloat(workOrder.totalAmount || '0');
           const appliedLaborRate = parseFloat(workOrder.appliedLaborRate || workOrder.laborRate || '0');
-          const partsAmount = parseFloat(workOrder.partsSubtotal || workOrder.totalPartsCost || '0');
+          const workOrderItemsForQb = await storage.getWorkOrderItems(workOrder.id);
+          // Keep this aligned with pdf-view-model.ts: parts_subtotal wins over the
+          // legacy column, but non-empty line items override a stale header.
+          const partsAmount = resolveTicketPartsSubtotal(
+            [workOrder.partsSubtotal, workOrder.totalPartsCost],
+            workOrderItemsForQb.map((item) => ({ rowTotal: ticketItemRowTotal(item) })),
+          ).value;
 
           if (totalLineAmount > 0) {
             qbLines.push({
@@ -7178,7 +7185,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ticketInvoiceId = wo.invoiceId;
         workDate = wo.completedAt ? new Date(wo.completedAt) : currentDate;
         laborSubtotal = parseFloat(wo.laborSubtotal || '0');
-        partsSubtotal = parseFloat(wo.totalPartsCost || '0');
+        const workOrderItemsForStandalone = await storage.getWorkOrderItems(wo.id);
+        partsSubtotal = resolveTicketPartsSubtotal(
+          [wo.partsSubtotal, wo.totalPartsCost],
+          workOrderItemsForStandalone.map((item) => ({ rowTotal: ticketItemRowTotal(item) })),
+        ).value;
         totalAmount = parseFloat(wo.totalAmount || '0');
         description = `Work Order ${wo.workOrderNumber}`;
         customerId = wo.customerId!;
@@ -9786,9 +9797,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       //     client-supplied totalPartsCost (tech-confirmed on the completion form).
       //   • Skip path (usedParts empty but WO has items): derive from persisted
       //     item totalPrices so the header stays consistent with the item rows.
-      const partsCost = skipReplace
-        ? priorItemsForGuard.reduce((s, it) => s + money(it.totalPrice), 0)
-        : money(totalPartsCost);
+      const completionParts = deriveCompletionPartsCost({
+        submittedTotalPartsCost: totalPartsCost,
+        incomingItems: incomingParts,
+        persistedItems: priorItemsForGuard,
+        skipReplace,
+      });
+      const partsCost = completionParts.partsCost;
+      if (completionParts.derivedFromSubmittedItems) {
+        console.log(
+          `[AUDIT] work_order_completion_parts_derived workOrderId=${workOrderId} ` +
+          `formValue=0 itemsTotal=${completionParts.itemsTotal.toFixed(2)}`,
+        );
+      }
       const rate = money(appliedLaborRate);
 
       const laborSubtotal = laborHours * rate;
@@ -13487,7 +13508,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         await storage.replaceWorkOrderItemsInTransaction(id, itemsToInsert);
         const computedPartsCost = itemsToInsert.reduce((sum: number, i: any) => sum + Number(i.totalPrice), 0);
-        await storage.updateWorkOrder(id, { totalPartsCost: computedPartsCost.toFixed(2) });
+        await storage.updateWorkOrder(id, {
+          totalPartsCost: computedPartsCost.toFixed(2),
+          partsSubtotal: computedPartsCost.toFixed(2),
+        });
         console.log(`[AUDIT] work_order_items_replaced workOrderId=${id} countBefore=${countBefore} countAfter=${resolvedWoUpdateItems.length}`);
 
         await regressionGuardZeroCatalogPrices('work_order_conversion', id, resolvedWoUpdateItems);

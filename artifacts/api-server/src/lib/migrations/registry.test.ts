@@ -259,6 +259,18 @@ describe("migration registry — static shape", () => {
     assert.ok(!m.deprecated, "new migration must NOT be deprecated");
   });
 
+  it("repair-work-order-parts-v1 has the required MigrationDefinition shape", () => {
+    const m = getMigration("repair-work-order-parts-v1");
+    assert.ok(m, "getMigration should return a definition");
+    assert.equal(m.id, "repair-work-order-parts-v1");
+    assert.ok(m.title.length > 0);
+    assert.ok(m.description.length > 0);
+    assert.equal(typeof m.check, "function");
+    assert.equal(typeof m.preview, "function");
+    assert.equal(typeof m.run, "function");
+    assert.ok(!m.deprecated);
+  });
+
   it("does NOT contain reconcile-billing-sheet-invoice-totals-v1 (superseded)", () => {
     const ids = new Set(listMigrations().map((m) => m.id));
     assert.ok(
