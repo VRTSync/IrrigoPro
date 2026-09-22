@@ -1,0 +1,145 @@
+# FIX — Invoice PDF Parts Subtotal Reads the Wrong Column (1 of 2)
+
+## What & Why
+
+A board treasurer at Woodglenn Squares HOA rejected invoice #30210 (July 2026) because two work-order ticket pages print a financial breakdown that does not add up:
+
+| Ticket | Labor | Parts Subtotal (printed) | TOTAL (printed) |
+|---|---|---|---|
+| WO-1783955816671-314 | $5,270.00 | **$0.00** | $8,401.70 |
+| WO-1783955809401-62 | $913.75 | **$0.00** | $1,886.25 |
+
+Labor plus zero parts cannot exceed labor. Both totals are in fact correct — summing the PARTS & LABOR DETAILS table printed directly beneath each ticket gives $3,131.70 and $972.50, which reconcile to the printed totals to the cent, and the invoice cover ($6,438.75 labor + $4,751.08 parts = $11,189.83) is right. Only the per-ticket Parts Subtotal line is wrong, and it is wrong in the most damaging possible way: it is the one number on the page a customer checks by hand.
+
+**Root cause.** `pdf-view-model.ts:314` resolves the work-order parts figure from one column only:
+
+```ts
+const partsSubtotal = safeNum(workOrder.totalPartsCost, itemRows.reduce((s, r) => s + r.rowTotal, 0));
+```
+
+Two defects compound here.
+
+1. **Wrong column.** `work_orders` carries both `parts_subtotal` (`schema.ts:781`) and the older `total_parts_cost` (`schema.ts:777`, commented "Cost of parts used"). Every other consumer in the repo prefers the former: `storage.ts:6536` and `storage.ts:7002` both read `wo.partsSubtotal ?? wo.totalPartsCost ?? 0`, and the QuickBooks line builder at `routes.ts:6934` reads `workOrder.partsSubtotal || workOrder.totalPartsCost || '0'`. The PDF is the odd one out — it reads the legacy column alone and never looks at `partsSubtotal`.
+
+2. **The fallback is dead code.** `safeNum` (`pdf-view-model.ts:241-245`) returns its fallback only for `null`, `undefined`, `''` or `NaN`. A stored `"0.00"` parses to `0` and is returned as-is, so the `itemRows.reduce(...)` fallback — which would have produced the correct figure — never runs. The intent of that line was clearly "fall back to the items"; as written it does so only when the column is absent, never when it is present and wrong.
+
+The result is a ticket page whose header contradicts the table beneath it. `ticketPageWO` prints `formatCurrency(wo.partsSubtotal)` at `pdf-helpers.ts:442` and then calls `partsTableFromWO(wo.items, site.zone)` at `pdf-helpers.ts:451` — two renderers, two independent sources, no invariant tying them together.
+
+Billing sheets and wet-check billings do not have this defect: `pdf-view-model.ts:372` reads `billingSheet.partsSubtotal` (a `.notNull()` column, `schema.ts:541`) and `pdf-helpers.ts:571` reads `wcb.partsSubtotal`. That matches the observed data — the August packet's billing sheets all printed correct parts subtotals. This is a work-order-path defect.
+
+**Decision (already made, do not relitigate):** when a ticket has line items, the items are authoritative for that ticket's Parts Subtotal. A ticket page must never print a subtotal that contradicts the table printed directly beneath it. The header columns are a cache; the items are the record. This slice changes the read path only — no schema change, no data write, no migration. Slice 2 of 2 repairs the stored columns and closes the remaining legacy readers.
+
+## Done looks like
+
+- Regenerating invoice #30210 prints Parts Subtotal $3,131.70 on WO-1783955816671-314 and $972.50 on WO-1783955809401-62, with labor, parts and TOTAL adding up on the page.
+- No work-order, billing-sheet or wet-check ticket page anywhere in the packet prints a Parts Subtotal that differs from the sum of its own line-item table by more than $0.01.
+- Tickets with no line items still print their stored header figure rather than $0.00.
+- The invoice cover totals are unchanged on every previously correct packet — byte-identical output for any invoice whose headers already agreed with its items.
+- A per-packet log line reports how many tickets were healed, so the size of the stored-data problem is measurable before Slice 2 runs.
+- `pdf-ticket-parity.test.ts`, `pdf-view-model.test.ts`, `pdf-helpers-wcb.test.ts` and `pdf-site-metadata.test.ts` all pass, with the committed snapshot updated as a reviewed diff.
+
+## Out of scope
+
+- Any write to `work_orders`, any migration, any repair of stored `total_parts_cost` / `parts_subtotal` values. That is Slice 2. This slice must leave the database untouched.
+- `routes.ts:7182` (the Bill Separately path, which also reads `totalPartsCost` alone) and `routes.ts:6934` (QuickBooks). Both are Slice 2.
+- The work-order completion form and the writer paths at `routes.ts:9827`, `routes.ts:13590` and `routes.ts:13825`. Slice 2.
+- The estimate PDF (`estimate-pdf-html.ts`) and the Wet Check Results Report (`wet-check-report-pdf.ts`). Neither shares this code path.
+- The invoice cover card and `totals.partsSubtotal` resolution at `pdf-view-model.ts:423`, which correctly prefers `invoice.partsSubtotal`. Leave it alone.
+- Emoji entities, site panel layout, QR rendering — untouched by this ticket. The standing constraint against emoji entities in this renderer still applies to anything you add.
+
+## Steps
+
+1. **Add one shared resolver to `pdf-view-model.ts`, above `buildPdfViewModel`.** One helper, used by both ticket types — do not write the logic twice.
+
+```ts
+/**
+ * Resolve a ticket's Parts Subtotal. The line-item table is rendered on the
+ * same page from `itemRows`, so the header figure must agree with it or the
+ * page contradicts itself. When the ticket has items, the items win.
+ *
+ * `total_parts_cost` is the legacy column; `parts_subtotal` is the billed
+ * price and is preferred. Both are read with `??`, not `||`, so a genuine
+ * stored 0.00 is distinguishable from an absent value.
+ */
+function resolveTicketPartsSubtotal(
+  headerCandidates: Array<string | number | null | undefined>,
+  itemRows: Array<{ rowTotal: number }>,
+): { value: number; healed: boolean } {
+  const header = headerCandidates.find(c => c !== null && c !== undefined && c !== '');
+  const headerNum = safeNum(header, NaN);
+  if (itemRows.length === 0) {
+    return { value: isNaN(headerNum) ? 0 : headerNum, healed: false };
+  }
+  const itemsTotal = itemRows.reduce((s, r) => s + r.rowTotal, 0);
+  const healed = isNaN(headerNum) || Math.abs(headerNum - itemsTotal) > 0.01;
+  return { value: itemsTotal, healed };
+}
+```
+
+Use `> 0.01` to match the existing `TOLERANCE` constant already in this module — do not introduce a second tolerance value.
+
+2. **Replace the work-order read at `pdf-view-model.ts:314`.** Straight substitution, not a second code path alongside the old one:
+
+```ts
+const parts = resolveTicketPartsSubtotal(
+  [workOrder.partsSubtotal, workOrder.totalPartsCost],
+  itemRows,
+);
+const partsSubtotal = parts.value;
+```
+
+`rowTotal` on the next line (`safeNum(workOrder.totalAmount, partsSubtotal + laborSubtotal)`) stays as it is — the stored `totalAmount` is correct on these records and remains authoritative for the TOTAL line.
+
+3. **Apply the same resolver to the billing-sheet branch at `pdf-view-model.ts:372`**, passing `[billingSheet.partsSubtotal]`. No defect is known on this path, and the expectation is zero healed billing sheets — which is exactly why it should run: it turns "we believe BS is fine" into a measured fact, and it stops the two branches drifting apart again. Leave the wet-check branch alone; `PdfWetCheckBillingRow` carries no comparable `itemRows` and a repair there would be guesswork.
+
+4. **Count and log the heals once per packet.** Accumulate `healed` across both branches while building the rows, then emit a single line before returning, alongside the existing validation-warning logic near `pdf-view-model.ts:429`:
+
+```
+[AUDIT] pdf_parts_subtotal_healed invoiceNumber=<n> workOrders=<count> billingSheets=<count> ticketsTotal=<count>
+```
+
+Emit it only when the count is non-zero, so clean packets stay quiet. This is the number Slice 2 needs to size the stored-data repair, and it is how we will know the repair worked.
+
+5. **Add test cases to `pdf-view-model.test.ts`.** Four, named for the condition they pin:
+   - stored `totalPartsCost: "0.00"` with items summing to $3,131.70 renders $3,131.70 and reports `healed` — this is the Woodglenn case and the regression that must never come back;
+   - stored `partsSubtotal: "500.00"`, `totalPartsCost: "0.00"`, items summing to $500.00 renders $500.00 and does not report healed — proves the preferred column is read first;
+   - a ticket with zero items and `partsSubtotal: "0.00"` renders $0.00 and does not report healed — a genuinely parts-free ticket must not be "repaired" into anything else;
+   - a billing sheet whose header and items agree renders unchanged and does not report healed.
+
+   Note that several existing fixtures in this file carry `partsSubtotal: "0"` (lines 35, 90, 277, 301) with no items; step 1's `itemRows.length === 0` branch is what keeps them passing. Confirm that rather than editing the fixtures.
+
+6. **Update the committed snapshot as a reviewed diff.** `artifacts/api-server/src/__snapshots__/pdf-ticket-parity.test.ts.snap` holds ~45KB of ticket HTML and will move if any rendered value changes. Its fixtures use $100 parts against items that agree, so the expectation is **no change at all**. Run the suite and report the diff:
+   - an empty diff is the pass condition and should be stated as such;
+   - a non-empty diff means the parity fixtures were inconsistent and must be read line by line before it is accepted. Never run with `-u` blind.
+
+   `pdf-ticket-parity.test.ts:105` asserts the "Parts Subtotal" label is shared across ticket types — that assertion must continue to pass untouched.
+
+7. **Validate.** `.replit:513` (`pdf-site-metadata`) already runs `pdf-site-metadata.test.ts`, `pdf-ticket-parity.test.ts`, `pdf-view-model.test.ts` and `pdf-helpers-wcb.test.ts` in one command. Run it. No `.replit` change is needed for this ticket.
+
+## Notes for the executor
+
+- **Tenancy:** `buildPdfViewModel` is a pure function over rows its caller has already fetched and scoped; `invoice-pdf-service.ts:417` is the only caller. This slice adds no query and therefore no new tenancy surface. Do not add one — if you find yourself wanting to look a work order up inside the view model, stop, because that would introduce an unscoped read into a function that has never had one.
+- **Additive, not duplicative:** replace the expression at line 314, do not leave the old one behind under a flag or a second resolved variable. One resolver, two call sites, nothing shadowed.
+- `safeNum` is used throughout this module and its behaviour is relied on elsewhere. Do not change `safeNum` itself to "fix" the fallback — that would silently alter every other call site, including the invoice cover totals. The fix belongs in the new resolver.
+- Currency is `decimal(10,2)` and arrives as a string. Keep the comparison in `Number` space with the `0.01` tolerance; do not compare formatted strings.
+
+## Proof to attach when done
+
+- `file:line` for the resolver, both call sites and the audit log line.
+- Test output for all four suites in the `pdf-site-metadata` validation command, green.
+- The snapshot diff, stated explicitly as empty or walked through line by line.
+- A regenerated invoice #30210 PDF, with the two ticket pages visible, showing Parts Subtotal $3,131.70 and $972.50 and totals that add up.
+- The `pdf_parts_subtotal_healed` log line from that regeneration, with its counts.
+
+## Relevant files
+
+- `artifacts/api-server/src/pdf-view-model.ts` — `safeNum` (241-245), work-order parts resolution (314), billing-sheet parts resolution (372), packet totals (406-427)
+- `artifacts/api-server/src/pdf-helpers.ts` — `ticketPageWO` Parts Subtotal render (442), `partsTableFromWO` call (451) and definition (849), `ticketPageBS` (523), `ticketPageWCB` (571, 620)
+- `lib/db/src/schema/schema.ts` — `work_orders.total_parts_cost` (777), `work_orders.parts_subtotal` (781), `billing_sheets.parts_subtotal` (541)
+- `artifacts/api-server/src/invoice-pdf-service.ts:417` — the only caller of `buildPdfViewModel`
+- `artifacts/api-server/src/pdf-view-model.test.ts` — new cases; existing zero-parts fixtures at 35, 90, 277, 301
+- `artifacts/api-server/src/pdf-ticket-parity.test.ts` — shared-label assertion at 105
+- `artifacts/api-server/src/__snapshots__/pdf-ticket-parity.test.ts.snap` — reviewed diff only
+- `.replit:513` — the `pdf-site-metadata` validation command (no change)
+
+**Build order:** this slice ships first and alone. It fixes every future and re-generated PDF without touching data. Slice 2 (`FIX - Repair Stale Work-Order Parts Columns (2 of 2).md`) repairs the stored columns and closes the remaining legacy readers. Do not merge them into one task.
