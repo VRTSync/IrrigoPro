@@ -102,10 +102,6 @@ args = "work-order-labor-hours"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "work-order-deferred-items"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "invoice-ar-first-ui"
 
 [[workflows.workflow.tasks]]
@@ -427,17 +423,6 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/shared exec node --import tsx --test --test-reporter=spec src/work-order-labor-hours.test.ts"
-
-[workflows.workflow.metadata]
-isValidation = true
-
-[[workflows.workflow]]
-name = "work-order-deferred-items"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/lib/work-order-deferred-items.test.ts"
 
 [workflows.workflow.metadata]
 isValidation = true
