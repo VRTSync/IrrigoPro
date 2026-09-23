@@ -26,7 +26,7 @@ export type FinancialPulseVariant =
   | "billing-header"
   | "customer-detail"
   | "top-customers-compact"
-  | "billing-header";
+  | "action-board";
 
 interface BaseProps {
   variant: FinancialPulseVariant;
@@ -46,15 +46,17 @@ interface TopCustomersCompactProps extends BaseProps {
   variant: "top-customers-compact";
   limit?: number;
 }
-interface BillingHeaderProps extends BaseProps {
-  variant: "billing-header";
+interface ActionBoardProps extends BaseProps {
+  variant: "action-board";
+  year?: number;
+  month?: number;
 }
 export type FinancialPulseWidgetProps =
   | AdminDashboardProps
   | BillingHeaderProps
   | CustomerDetailProps
   | TopCustomersCompactProps
-  | BillingHeaderProps;
+  | ActionBoardProps;
 
 const CURRENCY = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -131,6 +133,21 @@ interface TopCustomerRow {
 interface TopCustomersResponse {
   rows: TopCustomerRow[];
   total: number;
+}
+
+interface ActionBoardRollup {
+  totalAllocation?: number;
+  totalInvoiced?: number;
+  totalPending?: number;
+  seasonTarget?: number;
+  seasonSpend?: number;
+  overBudgetCount?: number;
+  heldWorkOrderCount?: number;
+  billedThisMonth?: number;
+  seasonLeftToBill?: number;
+}
+interface ActionBoardResponse {
+  rollup?: ActionBoardRollup;
 }
 
 // Generic fetch with role-aware soft fail. Returns `null` on 403 so
@@ -628,6 +645,40 @@ function TopCustomersCompactVariant({ limit = 5 }: { limit?: number }) {
   );
 }
 
+function ActionBoardVariant({ year, month, className }: { year?: number; month?: number; className?: string }) {
+  const now = new Date();
+  const selectedYear = year ?? now.getFullYear();
+  const selectedMonth = month ?? now.getMonth() + 1;
+  const url = `/api/action-board?year=${selectedYear}&month=${selectedMonth}`;
+  const { data, isLoading, error } = useFinancialPulseData<ActionBoardResponse>("action-board", url);
+  const rollup = data?.rollup;
+  const billed = rollup?.billedThisMonth ?? rollup?.totalInvoiced ?? null;
+  const allocation = rollup?.totalAllocation ?? null;
+  const seasonTarget = rollup?.seasonTarget ?? null;
+  const seasonSpend = rollup?.seasonSpend ?? null;
+  const leftToBill = rollup?.seasonLeftToBill ?? (seasonTarget != null && seasonSpend != null ? Math.max(0, seasonTarget - seasonSpend) : null);
+  const billedPercent = allocation && billed != null ? Math.round((billed / allocation) * 100) : null;
+  const paceDelta = seasonTarget != null && seasonSpend != null ? seasonTarget - seasonSpend : null;
+  const held = rollup?.heldWorkOrderCount;
+  return (
+    <div className={cn("grid grid-cols-2 lg:grid-cols-4 gap-3", className)} data-testid="fp-widget-action-board">
+      {error ? (
+        <ErrorState testId="fp-widget-action-board" />
+      ) : (
+        <>
+          <MetricTile label={`Billed in ${new Intl.DateTimeFormat("en-US", { month: "long" }).format(new Date(selectedYear, selectedMonth - 1, 1))}`} value={billed} format="currency" helper={allocation != null ? `${formatCurrency(allocation)} allocated${billedPercent != null ? ` · ${billedPercent}%` : ""}` : undefined} isLoading={isLoading} testId="fp-tile-action-board-billed" />
+          <MetricTile label="Season pace" value={seasonSpend} format="currency" helper={paceDelta == null ? undefined : paceDelta >= 0 ? `${formatCurrency(paceDelta)} behind target` : `${formatCurrency(Math.abs(paceDelta))} ahead of target`} isLoading={isLoading} testId="fp-tile-action-board-pace" />
+          <MetricTile label="Left to bill this season" value={leftToBill} format="currency" helper="Remaining season allocation" isLoading={isLoading} testId="fp-tile-action-board-left" />
+          <MetricTile label="Over budget" value={rollup?.overBudgetCount ?? null} format="number" helper={held == null ? undefined : `${held} work orders held`} isLoading={isLoading} testId="fp-tile-action-board-over-budget" />
+          {allocation != null && billed != null && (
+            <span className="sr-only">{formatCurrency(billed)} of {formatCurrency(allocation)} allocated</span>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Public component ────────────────────────────────────────────────────
 
 export function FinancialPulseWidget(props: FinancialPulseWidgetProps) {
@@ -640,5 +691,7 @@ export function FinancialPulseWidget(props: FinancialPulseWidgetProps) {
       return <CustomerDetailVariant customerId={props.customerId} />;
     case "top-customers-compact":
       return <TopCustomersCompactVariant limit={props.limit} />;
+    case "action-board":
+      return <ActionBoardVariant year={props.year} month={props.month} className={props.className} />;
   }
 }

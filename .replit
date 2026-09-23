@@ -196,6 +196,14 @@ args = "estimate-branch-gate"
 task = "workflow.run"
 args = "retire-followup-migration"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "action-board-api"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "action-board-ui"
+
 [[workflows.workflow]]
 name = "auth-middleware-coverage"
 author = "agent"
@@ -690,6 +698,28 @@ args = "pnpm --filter @workspace/api-server exec node --import tsx --test --test
 
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow]]
+name = "action-board-api"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/action-board.test.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "action-board-ui"
+author = "agent"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/irrigopro exec vitest run src/components/layout/budget-route-nav-parity.test.ts src/pages/action-board.test.tsx"
 
 [agent]
 stack = "PNPM_WORKSPACE"

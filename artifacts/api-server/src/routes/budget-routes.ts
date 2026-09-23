@@ -63,6 +63,70 @@ function parseDecimal(raw: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+export interface BudgetStatusRowInput {
+  customer: any;
+  allocation: number | null;
+  monthSpend: { invoiced: number; pendingNotBilled: number; total: number };
+  seasonTarget: number;
+  seasonSpend: { invoiced: number; pendingNotBilled: number; total: number };
+}
+
+/** Shared per-customer budget row contract. Keep this pure so every budget surface agrees. */
+export function buildBudgetStatusRow(input: BudgetStatusRowInput) {
+  const { customer, allocation, monthSpend, seasonTarget, seasonSpend } = input;
+  const soft = customer.budgetSoftThresholdPercent ?? 75;
+  const hard = customer.budgetHardThresholdPercent ?? 100;
+  let fillPercent: number | null = null;
+  if (allocation !== null && allocation > 0) fillPercent = (monthSpend.total / allocation) * 100;
+  let status: "Go" | "Slow down" | "Stop" | "Unset";
+  if (fillPercent === null) status = "Unset";
+  else if (fillPercent >= hard) status = "Stop";
+  else if (fillPercent >= soft) status = "Slow down";
+  else status = "Go";
+  return {
+    customerId: customer.id,
+    customerName: customer.name ?? "(unnamed)",
+    allocation,
+    invoicedAmount: monthSpend.invoiced,
+    pendingAmount: monthSpend.pendingNotBilled,
+    totalSpend: monthSpend.total,
+    fillPercent,
+    status,
+    softThresholdPercent: soft,
+    hardThresholdPercent: hard,
+    seasonToDateTarget: seasonTarget,
+    seasonToDateSpend: seasonSpend.total,
+    seasonToDateInvoiced: seasonSpend.invoiced,
+    seasonToDatePending: seasonSpend.pendingNotBilled,
+    annualGoal: parseDecimal(customer.annualBudgetGoal),
+  } as const;
+}
+
+/** Shared allocation reader; callers must scope customer ids and company. */
+export async function loadBudgetAllocations(
+  companyId: number,
+  customerIds: number[],
+  year: number,
+  month: number,
+): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  if (customerIds.length === 0) return out;
+  const rows = await db.select({
+    customerId: customerBudgetMonths.customerId,
+    amount: customerBudgetMonths.amount,
+  }).from(customerBudgetMonths).where(and(
+    eq(customerBudgetMonths.companyId, companyId),
+    inArray(customerBudgetMonths.customerId, customerIds),
+    eq(customerBudgetMonths.year, year),
+    eq(customerBudgetMonths.month, month),
+  ));
+  for (const row of rows) {
+    const amount = parseDecimal(row.amount);
+    if (amount != null) out.set(row.customerId, amount);
+  }
+  return out;
+}
+
 const FIRST_SEASON_MONTH = 4;
 const LAST_SEASON_MONTH = 10;
 
@@ -1003,8 +1067,6 @@ export function registerBudgetRoutes(
 
         // Compute spend for all customers (sequentially to avoid overwhelming DB).
         for (const customer of allCustomers) {
-          const soft = customer.budgetSoftThresholdPercent ?? 75;
-          const hard = customer.budgetHardThresholdPercent ?? 100;
           const allocation = allocationMap.get(customer.id) ?? null;
           const seasonTarget = seasonAllocMap.get(customer.id) ?? 0;
 
@@ -1013,42 +1075,13 @@ export function registerBudgetRoutes(
             computeCustomerSpend(customer.id, companyId, { start: seasonStart, end: seasonEnd }),
           ]);
 
-          let fillPercent: number | null = null;
-          if (allocation !== null && allocation > 0) {
-            fillPercent = (monthSpend.total / allocation) * 100;
-          }
-
-          // Map internal status to crew-friendly labels.
-          let status: "Go" | "Slow down" | "Stop" | "Unset";
-          if (fillPercent === null) {
-            status = "Unset";
-          } else if (fillPercent >= hard) {
-            status = "Stop";
-          } else if (fillPercent >= soft) {
-            status = "Slow down";
-          } else {
-            status = "Go";
-          }
-
-          const annualGoal = parseDecimal((customer as any).annualBudgetGoal);
-
-          rows.push({
-            customerId: customer.id,
-            customerName: customer.name ?? "(unnamed)",
+          rows.push(buildBudgetStatusRow({
+            customer,
             allocation,
-            invoicedAmount: monthSpend.invoiced,
-            pendingAmount: monthSpend.pendingNotBilled,
-            totalSpend: monthSpend.total,
-            fillPercent,
-            status,
-            softThresholdPercent: soft,
-            hardThresholdPercent: hard,
-            seasonToDateTarget: seasonTarget,
-            seasonToDateSpend: seasonSpend.total,
-            seasonToDateInvoiced: seasonSpend.invoiced,
-            seasonToDatePending: seasonSpend.pendingNotBilled,
-            annualGoal,
-          });
+            monthSpend,
+            seasonTarget,
+            seasonSpend,
+          }));
         }
 
         // Sort worst-first by fillPercent descending (null/unset last).

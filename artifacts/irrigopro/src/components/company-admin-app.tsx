@@ -19,6 +19,7 @@ import CustomerBilling from "@/pages/customer-billing";
 const IrrigationProfilePage = lazy(() => import("@/pages/customers/IrrigationProfile"));
 
 const BudgetStatusPage = lazy(() => import("@/pages/budget-status"));
+const ActionBoardPage = lazy(() => import("@/pages/action-board"));
 const AdminBudgetGoalsPage = lazy(() => import("@/pages/admin-budget-goals"));
 import ManagerWorkspace from "@/pages/manager-workspace";
 
@@ -192,6 +193,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/site-maps" component={SiteMapsPage} />
           <Route path="/manager-workspace" component={ManagerWorkspace} />
           <Route path="/budget-status" component={BudgetStatusPage} />
+          <Route path="/action-board" component={ActionBoardPage} />
           <Route path="/billing-workspace" component={RedirectToBillingWorkspace} />
           <Route path="/billing" component={RedirectToBillingWorkspace} />
           <Route path="/billing/dashboard" component={RedirectToBillingWorkspace} />

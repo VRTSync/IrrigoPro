@@ -10,13 +10,16 @@
 // Non-super_admin callers see only their own company's data.
 
 import type { Express, RequestHandler } from "express";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   wetChecks,
   wetCheckFindings,
 } from "@workspace/db/schema";
 import { db } from "../db";
 import { storage } from "../storage";
+import { computeCustomerSpend } from "../budget-spend";
+import { CAN_VIEW_BUDGETS, hasCapability } from "@workspace/shared";
+import { buildBudgetStatusRow, loadBudgetAllocations } from "./budget-routes";
 // Task #2027 — the shared QuickBooks verdict. The strip renders more of it
 // than the other two surfaces do; it does not decide any of it.
 import { loadQuickBooksHealth } from "./quickbooks-health";
@@ -68,6 +71,12 @@ const ALL_WO_STAGES = new Set([
   "approved_passed_to_billing",
   "billed",
 ]);
+// Action Board dispatchable work: pending answers "is work waiting?",
+// assigned answers "has a crew?", in_progress answers "is it underway?".
+export const ACTION_BOARD_OPEN_WO_STATUSES = new Set(["pending", "assigned", "in_progress"]);
+export const ACTION_BOARD_COMPLETED_WC_STATUSES = new Set([
+  "submitted", "approved", "partially_converted", "converted",
+]);
 // Billing-sheet statuses that appear in the merged queue.
 const ALL_BS_STAGES = new Set([
   "pending_manager_review",
@@ -99,6 +108,73 @@ function parseIntOr(v: unknown, dflt: number): number {
   return Number.isFinite(n) ? Math.trunc(n) : dflt;
 }
 
+/** The sole do-not-exceed arithmetic seam; future preApproved subtraction belongs here. */
+export function computeActionBoardDoNotExceed(allocation: number, total: number): number {
+  // Future: allocation - (total - preApproved), once spend exposes preApproved.
+  return allocation - total;
+}
+
+export type ActionBoardLane = "clear_to_send" | "over_budget_nothing_approved" | "nothing_pending";
+export function buildActionBoardRow(args: {
+  customer: { id: number; name?: string | null };
+  budget: ReturnType<typeof buildBudgetStatusRow>;
+  openWorkOrders: any[];
+  newestWetCheck: any | null;
+  wetChecks?: any[];
+  year: number;
+  month: number;
+}) {
+  const { customer, budget, openWorkOrders, newestWetCheck, wetChecks = [], year, month } = args;
+  const headroom = budget.allocation == null ? null : computeActionBoardDoNotExceed(budget.allocation, budget.totalSpend);
+  const normalizedWorkOrders = openWorkOrders.map((w) => {
+    if (w.estimatedTotal == null) return { ...w, estimatedTotal: null };
+    const value = Number(w.estimatedTotal);
+    return { ...w, estimatedTotal: Number.isFinite(value) ? value : null };
+  });
+  const valued = normalizedWorkOrders.filter((w) => w.estimatedTotal != null);
+  const unknownEstimate = normalizedWorkOrders.some((w) => w.estimatedTotal == null);
+  const openTotal = valued.reduce((sum, w) => sum + w.estimatedTotal, 0);
+  const fits = headroom != null && !unknownEstimate && openTotal <= headroom;
+  const preApproved = openWorkOrders.some((w) => w.estimateId != null);
+  const completedInMonth = (wetChecks.length > 0 ? wetChecks : (newestWetCheck ? [newestWetCheck] : []))
+    .some((w) => {
+      const started = new Date(w.startedAt);
+      return ACTION_BOARD_COMPLETED_WC_STATUSES.has(String(w.status)) &&
+        started.getFullYear() === year && started.getMonth() + 1 === month;
+    });
+  const completed = completedInMonth;
+  const due = !completed;
+  let lane: ActionBoardLane;
+  if (openWorkOrders.length === 0 && !due) lane = "nothing_pending";
+  else if (preApproved || fits || (openWorkOrders.length === 0 && due && (headroom ?? 0) > 0)) {
+    lane = "clear_to_send";
+  } else lane = "over_budget_nothing_approved";
+  return {
+    customerId: customer.id,
+    customerName: customer.name ?? "(unnamed)",
+    annualGoal: budget.annualGoal,
+    allocation: budget.allocation,
+    invoicedAmount: budget.invoicedAmount,
+    pendingAmount: budget.pendingAmount,
+    totalSpend: budget.totalSpend,
+    fillPercent: budget.fillPercent,
+    status: budget.status,
+    softThresholdPercent: budget.softThresholdPercent,
+    hardThresholdPercent: budget.hardThresholdPercent,
+    budget,
+    lane,
+    headroom,
+    inspectionOnly: due && (headroom ?? 0) <= 0,
+    openWorkOrders: normalizedWorkOrders.map((w) => ({ ...w, preApproved: w.estimateId != null })),
+    preApproved,
+    openWorkOrderTotal: openTotal,
+    hasUnknownEstimate: unknownEstimate,
+    wetCheck: newestWetCheck,
+    wetCheckDue: due,
+    month: `${year}-${String(month).padStart(2, "0")}`,
+  };
+}
+
 // -----------------------------------------------------------------------
 // Test override slots — allow unit tests to inject fixtures without a
 // live database.
@@ -113,6 +189,9 @@ let _reviewsOverride: (() => Promise<any[]>) | null = null;
 // (wet_check_findings.billingSheetId → billing_sheets.invoiceId IS NOT NULL).
 // Tests inject this directly to avoid hitting the real DB.
 let _invoicedBsWcIdsOverride: (() => Promise<Set<number>>) | null = null;
+let _actionBoardCustomersOverride: ((companyId: number) => Promise<any[]>) | null = null;
+let _actionBoardAllocationsOverride: ((companyId: number, ids: number[], year: number, month: number) => Promise<Map<number, number>>) | null = null;
+let _actionBoardSpendOverride: ((customerId: number, companyId: number, window: { start: Date; end: Date }) => Promise<any>) | null = null;
 
 export function _setWetChecksForTests(fn: () => Promise<any[]>): void {
   _wetCheckOverride = fn;
@@ -143,6 +222,19 @@ export function _resetManagerWorkspaceOverridesForTests(): void {
   _partsOverride = null;
   _reviewsOverride = null;
   _invoicedBsWcIdsOverride = null;
+  _actionBoardCustomersOverride = null;
+  _actionBoardAllocationsOverride = null;
+  _actionBoardSpendOverride = null;
+}
+
+export function _setActionBoardCustomersForTests(fn: (companyId: number) => Promise<any[]>): void {
+  _actionBoardCustomersOverride = fn;
+}
+export function _setActionBoardAllocationsForTests(fn: (companyId: number, ids: number[], year: number, month: number) => Promise<Map<number, number>>): void {
+  _actionBoardAllocationsOverride = fn;
+}
+export function _setActionBoardSpendForTests(fn: (customerId: number, companyId: number, window: { start: Date; end: Date }) => Promise<any>): void {
+  _actionBoardSpendOverride = fn;
 }
 
 // -----------------------------------------------------------------------
@@ -926,6 +1018,143 @@ export function registerManagerWorkspaceRoutes(
     requireAuthentication,
     (_req: any, res) => {
       res.status(404).json({ message: "This endpoint has been removed. Use the wet-check review screen to route findings." });
+    },
+  );
+
+  // GET /api/action-board — read-only dispatch board, sharing budget semantics
+  // with /api/budget/status. Findings are intentionally not read here.
+  app.get(
+    "/api/action-board",
+    requireAuthentication,
+    async (req: any, res: any) => {
+      try {
+        const role = req.authenticatedUserRole as string | undefined;
+        if (!hasCapability(role, CAN_VIEW_BUDGETS)) {
+          res.status(403).json({ message: "Forbidden" });
+          return;
+        }
+        const callerCompanyId = req.authenticatedUserCompanyId as number | null | undefined;
+        if (role !== "super_admin" && callerCompanyId == null) {
+          res.status(403).json({ message: "No company context" });
+          return;
+        }
+        const now = new Date();
+        const year = Number(req.query.year ?? now.getFullYear());
+        const month = Number(req.query.month ?? now.getMonth() + 1);
+        if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+          res.status(400).json({ message: "Invalid year or month" });
+          return;
+        }
+        let companyId: number;
+        if (role === "super_admin") {
+          if (!req.query.companyId) {
+            res.status(400).json({ message: "companyId is required for super_admin" });
+            return;
+          }
+          companyId = Number(req.query.companyId);
+          if (!Number.isInteger(companyId) || companyId <= 0) {
+            res.status(400).json({ message: "Invalid companyId" });
+            return;
+          }
+        } else companyId = callerCompanyId as number;
+
+        // The storage boundary applies the same tenant predicate for ordinary
+        // callers; companyId here is already resolved (never trusted from a
+        // manager query string).
+        const allCustomers = _actionBoardCustomersOverride
+          ? await _actionBoardCustomersOverride(companyId)
+          : await storage.getCustomers(companyId);
+        const scopedCustomers = allCustomers.filter((customer) => customer.companyId === companyId);
+        const ids = scopedCustomers.map((c) => c.id);
+        const allocations = _actionBoardAllocationsOverride
+          ? await _actionBoardAllocationsOverride(companyId, ids, year, month)
+          : await loadBudgetAllocations(companyId, ids, year, month);
+        const seasonMonths = Array.from(
+          { length: Math.max(0, Math.min(month, 10) - 4 + 1) },
+          (_, i) => i + 4,
+        );
+        const seasonAllocations = new Map<number, number>();
+        const fullSeasonAllocations = new Map<number, number>();
+        for (const seasonMonth of Array.from({ length: 7 }, (_, i) => i + 4)) {
+          const monthAllocations = _actionBoardAllocationsOverride
+            ? await _actionBoardAllocationsOverride(companyId, ids, year, seasonMonth)
+            : await loadBudgetAllocations(companyId, ids, year, seasonMonth);
+          for (const [id, amount] of monthAllocations) {
+            fullSeasonAllocations.set(id, (fullSeasonAllocations.get(id) ?? 0) + amount);
+            if (seasonMonths.includes(seasonMonth)) {
+              seasonAllocations.set(id, (seasonAllocations.get(id) ?? 0) + amount);
+            }
+          }
+        }
+        const monthWindow = { start: new Date(year, month - 1, 1), end: new Date(year, month, 1) };
+        const [workOrders, wetCheckRows] = await Promise.all([
+          scopedWorkOrdersForManager(req),
+          scopedWetChecks(req),
+        ]);
+        const scopedWos = workOrders.filter((w) => w.companyId === companyId);
+        const scopedWcs = wetCheckRows.filter((w) => w.companyId === companyId);
+        const rows = [];
+        for (const customer of scopedCustomers) {
+          const allocation = allocations.get(customer.id) ?? null;
+          if (allocation == null) continue;
+          const spendReader = _actionBoardSpendOverride ?? computeCustomerSpend;
+          const spend = await spendReader(customer.id, companyId, monthWindow);
+          const seasonSpend = await spendReader(customer.id, companyId, {
+            start: new Date(year, 3, 1),
+            end: new Date(year, Math.min(month, 10), 1),
+          });
+          const budget = buildBudgetStatusRow({
+            customer,
+            allocation,
+            monthSpend: spend,
+            seasonTarget: seasonAllocations.get(customer.id) ?? 0,
+            seasonSpend,
+          });
+          const open = scopedWos.filter((w) =>
+            w.customerId === customer.id && ACTION_BOARD_OPEN_WO_STATUSES.has(w.status));
+          const customerChecks = scopedWcs.filter((w) => w.customerId === customer.id);
+          // Lifecycle is authoritative: an abandoned in_progress check must
+          // not hide a submitted visit. Keep the newest unfinished visit only
+          // as display context for the due row.
+          const newest = [...customerChecks]
+            .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0] ?? null;
+          rows.push(buildActionBoardRow({
+            customer, budget, openWorkOrders: open, newestWetCheck: newest,
+            wetChecks: customerChecks, year, month,
+          }));
+        }
+        rows.sort((a, b) => (b.fillPercent ?? -Infinity) - (a.fillPercent ?? -Infinity));
+        const totalAllocation = rows.reduce((s, r) => s + (r.allocation ?? 0), 0);
+        const totalInvoiced = rows.reduce((s, r) => s + r.invoicedAmount, 0);
+        const totalSpend = rows.reduce((s, r) => s + r.totalSpend, 0);
+        const seasonTarget = rows.reduce((s, r) => s + r.budget.seasonToDateTarget, 0);
+        const seasonSpend = rows.reduce((s, r) => s + r.budget.seasonToDateSpend, 0);
+        const fullSeasonTarget = rows.reduce((s, r) => s + (fullSeasonAllocations.get(r.customerId) ?? 0), 0);
+        const overBudgetRows = rows.filter((r) => r.lane === "over_budget_nothing_approved");
+        const heldWorkOrderCount = overBudgetRows.reduce((s, r) => s + r.openWorkOrders.length, 0);
+        res.json({
+          year, month, companyId, rows,
+          excludedWithoutBudgetGoal: scopedCustomers.length - rows.length,
+          rollup: {
+            totalAllocation,
+            totalInvoiced,
+            totalSpend,
+            seasonTarget,
+            seasonSpend,
+            seasonLeftToBill: Math.max(0, fullSeasonTarget - seasonSpend),
+            // Names consumed by the Action Board tiles.
+            billedThisMonth: totalInvoiced,
+            seasonPaceTarget: seasonTarget,
+            seasonPaceSpend: seasonSpend,
+            leftToBillThisSeason: Math.max(0, fullSeasonTarget - seasonSpend),
+            overBudgetCount: overBudgetRows.length,
+            heldWorkOrderCount,
+          },
+        });
+      } catch (error) {
+        req.log?.error?.({ err: error }, "action board failed");
+        res.status(500).json({ message: "Failed to load action board" });
+      }
     },
   );
 
