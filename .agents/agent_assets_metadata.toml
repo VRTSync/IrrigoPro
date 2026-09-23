@@ -17,21 +17,25 @@ id = "0DVgu4DiePIxvRdQGb8wX"
 uri = "file://marketing-site-standalone.zip"
 type = "unspecified"
 title = "Marketing site handoff bundle"
+logical_id = "f1137a45-c094-4661-9023-7a28c812d634"
 
 [[outputs]]
 id = "qeQ2rHXgCnA6TSwduQr4m"
 uri = "file://marketing-site-standalone/public/opengraph.jpg"
 type = "image"
 title = "IrrigoPro 2026 Open Graph image"
+logical_id = "2df6e6cd-6098-4b89-87cf-80c469407b10"
 
 [[outputs]]
 id = "wEiBN-k6Ki79nC7ndiFtN"
 uri = "file://.local/outputs/IrrigoPro.pdf"
 type = "pdf"
 title = "IrrigoPro.pdf"
+logical_id = "57982605-23c9-49ff-aa92-41134f6dbde6"
 
 [[outputs]]
 id = "-Tt7veEcwDpcnJnXlcsve"
 uri = "file://.local/outputs/IrrigoPro.pptx"
 type = "slides"
 title = "IrrigoPro.pptx"
+logical_id = "4eacbb5d-0165-4c47-9274-f8232bb9719a"
