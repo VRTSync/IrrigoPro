@@ -179,7 +179,6 @@ interface TechnicianRow {
   hoursBilled: number;
   revenue: number;
   laborCost: number | null;
-  marginPct: number | null;
   avgTicket: number | null;
   billingSheetCount: number;
   workOrderCount: number;
@@ -192,6 +191,7 @@ interface ByTechResponse {
 }
 interface ServiceTypeRow {
   key: "emergency" | "standard" | "contract" | "adhoc";
+  group: "urgency" | "agreement";
   label: string;
   revenue: number;
   pctOfTotal: number | null;
@@ -1523,8 +1523,7 @@ function TechniciansTab({ period }: { period: Period }) {
               <TableHead className="text-right">Hours</TableHead>
               <TableHead className="text-right">Revenue</TableHead>
               <TableHead className="text-right">Labor cost</TableHead>
-              <TableHead className="text-right">Margin %</TableHead>
-              <TableHead className="text-right">Avg ticket</TableHead>
+              <TableHead className="text-right">Avg per invoice worked</TableHead>
               <TableHead className="text-right"># BS</TableHead>
               <TableHead className="text-right"># WO</TableHead>
               <TableHead className="text-right">Parts revenue</TableHead>
@@ -1533,13 +1532,13 @@ function TechniciansTab({ period }: { period: Period }) {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={9} className="py-8 text-center text-sm text-gray-500">
+                <TableCell colSpan={8} className="py-8 text-center text-sm text-gray-500">
                   Loading…
                 </TableCell>
               </TableRow>
             ) : pageRows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="py-8 text-center text-sm text-gray-400">
+                <TableCell colSpan={8} className="py-8 text-center text-sm text-gray-400">
                   No technician activity in this period.
                 </TableCell>
               </TableRow>
@@ -1562,16 +1561,6 @@ function TechniciansTab({ period }: { period: Period }) {
                         </Tooltip>
                       ) : (
                         CURRENCY.format(r.laborCost)
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {r.marginPct == null ? (
-                        <Tooltip>
-                          <TooltipTrigger className="text-gray-400">—</TooltipTrigger>
-                          <TooltipContent>No hourly wage set.</TooltipContent>
-                        </Tooltip>
-                      ) : (
-                        `${r.marginPct.toFixed(1)}%`
                       )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
@@ -1631,6 +1620,10 @@ function ServiceTypeTab({ period }: { period: Period }) {
     refetchOnWindowFocus: false,
   });
   const rows = data?.rows ?? [];
+  const groups = [
+    { key: "urgency" as const, label: "Urgency" },
+    { key: "agreement" as const, label: "Agreement" },
+  ];
 
   const onExport = () => {
     const suffix = period === "ytd"
@@ -1673,25 +1666,32 @@ function ServiceTypeTab({ period }: { period: Period }) {
                 </TableCell>
               </TableRow>
             ) : (
-              rows.map((r) => (
-                <TableRow key={r.key} data-testid={`service-row-${r.key}`}>
-                  <TableCell className="font-medium">{r.label}</TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {CURRENCY.format(r.revenue)}
+              groups.flatMap((group) => [
+                <TableRow key={`${group.key}-heading`} className="bg-slate-50">
+                  <TableCell colSpan={5} className="font-semibold text-slate-700">
+                    {group.label}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {r.pctOfTotal == null
-                      ? "—"
-                      : PERCENT1.format(r.pctOfTotal / 100)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {r.invoiceCount}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {r.avgTicket == null ? "—" : CURRENCY.format(r.avgTicket)}
-                  </TableCell>
-                </TableRow>
-              ))
+                </TableRow>,
+                ...rows.filter((r) => r.group === group.key).map((r) => (
+                  <TableRow key={r.key} data-testid={`service-row-${r.key}`}>
+                    <TableCell className="font-medium pl-8">{r.label}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {CURRENCY.format(r.revenue)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {r.pctOfTotal == null
+                        ? "—"
+                        : PERCENT1.format(r.pctOfTotal / 100)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {r.invoiceCount}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {r.avgTicket == null ? "—" : CURRENCY.format(r.avgTicket)}
+                    </TableCell>
+                  </TableRow>
+                )),
+              ])
             )}
           </TableBody>
         </Table>

@@ -172,7 +172,7 @@ describe("Task #692 — CSV export on tab endpoints", () => {
     );
     assert.equal(r.status, 200);
     const body = await r.text();
-    assert.match(body, /^Key,Label,/);
+    assert.match(body, /^Key,Group,Label,/);
   });
 });
 

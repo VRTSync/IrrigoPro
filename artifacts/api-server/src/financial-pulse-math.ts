@@ -106,12 +106,14 @@ export interface CustomerLike {
   id: number;
   companyId: number;
   contractType?: string | null;
+  laborRate?: string | number | null;
   emergencyLaborRate?: string | number | null;
 }
 
 export interface WorkOrderLike {
   invoiceId?: number | null;
   totalHours?: string | number | null;
+  rateMode?: string | null;
   /**
    * @deprecated Task #2014 — a real cost, but a sheet-level snapshot rather
    * than a line-level one. Parts cost is now derived line by line from the
@@ -126,6 +128,7 @@ export interface WorkOrderLike {
 export interface BillingSheetLike {
   invoiceId?: number | null;
   totalHours?: string | number | null;
+  rateMode?: string | null;
   /** @deprecated billed price — never a cost input (Task #2014). */
   partsSubtotal?: string | number | null;
   technicianId?: number | null;
@@ -976,7 +979,6 @@ export interface TechnicianRow {
   hoursBilled: number;
   revenue: number;
   laborCost: number | null;
-  marginPct: number | null;
   avgTicket: number | null;
   billingSheetCount: number;
   workOrderCount: number;
@@ -989,26 +991,97 @@ export interface UserWithName extends UserLike {
   role?: string | null;
 }
 
+export interface InvoiceTechnicianShare {
+  invoiceId: number;
+  technicianId: number;
+  revenue: number;
+  partsRevenue: number;
+}
+
+type TechnicianContribution = {
+  invoiceId?: number | null;
+  technicianId?: number | null;
+  hours?: string | number | null;
+};
+
+/**
+ * Split each invoice across its contributing technicians. Positive hours are
+ * proportional; when none are usable the split is equal. Amounts are allocated
+ * in cents and the final technician receives the remainder, so every invoice
+ * reconciles exactly and can never be credited above its stored total.
+ */
+export function allocateInvoiceRevenueByTechnician(
+  invoices: InvoiceLike[],
+  contributions: TechnicianContribution[],
+): InvoiceTechnicianShare[] {
+  const byInvoice = new Map<number, Map<number, number>>();
+  for (const row of contributions) {
+    if (row.invoiceId == null || row.technicianId == null) continue;
+    const techHours = byInvoice.get(row.invoiceId) ?? new Map<number, number>();
+    techHours.set(
+      row.technicianId,
+      (techHours.get(row.technicianId) ?? 0) + Math.max(0, toNum(row.hours)),
+    );
+    byInvoice.set(row.invoiceId, techHours);
+  }
+
+  const allocateCents = (amount: unknown, weights: number[]): number[] => {
+    const cents = Math.round(toNum(amount) * 100);
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+    const effective = totalWeight > 0 ? weights : weights.map(() => 1);
+    const denominator = effective.reduce((sum, weight) => sum + weight, 0);
+    let used = 0;
+    return effective.map((weight, index) => {
+      const share =
+        index === effective.length - 1
+          ? cents - used
+          : Math.round((cents * weight) / denominator);
+      used += share;
+      return share / 100;
+    });
+  };
+
+  const out: InvoiceTechnicianShare[] = [];
+  for (const inv of invoices) {
+    if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
+    const techHours = byInvoice.get(inv.id);
+    if (!techHours?.size) continue;
+    const entries = [...techHours.entries()].sort(([a], [b]) => a - b);
+    const weights = entries.map(([, hours]) => hours);
+    const revenue = allocateCents(inv.totalAmount, weights);
+    const parts = allocateCents(inv.partsSubtotal, weights);
+    entries.forEach(([technicianId], index) => {
+      out.push({
+        invoiceId: inv.id,
+        technicianId,
+        revenue: revenue[index],
+        partsRevenue: parts[index],
+      });
+    });
+  }
+  return out;
+}
+
 export function computeByTechnician(input: {
   techs: UserWithName[];
   invoices: InvoiceLike[];
   workOrders: WorkOrderLike[];
   billingSheets: BillingSheetLike[];
   // Task #814 — wet check billings linked to invoices in the window,
-  // attributed by technicianId. Hours tallied for margin; invoice revenue
+  // attributed by technicianId. Hours tally labor cost; invoice revenue
   // and partsRevenue come from the invoice (no double-count).
   wetCheckBillings?: WetCheckBillingLike[];
   window: { start: Date; end: Date };
 }): TechnicianRow[] {
   const { techs, invoices, workOrders, billingSheets, wetCheckBillings = [], window } = input;
   const invoiceIdsInWindow = new Set<number>();
-  const invoiceById = new Map<number, InvoiceLike>();
+  const invoicesInWindow: InvoiceLike[] = [];
   for (const inv of invoices) {
     if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     const d = toDate(inv.createdAt);
     if (!inWindow(d, window.start, window.end)) continue;
     invoiceIdsInWindow.add(inv.id);
-    invoiceById.set(inv.id, inv);
+    invoicesInWindow.push(inv);
   }
 
   interface Acc {
@@ -1019,6 +1092,7 @@ export function computeByTechnician(input: {
     wcbCount: number;
   }
   const acc = new Map<number, Acc>();
+  const contributions: TechnicianContribution[] = [];
   const ensure = (id: number): Acc => {
     let a = acc.get(id);
     if (!a) {
@@ -1036,6 +1110,7 @@ export function computeByTechnician(input: {
     a.hours += toNum(wo.totalHours);
     a.invoiceIds.add(wo.invoiceId);
     a.woCount += 1;
+    contributions.push({ invoiceId: wo.invoiceId, technicianId: techId, hours: wo.totalHours });
   }
   for (const bs of billingSheets) {
     if (bs.invoiceId == null || !invoiceIdsInWindow.has(bs.invoiceId)) continue;
@@ -1044,6 +1119,7 @@ export function computeByTechnician(input: {
     a.hours += toNum(bs.totalHours);
     a.invoiceIds.add(bs.invoiceId);
     a.bsCount += 1;
+    contributions.push({ invoiceId: bs.invoiceId, technicianId: bs.technicianId, hours: bs.totalHours });
   }
   // Task #814 — wet check billings attributed to technician for hours + invoice.
   for (const wcb of wetCheckBillings) {
@@ -1053,6 +1129,14 @@ export function computeByTechnician(input: {
     a.hours += toNum(wcb.totalHours);
     a.invoiceIds.add(wcb.invoiceId);
     a.wcbCount += 1;
+    contributions.push({ invoiceId: wcb.invoiceId, technicianId: wcb.technicianId, hours: wcb.totalHours });
+  }
+
+  const sharesByTech = new Map<number, InvoiceTechnicianShare[]>();
+  for (const share of allocateInvoiceRevenueByTechnician(invoicesInWindow, contributions)) {
+    const shares = sharesByTech.get(share.technicianId) ?? [];
+    shares.push(share);
+    sharesByTech.set(share.technicianId, shares);
   }
 
   const techById = new Map(techs.map((t) => [t.id, t]));
@@ -1060,26 +1144,18 @@ export function computeByTechnician(input: {
   for (const [techId, a] of acc) {
     const tech = techById.get(techId);
     if (!tech) continue;
-    let revenue = 0;
-    let partsRevenue = 0;
-    for (const iid of a.invoiceIds) {
-      const inv = invoiceById.get(iid);
-      if (!inv) continue;
-      revenue += toNum(inv.totalAmount);
-      partsRevenue += toNum(inv.partsSubtotal);
-    }
+    const shares = sharesByTech.get(techId) ?? [];
+    const revenue = shares.reduce((sum, share) => sum + share.revenue, 0);
+    const partsRevenue = shares.reduce((sum, share) => sum + share.partsRevenue, 0);
     const wage = toNum(tech.hourlyWage, NaN);
     const hasWage = Number.isFinite(wage) && wage > 0;
     const laborCost = hasWage ? a.hours * wage : null;
-    const marginPct =
-      hasWage && revenue > 0 ? ((revenue - laborCost!) / revenue) * 100 : null;
     out.push({
       technicianId: techId,
       name: tech.name ?? `Tech #${techId}`,
       hoursBilled: a.hours,
       revenue,
       laborCost,
-      marginPct,
       avgTicket: a.invoiceIds.size > 0 ? revenue / a.invoiceIds.size : null,
       billingSheetCount: a.bsCount,
       workOrderCount: a.woCount,
@@ -1093,6 +1169,7 @@ export function computeByTechnician(input: {
 
 export interface ServiceTypeRow {
   key: "emergency" | "standard" | "contract" | "adhoc";
+  group: "urgency" | "agreement";
   label: string;
   revenue: number;
   pctOfTotal: number | null;
@@ -1101,18 +1178,21 @@ export interface ServiceTypeRow {
 }
 
 /**
- * Four-row service-type breakdown. emergency/standard split is per
- * invoice (an invoice is "emergency" if it has at least one line item
- * priced at the customer's emergencyLaborRate). contract/adhoc split is
- * by `customer.contractType != null && != ''`.
+ * Four-row service-type breakdown in two independent groups. The
+ * emergency/standard split uses source-ticket rateMode, with rate comparison
+ * only for legacy tickets. The contract/adhoc split uses customer contractType.
  */
 export function computeByServiceType(input: {
   invoices: InvoiceLike[];
   items: InvoiceItemLike[];
   customersById: Map<number, CustomerLike>;
+  workOrders?: WorkOrderLike[];
+  billingSheets?: BillingSheetLike[];
   window: { start: Date; end: Date };
 }): ServiceTypeRow[] {
-  const { invoices, items, customersById, window } = input;
+  const {
+    invoices, items, customersById, workOrders = [], billingSheets = [], window,
+  } = input;
   const inWin: InvoiceLike[] = [];
   for (const inv of invoices) {
     if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
@@ -1133,6 +1213,13 @@ export function computeByServiceType(input: {
     contract: { revenue: 0, count: 0 },
     adhoc: { revenue: 0, count: 0 },
   };
+  const rateModesByInvoice = new Map<number, string[]>();
+  for (const row of [...workOrders, ...billingSheets]) {
+    if (row.invoiceId == null || row.rateMode == null) continue;
+    const modes = rateModesByInvoice.get(row.invoiceId) ?? [];
+    modes.push(row.rateMode);
+    rateModesByInvoice.set(row.invoiceId, modes);
+  }
   for (const inv of inWin) {
     const total = toNum(inv.totalAmount);
     const c = customersById.get(inv.customerId);
@@ -1141,8 +1228,15 @@ export function computeByServiceType(input: {
         ? null
         : toNum(c.emergencyLaborRate);
     const lines = itemsByInvoice.get(inv.id) ?? [];
-    let isEmergency = false;
-    if (emergencyRate != null) {
+    const explicitModes = rateModesByInvoice.get(inv.id) ?? [];
+    let isEmergency = explicitModes.includes("emergency");
+    const standardRate =
+      c?.laborRate == null || c.laborRate === "" ? null : toNum(c.laborRate);
+    const ratesAreDistinct =
+      emergencyRate != null &&
+      standardRate != null &&
+      Math.abs(emergencyRate - standardRate) >= 0.005;
+    if (!isEmergency && explicitModes.length === 0 && ratesAreDistinct) {
       for (const it of lines) {
         const rate = it.laborRate == null ? null : toNum(it.laborRate);
         if (rate != null && Math.abs(rate - emergencyRate) < 0.005) {
@@ -1167,24 +1261,28 @@ export function computeByServiceType(input: {
       buckets.adhoc.count += 1;
     }
   }
-  const total = inWin.reduce((s, inv) => s + toNum(inv.totalAmount), 0);
   const mk = (
     key: ServiceTypeRow["key"],
+    group: ServiceTypeRow["group"],
     label: string,
     b: { revenue: number; count: number },
+    groupTotal: number,
   ): ServiceTypeRow => ({
     key,
+    group,
     label,
     revenue: b.revenue,
-    pctOfTotal: total > 0 ? (b.revenue / total) * 100 : null,
+    pctOfTotal: groupTotal > 0 ? (b.revenue / groupTotal) * 100 : null,
     invoiceCount: b.count,
     avgTicket: b.count > 0 ? b.revenue / b.count : null,
   });
+  const urgencyTotal = buckets.emergency.revenue + buckets.standard.revenue;
+  const agreementTotal = buckets.contract.revenue + buckets.adhoc.revenue;
   return [
-    mk("emergency", "Emergency", buckets.emergency),
-    mk("standard", "Standard", buckets.standard),
-    mk("contract", "Contract", buckets.contract),
-    mk("adhoc", "Ad-hoc", buckets.adhoc),
+    mk("emergency", "urgency", "Emergency", buckets.emergency, urgencyTotal),
+    mk("standard", "urgency", "Standard", buckets.standard, urgencyTotal),
+    mk("contract", "agreement", "Contract", buckets.contract, agreementTotal),
+    mk("adhoc", "agreement", "Ad-hoc", buckets.adhoc, agreementTotal),
   ];
 }
 
@@ -1196,14 +1294,10 @@ export function computeRevenueMix(input: {
   // Task #814 — uninvoiced wet check billings add their parts/labor
   // directly to the mix since they're not yet captured in any invoice.
   uninvoicedWetCheckBillings?: WetCheckBillingLike[];
-  // Task #814 — WCBs linked to invoices in the window contribute
-  // parts/labor costs that may not be reflected in invoice subtotals.
-  invoicedWetCheckBillings?: WetCheckBillingLike[];
 }): RevenueMixResult {
   const {
     invoices, items, customersById, window,
     uninvoicedWetCheckBillings = [],
-    invoicedWetCheckBillings = [],
   } = input;
   const invoiceIdsInWindow = new Set<number>();
   let parts = 0;
@@ -1230,13 +1324,6 @@ export function computeRevenueMix(input: {
     parts += toNum(wcb.partsSubtotal);
     labor += toNum(wcb.laborSubtotal);
   }
-  // Task #814 — invoiced WCBs linked to invoices in the window contribute
-  // their parts/labor subtotals (contract/adhoc split stays at invoice level).
-  for (const wcb of invoicedWetCheckBillings) {
-    parts += toNum(wcb.partsSubtotal);
-    labor += toNum(wcb.laborSubtotal);
-  }
-
   // Emergency vs standard — bucket per invoice item, comparing each
   // item's laborRate to the parent customer's emergencyLaborRate. If
   // a single invoice spans both, both buckets collect their slice.
@@ -1290,6 +1377,7 @@ export function computeRevenueMix(input: {
 export interface PulseWorkOrderLike extends WorkOrderBillableLike {
   customerId: number;
   assignedTechnicianId?: number | null;
+  totalHours?: string | number | null;
 }
 
 /**
@@ -1298,6 +1386,7 @@ export interface PulseWorkOrderLike extends WorkOrderBillableLike {
 export interface PulseBillingSheetLike extends BillingSheetBillableLike {
   customerId: number;
   technicianId?: number | null;
+  totalHours?: string | number | null;
 }
 
 /**
@@ -1307,6 +1396,7 @@ export interface PulseBillingSheetLike extends BillingSheetBillableLike {
 export interface PulseWetCheckBillingLike extends WetCheckBillingBillableLike {
   customerId: number;
   technicianId?: number | null;
+  totalHours?: string | number | null;
 }
 
 export interface PulseCustomerRow {
@@ -1423,57 +1513,52 @@ export function computePulseCustomers(input: {
  *
  * - inFlight: sum of uninvoiced non-cancelled WOs (via assignedTechnicianId)
  *             + BSs (via technicianId)
- * - ytd:      revenue from invoices this year whose linked WOs/BSs attribute
- *             to this tech. Each invoice counted at most once per tech to
- *             avoid double-counting when a WO and BS both link to the same
- *             invoice for the same technician.
+ * - ytd:      proportional invoice revenue by technician hours, with equal
+ *             shares when an invoice has no usable hours.
  */
 export function computePulseTechnicians(input: {
   techs: UserWithName[];
   invoices: InvoiceLike[];
   workOrders: PulseWorkOrderLike[];
   billingSheets: PulseBillingSheetLike[];
-  // Task #814 — WCBs: invoiced ones credit the invoice amount to technician;
-  // uninvoiced ones contribute directly to inFlight.
+  // Task #814 — WCBs: invoiced ones contribute technician hours for the shared
+  // invoice allocation; uninvoiced ones contribute directly to inFlight.
   wetCheckBillings?: PulseWetCheckBillingLike[];
   currentYear: number;
 }): PulseTechRow[] {
   const { techs, invoices, workOrders, billingSheets, wetCheckBillings = [], currentYear } = input;
 
-  const ytdInvoiceAmount = new Map<number, number>();
+  const ytdInvoices: InvoiceLike[] = [];
   for (const inv of invoices) {
     // Task #2013 — one excluded-status set, shared with the Accounting tab.
     if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) continue;
     if ((inv.invoiceYear ?? 0) !== currentYear) continue;
-    ytdInvoiceAmount.set(inv.id, toNum(inv.totalAmount));
+    ytdInvoices.push(inv);
   }
 
   const ytdByTech = new Map<number, number>();
-  const seenByTech = new Map<number, Set<number>>();
-
-  const creditInvoice = (techId: number, invoiceId: number | null | undefined) => {
-    if (invoiceId == null) return;
-    const amount = ytdInvoiceAmount.get(invoiceId);
-    if (amount == null) return;
-    let seen = seenByTech.get(techId);
-    if (!seen) { seen = new Set(); seenByTech.set(techId, seen); }
-    if (seen.has(invoiceId)) return;
-    seen.add(invoiceId);
-    ytdByTech.set(techId, (ytdByTech.get(techId) ?? 0) + amount);
-  };
-
-  for (const wo of workOrders) {
-    if (wo.assignedTechnicianId == null) continue;
-    creditInvoice(wo.assignedTechnicianId, wo.invoiceId);
-  }
-  for (const bs of billingSheets) {
-    if (bs.technicianId == null) continue;
-    creditInvoice(bs.technicianId, bs.invoiceId);
-  }
-  // Task #814 — invoiced WCBs credit the invoice to the technician.
-  for (const wcb of wetCheckBillings) {
-    if (wcb.technicianId == null) continue;
-    creditInvoice(wcb.technicianId, wcb.invoiceId);
+  const contributions: TechnicianContribution[] = [
+    ...workOrders.map((wo) => ({
+      invoiceId: wo.invoiceId,
+      technicianId: wo.assignedTechnicianId,
+      hours: wo.totalHours,
+    })),
+    ...billingSheets.map((bs) => ({
+      invoiceId: bs.invoiceId,
+      technicianId: bs.technicianId,
+      hours: bs.totalHours,
+    })),
+    ...wetCheckBillings.map((wcb) => ({
+      invoiceId: wcb.invoiceId,
+      technicianId: wcb.technicianId,
+      hours: wcb.totalHours,
+    })),
+  ];
+  for (const share of allocateInvoiceRevenueByTechnician(ytdInvoices, contributions)) {
+    ytdByTech.set(
+      share.technicianId,
+      (ytdByTech.get(share.technicianId) ?? 0) + share.revenue,
+    );
   }
 
   const inFlightByTech = new Map<number, number>();

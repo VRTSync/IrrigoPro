@@ -189,6 +189,7 @@ async function loadCustomers(
     id: customers.id,
     companyId: customers.companyId,
     contractType: customers.contractType,
+    laborRate: customers.laborRate,
     emergencyLaborRate: customers.emergencyLaborRate,
     name: customers.name,
     hiddenFromBilling: customers.hiddenFromBilling,
@@ -221,6 +222,7 @@ async function loadCustomers(
     id: c.id,
     companyId: c.companyId,
     contractType: c.contractType ?? null,
+    laborRate: c.laborRate ?? null,
     emergencyLaborRate: c.emergencyLaborRate ?? null,
     name: c.name ?? null,
     hiddenFromBilling: c.hiddenFromBilling ?? false,
@@ -488,6 +490,7 @@ async function loadWorkOrdersForInvoices(
     .select({
       invoiceId: workOrders.invoiceId,
       totalHours: workOrders.totalHours,
+      rateMode: workOrders.rateMode,
       assignedTechnicianId: workOrders.assignedTechnicianId,
       completedByUserId: workOrders.completedByUserId,
     })
@@ -496,6 +499,7 @@ async function loadWorkOrdersForInvoices(
   return rows.map((w) => ({
     invoiceId: w.invoiceId,
     totalHours: w.totalHours ?? null,
+    rateMode: w.rateMode ?? null,
     assignedTechnicianId: w.assignedTechnicianId ?? null,
     completedByUserId: w.completedByUserId ?? null,
   }));
@@ -512,6 +516,7 @@ async function loadBillingSheetsForInvoices(
     .select({
       invoiceId: billingSheets.invoiceId,
       totalHours: billingSheets.totalHours,
+      rateMode: billingSheets.rateMode,
       technicianId: billingSheets.technicianId,
     })
     .from(billingSheets)
@@ -519,6 +524,7 @@ async function loadBillingSheetsForInvoices(
   return rows.map((b) => ({
     invoiceId: b.invoiceId,
     totalHours: b.totalHours ?? null,
+    rateMode: b.rateMode ?? null,
     technicianId: b.technicianId ?? null,
   }));
 }
@@ -1098,10 +1104,7 @@ export function registerFinancialPulseRoutes(
         const customersById = new Map(cust.map((c) => [c.id, c]));
         const customerIds = cust.map((c) => c.id);
         // Task #814 — load uninvoiced WCBs alongside invoices.
-        const [allInvoices, allWcbsMix] = await Promise.all([
-          loadInvoicesForCustomers(customerIds),
-          loadAllWetCheckBillingsForCustomers(customerIds),
-        ]);
+        const allInvoices = await loadInvoicesForCustomers(customerIds);
         const invoiceIdsInWindow = allInvoices
           .filter((inv) => {
             if (INVOICE_EXCLUDED_STATUSES.has(inv.status))
@@ -1114,12 +1117,10 @@ export function registerFinancialPulseRoutes(
           .map((i) => i.id);
         const items = await loadInvoiceItemsForInvoices(invoiceIdsInWindow);
 
-        // Task #814 — load uninvoiced and invoiced WCBs in the window.
-        // `allWcbsMix` (BillableLike shape) has workDate/totalAmount but not subtotals,
-        // so run a single direct query scoped to this company's customers for both legs.
-        void allWcbsMix; // used only to confirm the parallel fetch; subtotals query below
+        // Uninvoiced WCBs are not represented by an invoice yet, so include
+        // their subtotals directly. Invoiced WCBs are already in invoice
+        // parts/labor subtotals and must not be added again.
         const uninvoicedWcbRows: WetCheckBillingLike[] = [];
-        const invoicedWcbRows: WetCheckBillingLike[] = [];
         if (customerIds.length > 0) {
           const wcbFull = await db
             .select({
@@ -1148,9 +1149,6 @@ export function registerFinancialPulseRoutes(
               if (!d || Number.isNaN(d.getTime())) continue;
               if (d < window.start || d >= window.end) continue;
               uninvoicedWcbRows.push(row);
-            } else if (invoiceIdsInWindow.includes(w.invoiceId)) {
-              // Invoiced: only include if the linked invoice falls in the window.
-              invoicedWcbRows.push(row);
             }
           }
         }
@@ -1161,7 +1159,6 @@ export function registerFinancialPulseRoutes(
           customersById,
           window,
           uninvoicedWetCheckBillings: uninvoicedWcbRows,
-          invoicedWetCheckBillings: invoicedWcbRows,
         });
         res.json({ ...mix, period, asOf: now.toISOString() });
       } catch (err) {
@@ -1371,11 +1368,17 @@ export function registerFinancialPulseRoutes(
             return d >= window.start && d < window.end;
           })
           .map((i) => i.id);
-        const items = await loadInvoiceItemsForInvoices(invoiceIdsInWindow);
+        const [items, wos, bss] = await Promise.all([
+          loadInvoiceItemsForInvoices(invoiceIdsInWindow),
+          loadWorkOrdersForInvoices(invoiceIdsInWindow),
+          loadBillingSheetsForInvoices(invoiceIdsInWindow),
+        ]);
         const rows = computeByServiceType({
           invoices: allInvoices,
           items,
           customersById,
+          workOrders: wos,
+          billingSheets: bss,
           window,
         });
 
@@ -1940,6 +1943,7 @@ async function loadPulseWorkOrdersForCustomers(
       createdAt: workOrders.createdAt,
       customerId: workOrders.customerId,
       assignedTechnicianId: workOrders.assignedTechnicianId,
+      totalHours: workOrders.totalHours,
     })
     .from(workOrders)
     .where(inArray(workOrders.customerId, customerIds));
@@ -1950,6 +1954,7 @@ async function loadPulseWorkOrdersForCustomers(
     createdAt: w.createdAt,
     customerId: w.customerId,
     assignedTechnicianId: w.assignedTechnicianId ?? null,
+    totalHours: w.totalHours ?? null,
   }));
 }
 
@@ -1965,6 +1970,7 @@ async function loadPulseBillingSheetForCustomers(
       createdAt: billingSheets.createdAt,
       customerId: billingSheets.customerId,
       technicianId: billingSheets.technicianId,
+      totalHours: billingSheets.totalHours,
     })
     .from(billingSheets)
     .where(inArray(billingSheets.customerId, customerIds));
@@ -1977,6 +1983,7 @@ async function loadPulseBillingSheetForCustomers(
       createdAt: b.createdAt,
       customerId: b.customerId,
       technicianId: b.technicianId ?? null,
+      totalHours: b.totalHours ?? null,
     }));
 }
 
@@ -1993,6 +2000,7 @@ async function loadPulseWetCheckBillingsForCustomers(
       workDate: wetCheckBillings.workDate,
       customerId: wetCheckBillings.customerId,
       technicianId: wetCheckBillings.technicianId,
+      totalHours: wetCheckBillings.totalHours,
     })
     .from(wetCheckBillings)
     .where(inArray(wetCheckBillings.customerId, customerIds));
@@ -2005,6 +2013,7 @@ async function loadPulseWetCheckBillingsForCustomers(
       workDate: w.workDate,
       customerId: w.customerId,
       technicianId: w.technicianId ?? null,
+      totalHours: w.totalHours ?? null,
     }));
 }
 
@@ -2088,8 +2097,7 @@ function techniciansCsv(rows: TechnicianRow[]): string {
     "Hours Billed",
     "Revenue",
     "Labor Cost",
-    "Margin %",
-    "Avg Ticket",
+    "Avg per invoice worked",
     "# Billing Sheets",
     "# Work Orders",
     "Parts Revenue",
@@ -2102,7 +2110,6 @@ function techniciansCsv(rows: TechnicianRow[]): string {
       fmtNum(r.hoursBilled),
       fmtNum(r.revenue),
       r.laborCost == null ? "" : fmtNum(r.laborCost),
-      r.marginPct == null ? "" : fmtNum(r.marginPct, 1),
       r.avgTicket == null ? "" : fmtNum(r.avgTicket),
       r.billingSheetCount,
       r.workOrderCount,
@@ -2116,6 +2123,7 @@ function techniciansCsv(rows: TechnicianRow[]): string {
 function serviceTypeCsv(rows: ServiceTypeRow[]): string {
   const header = csvRow([
     "Key",
+    "Group",
     "Label",
     "Revenue",
     "% of Total",
@@ -2125,6 +2133,7 @@ function serviceTypeCsv(rows: ServiceTypeRow[]): string {
   const body = rows.map((r) =>
     csvRow([
       r.key,
+      r.group,
       r.label,
       fmtNum(r.revenue),
       r.pctOfTotal == null ? "" : fmtNum(r.pctOfTotal, 1),

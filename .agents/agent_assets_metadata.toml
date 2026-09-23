@@ -39,3 +39,17 @@ uri = "file://.local/outputs/IrrigoPro.pptx"
 type = "slides"
 title = "IrrigoPro.pptx"
 logical_id = "4eacbb5d-0165-4c47-9274-f8232bb9719a"
+
+[[outputs]]
+id = "oSDkIbMHrs0ZG5wfbzYQd"
+uri = "file://screenshots/financial-pulse-attribution.jpg"
+type = "image"
+title = "Financial Pulse attribution proof"
+description = "Authenticated Accounting view showing the By Technician table after proportional attribution: Revenue remains, Margin % is removed, Labor cost remains, and Avg per invoice worked is visible. The development tenant has $0 MTD activity, so the visible table and Billed MTD reconcile at zero."
+logical_id = "56c98be1-066c-42fb-8d2b-cd709abf9af6"
+content_hash = "sha256:b78e76368b8bef48252e168e60aacb4fb8d1c19b6d0b6388b11304f262c81cf7"
+size = 223227
+mtime_ms = 1790187714998
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/56c98be1-066c-42fb-8d2b-cd709abf9af6/306f5b2e-cc04-4eb9-862f-599ffe879308"
+storage_version_token = "1790187744574934"
+content_type = "image/jpeg"
