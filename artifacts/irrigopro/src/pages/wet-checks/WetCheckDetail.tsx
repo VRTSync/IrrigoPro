@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth-context";
 import { countZonePhotos } from "@/lib/wet-check-photos";
+import { formatCurrency } from "@/lib/format-currency";
 import { apiRequest, asArray, queryClient, useArrayQuery, authedPdfUrl } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -131,6 +132,7 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
     autoBilledCount: number;
     autoBilledPartsTotal: string;
     autoBilledLaborTotal: string;
+    autoBilledLaborHours: string;
     autoBilledGrandTotal: string;
     pendingCount: number;
     pendingByGroup: { quick_fix: number; advanced: number; zone_issue: number };
@@ -1276,10 +1278,10 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
                     Auto-billed now
                   </div>
                   <div className="text-xs text-gray-600 mt-1">
-                    {preview.autoBilledCount} finding(s) marked complete · Parts ${preview.autoBilledPartsTotal} · Labor ${preview.autoBilledLaborTotal}
+                    {preview.autoBilledCount} finding(s) marked complete · Parts {formatCurrency(preview.autoBilledPartsTotal)} · Labor {preview.autoBilledLaborHours} hrs · {formatCurrency(preview.autoBilledLaborTotal)}
                   </div>
                   <div className="font-semibold mt-1" data-testid="preview-grand-total">
-                    Total: ${preview.autoBilledGrandTotal}
+                    Total: {formatCurrency(preview.autoBilledGrandTotal)}
                   </div>
                 </div>
               ) : (

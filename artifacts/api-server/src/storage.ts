@@ -193,7 +193,13 @@ import {
   type BillingPreviewWetCheckBilling,
   type BillingPreviewWorkOrder,
 } from "./billing-preview-sources";
-import { resolveIssueTypeKey, seedIssueTypeConfigsForCompany } from "./seeds/issue-type-configs";
+import { seedIssueTypeConfigsForCompany } from "./seeds/issue-type-configs";
+import {
+  buildLaborCatalog,
+  canAutoBillFinding,
+  computeAutoZoneRepairLaborHours,
+  computeRepairedInFieldTotals,
+} from "./lib/wet-check-repair-totals";
 import { seedFieldWorkTypesForCompany } from "./seeds/field-work-types";
 import {
   validateMerge,
@@ -1071,6 +1077,7 @@ export interface IStorage {
     autoBilledCount: number;
     autoBilledPartsTotal: string;
     autoBilledLaborTotal: string;
+    autoBilledLaborHours: string;
     autoBilledGrandTotal: string;
     pendingCount: number;
     pendingByGroup: { quick_fix: number; advanced: number; zone_issue: number };
@@ -9266,13 +9273,8 @@ export class DatabaseStorage implements IStorage {
       // must be gracefully re-routed to needs_review instead of throwing.
       // This eliminates the "Cannot auto-bill finding" submission blocker for
       // legacy data and for any future split-brain case.
-      const canAutoBill = (f: WetCheckFinding) =>
-        f.partId != null ||
-        Boolean(f.noPartNeeded) ||
-        LABOR_ONLY_ISSUE_TYPES.has(f.issueType ?? "");
-
-      const repairedBillable   = repaired.filter(f =>  canAutoBill(f));
-      const repairedUnbillable = repaired.filter(f => !canAutoBill(f));
+      const repairedBillable   = repaired.filter(f => canAutoBillFinding(f, LABOR_ONLY_ISSUE_TYPES));
+      const repairedUnbillable = repaired.filter(f => !canAutoBillFinding(f, LABOR_ONLY_ISSUE_TYPES));
       if (repairedUnbillable.length > 0) {
         await tx.update(wetCheckFindings)
           .set({ resolution: "pending", techDisposition: "needs_review" })
@@ -9321,8 +9323,8 @@ export class DatabaseStorage implements IStorage {
           f.workOrderId == null &&
           f.resolution !== "repaired_in_field",
       );
-      const completedBillable   = completedInFieldUnrouted.filter(f =>  canAutoBill(f));
-      const completedUnbillable = completedInFieldUnrouted.filter(f => !canAutoBill(f));
+      const completedBillable   = completedInFieldUnrouted.filter(f => canAutoBillFinding(f, LABOR_ONLY_ISSUE_TYPES));
+      const completedUnbillable = completedInFieldUnrouted.filter(f => !canAutoBillFinding(f, LABOR_ONLY_ISSUE_TYPES));
       if (completedUnbillable.length > 0) {
         await tx.update(wetCheckFindings)
           .set({ resolution: "pending", techDisposition: "needs_review" })
@@ -9393,11 +9395,56 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
+  private async _loadRepairTotalsInput(
+    exec: DbExecutor, wc: WetCheck, billed: WetCheckFinding[],
+  ): Promise<Omit<Parameters<typeof computeRepairedInFieldTotals>[0], "laborRate">> {
+    const zoneIds = [...new Set(billed.map(f => f.zoneRecordId))];
+    const zones = zoneIds.length
+      ? await exec.select({
+          id: wetCheckZoneRecords.id,
+          repairLaborHours: wetCheckZoneRecords.repairLaborHours,
+          repairLaborManuallySet: wetCheckZoneRecords.repairLaborManuallySet,
+        }).from(wetCheckZoneRecords).where(and(
+          inArray(wetCheckZoneRecords.id, zoneIds),
+          eq(wetCheckZoneRecords.wetCheckId, wc.id),
+        ))
+      : [];
+    if (zones.length !== zoneIds.length) throw new Error("Billed wet-check zone not found");
+    const rows = zoneIds.length
+      ? await exec.select({
+          zoneRecordId: wetCheckFindings.zoneRecordId,
+          issueType: wetCheckFindings.issueType,
+          quantity: wetCheckFindings.quantity,
+        }).from(wetCheckFindings).where(and(
+          inArray(wetCheckFindings.zoneRecordId, zoneIds),
+          eq(wetCheckFindings.wetCheckId, wc.id),
+        ))
+      : [];
+    const configs = await exec.select({
+      issueType: issueTypeConfigs.issueType,
+      defaultLaborHours: issueTypeConfigs.defaultLaborHours,
+    }).from(issueTypeConfigs).where(eq(issueTypeConfigs.companyId, wc.companyId));
+    const zoneFindings = new Map<number, Array<{ issueType: string; quantity: number | null }>>();
+    for (const row of rows) {
+      const group = zoneFindings.get(row.zoneRecordId) ?? [];
+      group.push({ issueType: row.issueType, quantity: row.quantity });
+      zoneFindings.set(row.zoneRecordId, group);
+    }
+    return {
+      billed,
+      zones,
+      zoneFindings,
+      catalog: buildLaborCatalog(configs),
+      wcBaseLaborHours: parseFloat(String(wc.totalLaborHours ?? "0")) || 0,
+    };
+  }
+
   async previewWetCheckSubmit(id: number, companyId: number): Promise<{
     autoBillEnabled: boolean;
     autoBilledCount: number;
     autoBilledPartsTotal: string;
     autoBilledLaborTotal: string;
+    autoBilledLaborHours: string;
     autoBilledGrandTotal: string;
     pendingCount: number;
     pendingByGroup: { quick_fix: number; advanced: number; zone_issue: number };
@@ -9415,28 +9462,13 @@ export class DatabaseStorage implements IStorage {
       f.wetCheckBillingId == null &&
       f.billingSheetId == null,
     );
-    // Task #464 — preview must mirror the submit guard exactly so the
-    // tech-facing modal totals match what _writeRepairedInFieldBilling
-    // will actually persist:
-    //   - With a part assigned → bill parts (qty × partPrice) + labor.
-    //   - With no part but `noPartNeeded` true → labor-only line
-    //     (qty 0 / partPrice 0); only labor counts.
-    //   - With no part AND no `noPartNeeded` → submit will throw, so we
-    //     exclude these from the totals (they're surfaced inline on the
-    //     submit CTA and block the button instead).
-    const billable = repaired.filter(f => f.partId != null || f.noPartNeeded);
-    let partsTotal = 0;
-    let laborTotal = 0;
-    if (autoBillEnabled) {
-      for (const f of billable) {
-        const isLaborOnly = f.partId == null && f.noPartNeeded;
-        const qty = isLaborOnly ? 0 : Number(f.quantity ?? 0);
-        const partPrice = isLaborOnly ? 0 : parseFloat(String(f.partPrice ?? "0"));
-        const laborHours = parseFloat(String(f.laborHours ?? "0"));
-        partsTotal += partPrice * qty;
-        laborTotal += laborHours * laborRate;
-      }
-    }
+    const billable = repaired.filter(f => canAutoBillFinding(f, LABOR_ONLY_ISSUE_TYPES));
+    const totals = autoBillEnabled && billable.length > 0
+      ? computeRepairedInFieldTotals({
+          ...(await this._loadRepairTotalsInput(db, wc, billable)),
+          laborRate,
+        })
+      : { partsSubtotal: 0, laborHours: 0, laborSubtotal: 0, grandTotal: 0 };
     const pendingByGroup = { quick_fix: 0, advanced: 0, zone_issue: 0 };
     let pendingCount = 0;
     for (const f of findings) {
@@ -9450,9 +9482,10 @@ export class DatabaseStorage implements IStorage {
     return {
       autoBillEnabled,
       autoBilledCount: autoBillEnabled ? billable.length : 0,
-      autoBilledPartsTotal: partsTotal.toFixed(2),
-      autoBilledLaborTotal: laborTotal.toFixed(2),
-      autoBilledGrandTotal: (partsTotal + laborTotal).toFixed(2),
+      autoBilledPartsTotal: totals.partsSubtotal.toFixed(2),
+      autoBilledLaborHours: totals.laborHours.toFixed(2),
+      autoBilledLaborTotal: totals.laborSubtotal.toFixed(2),
+      autoBilledGrandTotal: totals.grandTotal.toFixed(2),
       pendingCount,
       pendingByGroup,
     };
@@ -9504,7 +9537,7 @@ export class DatabaseStorage implements IStorage {
       // Also skip the check for issue types that are inherently labor-only
       // (e.g. head_adjustment) — the wizard auto-injects noPartNeeded=true
       // for those, but we guard here too so pre-existing rows are safe.
-      if (f.partId == null && !f.noPartNeeded && !LABOR_ONLY_ISSUE_TYPES.has(f.issueType)) {
+      if (!canAutoBillFinding(f, LABOR_ONLY_ISSUE_TYPES)) {
         throw new Error(
           `Cannot auto-bill finding ${f.id}: marked complete but has no part assigned. ` +
           `Add a part before submitting, tick "No part needed" for a labor-only fix, ` +
@@ -9524,21 +9557,6 @@ export class DatabaseStorage implements IStorage {
         throw new Error(`Cannot auto-bill finding ${f.id}: laborHours must be >= 0 (got ${f.laborHours}).`);
       }
     }
-    const lines = repaired.map(f => {
-      // Labor-only lines: qty 0, unit price 0, total parts 0. Labor still
-      // flows from the per-finding laborHours × customer rate as normal.
-      if (f.partId == null && f.noPartNeeded) {
-        const laborHours = parseFloat(String(f.laborHours ?? "0"));
-        return { qty: 0, partPrice: 0, laborHours, partsTotal: 0 };
-      }
-      const qty = Number(f.quantity);
-      const partPrice = parseFloat(String(f.partPrice ?? "0"));
-      const laborHours = parseFloat(String(f.laborHours ?? "0"));
-      const partsTotal = partPrice * qty;
-      return { qty, partPrice, laborHours, partsTotal };
-    });
-    const newPartsSubtotal = lines.reduce((s, l) => s + l.partsTotal, 0);
-
     // Task #753 (Slice 4 Option B) — zone-level repairLaborHours is the
     // authoritative labor source for WCB billing totals.
     //
@@ -9563,16 +9581,12 @@ export class DatabaseStorage implements IStorage {
       await this._recomputeZoneRepairLaborIfAuto(tx, zoneId, wc.companyId);
     }
 
-    const newZoneRows = newZoneIds.length > 0
-      ? await tx.select({ id: wetCheckZoneRecords.id, repairLaborHours: wetCheckZoneRecords.repairLaborHours })
-          .from(wetCheckZoneRecords)
-          .where(inArray(wetCheckZoneRecords.id, newZoneIds))
-      : [];
-    const newZoneRepairHours = newZoneRows.reduce(
-      (s, zr) => s + parseFloat(String(zr.repairLaborHours ?? "0")), 0,
-    );
-    // For the new-WCB branch: total = wc base + new zone repair hours.
-    const newLaborHours = wcBaseLaborHours + newZoneRepairHours;
+    const totals = computeRepairedInFieldTotals({
+      ...(await this._loadRepairTotalsInput(tx, wc, repaired)),
+      laborRate: customerLaborRate,
+    });
+    const newPartsSubtotal = totals.partsSubtotal;
+    const newLaborHours = totals.laborHours;
 
     let wcbId: number;
     if (priorWcbId != null) {
@@ -9816,22 +9830,7 @@ export class DatabaseStorage implements IStorage {
         defaultLaborHours: issueTypeConfigs.defaultLaborHours,
       }).from(issueTypeConfigs).where(eq(issueTypeConfigs.companyId, companyId));
 
-      // B2b fix — normalize every catalog key so mixed-case or
-      // space/dash variants in the DB (legacy data) still resolve.
-      const configMap = new Map(
-        configs.map((c) => [resolveIssueTypeKey(c.issueType), c.defaultLaborHours]),
-      );
-
-      for (const f of findings) {
-        // B2b fix — resolve the finding's issueType before lookup.
-        const raw = configMap.get(resolveIssueTypeKey(f.issueType));
-        if (raw) {
-          const perUnit = parseFloat(String(raw)) || 0;
-          // B2c fix — multiply by quantity (was previously missing).
-          const qty = typeof f.quantity === "number" ? f.quantity : parseInt(String(f.quantity ?? "1"), 10);
-          totalHours += perUnit * (isNaN(qty) || qty < 1 ? 1 : qty);
-        }
-      }
+      totalHours = computeAutoZoneRepairLaborHours(findings, buildLaborCatalog(configs));
     }
 
     await tx.update(wetCheckZoneRecords)

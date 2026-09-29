@@ -204,6 +204,18 @@ args = "action-board-api"
 task = "workflow.run"
 args = "action-board-ui"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "wet-check-labor-shared"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "wet-check-repair-totals"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "wet-check-submit-preview-parity"
+
 [[workflows.workflow]]
 name = "auth-middleware-coverage"
 author = "agent"
@@ -720,6 +732,39 @@ isValidation = true
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/irrigopro exec vitest run src/components/layout/budget-route-nav-parity.test.ts src/pages/action-board.test.tsx"
+
+[[workflows.workflow]]
+name = "wet-check-labor-shared"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/shared exec node --import tsx --test --test-reporter=spec src/wet-check-labor.test.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "wet-check-repair-totals"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/lib/wet-check-repair-totals.test.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "wet-check-submit-preview-parity"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/wet-check-submit-preview-parity.test.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [agent]
 stack = "PNPM_WORKSPACE"
