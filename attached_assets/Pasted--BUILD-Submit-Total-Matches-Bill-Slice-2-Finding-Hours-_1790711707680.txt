@@ -1,0 +1,172 @@
+# BUILD — Submit Total Matches Bill, Slice 2: Finding Hours Equal Catalog × Quantity
+
+This is a single self-contained task. Build exactly what is described. Do not deviate, do not
+re-decide the locked decisions below, and do not merge this with Slice 1. **Slice 1 must be merged
+first**: this ticket imports `catalogLaborHours` from `@workspace/shared` and
+`buildLaborCatalog` / `catalogLaborHoursForFinding` from
+`artifacts/api-server/src/lib/wet-check-repair-totals.ts`, both created there.
+
+## What & Why
+
+After Slice 1, the tech's Submit dialog shows the real bill. But while working, the tech still sees
+a wrong number on every finding with quantity above 1.
+
+In service mode, the finding form prefills **Labor hrs** with the catalog default for one unit
+(`artifacts/irrigopro/src/pages/wet-checks/ZoneScreen.tsx:117`) and lets the tech step it
+(`:394-401`). The zone's finding list then shows that value (`:1830`). The bill ignores it: labor
+comes from zone hours, which are catalog × quantity (`storage.ts` `_recomputeZoneRepairLaborIfAuto`).
+So 3 heads shows **0.25h** on the finding and bills **0.75h**. The stepper is also misleading — a
+tech who raises it believes labor went up, and the bill never sees it.
+
+This ticket makes each service finding's hours equal catalog × quantity, shown read-only, and makes
+the server store that value no matter what the client sends.
+
+## Design context (locked decisions — do not relitigate)
+
+1. **Service-mode finding hours are derived, not entered (decided, Randy 2026-09-29).**
+   `laborHours = catalog defaultLaborHours × quantity`, same arithmetic the bill uses. The tech
+   cannot edit it. Zone-level adjustments stay on the existing zone card (decision 5).
+2. **The server is authoritative.** For a service-mode, non-`custom_review`, billable finding
+   (create: `repairedInField: true`; patch: `repairedInField: true` in the body or stored
+   `resolution = "repaired_in_field"`), the server overwrites `laborHours` with the catalog value and
+   ignores the client's number. This also covers the Expo app and any queued offline payload.
+3. **No 0.25 snapping for these findings.** The stored value must equal the zone contribution
+   exactly, and catalog values need not be quarter-hours (Artisan Pines billed 24.05h). The Task
+   #1757 floor and quantization still apply to inspection mode and to non-billable service saves.
+4. **Inspection mode is unchanged.** Its "Est. labor hrs" stepper stays editable and feeds the
+   estimate (`storage.ts` convert path, `calc(f).laborHours`). Every guard below is service-only.
+5. **The zone card "Repair labor for this zone" (`ZoneScreen.tsx:2089-2131`) is not touched.** It is
+   the one place a tech can override a zone's hours; the bill and Slice 1's preview already honor it.
+6. **No backfill.** Findings already saved on in-progress wet checks keep their stored value until
+   next edited. Per-finding hours are display-only for billing; the Submit total (Slice 1) is already
+   correct for them. Submitted wet checks are never rewritten.
+7. **Catalog lookup key.** Server: `resolveIssueTypeKey` against `listAllIssueTypeConfigs(companyId)`
+   (active and inactive — the same set the zone recompute uses, `storage.ts:9815-9817`). Client: the
+   `cfg` it already resolves (`ZoneScreen.tsx:98`). If they ever disagree for a legacy key, the
+   server's stored value wins on the next refetch.
+
+## Done looks like
+
+- Service wet check, new finding, head replacement: qty 1 shows **Labor hrs 0.25**; changing qty to
+  3 immediately shows **0.75** with `0.25 × 3` underneath. There is no stepper.
+- Saving and reopening shows 0.75; the zone's finding list row reads `qty 3 · 0.75h`.
+- Editing an existing finding's quantity from 3 to 5 stores and shows 1.25.
+- A PATCH or POST that sends `laborHours: "4.00"` for a service billable finding stores the catalog
+  value, not 4.00.
+- Inspection wet check: the stepper is present, editable, and saves as it does today.
+
+## Out of scope
+
+- The zone repair-labor card and its endpoints.
+- `FindingSheet.tsx`. It is only re-exported (`pages/wet-checks.tsx:9`) and rendered nowhere
+  (`grep -rn "<FindingSheet" artifacts/irrigopro/src` → no match). Its removal is a separate Rule 3
+  ticket; do not edit it here.
+- The Expo app UI (`artifacts/irrigopro-mobile`). Its stepper value is overwritten server-side by
+  decision 2; its screen is not changed.
+- Backfilling stored hours (decision 6). Removing `wc.totalLaborHours` from the bill.
+
+## Steps
+
+1. **Storage: expose quantity on the finding snapshot.** `getWetCheckFindingSnapshot`
+   (`storage.ts:9002-9020`, interface `:1043-1048`): add `quantity: number` to the select and the
+   return type. Update the route's local type at `routes/routes.ts:17829` to match.
+
+2. **Storage: one lookup for a finding's catalog hours.** Add to `IStorage` and `DatabaseStorage`:
+   ```ts
+   async getCatalogLaborHoursForFinding(companyId: number, issueType: string, quantity: number): Promise<string>
+   ```
+   Body: `buildLaborCatalog(await this.listAllIssueTypeConfigs(companyId))`, then
+   `catalogLaborHoursForFinding({ issueType, quantity }, catalog).toFixed(2)`. Company-scoped by
+   argument (Rule 1). No other caller computes catalog hours for a finding.
+
+3. **Create route** (`routes/routes.ts`, `POST` finding handler, labor block `:17734-17749`): keep the
+   NaN/negative 400. Then compute:
+   - `isPostCustom` → `"0.00"` (unchanged).
+   - `wcMode === "service" && body.repairedInField` →
+     `await storage.getCatalogLaborHoursForFinding(cid, body.issueType, body.quantity)`.
+     Replaces the `Math.max(0.25, …)` branch.
+   - otherwise → the existing quarter-hour quantize (unchanged).
+   Update the comment above the block to name these three cases and cite this ticket.
+
+4. **Patch route** (labor block `:17890-17911`). Define
+   `isBillableServicePatch` exactly as today (`:17901-17903`). When it is true, set
+   `(body as any).laborHours = await storage.getCatalogLaborHoursForFinding(cid,
+   effectivePatchIssueType, body.quantity ?? findingSnapshot.quantity)` — **whether or not** the body
+   contained `laborHours`, so a quantity-only or issue-type-only edit also recomputes it. Move that
+   branch out of the `if (body.laborHours !== undefined)` block; the custom and non-billable branches
+   stay inside it unchanged. `effectivePatchIssueType` already exists (`:17845`).
+
+5. **Payload builder** (`artifacts/irrigopro/src/lib/finding-save-payload.ts`): add optional
+   `exactLaborHours?: boolean` to `FindingSavePayloadInput` (`:53-61`). In `buildFindingSavePayload`
+   (`:101`): when true, `laborHours = (parseFloat(input.laborHours) || 0).toFixed(2)`; otherwise the
+   existing `quantizeLaborHours` path. This keeps the offline mirror showing the same value the
+   server will store.
+
+6. **ZoneScreen form** (`ZoneScreen.tsx`):
+   - Import `catalogLaborHours` from `@workspace/shared` (the package is already imported at `:16`).
+   - Below the `cfg` lookup (`:98`):
+     ```ts
+     const isServiceForm = wetCheckMode !== "inspection";
+     const derivedLaborHours = catalogLaborHours(cfg?.defaultLaborHours, quantity).toFixed(2);
+     ```
+     (`wetCheckMode !== "inspection"` is the existing service test used at `:158`.)
+   - In `saveMut` (`:162-170`) pass `laborHours: isServiceForm ? derivedLaborHours : laborHours` and
+     `exactLaborHours: isServiceForm`.
+   - Replace the labor cell (`:394-402`). Inspection: the existing `LaborHoursStepper`, unchanged.
+     Service:
+     ```tsx
+     <div data-testid="inline-finding-labor">
+       <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">Labor hrs</div>
+       <div className="h-11 flex items-center text-base font-medium text-gray-900"
+            data-testid="inline-finding-labor-derived">{derivedLaborHours}</div>
+       <div className="text-xs text-gray-500" data-testid="inline-finding-labor-formula">
+         {cfg?.defaultLaborHours ?? "0.00"} × {Math.max(1, parseInt(quantity) || 1)}
+       </div>
+     </div>
+     ```
+     `h-11` matches the Qty input height beside it (`:390`) so the two columns align.
+   - The `laborHours` state and its setters at `:109` / `:117` stay; inspection still uses them.
+
+## Tests
+
+Register each new test file as a **validation command** — the repo is past its workflow cap; do not
+add a workflow. If a component test opens a Radix `Select`, copy the pointer-capture shim from an
+existing test that already drives one; do not debug it fresh.
+
+**New `artifacts/api-server/src/routes/finding-catalog-labor.test.ts`** (real DB, real routes: mount
+the production `registerRoutes` on a fresh Express app exactly as `routes/financial-pulse-wcb.test.ts:350-480`
+does; fixtures and cleanup follow `wc-labor-quantity-multiplier.test.ts`. Do not use a stub app —
+`zone-repair-labor-routes.test.ts` stubs storage and would not exercise steps 3-4):
+1. Service, create head_replacement, qty 3, `repairedInField: true`, body `laborHours: "2.00"` → stored `"0.75"`.
+2. Service, patch that finding `{ quantity: 5 }` only → `"1.25"`.
+3. Service, patch `{ laborHours: "4.00" }` only → stays `"1.25"`.
+4. Service, patch `{ issueType: "leak_repair" }` (qty 5) → `"5.00"`.
+5. Service, catalog row edited to `"0.05"`, qty 3 → `"0.15"` (no snapping).
+6. Service, issue type with no catalog row → `"0.00"`.
+7. Service, `custom_review` → `"0.00"` (unchanged).
+8. Inspection, create qty 3, `laborHours: "1.30"` → `"1.25"` (unchanged quantize).
+9. Tenancy: company A's catalog value is never applied to company B's finding (two companies, same
+   issue type, different defaults).
+
+**Update `routes/finding-save-gate.test.ts`**: its local replica of the route's labor branches
+(`:58-70`, `:103-120`) must mirror steps 3-4, and the service-billable cases assert the catalog value.
+
+**Update `lib/finding-save-payload.test.ts`**: add `exactLaborHours: true` with `"0.15"` → `"0.15"`;
+existing cases unchanged.
+
+**New `artifacts/irrigopro/src/pages/wet-checks/zone-screen-derived-labor.test.tsx`** (reuse the
+render harness in `pages/wet-checks-zone-leak.test.tsx`):
+10. Service mode: `inline-finding-labor-derived` shows `0.25`; set qty to 3 → `0.75`,
+    `inline-finding-labor-formula` shows `0.25 × 3`; no labor stepper is rendered.
+11. Inspection mode: the stepper renders and `inline-finding-labor-derived` does not.
+
+## Acceptance checklist (Rule 7 — every line needs file:line + proof)
+
+- [ ] `getCatalogLaborHoursForFinding` exists and is called from exactly the create and patch
+      handlers (grep output).
+- [ ] No `Math.max(0.25` remains on the service-billable branch of either handler (grep output).
+- [ ] Tests 1-11 and the two updated files pass; `wc-labor-quantity-multiplier.test.ts` and Slice
+      1's parity test still pass.
+- [ ] Screenshot: service finding with qty 3 showing 0.75 and `0.25 × 3`, plus the zone list row.
+- [ ] Screenshot: inspection finding form with the editable stepper.
+- [ ] Deploy status stated.
