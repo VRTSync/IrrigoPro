@@ -133,6 +133,18 @@ export function ControllerSelectionPage({ customerId, branchName }: ControllerSe
     queryKey: ["/api/customers", customerId],
     queryFn: () => apiRequest(`/api/customers/${customerId}`),
   });
+  // Recheck immediately before start: this page can be opened directly, and
+  // sessionStorage may have discarded the mode chosen on the previous screen.
+  const {
+    data: modePreview,
+    isLoading: loadingMode,
+    isError: modeError,
+  } = useQuery<{ mode: "service" | "inspection"; forcedByBudget: boolean }>({
+    queryKey: [`/api/wet-checks/customer/${customerId}/create-mode`],
+    queryFn: () => apiRequest(`/api/wet-checks/customer/${customerId}/create-mode`),
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
 
   // Task #315 — when a branch is selected, scope the controllers fetch to
   // that branch via ?branch=<name>. The server lazily bootstraps the branch
@@ -220,7 +232,7 @@ export function ControllerSelectionPage({ customerId, branchName }: ControllerSe
 
   const startMutation = useMutation({
     mutationFn: async () => {
-      const mode = consumePendingMode();
+      const mode = modePreview?.forcedByBudget ? "inspection" : consumePendingMode();
       // 1. Create the wet check record. The server is authoritative for numControllers —
       //    it derives it from customer.totalControllers, so we do not pass it here.
       //    branchName is included so the server scopes the check and bootstraps the
@@ -260,7 +272,7 @@ export function ControllerSelectionPage({ customerId, branchName }: ControllerSe
   // ensurePropertyControllers and records numControllers=0.
   const blankStartMutation = useMutation({
     mutationFn: async () => {
-      const mode = consumePendingMode();
+      const mode = modePreview?.forcedByBudget ? "inspection" : consumePendingMode();
       const wc = await apiRequest("/api/wet-checks", "POST", {
         customerId,
         weather: weather ?? null,
@@ -368,6 +380,21 @@ export function ControllerSelectionPage({ customerId, branchName }: ControllerSe
           </p>
         )}
       </div>
+
+      {modePreview?.forcedByBudget && (
+        <div className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950" role="status" data-testid="over-budget-inspection-notice">
+          <p className="font-semibold">This visit will be an inspection</p>
+          <p className="mt-1 text-sm">
+            This customer has no monthly budget headroom. Document issues, do not make repairs,
+            and the visit will return as an estimate for approval.
+          </p>
+        </div>
+      )}
+      {modeError && (
+        <p className="mb-5 text-sm text-red-900" role="alert">
+          Couldn't check this customer's budget mode. Retry before starting the wet check.
+        </p>
+      )}
 
       {/* ── Controller grid ── */}
       {hasControllers ? (
@@ -491,7 +518,7 @@ export function ControllerSelectionPage({ customerId, branchName }: ControllerSe
           )}
           <Button
             className="w-full h-12 text-base font-semibold"
-            disabled={!canBegin || isBusy}
+            disabled={!canBegin || isBusy || loadingMode || modeError}
             onClick={() => startMutation.mutate()}
             data-testid="btn-begin-inspection"
           >
@@ -512,7 +539,7 @@ export function ControllerSelectionPage({ customerId, branchName }: ControllerSe
         <Button
           variant="outline"
           className="w-full h-12 text-base font-medium"
-          disabled={isBusy}
+          disabled={isBusy || loadingMode || modeError}
           onClick={() => blankStartMutation.mutate()}
           data-testid="btn-blank-start"
         >

@@ -164,7 +164,9 @@ export function buildActionBoardRow(args: {
     budget,
     lane,
     headroom,
-    inspectionOnly: due && (headroom ?? 0) <= 0,
+    // The budget row uses the same wet-check mode resolver as POST /api/wet-checks.
+    // Keep the verdict independent of cadence; the UI shows it only for due visits.
+    inspectionOnly: budget.inspectionOnly,
     openWorkOrders: normalizedWorkOrders.map((w) => ({ ...w, preApproved: w.estimateId != null })),
     preApproved,
     openWorkOrderTotal: openTotal,

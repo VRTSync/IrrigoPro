@@ -26,6 +26,7 @@ import {
   wetCheckCreateBody,
   normalizeBranchName,
   checkBranchGate,
+  resolveWetCheckMode,
 } from "./wet-check-create-gate";
 
 // ─── Pure unit tests on normalizeBranchName + checkBranchGate ────────────────
@@ -70,6 +71,35 @@ describe("checkBranchGate — multi-branch customer must supply a branch", () =>
       err,
       "Branch selection required for this customer — select a branch before starting a wet check.",
     );
+  });
+});
+
+describe("resolveWetCheckMode — monthly headroom gate", () => {
+  it("keeps service above zero", () => {
+    assert.equal(resolveWetCheckMode(0.01, "service"), "service");
+  });
+
+  it("forces service to inspection at exactly zero", () => {
+    assert.equal(resolveWetCheckMode(0, "service"), "inspection");
+  });
+
+  it("forces service to inspection below zero", () => {
+    assert.equal(resolveWetCheckMode(-25, "service"), "inspection");
+  });
+
+  it("leaves an unset allocation unchanged rather than treating null as zero", () => {
+    assert.equal(resolveWetCheckMode(null, "service"), "service");
+  });
+
+  it("never changes an explicitly requested inspection", () => {
+    for (const headroom of [100, 0, -1, null]) {
+      assert.equal(resolveWetCheckMode(headroom, "inspection"), "inspection");
+    }
+  });
+
+  it("defaults an omitted requested mode to service before applying the gate", () => {
+    assert.equal(resolveWetCheckMode(1), "service");
+    assert.equal(resolveWetCheckMode(0), "inspection");
   });
 });
 

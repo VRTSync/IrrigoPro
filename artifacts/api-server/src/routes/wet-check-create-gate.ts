@@ -23,6 +23,7 @@ export const wetCheckCreateBody = z.object({
 }).strict();
 
 export type WetCheckCreateBody = z.infer<typeof wetCheckCreateBody>;
+export type WetCheckMode = NonNullable<WetCheckCreateBody["mode"]>;
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
@@ -48,4 +49,17 @@ export function checkBranchGate(
     return "Branch selection required for this customer — select a branch before starting a wet check.";
   }
   return null;
+}
+
+/**
+ * Over-budget visits still happen, but as inspections. A missing allocation is
+ * represented by null and never treated as zero headroom.
+ */
+export function resolveWetCheckMode(
+  headroom: number | null,
+  requestedMode: WetCheckMode = "service",
+): WetCheckMode {
+  return requestedMode === "service" && headroom !== null && headroom <= 0
+    ? "inspection"
+    : requestedMode;
 }

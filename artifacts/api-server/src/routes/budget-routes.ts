@@ -31,6 +31,7 @@ import {
   resetMonthOverride,
 } from "../services/generate-budget-months";
 import { recordAuditEvent } from "./audit-log";
+import { resolveWetCheckMode } from "./wet-check-create-gate";
 import {
   canonicalBudgetGoalRows,
   classifyBudgetGoalRows,
@@ -99,6 +100,10 @@ export function buildBudgetStatusRow(input: BudgetStatusRowInput) {
     seasonToDateInvoiced: seasonSpend.invoiced,
     seasonToDatePending: seasonSpend.pendingNotBilled,
     annualGoal: parseDecimal(customer.annualBudgetGoal),
+    inspectionOnly: resolveWetCheckMode(
+      allocation === null ? null : allocation - monthSpend.total,
+      "service",
+    ) === "inspection",
   } as const;
 }
 
@@ -642,6 +647,10 @@ export function registerBudgetRoutes(
           monthlySpend: monthly.spend,
           monthlyInvoiced: monthSpend.invoiced,
           monthlyPendingNotBilled: monthSpend.pendingNotBilled,
+          inspectionOnly: resolveWetCheckMode(
+            monthlyAllocation === null ? null : monthlyAllocation - monthSpend.total,
+            "service",
+          ) === "inspection",
           monthlyPercent: monthly.percent,
           monthlyStatus: monthly.status,
           seasonToDateTarget,

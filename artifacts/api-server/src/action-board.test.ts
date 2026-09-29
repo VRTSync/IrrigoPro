@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { buildActionBoardRow } from "./routes/manager-workspace-routes";
+import { buildBudgetStatusRow } from "./routes/budget-routes";
 import express from "express";
 import { registerManagerWorkspaceRoutes, _setWorkOrdersForTests, _setWetChecksForTests, _setActionBoardCustomersForTests, _setActionBoardAllocationsForTests, _setActionBoardSpendForTests, _resetManagerWorkspaceOverridesForTests } from "./routes/manager-workspace-routes";
 
@@ -8,18 +9,38 @@ const customer = { id: 1, name: "Property", annualBudgetGoal: "12000" };
 function row(total: number, allocation = 1000, work: any[] = [], check: any = null, month = 9) {
   return buildActionBoardRow({
     customer,
-    budget: {
-      customerId: 1, customerName: "Property", allocation, invoicedAmount: total,
-      pendingAmount: 0, totalSpend: total, fillPercent: total / allocation * 100,
-      status: total >= allocation ? "Stop" : "Go", softThresholdPercent: 75,
-      hardThresholdPercent: 100, seasonToDateTarget: 0, seasonToDateSpend: total,
-      seasonToDateInvoiced: total, seasonToDatePending: 0, annualGoal: 12000,
-    } as any,
+    budget: buildBudgetStatusRow({
+      customer,
+      allocation,
+      monthSpend: { invoiced: total, pendingNotBilled: 0, total },
+      seasonTarget: 0,
+      seasonSpend: { invoiced: total, pendingNotBilled: 0, total },
+    }),
     openWorkOrders: work, newestWetCheck: check, year: 2026, month,
   });
 }
 
 describe("Action Board lane boundaries", () => {
+  it("uses the creation gate's inspection verdict at positive, zero and negative headroom", () => {
+    assert.equal(row(999).inspectionOnly, false);
+    assert.equal(row(1000).inspectionOnly, true);
+    assert.equal(row(1001).inspectionOnly, true);
+    const unbudgeted = buildActionBoardRow({
+      customer,
+      budget: buildBudgetStatusRow({
+        customer,
+        allocation: null,
+        monthSpend: { invoiced: 0, pendingNotBilled: 0, total: 0 },
+        seasonTarget: 0,
+        seasonSpend: { invoiced: 0, pendingNotBilled: 0, total: 0 },
+      }),
+      openWorkOrders: [],
+      newestWetCheck: null,
+      year: 2026,
+      month: 9,
+    });
+    assert.equal(unbudgeted.inspectionOnly, false);
+  });
   it("covers fit, exceed, exact zero, due headroom, and nothing pending", () => {
     assert.equal(row(500, 1000, [{ estimatedTotal: 500 }]).lane, "clear_to_send");
     assert.equal(row(500, 1000, [{ estimatedTotal: 501 }]).lane, "over_budget_nothing_approved");

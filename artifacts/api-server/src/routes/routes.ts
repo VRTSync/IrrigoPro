@@ -15,7 +15,7 @@ import {
 } from "../storage";
 import { classifyAndLog as _classifyAndLog } from "./route-error-helpers";
 import { registerWetCheckPhotoAttachRoutes } from "./wet-check-photo-attach-route";
-import { wetCheckCreateBody, normalizeBranchName, checkBranchGate } from "./wet-check-create-gate";
+import { registerWetCheckCreateRoutes } from "./wet-check-create-route";
 import { registerWorkOrderZoneRoutes } from "./work-order-zone-route";
 import type { InsertInvoice, InsertCustomer } from "@workspace/db";
 import { PRICING_FIELDS_TO_STRIP } from "@workspace/db";
@@ -17188,94 +17188,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // wet-check-create-gate.ts so they can be unit-tested without standing
   // up the full registerRoutes() side effects (Task #1463).
 
-  app.post("/api/wet-checks", requireAuthentication, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
-    const parsed = wetCheckCreateBody.safeParse(req.body ?? {});
-    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
-    const body = parsed.data;
-    try {
-      const customer = await storage.getCustomer(body.customerId);
-      if (!customer || customer.companyId !== cid) { res.status(404).json({ message: "Customer not found" }); return; }
-      const techId = req.authenticatedUserId;
-      if (!techId) { res.status(401).json({ message: "Authentication required" }); return; }
-      const tech = await storage.getUser(techId);
-      if (!tech) { res.status(401).json({ message: "User not found" }); return; }
-
-      // Normalise branchName: empty string → null (consistent with
-      // wet_check_billings / work_orders convention).
-      const branchName = normalizeBranchName(body.branchName);
-
-      // Gate: if the customer has branches, a branch must be selected.
-      const customerBranches = Array.isArray(customer.branches) ? customer.branches as string[] : [];
-      const branchGateError = checkBranchGate(customerBranches, branchName);
-      if (branchGateError) {
-        res.status(400).json({ message: branchGateError });
-        return;
-      }
-
-      // Resume an existing in-progress wet check at this property/branch for this
-      // tech before creating a new one. Idempotent for the common "tap New again" case.
-      // Branch-scoped so a tech can have one in-progress check per branch.
-      const existing = await storage.findActiveWetCheck(cid, body.customerId, tech.id, branchName);
-      if (existing) {
-        res.status(200).json(existing);
-        return;
-      }
-
-      // blankStart=true: caller confirmed no site-map controllers.
-      // Skip grid seeding entirely; numControllers=0. Profile is NOT consulted.
-      let numControllers: number;
-      if (body.blankStart) {
-        numControllers = 0;
-      } else {
-        // branchName is null for customer-level; irrigation_controllers stores
-        // customer-level rows under branchName='' — use "" as the branchKey so
-        // listIrrigationControllers applies the branch filter correctly.
-        const branchKey = branchName ?? "";
-        const irrigCtrlsForWC = await storage.listIrrigationControllers(cid, body.customerId, branchKey);
-        let gridResult = buildWetCheckGrid(irrigCtrlsForWC);
-        // When no irrigation profile exists yet, seed from customers.totalControllers
-        // (clamped 1–26). property_controllers is no longer available.
-        if (gridResult.seedConfigs.length === 0) {
-          const WC_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-          const numCtrl = Math.min(26, Math.max(1, customer.totalControllers ?? 1));
-          gridResult = {
-            numControllers: numCtrl,
-            seedConfigs: Array.from({ length: numCtrl }, (_, i) => ({
-              name: `Controller ${WC_ALPHABET[i]}`,
-              zoneCount: null,
-            })),
-          };
-        }
-        numControllers = gridResult.numControllers;
-        await storage.ensureIrrigationControllers(cid, body.customerId, gridResult.seedConfigs, branchName);
-      }
-
-      const wc = await storage.createWetCheck({
-        companyId: cid,
-        customerId: body.customerId,
-        technicianId: tech.id,
-        technicianName: tech.name,
-        customerName: customer.name,
-        propertyAddress: customer.address ?? null,
-        numControllers,
-        status: "in_progress",
-        weather: body.weather ?? null,
-        notes: body.notes ?? null,
-        clientId: body.clientId ?? null,
-        mode: body.mode ?? "service",
-        branchName,
-      });
-      res.status(201).json(wc);
-    } catch (e: any) {
-      const { status, message } = classifyAndLog(req, e, {
-        op: "createWetCheck",
-        ctx: { cid, customerId: body.customerId },
-        fallbackMessage: "Couldn't start wet check — please retry",
-      });
-      res.status(status).json({ message });
-    }
+  registerWetCheckCreateRoutes(app, {
+    requireAuthentication,
+    requireCompanyId,
+    isFieldRole,
+    classifyAndLog: _classifyAndLog,
+    recordLifecycleAudit,
   });
 
   const wetCheckPatchBody = z.object({
