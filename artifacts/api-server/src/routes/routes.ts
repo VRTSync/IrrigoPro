@@ -17731,24 +17731,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
     }
-    // Snap laborHours to nearest 0.25h. Reject NaN/negative.
-    // Floor rules (Task #1757 — fix over-application of the 0.25 floor):
-    //   custom_review (flag for manager) → always "0.00" (no part/qty/labor stored)
-    //   billable service capture (non-custom + service mode + repairedInField) → floor 0.25
-    //   all other (inspection mode, or non-billable service) → quantize, no floor
+    // Task #2056: custom review stores zero; completed service derives catalog × quantity;
+    // inspection and non-billable service still quantize to quarter-hours.
+    // Reject invalid client input even when completed service overrides its value.
     const rawLaborNum = parseFloat(String(body.laborHours));
     if (!isFinite(rawLaborNum) || rawLaborNum < 0) {
       res.status(400).json({ message: "Labor hours must be a non-negative number." });
       return;
     }
     const isPostCustom = body.issueType === "custom_review";
-    const quantizedLaborHours = isPostCustom
-      ? "0.00"
-      : (wcMode === "service" && body.repairedInField)
-        ? Math.max(0.25, Math.round(rawLaborNum * 4) / 4).toFixed(2)
-        : (Math.round(rawLaborNum * 4) / 4).toFixed(2);
-
     try {
+      const quantizedLaborHours = isPostCustom
+        ? "0.00"
+        : (wcMode === "service" && body.repairedInField)
+          ? await storage.getCatalogLaborHoursForFinding(cid, body.issueType, body.quantity)
+          : (Math.round(rawLaborNum * 4) / 4).toFixed(2);
       const userId = req.authenticatedUserId ?? null;
       const created = await storage.createWetCheckFinding(parseInt(req.params.id), cid, {
         issueType: body.issueType,
@@ -17826,7 +17823,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     //   (a) the service-mode complete-or-flag guards below,
     //   (b) the labor-quantize branch (effective issue type),
     //   (c) the always-force "0.00" for custom_review findings (even notes-only PATCHes).
-    let findingSnapshot: { issueType: string; resolution: string; partId: number | null; noPartNeeded: boolean } | null = null;
+    let findingSnapshot: { issueType: string; quantity: number; resolution: string; partId: number | null; noPartNeeded: boolean } | null = null;
     try {
       findingSnapshot = await storage.getWetCheckFindingSnapshot(findingId, cid);
     } catch (e: any) {
@@ -17887,27 +17884,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
     }
-    // Quantize laborHours on PATCH when explicitly provided.
-    // Reject NaN/negative. Floor rules (Task #1757 — fix over-application of 0.25 floor):
-    //   effective-custom → force "0.00" (also enforced unconditionally below)
-    //   billable service (body repairedInField:true, or stored resolution=repaired_in_field) → floor 0.25
-    //   inspection mode, or non-billable service → quantize, no floor
+    // Task #2056: validate supplied hours, then derive completed service labor
+    // even for quantity-only or issue-type-only edits. Other modes keep quantization.
     if (body.laborHours !== undefined) {
       const rawPatchLabor = parseFloat(String(body.laborHours));
       if (!isFinite(rawPatchLabor) || rawPatchLabor < 0) {
         res.status(400).json({ message: "Labor hours must be a non-negative number." });
         return;
       }
-      const isBillableServicePatch =
-        wcMode === "service" &&
-        !effectivePatchIsCustom &&
-        (body.repairedInField === true || findingSnapshot.resolution === "repaired_in_field");
       if (effectivePatchIsCustom) {
         (body as any).laborHours = "0.00";
-      } else if (isBillableServicePatch) {
-        (body as any).laborHours = Math.max(0.25, Math.round(rawPatchLabor * 4) / 4).toFixed(2);
       } else {
         (body as any).laborHours = (Math.round(rawPatchLabor * 4) / 4).toFixed(2);
+      }
+    }
+    const isBillableServicePatch =
+      wcMode === "service" &&
+      !effectivePatchIsCustom &&
+      (body.repairedInField === true || findingSnapshot.resolution === "repaired_in_field");
+    if (isBillableServicePatch) {
+      try {
+        (body as any).laborHours = await storage.getCatalogLaborHoursForFinding(
+          cid, effectivePatchIssueType, body.quantity ?? findingSnapshot.quantity,
+        );
+      } catch (e: any) {
+        const { status, message } = classifyAndLog(req, e, {
+          op: "getCatalogLaborHoursForFinding",
+          ctx: { cid, findingId },
+          fallbackMessage: "Couldn't load finding labor — please retry",
+        });
+        res.status(status).json({ message });
+        return;
       }
     }
 

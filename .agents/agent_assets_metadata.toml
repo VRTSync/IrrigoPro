@@ -53,3 +53,45 @@ mtime_ms = 1790187714998
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/56c98be1-066c-42fb-8d2b-cd709abf9af6/306f5b2e-cc04-4eb9-862f-599ffe879308"
 storage_version_token = "1790187744574934"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "SLDSTXmJYqk4wlOQQfHCd"
+uri = "file://screenshots/service-finding-qty-3.png"
+type = "image"
+title = "Service finding — three units"
+description = "Real browser capture: 0.75 derived labor hours and 0.25 × 3 formula."
+logical_id = "0d164ae7-f593-4e96-a16f-9014e1330c73"
+content_hash = "sha256:5260350826a5105082358206516f717d0822641d7997a47debe2a03379823206"
+size = 118520
+mtime_ms = 1790719300227
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/0d164ae7-f593-4e96-a16f-9014e1330c73/77fef2e2-0176-46aa-a3cd-1ae006660e40"
+storage_version_token = "1790719507595194"
+content_type = "image/png"
+
+[[outputs]]
+id = "opRtoXSezV0OSo6bxkaB_"
+uri = "file://screenshots/service-finding-saved-row.png"
+type = "image"
+title = "Saved service finding"
+description = "Real browser capture: saved zone row shows qty 3 · 0.75h."
+logical_id = "bb9a8fdc-9ea4-4c3c-b038-17108c6b6f66"
+content_hash = "sha256:c73a49fef48e11d511f4962f93deae3694706a7e85a9b811a14fa09b376d4dfe"
+size = 112152
+mtime_ms = 1790719300479
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/bb9a8fdc-9ea4-4c3c-b038-17108c6b6f66/b3eeade1-ec99-4b3d-b46b-49f5f3d32874"
+storage_version_token = "1790719508305449"
+content_type = "image/png"
+
+[[outputs]]
+id = "mdsjeh0G57SKdPMvTFAkn"
+uri = "file://screenshots/inspection-finding-stepper.png"
+type = "image"
+title = "Inspection finding — editable hours"
+description = "Real browser capture: estimated labor stepper remains editable."
+logical_id = "3567d3e0-abf6-4ef2-9112-beab7ac07665"
+content_hash = "sha256:b6f6cb0b9a42bfeb5387ce9b692bdf624f2e07f7be4864be52b95e57ecedf5e5"
+size = 109700
+mtime_ms = 1790719301823
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/3567d3e0-abf6-4ef2-9112-beab7ac07665/29b36b34-93e6-42db-9121-0ed9bbd3e1fb"
+storage_version_token = "1790719508949908"
+content_type = "image/png"

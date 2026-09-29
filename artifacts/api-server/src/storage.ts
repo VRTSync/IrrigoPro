@@ -196,6 +196,7 @@ import {
 import { seedIssueTypeConfigsForCompany } from "./seeds/issue-type-configs";
 import {
   buildLaborCatalog,
+  catalogLaborHoursForFinding,
   canAutoBillFinding,
   computeAutoZoneRepairLaborHours,
   computeRepairedInFieldTotals,
@@ -1048,10 +1049,12 @@ export interface IStorage {
   // (issueType, resolution, partId, noPartNeeded) without a full finding load.
   getWetCheckFindingSnapshot(findingId: number, companyId: number): Promise<{
     issueType: string;
+    quantity: number;
     resolution: string;
     partId: number | null;
     noPartNeeded: boolean;
   } | null>;
+  getCatalogLaborHoursForFinding(companyId: number, issueType: string, quantity: number): Promise<string>;
   // Canonical estimate-creation service shared by POST /api/estimates
   // and the wet-check conversion engine.
   createEstimateFromPayload(
@@ -9008,6 +9011,7 @@ export class DatabaseStorage implements IStorage {
 
   async getWetCheckFindingSnapshot(findingId: number, companyId: number): Promise<{
     issueType: string;
+    quantity: number;
     resolution: string;
     partId: number | null;
     noPartNeeded: boolean;
@@ -9015,6 +9019,7 @@ export class DatabaseStorage implements IStorage {
     const [row] = await db
       .select({
         issueType: wetCheckFindings.issueType,
+        quantity: wetCheckFindings.quantity,
         resolution: wetCheckFindings.resolution,
         partId: wetCheckFindings.partId,
         noPartNeeded: wetCheckFindings.noPartNeeded,
@@ -9026,6 +9031,11 @@ export class DatabaseStorage implements IStorage {
         eq(wetChecks.companyId, companyId),
       ));
     return row ?? null;
+  }
+
+  async getCatalogLaborHoursForFinding(companyId: number, issueType: string, quantity: number): Promise<string> {
+    const catalog = buildLaborCatalog(await this.listAllIssueTypeConfigs(companyId));
+    return catalogLaborHoursForFinding({ issueType, quantity }, catalog).toFixed(2);
   }
 
   async getWetCheck(id: number, companyId: number): Promise<WetCheckWithDetails | undefined> {

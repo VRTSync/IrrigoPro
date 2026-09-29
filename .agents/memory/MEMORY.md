@@ -61,3 +61,4 @@
 - [A parts diff is not completion evidence](parts-diff-is-not-completion-evidence.md) — never re-derive "undone work" from estimate-vs-WO parts; substitution is normal and completion is the trust signal.
 - [Named-record cleanup migrations](named-record-cleanup-migrations.md) — hand-enumerated targets are a snapshot: widen the preview to the whole population, keep the write set to the named rows.
 - [Retirement migration outlives its column](retirement-migration-outlives-its-column.md) — exempt it from the "zero grep hits" bar; the gate is the production schema push, never the merge.
+- [Wet-check browser evidence and stale mirrors](wet-check-browser-evidence.md) — after direct DB fixture changes, use a fresh wet-check ID for browser evidence rather than trusting reload.

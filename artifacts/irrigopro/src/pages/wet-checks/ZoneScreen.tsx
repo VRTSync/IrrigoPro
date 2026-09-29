@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { tintForControllerLetter } from "@workspace/shared";
+import { catalogLaborHours, tintForControllerLetter } from "@workspace/shared";
 import { isOfflineQueueEnabled } from "@/lib/offline/engine";
 import {
   upsertZoneRecord as offlineUpsertZoneRecord,
@@ -96,6 +96,8 @@ function InlineFindingEditor({
     queryFn: () => cachedApiRequest("/api/wet-checks/issue-types"),
   });
   const cfg = configs.find((c) => c.issueType === issueType);
+  const isServiceForm = wetCheckMode !== "inspection";
+  const derivedLaborHours = catalogLaborHours(cfg?.defaultLaborHours, quantity).toFixed(2);
 
   useEffect(() => {
     if (editing) {
@@ -163,7 +165,8 @@ function InlineFindingEditor({
         selectedPart,
         partFromEdit,
         quantity,
-        laborHours,
+        laborHours: isServiceForm ? derivedLaborHours : laborHours,
+        exactLaborHours: isServiceForm,
         notes,
         repairedInField,
         noPartNeeded,
@@ -217,7 +220,8 @@ function InlineFindingEditor({
         selectedPart,
         partFromEdit,
         quantity,
-        laborHours,
+        laborHours: isServiceForm ? derivedLaborHours : laborHours,
+        exactLaborHours: isServiceForm,
         notes,
         repairedInField,
         noPartNeeded,
@@ -392,13 +396,23 @@ function InlineFindingEditor({
           />
         </div>
         <div data-testid="inline-finding-labor">
-          <LaborHoursStepper
-            label={wetCheckMode === "inspection" ? "Est. labor hrs" : "Labor hrs"}
-            value={laborHours}
-            onChange={setLaborHours}
-            min="0.25"
-            disabled={readOnly}
-          />
+          {isServiceForm ? (
+            <>
+              <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">Labor hrs</div>
+              <div className="h-11 flex items-center text-base font-medium text-gray-900" data-testid="inline-finding-labor-derived">{derivedLaborHours}</div>
+              <div className="text-xs text-gray-500" data-testid="inline-finding-labor-formula">
+                {cfg?.defaultLaborHours ?? "0.00"} × {Math.max(1, parseInt(quantity) || 1)}
+              </div>
+            </>
+          ) : (
+            <LaborHoursStepper
+              label="Est. labor hrs"
+              value={laborHours}
+              onChange={setLaborHours}
+              min="0.25"
+              disabled={readOnly}
+            />
+          )}
         </div>
       </div>
 

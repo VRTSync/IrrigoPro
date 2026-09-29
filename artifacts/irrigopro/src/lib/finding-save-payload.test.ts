@@ -107,6 +107,10 @@ describe("buildFindingSavePayload — edit save preserves completed-in-field sta
 import { quantizeLaborHours } from "./finding-save-payload";
 
 describe("quantizeLaborHours integration", () => {
+  it("keeps exact catalog precision in offline and optimistic payloads", () => {
+    expect(buildFindingSavePayload(inputFromEditing({ laborHours: "0.15", exactLaborHours: true })).laborHours).toBe("0.15");
+    expect(buildFindingSavePayload(inputFromEditing({ laborHours: "0.15" })).laborHours).toBe("0.25");
+  });
   it('"0.33" rounds down to "0.25"', () => {
     expect(quantizeLaborHours("0.33")).toBe("0.25");
   });

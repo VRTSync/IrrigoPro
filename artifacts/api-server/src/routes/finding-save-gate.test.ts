@@ -7,9 +7,9 @@
 // POST guard:  non-custom must have repairedInField + billability; service mode only.
 // PATCH guard 1: explicit repairedInField:false blocked for non-custom (effective type).
 // PATCH guard 2: merge-state billability — only when patch touches billability fields.
-// Labor floor rules (Task #1757):
+// Labor rules:
 //   custom_review → always "0.00"
-//   billable service (non-custom + service mode + repairedInField) → floor 0.25
+//   billable service → catalog hours × quantity (Task #2056)
 //   inspection, or non-billable service → quantize, no floor
 //
 // Uses node:test / node:assert — no vitest dependency required.
@@ -17,6 +17,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { LABOR_ONLY_ISSUE_TYPES } from "../storage";
+import { catalogLaborHours } from "@workspace/shared";
 
 const CUSTOM_REVIEW_ISSUE_TYPE = "custom_review";
 
@@ -24,10 +25,14 @@ const CUSTOM_REVIEW_ISSUE_TYPE = "custom_review";
 
 type FindingSnapshot = {
   issueType: string;
+  quantity?: number;
   resolution: string;
   partId: number | null;
   noPartNeeded: boolean;
 };
+const testCatalog: Record<string, string> = { broken_head: "0.25", leak_repair: "1.00" };
+const derived = (issueType: string, quantity = 1) =>
+  catalogLaborHours(testCatalog[issueType] ?? null, quantity).toFixed(2);
 
 // ─── POST guard helper ────────────────────────────────────────────────────────
 
@@ -39,6 +44,7 @@ function applyPostGuards(
     partId?: number | null;
     noPartNeeded?: boolean;
     laborHours?: string | number;
+    quantity?: number;
   }
 ): { ok: true; quantizedLabor: string } | { ok: false; status: number; message: string } {
   if (wcMode === "service") {
@@ -59,12 +65,12 @@ function applyPostGuards(
   if (!isFinite(rawLabor) || rawLabor < 0) {
     return { ok: false, status: 400, message: "Labor hours must be a non-negative number." };
   }
-  // Task #1757 — three-way floor branch.
+  // Completed service uses the catalog, not the submitted hours.
   const isPostCustom = body.issueType === CUSTOM_REVIEW_ISSUE_TYPE;
   const quantizedLabor = isPostCustom
     ? "0.00"
     : (wcMode === "service" && body.repairedInField)
-      ? Math.max(0.25, Math.round(rawLabor * 4) / 4).toFixed(2)
+       ? derived(body.issueType, body.quantity)
       : (Math.round(rawLabor * 4) / 4).toFixed(2);
   return { ok: true, quantizedLabor };
 }
@@ -72,7 +78,7 @@ function applyPostGuards(
 // ─── PATCH guard 1 helper (repairedInField:false gate) ───────────────────────
 // Uses effective issue type (snapshot merged with body) so an already-custom
 // finding is correctly treated as custom even when body omits issueType.
-// Task #1757 — also applies the three-way labor floor and unconditional
+// Also applies the derived service labor and unconditional
 // custom-force (mirrors the route: custom_review always gets labor="0.00"
 // even when laborHours is absent from the body).
 
@@ -83,6 +89,7 @@ function applyPatchGuard1(
     issueType?: string;
     repairedInField?: boolean;
     laborHours?: string | number;
+    quantity?: number;
   }
 ): { ok: true; quantizedLabor?: string } | { ok: false; status: number; message: string } {
   const effectivePatchIssueType = body.issueType ?? snapshot.issueType;
@@ -96,24 +103,18 @@ function applyPatchGuard1(
 
   // Task #1757 — custom_review always stores 0.00, regardless of whether
   // laborHours was supplied. Mirror the unconditional post-buildPatch force.
-  if (effectivePatchIsCustom) {
-    return { ok: true, quantizedLabor: "0.00" };
-  }
-
   if (body.laborHours !== undefined) {
     const raw = parseFloat(String(body.laborHours));
     if (!isFinite(raw) || raw < 0) {
       return { ok: false, status: 400, message: "Labor hours must be a non-negative number." };
     }
-    // Task #1757 — three-way floor branch (mirrors route logic).
-    const isBillableService =
-      wcMode === "service" &&
-      (body.repairedInField === true || snapshot.resolution === "repaired_in_field");
-    const quantizedLabor = isBillableService
-      ? Math.max(0.25, Math.round(raw * 4) / 4).toFixed(2)
-      : (Math.round(raw * 4) / 4).toFixed(2);
-    return { ok: true, quantizedLabor };
+    if (effectivePatchIsCustom) return { ok: true, quantizedLabor: "0.00" };
+    if (wcMode !== "service" || (body.repairedInField !== true && snapshot.resolution !== "repaired_in_field"))
+      return { ok: true, quantizedLabor: (Math.round(raw * 4) / 4).toFixed(2) };
   }
+  if (effectivePatchIsCustom) return { ok: true, quantizedLabor: "0.00" };
+  if (wcMode === "service" && (body.repairedInField === true || snapshot.resolution === "repaired_in_field"))
+    return { ok: true, quantizedLabor: derived(effectivePatchIssueType, body.quantity ?? snapshot.quantity) };
   return { ok: true };
 }
 
@@ -184,7 +185,7 @@ describe("POST finding (service mode) — complete-or-flag guard", () => {
   it("accepts non-custom with repairedInField + part", () => {
     const result = applyPostGuards("service", { issueType: "broken_head", repairedInField: true, partId: 42, laborHours: "1.0" });
     assert.equal(result.ok, true);
-    if (result.ok) assert.equal(result.quantizedLabor, "1.00");
+    if (result.ok) assert.equal(result.quantizedLabor, "0.25");
   });
 
   it("accepts non-custom with repairedInField + noPartNeeded", () => {
@@ -221,10 +222,10 @@ describe("POST finding (service mode) — complete-or-flag guard", () => {
     if (result.ok) assert.equal(result.quantizedLabor, "0.25");
   });
 
-  it("snaps labor 0.6 to 0.50", () => {
+  it("ignores submitted 0.6 in favor of catalog hours", () => {
     const result = applyPostGuards("service", { issueType: "broken_head", repairedInField: true, partId: 1, laborHours: "0.6" });
     assert.equal(result.ok, true);
-    if (result.ok) assert.equal(result.quantizedLabor, "0.50");
+    if (result.ok) assert.equal(result.quantizedLabor, "0.25");
   });
 
   it("snaps labor 0 up to 0.25 (floor)", () => {
@@ -440,10 +441,10 @@ describe("LABOR_ONLY_ISSUE_TYPES", () => {
   });
 });
 
-// ─── Task #1757 — Labor floor correctness ─────────────────────────────────────
-// Verifies the three-way floor branch introduced in Task #1757:
+// ─── Finding labor rules ──────────────────────────────────────────────────────
+// Verifies the three-way branch:
 //   custom_review → always "0.00"
-//   billable service (non-custom + service + repairedInField) → floor 0.25
+//   billable service → catalog × quantity
 //   inspection / non-billable service → quantize, no floor
 
 describe("POST labor floor — custom_review always stores 0.00", () => {
@@ -477,7 +478,7 @@ describe("POST labor floor — custom_review always stores 0.00", () => {
   });
 });
 
-describe("POST labor floor — billable service capture keeps the 0.25 floor", () => {
+describe("POST billable service uses catalog hours", () => {
   it("laborHours 0 → floor to 0.25 (service + repairedInField)", () => {
     const result = applyPostGuards("service", {
       issueType: "broken_head",
@@ -500,7 +501,7 @@ describe("POST labor floor — billable service capture keeps the 0.25 floor", (
     if (result.ok) assert.equal(result.quantizedLabor, "0.25");
   });
 
-  it("laborHours 1.1 → quantized to 1.00 with floor preserved", () => {
+  it("laborHours 1.1 → catalog hours regardless of submitted number", () => {
     const result = applyPostGuards("service", {
       issueType: "broken_head",
       repairedInField: true,
@@ -508,7 +509,7 @@ describe("POST labor floor — billable service capture keeps the 0.25 floor", (
       laborHours: "1.1",
     });
     assert.equal(result.ok, true);
-    if (result.ok) assert.equal(result.quantizedLabor, "1.00");
+    if (result.ok) assert.equal(result.quantizedLabor, "0.25");
   });
 });
 
@@ -602,7 +603,7 @@ describe("PATCH labor floor — custom_review (stored or effective) forces 0.00"
   });
 });
 
-describe("PATCH labor floor — billable service (stored resolution=repaired_in_field) keeps floor", () => {
+describe("PATCH completed service derives catalog labor", () => {
   const completedSnap: FindingSnapshot = {
     issueType: "broken_head",
     resolution: "repaired_in_field",
@@ -616,10 +617,10 @@ describe("PATCH labor floor — billable service (stored resolution=repaired_in_
     if (result.ok) assert.equal(result.quantizedLabor, "0.25");
   });
 
-  it("manager edits labor on a completed service finding: 1.4 → 1.50", () => {
+  it("manager edits labor on a completed service finding: 1.4 → catalog 0.25", () => {
     const result = applyPatchGuard1("service", completedSnap, { laborHours: "1.4" });
     assert.equal(result.ok, true);
-    if (result.ok) assert.equal(result.quantizedLabor, "1.50");
+    if (result.ok) assert.equal(result.quantizedLabor, "0.25");
   });
 });
 

@@ -55,6 +55,7 @@ export type FindingSavePayloadInput = {
   partFromEdit: { id: number | null; name: string | null; price: string | null } | null;
   quantity: string;
   laborHours: string;
+  exactLaborHours?: boolean;
   notes: string;
   repairedInField: boolean;
   noPartNeeded: boolean;
@@ -98,7 +99,9 @@ export function buildFindingSavePayload(input: FindingSavePayloadInput): Finding
     partName: p.name,
     partPrice: p.price,
     quantity: Math.max(1, parseInt(input.quantity) || 1),
-    laborHours: input.laborHours ? quantizeLaborHours(input.laborHours) : "0.25",
+    laborHours: input.exactLaborHours
+      ? (parseFloat(input.laborHours) || 0).toFixed(2)
+      : input.laborHours ? quantizeLaborHours(input.laborHours) : "0.25",
     notes: input.notes || null,
     repairedInField: input.repairedInField,
     // Task #428 — tech disposition mirrors the Mark Complete toggle so an
