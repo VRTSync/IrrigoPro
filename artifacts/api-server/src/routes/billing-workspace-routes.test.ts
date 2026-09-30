@@ -2,9 +2,7 @@
 //
 // Mounts registerBillingWorkspaceRoutes against an in-memory storage
 // stub and exercises the queue filter/sort/pagination contract, the
-// status-strip semantics (awaitingApproval / approvedThisWeek /
-// draftsLast24h / quickbooks+overdue), the overdue-summary shape
-// and 15-minute cache, and the 301 redirects from legacy paths.
+// and the 301 redirects from legacy paths.
 
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
@@ -14,7 +12,6 @@ import type { AddressInfo } from "node:net";
 
 import {
   registerBillingWorkspaceRoutes,
-  _resetOverdueCacheForTests,
   _resetFlagsForTests,
 } from "./billing-workspace-routes";
 import { storage } from "../storage";
@@ -28,9 +25,6 @@ function restore() {
   for (const k of Object.keys(ORIG)) (storage as any)[k] = ORIG[k];
 }
 
-let invoiceFixture: any[] = [];
-let getAllInvoicesCallCount = 0;
-
 describe("billing-workspace routes", () => {
   let server: Server;
   let base: string;
@@ -42,7 +36,7 @@ describe("billing-workspace routes", () => {
   // WCB seed fixture — two WCBs in two different companies.
   // wcb id=1 (company 1, submitted — active)
   // wcb id=2 (company 2, submitted — active, out-of-scope for co1)
-  // wcb id=3 (company 1, approved_passed_to_billing — counts toward approvedThisWeek)
+  // wcb id=3 (company 1, approved_passed_to_billing — active until invoiced)
   function seedWcbs() {
     patch("getAllWetCheckBillingsWithCounts", async () => [
       { id: 1, billingNumber: "WCB-1", customerId: 10, customerName: "Acme",
@@ -94,22 +88,6 @@ describe("billing-workspace routes", () => {
     patch("getCustomer", async (id: number) => ({
       id, companyId: id < 20 ? 1 : 2, name: `cust-${id}`,
     }));
-    getAllInvoicesCallCount = 0;
-    invoiceFixture = [
-      // overdue, co 1
-      { id: 1, customerId: 10, status: "sent", totalAmount: "100.00", dueDate: iso(5 * 86400_000) },
-      // not overdue (future due)
-      { id: 2, customerId: 10, status: "sent", totalAmount: "50.00", dueDate: new Date(now + 86400_000).toISOString() },
-      // paid (should be excluded)
-      { id: 3, customerId: 10, status: "paid", totalAmount: "75.00", dueDate: iso(5 * 86400_000) },
-      // overdue, co 2 (excluded for billing_manager in co 1)
-      { id: 4, customerId: 20, status: "sent", totalAmount: "200.00", dueDate: iso(5 * 86400_000) },
-    ];
-    (storage as any).getAllInvoices = async () => {
-      getAllInvoicesCallCount++;
-      return invoiceFixture;
-    };
-
     const app: Express = express();
     app.use(express.json());
     const requireAuthentication: RequestHandler = (req: any, _res, next) => {
@@ -127,8 +105,6 @@ describe("billing-workspace routes", () => {
   beforeEach(() => {
     role = "billing_manager";
     companyId = 1;
-    _resetOverdueCacheForTests();
-    getAllInvoicesCallCount = 0;
   });
 
   after(async () => {
@@ -199,44 +175,6 @@ describe("billing-workspace routes", () => {
     assert.equal(r1.headers.get("x-total-count"), String(b1.total));
   });
 
-  it("status-strip returns the four required indicators", async () => {
-    const r = await fetch(`${base}/api/billing-workspace/status-strip`);
-    assert.equal(r.status, 200);
-    const body = (await r.json()) as any;
-    for (const k of ["awaitingApproval", "approvedThisWeek", "draftsLast24h", "quickbooks"]) {
-      assert.ok(k in body, `missing ${k}`);
-    }
-    // BS-1 + WO-9 awaiting in co1
-    assert.equal(body.awaitingApproval, 2);
-    // BS-3 approved within last week
-    assert.equal(body.approvedThisWeek, 1);
-    // BS-4 created within last 24h, draft
-    assert.equal(body.draftsLast24h, 1);
-    assert.ok("state" in body.quickbooks);
-    assert.ok("overdueCount" in body.quickbooks, "QB tile carries the overdue pill count");
-  });
-
-  it("overdue-summary returns {overdueCount, overdueAmount, agingReportUrl}", async () => {
-    const r = await fetch(`${base}/api/quickbooks/overdue-summary`);
-    assert.equal(r.status, 200);
-    const body = (await r.json()) as any;
-    // Only invoice 1 is overdue + scoped to co1
-    assert.equal(body.overdueCount, 1);
-    assert.equal(body.overdueAmount, 100);
-    assert.ok(typeof body.agingReportUrl === "string" && body.agingReportUrl.length > 0);
-  });
-
-  it("overdue-summary caches results for 15 minutes per (role, company)", async () => {
-    await fetch(`${base}/api/quickbooks/overdue-summary`);
-    const after1 = getAllInvoicesCallCount;
-    await fetch(`${base}/api/quickbooks/overdue-summary`);
-    const after2 = getAllInvoicesCallCount;
-    assert.equal(after2, after1, "second call within TTL should hit cache");
-    _resetOverdueCacheForTests();
-    await fetch(`${base}/api/quickbooks/overdue-summary`);
-    assert.ok(getAllInvoicesCallCount > after2, "cache reset should re-fetch");
-  });
-
   it("super_admin sees all tenants", async () => {
     role = "super_admin";
     companyId = null;
@@ -250,7 +188,6 @@ describe("billing-workspace routes", () => {
     beforeEach(() => {
       role = "billing_manager";
       companyId = 1;
-      _resetOverdueCacheForTests();
       _resetFlagsForTests();
       seedWcbs();
     });
@@ -260,14 +197,14 @@ describe("billing-workspace routes", () => {
       assert.equal(r.status, 200);
       const body = (await r.json()) as any;
       const refIds = body.items.map((x: any) => x.refId).sort((a: number, b: number) => a - b);
-      assert.deepEqual(refIds, [1], "co1 has only WCB-1 in active status");
+      assert.deepEqual(refIds, [1, 3], "co1 sees submitted and approved awaiting invoicing");
     });
 
-    it("non-active WCB statuses are excluded from the queue", async () => {
+    it("approved WCB awaiting invoicing remains in the queue", async () => {
       const r = await fetch(`${base}/api/billing-workspace/queue?type=wcb`);
       const body = (await r.json()) as any;
       const numbers = body.items.map((x: any) => x.number);
-      assert.ok(!numbers.includes("WCB-3"), "approved WCB should not appear in queue");
+      assert.ok(numbers.includes("WCB-3"), "approved WCB still needs billing action");
     });
 
     it("WCB queue item carries wetCheckId", async () => {
@@ -295,29 +232,16 @@ describe("billing-workspace routes", () => {
       assert.ok(!types.includes("wet_check_billing"), "bs filter should exclude WCBs");
     });
 
-    it("status-strip awaitingApproval and approvedThisWeek include WCBs; draftsLast24h does not", async () => {
-      const r = await fetch(`${base}/api/billing-workspace/status-strip`);
-      assert.equal(r.status, 200);
-      const body = (await r.json()) as any;
-      // BS-1 + WO-9 + WCB-1 = 3 awaiting (co1 only)
-      assert.equal(body.awaitingApproval, 3, "awaitingApproval should include 1 active WCB");
-      // BS-3 approved + WCB-3 approved this week = 2
-      assert.equal(body.approvedThisWeek, 2, "approvedThisWeek should include 1 approved WCB");
-      // draftsLast24h stays at 1 (BS-4), no WCB drafts
-      assert.equal(body.draftsLast24h, 1, "draftsLast24h should not include WCBs");
-    });
-
-    it("tenant scoping: co1 sees 1 active WCB, super_admin sees 2", async () => {
-      // co1 — already covered above (id=1)
+    it("tenant scoping: co1 sees 2 active WCBs, super_admin sees 3", async () => {
       const r1 = await fetch(`${base}/api/billing-workspace/queue?type=wcb`);
       const b1 = (await r1.json()) as any;
-      assert.equal(b1.items.length, 1, "co1 should see 1 active WCB");
+      assert.equal(b1.items.length, 2, "co1 should see both active WCBs");
 
       role = "super_admin";
       companyId = null;
       const r2 = await fetch(`${base}/api/billing-workspace/queue?type=wcb`);
       const b2 = (await r2.json()) as any;
-      assert.equal(b2.items.length, 2, "super_admin should see 2 active WCBs");
+      assert.equal(b2.items.length, 3, "super_admin should see all active WCBs");
     });
   });
 });

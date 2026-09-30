@@ -143,7 +143,7 @@ describe("billing-workspace-routes — approved drill-down data visibility", () 
     }
   });
 
-  it("GET /api/billing-workspace/queue without status filter excludes approved items", async () => {
+  it("GET /api/billing-workspace/queue includes approved WCBs awaiting invoicing", async () => {
     const approvedWcb = {
       id: 99,
       status: "approved_passed_to_billing",
@@ -168,8 +168,8 @@ describe("billing-workspace-routes — approved drill-down data visibility", () 
       assert.equal(res.status, 200);
       const body = (await res.json()) as { items: any[]; total: number };
       assert.ok(
-        !body.items.some((it: any) => it.status === "approved_passed_to_billing"),
-        "Default queue must not include approved items",
+        body.items.some((it: any) => it.status === "approved_passed_to_billing"),
+        "Default queue includes approved WCBs that still need invoicing",
       );
     } finally {
       await close(server);

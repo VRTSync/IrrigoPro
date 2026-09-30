@@ -1,32 +1,18 @@
-// Task #709 — Billing Workspace endpoints.
-//
-// Contract endpoints that back /billing-workspace:
-//   GET /api/billing-workspace/queue
-//   GET /api/billing-workspace/status-strip
-//   GET /api/quickbooks/overdue-summary
-//
-// All endpoints are gated to billing_manager / company_admin /
-// super_admin and tenant-scoped through the authenticated user's
-// company id (super_admin gets the global view).
+// Legacy Billing Workspace routes (queue, flag, QuickBooks sync detail/retry)
+// and shared status sets used by the live Manager Workspace and review routes.
+// The retired Billing Workspace status strip has no non-test caller; Manager
+// Workspace uses its own /api/manager-workspace/status-strip endpoint instead.
 
 import type { Express, RequestHandler } from "express";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
-import {
-  customers,
-  estimates,
-  invoices,
-  quickbooksIntegration,
-  quickbooksSync,
-} from "@workspace/db/schema";
+import { inArray } from "drizzle-orm";
+import { quickbooksSync } from "@workspace/db/schema";
 import { db } from "../db";
 import { storage } from "../storage";
 // Task #2027 — one QuickBooks verdict for every surface. This file renders it.
 import {
   getScopedSyncRows,
   loadQbSyncStatus,
-  loadQuickBooksHealth,
   resolveQbScope,
-  type QuickBooksHealth,
 } from "./quickbooks-health";
 
 export interface RegisterBillingWorkspaceRoutesDeps {
@@ -177,16 +163,6 @@ interface QueueItem {
   wetCheckId?: number | null;
 }
 
-// ---------------------------------------------------------------
-// Overdue-summary 15-minute in-process cache
-// ---------------------------------------------------------------
-interface OverdueCacheEntry {
-  expiresAt: number;
-  body: { overdueCount: number; overdueAmount: number; agingReportUrl: string; asOf: string };
-}
-const OVERDUE_CACHE = new Map<string, OverdueCacheEntry>();
-const OVERDUE_TTL_MS = 15 * 60 * 1000;
-
 // In-memory follow-up flag store. Best-effort, per-process.
 interface FlagEntry {
   id: string;
@@ -198,10 +174,6 @@ interface FlagEntry {
 }
 const BW_FLAGS = new Map<string, FlagEntry>();
 export function _resetFlagsForTests(): void { BW_FLAGS.clear(); }
-
-export function _resetOverdueCacheForTests(): void {
-  OVERDUE_CACHE.clear();
-}
 
 // ---------------------------------------------------------------
 // QuickBooks sync status — Task #715, consolidated by Task #2027.
@@ -483,97 +455,6 @@ export function registerBillingWorkspaceRoutes(
   );
 
   // -------------------------------------------------------------
-  // GET /api/billing-workspace/status-strip
-  //
-  // Four indicators for Zone A (per spec):
-  //   awaitingApproval  — open BS+WO awaiting manager review
-  //   approvedThisWeek  — BS/WO approved in the current ISO week
-  //   draftsLast24h     — draft/in-progress rows created in last 24h
-  //   quickbooks        — { state, lastSyncAt, pendingSync, overdueCount }
-  // -------------------------------------------------------------
-  app.get(
-    "/api/billing-workspace/status-strip",
-    requireAuthentication,
-    async (req: any, res) => {
-      try {
-        if (!isAllowed(req)) {
-          res.status(403).json({ message: "Access denied." });
-          return;
-        }
-        const [sheets, orders, wcbs] = await Promise.all([
-          scopedBillingSheets(req),
-          scopedWorkOrders(req),
-          scopedWetCheckBillings(req),
-        ]);
-
-        const now = Date.now();
-        const weekAgo = now - 7 * 86_400_000;
-        const dayAgo = now - 86_400_000;
-        const tsOf = (v: any): number => {
-          if (!v) return NaN;
-          const t = new Date(v).getTime();
-          return Number.isFinite(t) ? t : NaN;
-        };
-
-        const awaitingApproval =
-          sheets.filter((s) => ACTIVE_BS.has(s.status)).length +
-          orders.filter((w) => ACTIVE_WO.has(w.status)).length +
-          wcbs.filter((w) => ACTIVE_WCB.has(w.status)).length;
-
-        const approvedThisWeek =
-          sheets.filter((s) =>
-            APPROVED_BS.has(s.status) && tsOf(s.approvedAt ?? s.updatedAt) >= weekAgo,
-          ).length +
-          orders.filter((w) =>
-            APPROVED_WO.has(w.status) && tsOf(w.approvedAt ?? w.updatedAt) >= weekAgo,
-          ).length +
-          wcbs.filter((w) =>
-            APPROVED_WCB.has(w.status) && tsOf(w.updatedAt ?? w.createdAt) >= weekAgo,
-          ).length;
-
-        const draftsLast24h =
-          sheets.filter((s) =>
-            DRAFT_BS.has(s.status) && tsOf(s.createdAt) >= dayAgo,
-          ).length +
-          orders.filter((w) =>
-            DRAFT_WO.has(w.status) && tsOf(w.createdAt) >= dayAgo,
-          ).length;
-
-        // QuickBooks indicator — the shared verdict from
-        // ./quickbooks-health, rendered, never re-derived (Task #2027).
-        const qbHealth: QuickBooksHealth = (await loadQuickBooksHealth(req)) ?? {
-          state: "unknown",
-          reason: "not_configured",
-          connectionStatus: null,
-          reconnectRequiredReason: null,
-          lastSyncAt: null,
-          lastPaymentSyncAt: null,
-          pendingSync: 0,
-          recentErrorCount: 0,
-        };
-        let overdueCount = 0;
-        try {
-          const od = await overdueSummary(req);
-          overdueCount = od.overdueCount;
-        } catch {
-          overdueCount = 0;
-        }
-
-        res.json({
-          awaitingApproval,
-          approvedThisWeek,
-          draftsLast24h,
-          // The shared verdict, spread whole, plus this tile's own extra.
-          quickbooks: { ...qbHealth, overdueCount },
-        });
-      } catch (error) {
-        req.log?.error?.({ err: error }, "billing-workspace status-strip failed");
-        res.status(500).json({ message: "Failed to load status strip" });
-      }
-    },
-  );
-
-  // -------------------------------------------------------------
   // POST /api/billing-workspace/flag
   //
   // Lightweight in-memory flag store so the workspace can mark
@@ -673,85 +554,4 @@ export function registerBillingWorkspaceRoutes(
     },
   );
 
-  // -------------------------------------------------------------
-  // GET /api/quickbooks/overdue-summary
-  //
-  // { overdueCount, overdueAmount, agingReportUrl }
-  // 15-minute in-process cache keyed by role+companyId.
-  // -------------------------------------------------------------
-  app.get(
-    "/api/quickbooks/overdue-summary",
-    requireAuthentication,
-    async (req: any, res) => {
-      try {
-        if (!isAllowed(req)) {
-          res.status(403).json({ message: "Access denied." });
-          return;
-        }
-        const body = await overdueSummary(req);
-        res.json(body);
-      } catch (error) {
-        req.log?.error?.(
-          { err: error },
-          "quickbooks overdue-summary failed",
-        );
-        res.status(500).json({ message: "Failed to load overdue summary" });
-      }
-    },
-  );
-}
-
-async function overdueSummary(req: any): Promise<{
-  overdueCount: number;
-  overdueAmount: number;
-  agingReportUrl: string;
-  asOf: string;
-}> {
-  const role = req.authenticatedUserRole;
-  const cid: number | null = req.authenticatedUserCompanyId ?? null;
-  const cacheKey = `${role}:${cid ?? "*"}`;
-  const now = Date.now();
-  const cached = OVERDUE_CACHE.get(cacheKey);
-  if (cached && cached.expiresAt > now) return cached.body;
-
-  const allInvoices: any[] = (await (storage as any).getAllInvoices?.()) ?? [];
-  const custCompany = new Map<number, number | null>();
-  for (const inv of allInvoices) {
-    if (inv.customerId == null) continue;
-    if (!custCompany.has(inv.customerId)) {
-      try {
-        const c: any = await storage.getCustomer(inv.customerId);
-        custCompany.set(inv.customerId, c?.companyId ?? null);
-      } catch {
-        custCompany.set(inv.customerId, null);
-      }
-    }
-  }
-  const scoped = allInvoices.filter((inv) => {
-    if (role === "super_admin") return true;
-    if (cid == null || inv.customerId == null) return false;
-    return custCompany.get(inv.customerId) === cid;
-  });
-  let overdueCount = 0;
-  let overdueAmount = 0;
-  for (const inv of scoped) {
-    const status = String(inv.status ?? "").toLowerCase();
-    if (status === "draft" || status === "cancelled" || status === "paid" || status === "superseded") continue;
-    const due = inv.dueDate ? new Date(inv.dueDate).getTime() : NaN;
-    if (!Number.isFinite(due) || due >= now) continue;
-    overdueCount += 1;
-    overdueAmount += numOr0(inv.totalAmount);
-  }
-  // Task #720 — surface the snapshot freshness so the UI can render
-  // "as of HH:MM" beside the overdue tile (this endpoint is cached
-  // for 15 minutes per role+companyId, so the displayed number can
-  // legitimately lag wall-clock).
-  const body = {
-    overdueCount,
-    overdueAmount,
-    agingReportUrl: "/financial-pulse/ar-aging",
-    asOf: new Date(now).toISOString(),
-  };
-  OVERDUE_CACHE.set(cacheKey, { expiresAt: now + OVERDUE_TTL_MS, body });
-  return body;
 }

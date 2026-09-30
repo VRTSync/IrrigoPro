@@ -528,20 +528,12 @@ every KPI tile (Financial Pulse `KpiBand` and the
 AND the tooltips in lockstep — they are checked by hand, not by a
 type. Key invariants:
 
-- The Billing Workspace embeds `FinancialPulseWidget` variant
-  `billing-header` and does **not** recompute Billed / Collected /
-  A/R locally in `billing-workspace-routes.ts`.
-- `computeCollected` excludes `draft` and `cancelled` rows even when
-  `paidAt` is in the window (Task #720 fix; covered by
-  `financial-pulse.test.ts`).
-- Outstanding A/R (from invoices, point-in-time, excludes paid) and
-  QuickBooks Overdue (from invoices, `dueDate` past, distinct tile)
-  are intentionally two separate numbers — never collapse them.
-- `GET /api/quickbooks/overdue-summary` returns `asOf` for the
-  cached snapshot (15 min TTL); the BW page renders "as of HH:MM"
-  beside the overdue pill.
-- Rolling-window tiles ("Approved This Week" 7d, "Drafts Last 24h"
-  24h) carry an explicit window badge so they don't read as MTD.
+- Financial Pulse computes its invoiced figures using the shared
+  excluded-status set; Money Owed and the invoices A/R view use the
+  shared remaining-balance rule. See `docs/financial-metrics.md`.
+- The Manager Workspace uses its own status-strip endpoint and shared
+  work-status sets. The former Billing Workspace strip and standalone
+  QuickBooks overdue summary are retired.
 
 ## Estimate system
 
@@ -609,48 +601,14 @@ covering the full role matrix (5 endpoints × 5 roles), CSV content
 type / disposition on all three tab endpoints, aging-vs-KPI parity,
 `sort=budget_risk` ordering, and `sort=revenue` regression.
 
-## Billing Workspace (Task #709)
+## Billing Workspace legacy routes
 
-Focused "one screen for everything I have to act on" view for
-billing managers, at `/billing-workspace`. Replaces the legacy
-billing dashboard — `/billing-dashboard`, `/billing`, and
-`/billing/dashboard` now redirect to the workspace.
-
-- **Backend** — `artifacts/api-server/src/routes/billing-workspace-routes.ts`:
-  - `GET /api/billing-workspace/queue?type=all|bs|wo|part|review&q=…`
-    — unified approval queue (billing sheets + work orders + parts +
-    manual reviews), tenant-scoped via `technician.companyId` (BS/WO
-    have no direct `companyId`).
-  - `GET /api/billing-workspace/status-strip` — 4 indicators:
-    awaitingApproval, readyToInvoice, overdueInvoices, quickbooksSync.
-  - `GET /api/quickbooks/overdue-summary` — light wrapper for the
-    overdue tile.
-  - Role-gated to `billing_manager | company_admin | super_admin`.
-  - Wired from `routes.ts` after `registerPartRoutes`.
-- **Frontend** — `pages/billing-workspace.tsx` lays out four zones:
-  Zone 0 = FP `billing-header` widget variant (Billed MTD / Collected
-  MTD / Outstanding A/R + link to `/financial-pulse`); Zone A = 4-tile
-  status strip; Zone B = unified queue with filter chips; Zone C = a
-  right-side detail drawer (~40% width) with inline preview on `lg+`;
-  Zone D = keyboard nav (J/K to move, A to approve, F to open,
-  Esc to close, ? for help, Ctrl+S to save). Approvals POST to the
-  existing `/api/billing-sheets/:id/approve` and
-  `/api/work-orders/:id/approve` — no new mutation endpoints.
-- **FP widget** — `financial-pulse-widget.tsx` gains a `billing-header`
-  variant (slim card with the three tiles + a "View full Financial
-  Pulse →" link).
-- **Routing** — `App.tsx` (billing_manager Switch) and
-  `company-admin-app.tsx` both wire `/billing-workspace` to
-  `BillingWorkspace` and add `RedirectToBillingWorkspace` for the three
-  legacy paths. `nav-config.ts` swaps "Billing Dashboard" →
-  "Billing Workspace" in both `billingManagerNav` and
-  `companyAdminNav`. The monthly billing flow (`customer-billing.tsx`
-  at `/billing/command-center`) is untouched.
-- **Removed**: `pages/billing-dashboard.tsx` (the old dashboard page).
-- **Test**: `routes/billing-workspace-routes.test.ts` smoke-covers
-  role gating (403 for `field_tech`), tenant scoping by
-  `technician.companyId`, super-admin global view, and the
-  status-strip indicator shape.
+`/billing-workspace` and `/billing-dashboard` redirect to the live
+manager experience. The API retains legacy queue, flag, QuickBooks sync
+detail/retry, and bulk-approve routes, but no client calls them. The
+work-status sets in the route module are still imported by the Manager
+Workspace and needs-review routes. The bulk-approve bar component has no
+importer; do not mistake it for a live approval flow.
 
 ## Pointers
 

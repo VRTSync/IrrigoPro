@@ -57,7 +57,7 @@ describe("manager-workspace routes", () => {
   const prevWeek = new Date(isoWeekStartMs() - 3_600_000).toISOString();
 
   before(async () => {
-    patch("getWorkOrders", async () => [
+    patch("getWorkOrders", async (cid: number | null) => [
       // Active WO in company 1 — manager should see this
       {
         id: 9, workOrderNumber: "WO-9", assignedTechnicianId: 100, customerId: 10,
@@ -76,7 +76,7 @@ describe("manager-workspace routes", () => {
         customerName: "Acme", status: "draft", totalAmount: "100.00",
         photos: [], createdAt: iso(3 * 86400_000),
       },
-    ]);
+    ].filter((wo) => cid == null || (wo.customerId === 10 ? 1 : 2) === cid));
     patch("getUser", async (id: number) =>
       id === 100
         ? { id: 100, companyId: 1, fullName: "Tech A" }
