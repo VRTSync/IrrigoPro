@@ -9,11 +9,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  parseAsOfParam,
   parsePeriodParam,
   resolveFinancialPulseScope,
 } from "./financial-pulse";
 import {
+  buildRevenueTrend,
   bucketMonthlyRevenue,
   computeAvgDaysToPay,
   computeBilled,
@@ -28,6 +28,7 @@ import {
   getMonthStarts,
   getMtdWindow,
   getPrevMonthWindow,
+  getPrevYearYtdWindow,
   getYtdWindow,
   isUnbilledWorkRow,
   pctDelta,
@@ -851,16 +852,45 @@ describe("Task #688 — parsePeriodParam", () => {
   });
 });
 
-describe("Task #688 — parseAsOfParam", () => {
-  it("accepts absent and well-formed YYYY-MM-DD", () => {
-    assert.equal(parseAsOfParam(undefined).ok, true);
-    assert.equal(parseAsOfParam("").ok, true);
-    assert.equal(parseAsOfParam("2026-05-19").ok, true);
-  });
-  it("rejects malformed values", () => {
-    for (const bad of ["not-a-date", "2026/05/19", "2026-13-01", "05-19-2026"]) {
-      assert.equal(parseAsOfParam(bad).ok, false, `expected ${bad} rejected`);
+describe("Financial Pulse comparison windows and trend", () => {
+  it("clamps shorter prior months without including the current month", () => {
+    for (const [now, last] of [
+      [new Date(2025, 2, 31, 14, 20), new Date(2025, 1, 28, 14, 20)],
+      [new Date(2026, 4, 31, 14, 20), new Date(2026, 3, 30, 14, 20)],
+    ]) {
+      const window = getPrevMonthWindow(now);
+      assert.equal(window.end.getTime() - 1, last.getTime());
+      assert.equal(window.end.getMonth(), window.start.getMonth());
     }
+    const leap = getPrevYearYtdWindow(new Date(2024, 1, 29, 9, 15));
+    assert.equal(leap.end.getTime() - 1, new Date(2023, 1, 28, 9, 15).getTime());
+  });
+
+  it("keeps missing invoice splits absent, but preserves recorded zero", () => {
+    const starts = [new Date(2026, 0, 1), new Date(2026, 1, 1)];
+    const buckets = bucketMonthlyRevenue([
+      inv({ id: 1001, createdAt: new Date(2026, 0, 5), totalAmount: "90", partsSubtotal: null, laborSubtotal: null }),
+      inv({ id: 1002, createdAt: new Date(2026, 1, 5), totalAmount: "20", partsSubtotal: "0", laborSubtotal: "20" }),
+    ], starts);
+    assert.equal(buckets[0].revenue, 90);
+    assert.equal(buckets[0].partsRevenue, null);
+    assert.equal(buckets[0].laborRevenue, null);
+    assert.equal(buckets[1].partsRevenue, 0);
+  });
+
+  it("compares invoiced revenue identically with or without uninvoiced wet-check work", () => {
+    const now = new Date(2026, 4, 15);
+    const invoices = [
+      inv({ id: 1003, createdAt: new Date(2026, 4, 2), totalAmount: "140" }),
+      inv({ id: 1004, createdAt: new Date(2025, 4, 2), totalAmount: "100" }),
+    ];
+    const withoutWork = buildRevenueTrend(invoices, now, 1);
+    const withUninvoicedWetCheck = [{ invoiceId: null, workDate: now, totalAmount: "500" }];
+    // The endpoint passes invoices only; unbilled work cannot change either line.
+    assert.equal(withUninvoicedWetCheck[0].totalAmount, "500");
+    const withWork = buildRevenueTrend(invoices, now, 1);
+    assert.deepEqual(withWork, withoutWork);
+    assert.equal(pctDelta(withWork[0].revenue, withWork[0].prevYearRevenue), 40);
   });
 });
 

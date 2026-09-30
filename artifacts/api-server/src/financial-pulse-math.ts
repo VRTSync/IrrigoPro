@@ -184,21 +184,19 @@ export function getYtdWindow(now: Date) {
     end: new Date(now.getTime() + 1),
   };
 }
+/** Preserve the clock time while clamping the day to the target calendar month. */
+function sameDayInMonth(now: Date, year: number, month: number): Date {
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  return new Date(year, month, Math.min(now.getDate(), lastDay),
+    now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds() + 1);
+}
 export function getPrevMonthWindow(now: Date) {
   // Same calendar slice in the previous month: from the 1st of last
   // month through `now`'s day-of-month, so MoM comparison is
   // calendar-day aligned (not full prior month vs partial current
   // month).
   const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const end = new Date(
-    now.getFullYear(),
-    now.getMonth() - 1,
-    now.getDate(),
-    now.getHours(),
-    now.getMinutes(),
-    now.getSeconds(),
-    now.getMilliseconds() + 1,
-  );
+  const end = sameDayInMonth(now, start.getFullYear(), start.getMonth());
   return { start, end };
 }
 export function getPrevFullMonthWindow(now: Date) {
@@ -215,15 +213,7 @@ export function getPrevYearYtdWindow(now: Date) {
   // `now`'s month/day, aligned to the millisecond after the matching
   // day-of-year. Calendar-day parity with `getYtdWindow`.
   const start = new Date(now.getFullYear() - 1, 0, 1);
-  const end = new Date(
-    now.getFullYear() - 1,
-    now.getMonth(),
-    now.getDate(),
-    now.getHours(),
-    now.getMinutes(),
-    now.getSeconds(),
-    now.getMilliseconds() + 1,
-  );
+  const end = sameDayInMonth(now, now.getFullYear() - 1, now.getMonth());
   return { start, end };
 }
 
@@ -682,8 +672,8 @@ export function pctDelta(curr: number, prev: number): number | null {
 export interface MonthBucket {
   month: string; // YYYY-MM
   revenue: number;
-  partsRevenue: number;
-  laborRevenue: number;
+  partsRevenue: number | null;
+  laborRevenue: number | null;
 }
 
 function monthKey(d: Date): string {
@@ -706,8 +696,8 @@ export function bucketMonthlyRevenue(
   const buckets = monthStarts.map((d) => ({
     month: monthKey(d),
     revenue: 0,
-    partsRevenue: 0,
-    laborRevenue: 0,
+    partsRevenue: null as number | null,
+    laborRevenue: null as number | null,
   }));
   const idx = new Map(buckets.map((b, i) => [b.month, i]));
   for (const inv of invoices) {
@@ -717,10 +707,25 @@ export function bucketMonthlyRevenue(
     const i = idx.get(monthKey(d));
     if (i == null) continue;
     buckets[i].revenue += toNum(inv.totalAmount);
-    buckets[i].partsRevenue += toNum(inv.partsSubtotal);
-    buckets[i].laborRevenue += toNum(inv.laborSubtotal);
+    if (inv.partsSubtotal != null) buckets[i].partsRevenue =
+      (buckets[i].partsRevenue ?? 0) + toNum(inv.partsSubtotal);
+    if (inv.laborSubtotal != null) buckets[i].laborRevenue =
+      (buckets[i].laborRevenue ?? 0) + toNum(inv.laborSubtotal);
   }
   return buckets;
+}
+
+/** Both trend lines use the same invoiced-only rule; uninvoiced work is not an input. */
+export function buildRevenueTrend(invoices: InvoiceLike[], now: Date, months: number) {
+  const current = bucketMonthlyRevenue(invoices, getMonthStarts(now, months));
+  const prior = bucketMonthlyRevenue(
+    invoices,
+    getMonthStarts(new Date(now.getFullYear() - 1, now.getMonth(), 1), months),
+  );
+  return current.map((row, i) => ({
+    ...row,
+    prevYearRevenue: prior[i]?.revenue ?? 0,
+  }));
 }
 
 export interface RevenueMixResult {

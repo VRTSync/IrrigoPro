@@ -32,7 +32,7 @@ import {
   workOrders,
 } from "@workspace/db/schema";
 import {
-  bucketMonthlyRevenue,
+  buildRevenueTrend,
   computeArAging,
   computeAvgDaysToPay,
   computeBilled,
@@ -50,7 +50,6 @@ import {
   computeRevenueMix,
   computeTopCustomers,
   getDistinctBillingCycles,
-  getMonthStarts,
   getMtdWindow,
   getPrevMonthWindow,
   getPrevFullMonthWindow,
@@ -111,24 +110,6 @@ export interface ResolvedScope {
   status: 200 | 400 | 403;
   body?: { message: string };
   companyId: number | null; // null = global (super_admin)
-}
-
-// `?asOf=YYYY-MM-DD` — optional, accepted by all three endpoints. v1
-// ignores the value for computation (everything anchors to "now"); we
-// still validate the shape so a future slice can light it up without
-// breaking client contracts. Returns { ok: true } when the param is
-// either absent or a well-formed date, and { ok: false } when the
-// caller sent something non-conforming.
-export function parseAsOfParam(
-  raw: string | undefined,
-): { ok: true } | { ok: false; message: string } {
-  if (raw == null || raw === "") return { ok: true };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw))
-    return { ok: false, message: "asOf must be YYYY-MM-DD" };
-  const d = new Date(`${raw}T00:00:00Z`);
-  if (Number.isNaN(d.getTime()))
-    return { ok: false, message: "asOf is not a valid date" };
-  return { ok: true };
 }
 
 // Strict period validation. KPIs + revenue-mix accept exactly "mtd"
@@ -721,11 +702,6 @@ export function registerFinancialPulseRoutes(
           res.status(scope.status).json(scope.body);
           return;
         }
-        const asOf = parseAsOfParam(req.query.asOf as string | undefined);
-        if (!asOf.ok) {
-          res.status(400).json({ message: asOf.message });
-          return;
-        }
         const periodParsed = parsePeriodParam(
           req.query.period as string | undefined,
         );
@@ -997,11 +973,6 @@ export function registerFinancialPulseRoutes(
           res.status(scope.status).json(scope.body);
           return;
         }
-        const asOf = parseAsOfParam(req.query.asOf as string | undefined);
-        if (!asOf.ok) {
-          res.status(400).json({ message: asOf.message });
-          return;
-        }
         const months = Math.max(
           1,
           Math.min(36, parseInt(String(req.query.months ?? "13"), 10) || 13),
@@ -1009,52 +980,9 @@ export function registerFinancialPulseRoutes(
         const now = new Date();
         const cust = await loadCustomers(scope.companyId);
         const customerIds = cust.map((c) => c.id);
-        // Task #814 — load uninvoiced WCBs alongside invoices for bucketing.
-        const [allInvoices, allWcbsTrend] = await Promise.all([
-          loadInvoicesForCustomers(customerIds),
-          loadAllWetCheckBillingsForCustomers(customerIds),
-        ]);
+        const allInvoices = await loadInvoicesForCustomers(customerIds);
 
-        const currentStarts = getMonthStarts(now, months);
-        const earliest = currentStarts[0];
-        const prevYearAnchor = new Date(
-          earliest.getFullYear() - 1,
-          earliest.getMonth(),
-          1,
-        );
-        const prevStarts = getMonthStarts(
-          new Date(now.getFullYear() - 1, now.getMonth(), 1),
-          months,
-        );
-
-        const current = bucketMonthlyRevenue(allInvoices, currentStarts);
-        const prev = bucketMonthlyRevenue(allInvoices, prevStarts);
-
-        // Task #814 — bucket uninvoiced WCBs by workDate into current series.
-        // Invoiced WCBs are already captured via the invoice's totalAmount above.
-        const currentMonthKeys = new Map(current.map((b) => [b.month, b]));
-        for (const wcb of allWcbsTrend) {
-          if (wcb.invoiceId != null) continue; // invoiced: skip (in invoice total)
-          const d = wcb.workDate instanceof Date
-            ? wcb.workDate
-            : wcb.workDate ? new Date(wcb.workDate as unknown as string) : null;
-          if (!d || Number.isNaN(d.getTime())) continue;
-          const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-          const bucket = currentMonthKeys.get(key);
-          if (!bucket) continue;
-          const amt = wcb.totalAmount == null ? 0 : parseFloat(String(wcb.totalAmount));
-          if (Number.isFinite(amt)) bucket.revenue += amt;
-        }
-
-        const series = current.map((row, i) => ({
-          month: row.month,
-          revenue: row.revenue,
-          partsRevenue: row.partsRevenue,
-          laborRevenue: row.laborRevenue,
-          prevYearRevenue: prev[i]?.revenue ?? 0,
-        }));
-        // Touch unused var to satisfy strict TS w/o adding @ts-ignore
-        void prevYearAnchor;
+        const series = buildRevenueTrend(allInvoices, now, months);
 
         res.json({ series });
       } catch (err) {
@@ -1082,11 +1010,6 @@ export function registerFinancialPulseRoutes(
         );
         if (scope.status !== 200) {
           res.status(scope.status).json(scope.body);
-          return;
-        }
-        const asOf = parseAsOfParam(req.query.asOf as string | undefined);
-        if (!asOf.ok) {
-          res.status(400).json({ message: asOf.message });
           return;
         }
         const periodParsed = parsePeriodParam(
@@ -1183,11 +1106,6 @@ export function registerFinancialPulseRoutes(
           res.status(scope.status).json(scope.body);
           return;
         }
-        const asOf = parseAsOfParam(req.query.asOf as string | undefined);
-        if (!asOf.ok) {
-          res.status(400).json({ message: asOf.message });
-          return;
-        }
         const periodParsed = parsePeriodParam(
           req.query.period as string | undefined,
         );
@@ -1259,11 +1177,6 @@ export function registerFinancialPulseRoutes(
         );
         if (scope.status !== 200) {
           res.status(scope.status).json(scope.body);
-          return;
-        }
-        const asOf = parseAsOfParam(req.query.asOf as string | undefined);
-        if (!asOf.ok) {
-          res.status(400).json({ message: asOf.message });
           return;
         }
         const periodParsed = parsePeriodParam(
@@ -1338,11 +1251,6 @@ export function registerFinancialPulseRoutes(
           res.status(scope.status).json(scope.body);
           return;
         }
-        const asOf = parseAsOfParam(req.query.asOf as string | undefined);
-        if (!asOf.ok) {
-          res.status(400).json({ message: asOf.message });
-          return;
-        }
         const periodParsed = parsePeriodParam(
           req.query.period as string | undefined,
         );
@@ -1414,11 +1322,6 @@ export function registerFinancialPulseRoutes(
           res.status(scope.status).json(scope.body);
           return;
         }
-        const asOf = parseAsOfParam(req.query.asOf as string | undefined);
-        if (!asOf.ok) {
-          res.status(400).json({ message: asOf.message });
-          return;
-        }
         // A/R aging is intrinsically a snapshot ("everything currently
         // outstanding"), so `period` doesn't change the math — but we
         // validate and echo it so the Slice 2 period toggle can drive
@@ -1462,11 +1365,6 @@ export function registerFinancialPulseRoutes(
         );
         if (scope.status !== 200) {
           res.status(scope.status).json(scope.body);
-          return;
-        }
-        const asOf = parseAsOfParam(req.query.asOf as string | undefined);
-        if (!asOf.ok) {
-          res.status(400).json({ message: asOf.message });
           return;
         }
         // Projection math anchors on the current month (run-rate vs prev
@@ -1761,11 +1659,6 @@ export function registerFinancialPulseRoutes(
         );
         if (scope.status !== 200) {
           res.status(scope.status).json(scope.body);
-          return;
-        }
-        const asOf = parseAsOfParam(req.query.asOf as string | undefined);
-        if (!asOf.ok) {
-          res.status(400).json({ message: asOf.message });
           return;
         }
 

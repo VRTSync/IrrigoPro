@@ -16,6 +16,24 @@ from a cross-tenant cached rollup. Tax and markup are baked into
 `invoices.totalAmount` at finalization time and **are included**
 in every dollar tile below.
 
+Financial Pulse's MTD/YTD selector governs Profit Margin, revenue mix, and
+the drill-down tables, not every tile. The two revenue-trend lines are both
+invoiced revenue by `createdAt`; uninvoiced wet-check work belongs in Work
+Not Yet Billed instead. Months whose invoices have no recorded parts/labor
+subtotals have no split plotted, not a $0 split. The customer drill-down
+reports both returned rows and the full total when the 500-row view is
+truncated. Table dollar amounts retain two decimal places, like their CSVs;
+the headline tiles display whole dollars.
+
+For invoice-based Financial Pulse figures, the canonical excluded statuses
+are **draft, cancelled, superseded, merged, failed**. Money Owed additionally
+excludes paid invoices. The Work Not Yet Billed snapshot includes uninvoiced
+wet-check billings as well as work orders and billing sheets.
+
+The MTD comparison to last month and YTD comparison to last year clamp the
+day to the last day of the target month when it is shorter (March 31 compares
+through February 28; February 29 compares through February 28 last year).
+
 ---
 
 ## Tile 1 — Billed Last Cycle
@@ -24,12 +42,10 @@ in every dollar tile below.
 - **Date column**: `invoices.invoiceMonth` / `invoices.invoiceYear`
   (billing period, NOT `createdAt`). An April invoice created in early
   May is counted in the April cycle, not the May cycle.
-- **Cycle selection**: the most recent billing cycle is determined by
-  `max(invoiceYear * 100 + invoiceMonth)` across all non-draft,
-  non-cancelled invoices in scope. This matches the Customer Billing
-  command-center logic in `customer-billing.tsx:505-521`.
-- **Status filter**: excludes `draft` and `cancelled`.
-- **Helper**: `getDistinctBillingCycles(invoices)[0]` to find the cycle,
+- **Cycle selection**: the most recent **closed** billing cycle, excluding
+  the current in-progress month, from eligible invoices in scope.
+- **Status filter**: excludes `draft`, `cancelled`, `superseded`, `merged`, `failed`.
+- **Helper**: `getDistinctBillingCycles(invoices, { closedAsOf: now })[0]` to find the cycle,
   then `computeBilledForCycle(invoices, cycle)` to sum it.
 - **Endpoint**: `GET /api/financial-pulse/kpis` → `billedLastCycle.value`
 - **Delta**: compared to the second-most-recent billing cycle
@@ -41,7 +57,7 @@ in every dollar tile below.
 - **Source**: `invoices`
 - **Date column**: `invoices.paidAt`
 - **Window**: MTD (first of current month 00:00 local → now)
-- **Status filter**: excludes `draft` and `cancelled`. A row with
+- **Status filter**: excludes `draft`, `cancelled`, `superseded`, `merged`, `failed`. A row with
   `paidAt` in the window but status `draft` / `cancelled` is a data bug;
   the read path defends against it explicitly.
 - **Tax / markup**: included
@@ -55,7 +71,7 @@ in every dollar tile below.
 
 - **Source**: `invoices` (local Postgres, NOT QuickBooks)
 - **Date column**: none — point-in-time snapshot as of `now`
-- **Status filter**: excludes `draft`, `cancelled`, and `paid`. A
+- **Status filter**: excludes `draft`, `cancelled`, `superseded`, `merged`, `failed`, and `paid`. A
   row with a non-null `paidAt` is also excluded (defends against
   stale status).
 - **Tax / markup**: included
@@ -66,38 +82,34 @@ in every dollar tile below.
 
 ## Tile 4 — Projected by Month-End *(previously "Projected Month-End")*
 
-- **Formula**: `(unbilledExposure ÷ daysElapsed) × daysInMonth`
-  where `unbilledExposure` is the total uninvoiced pipeline (tile 6).
-- **Base**: unbilled WO + billing-sheet pipeline, not billed invoice
-  run-rate. This makes the forecast a leading indicator of upcoming
-  revenue rather than an extrapolation of past invoicing.
-- **Helper**: `computeProjectedMonthEnd(unbilledExposure, now)`
+- **Formula**: `(billedMtd ÷ daysElapsed) × daysInMonth`.
+- **Base**: invoices created month-to-date, not the point-in-time
+  uninvoiced pipeline, which cannot be run-rated by elapsed days.
+- **Helper**: `computeProjectedMonthEnd(billedMtd, now)`
 - **Endpoint**: `GET /api/financial-pulse/kpis` → `projectedMonthEnd.value`
 
-## Tile 5 — Billed YTD
+## Tile 5 — Invoiced YTD and Work Booked YTD
 
-- **Definition**: the complete picture of all billable work in the
-  system this calendar year, whether invoiced or not.
+- **Definition**: Invoiced YTD is eligible invoices in this billing year.
+  Work Booked YTD adds eligible work booked this year without an invoice.
 - **Formula**:
   ```
-  invoices[invoiceYear = currentYear, status ≠ draft/cancelled].sum(totalAmount)
-  + workOrders[status ≠ cancelled, createdAt.year = currentYear].sum(totalAmount)   ← invoiced or not
-  + billingSheets[status ≠ cancelled, createdAt.year = currentYear].sum(totalAmount) ← invoiced or not
+  invoices[invoiceYear = currentYear, eligible status].sum(totalAmount)
+  + uninvoiced workOrders[createdAt.year = currentYear].sum(totalAmount)
+  + uninvoiced billingSheets[createdAt.year = currentYear].sum(totalAmount)
+  + uninvoiced wetCheckBillings[workDate.year = currentYear].sum(totalAmount)
   ```
-  WOs/BSs that have already been invoiced **are** included alongside
-  the invoice totals. This is intentional — it gives managers
-  visibility into the full contracted scope (WO/BS amounts) and the
-  realized revenue (invoice amounts) in a single KPI.
+  Invoiced work is counted through its invoice only.
 - **Status filter for WOs/BSs**: excludes `cancelled` only.
-- **Helper**: `computeAllBillableYtd(invoices, workOrders, billingSheets, currentYear)`
-- **Endpoint**: `GET /api/financial-pulse/kpis` → `billedYtd.value`
-- **Compared to**: prior-year-to-date (invoices only, by `createdAt`
-  for the YoY delta — the YoY comparison uses `computeBilled` on the
-  prior year range to maintain backward compatibility).
+- **Helpers**: `computeInvoicedYtd`, `computeWorkBookedYtd`
+- **Endpoint**: `GET /api/financial-pulse/kpis` → `invoicedYtd.value`,
+  `workBookedYtd.value`
+- **Compared to**: Invoiced YTD compares to prior-year invoiced YTD
+  through the same (clamped) calendar date; Work Booked YTD has no delta.
 
 ## Tile 6 — Unbilled Pipeline
 
-- **Source**: `work_orders` + `billing_sheets`
+- **Source**: `work_orders` + `billing_sheets` + `wet_check_billings`
 - **Date column**: none — point-in-time snapshot
 - **Status filter**: rows with `invoiceId IS NULL` and **any status
   except `cancelled`**. This intentionally includes in-progress,
@@ -113,9 +125,8 @@ in every dollar tile below.
 - **Endpoint**: `GET /api/financial-pulse/kpis` → `unbilledExposure.value`
 - **Label on page**: "Work Not Yet Billed" (previously "Unbilled Pipeline" /
   "Unbilled Exposure" — renamed in Task #730 for plain-language clarity)
-- **Note**: Tile 4 (Projected by Month-End) uses this value as its
-  forecast base, so the broader status inclusion also improves the
-  month-end projection.
+- **Note**: This is a point-in-time balance, not the base of a run-rate
+  projection.
 
 ## Tile 7 — Avg. Time to Get Paid *(previously "Avg Days to Pay")*
 

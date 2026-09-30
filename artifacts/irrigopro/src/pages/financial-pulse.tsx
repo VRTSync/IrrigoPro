@@ -137,8 +137,8 @@ interface KpisResponse {
 interface TrendPoint {
   month: string;
   revenue: number;
-  partsRevenue: number;
-  laborRevenue: number;
+  partsRevenue: number | null;
+  laborRevenue: number | null;
   prevYearRevenue: number;
 }
 interface TrendResponse {
@@ -267,6 +267,12 @@ const CURRENCY = new Intl.NumberFormat("en-US", {
   currency: "USD",
   maximumFractionDigits: 0,
 });
+const TABLE_CURRENCY = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 
 // Task #2014 — the Profit Margin warning names BOTH gaps in the cost base:
 // technicians with no hourly wage (labor) and invoice part lines with no
@@ -345,22 +351,22 @@ const ALLOWED_ROLES = new Set([
 // `docs/financial-metrics.md`; if you change one, change the doc.
 export const INFO_TIPS = {
   billedMtd:
-    "From invoices · current month-to-date by createdAt · excludes draft, cancelled · includes tax and markup. Counts invoices CREATED this month whatever period they bill, so a month of arrears billing can equal Billed Last Cycle.",
+    "From invoices · current month-to-date by createdAt · excludes draft, cancelled, superseded, merged, failed · includes tax and markup. Counts invoices CREATED this month whatever period they bill, so a month of arrears billing can equal Billed Last Cycle.",
   billedLastCycle:
-    "From invoices · most recent CLOSED billing cycle by invoiceMonth/invoiceYear · excludes draft, cancelled · includes tax and markup. April invoices created in May still land in the April cycle. The current calendar month is still in progress and is never shown here.",
+    "From invoices · most recent CLOSED billing cycle by invoiceMonth/invoiceYear · excludes draft, cancelled, superseded, merged, failed · includes tax and markup. April invoices created in May still land in the April cycle. The current calendar month is still in progress and is never shown here.",
   collectedMtd:
-    "From invoices · current month-to-date by paidAt · excludes draft, cancelled · includes tax and markup. Reflects QuickBooks payment sync — may show $0 without an active QBO connection.",
+    "From invoices · current month-to-date by paidAt · excludes draft, cancelled, superseded, merged, failed · includes tax and markup. Reflects QuickBooks payment sync — may show $0 without an active QBO connection.",
   outstandingAr:
-    "From invoices · point-in-time snapshot · excludes draft, cancelled, paid · live from this app. Accuracy depends on QuickBooks payment sync.",
+    "From invoices · point-in-time snapshot · excludes draft, cancelled, superseded, merged, failed, paid · live from this app. Accuracy depends on QuickBooks payment sync.",
   // Task #2012 — the single "Billed YTD" tip used to describe and justify
   // counting invoiced work twice. Both halves are now separate tiles and no
   // row is counted twice in either.
   invoicedYtd:
-    "From invoices · this billing year by invoiceMonth/invoiceYear · excludes draft, cancelled, merged · includes tax and markup. Realized revenue only. The comparison is against the same day of last year, invoices to invoices.",
+    "From invoices · this billing year by invoiceMonth/invoiceYear · excludes draft, cancelled, superseded, merged, failed · includes tax and markup. Realized revenue only. The comparison is against the same day of last year, invoices to invoices.",
   workBookedYtd:
     "Invoiced YTD plus work booked this year that has no invoice yet — work orders and billing sheets created this year, and wet check billings worked this year, excluding cancelled and customers hidden from billing. Nothing is counted twice: once work is invoiced it counts through the invoice only.",
   unbilledExposure:
-    "Work orders + billing sheets with no invoice yet, regardless of status (except cancelled) · excludes customers hidden from billing.",
+    "Work orders + billing sheets + wet-check billings with no invoice yet, regardless of status (except cancelled) · excludes customers hidden from billing.",
   projectedMonthEnd:
     "Billed month-to-date ÷ days elapsed × days in month — assumes the rest of the month bills at the same daily pace as the days so far.",
   avgDaysToPay:
@@ -482,9 +488,6 @@ export default function FinancialPulsePage() {
 function AccountingTab({ navigate }: { navigate: (path: string) => void }) {
   const queryClient = useQueryClient();
   const [period, setPeriod] = useState<Period>("mtd");
-  const [customRange, setCustomRange] = useState<{ asOf: string | null }>({
-    asOf: null,
-  });
 
   const kpis = useQuery<KpisResponse>({
     queryKey: ["/api/financial-pulse/kpis", period],
@@ -532,6 +535,7 @@ function AccountingTab({ navigate }: { navigate: (path: string) => void }) {
     <div className="space-y-6" data-testid="accounting-tab">
       {/* Controls */}
       <div className="flex flex-wrap items-center justify-end gap-3">
+        <div className="flex flex-col items-end">
         <ToggleGroup
           type="single"
           value={period}
@@ -545,18 +549,8 @@ function AccountingTab({ navigate }: { navigate: (path: string) => void }) {
             YTD
           </ToggleGroupItem>
         </ToggleGroup>
-        <input
-          type="date"
-          value={customRange.asOf ?? ""}
-          onChange={(e) =>
-            setCustomRange((r) => ({ ...r, asOf: e.target.value }))
-          }
-          disabled
-          aria-label="Custom date range (coming soon)"
-          title="Custom date range — coming in Slice 3"
-          className="hidden sm:inline-block h-9 rounded-md border border-gray-200 bg-gray-50 px-2 text-xs text-gray-400 cursor-not-allowed"
-          data-testid="custom-range-asof"
-        />
+        <span className="text-xs text-gray-600">MTD/YTD controls Profit Margin, revenue mix, and drill-down tables.</span>
+        </div>
         <span className="text-xs text-gray-500 hidden sm:inline">
           Last refreshed {formatRelative(lastRefreshed)}
         </span>
@@ -588,7 +582,7 @@ function AccountingTab({ navigate }: { navigate: (path: string) => void }) {
       )}
 
       {/* Band 1 — KPI snapshot */}
-      <KpiBand data={kpis.data} isLoading={kpis.isLoading} isError={kpis.isError} />
+      <KpiBand data={kpis.data} period={period} isLoading={kpis.isLoading} isError={kpis.isError} />
 
       {/* Band 2 — Parts vs labor stacked bar (revenue trend line moved to Pulse tab) */}
       <Card className="shadow-md hover:shadow-lg transition-shadow">
@@ -917,7 +911,7 @@ function PulseTab({
                       <TableRow
                         key={r.customerId}
                         className="cursor-pointer hover:bg-gray-50"
-                        onClick={() => navigate(`/customers/${r.customerId}`)}
+                        onClick={() => navigate(`/customers/${r.customerId}/profile`)}
                         data-testid={`pulse-customer-row-${r.customerId}`}
                       >
                         <TableCell className="font-medium">
@@ -1096,16 +1090,23 @@ export function CustomerBudgetCell({
   testId: string;
 }) {
   return (
-    <BudgetBar
-      spentAmount={spend}
-      allocation={cap}
-      forcedStatus={status}
-      tone="analytic"
-      size="sm"
-      layout="inline"
-      showPercent
-      data-testid={testId}
-    />
+    <div>
+      <BudgetBar
+        spentAmount={spend}
+        allocation={cap}
+        forcedStatus={status}
+        tone="analytic"
+        size="sm"
+        layout="inline"
+        showPercent
+        hideDollars
+        hidePercent={false}
+        data-testid={testId}
+      />
+      <span className="text-xs tabular-nums text-gray-600">
+        {TABLE_CURRENCY.format(spend)} / {cap == null ? "Unset" : TABLE_CURRENCY.format(cap)}
+      </span>
+    </div>
   );
 }
 
@@ -1386,12 +1387,12 @@ function CustomersTab({ period }: { period: Period }) {
                 <TableRow
                   key={r.customerId}
                   className="cursor-pointer hover:bg-gray-50"
-                  onClick={() => navigate(`/customers/${r.customerId}`)}
+                  onClick={() => navigate(`/customers/${r.customerId}/profile`)}
                   data-testid={`customer-row-${r.customerId}`}
                 >
                   <TableCell className="font-medium">{r.name}</TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {CURRENCY.format(r.revenue)}
+                    {TABLE_CURRENCY.format(r.revenue)}
                   </TableCell>
                   <TableCell>
                     <Sparkline data={r.monthlySpark} />
@@ -1420,7 +1421,7 @@ function CustomersTab({ period }: { period: Period }) {
                     <StatusPill status={r.monthlyStatus} />
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {r.avgDaysToPay == null ? "—" : r.avgDaysToPay.toFixed(0)}
+                    {r.avgDaysToPay == null ? "—" : r.avgDaysToPay.toFixed(1)}
                   </TableCell>
                   <TableCell className="text-xs text-gray-600">
                     {r.lastInvoiceAt
@@ -1435,7 +1436,7 @@ function CustomersTab({ period }: { period: Period }) {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => navigate(`/customers/${r.customerId}`)}>
+                        <DropdownMenuItem onClick={() => navigate(`/customers/${r.customerId}/profile`)}>
                           View customer
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => navigate(`/invoices?customerId=${r.customerId}`)}>
@@ -1450,10 +1451,10 @@ function CustomersTab({ period }: { period: Period }) {
           </TableBody>
         </Table>
       </div>
-      {rows.length > PAGE_SIZE && (
+      {!isLoading && (
         <div className="flex items-center justify-between mt-3 text-xs text-gray-600">
           <span>
-            Page {page + 1} of {totalPages} · {rows.length} customers
+            Page {page + 1} of {totalPages} · Showing {rows.length} of {data?.total ?? rows.length} customers{(data?.total ?? 0) > rows.length ? " (view truncated to 500)" : ""}
           </span>
           <div className="flex gap-2">
             <Button
@@ -1548,10 +1549,10 @@ function TechniciansTab({ period }: { period: Period }) {
                   <TableRow key={r.technicianId} data-testid={`tech-row-${r.technicianId}`}>
                     <TableCell className="font-medium">{r.name}</TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {r.hoursBilled.toFixed(1)}
+                      {r.hoursBilled.toFixed(2)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {CURRENCY.format(r.revenue)}
+                      {TABLE_CURRENCY.format(r.revenue)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {r.laborCost == null ? (
@@ -1560,11 +1561,11 @@ function TechniciansTab({ period }: { period: Period }) {
                           <TooltipContent>No hourly wage set.</TooltipContent>
                         </Tooltip>
                       ) : (
-                        CURRENCY.format(r.laborCost)
+                        TABLE_CURRENCY.format(r.laborCost)
                       )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {r.avgTicket == null ? "—" : CURRENCY.format(r.avgTicket)}
+                      {r.avgTicket == null ? "—" : TABLE_CURRENCY.format(r.avgTicket)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {r.billingSheetCount}
@@ -1573,7 +1574,7 @@ function TechniciansTab({ period }: { period: Period }) {
                       {r.workOrderCount}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {CURRENCY.format(r.partsRevenue)}
+                      {TABLE_CURRENCY.format(r.partsRevenue)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1676,7 +1677,7 @@ function ServiceTypeTab({ period }: { period: Period }) {
                   <TableRow key={r.key} data-testid={`service-row-${r.key}`}>
                     <TableCell className="font-medium pl-8">{r.label}</TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {CURRENCY.format(r.revenue)}
+                      {TABLE_CURRENCY.format(r.revenue)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {r.pctOfTotal == null
@@ -1687,7 +1688,7 @@ function ServiceTypeTab({ period }: { period: Period }) {
                       {r.invoiceCount}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {r.avgTicket == null ? "—" : CURRENCY.format(r.avgTicket)}
+                      {r.avgTicket == null ? "—" : TABLE_CURRENCY.format(r.avgTicket)}
                     </TableCell>
                   </TableRow>
                 )),
@@ -1772,7 +1773,7 @@ function ArAgingCard({
                 >
                   <div className="text-xs font-medium">{b.label}</div>
                   <div className="text-lg font-semibold tabular-nums mt-1">
-                    {CURRENCY.format(b.amount)}
+                    {TABLE_CURRENCY.format(b.amount)}
                   </div>
                   <div className="text-xs opacity-75 mt-0.5">
                     {b.count} {b.count === 1 ? "invoice" : "invoices"}
@@ -1874,12 +1875,14 @@ function ProjectionCard({
   );
 }
 
-function KpiBand({
+export function KpiBand({
   data,
+  period,
   isLoading,
   isError,
 }: {
   data: KpisResponse | undefined;
+  period: Period;
   isLoading: boolean;
   isError: boolean;
 }) {
@@ -2017,6 +2020,7 @@ function KpiBand({
       <MetricTile
         testId="kpi-gross-margin"
         label="Profit Margin"
+        windowBadge={period.toUpperCase()}
         value={data?.grossMarginPct.value ?? null}
         format="percent"
         deltaGoodDirection="up"
@@ -2103,6 +2107,8 @@ function PartsVsLaborChart({
   data: TrendPoint[];
   isLoading: boolean;
 }) {
+  const firstRecorded = data.find((point) => point.partsRevenue != null || point.laborRevenue != null)?.month;
+  const missing = data.some((point) => point.partsRevenue == null && point.laborRevenue == null);
   return (
     <div>
       <h3 className="text-sm font-medium text-gray-700 mb-2">
@@ -2139,6 +2145,12 @@ function PartsVsLaborChart({
           </ResponsiveContainer>
         )}
       </div>
+      {!isLoading && missing && (
+        <p className="mt-2 text-xs text-gray-600" data-testid="split-data-gap">
+          Blank months have no recorded invoice parts/labor split.
+          {firstRecorded ? ` Split data starts in ${firstRecorded}.` : " No split data has been recorded in this range."}
+        </p>
+      )}
     </div>
   );
 }
@@ -2232,7 +2244,9 @@ function RevenueMixCard({
               </ResponsiveContainer>
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="text-center">
-                  <div className="text-xs text-gray-500">Total</div>
+                  <div className="text-xs text-gray-500" data-testid="mix-centre-label">
+                    {tab === "partsLabor" ? "Parts + labor" : tab === "emergency" ? "Line-item revenue" : "Invoiced total"}
+                  </div>
                   <div className="text-xl font-semibold text-gray-900">
                     {CURRENCY.format(total)}
                   </div>

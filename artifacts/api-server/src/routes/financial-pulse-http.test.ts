@@ -11,6 +11,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
 import { db } from "../db";
+import { customers, invoices, wetCheckBillings } from "@workspace/db/schema";
 
 // Swap `db.select` for a chainable shim that always resolves to an
 // empty array. The route handlers call patterns like:
@@ -121,17 +122,6 @@ describe("Task #688 — /api/financial-pulse/* role matrix", () => {
       assert.equal(r.status, 400);
     });
 
-    it(`${path} → 200 when ?asOf=YYYY-MM-DD is well-formed (value ignored in v1)`, async () => {
-      const { base } = await spin("super_admin", null);
-      const r = await fetch(`${base}${path}?asOf=2026-05-19`);
-      assert.equal(r.status, 200);
-    });
-
-    it(`${path} → 400 when ?asOf is malformed`, async () => {
-      const { base } = await spin("super_admin", null);
-      const r = await fetch(`${base}${path}?asOf=not-a-date`);
-      assert.equal(r.status, 400);
-    });
   }
 });
 
@@ -186,5 +176,50 @@ describe("Task #688 — /api/financial-pulse/kpis response shape", () => {
     assert.equal(r.status, 200);
     const body = (await r.json()) as any;
     assert.equal(body.period, "ytd");
+  });
+});
+
+describe("Financial Pulse revenue-trend endpoint", () => {
+  it("keeps YoY invoiced-only when uninvoiced wet-check work exists", async () => {
+    const now = new Date();
+    const current = new Date(now.getFullYear(), now.getMonth(), 1, 12);
+    const prior = new Date(now.getFullYear() - 1, now.getMonth(), 1, 12);
+    const invoiceRows = [
+      { id: 1, customerId: 11, totalAmount: "140", partsSubtotal: null, laborSubtotal: null, status: "sent", createdAt: current, paidAt: null },
+      { id: 2, customerId: 11, totalAmount: "100", partsSubtotal: "0", laborSubtotal: "100", status: "sent", createdAt: prior, paidAt: null },
+    ];
+    let wetCheckWork: any[] = [];
+    const originalSelect = (db as any).select;
+    const select = () => {
+      let table: unknown;
+      const query: any = new Proxy({}, {
+        get(_target, prop) {
+          if (prop === "then") {
+            const rows = table === customers
+              ? [{ id: 11, companyId: 1, name: "Test", hiddenFromBilling: false }]
+              : table === invoices ? invoiceRows
+              : table === wetCheckBillings ? wetCheckWork : [];
+            return (resolve: (rows: any[]) => void) => resolve(rows);
+          }
+          if (prop === "from") return (t: unknown) => { table = t; return query; };
+          return () => query;
+        },
+      });
+      return query;
+    };
+    (db as any).select = select;
+    try {
+      const { base } = await spin("company_admin", 1);
+      const url = `${base}/api/financial-pulse/revenue-trend?months=1`;
+      const before = (await (await fetch(url)).json()) as any;
+      wetCheckWork = [{ invoiceId: null, workDate: current, totalAmount: "900" }];
+      const after = (await (await fetch(url)).json()) as any;
+      assert.deepEqual(after.series, before.series);
+      assert.equal(after.series[0].revenue, 140);
+      assert.equal(after.series[0].prevYearRevenue, 100);
+      assert.equal(after.series[0].partsRevenue, null);
+    } finally {
+      (db as any).select = originalSelect;
+    }
   });
 });
