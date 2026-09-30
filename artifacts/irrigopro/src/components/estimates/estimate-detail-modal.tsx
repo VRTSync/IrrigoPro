@@ -48,6 +48,7 @@ import {
 } from "@workspace/shared";
 import { EstimateListStatusBadge } from "@/components/estimates/list/estimate-list-status-badge";
 import { formatEstimateNumber, buildEstimatePdfFilename } from "@workspace/shared";
+import { readCurrentUserRole } from "@/lib/current-user-role";
 
 interface EstimateDetailModalProps {
   open: boolean;
@@ -69,25 +70,6 @@ const PDF_READ_ROLES = new Set<string>([
   "billing_manager",
   "irrigation_manager",
 ]);
-
-// Task #634 / #658 — the role × lifecycle delete matrix lives in
-// `@/lib/lifecycle` (`canDeleteEstimateAs`) so this modal and the
-// estimate list row stay in lockstep. The server is still the
-// authoritative gate.
-
-function readCurrentUserRole(): string | null {
-  try {
-    if (typeof window === "undefined") return null;
-    const raw = window.localStorage.getItem("user");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { role?: string };
-    return typeof parsed?.role === "string" ? parsed.role : null;
-  } catch {
-    return null;
-  }
-}
-
-
 export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: EstimateDetailModalProps) {
   const { toast } = useToast();
   const [isConverting, setIsConverting] = useState(false);
@@ -1547,4 +1529,3 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     </Dialog>
   );
 }
-

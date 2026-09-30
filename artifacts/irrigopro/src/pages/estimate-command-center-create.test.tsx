@@ -5,6 +5,14 @@ import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
 import { shouldInvalidateAfterEstimateWrite } from "@/components/estimates/estimate-wizard-submit";
 import EstimateCommandCenter from "./estimate-command-center";
+import { apiRequest } from "@/lib/queryClient";
+
+const { toastSpy } = vi.hoisted(() => ({ toastSpy: vi.fn() }));
+vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: toastSpy }) }));
+vi.mock("@/lib/queryClient", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/queryClient")>(),
+  apiRequest: vi.fn(),
+}));
 
 type Row = {
   id: number;
@@ -119,11 +127,91 @@ function mount() {
 beforeEach(() => {
   rows = [];
   nextId = 10;
+  localStorage.setItem("user", JSON.stringify({ role: "company_admin" }));
+  vi.mocked(apiRequest).mockReset();
+  toastSpy.mockClear();
   window.history.replaceState({}, "", "/estimates/command-center");
   // Radix's dropdown relies on these pointer methods, absent in jsdom.
   Element.prototype.setPointerCapture = vi.fn();
   Element.prototype.releasePointerCapture = vi.fn();
   Element.prototype.hasPointerCapture = vi.fn(() => false);
+});
+
+describe("Command Center row Delete confirmation", () => {
+  const seed = (lifecycle: "draft" | "pending_review", id: number) => {
+    rows = [{
+      id, estimateNumber: "00042", customerName: "Spruce Grove",
+      projectName: "Repair", createdBy: "Admin", totalAmount: "200",
+      status: "pending", internalStatus: lifecycle === "draft" ? "draft" : "pending_approval",
+      lifecycle, createdAt: new Date().toISOString(),
+    }];
+  };
+  const openDelete = async (id: number) => {
+    fireEvent.pointerDown(await screen.findByTestId(`estimate-row-actions-${id}`), {
+      button: 0, ctrlKey: false, pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByTestId(`row-delete-${id}`));
+    return screen.findByTestId("cc-delete-dialog");
+  };
+
+  it("names the draft, cancels safely, then removes the table and board row after confirmation", async () => {
+    seed("draft", 42);
+    const fetched = mount();
+    const dialog = await openDelete(42);
+    expect(dialog).toHaveTextContent("00042");
+    expect(dialog).toHaveTextContent("Spruce Grove");
+    expect(dialog).toHaveTextContent("preserved for audit");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(apiRequest).not.toHaveBeenCalled();
+    expect(screen.getByTestId("estimate-row-42")).toBeInTheDocument();
+
+    vi.mocked(apiRequest).mockImplementation(async (url, method) => {
+      expect(url).toBe("/api/estimates/42");
+      expect(method).toBe("DELETE");
+      rows = [];
+      return {};
+    });
+    const secondDialog = await openDelete(42);
+    fireEvent.click(within(secondDialog).getByTestId("cc-delete-confirm"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("estimate-row-42")).not.toBeInTheDocument();
+      expect(screen.getByTestId("kanban-count-draft")).toHaveTextContent("0");
+      expect(screen.getByTestId("kpi-open-pipeline")).toHaveTextContent("0");
+    });
+    expect(fetched.filter((key) => key === "/api/estimates?limit=500").length).toBeGreaterThan(1);
+    expect(fetched.filter((key) => key === "/api/estimates/summary").length).toBeGreaterThan(1);
+    expect(toastSpy).toHaveBeenCalledWith(expect.objectContaining({ title: "Estimate deleted" }));
+  });
+
+  it("removes pending-review value from Open pipeline after delete", async () => {
+    seed("pending_review", 43);
+    mount();
+    await waitFor(() => expect(screen.getByTestId("kpi-open-pipeline")).toHaveTextContent("1"));
+    vi.mocked(apiRequest).mockImplementation(async () => { rows = []; return {}; });
+    const dialog = await openDelete(43);
+    expect(dialog).toHaveTextContent("has been submitted for approval");
+    fireEvent.click(within(dialog).getByTestId("cc-delete-confirm"));
+    await waitFor(() => {
+      expect(screen.getByTestId("kpi-open-pipeline")).toHaveTextContent("0");
+      expect(screen.queryByTestId("estimate-row-43")).not.toBeInTheDocument();
+    });
+  });
+
+  it("keeps the record and dialog when the server rejects the delete", async () => {
+    seed("draft", 44);
+    mount();
+    vi.mocked(apiRequest).mockRejectedValue(new Error("409: {\"message\":\"Estimate is already sent\"}"));
+    const dialog = await openDelete(44);
+    fireEvent.click(within(dialog).getByTestId("cc-delete-confirm"));
+    await waitFor(() => expect(toastSpy).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Couldn't delete estimate",
+      description: "Estimate is already sent",
+      variant: "destructive",
+    })));
+    expect(apiRequest).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByTestId("cc-delete-dialog")).toBeInTheDocument());
+    expect(screen.getByTestId("estimate-row-44")).toBeInTheDocument();
+  });
 });
 
 describe("Command Center new estimate entry", () => {

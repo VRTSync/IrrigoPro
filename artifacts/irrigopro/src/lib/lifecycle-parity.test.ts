@@ -25,7 +25,7 @@
 // decision about both sides at once.
 
 import { describe, it, expect } from "vitest";
-import { computeLifecycleStatus } from "@workspace/shared";
+import { canDeleteEstimateAs, computeLifecycleStatus } from "@workspace/shared";
 
 // Mirror of the SQL filter in storage.getEstimatesPendingApproval.
 // Keeping this list local to the test (rather than importing from the
@@ -85,5 +85,26 @@ describe("Pending review parity (Task #606)", () => {
         estimateDate: new Date(),
       }),
     ).toBe("sent");
+  });
+});
+
+describe("estimate delete role/lifecycle parity with server guards", () => {
+  // Mirrors ESTIMATE_DELETE_ROLES and ESTIMATE_PENDING_DELETE_ROLES in
+  // estimate-routes.ts / estimate-role-guards.ts; no server rules are changed.
+  const officeRoles = ["super_admin", "company_admin", "billing_manager", "irrigation_manager"];
+  it("allows the five creation roles on draft, but only office roles in review", () => {
+    for (const role of [...officeRoles, "field_tech"]) {
+      expect(canDeleteEstimateAs(role, "draft")).toBe(true);
+      expect(canDeleteEstimateAs(role, "pending_review")).toBe(role !== "field_tech");
+    }
+    expect(canDeleteEstimateAs(null, "draft")).toBe(false);
+    expect(canDeleteEstimateAs("unknown", "draft")).toBe(false);
+  });
+  it("preserves sent and terminal rows for audit regardless of role", () => {
+    for (const role of [...officeRoles, "field_tech"]) {
+      for (const lifecycle of ["sent", "approved", "rejected", "expired"] as const) {
+        expect(canDeleteEstimateAs(role, lifecycle)).toBe(false);
+      }
+    }
   });
 });

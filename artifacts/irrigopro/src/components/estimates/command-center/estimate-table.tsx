@@ -37,6 +37,7 @@ import { format, formatDistanceToNow } from "date-fns";
 import {
   LIFECYCLE_ORDER,
   LIFECYCLE_TINTS,
+  canDeleteEstimateAs,
   isConvertedToWorkOrder,
   isReadyToSend,
   lifecycleOf,
@@ -96,6 +97,8 @@ interface EstimateTableProps {
   onEditEstimate?: (id: number) => void;
   onApproveAndSend?: (id: number) => void;
   onConvertToWorkOrder?: (id: number) => void;
+  currentRole?: string | null;
+  onDeleteEstimate?: (id: number) => void;
 }
 
 export function EstimateTable({
@@ -110,6 +113,8 @@ export function EstimateTable({
   onEditEstimate,
   onApproveAndSend,
   onConvertToWorkOrder,
+  currentRole,
+  onDeleteEstimate,
 }: EstimateTableProps) {
   const [search, setSearch] = useState("");
   const [owners, setOwners] = useState<string[]>([]);
@@ -440,6 +445,34 @@ export function EstimateTable({
                                 data-testid={`row-convert-${e.id}`}
                               >
                                 Convert to work order
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                          {onDeleteEstimate && (lc === "draft" || lc === "pending_review") &&
+                            canDeleteEstimateAs(currentRole, e) && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                                  onSelect={() => onDeleteEstimate(e.id)}
+                                  data-testid={`row-delete-${e.id}`}
+                                >
+                                  Delete
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          {onDeleteEstimate && lc !== "draft" && lc !== "pending_review" && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                disabled
+                                className="flex-col items-start gap-0.5"
+                                data-testid={`row-delete-disabled-${e.id}`}
+                              >
+                                <span>Delete</span>
+                                <span className="text-[11px] text-gray-400">
+                                  Sent estimates are kept for audit
+                                </span>
                               </DropdownMenuItem>
                             </>
                           )}

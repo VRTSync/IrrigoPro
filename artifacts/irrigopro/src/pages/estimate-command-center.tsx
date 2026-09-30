@@ -37,8 +37,16 @@ import {
 } from "@/components/estimates/command-center/estimate-table";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
+import { readCurrentUserRole } from "@/lib/current-user-role";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ConvertToWorkOrderModal } from "@/components/estimates/convert-to-work-order-modal";
-import { LIFECYCLE_STATUSES, type LifecycleStatus } from "@workspace/shared";
+import {
+  LIFECYCLE_STATUSES, canDeleteEstimateAs, formatEstimateNumber,
+  isPendingReview, type LifecycleStatus,
+} from "@workspace/shared";
 import type { Estimate } from "@workspace/db/schema";
 import type { EstimateSummary } from "@workspace/db";
 
@@ -67,6 +75,7 @@ export default function EstimateCommandCenter() {
   const [, setSearchTick] = useState(0);
   const { toast } = useToast();
   const qc = useQueryClient();
+  const currentRole = useMemo(() => readCurrentUserRole(), []);
 
   useEffect(() => {
     const tick = () => setSearchTick((n) => n + 1);
@@ -293,6 +302,29 @@ export default function EstimateCommandCenter() {
     [],
   );
 
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+  const pendingDeleteEstimate = estimates.find((e) => e.id === pendingDeleteId);
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => apiRequest(`/api/estimates/${id}`, "DELETE"),
+    onSuccess: () => {
+      toast({ title: "Estimate deleted", description: "The estimate was removed from your lists." });
+      setPendingDeleteId(null);
+      qc.invalidateQueries({
+        predicate: (q) => {
+          const key = q.queryKey?.[0];
+          return typeof key === "string" && key.startsWith("/api/estimates");
+        },
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: "Couldn't delete estimate",
+        description: parseApiError(err, "Please try again."),
+        variant: "destructive",
+      });
+    },
+  });
+
   const attentionIds: number[] | null = useMemo(() => {
     if (!attentionFilter) return null;
     if (!summary) return [];
@@ -451,6 +483,8 @@ export default function EstimateCommandCenter() {
           onEditEstimate={onEditEstimate}
           onApproveAndSend={onApproveAndSend}
           onConvertToWorkOrder={onConvertToWorkOrder}
+          currentRole={currentRole}
+          onDeleteEstimate={setPendingDeleteId}
         />
       </section>
 
@@ -485,6 +519,54 @@ export default function EstimateCommandCenter() {
           convertMutation.mutate({ id: convertingEstimateId, assignedTechnicianId });
         }}
       />
+      <AlertDialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(open) => { if (!open && !deleteMutation.isPending) setPendingDeleteId(null); }}
+      >
+        <AlertDialogContent data-testid="cc-delete-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingDeleteEstimate && isPendingReview(pendingDeleteEstimate)
+                ? "Delete this pending estimate?"
+                : "Delete this draft estimate?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDeleteEstimate && isPendingReview(pendingDeleteEstimate) ? (
+                <>
+                  Estimate <span className="font-medium">{formatEstimateNumber(pendingDeleteEstimate.estimateNumber)}</span>{" "}
+                  for <span className="font-medium">{pendingDeleteEstimate.customerName}</span>{" "}
+                  has been submitted for approval. Deleting it will hide it
+                  from every list; admins can still see it for audit.
+                </>
+              ) : (
+                <>
+                  Estimate <span className="font-medium">{formatEstimateNumber(pendingDeleteEstimate?.estimateNumber)}</span>{" "}
+                  for <span className="font-medium">{pendingDeleteEstimate?.customerName}</span>{" "}
+                  will be removed from lists and dashboards. The row is preserved for audit and can be restored
+                  by a super admin if needed.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+              disabled={deleteMutation.isPending || !pendingDeleteEstimate ||
+                !canDeleteEstimateAs(currentRole, pendingDeleteEstimate)}
+              onClick={(e) => {
+                e.preventDefault();
+                if (pendingDeleteEstimate && canDeleteEstimateAs(currentRole, pendingDeleteEstimate)) {
+                  deleteMutation.mutate(pendingDeleteEstimate.id);
+                }
+              }}
+              data-testid="cc-delete-confirm"
+            >
+              {deleteMutation.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

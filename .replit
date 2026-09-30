@@ -240,6 +240,10 @@ args = "estimate-command-center"
 task = "workflow.run"
 args = "manager-mobile-action-board"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "command-center-row-delete"
+
 [[workflows.workflow]]
 name = "auth-middleware-coverage"
 author = "agent"
@@ -855,6 +859,17 @@ args = "pnpm --filter @workspace/shared typecheck && pnpm --filter @workspace/ir
 
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow]]
+name = "command-center-row-delete"
+author = "agent"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/irrigopro exec vitest run src/components/estimates/command-center/estimate-table-delete.test.tsx src/pages/estimate-command-center-create.test.tsx src/lib/current-user-role.test.ts src/lib/lifecycle-parity.test.ts src/components/estimates/estimate-delete-visibility.test.tsx src/components/estimates/estimate-wizard-submit.test.ts --maxWorkers=1 --minWorkers=1 --testTimeout=20000"
 
 [agent]
 stack = "PNPM_WORKSPACE"

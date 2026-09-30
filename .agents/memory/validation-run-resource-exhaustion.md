@@ -27,3 +27,14 @@ the last few PIDs. CPU (8 cores) and RAM (16 GB) are NOT the constraint — only
    assertion errors, and the serial runs that passed.
 
 A shifting failure set with zero assertion errors is the fingerprint. Read it early.
+
+For a focused Vitest validation under PID pressure, setting only `--maxWorkers=1`
+can fail before tests run with "options.minThreads and options.maxThreads must not
+conflict." Set **both** `--maxWorkers=1 --minWorkers=1` (or use the single-fork
+mode above) and give UI tests a realistic timeout when other jobs share the host.
+
+**Why:** Vitest's configured/default minimum worker count can exceed a CLI
+maximum of one; that configuration failure is unrelated to the assertions.
+
+**How to apply:** Limit both worker bounds together when registering focused
+validation commands on this workspace.

@@ -29,23 +29,12 @@ import {
 import { formatEstimateNumber, buildEstimatePdfFilename } from "@workspace/shared";
 import { EstimateListStatusBadge } from "./estimate-list-status-badge";
 import { useToast } from "@/hooks/use-toast";
+import { readCurrentUserRole } from "@/lib/current-user-role";
 
 // Task #634 / #658 — the role × lifecycle delete matrix lives in
 // `@/lib/lifecycle` (`canDeleteEstimateAs`) so this file and the
 // estimate detail modal stay in lockstep. The server is still the
 // authoritative gate.
-
-function readCurrentUserRole(): string | null {
-  try {
-    if (typeof window === "undefined") return null;
-    const raw = window.localStorage.getItem("user");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { role?: string };
-    return typeof parsed?.role === "string" ? parsed.role : null;
-  } catch {
-    return null;
-  }
-}
 
 interface Props {
   estimate: Estimate;
