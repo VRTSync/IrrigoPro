@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { generateActionBoardPlan } from "@workspace/shared";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ActionBoardPage from "./action-board";
 
@@ -44,11 +45,11 @@ function renderPage(response = base) {
     json: async () => response,
   }));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}><ActionBoardPage /></QueryClientProvider>);
+  return { ...render(<QueryClientProvider client={client}><ActionBoardPage /></QueryClientProvider>), client };
 }
 
 describe("Action Board page", () => {
-  beforeEach(() => vi.restoreAllMocks());
+  beforeEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   it("renders normalized decimal totals, null estimates, every lane, approvals, and no edit/findings UI", async () => {
     renderPage();
@@ -62,9 +63,12 @@ describe("Action Board page", () => {
     expect(screen.getByTestId("action-board-lane-nothing_pending")).toBeInTheDocument();
     expect(screen.getAllByText(/pre-approved/).length).toBeGreaterThanOrEqual(2);
     expect(screen.getByTestId("action-board-excluded")).toHaveTextContent("2 customers excluded");
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByTestId("button-copy-plan")).toBeInTheDocument();
+    expect(screen.getByTestId("input-action-board-plan")).toHaveValue(
+      generateActionBoardPlan(base.rows, new Date()),
+    );
     expect(screen.queryByText(/finding/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/edit/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("input-action-board-plan")).toBeInTheDocument();
   });
 
   it("shows the budget-goal empty state", async () => {
@@ -72,5 +76,54 @@ describe("Action Board page", () => {
     await waitFor(() => expect(screen.getByTestId("action-board-empty")).toBeInTheDocument());
     expect(screen.getByTestId("action-board-empty")).toHaveTextContent("No customers have a budget goal");
     expect(screen.getByTestId("action-board-excluded")).toHaveTextContent("4 customers excluded");
+  });
+
+  it("keeps the editable plan through a refetch, copies edits, and confirms regeneration", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const { client } = renderPage();
+    await waitFor(() => expect((screen.getByTestId("input-action-board-plan") as HTMLTextAreaElement).value).toContain("Decimal Lawn"));
+    const editor = screen.getByTestId("input-action-board-plan") as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "Crew A\nDecimal Lawn" } });
+    client.setQueriesData({ predicate: (query) => String(query.queryKey[0]).startsWith("/api/action-board?") },
+      (old) => ({ ...(old as typeof base), excludedWithoutBudgetGoal: 5 }));
+    await waitFor(() => expect(screen.getByTestId("action-board-excluded")).toHaveTextContent("5 customers"));
+    expect(editor.value).toBe("Crew A\nDecimal Lawn");
+    fireEvent.click(screen.getByTestId("button-copy-plan"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Crew A\nDecimal Lawn"));
+    expect(screen.getByTestId("status-copy-plan")).toHaveTextContent("Copied today's plan");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    fireEvent.click(screen.getByTestId("button-regenerate-plan"));
+    expect(confirm).toHaveBeenCalled();
+    expect(editor.value).toBe("Crew A\nDecimal Lawn");
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByTestId("button-regenerate-plan"));
+    expect(editor.value).toContain("Decimal Lawn");
+    expect(editor.value).toContain("Work orders are in the app");
+  });
+
+  it("selects the full plan for manual copy when both clipboard paths fail", async () => {
+    vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) } });
+    const exec = vi.fn().mockReturnValue(false);
+    Object.defineProperty(document, "execCommand", { configurable: true, value: exec });
+    renderPage();
+    await waitFor(() => expect((screen.getByTestId("input-action-board-plan") as HTMLTextAreaElement).value).toContain("Decimal Lawn"));
+    const editor = screen.getByTestId("input-action-board-plan") as HTMLTextAreaElement;
+    fireEvent.click(screen.getByTestId("button-copy-plan"));
+    await waitFor(() => expect(screen.getByTestId("status-copy-plan")).toHaveTextContent("copy it manually"));
+    expect(exec).toHaveBeenCalledWith("copy");
+    expect(editor.selectionStart).toBe(0);
+    expect(editor.selectionEnd).toBe(editor.value.length);
+  });
+
+  it("copies with the selection fallback when iOS does not expose the async clipboard", async () => {
+    vi.stubGlobal("navigator", {});
+    const exec = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, "execCommand", { configurable: true, value: exec });
+    renderPage();
+    await waitFor(() => expect((screen.getByTestId("input-action-board-plan") as HTMLTextAreaElement).value).toContain("Decimal Lawn"));
+    fireEvent.click(screen.getByTestId("button-copy-plan"));
+    await waitFor(() => expect(screen.getByTestId("status-copy-plan")).toHaveTextContent("Copied today's plan"));
+    expect(exec).toHaveBeenCalledWith("copy");
   });
 });

@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Calendar, ClipboardCheck, Send, ShieldAlert } from "lucide-react";
+import { generateActionBoardPlan } from "@workspace/shared";
+import { copyText } from "@/lib/copy-text";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { BudgetBar } from "@/components/budget/BudgetBar";
@@ -109,6 +111,28 @@ export default function ActionBoardPage() {
     const lane = (row.lane === "over_budget_nothing_approved" ? "over_budget" : row.lane) as Lane;
     if (grouped[lane]) grouped[lane].push(row);
   }
+  const generatedPlan = useMemo(
+    () => data ? generateActionBoardPlan(data.rows, new Date()) : "",
+    [data],
+  );
+  // Keep edits local. A month switch presents its own generated plan; a refetch
+  // never silently overwrites a manager's draft for the same month.
+  const [draft, setDraft] = useState<{ selection: string; text: string } | null>(null);
+  const [copyStatus, setCopyStatus] = useState("");
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const planText = draft?.selection === selection ? draft.text : generatedPlan;
+  const hasEdits = draft?.selection === selection && draft.text !== generatedPlan;
+  const handleCopyPlan = async () => {
+    // Start the clipboard operation in this click gesture, before any async work.
+    try {
+      await copyText(planText);
+      setCopyStatus("Copied today's plan");
+    } catch {
+      editorRef.current?.focus();
+      editorRef.current?.select();
+      setCopyStatus("Copy failed. Plan selected — copy it manually.");
+    }
+  };
   const options = Array.from({ length: 12 }, (_, index) => {
     const date = new Date(now.getFullYear(), now.getMonth() - index, 1);
     return { value: `${date.getFullYear()}-${date.getMonth() + 1}`, label: `${months[date.getMonth() + 1]} ${date.getFullYear()}` };
@@ -130,6 +154,40 @@ export default function ActionBoardPage() {
         const info = laneInfo[lane]; const Icon = info.icon;
         return <section key={lane} className="rounded-xl border bg-white overflow-hidden" data-testid={`action-board-lane-${lane}`}><div className="p-4 bg-slate-50 border-b"><h2 className="font-bold flex items-center gap-2"><Icon className="w-4 h-4 text-blue-700" />{info.title} <span className="text-sm font-normal text-slate-500">({grouped[lane].length})</span></h2><p className="text-xs text-slate-500 mt-1">{info.subtitle}</p></div>{grouped[lane].length ? <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr className="text-[11px] uppercase tracking-wide text-slate-500"><th className="p-4">Customer · budget</th><th className="p-4">Open work orders</th><th className="p-4">Wet check</th><th className="p-4">{lane === "clear_to_send" ? "Do not exceed" : lane === "over_budget" ? "Headroom" : "Unused"}</th></tr></thead><tbody>{grouped[lane].map((row) => <Row key={row.customerId} row={row} />)}</tbody></table></div> : <p className="p-6 text-sm text-slate-400">No customers in this lane.</p>}</section>;
       })}
+      {data && (
+        <section className="rounded-xl border bg-white overflow-hidden" data-testid="action-board-plan">
+          <div className="flex flex-wrap items-center gap-3 border-b bg-slate-50 px-4 py-3">
+            <h2 className="font-semibold text-slate-900">Today's plan</h2>
+            <span className="text-xs text-slate-500">Edit before copying; changes are not saved.</span>
+            <div className="flex flex-wrap gap-2 sm:ml-auto">
+              <button
+                type="button"
+                onClick={() => {
+                  if (hasEdits && !window.confirm("Regenerate the plan and replace your edits?")) return;
+                  setDraft({ selection, text: generatedPlan });
+                  setCopyStatus("");
+                }}
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                data-testid="button-regenerate-plan"
+              >Regenerate (replaces edits)</button>
+              <button type="button" onClick={handleCopyPlan}
+                className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white"
+                data-testid="button-copy-plan"
+              >Copy today's plan</button>
+            </div>
+          </div>
+          {copyStatus && <p className="px-4 pt-3 text-sm text-blue-700" role="status" data-testid="status-copy-plan">{copyStatus}</p>}
+          <textarea
+            ref={editorRef}
+            aria-label="Today's plan text"
+            data-testid="input-action-board-plan"
+            value={planText}
+            onChange={(event) => { setDraft({ selection, text: event.target.value }); setCopyStatus(""); }}
+            spellCheck={false}
+            className="block w-full min-h-[24rem] resize-y bg-white p-4 font-mono text-xs leading-relaxed text-slate-800 outline-none focus:ring-2 focus:ring-inset focus:ring-blue-600"
+          />
+        </section>
+      )}
     </main>
   );
 }

@@ -224,6 +224,14 @@ args = "finding-catalog-labor"
 task = "workflow.run"
 args = "zone-screen-derived-labor"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "action-board-plan-text"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "action-board-plan-ui"
+
 [[workflows.workflow]]
 name = "auth-middleware-coverage"
 author = "agent"
@@ -792,6 +800,28 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/irrigopro exec vitest run src/pages/wet-checks/zone-screen-derived-labor.test.tsx"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "action-board-plan-text"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/shared exec node --import tsx --test --test-reporter=spec src/action-board-plan.test.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "action-board-plan-ui"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/irrigopro exec vitest run src/pages/action-board.test.tsx"
 
 [workflows.workflow.metadata]
 isValidation = true

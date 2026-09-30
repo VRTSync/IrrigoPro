@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { safeGet } from "@/utils/safeStorage";
+import { copyText } from "@/lib/copy-text";
 
 interface Props {
   children: ReactNode;
@@ -206,21 +207,7 @@ export class AppErrorBoundary extends Component<Props, State> {
   private handleCopyDiagnostics = async () => {
     const text = this.buildDiagnostics();
     try {
-      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else if (typeof document !== "undefined") {
-        // Safari iOS without async clipboard API: fall back to the
-        // hidden-textarea + execCommand trick so techs in the field on
-        // older iOS still get the copy affordance.
-        const ta = document.createElement("textarea");
-        ta.value = text;
-        ta.style.position = "fixed";
-        ta.style.opacity = "0";
-        document.body.appendChild(ta);
-        ta.select();
-        try { document.execCommand("copy"); } catch { /* ignore */ }
-        document.body.removeChild(ta);
-      }
+      await copyText(text);
       this.setState({ copied: true });
       window.setTimeout(() => this.setState({ copied: false }), 2000);
     } catch (copyErr) {
