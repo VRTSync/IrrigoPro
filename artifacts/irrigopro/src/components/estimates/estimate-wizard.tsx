@@ -34,7 +34,7 @@ import {
   CustomerLocationStep,
   type CustomerLocationValue,
 } from "@/components/location/customer-location-step";
-import { submitEstimate, type SubmitMode } from "./estimate-wizard-submit";
+import { shouldInvalidateAfterEstimateWrite, submitEstimate, type SubmitMode } from "./estimate-wizard-submit";
 import { isDraft, estimateSubmitStatusFields } from "@workspace/shared";
 import { getCurrentUser } from "@/lib/impersonation";
 
@@ -729,12 +729,9 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
         apiRequest as unknown as Parameters<typeof submitEstimate>[3],
       ),
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/estimates/pending-approval"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      if (isEdit && estimateId) {
-        queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
-      }
+      queryClient.invalidateQueries({
+        predicate: (q) => shouldInvalidateAfterEstimateWrite(q.queryKey?.[0]),
+      });
       clearDraft(estimateId ?? null);
       if (result.mode === "draft") {
         toast({ title: isDraftEdit ? "Draft saved" : "Saved to drafts" });

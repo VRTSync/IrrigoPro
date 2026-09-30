@@ -15,7 +15,23 @@
 //     could leave the estimate half-submitted.
 
 import { describe, it, expect } from "vitest";
-import { submitEstimate, type ApiRequest } from "./estimate-wizard-submit";
+import { shouldInvalidateAfterEstimateWrite, submitEstimate, type ApiRequest } from "./estimate-wizard-submit";
+
+describe("wizard save query invalidation", () => {
+  it("refreshes limited lists, summary, detail, and dashboard, but not unrelated queries", () => {
+    for (const key of [
+      "/api/estimates",
+      "/api/estimates?limit=500",
+      "/api/estimates/summary",
+      "/api/estimates/pending-approval",
+      "/api/dashboard/stats",
+    ]) {
+      expect(shouldInvalidateAfterEstimateWrite(key)).toBe(true);
+    }
+    expect(shouldInvalidateAfterEstimateWrite("/api/work-orders")).toBe(false);
+    expect(shouldInvalidateAfterEstimateWrite(null)).toBe(false);
+  });
+});
 
 interface Call {
   url: string;

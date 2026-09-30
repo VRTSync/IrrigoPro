@@ -22,7 +22,9 @@ import {
   ShieldCheck,
   TrendingUp,
   CalendarClock,
+  Plus,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { KpiTile } from "@/components/admin-dashboard/kpi-tile";
 import {
   AttentionStrip,
@@ -200,6 +202,11 @@ export default function EstimateCommandCenter() {
   // --- Edit (EstimateWizard) ---
   const [editingEstimateId, setEditingEstimateId] = useState<number | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const onNewEstimate = useCallback(() => {
+    setSelectedEstimateId(null);
+    setEditingEstimateId(null);
+    setWizardOpen(true);
+  }, []);
   const onEditEstimate = useCallback((id: number) => {
     setSelectedEstimateId(null);
     setEditingEstimateId(id);
@@ -369,6 +376,14 @@ export default function EstimateCommandCenter() {
             Pipeline, attention, and lifecycle for every estimate.
           </p>
         </div>
+        <Button
+          onClick={onNewEstimate}
+          className="bg-blue-600 hover:bg-blue-700 text-white"
+          data-testid="cc-new-estimate"
+        >
+          <Plus className="w-4 h-4 mr-2" />
+          New Estimate
+        </Button>
       </header>
 
       <section

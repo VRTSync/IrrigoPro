@@ -17,6 +17,13 @@ export type ApiRequest = (
   body?: unknown,
 ) => Promise<unknown>;
 
+// Query keys use the URL as their first element. TanStack's element-wise
+// prefix matching does not include URL query-string variants of a list.
+export function shouldInvalidateAfterEstimateWrite(key: unknown): boolean {
+  return typeof key === "string" &&
+    (key.startsWith("/api/estimates") || key.startsWith("/api/dashboard"));
+}
+
 // Wizard save path. There are three cases:
 //   1. New estimate (POST /api/estimates) — already a single atomic
 //      insert, so draft-vs-submit just toggles the internalStatus the

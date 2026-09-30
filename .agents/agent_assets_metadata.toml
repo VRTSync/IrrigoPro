@@ -95,3 +95,59 @@ mtime_ms = 1790719301823
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/3567d3e0-abf6-4ef2-9112-beab7ac07665/29b36b34-93e6-42db-9121-0ed9bbd3e1fb"
 storage_version_token = "1790719508949908"
 content_type = "image/png"
+
+[[outputs]]
+id = "mhMWoI50JvffWnjxdTEqV"
+uri = "file://screenshots/estimate-command-center/header-desktop.jpg"
+type = "image"
+title = "Command Center header — desktop"
+description = "Browser capture of the real page component with sample data; no authenticated account was used."
+logical_id = "cb8490db-41c4-4657-9f1c-cc8fa253319f"
+content_hash = "sha256:7fdd67dfdb0c06734817efa4ec5ed9e603214d568ce43f4dfbed65811b147aed"
+size = 74011
+mtime_ms = 1790790300321
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/cb8490db-41c4-4657-9f1c-cc8fa253319f/c3902cdb-01d9-45f7-aec8-020bba9ab73c"
+storage_version_token = "1790790342340073"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "fJan28usyfDkDQF8oGmFn"
+uri = "file://screenshots/estimate-command-center/header-640.jpg"
+type = "image"
+title = "Command Center header — 640px"
+description = "Browser capture of the real page component at 640px with sample data."
+logical_id = "297c060d-1b24-4e08-8843-1d401c8aec32"
+content_hash = "sha256:0fad45a516cf62c9f6ae4b099d5ca12f5df7daec05bc6af4ea12ea9f7ac0e561"
+size = 45019
+mtime_ms = 1790790300338
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/297c060d-1b24-4e08-8843-1d401c8aec32/8728b0fe-93cb-4fe2-a215-211010e28874"
+storage_version_token = "1790790343069042"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "EdqyRQK7sKjuSiaUxoSlZ"
+uri = "file://screenshots/estimate-command-center/after-draft.jpg"
+type = "image"
+title = "After draft save refresh"
+description = "Sample-data browser fixture: invalidating estimate queries refreshes the Draft column and table while Open pipeline remains 0."
+logical_id = "d65463ff-9795-477c-b03c-679a31c5457f"
+content_hash = "sha256:6ad3e382c8d4695d29158fb33cb78d4291dc430d720e12b4556cece767fcb972"
+size = 80025
+mtime_ms = 1790790300349
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/d65463ff-9795-477c-b03c-679a31c5457f/e4227c11-f449-4aa4-9cfa-fc76c9e2850f"
+storage_version_token = "1790790343536409"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "TiIQLhpmeAuCI58jiY25q"
+uri = "file://screenshots/estimate-command-center/after-submit.jpg"
+type = "image"
+title = "After pending-review submit refresh"
+description = "Sample-data browser fixture: pending review refreshes the table, column, and Open pipeline tile."
+logical_id = "55f18218-397e-4d64-8ca5-ad5b49cb14a2"
+content_hash = "sha256:d905deb2992ab2a5b3c3dd06c80b846f213bacf30dff60e0b71a31e806f28734"
+size = 84615
+mtime_ms = 1790790300358
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/55f18218-397e-4d64-8ca5-ad5b49cb14a2/603335e0-bde1-4a6f-836e-db04dc8501ce"
+storage_version_token = "1790790344110193"
+content_type = "image/jpeg"
