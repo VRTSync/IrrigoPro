@@ -1,0 +1,236 @@
+# BUILD — Estimate Command Center Slice 2: Delete From the Row Menu
+
+This is a single self-contained task. Build exactly what is described. Do not deviate, do not
+re-decide the locked decisions below, and do not merge this with Slice 1 (New Estimate entry point) —
+they are independent and must ship as separate tickets.
+
+## What & Why
+
+Delete already exists end to end. It is simply not reachable from the only estimates page a
+`company_admin` can open.
+
+- Server: `DELETE /api/estimates/:id` soft-deletes, writes an `estimate.deleted` audit event, and
+  returns the updated row (`artifacts/api-server/src/routes/estimate-routes.ts:889-1010`).
+- Shared gate: `canDeleteEstimateAs(role, estimate)` — draft for any of the five delete roles,
+  `pending_review` for the four office roles (`lib/shared/src/lifecycle.ts:269-299`). The server
+  enforces the identical matrix at `:900-960`.
+- Client surfaces that expose it: `components/estimates/list/estimate-list-row.tsx:98-135` (on
+  `pages/estimates.tsx`, which is **not routed for `company_admin`**) and
+  `components/estimates/estimate-detail-modal.tsx:523-524`, `:1154-1166`.
+
+So today a company admin's only route to Delete is: open a row → detail modal → scroll the action
+bar. The "All estimates" row menu offers View / Edit / Approve & send / Convert to work order
+(`components/estimates/command-center/estimate-table.tsx:415-445`) and no Delete. This ticket adds it
+there.
+
+**What this ticket does not change:** sent, approved, rejected and expired estimates stay
+undeletable. That was reconfirmed on 2026-09-23. Those rows have customer-facing artifacts —
+tokenised approval links, emailed PDFs — and the 409 at `estimate-routes.ts:936-946` is deliberate.
+Most rows on a healthy Command Center are terminal, so **the menu item must explain itself rather
+than vanish**, or this ticket will read as "delete still doesn't work" on exactly the rows Randy was
+looking at when he reported it.
+
+## Design context (locked decisions — do not relitigate)
+
+1. **Row kebab menu only.** No kebab on the lifecycle kanban cards. No bulk-select column, no
+   "Delete selected". Both were considered and declined on 2026-09-23.
+2. **No server change. No change to the delete matrix.** `canDeleteEstimateAs` and the route's role
+   and lifecycle gates are correct as written and are not touched.
+3. **Terminal rows show a disabled item, not a missing one.** On `sent` / `approved` / `rejected` /
+   `expired` the menu renders `Delete` disabled with the reason underneath. On `draft` and
+   `pending_review` for a role that fails the role half of the matrix, the item is **omitted**
+   entirely — a role limit is not something to advertise per-row.
+4. **The page owns the mutation and the confirm dialog; the table stays presentational.** This
+   matches how Convert to work order already works — the table takes `onConvertToWorkOrder` and the
+   page owns `ConvertToWorkOrderModal` (`pages/estimate-command-center.tsx:253-288`, `:471-480`).
+   Do not put a mutation or an `AlertDialog` inside `estimate-table.tsx`.
+5. **`readCurrentUserRole` gets extracted, not copied a third time.** It exists twice today,
+   byte-identical (`estimate-list-row.tsx:38-48`, `estimate-detail-modal.tsx:78-88`). Move it to one
+   module and repoint both callers. A third inline copy is not acceptable.
+
+## Done looks like
+
+- On a draft or pending-review row, the "..." menu shows **Delete** in destructive styling. Choosing
+  it opens a confirm dialog naming the estimate number and customer; confirming removes the row from
+  the table, the kanban and the KPI tiles without a manual refresh, and shows a success toast.
+- On a sent / approved / rejected / expired row, the menu shows **Delete** greyed out with
+  "Sent estimates are kept for audit" underneath it, and it cannot be activated.
+- A `field_tech` sees Delete on drafts and does not see it at all on pending-review rows.
+- The detail modal's Delete button and the estimate list row's Delete still work exactly as before.
+- `readCurrentUserRole` is defined in exactly one place in the repo.
+
+## Out of scope
+
+- Slice 1 (New Estimate entry point). Separate ticket.
+- Extending delete to any additional lifecycle state, and any "restore" or "Show deleted" affordance
+  on the Command Center (the toggle on `pages/estimates.tsx:113-131` stays where it is).
+- The kanban cards, the attention strip, and the KPI tiles' own markup.
+- Hard delete. This is a soft delete; the row is preserved.
+
+## Steps
+
+1. **Extract the role reader.** Create `artifacts/irrigopro/src/lib/current-user-role.ts`:
+
+   ```ts
+   import { safeGet } from "@/utils/safeStorage";
+
+   /** The signed-in user's role, or null. Single source — do not re-inline this. */
+   export function readCurrentUserRole(): string | null {
+     try {
+       const raw = safeGet("user");
+       if (!raw) return null;
+       const parsed = JSON.parse(raw) as { role?: string };
+       return typeof parsed?.role === "string" ? parsed.role : null;
+     } catch {
+       return null;
+     }
+   }
+   ```
+
+   Delete the local copies in `estimate-list-row.tsx:38-48` and `estimate-detail-modal.tsx:78-88` and
+   import from the new module in both. **Note the one intentional behaviour change:** the old copies
+   read `window.localStorage` directly; `safeGet` falls back to `sessionStorage`
+   (`utils/safeStorage.ts:9-21`), which is where the user record lands in Safari Private Browsing.
+   That is a fix, not drift — call it out in the PR so nobody reverts it.
+
+2. **Give the table the role and the callback.** In `estimate-table.tsx`, add to `EstimateTableProps`
+   (`:95-98`):
+
+   ```ts
+   currentRole?: string | null;
+   onDeleteEstimate?: (id: number) => void;
+   ```
+
+   Destructure both (`:109-112`). Import `canDeleteEstimateAs` from `@workspace/shared` alongside the
+   existing `isConvertedToWorkOrder` / `isReadyToSend` / `lifecycleOf` import (`:37-44`).
+
+3. **Render the item.** Inside `DropdownMenuContent`, after the Convert block (`:435-444`), add:
+
+   ```tsx
+   {onDeleteEstimate && (lc === "draft" || lc === "pending_review") &&
+     canDeleteEstimateAs(currentRole, e) && (
+     <>
+       <DropdownMenuSeparator />
+       <DropdownMenuItem
+         className="text-red-600 focus:text-red-600 focus:bg-red-50"
+         onSelect={() => onDeleteEstimate(e.id)}
+         data-testid={`row-delete-${e.id}`}
+       >
+         Delete
+       </DropdownMenuItem>
+     </>
+   )}
+   {onDeleteEstimate && lc !== "draft" && lc !== "pending_review" && (
+     <>
+       <DropdownMenuSeparator />
+       <DropdownMenuItem
+         disabled
+         className="flex-col items-start gap-0.5"
+         data-testid={`row-delete-disabled-${e.id}`}
+       >
+         <span>Delete</span>
+         <span className="text-[11px] text-gray-400">
+           Sent estimates are kept for audit
+         </span>
+       </DropdownMenuItem>
+     </>
+   )}
+   ```
+
+   `lc` is already computed at `:361`. Do not re-derive lifecycle from `e.status` or
+   `e.internalStatus` — `lifecycleOf` is the only sanctioned reader.
+
+4. **Own the mutation on the page.** In `estimate-command-center.tsx`, alongside `convertMutation`
+   (`:253-288`), add `pendingDeleteId` state and a delete mutation. Hold the id in page state — the
+   confirm dialog must live outside `DropdownMenuContent`, because a Radix menu unmounts its content
+   on close and would take an embedded dialog with it.
+
+   ```ts
+   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+   const deleteMutation = useMutation({
+     mutationFn: (id: number) => apiRequest(`/api/estimates/${id}`, "DELETE"),
+     onSuccess: () => {
+       toast({ title: "Estimate deleted", description: "The estimate was removed from your lists." });
+       setPendingDeleteId(null);
+       qc.invalidateQueries({
+         predicate: (q) => {
+           const k = q.queryKey?.[0];
+           return typeof k === "string" && k.startsWith("/api/estimates");
+         },
+       });
+     },
+     onError: (err) => {
+       toast({
+         title: "Couldn't delete estimate",
+         description: parseApiError(err, "Please try again."),
+         variant: "destructive",
+       });
+     },
+   });
+   ```
+
+   The `predicate` form is required: this page's keys are `"/api/estimates?limit=500"` and
+   `"/api/estimates/summary"`, and an exact-key invalidation on `"/api/estimates"` does not match
+   either (TanStack compares key elements, not string prefixes) — which is why the existing mutations
+   at `:222-225` list both keys by hand. `parseApiError` is already imported at `:15`; it surfaces the
+   server's own 409 text if a row goes terminal between render and click.
+
+5. **Add the confirm dialog to the page**, as a sibling of `ConvertToWorkOrderModal` (`:471-480`).
+   Copy the copy and the red `AlertDialogAction` styling from
+   `estimate-detail-modal.tsx:1496-1543`, including its two variants — the pending-review wording
+   ("has been submitted for approval… admins can still see it for audit") and the draft wording
+   ("preserved for audit and can be restored by a super admin"). Resolve the estimate for the dialog
+   from the already-loaded `estimates` array by `pendingDeleteId`; do not fetch it again.
+
+6. **Wire it up.** Pass `currentRole={readCurrentUserRole()}` and
+   `onDeleteEstimate={(id) => setPendingDeleteId(id)}` to `<EstimateTable>` (`:427-439`). Read the
+   role once at module-component scope via `useMemo(() => readCurrentUserRole(), [])`, not per row.
+
+7. **Prove the extraction is complete.** Grep for `readCurrentUserRole` and `localStorage.getItem("user")`
+   and show the only definition is the new module. Paste the output.
+
+## Tests
+
+Add `artifacts/irrigopro/src/components/estimates/command-center/estimate-table-delete.test.tsx`.
+**Register it as a validation command, not a workflow** — this repo is past its workflow cap and
+adding one will fail. No Radix `Select` is involved here, so no pointer-capture shim is needed; a
+`DropdownMenu` opens fine under jsdom with a plain `userEvent.click` on the trigger.
+
+Cases, driving the trigger `estimate-row-actions-<id>`:
+
+1. Draft row, `currentRole="company_admin"` → `row-delete-<id>` present; clicking it calls
+   `onDeleteEstimate` with that id.
+2. Pending-review row, `currentRole="company_admin"` → `row-delete-<id>` present.
+3. Pending-review row, `currentRole="field_tech"` → **neither** `row-delete-<id>` nor
+   `row-delete-disabled-<id>` is rendered (role half of the matrix; item omitted, not disabled).
+4. Draft row, `currentRole="field_tech"` → `row-delete-<id>` present.
+5. Sent row and rejected row, `currentRole="company_admin"` → `row-delete-disabled-<id>` present,
+   carries the audit sentence, and has the `disabled` attribute; `row-delete-<id>` absent.
+6. `onDeleteEstimate` omitted → no delete item of either kind renders.
+
+Add one page-level case to the Slice 1 test file (or a new
+`estimate-command-center-delete.test.tsx` if Slice 1 has not landed): choosing Delete on a draft row
+opens the confirm dialog, and the dialog text contains the formatted estimate number.
+
+Also assert in `lib/shared/src/lifecycle.test.ts` — or a new small test beside the extracted module —
+that the client matrix still matches the server's: `field_tech` true on draft / false on
+pending_review, `company_admin` true on both, every terminal lifecycle false for every role. There is
+an existing `lifecycle-parity.test.ts` in `artifacts/irrigopro/src/lib/`; prefer extending it over a
+new file.
+
+## Acceptance checklist
+
+- [ ] `file:line` for the new `current-user-role.ts`, both deleted copies, the two menu blocks, the
+      mutation, the dialog, and the two new props.
+- [ ] Grep output from Step 7 showing one definition.
+- [ ] Screenshots of the open row menu on a draft row and on a rejected row (the disabled item with
+      its reason must be legible).
+- [ ] Screencast or before/after screenshots of a draft delete: row leaves the table, leaves the
+      Draft kanban column, and "Open pipeline" decrements — no manual refresh.
+- [ ] Evidence the detail modal's Delete and the estimate list row's Delete still work after the
+      extraction (one screenshot each is enough).
+- [ ] `pnpm --filter @workspace/irrigopro typecheck` clean.
+- [ ] New test file green plus the existing estimate and lifecycle suites, run via the validation
+      command.
+- [ ] Confirmation that no file under `artifacts/api-server/` and no file under `lib/shared/src/`
+      was modified.

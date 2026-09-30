@@ -1,0 +1,178 @@
+# BUILD — Estimate Command Center Slice 1: New Estimate Entry Point
+
+This is a single self-contained task. Build exactly what is described. Do not deviate, do not
+re-decide the locked decisions below, and do not merge this with Slice 2 (row delete) — they are
+independent and must ship as separate tickets.
+
+## What & Why
+
+A `company_admin` has no way to create an estimate.
+
+`companyAdminNav` points "Estimates" at `/estimates/command-center`
+(`artifacts/irrigopro/src/components/layout/nav-config.ts:341-348`). That route resolves to
+`pages/estimate-command-center.tsx` in both shells (`App.tsx:581`, `components/company-admin-app.tsx:180`).
+The page that *does* have a "New Estimate" button — `pages/estimates.tsx:181-188` — is not routed in
+`company-admin-app.tsx` at all, so a company admin can never reach it.
+
+The Command Center already imports and mounts `EstimateWizard`
+(`pages/estimate-command-center.tsx:37`, `:455-462`), but the only thing that ever opens it is the
+edit path: `onEditEstimate` (`:203-208`) and the detail modal's `onEdit` (`:448-452`). Both set
+`editingEstimateId` to a real id first. `wizardOpen` is never set true with `editingEstimateId` null,
+so create mode is unreachable. `EstimateWizard` itself already supports create — `estimateId?: number | null`
+and `const isEdit = !!estimateId` (`components/estimates/estimate-wizard.tsx:97-100`, `:323-324`).
+
+**Second defect, found while verifying this — fix it in the same ticket.** The wizard's success
+handler invalidates the exact key `["/api/estimates"]` (`estimate-wizard.tsx:732-737`). The Command
+Center reads `["/api/estimates?limit=500"]` (`estimate-command-center.tsx:190-194`) and
+`["/api/estimates/summary"]`. TanStack Query matches query keys element-wise, not by string prefix, so
+`"/api/estimates"` does not match the element `"/api/estimates?limit=500"` — neither the table nor the
+KPI tiles refresh after a create. The page's own mutations already work around this by invalidating
+both keys explicitly (`:222-225`, `:267-272`). Without the fix, the new button appears to do nothing
+for up to 60 seconds (the `refetchInterval`), which is worse than having no button.
+
+## Design context (locked decisions — do not relitigate)
+
+1. **Header button only.** A primary "New Estimate" button in the page header, right side. No
+   empty-state CTA in the table, no "+" add-card on the Draft kanban column. Those were considered
+   and declined on 2026-09-23.
+2. **Reuse the already-mounted wizard.** Open `EstimateWizard` with `estimateId={null}`. No new
+   route, no new modal, no changes to the wizard's internals, steps, or validation.
+3. **No role gate on the button.** `POST /api/estimates` is gated by `requireAuthentication` only,
+   with no role allowlist (`artifacts/api-server/src/routes/estimate-routes.ts:491`). Every role that
+   can reach the Command Center can create. Do not invent a client-side role check.
+4. **Create-mode draft persistence stays as-is.** The wizard keys its local draft as
+   `${DRAFT_KEY_PREFIX}new` when `estimateId` is null (`estimate-wizard.tsx:129-131`). Re-opening
+   the wizard restoring an abandoned draft is existing behaviour on `pages/estimates.tsx` and is kept
+   here. Do not add a "discard draft" prompt.
+5. **The cache fix goes in the wizard, not the page.** Widening the invalidation at the single
+   success handler fixes every caller at once. Do not add a page-local `onSuccess` callback prop to
+   the wizard — that is a second mechanism doing the first one's job.
+
+## Done looks like
+
+- The Command Center header shows a primary "New Estimate" button beside the "Estimates" title.
+- Clicking it opens the estimate wizard in create mode — the wizard's own header reads as a new
+  estimate, not an edit, and no existing estimate's data is pre-filled.
+- Saving from that wizard lands the new estimate in the "All estimates" table and the Draft
+  lifecycle column without a manual refresh, and the "Open pipeline" KPI tile moves.
+- Closing the wizard without saving leaves the page exactly as it was, and the next click on
+  "New Estimate" still opens create mode (not the last-edited estimate).
+- Opening an existing estimate's Edit action still opens edit mode, unchanged.
+
+## Out of scope
+
+- Slice 2 (delete from the row menu). Separate ticket.
+- Any change to the wizard's steps, fields, validation, pricing, or branch-selection gate.
+- `pages/estimates.tsx` and `components/estimates/list/*` — the manager-facing list page is not
+  touched by this ticket.
+- The unreachable-`/estimates`-route question for company admins. Leave the routing as it is.
+
+## Steps
+
+1. **Add the create handler to the page.** In `pages/estimate-command-center.tsx`, next to
+   `onEditEstimate` (`:203-208`), add:
+
+   ```tsx
+   const onNewEstimate = useCallback(() => {
+     setSelectedEstimateId(null);
+     setEditingEstimateId(null);
+     setWizardOpen(true);
+   }, []);
+   ```
+
+   Clearing `editingEstimateId` is the whole mechanism — the wizard branches on
+   `!!estimateId`. Clearing `selectedEstimateId` closes the detail modal if it happens to be open.
+
+2. **Add the button to the header.** The header (`:367-373`) currently holds only the title block
+   inside a `flex items-center justify-between gap-3 flex-wrap` container, so the button drops into
+   the existing right-hand slot with no layout change. Add as the second child of `<header>`:
+
+   ```tsx
+   <Button
+     onClick={onNewEstimate}
+     className="bg-blue-600 hover:bg-blue-700 text-white"
+     data-testid="cc-new-estimate"
+   >
+     <Plus className="w-4 h-4 mr-2" />
+     New Estimate
+   </Button>
+   ```
+
+   Import `Button` from `@/components/ui/button` and add `Plus` to the existing `lucide-react` import
+   block (`:19-26`). The `bg-blue-600` class and the `Plus`-plus-label shape are copied verbatim from
+   `pages/estimates.tsx:181-188` so the two surfaces stay visually identical — do not restyle it to a
+   default variant.
+
+3. **Widen the wizard's cache invalidation.** Replace the three exact-key invalidations at
+   `estimate-wizard.tsx:732-734` with a predicate, matching the pattern already used by the estimate
+   list row's delete (`components/estimates/list/estimate-list-row.tsx:114-127`):
+
+   ```ts
+   queryClient.invalidateQueries({
+     predicate: (q) => {
+       const k = q.queryKey?.[0];
+       return (
+         typeof k === "string" &&
+         (k.startsWith("/api/estimates") ||
+          k.startsWith("/api/dashboard"))
+       );
+     },
+   });
+   ```
+
+   `k.startsWith("/api/estimates")` covers `/api/estimates`, `/api/estimates?limit=500`,
+   `/api/estimates/summary` and `/api/estimates/pending-approval` in one pass, which is why those
+   three lines collapse into it. Keep the `isEdit && estimateId` invalidation at `:735-737` — a
+   two-element key is a different shape and the predicate above already matches its first element, so
+   it can go; delete it rather than leaving it as dead weight, and say in the PR that you did.
+
+4. **Verify no other caller regressed.** The widened predicate now also invalidates
+   `/api/estimates/summary` for callers on `pages/estimates.tsx`, which is harmless (that page does
+   not read it). Grep for `queryKey: \["/api/estimates` and confirm every key it now catches is one
+   that *should* refresh after an estimate is created or edited. Paste the grep output.
+
+## Tests
+
+Add `artifacts/irrigopro/src/pages/estimate-command-center-create.test.tsx`.
+
+**Register it as a validation command, not a workflow.** This repo is past its workflow cap; adding
+a workflow for a new test file fails. Add the file to an existing estimates validation command or
+create one named `estimate-command-center`.
+
+**Mock the wizard — do not render it.** `EstimateWizard` drives Radix `Select` controls, which throw
+under jsdom without pointer-capture shims. This ticket does not need the real wizard; it needs to
+observe the prop. Stub it:
+
+```tsx
+vi.mock("@/components/estimates/estimate-wizard", () => ({
+  EstimateWizard: ({ open, estimateId }: { open: boolean; estimateId?: number | null }) =>
+    open ? <div data-testid="wizard-stub" data-estimate-id={String(estimateId ?? "null")} /> : null,
+}));
+```
+
+Cases:
+
+1. `cc-new-estimate` renders in the header on first paint.
+2. Clicking it renders `wizard-stub` with `data-estimate-id="null"`.
+3. Open the wizard in edit mode first, then close it, then click "New Estimate": `wizard-stub`
+   renders with `data-estimate-id="null"`, proving `editingEstimateId` is cleared and a stale id
+   cannot leak into create mode. The row Edit item has no `data-testid` today — reach it by its
+   accessible name ("Edit") inside the `estimate-row-actions-<id>` menu rather than adding one.
+
+Also add a unit assertion in the wizard's existing test file that the success handler's predicate
+returns `true` for `"/api/estimates?limit=500"` and `"/api/estimates/summary"` and `false` for
+`"/api/work-orders"`. If the predicate is not reachable from the existing tests, extract it as a
+named exported function `shouldInvalidateAfterEstimateWrite(key: unknown): boolean` in the wizard
+module and test that — do not leave the behaviour untested because it is awkward to reach.
+
+## Acceptance checklist
+
+- [ ] `file:line` for the new handler, the header button, and the changed invalidation block.
+- [ ] Screenshot of the Command Center header with the button, at desktop and at ~640px width
+      (the header's `flex-wrap` must not break the title block).
+- [ ] Screencast or before/after screenshots showing a newly created estimate appearing in the table
+      and the Draft column with no manual refresh.
+- [ ] Grep output from Step 4.
+- [ ] `pnpm --filter @workspace/irrigopro typecheck` clean.
+- [ ] The new test file and the existing estimate suites green, run via the validation command.
+- [ ] Confirmation that `pages/estimates.tsx` and the estimate list row were not modified.
