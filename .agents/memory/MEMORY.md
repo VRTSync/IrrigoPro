@@ -1,3 +1,4 @@
+- [Expo and shared ESM barrels](expo-shared-esm-barrels.md) — Metro cannot resolve TS-source package barrels whose relative re-exports use emitted `.js` extensions; expose focused TS subpaths.
 - [Testable route extraction pattern](route-extraction-pattern.md) — extract inline handlers to separate modules for storage-spy tests; never mirror handler logic in tests.
 - [offline-photo-FK-anchor](offline-photo-FK-anchor.md) — queuePhotoUpload body must include zoneRecordId/findingId; absence causes every photo to land loose.
 - [Finding-create photo linking](finding-photo-linking.md) — every finding-create path (FindingSheet + ZoneScreen CustomFindingEditor) must re-link pre-uploaded photos or they land loose (findingId=NULL).
@@ -63,4 +64,4 @@
 - [Retirement migration outlives its column](retirement-migration-outlives-its-column.md) — exempt it from the "zero grep hits" bar; the gate is the production schema push, never the merge.
 - [Wet-check browser evidence and stale mirrors](wet-check-browser-evidence.md) — after direct DB fixture changes, use a fresh wet-check ID for browser evidence rather than trusting reload.
 - [Merged prerequisites in isolated branches](isolated-branch-prerequisites.md) — task status can say merged before this checkout sees its code; check accessible remotes for the commit.
-- [Expo and shared ESM barrels](expo-shared-esm-barrels.md) — Metro cannot resolve TS-source package barrels whose relative re-exports use emitted `.js` extensions; expose focused TS subpaths.
+- [Mutation fetch test isolation](mutation-fetch-test-isolation.md) — modal background GETs may share the mutation URL prefix; route mocked responses by method as well as path.

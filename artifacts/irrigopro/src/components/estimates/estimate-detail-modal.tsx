@@ -15,7 +15,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest, authedPdfUrl } from "@/lib/queryClient";
+import { queryClient, apiRequest, authedPdfUrl, parseApiError } from "@/lib/queryClient";
 import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink, Send, Eye, Download, Trash2, Link as LinkIcon, Copy, PenLine, ChevronUp, ChevronDown } from "lucide-react";
 import { EstimateMediaBlock } from "@/components/estimates/estimate-media-block";
 import { ApprovalSignatureBlock } from "@/components/estimates/approval-signature-block";
@@ -287,7 +287,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     onError: (error) => {
       toast({
         title: "Error", 
-        description: "Failed to approve estimate",
+        description: parseApiError(error, "Failed to approve estimate"),
         variant: "destructive",
       });
     },
@@ -307,10 +307,10 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
       queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
     },
-    onError: (error: any) => {
+    onError: (error) => {
       toast({
         title: "Couldn't send estimate",
-        description: error?.message || "Please try again.",
+        description: parseApiError(error, "Please try again."),
         variant: "destructive",
       });
     },
@@ -342,10 +342,10 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
       queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
     },
-    onError: (err: any) => {
+    onError: (err) => {
       toast({
         title: "Couldn't mark as sent",
-        description: err?.message || "Please try again.",
+        description: parseApiError(err, "Please try again."),
         variant: "destructive",
       });
     },
@@ -366,7 +366,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to reject estimate", 
+        description: parseApiError(error, "Failed to reject estimate"),
         variant: "destructive",
       });
     },
@@ -390,7 +390,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to convert estimate to work order",
+        description: parseApiError(error, "Failed to convert estimate to work order"),
         variant: "destructive",
       });
     },
@@ -411,10 +411,10 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
       queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
     },
-    onError: (err: any) => {
+    onError: (err) => {
       toast({
         title: "Couldn't revert estimate",
-        description: err?.message || "Please try again.",
+        description: parseApiError(err, "Please try again."),
         variant: "destructive",
       });
       setShowUnapproveDialog(false);
@@ -435,10 +435,10 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
       queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
     },
-    onError: (err: any) => {
+    onError: (err) => {
       toast({
         title: "Couldn't revert estimate",
-        description: err?.message || "Please try again.",
+        description: parseApiError(err, "Please try again."),
         variant: "destructive",
       });
       setShowUnrejectDialog(false);
@@ -475,7 +475,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     onError: (err) => {
       toast({
         title: "Couldn't delete estimate",
-        description: err instanceof Error ? err.message : "Please try again.",
+        description: parseApiError(err, "Please try again."),
         variant: "destructive",
       });
     },
@@ -531,6 +531,8 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     try {
       await convertToWorkOrderMutation.mutateAsync(assignedTechnicianId);
       setShowConvertDialog(false);
+    } catch {
+      // The mutation already shows the API error; leave the dialog open for retry.
     } finally {
       setIsConverting(false);
     }

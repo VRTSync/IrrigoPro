@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Plus, Eye, ArrowRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, useArrayQuery } from "@/lib/queryClient";
+import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
 import { ConvertToWorkOrderModal } from "@/components/estimates/convert-to-work-order-modal";
 import type { Estimate } from "@workspace/db/schema";
@@ -55,10 +55,10 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
       queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
       queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to convert estimate to work order",
+        description: parseApiError(error, "Failed to convert estimate to work order"),
         variant: "destructive",
       });
     },
