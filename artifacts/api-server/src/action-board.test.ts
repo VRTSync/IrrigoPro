@@ -94,16 +94,17 @@ describe("Action Board endpoint authorization and tenant boundary", () => {
     const app = express();
     let role = "field_tech";
     const auth = (req: any, _res: any, next: any) => {
-      req.authenticatedUserRole = role;
-      req.authenticatedUserCompanyId = 1;
+      req.authenticatedUserRole = "super_admin";
+      req.authenticatedUserCompanyId = null;
       next();
     };
     registerManagerWorkspaceRoutes(app, { requireAuthentication: auth });
     const server = app.listen(0);
     try {
       const port = (server.address() as any).port;
-      let response = await fetch(`http://127.0.0.1:${port}/api/action-board`);
+      const response = await fetch(`http://127.0.0.1:${port}/api/action-board?companyId=10`);
       assert.equal(response.status, 403);
+      assert.deepEqual(await response.json(), { message: "Forbidden" });
       role = "bookkeeper";
       response = await fetch(`http://127.0.0.1:${port}/api/action-board`);
       assert.equal(response.status, 403);
@@ -133,15 +134,15 @@ describe("Action Board endpoint authorization and tenant boundary", () => {
     ]);
     const app = express();
     const auth = (req: any, _res: any, next: any) => {
-      req.authenticatedUserRole = "irrigation_manager";
-      req.authenticatedUserCompanyId = 1;
+      req.authenticatedUserRole = "super_admin";
+      req.authenticatedUserCompanyId = null;
       next();
     };
     registerManagerWorkspaceRoutes(app, { requireAuthentication: auth });
     const server = app.listen(0);
     try {
       const port = (server.address() as any).port;
-      const response = await fetch(`http://127.0.0.1:${port}/api/action-board?companyId=2`);
+      const response = await fetch(`http://127.0.0.1:${port}/api/action-board?companyId=10`);
       assert.equal(response.status, 200);
       const body: any = await response.json();
       assert.deepEqual(body.rows.map((r: any) => r.customerId), [1]);

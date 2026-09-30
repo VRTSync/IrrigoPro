@@ -63,3 +63,4 @@
 - [Retirement migration outlives its column](retirement-migration-outlives-its-column.md) — exempt it from the "zero grep hits" bar; the gate is the production schema push, never the merge.
 - [Wet-check browser evidence and stale mirrors](wet-check-browser-evidence.md) — after direct DB fixture changes, use a fresh wet-check ID for browser evidence rather than trusting reload.
 - [Merged prerequisites in isolated branches](isolated-branch-prerequisites.md) — task status can say merged before this checkout sees its code; check accessible remotes for the commit.
+- [Expo and shared ESM barrels](expo-shared-esm-barrels.md) — Metro cannot resolve TS-source package barrels whose relative re-exports use emitted `.js` extensions; expose focused TS subpaths.

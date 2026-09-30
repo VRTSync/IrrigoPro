@@ -236,6 +236,10 @@ args = "action-board-plan-ui"
 task = "workflow.run"
 args = "estimate-command-center"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "manager-mobile-action-board"
+
 [[workflows.workflow]]
 name = "auth-middleware-coverage"
 author = "agent"
@@ -841,6 +845,17 @@ args = "pnpm --filter @workspace/irrigopro exec vitest run src/pages/estimate-co
 [workflows.workflow.metadata]
 isValidation = true
 
+[[workflows.workflow]]
+name = "manager-mobile-action-board"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/shared typecheck && pnpm --filter @workspace/irrigopro-mobile typecheck && pnpm --filter @workspace/irrigopro-mobile test"
+
+[workflows.workflow.metadata]
+isValidation = true
+
 [agent]
 stack = "PNPM_WORKSPACE"
 expertMode = true
@@ -850,40 +865,8 @@ path = "scripts/post-merge.sh"
 timeoutMs = 120000
 
 [[ports]]
-localPort = 5000
-externalPort = 5000
-
-[[ports]]
-localPort = 8080
-externalPort = 8080
-
-[[ports]]
-localPort = 8081
-externalPort = 80
-
-[[ports]]
-localPort = 8082
-externalPort = 6000
-
-[[ports]]
-localPort = 18522
-externalPort = 3003
-
-[[ports]]
-localPort = 21025
-externalPort = 3000
-
-[[ports]]
-localPort = 21209
-externalPort = 3001
-
-[[ports]]
 localPort = 23333
-externalPort = 3002
-
-[[ports]]
-localPort = 23334
-externalPort = 5173
+externalPort = 80
 
 [nix]
 channel = "stable-25_05"

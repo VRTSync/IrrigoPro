@@ -76,6 +76,8 @@ function AuthGate() {
     <Stack screenOptions={{ headerBackTitle: "Back" }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="sign-in" options={{ headerShown: false }} />
+      <Stack.Screen name="schedule" options={{ title: "Today's Schedule" }} />
+      <Stack.Screen name="schedule-plan" options={{ title: "Today's plan" }} />
       <Stack.Screen name="work-order/[id]" options={{ title: "Work order" }} />
       <Stack.Screen
         name="work-order/[id]/billing-sheet"

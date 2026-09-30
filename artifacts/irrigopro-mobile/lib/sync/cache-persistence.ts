@@ -7,6 +7,7 @@
 //   * ["wet-check", id]                          — Last-loaded wet checks.
 //   * ["wet-check","issue-types"]                — Issue type catalog.
 //   * ["parts","field-tech"]                     — Parts catalog.
+//   * ["/api/action-board"]                       — Manager's last Action Board.
 //
 // **Per-user isolation.** The storage key is namespaced by the active
 // session id (set via `setActiveCacheSession`). On sign-out we clear
@@ -48,6 +49,8 @@ function isWhitelisted(key: readonly unknown[]): boolean {
     return true;
   }
   if (k0 === "parts" && k1 === "field-tech") return true;
+  if (key.length === 1 && typeof k0 === "string" &&
+      (k0 === "/api/action-board" || /^\/api\/action-board\?companyId=[1-9]\d*$/.test(k0))) return true;
   return false;
 }
 

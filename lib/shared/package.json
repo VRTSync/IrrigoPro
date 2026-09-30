@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./budget-status": "./src/budget-status.ts",
+    "./action-board-plan": "./src/action-board-plan.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
