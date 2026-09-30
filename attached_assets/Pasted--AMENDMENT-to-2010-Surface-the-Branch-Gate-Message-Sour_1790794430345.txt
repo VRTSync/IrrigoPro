@@ -1,0 +1,60 @@
+# AMENDMENT to #2010 — Surface the Branch Gate Message
+
+**Source:** Post-pull verification of `c4f01113`, 2026-09-16; re-confirmed still open 2026-09-30.
+**Status:** One defect. #2010 and its approve/send amendment are complete and correct — every gate, ordering property, the tripwire and the wet-check stamp verified in the merged code. This is the last mile.
+
+---
+
+## The defect
+
+`checkEstimateBranchGate` ships two messages. The `open_estimate` variant — "Open the estimate and choose a branch before sending or approving it" — exists because on a list or detail surface the user **cannot fix it from there**, so the message is the only thing telling them where to go.
+
+Three callers of gated routes hardcode their toast and throw it away:
+
+| File | Line | Gated route | User sees |
+|---|---|---|---|
+| `estimate-detail-modal.tsx` | 287-292 | `PATCH /api/estimates/:id/approve` | "Failed to approve estimate" |
+| `estimate-detail-modal.tsx` | 390-395 | `POST /api/estimates/:id/convert-to-work-order` | "Failed to convert estimate to work order" |
+| `estimates-manager.tsx` | 58-62 | `POST /api/estimates/:id/convert-to-work-order` | "Failed to convert estimate to work order" |
+
+Approve and convert are the two actions the guard exists to intercept. A manager hits a legacy branch-less estimate, is told the action failed, and retries something that can never pass.
+
+`parseApiError` (`lib/queryClient.ts:272`) is the codebase's extractor for this and is now used in 18 files. These three are the outliers.
+
+## The change
+
+At each of the three sites, replace the hardcoded `description` with `parseApiError(error, "<the existing string>")`, importing from `@/lib/queryClient`. The current copy becomes the fallback, so nothing changes for non-guard failures. Keep the existing `(error)` parameter; `parseApiError` takes `unknown` — do not widen it to `any`.
+
+**Same file, same fix:** five handlers in `estimate-detail-modal.tsx` use `error?.message || "..."` — send (`:310`), mark-sent (`:345`), unapprove (`:414`), unreject (`:438`), delete (`:475`). On an `apiRequest` rejection that is the raw `"400: {\"message\":\"...\"}"` string, so the gate text arrives wrapped in status-code-and-JSON noise. Convert all five the same way. Two spellings of "read the server's message" in one file is the drift #2010's single-helper rule exists to prevent.
+
+**Not in scope:** `estimate-list-row.tsx:128` (delete — not a gated route). Do not sweep the rest of the app.
+
+## Done looks like
+
+- Approving or converting a legacy branch-less estimate — from the detail modal **and** the manager estimates list — shows the open-the-estimate sentence, not "Failed to approve estimate".
+- The other five handlers show the server's message with no `400:` prefix and no JSON braces.
+- Every one still shows its original fallback when the server sends no message (network failure, 500).
+- No `err?.message ||` and no hardcoded error description remain in `estimate-detail-modal.tsx` or `estimates-manager.tsx`.
+
+## Tests
+
+Extend `estimate-detail-modal-footer.test.tsx` — do not add a file (workflow cap).
+
+- Approve rejecting with `new Error('400: {"message":"Branch is required for this customer. Open the estimate and choose a branch before sending or approving it."}')` renders that sentence, no `400:`, no braces. Same for convert.
+- Approve rejecting with `new Error("Network request failed")` still renders "Failed to approve estimate".
+
+## Proof
+
+- `file:line` for each of the eight handlers.
+- Grep showing no hardcoded descriptions and no bare `err?.message` toast descriptions left in either file.
+- **Screenshot of the real failure in the running app** — a manager clicking Approve on a legacy branch-less estimate, showing the open-the-estimate sentence. Trigger it and read what the user sees; do not verify by re-reading the route handler.
+- Screenshot of the same estimate approving cleanly once a branch is set in the wizard.
+- Passing output for the extended test file.
+
+## Relevant files
+
+- `artifacts/irrigopro/src/components/estimates/estimate-detail-modal.tsx:287-292, 310, 345, 390-395, 414, 438, 475`
+- `artifacts/irrigopro/src/components/manager/estimates-manager.tsx:58-62`
+- `artifacts/irrigopro/src/lib/queryClient.ts:272` — `parseApiError`; do not write a second one
+- `artifacts/irrigopro/src/pages/estimate-command-center.tsx`, `hooks/use-estimate-resend.ts` — the correct pattern
+- `.agents/memory/gate-message-needs-a-surface.md` — the lesson this completes
