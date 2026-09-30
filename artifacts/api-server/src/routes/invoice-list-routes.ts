@@ -21,6 +21,7 @@ import { inArray } from "drizzle-orm";
 import { customers } from "@workspace/db/schema";
 import { db as dbModule } from "../db";
 import { storage as storageModule } from "../storage";
+import { getMtdWindow, INVOICE_EXCLUDED_STATUSES } from "../financial-pulse-math";
 import { paginate } from "./pagination";
 // Shared with the notes endpoints so the list hover preview and the thread can
 // never disagree about which note is latest or how it is truncated.
@@ -788,6 +789,32 @@ export function registerInvoiceListRoutes(
   const loadPaymentTerms = deps._loadPaymentTerms ?? loadPaymentTermsFromDb;
   const nowFn = deps._now ?? (() => new Date());
   const loadQbHealth = deps._loadQbHealth ?? loadQuickBooksHealth;
+
+  app.get(
+    "/api/invoices/this-month-count",
+    deps.requireAuthentication,
+    deps.requireInvoiceRead,
+    async (req: any, res) => {
+      try {
+        const scope = resolveInvoiceScope(req);
+        if (!scope.ok) {
+          res.status(scope.status).json({ message: scope.message });
+          return;
+        }
+        const { start, end } = getMtdWindow(nowFn());
+        const invoices = (await storage.getInvoices(scope.companyId)) as InvoiceRowLike[];
+        const count = invoices.filter((inv) => {
+          if (INVOICE_EXCLUDED_STATUSES.has(inv.status)) return false;
+          const createdAt = new Date(inv.createdAt);
+          return createdAt >= start && createdAt < end;
+        }).length;
+        res.json({ count });
+      } catch (error) {
+        req.log?.error({ error }, "Failed to count this month's invoices");
+        res.status(500).json({ message: "Failed to count this month's invoices" });
+      }
+    },
+  );
 
   app.get(
     "/api/invoices",

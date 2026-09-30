@@ -167,6 +167,52 @@ async function get(app: Express, path: string) {
 
 const ids = (rows: any[]) => rows.map((r) => r.id);
 
+describe("GET /api/invoices/this-month-count", () => {
+  it("counts all qualifying invoices, not the first 25, excluding every canonical status", async () => {
+    const qualifying = Array.from({ length: 31 }, (_, i) =>
+      inv({ id: i + 1, createdAt: new Date("2026-08-05T12:00:00.000Z") }),
+    );
+    const excluded = ["draft", "cancelled", "superseded", "merged", "failed"].map((status, i) =>
+      inv({ id: 100 + i, status, createdAt: NOW }),
+    );
+    const { app } = buildApp([
+      ...excluded,
+      ...qualifying,
+      inv({ id: 200, createdAt: new Date("2026-07-31T23:59:59.000Z") }),
+      inv({ id: 201, createdAt: new Date("2026-08-11T00:00:00.000Z") }),
+    ]);
+    assert.equal((await get(app, "/api/invoices?limit=25")).body.length, 25);
+    assert.deepEqual(await get(app, "/api/invoices/this-month-count"), {
+      status: 200, body: { count: 31 }, total: null,
+    });
+  });
+
+  it("pins scoped users to their company even if they request another company", async () => {
+    const rowsByCompany = new Map<number | null, InvoiceRowLike[]>([
+      [1, [inv({ id: 1 })]],
+      [2, [inv({ id: 2 }), inv({ id: 3 })]],
+    ]);
+    const { app, calls } = buildApp([], { companyId: 1, rowsByCompany });
+    const response = await get(app, "/api/invoices/this-month-count?companyId=2");
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { count: 1 });
+    assert.deepEqual(calls.getInvoices, [1]);
+  });
+
+  it("rejects users without company scope and honors the super admin's explicit scope", async () => {
+    const unscoped = buildApp([], { companyId: null });
+    assert.equal((await get(unscoped.app, "/api/invoices/this-month-count")).status, 403);
+    assert.deepEqual(unscoped.calls.getInvoices, []);
+
+    const rowsByCompany = new Map<number | null, InvoiceRowLike[]>([
+      [2, [inv({ id: 2 }), inv({ id: 3 })]],
+    ]);
+    const admin = buildApp([], { role: "super_admin", companyId: null, rowsByCompany });
+    assert.deepEqual((await get(admin.app, "/api/invoices/this-month-count?companyId=2")).body, { count: 2 });
+    assert.deepEqual(admin.calls.getInvoices, [2]);
+  });
+});
+
 // ── (a) legacy behaviour ─────────────────────────────────────────────────────
 
 describe("GET /api/invoices — no A/R parameters", () => {

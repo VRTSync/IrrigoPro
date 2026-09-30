@@ -83,9 +83,6 @@ interface KpisResponse {
    * optional so older cached responses still type-check.
    */
   billedYtd?: KpiTile;
-  // Task #720 — preferred source for the Collected MTD tile. Older
-  // server responses without this field fall back to the derive helper
-  // below so we don't regress existing fixtures.
   collectedMtd?: KpiTile;
   outstandingAr: KpiTile;
   unbilledExposure: KpiTile;
@@ -96,11 +93,11 @@ interface KpisResponse {
 // `docs/financial-metrics.md` and the FP page's INFO_TIPS).
 const BILLING_HEADER_TIPS = {
   billedMtd:
-    "From invoices · month-to-date by createdAt · excludes draft, cancelled · includes tax and markup.",
+    "From invoices · month-to-date by createdAt · excludes draft, cancelled, superseded, merged, failed · includes tax and markup.",
   collectedMtd:
-    "From invoices · month-to-date by paidAt · excludes draft, cancelled · includes tax and markup.",
+    "From invoices · month-to-date by paidAt · excludes draft, cancelled, superseded, merged, failed · includes tax and markup.",
   outstandingAr:
-    "From invoices · point-in-time · excludes draft, cancelled, paid · live from this app, not QuickBooks.",
+    "From invoices · point-in-time · excludes draft, cancelled, superseded, merged, failed, and paid · live from this app, not QuickBooks.",
 } as const;
 
 interface CustomerSummary {
@@ -281,47 +278,6 @@ function AdminDashboardVariant() {
 
 // ─── Variant: billing-header ──────────────────────────────────────────────
 //
-// Task #711 — Financial Pulse Slice 5.1: slim status strip mounted at
-// the top of the Billing Dashboard. Reuses the same /financial-pulse/
-// kpis?period=mtd endpoint as the admin-dashboard variant so Outstanding
-// A/R and Billed MTD are guaranteed to match across pages. The third
-// tile (Collected MTD) is derived from billedMtd - outstandingAr if the
-// endpoint does not yet expose a dedicated collected field — currently
-// the response has no `collectedMtd`, so the tile renders the same way
-// it would on a soft-fail until that field lands.
-
-// Derive Collected MTD's prev-month delta from the two tiles we DO
-// have deltas on (billedMtd / outstandingAr). collected ≈ billed - AR,
-// so prevCollected ≈ prevBilled - prevAR; recover prev values from the
-// current value + deltaPct. Falls back to `null` (MetricTile renders no
-// delta) when any input is missing or the prev value is non-positive.
-function deriveCollectedMtdDeltaPct(
-  data: KpisResponse | null | undefined,
-  currentCollected: number | null,
-): number | null {
-  if (currentCollected == null) return null;
-  const billedNow = data?.billedMtd?.value;
-  const billedDelta = data?.billedMtd?.deltaPct;
-  const arNow = data?.outstandingAr?.value;
-  const arDelta = data?.outstandingAr?.deltaPct;
-  if (
-    billedNow == null ||
-    billedDelta == null ||
-    arNow == null ||
-    arDelta == null ||
-    !Number.isFinite(billedDelta) ||
-    !Number.isFinite(arDelta)
-  ) {
-    return null;
-  }
-  const prevBilled = billedNow / (1 + billedDelta / 100);
-  const prevAr = arNow / (1 + arDelta / 100);
-  if (!Number.isFinite(prevBilled) || !Number.isFinite(prevAr)) return null;
-  const prevCollected = Math.max(0, prevBilled - prevAr);
-  if (prevCollected <= 0) return null;
-  return ((currentCollected - prevCollected) / prevCollected) * 100;
-}
-
 function BillingHeaderVariant({ className }: { className?: string }) {
   const url = "/api/financial-pulse/kpis?period=mtd";
   const { data, isLoading, error, refetch } =
@@ -329,22 +285,9 @@ function BillingHeaderVariant({ className }: { className?: string }) {
   // 403 → render nothing for field techs, the only role excluded from FP.
   if (!isLoading && data == null && !error) return null;
 
-  // Task #720 — prefer the server's authoritative `collectedMtd` value
-  // when present (the canonical source per docs/financial-metrics.md);
-  // fall back to billed − A/R only when older responses omit the field.
   const serverCollected = data?.collectedMtd?.value;
   const hasServerCollected =
     typeof serverCollected === "number" && Number.isFinite(serverCollected);
-  const collectedMtdValue = hasServerCollected
-    ? serverCollected
-    : data &&
-        data.billedMtd?.value != null &&
-        data.outstandingAr?.value != null
-      ? Math.max(0, data.billedMtd.value - data.outstandingAr.value)
-      : null;
-  const collectedMtdDeltaPct = hasServerCollected
-    ? (data?.collectedMtd?.deltaPct ?? null)
-    : deriveCollectedMtdDeltaPct(data ?? null, collectedMtdValue);
 
   return (
     <div
@@ -424,11 +367,12 @@ function BillingHeaderVariant({ className }: { className?: string }) {
           />
           <MetricTile
             label="Collected MTD"
-            value={collectedMtdValue}
+            value={hasServerCollected ? serverCollected : null}
             format="currency"
-            deltaPct={collectedMtdDeltaPct}
+            deltaPct={hasServerCollected ? (data?.collectedMtd?.deltaPct ?? null) : null}
             deltaLabel="vs prev month"
             isLoading={isLoading}
+            isError={!isLoading && !hasServerCollected}
             testId="fp-tile-billing-header-collected-mtd"
             windowBadge="MTD"
             infoTip={BILLING_HEADER_TIPS.collectedMtd}
@@ -459,7 +403,7 @@ function BillingHeaderVariant({ className }: { className?: string }) {
 
 const CUSTOMER_DETAIL_TIPS = {
   invoicedMtd:
-    "Invoices created for this customer this month · anchored on invoice date · excludes draft and cancelled · includes tax and markup.",
+    "Invoices created for this customer this month · anchored on invoice date · excludes draft and cancelled · includes tax and markup · includes uninvoiced wet-check billings by work date.",
   invoicedYtd:
     "Invoices created for this customer this calendar year · anchored on invoice date · excludes draft and cancelled · includes uninvoiced wet-check billings by work date.",
   moneyOwed:

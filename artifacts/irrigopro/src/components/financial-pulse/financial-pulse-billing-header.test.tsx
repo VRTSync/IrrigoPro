@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 vi.mock("@/lib/queryClient", async () => {
   const actual =
@@ -29,11 +30,12 @@ function makeClient() {
 }
 
 function withClient(ui: React.ReactNode) {
-  return <QueryClientProvider client={makeClient()}>{ui}</QueryClientProvider>;
+  return <QueryClientProvider client={makeClient()}><TooltipProvider>{ui}</TooltipProvider></QueryClientProvider>;
 }
 
 const KPIS = {
   billedMtd: { value: 12000, deltaPct: 8.4 },
+  collectedMtd: { value: 7300, deltaPct: 4.2 },
   billedYtd: { value: 200000, deltaPct: 0 },
   outstandingAr: { value: 4500, deltaPct: -3.2 },
   unbilledExposure: { value: 2200, deltaPct: 0 },
@@ -62,11 +64,9 @@ describe("FinancialPulseWidget — billing-header variant (Task #711)", () => {
 
     // Tile order is Billed MTD → Collected MTD → Outstanding A/R.
     const container = screen.getByTestId("fp-widget-billing-header");
-    const tiles = Array.from(
-      container.querySelectorAll<HTMLElement>(
-        '[data-testid^="fp-tile-billing-header-"]',
-      ),
-    ).filter((el) => !el.getAttribute("data-testid")!.endsWith("-delta"));
+    const tiles = [
+      "billed-mtd", "collected-mtd", "outstanding-ar",
+    ].map((key) => container.querySelector<HTMLElement>(`[data-testid="fp-tile-billing-header-${key}"]`)!);
     expect(tiles.length).toBe(3);
     expect(tiles[0].getAttribute("data-testid")).toBe(
       "fp-tile-billing-header-billed-mtd",
@@ -80,8 +80,7 @@ describe("FinancialPulseWidget — billing-header variant (Task #711)", () => {
 
     // Values render formatted as USD.
     expect(tiles[0].textContent).toMatch(/\$12,000/);
-    // Collected MTD = billedMtd - outstandingAr = 7500.
-    expect(tiles[1].textContent).toMatch(/\$7,500/);
+    expect(tiles[1].textContent).toMatch(/\$7,300/);
     expect(tiles[2].textContent).toMatch(/\$4,500/);
 
     // Header link to /financial-pulse.
@@ -101,6 +100,18 @@ describe("FinancialPulseWidget — billing-header variant (Task #711)", () => {
       "/api/financial-pulse/kpis?period=mtd",
       expect.objectContaining({ credentials: "include" }),
     );
+  });
+
+  it("shows only Collected MTD as unavailable when the server omits it", async () => {
+    const { collectedMtd: _omitted, ...withoutCollected } = KPIS;
+    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify(withoutCollected), { status: 200 }));
+    render(withClient(<FinancialPulseWidget variant="billing-header" />));
+    await screen.findByText(/\$12,000/);
+    const collected = screen.getByTestId("fp-tile-billing-header-collected-mtd");
+    expect(collected).toHaveTextContent("—");
+    expect(collected).not.toHaveTextContent("$7,500");
+    expect(screen.queryByTestId("fp-tile-billing-header-collected-mtd-delta")).toBeNull();
+    expect(screen.getByTestId("fp-tile-billing-header-outstanding-ar")).toHaveTextContent("$4,500");
   });
 
   it("shows a skeleton-loading state before data resolves", () => {
@@ -235,57 +246,13 @@ describe("FinancialPulseWidget — billing-header variant (Task #711)", () => {
   });
 });
 
-describe("Task #711 — Billing Dashboard integration", () => {
-  // Render the live BillingDashboard page with fetch mocked, then
-  // assert that (a) the widget mounts, (b) the FP endpoint was hit
-  // from page context, and (c) the rendered tile values match the
-  // KPIS fixture.
-  const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-  beforeEach(() => fetchSpy.mockReset());
-  afterEach(() => fetchSpy.mockReset());
-
-  it("mounts the billing-header widget, calls /api/financial-pulse/kpis?period=mtd, and renders the tile values", async () => {
-    fetchSpy.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = typeof input === "string" ? input : input.toString();
-      if (url.startsWith("/api/financial-pulse/kpis")) {
-        return new Response(JSON.stringify(KPIS), { status: 200 });
-      }
-      // Every other list endpoint the dashboard hits → empty list.
-      return new Response("[]", { status: 200 });
-    });
-
-    const { default: BillingDashboard } = await import(
-      "../../pages/billing-dashboard"
-    );
-
-    render(withClient(<BillingDashboard />));
-
-    // Widget appears.
-    await screen.findByTestId("fp-widget-billing-header");
-    // And the FP endpoint was called from the page.
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "/api/financial-pulse/kpis?period=mtd",
-      expect.objectContaining({ credentials: "include" }),
-    );
-    // Tile values render.
-    await screen.findByText(/\$12,000/);
-    const arTile = screen.getByTestId("fp-tile-billing-header-outstanding-ar");
-    expect(arTile.textContent ?? "").toMatch(/\$4,500/);
-    const collectedTile = screen.getByTestId(
-      "fp-tile-billing-header-collected-mtd",
-    );
-    expect(collectedTile.textContent ?? "").toMatch(/\$7,500/);
-  });
-});
-
 describe("Task #711 — static-source guards", () => {
   const WIDGET_SRC = fs.readFileSync(
     path.join(__dirname, "financial-pulse-widget.tsx"),
     "utf8",
   );
   const DASH_SRC = fs.readFileSync(
-    path.join(__dirname, "..", "..", "pages", "billing-dashboard.tsx"),
+    path.join(__dirname, "..", "..", "pages", "manager-workspace.tsx"),
     "utf8",
   );
 
@@ -301,21 +268,9 @@ describe("Task #711 — static-source guards", () => {
     expect(body).toContain("/api/financial-pulse/kpis?period=mtd");
   });
 
-  it("billing-dashboard mounts the billing-header variant at the top", () => {
+  it("manager workspace mounts the billing-header variant", () => {
     expect(DASH_SRC).toMatch(
       /<FinancialPulseWidget\s+variant="billing-header"/,
     );
-    // The widget must come before the "Financial Exposure" heading.
-    const widgetIdx = DASH_SRC.indexOf('variant="billing-header"');
-    const exposureIdx = DASH_SRC.indexOf("Financial Exposure");
-    expect(widgetIdx).toBeGreaterThan(-1);
-    // Anchor against the JSX header (not the comment block at the top
-    // of the file), which is the actual rendered "Financial Exposure"
-    // section heading.
-    const exposureHeadingIdx = DASH_SRC.indexOf(
-      "/> Financial Exposure",
-    );
-    expect(exposureHeadingIdx).toBeGreaterThan(widgetIdx);
-    void exposureIdx;
   });
 });

@@ -67,11 +67,7 @@ interface InvoiceLite {
   id: number;
   invoiceNumber: string;
   customerName: string;
-  totalAmount: string | number;
-  status: string;
   createdAt: string;
-  periodStart?: string;
-  periodEnd?: string;
 }
 
 interface FieldTech { id: number; name: string; isActive?: boolean; }
@@ -110,6 +106,12 @@ export default function AdminDashboard() {
   const workOrdersQ = useArrayQuery<WorkOrderLite>({ queryKey: ["/api/work-orders"], enabled: !!user?.companyId });
   const billingSheetsQ = useArrayQuery<BillingSheetLite>({ queryKey: ["/api/billing-sheets"], enabled: !!user?.companyId });
   const estimatesQ = useArrayQuery<EstimateLite>({ queryKey: ["/api/estimates"], enabled: !!user?.companyId });
+  const invoiceCountQ = useQuery<{ count: number }>({
+    queryKey: ["/api/invoices/this-month-count"],
+    enabled: !!user?.companyId,
+  });
+  // Recent invoice rows still feed the activity feed; they no longer determine
+  // the monthly count, which must not be limited to this page of rows.
   const invoicesQ = useArrayQuery<InvoiceLite>({
     queryKey: ["/api/invoices", { limit: 25 }],
     queryFn: async () => {
@@ -186,7 +188,6 @@ export default function AdminDashboard() {
     const wos = workOrdersQ.data ?? [];
     const bss = billingSheetsQ.data ?? [];
     const ests = estimatesQ.data ?? [];
-    const invs = invoicesQ.data ?? [];
 
     // Task #638 — "open" = anything not yet in a terminal lifecycle
     // bucket (approved / rejected / expired). Reading the lifecycle
@@ -206,16 +207,9 @@ export default function AdminDashboard() {
         b.status === "approved_passed_to_billing"
     ).length;
 
-    const now = new Date();
-    const m = now.getMonth();
-    const y = now.getFullYear();
-    const invoicesThisMonth = invs.filter((i) => {
-      const d = new Date(i.createdAt);
-      return d.getMonth() === m && d.getFullYear() === y;
-    }).length;
-
-    return { estimatesOpen, woOpen, woInProgress, woCompleted, billingActive, invoicesThisMonth };
-  }, [workOrdersQ.data, billingSheetsQ.data, estimatesQ.data, invoicesQ.data]);
+    return { estimatesOpen, woOpen, woInProgress, woCompleted, billingActive };
+  }, [workOrdersQ.data, billingSheetsQ.data, estimatesQ.data]);
+  const invoicesThisMonth = invoiceCountQ.data?.count ?? 0;
 
   // Task #708 — Unbilled Revenue KPI tile is now sourced from FP
   // (`/api/financial-pulse/kpis` → `unbilledExposure.value`) so the
@@ -429,12 +423,12 @@ export default function AdminDashboard() {
         />
         <KpiTile
           label="Invoices This Month"
-          value={pipeline.invoicesThisMonth}
+          value={invoicesThisMonth}
           icon={Receipt}
           accent="blue"
           href="/invoices"
-          isLoading={invoicesQ.isLoading}
-          isError={invoicesQ.isError}
+          isLoading={invoiceCountQ.isLoading}
+          isError={invoiceCountQ.isError}
           testId="kpi-invoices-month"
         />
         {/* Task #708 — sourced from FP (`unbilledExposure`) so this tile
@@ -470,8 +464,8 @@ export default function AdminDashboard() {
             workOrdersInProgress={pipeline.woInProgress}
             workOrdersCompleted={pipeline.woCompleted}
             billingSheets={pipeline.billingActive}
-            invoicesThisMonth={pipeline.invoicesThisMonth}
-            isLoading={workOrdersQ.isLoading || billingSheetsQ.isLoading || estimatesQ.isLoading || invoicesQ.isLoading}
+            invoicesThisMonth={invoicesThisMonth}
+            isLoading={workOrdersQ.isLoading || billingSheetsQ.isLoading || estimatesQ.isLoading || invoiceCountQ.isLoading}
           />
           <FinancialPulseWidget variant="admin-dashboard" />
           <FinancialPulseWidget variant="top-customers-compact" />
