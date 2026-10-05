@@ -1,0 +1,70 @@
+# AUDIT — Irrigation Build-Out: Zone Count vs Zone Records, and Billing by Controller and Zone
+
+Date: 2026-10-05. Source: `main` at `09230dbb`. Every claim below was read in the file cited.
+
+## The question
+
+Villas at the Boulders, irrigation profile (`/customers/:customerId/irrigation-profile`): the collapsed tile for Controller A shows 38 numbered zone chips and the stepper reads 38. Expand the same controller and the Zones table is empty — just "+ Add Zone". The wet check and the work-order/billing-sheet location picker both offer zones 1-38. Where is the disconnect?
+
+## Answer: a controller's zones are stored twice, and nothing keeps the two in step
+
+| Store | What it is | Who reads it |
+|---|---|---|
+| `irrigation_controllers.total_zones` (`lib/db/src/schema/schema.ts:1933`) | A bare integer | The tile chips (`irrigation-controller-grid.tsx:1538`, `Array.from({ length: zoneCount })`), the stepper (`:1328`), the "231 zones" header chip (`IrrigationProfile.tsx:229`), the customer card (`irrigation-system-card.tsx:28-31`), the wet-check resolver (`irrigation-controller-resolver.ts:57`, `:81`), `GET /api/properties/:customerId/controllers` (`routes.ts:16376`, `:16404`), the field location picker (`work-location-controls.tsx:123`, `:420`), the wet-check zone grid (`ZoneStatusGrid.tsx:81`) |
+| `irrigation_profile_zones` rows (`schema.ts:1991-2028`) | One row per zone: name, type, runtime, program, order, notes | Only the expanded Zones table (`irrigation-controller-grid.tsx:1802+`), the CSV export, the profile PDF, history snapshots |
+
+So the 38 chips are drawn from the number, and the table is drawn from rows. Villas has the number and no rows.
+
+### Every path that writes one store without the other
+
+1. **Creating a controller with a count creates no rows.** `createIrrigationController` (`artifacts/api-server/src/storage.ts:11588-11630`) inserts the controller with `totalZones` and returns. The Add Controller form (`IrrigationProfile.tsx:58`, `:69`) and the admin Controllers & Zones page (`admin-controllers.tsx`, POST `controllers-profile`) both hit it.
+2. **Setting a count on a controller that had none creates no rows.** `updateIrrigationController` (`storage.ts:11632-11722`) seeds or trims rows only when the old *and* new counts are both numbers (`:11668-11717`). Null → 38 seeds nothing. A wet-check placeholder controller (seeded with `zoneCount: null`, `routes.ts:16365`, `:16394`) that later gets a count lands exactly here.
+3. **The wet-check stepper bypasses storage entirely.** `PATCH /api/properties/:customerId/controllers` (`routes.ts:16420-16475`, called from `wet-checks/ControllerHeader.tsx:31`) does a raw `db.update(irrigationControllers).set({ totalZones })` (`:16450-16453`). No row sync, no history snapshot, no `lastUpdatedBy`.
+4. **Adding or deleting a zone row never changes the count.** `createIrrigationZone` (`storage.ts:11833-11859`) and `deleteIrrigationZone` (`:11896-11924`) leave `total_zones` alone. Add zone 39 in the table and every picker still stops at 38.
+5. **Lowering the count leaves zones with data in place.** The shrink path (`storage.ts:11663-11691`) deletes only empty rows above the new count, so a controller can show 30 chips over a table of 34 rows.
+6. **Zone number is freely editable** (`irrigation-controller-grid.tsx:912-920`, `updateZoneBody` at `irrigation-profile-routes.ts:111`), so rows can be renumbered past the count or leave gaps.
+7. **CSV import writes the count two different ways.** New controllers get the highest zone number (`storage.ts:12206`). Existing ones get the highest number in add/update mode but the row *count* in Replace mode (`:12219-12224`). Replace mode also hard-deletes zones (`:12384-12388`).
+
+Paths that do keep the two in step: `ensureIrrigationControllers` seeds rows when it has a real count (`storage.ts:11526-11542`), and the tile stepper works *after* a controller already has rows, because it goes through `updateIrrigationController`.
+
+## Why this blocks billing by controller and by zone
+
+- **Documents carry a zone number, never a zone.** `billing_sheets` (`schema.ts:302-313`), `estimates` (`:574-577`), `estimate_items` (`:651-655`), `work_orders` (`:802-812`), `work_order_items` (`:890-894`), `wet_check_zone_records` (`:1561-1589`) and `work_order_zone_photos` (`:1764-1767`) each store `controller_id` + `zone_number`. "Zone 12" has no identity, type or history behind it.
+- **Invoice lines carry neither.** `invoice_items` (`schema.ts:986-1006`) has `sourceType` + `sourceId` and nothing about location. `billing_sheet_items` has no zone fields; the zone sits once on the sheet header.
+- **One invoice line can span many zones.** A wet-check billing posts as one line ("WC Billing WC-2026-1144 $1,594.05") covering every repaired zone on that wet check. Per-zone billing needs that line split across zones, not stamped with one.
+- **What a line can be attributed to depends on the work type** (Randy, 2026-10-05). The field work-type registry already encodes this: `field_work_types.requires_controller` / `requires_zone` (`schema.ts:39-52`). Zone/Head/Valve Repair → zone. Controller-Clock Repair → controller only. Backflow, Mainline, Other → neither (property level).
+- **No VRTSync key exists on controllers, programs or zones.** Only `irrigation_backflows.vrt_sync_id` (`schema.ts:2082`) has one. Without it, a future VRTSync feed has nothing to match on and will duplicate the system.
+- **Company-wide "average billed per zone" has no denominator.** The count today is the integer, and the integer is unreliable for the reasons above.
+
+## Decisions (Randy, 2026-10-05)
+
+1. **Zone records are the truth.** The count is always "how many zones this controller has". Setting it to 38 means zones 1-38 exist as records you can fill in.
+2. **Lowering the count retires zones; it never deletes them.** Retired zones drop out of pickers and counts; their history and billing stay reportable.
+3. **Every billed dollar is tied to a controller and zone, at the level the work type allows** — zone, controller only, or property level (backflow, mainline, other).
+4. **Delivered as this audit plus a numbered ticket family.**
+5. **Existing pages only** (Randy, 2026-10-05). Every change lands on a screen that already exists: the irrigation profile page, the wet-check screens, the work-order and billing-sheet location controls, Financial Pulse, the invoice PDF. No new pages or routes.
+
+Also decided while specifying (Claude, under Rule 8, each with its reason in the slice):
+
+- **Zones are numbered 1..N with no gaps.** Every picker and the wet-check grid already assume this. An unused station stays a zone; its name can say so.
+- **`total_zones` stays as a stored copy of the count until the readers move** (Slice 4). It is written by one function only, in the same transaction as the rows. Slice 4 moves every reader to zone records and drops the column.
+- **Field techs can still change the count from the wet check.** The field is where an uncounted zone gets discovered (Rule 4). The wet check calls the same function as the profile page and is logged the same way.
+
+## The ticket family
+
+| # | Slice | What it fixes | Page(s) touched |
+|---|---|---|---|
+| 1 | Zone records are the truth | Closes all seven write paths above; one function sets the count; retire instead of delete; backfill so Villas and every other controller gets its rows | Server + one migration; the existing profile page's calls switch to the new endpoint |
+| 2 | Connected controller tiles | Chips are the zone records; click a chip to open that zone; "38 zones, 12 set up"; Add Zone / minus retire from the top; retired zones listed | Irrigation profile (existing) |
+| 3 | Fast zone entry | Grid editing (Tab/Enter, save on blur), multi-select + apply Type/Program/Runtime to many zones at once | Irrigation profile (existing) |
+| 4 | Pickers and documents point at real zones | Location picker, wet-check grid and resolver read zone records; documents stamp `profile_zone_id`; drop `total_zones` | Work-order and billing-sheet location controls, wet-check screens (existing) |
+| 5 | Billing attribution | Each invoice line is split into controller/zone allocations by work type; wet-check lines split by finding; historical backfill | Invoice generation (server) |
+| 6 | Per-zone reporting | Customer billing by controller and zone on the irrigation profile; company-wide average billed per zone on Financial Pulse; per-zone breakdown on the invoice PDF | Irrigation profile, Financial Pulse, invoice PDF (existing) |
+| 7 | VRTSync keys | `vrt_sync_id` on controllers, programs, zones; match key in CSV import/export | Server + existing CSV import |
+
+Slices 1-3 are written: `BUILD - Irrigation Build-Out Slice 1 - Zone Records Are the Truth.md`, `... Slice 2 - Connected Controller Tiles.md`, `... Slice 3 - Fast Zone Entry.md`. Slices 4-7 depend on Slice 1's columns and are specced after it ships.
+
+## Out of scope for the whole family
+
+- **Site maps** — the `controllers` and `irrigation_zones` tables, `/site-maps`, `/customers/:id/site-maps`. They model the same equipment and may disagree with the profile; that is accepted. No slice in this family reads or writes them.
+- Command Center (`customer-billing.tsx`).
