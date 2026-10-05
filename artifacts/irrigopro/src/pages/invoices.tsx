@@ -1,16 +1,14 @@
 import { Fragment, useState, useMemo, useEffect, useRef } from "react";
-import { useInfiniteQuery, useMutation, useQueries, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import {
   hasCapability,
-  usesUiDefault,
   CAN_EDIT_INVOICES,
   CAN_MANAGE_QUICKBOOKS,
   CAN_READ_AR_NOTES,
   CAN_SEND_INVOICE_EMAIL,
   CAN_VIEW_REMINDER_HISTORY,
   CAN_VIEW_COSTS,
-  COLLECTIONS_LANDING_DEFAULT,
   AGING_BUCKET_LABELS,
   AR_FLAG_LABELS,
   AR_FLAG_TOOLTIPS,
@@ -117,7 +115,6 @@ import { formatCurrency } from "@/lib/format-currency";
 import {
   AR_SORT_LABELS,
   BUCKET_TO_AGING_VALUE,
-  COLLECTIONS_DEFAULT_QUERY,
   EMPTY_AR_QUERY,
   agingSummaryParams,
   arQueryToParams,
@@ -686,9 +683,9 @@ export default function InvoicesPage() {
   // useState) is what makes a view survive a reload and share as a link.
   const arQuery = useMemo(() => readArQuery(search ?? ""), [search]);
   const agingFilter = arQuery.aging;
-  const setArQuery = (next: ArQuery) => {
+  const setArQuery = (next: ArQuery, opts?: { replace?: boolean }) => {
     const qs = arQueryToParams(next).toString();
-    setLocation(qs ? `/invoices?${qs}` : "/invoices");
+    setLocation(qs ? `/invoices?${qs}` : "/invoices", opts?.replace ? { replace: true } : undefined);
   };
   // Patches merge against the URL as it is when the patch runs, not as it was
   // when the callback was created. The debounced search below writes up to
@@ -698,8 +695,8 @@ export default function InvoicesPage() {
   // select-all describing a set nobody asked for.
   const arQueryRef = useRef(arQuery);
   arQueryRef.current = arQuery;
-  const patchArQuery = (patch: Partial<ArQuery>) =>
-    setArQuery({ ...arQueryRef.current, ...patch });
+  const patchArQuery = (patch: Partial<ArQuery>, opts?: { replace?: boolean }) =>
+    setArQuery({ ...arQueryRef.current, ...patch }, opts);
 
   // Task #1942 — the search box echoes locally so typing stays responsive,
   // but the value that filters anything lives in the URL and is applied by
@@ -716,13 +713,17 @@ export default function InvoicesPage() {
     pushedSearchRef.current = arQuery.search;
     setSearchInput(arQuery.search);
   }, [arQuery.search]);
+  // Applies the box's text to the URL now. Search writes REPLACE the history
+  // entry: one back-press should leave the search, not undo it a word at a time.
+  const commitSearch = (raw: string) => {
+    const next = raw.trim();
+    if (next === arQueryRef.current.search) return;
+    pushedSearchRef.current = next;
+    patchArQuery({ search: next }, { replace: true });
+  };
   useEffect(() => {
-    const next = searchInput.trim();
-    if (next === arQuery.search) return;
-    const t = setTimeout(() => {
-      pushedSearchRef.current = next;
-      patchArQuery({ search: next });
-    }, 250);
+    if (searchInput.trim() === arQuery.search) return;
+    const t = setTimeout(() => commitSearch(searchInput), 250);
     return () => clearTimeout(t);
   }, [searchInput, arQuery.search]);
 
@@ -794,31 +795,6 @@ export default function InvoicesPage() {
   // — is the person who does it. See
   // docs/audits/invoice-page-capability-audit-2026-08.md.
   const canManageQuickBooks = hasCapability(userRole, CAN_MANAGE_QUICKBOOKS);
-
-  // Task #1890 — the collections landing default.
-  // Task #1950 — expanded to every invoice-reading role so the page looks
-  //              the same regardless of who is viewing it.
-  //
-  // Resolved through `usesUiDefault` against a UI-default membership, never a
-  // role-string comparison and never a capability set. The distinction is
-  // enforced by the type: `COLLECTIONS_LANDING_DEFAULT` is not a
-  // `ReadonlySet<Role>`, so it cannot be handed to `hasCapability` and quietly
-  // turned into an authorization decision. It grants nothing — every role here
-  // already reads invoices via CAN_READ_INVOICES; this only decides what they
-  // see first.
-  const usesCollectionsDefault = usesUiDefault(userRole, COLLECTIONS_LANDING_DEFAULT);
-  const defaultArQuery = usesCollectionsDefault ? COLLECTIONS_DEFAULT_QUERY : EMPTY_AR_QUERY;
-  // Applied once per mount, and only when the caller arrived with no view of
-  // their own — a shared link or a Financial Pulse deep link must win.
-  const appliedLandingDefault = useRef(false);
-  useEffect(() => {
-    if (appliedLandingDefault.current) return;
-    appliedLandingDefault.current = true;
-    if (!usesCollectionsDefault) return;
-    if (!isEmptyArQuery(arQuery)) return;
-    setArQuery(COLLECTIONS_DEFAULT_QUERY);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [usesCollectionsDefault]);
 
   // Task #1425 — invoice merge selection. `selectedIds` holds the invoices
   // ticked for merging; `survivingId` is the chosen survivor in the confirm
@@ -990,6 +966,8 @@ export default function InvoicesPage() {
   const {
     data: invoicePages,
     isLoading,
+    isFetching,
+    isPlaceholderData,
     error,
     fetchNextPage,
     hasNextPage,
@@ -997,6 +975,7 @@ export default function InvoicesPage() {
   } = useInfiniteQuery<{ rows: Invoice[]; total: number; nextOffset: number | null }>({
     queryKey: ["/api/invoices", { paginated: true, pageSize: PAGE_SIZE, ar: arParams }],
     initialPageParam: 0,
+    placeholderData: keepPreviousData,
     queryFn: async ({ pageParam = 0 }) => {
       const offset = Number(pageParam) || 0;
       const suffix = arParams ? `&${arParams}` : "";
@@ -1048,6 +1027,7 @@ export default function InvoicesPage() {
     // leave the header and the strip quoting pre-sync totals over refreshed
     // rows until something unrelated happened to refetch them.
     queryKey: ["/api/invoices", "aging-summary", agingParams],
+    placeholderData: keepPreviousData,
     queryFn: async () => {
       const res = await fetch(
         `/api/invoices/aging-summary${agingParams ? `?${agingParams}` : ""}`,
@@ -2149,28 +2129,6 @@ export default function InvoicesPage() {
     </DropdownMenu>
   );
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-64 p-8">
-        <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-        <span className="ml-2 text-gray-600">Loading invoices...</span>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-6">
-        <Card>
-          <CardContent className="p-8 text-center">
-            <AlertCircle className="w-8 h-8 mx-auto mb-2 text-red-600" />
-            <p className="text-gray-600">Failed to load invoices. Please try again.</p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="w-full px-4 lg:px-6 py-4 lg:py-6">
@@ -2226,11 +2184,13 @@ export default function InvoicesPage() {
         <InvoiceFilterBar
           searchTerm={searchInput}
           onSearchChange={setSearchInput}
+          onSearchCommit={commitSearch}
+          isSearching={isFetching && !isFetchingNextPage}
           query={arQuery}
           onPatch={patchArQuery}
           onClearAll={() => {
             setSearchInput("");
-            setArQuery(defaultArQuery);
+            setArQuery(EMPTY_AR_QUERY);
           }}
           hasActiveFilters={!isEmptyArQuery(arQuery)}
           customerOptions={customerOptions}
@@ -2239,6 +2199,20 @@ export default function InvoicesPage() {
           onMonthChange={(value) => patchArQuery({ month: value === "all" ? "" : value })}
         />
 
+        {isLoading ? (
+          <div className="flex items-center justify-center min-h-64 p-8" data-testid="invoice-list-loading">
+            <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+            <span className="ml-2 text-gray-600">Loading invoices...</span>
+          </div>
+        ) : error ? (
+          <Card data-testid="invoice-list-error">
+            <CardContent className="p-8 text-center">
+              <AlertCircle className="w-8 h-8 mx-auto mb-2 text-red-600" />
+              <p className="text-gray-600">Failed to load invoices. Please try again.</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
         {/* Empty state */}
         {flatSections.length === 0 && (
           <Card>
@@ -2256,7 +2230,11 @@ export default function InvoicesPage() {
 
         {/* Invoice list — grouped by billing month, or flat when an A/R sort
             is active (Task #1890). */}
-        <div className="space-y-8">
+        <div
+          className={`space-y-8 transition-opacity ${isPlaceholderData ? "opacity-60" : ""}`}
+          aria-busy={isPlaceholderData}
+          data-testid="invoice-list-rows"
+        >
           {flatSections.map((group) => {
             // Terminal invoices (superseded, merged) are excluded from the
             // group total and collapsed as version history beneath their survivor.
@@ -2658,6 +2636,9 @@ export default function InvoicesPage() {
               )}
             </Button>
           </div>
+        )}
+
+          </>
         )}
 
         {/* Cancelled invoices — collapsible audit drawer, hidden from main list and totals */}

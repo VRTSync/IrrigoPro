@@ -7,8 +7,7 @@
  * spy in `artifacts/api-server/src/routes/invoice-list-routes.test.ts`; what
  * can only be checked here is:
  *
- *  1. every invoice-reading role lands on collections work without touching a
- *     control (Task #1950 expanded this from bookkeeper-only to all roles);
+ *  1. every invoice-reading role lands on the unfiltered list with a clean URL;
  *  2. every filter survives a URL round-trip and reaches the server as one
  *     AND-ed query;
  *  3. an existing `?aging=` deep link from the Financial Pulse widget still
@@ -231,44 +230,21 @@ async function openActionsMenu(invoiceId: number) {
 
 // ── 1. landing defaults ──────────────────────────────────────────────────────
 
-describe("collections landing default", () => {
-  it("drops the bookkeeper on unpaid-and-overdue, biggest balance in the oldest bucket", async () => {
-    roleRef.current = "bookkeeper";
-    const { nav } = renderInvoices("/invoices");
-
-    await waitFor(() => {
-      const q = new URLSearchParams(nav.history[nav.history.length - 1].split("?")[1] ?? "");
-      expect(q.get("aging")).toBe("overdue");
-      expect(q.get("paymentStatus")).toBe("unpaid");
-      expect(q.get("sort")).toBe("balanceDue");
-      expect(q.get("dir")).toBe("desc");
-    });
-
-    // …and those same filters are what the server is asked for.
-    await waitFor(() => {
+describe("no landing default", () => {
+  it.each(["bookkeeper", "billing_manager", "company_admin", "irrigation_manager", "super_admin"])(
+    "%s opens unfiltered without changing the URL",
+    async (role) => {
+      roleRef.current = role;
+      const { nav } = renderInvoices("/invoices");
+      await waitForInvoiceFetch();
+      expect(nav.history).toEqual(["/invoices"]);
       const q = lastInvoiceQuery();
-      expect(q.get("aging")).toBe("overdue");
-      expect(q.get("sort")).toBe("balanceDue");
-    });
-  });
-
-  it("also drops billing_manager on unpaid-and-overdue, biggest balance first", async () => {
-    roleRef.current = "billing_manager";
-    const { nav } = renderInvoices("/invoices");
-
-    await waitFor(() => {
-      const q = new URLSearchParams(nav.history[nav.history.length - 1].split("?")[1] ?? "");
-      expect(q.get("aging")).toBe("overdue");
-      expect(q.get("paymentStatus")).toBe("unpaid");
-      expect(q.get("sort")).toBe("balanceDue");
-      expect(q.get("dir")).toBe("desc");
-    });
-    await waitFor(() => {
-      const q = lastInvoiceQuery();
-      expect(q.get("aging")).toBe("overdue");
-      expect(q.get("sort")).toBe("balanceDue");
-    });
-  });
+      for (const key of ["aging", "paymentStatus", "sort", "dir"]) {
+        expect(q.has(key)).toBe(false);
+      }
+      expect(screen.queryByTestId("ar-filter-chips")).toBeNull();
+    },
+  );
 
   it("does not override a view the bookkeeper arrived with", async () => {
     roleRef.current = "bookkeeper";
@@ -322,28 +298,21 @@ describe("A/R filters and the URL", () => {
     });
   });
 
-  it("clearing everything returns the role's default list", async () => {
-    const { nav } = renderInvoices("/invoices?aging=days60&flagged=1&sort=balanceDue&dir=desc");
+  it.each(["bookkeeper", "billing_manager", "company_admin", "irrigation_manager", "super_admin"])("clearing everything returns the unfiltered list for %s", async (role) => {
+    roleRef.current = role;
+    const { nav } = renderInvoices("/invoices?search=ranch&month=2026-06&customerId=10&aging=days60&flagged=1&sort=balanceDue&dir=desc");
     await waitForInvoiceFetch();
 
     fireEvent.click(screen.getByTestId("ar-filter-clear"));
 
-    // After clearing, the role lands on its default: unpaid-and-overdue, biggest
-    // balance first (Task #1950 — now universal across all invoice-reading roles).
     await waitFor(() => {
-      const q = new URLSearchParams(nav.history[nav.history.length - 1].split("?")[1] ?? "");
-      expect(q.get("aging")).toBe("overdue");
-      expect(q.get("paymentStatus")).toBe("unpaid");
-      expect(q.get("sort")).toBe("balanceDue");
-      expect(q.get("dir")).toBe("desc");
+      expect(nav.history[nav.history.length - 1]).toBe("/invoices");
+      expect(screen.queryByTestId("ar-filter-chips")).toBeNull();
+      expect(screen.getByTestId("invoice-search-input")).toHaveValue("");
     });
   });
 
   it("a sortable A/R header cycles desc → asc → off in the URL", async () => {
-    // Use ?paymentStatus=unpaid so the landing-default effect fires but returns
-    // early (non-empty query) without triggering an extra fetch.  We do NOT
-    // use ?aging=overdue here because the client-side aging filter would drop
-    // cleanInvoice() (agingBucket="current"), leaving the table empty.
     const { nav } = renderInvoices("/invoices?paymentStatus=unpaid");
     // Wait for the table and its sort headers to appear.
     await waitFor(() => screen.getAllByTestId("ar-sort-balanceDue")[0]);
@@ -352,8 +321,7 @@ describe("A/R filters and the URL", () => {
     // Descending first: collections wants the biggest balance at the top.
     fireEvent.click(screen.getAllByTestId("ar-sort-balanceDue")[0]);
     await waitFor(() => expect(last()).toContain("sort=balanceDue&dir=desc"));
-    // The new query key triggers a re-fetch; wait for the table to reappear
-    // before clicking again — the header is absent during the loading state.
+    // The previous table stays available while the new query refetches.
     await waitFor(() => screen.getAllByTestId("ar-sort-balanceDue")[0]);
 
     fireEvent.click(screen.getAllByTestId("ar-sort-balanceDue")[0]);
@@ -408,9 +376,6 @@ describe("existing ?aging= deep links", () => {
 describe("flag badges", () => {
   it("renders nothing but an em dash for a clean invoice", async () => {
     rowsForResponse = [cleanInvoice()];
-    // Use ?paymentStatus=unpaid so the landing-default effect fires but returns
-    // early (non-empty query) and the client-side aging filter (all) passes the
-    // cleanInvoice() fixture (agingBucket="current").
     renderInvoices("/invoices?paymentStatus=unpaid");
     await waitFor(() => expect(screen.getByTestId("ar-flags-none-1")).toBeTruthy());
   });
@@ -628,8 +593,7 @@ describe("A/R columns", () => {
 // ── 7. the bookkeeper's read-only view ───────────────────────────────────────
 
 describe("bookkeeper controls", () => {
-  // The bookkeeper lands on unpaid-and-overdue, so a fixture she can actually
-  // see has to be overdue and unpaid.
+  // Overdue fixture so the flag and reminder controls have something to act on.
   const overdueInvoice = (overrides: Row = {}) =>
     cleanInvoice({
       isOverdue: true,

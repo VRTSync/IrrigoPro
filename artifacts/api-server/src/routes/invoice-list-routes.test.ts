@@ -19,8 +19,6 @@
 //       "never sent"
 //   (h) X-Total-Count is the post-filter total
 //   (i) company isolation — the handler only ever sees its own company's rows
-//   (j) a compile-time proof that the collections UI default cannot be used as
-//       an authorization capability
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -38,17 +36,13 @@ import {
 } from "./invoice-list-routes";
 import {
   hasCapability,
-  usesUiDefault,
   CAN_READ_INVOICES,
-  CAN_EDIT_INVOICES,
-  COLLECTIONS_LANDING_DEFAULT,
   OVERDUE_AGING_FILTER,
   AGING_BUCKET_KEYS,
   AGING_BUCKET_LABELS,
   classifyAgingBucket,
   computeEffectiveDueDate,
   isInvoiceOverdue,
-  type Capability,
 } from "@workspace/shared";
 import { requireInvoiceRead } from "./role-guards";
 
@@ -704,51 +698,6 @@ describe("sortAnnotatedInvoices", () => {
       ids(sortAnnotatedInvoices(rows, "status", "asc")),
       ids(sortAnnotatedInvoices([...rows].reverse(), "status", "asc")),
     );
-  });
-});
-
-// ── (j) the collections UI default is not a capability ───────────────────────
-//
-// A runtime test cannot catch this class of mistake: if the UI default were
-// another ReadonlySet<Role>, handing it to hasCapability would compile, run,
-// and quietly authorise whoever is in it. So the assertion is a compile-time
-// one. `@ts-expect-error` fails the typecheck when the error DISAPPEARS, which
-// is exactly the regression we are guarding against — the day someone
-// "simplifies" UiDefaultRoles back into a Set, this file stops compiling.
-
-// Never called. Every line below is a deliberate type error, and
-// `@ts-expect-error` turns each one into a failing typecheck the moment it
-// starts compiling — which is precisely when the safety has been lost.
-// These must NOT run: at runtime they would throw, and a throw is a much
-// weaker signal than "this mistake cannot be written down".
-export function __collectionsDefaultIsNotACapability(): void {
-  // @ts-expect-error — a UI landing default is not a Capability.
-  hasCapability("bookkeeper", COLLECTIONS_LANDING_DEFAULT);
-  // @ts-expect-error — UiDefaultRoles is not a ReadonlySet<Role>.
-  const asCapability: Capability = COLLECTIONS_LANDING_DEFAULT;
-  void asCapability;
-  // @ts-expect-error — the invoice-read allowlist is a Capability, not a UI default.
-  usesUiDefault("bookkeeper", CAN_READ_INVOICES);
-  // @ts-expect-error — CAN_EDIT_INVOICES is a Capability, not a UiDefaultRoles.
-  usesUiDefault("billing_manager", CAN_EDIT_INVOICES);
-}
-
-describe("collections landing default is not usable as an authorization guard", () => {
-  it("returns true for every invoice-reading role and false for everything else", () => {
-    // All roles in CAN_READ_INVOICES get the AR-first landing.
-    assert.equal(usesUiDefault("bookkeeper", COLLECTIONS_LANDING_DEFAULT), true);
-    assert.equal(usesUiDefault("billing_manager", COLLECTIONS_LANDING_DEFAULT), true);
-    assert.equal(usesUiDefault("company_admin", COLLECTIONS_LANDING_DEFAULT), true);
-    assert.equal(usesUiDefault("irrigation_manager", COLLECTIONS_LANDING_DEFAULT), true);
-    assert.equal(usesUiDefault("super_admin", COLLECTIONS_LANDING_DEFAULT), true);
-    // Non-invoice roles and bad inputs always return false.
-    assert.equal(usesUiDefault("field_tech", COLLECTIONS_LANDING_DEFAULT), false);
-    assert.equal(usesUiDefault("not_a_role", COLLECTIONS_LANDING_DEFAULT), false);
-    assert.equal(usesUiDefault(null, COLLECTIONS_LANDING_DEFAULT), false);
-    assert.equal(usesUiDefault(undefined, COLLECTIONS_LANDING_DEFAULT), false);
-    // The bookkeeper still reads invoices via the capability registry.
-    assert.equal(hasCapability("bookkeeper", CAN_READ_INVOICES), true);
-    assert.equal(hasCapability("bookkeeper", CAN_EDIT_INVOICES), false);
   });
 });
 

@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { queryClient as appQueryClient } from "@/lib/queryClient";
 import { Router } from "wouter";
@@ -156,6 +156,9 @@ let summaryForResponse: Record<string, unknown> = agingSummary();
 let eligibilityForResponse: Row[] = [];
 /** Rows the `limit=500` select-all fetch should return, when it differs. */
 let selectAllRowsForResponse: Row[] | null = null;
+let deferredList: Promise<Response> | null = null;
+let deferredSummary: Promise<Response> | null = null;
+let failList = false;
 
 const isListRequest = (u: string) => u.includes("/api/invoices?");
 const isSummaryRequest = (u: string) => u.includes("/api/invoices/aging-summary");
@@ -172,6 +175,9 @@ beforeEach(() => {
   summaryForResponse = agingSummary();
   eligibilityForResponse = [eligibility(1)];
   selectAllRowsForResponse = null;
+  deferredList = null;
+  deferredSummary = null;
+  failList = false;
   roleRef.current = "billing_manager";
   companyRef.current = null;
   vi.stubGlobal(
@@ -185,11 +191,13 @@ beforeEach(() => {
           headers: { "Content-Type": "application/json", ...headers },
         });
 
-      if (isSummaryRequest(url)) return json(summaryForResponse);
+      if (isSummaryRequest(url)) return deferredSummary ?? json(summaryForResponse);
       if (url.includes("/api/invoices/reminder-eligibility")) {
         return json({ rows: eligibilityForResponse, notFound: [] });
       }
       if (isListRequest(url) || url.endsWith("/api/invoices")) {
+        if (deferredList) return deferredList;
+        if (failList) return new Response("Failed", { status: 500 });
         const wantsAll = url.includes("limit=500");
         const body = wantsAll && selectAllRowsForResponse ? selectAllRowsForResponse : rowsForResponse;
         return json(body, {
@@ -202,6 +210,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
@@ -719,34 +728,145 @@ describe("no rendered control reaches an endpoint its role cannot", () => {
 
 // ── 5. landing defaults ──────────────────────────────────────────────────────
 
-describe("landing default per role", () => {
-  it("lands the bookkeeper flat, biggest balance first", async () => {
+describe("no landing default", () => {
+  it("lands the bookkeeper unfiltered with billing month groups", async () => {
     roleRef.current = "bookkeeper";
     const { nav } = renderInvoices();
 
-    await waitFor(() => {
-      const q = new URLSearchParams(nav.history[nav.history.length - 1].split("?")[1] ?? "");
-      expect(q.get("sort")).toBe("balanceDue");
-      expect(q.get("dir")).toBe("desc");
-      expect(q.get("aging")).toBe("overdue");
-    });
-    // Flat: an A/R ordering is a statement about the ledger, so the month
-    // headings are gone.
-    await waitFor(() => expect(screen.queryByTestId("invoice-group-header")).toBeNull());
+    await waitFor(() => expect(screen.getAllByTestId("invoice-group-header").length).toBeGreaterThan(0));
+    expect(nav.history).toEqual(["/invoices"]);
+  });
+});
+
+describe("search box", () => {
+  async function ready(path = "/invoices") {
+    const view = renderInvoices(path);
+    await screen.findByTestId("invoice-list-rows");
+    await waitFor(() => expect(screen.getByTestId("invoice-header-outstanding")).toHaveTextContent("$10,000.00"));
+    return view;
+  }
+
+  async function flush(ms = 0) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  }
+
+  it("keeps the same input and focus through paused typing and refetches", async () => {
+    await ready();
+    const input = screen.getByTestId("invoice-search-input");
+    input.focus();
+    vi.useFakeTimers();
+    for (const value of ["wood", "woodg", "woodglenn"]) {
+      fireEvent.change(input, { target: { value } });
+      await flush(300);
+      await flush();
+      expect(lastRequest(isListRequest).get("search")).toBe(value);
+      expect(screen.getByTestId("invoice-search-input")).toBe(input);
+      expect(document.activeElement).toBe(input);
+    }
+    await flush(300);
   });
 
-  it("lands the billing manager flat, biggest balance first too", async () => {
-    roleRef.current = "billing_manager";
-    const { nav } = renderInvoices();
+  it("keeps the toolbar, rows and aggregate visible while loading", async () => {
+    await ready();
+    let resolveList!: (value: Response) => void;
+    let resolveSummary!: (value: Response) => void;
+    deferredList = new Promise((resolve) => { resolveList = resolve; });
+    deferredSummary = new Promise((resolve) => { resolveSummary = resolve; });
+    const input = screen.getByTestId("invoice-search-input");
+    input.focus();
+    vi.useFakeTimers();
+    fireEvent.change(input, { target: { value: "slow" } });
+    await flush(300);
+    expect(lastRequest(isListRequest).get("search")).toBe("slow");
+    expect(screen.getByTestId("invoice-search-pending")).toBeTruthy();
+    expect(screen.getByTestId("invoice-search-input")).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(screen.queryByTestId("invoice-list-loading")).toBeNull();
+    expect(screen.getByTestId("invoice-list-rows")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByTestId("invoice-list-rows")).toHaveClass("opacity-60");
+    expect(screen.getAllByTestId("invoice-row-1").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("invoice-header-outstanding")).toHaveTextContent("$10,000.00");
+    expect(screen.getByTestId("ar-aging-card-total-days60")).toHaveTextContent("$3,000.00");
+    resolveList(new Response(JSON.stringify([invoiceRow()]), { headers: { "X-Total-Count": "1" } }));
+    resolveSummary(new Response(JSON.stringify(agingSummary())));
+    await flush(10);
+    expect(screen.getByTestId("invoice-list-rows")).toHaveAttribute("aria-busy", "false");
+    expect(screen.queryByTestId("invoice-search-pending")).toBeNull();
+    await flush(300);
+  });
 
-    await waitFor(() => {
-      const q = new URLSearchParams(nav.history[nav.history.length - 1].split("?")[1] ?? "");
-      expect(q.get("sort")).toBe("balanceDue");
-      expect(q.get("dir")).toBe("desc");
-      expect(q.get("aging")).toBe("overdue");
-    });
-    // Flat: AR ordering suppresses month group headings.
-    await waitFor(() => expect(screen.queryByTestId("invoice-group-header")).toBeNull());
+  it("Enter commits trimmed search before the debounce elapses", async () => {
+    await ready();
+    vi.useFakeTimers();
+    const input = screen.getByTestId("invoice-search-input");
+    fireEvent.change(input, { target: { value: " ranch " } });
+    await flush(0);
+    expect(lastRequest(isListRequest).has("search")).toBe(false);
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush(0);
+    expect(lastRequest(isListRequest).get("search")).toBe("ranch");
+    await flush(300);
+  });
+
+  it.each(["Escape", "X"])("%s clears search immediately", async (action) => {
+    const { nav } = await ready("/invoices?search=ranch");
+    vi.useFakeTimers();
+    const input = screen.getByTestId("invoice-search-input");
+    if (action === "Escape") fireEvent.keyDown(input, { key: "Escape" });
+    else fireEvent.click(screen.getByTestId("invoice-search-clear"));
+    await flush(0);
+    expect(input).toHaveValue("");
+    expect(nav.history.at(-1)).toBe("/invoices");
+    expect(lastRequest(isListRequest).has("search")).toBe(false);
+    await flush(300);
+    expect(nav.history.at(-1)).toBe("/invoices");
+  });
+
+  it("replaces history for search but pushes deliberate bucket navigation", async () => {
+    const { nav } = await ready();
+    vi.useFakeTimers();
+    const initialLength = nav.history.length;
+    const input = screen.getByTestId("invoice-search-input");
+    for (const value of ["a", "ab"]) {
+      fireEvent.change(input, { target: { value } });
+      await flush(300);
+    }
+    expect(nav.history.length).toBe(initialLength);
+    expect(nav.history.at(-1)).toBe("/invoices?search=ab");
+    fireEvent.click(screen.getByTestId("ar-aging-card-days60"));
+    await flush(0);
+    expect(nav.history.length).toBe(initialLength + 1);
+    expect(nav.history.at(-1)).toContain("search=ab&aging=days60");
+    await flush(300);
+  });
+
+  it("keeps the shell mounted during cold loading", async () => {
+    let resolveList!: (value: Response) => void;
+    deferredList = new Promise((resolve) => { resolveList = resolve; });
+    renderInvoices();
+    const input = screen.getByTestId("invoice-search-input");
+    expect(screen.getByTestId("invoice-list-loading")).toBeTruthy();
+    expect(screen.getByTestId("ar-filters")).toBeTruthy();
+    expect(screen.getByTestId("invoice-header-outstanding")).toBeTruthy();
+    expect(screen.getByTestId("ar-aging-strip")).toBeTruthy();
+    resolveList(new Response(JSON.stringify([invoiceRow()])));
+    await screen.findByTestId("invoice-list-rows");
+    expect(screen.getByTestId("invoice-search-input")).toBe(input);
+  });
+
+  it("keeps the focused input and shell mounted on list errors", async () => {
+    await ready();
+    failList = true;
+    const input = screen.getByTestId("invoice-search-input");
+    input.focus();
+    fireEvent.change(input, { target: { value: "failure" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await screen.findByTestId("invoice-list-error");
+    expect(screen.getByTestId("invoice-search-input")).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(screen.getByTestId("invoice-header-outstanding")).toBeTruthy();
+    expect(screen.getByTestId("ar-aging-card-days60")).toBeTruthy();
+    expect(screen.getByTestId("ar-filters")).toBeTruthy();
   });
 });
 

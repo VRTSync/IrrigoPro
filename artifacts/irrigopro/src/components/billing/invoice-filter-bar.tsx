@@ -12,7 +12,7 @@
  * the first place the active ones become visible without opening anything.
  */
 
-import { Filter, Search, X } from "lucide-react";
+import { Filter, Loader2, Search, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -41,6 +41,8 @@ import {
 export function InvoiceFilterBar({
   searchTerm,
   onSearchChange,
+  onSearchCommit,
+  isSearching,
   query,
   onPatch,
   onClearAll,
@@ -52,6 +54,8 @@ export function InvoiceFilterBar({
 }: {
   searchTerm: string;
   onSearchChange: (value: string) => void;
+  onSearchCommit: (value: string) => void;
+  isSearching: boolean;
   query: ArQuery;
   onPatch: (patch: Partial<ArQuery>) => void;
   onClearAll: () => void;
@@ -75,10 +79,36 @@ export function InvoiceFilterBar({
             placeholder="Search invoice # or customer…"
             value={searchTerm}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="pl-9"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onSearchCommit(searchTerm);
+              } else if (e.key === "Escape" && searchTerm) {
+                e.preventDefault();
+                onSearchChange("");
+                onSearchCommit("");
+              }
+            }}
+            className="pl-9 pr-16"
             aria-label="Search by invoice number or customer name"
             data-testid="invoice-search-input"
           />
+          <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
+            {isSearching && (
+              <Loader2 className="h-4 w-4 animate-spin text-gray-400" aria-hidden data-testid="invoice-search-pending" />
+            )}
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => { onSearchChange(""); onSearchCommit(""); }}
+                className="rounded p-1 text-gray-400 hover:text-gray-700"
+                aria-label="Clear search"
+                data-testid="invoice-search-clear"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
 
         <Popover>

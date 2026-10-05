@@ -65,3 +65,4 @@
 - [Wet-check browser evidence and stale mirrors](wet-check-browser-evidence.md) — after direct DB fixture changes, use a fresh wet-check ID for browser evidence rather than trusting reload.
 - [Merged prerequisites in isolated branches](isolated-branch-prerequisites.md) — task status can say merged before this checkout sees its code; check accessible remotes for the commit.
 - [Mutation fetch test isolation](mutation-fetch-test-isolation.md) — modal background GETs may share the mutation URL prefix; route mocked responses by method as well as path.
+- [Invoice landing policy](invoice-landing-policy.md) — invoice-reading roles must land unfiltered; collections views are deliberate navigation, not automatic defaults.

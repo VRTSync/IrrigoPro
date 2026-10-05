@@ -58,7 +58,7 @@ import {
  * `current` / `days30` / `days60` / `days90Plus` are the values the Financial
  * Pulse widget has always deep-linked with — unchanged, deliberately, so
  * existing links keep working. `overdue` is added for "anything at or past its
- * due date", which is what the collections landing default needs; it reuses
+ * due date", which is what a balance-first collections sort needs; it reuses
  * this parameter rather than introducing a second one. Its literal is
  * `OVERDUE_AGING_FILTER` in the shared aging module — the sidebar's overdue
  * badge (Task #1914) counts through this same filter, so the two surfaces

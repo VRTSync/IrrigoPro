@@ -14,8 +14,7 @@ import { AGING_BUCKET_LABELS, type AgingBucketKey } from "@workspace/shared";
 // Task #708 — A/R aging filter values mirror the
 // `/api/financial-pulse/ar-aging` bucket keys (with `days90Plus` matching the
 // inclusive 60+ bucket), so the widget can deep-link via `?aging=`.
-// Task #1890 — `overdue` is an addition to this same parameter, NOT a second
-// one: the collections landing default and the widget's deep links share it.
+// Task #1890 — `overdue` is an addition to this same parameter, NOT a second one.
 export type AgingFilter = "all" | "current" | "days30" | "days60" | "days90Plus" | "overdue";
 
 export const AGING_OPTIONS: { value: AgingFilter; label: string }[] = [
@@ -133,24 +132,6 @@ export const EMPTY_AR_QUERY: ArQuery = {
   amountMax: "",
   flagged: false,
   sort: null,
-  dir: "desc",
-};
-
-/**
- * The collections landing view: unpaid and overdue, oldest bucket first with
- * the biggest balance first inside it. Expressed as a URL rather than a
- * separate route, so there is still exactly one canonical invoice list.
- */
-export const COLLECTIONS_DEFAULT_QUERY: ArQuery = {
-  ...EMPTY_AR_QUERY,
-  aging: "overdue",
-  paymentStatus: "unpaid",
-  // Task #1942 — biggest first, not oldest-bucket first. Both orderings are
-  // "collections work", but the money is the thing being chased: bucket-first
-  // puts a $40 invoice from last quarter above a $9,000 one from last month.
-  // The ordering is applied by the server across the whole filtered set, and
-  // an A/R sort renders the list flat rather than sliced back into months.
-  sort: "balanceDue",
   dir: "desc",
 };
 
