@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Calendar, ClipboardCheck, Send, ShieldAlert } from "lucide-react";
-import { generateActionBoardPlan } from "@workspace/shared";
+import { CAN_VIEW_ACTION_BOARD, generateActionBoardPlan, hasCapability } from "@workspace/shared";
+import { useAuth } from "@/lib/auth-context";
 import { copyText } from "@/lib/copy-text";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
@@ -94,13 +95,53 @@ function Row({ row }: { row: BoardRow }) {
 }
 
 export default function ActionBoardPage() {
+  const { user } = useAuth();
+  if (!hasCapability(user?.role, CAN_VIEW_ACTION_BOARD)) {
+    return <p role="alert">You do not have access to Action Board.</p>;
+  }
+  if (user?.role === "super_admin") return <CompanyActionBoard />;
+  return <ActionBoardContent />;
+}
+
+function CompanyActionBoard() {
+  const [companyId, setCompanyId] = useState(() => {
+    const requested = Number(new URLSearchParams(window.location.search).get("companyId"));
+    return Number.isSafeInteger(requested) && requested > 0 ? String(requested) : "";
+  });
+  const { data: companies, error, isLoading } = useQuery<Array<{ id: number; name: string }>>({
+    queryKey: ["/api/companies"],
+    queryFn: async () => {
+      const response = await fetch("/api/companies", { credentials: "include" });
+      if (!response.ok) throw new Error("Unable to load companies");
+      return response.json();
+    },
+  });
+  return (
+    <>
+      <div className="max-w-7xl mx-auto px-4 pt-6">
+        <label htmlFor="action-board-company">Company</label>
+        <select id="action-board-company" className="ml-3 rounded border p-2" value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
+          <option value="">Select a company</option>
+          {(companies ?? []).map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+        </select>
+        {isLoading && <p>Loading companies…</p>}
+        {error && <p role="alert">Unable to load companies.</p>}
+        {!companyId && <p>Select a company before opening Action Board.</p>}
+      </div>
+      {companyId && <ActionBoardContent key={companyId} companyId={Number(companyId)} />}
+    </>
+  );
+}
+
+function ActionBoardContent({ companyId }: { companyId?: number }) {
   const now = new Date();
   const [selection, setSelection] = useState(`${now.getFullYear()}-${now.getMonth() + 1}`);
   const [year, month] = selection.split("-").map(Number);
+  const url = `/api/action-board?year=${year}&month=${month}${companyId ? `&companyId=${companyId}` : ""}`;
   const { data, isLoading, error } = useQuery<BoardResponse>({
-    queryKey: [`/api/action-board?year=${year}&month=${month}`],
+    queryKey: [url],
     queryFn: async () => {
-      const response = await fetch(`/api/action-board?year=${year}&month=${month}`, { credentials: "include" });
+      const response = await fetch(url, { credentials: "include" });
       if (!response.ok) throw new Error("Unable to load Action Board");
       return response.json();
     },
@@ -145,7 +186,7 @@ export default function ActionBoardPage() {
           <div className="flex items-center gap-2"><Calendar className="w-4 h-4" /><select value={selection} onChange={(event) => setSelection(event.target.value)} className="rounded-md bg-white/15 border border-white/30 px-3 py-2 text-sm" data-testid="action-board-month-selector">{options.map((option) => <option className="text-slate-900" key={option.value} value={option.value}>{option.label}</option>)}</select></div>
         </div>
       </section>
-      <FinancialPulseWidget variant="action-board" year={year} month={month} />
+      <FinancialPulseWidget variant="action-board" year={year} month={month} companyId={companyId} />
       {isLoading && <Skeleton className="h-48 w-full" />}
       {error && <p className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700" data-testid="action-board-error">Action Board is temporarily unavailable.</p>}
       {data && <p className="text-sm text-slate-500" data-testid="action-board-excluded">{data.excludedWithoutBudgetGoal} customers excluded — no budget goal set.</p>}

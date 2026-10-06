@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CAN_VIEW_BUDGETS, hasCapability } from "@workspace/shared";
+import { CAN_VIEW_ACTION_BOARD, CAN_VIEW_BUDGETS, hasCapability } from "@workspace/shared";
 
 import {
   billingManagerNav,
@@ -79,26 +79,53 @@ describe("Budget Status route and navigation parity", () => {
 
 describe("Action Board route and navigation parity", () => {
   it.each([
-    ["billing_manager", billingManagerNav],
     ["irrigation_manager", managerNav],
   ] as const)("%s has route and nav leaf", (role, nav) => {
+    expect(hasCapability(role, CAN_VIEW_ACTION_BOARD)).toBe(true);
     expect(roleBlock(role)).toContain('<Route path="/action-board"');
     expect(hasActionBoardLeaf(nav)).toBe(true);
   });
 
   it("company_admin has route and nav leaf", () => {
+    expect(hasCapability("company_admin", CAN_VIEW_ACTION_BOARD)).toBe(true);
     expect(companyAdminSource).toContain('<Route path="/action-board"');
     expect(hasActionBoardLeaf(companyAdminNav)).toBe(true);
   });
 
   it("super_admin has the route but deliberate route-without-leaf asymmetry", () => {
+    expect(hasCapability("super_admin", CAN_VIEW_ACTION_BOARD)).toBe(true);
     expect(roleBlock("super_admin")).toContain('<Route path="/action-board"');
     expect(hasActionBoardLeaf(superAdminNav)).toBe(false);
   });
 
   it("bookkeeper and field_tech cannot reach Action Board", () => {
+    expect(hasCapability("bookkeeper", CAN_VIEW_ACTION_BOARD)).toBe(false);
+    expect(hasCapability("field_tech", CAN_VIEW_ACTION_BOARD)).toBe(false);
     expect(roleBlock("bookkeeper")).not.toContain('<Route path="/action-board"');
     expect(hasActionBoardLeaf(bookkeeperNav)).toBe(false);
     expect(roleBlock("field_tech")).not.toContain('<Route path="/action-board"');
+  });
+
+  it("billing managers keep budget and financial access but cannot reach Action Board", () => {
+    expect(hasCapability("billing_manager", CAN_VIEW_ACTION_BOARD)).toBe(false);
+    expect(hasCapability("billing_manager", CAN_VIEW_BUDGETS)).toBe(true);
+    expect(roleBlock("billing_manager")).not.toContain('<Route path="/action-board"');
+    expect(roleBlock("billing_manager")).toContain('<Route path="/financial-pulse"');
+    expect(hasActionBoardLeaf(billingManagerNav)).toBe(false);
+  });
+
+  it.each([undefined, null, "unknown"])("fails closed for role %s", (role) => {
+    expect(hasCapability(role, CAN_VIEW_ACTION_BOARD)).toBe(false);
+  });
+});
+
+describe("Bookkeeper location audit direct routes", () => {
+  it("keeps the audit report and exact-record read-only projections, not ticket editors", () => {
+    const routes = roleBlock("bookkeeper");
+    expect(routes).toContain('<Route path="/reports/missing-location-data" component={MissingLocationDataReportPage}');
+    expect(routes).toMatch(/<Route path="\/work-orders">\s*\{\(\) => <MissingLocationTicketDetail ticketType="work_order" \/>\}/);
+    expect(routes).toMatch(/<Route path="\/billing-sheets">\s*\{\(\) => <MissingLocationTicketDetail ticketType="billing_sheet" \/>\}/);
+    expect(routes).not.toContain('component={WorkOrders}');
+    expect(routes).not.toContain('component={BillingSheets}');
   });
 });

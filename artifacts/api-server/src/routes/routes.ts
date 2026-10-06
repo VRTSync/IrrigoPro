@@ -437,6 +437,7 @@ import { registerInspectionZoneBackfillRoutes } from "./admin-inspection-zone-ba
 import { registerCleanupInvoice71256Routes } from "./cleanup-invoice-71256";
 import { registerWetCheckReconciliationRoutes } from "./wet-check-reconciliation-routes";
 import { registerIrrigationProfileRoutes } from "./irrigation-profile-routes";
+import { makePropertyControllerPatch } from "./property-controller-patch";
 import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
 import { buildWetCheckGrid } from "../wet-check-grid";
 import { scrubEvent, setScrubCustomerNames } from "../lib/scrubEvent";
@@ -16417,59 +16418,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // PATCH /api/properties/:customerId/controllers — body identifies the
   // controller by letter, matching the spec's "get + patch at the same
   // collection path" contract.
-  const propertyControllerPatchBody = z.object({
-    controllerLetter: z.string().length(1).transform(s => s.toUpperCase())
-      .refine(s => s >= "A" && s <= "Z", "controllerLetter must be A-Z"),
-    zoneCount: z.coerce.number().int().min(1).max(100).optional(),
-    notes: z.string().nullish(),
-  });
-  app.patch("/api/properties/:customerId/controllers", requireAuthentication, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
-    const customerId = parseInt(req.params.customerId);
-    const parsed = propertyControllerPatchBody.safeParse(req.body ?? {});
-    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
-    const { controllerLetter, zoneCount, notes } = parsed.data;
-    try {
-      // Verify the customer belongs to the caller's company before any write.
-      // The update path is already company-scoped, but the upsert fallback
-      // would otherwise allow cross-tenant writes via a foreign customerId.
-      const owner = await storage.getCustomer(customerId);
-      if (!owner || owner.companyId !== cid) {
-        res.status(404).json({ message: "Not found" });
-        return;
-      }
-      // Task #1857: property_controllers is dropped; look up the irrigation_controller by letter.
-      const branchParam = typeof req.query.branch === "string" ? req.query.branch.trim() : "";
-      const ctrls = await storage.listIrrigationControllers(cid, customerId, branchParam);
-      const ctrl = ctrls.find(c => c.letter === controllerLetter);
-      if (!ctrl) { res.status(404).json({ message: "Controller not found" }); return; }
-      const patch: Record<string, unknown> = { lastUpdatedAt: new Date() };
-      if (zoneCount !== undefined) patch.totalZones = zoneCount;
-      if (notes !== undefined) patch.notes = notes;
-      const [updated] = await db.update(irrigationControllers)
-        .set(patch)
-        .where(eq(irrigationControllers.id, ctrl.id))
-        .returning();
-      if (!updated) { res.status(404).json({ message: "Not found" }); return; }
-      res.json({
-        id: updated.id,
-        companyId: updated.companyId,
-        customerId: updated.customerId,
-        branchName: branchParam || null,
-        controllerLetter: updated.letter,
-        zoneCount: updated.totalZones,
-        notes: updated.notes ?? null,
-      });
-    } catch (e: any) {
-      const { status, message } = classifyAndLog(req, e, {
-        op: "patchPropertyController",
-        ctx: { cid, customerId, controllerLetter },
-        fallbackMessage: "Couldn't save controller — please retry",
-      });
-      res.status(status).json({ message });
-    }
-  });
+  app.patch("/api/properties/:customerId/controllers", requireAuthentication,
+    makePropertyControllerPatch({ requireCompanyId, isFieldRole, classifyAndLog: _classifyAndLog }));
 
   // ─── Needs Review queue (Spec B cross-spec interface) ───────────────────────
   //

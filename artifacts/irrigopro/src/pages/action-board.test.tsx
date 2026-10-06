@@ -4,6 +4,11 @@ import { generateActionBoardPlan } from "@workspace/shared";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ActionBoardPage from "./action-board";
 
+const auth = vi.hoisted(() => ({ role: "irrigation_manager" as string | undefined }));
+vi.mock("@/lib/auth-context", () => ({
+  useAuth: () => ({ user: auth.role ? { role: auth.role } : null }),
+}));
+
 const base = {
   year: 2026,
   month: 9,
@@ -40,16 +45,59 @@ const base = {
 };
 
 function renderPage(response = base) {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-    ok: true,
-    json: async () => response,
-  }));
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({
+    ok: !(auth.role === "super_admin" && url.startsWith("/api/action-board") && !new URL(url, "http://localhost").searchParams.has("companyId")),
+    json: async () => url === "/api/companies" ? [{ id: 10, name: "Company A" }, { id: 20, name: "Company B" }] : response,
+  })));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return { ...render(<QueryClientProvider client={client}><ActionBoardPage /></QueryClientProvider>), client };
 }
 
 describe("Action Board page", () => {
-  beforeEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  beforeEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); auth.role = "irrigation_manager"; window.history.replaceState({}, "", "/action-board"); });
+
+  it.each(["billing_manager", "bookkeeper", "field_tech", "unknown", undefined])(
+    "denies direct page access for %s without issuing any requests",
+    (role) => {
+      auth.role = role;
+      renderPage();
+      expect(screen.getByRole("alert")).toHaveTextContent("You do not have access to Action Board.");
+      expect(screen.queryByTestId("action-board-page")).not.toBeInTheDocument();
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["irrigation_manager", "company_admin", "super_admin"])(
+    "allows direct page access for %s",
+    async (role) => {
+      auth.role = role;
+      if (role === "super_admin") window.history.replaceState({}, "", "/action-board?companyId=10");
+      renderPage();
+      await waitFor(() => expect(screen.getByTestId("action-board-excluded")).toBeInTheDocument());
+      expect(screen.getByTestId("action-board-page")).toBeInTheDocument();
+      const boardCalls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).startsWith("/api/action-board"));
+      expect(boardCalls.length).toBeGreaterThan(0);
+      for (const [url] of boardCalls) {
+        const params = new URL(String(url), "http://localhost").searchParams;
+        expect(params.get("companyId")).toBe(role === "super_admin" ? "10" : null);
+      }
+    },
+  );
+
+  it("waits for super-admin company selection and scopes board and tiles after switching companies", async () => {
+    auth.role = "super_admin";
+    renderPage();
+    await screen.findByRole("option", { name: "Company A" });
+    expect(screen.getByText("Select a company before opening Action Board.")).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).startsWith("/api/action-board"))).toBe(false);
+    fireEvent.change(screen.getByLabelText("Company"), { target: { value: "10" } });
+    await screen.findByTestId("action-board-excluded");
+    fireEvent.change(screen.getByLabelText("Company"), { target: { value: "20" } });
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("companyId=20"))).toBe(true));
+    const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).startsWith("/api/action-board"));
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect(calls.every(([url]) => ["10", "20"].includes(new URL(String(url), "http://localhost").searchParams.get("companyId") ?? ""))).toBe(true);
+  });
 
   it("renders normalized decimal totals, null estimates, every lane, approvals, and no edit/findings UI", async () => {
     renderPage();

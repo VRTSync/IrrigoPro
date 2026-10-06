@@ -50,6 +50,7 @@ interface ActionBoardProps extends BaseProps {
   variant: "action-board";
   year?: number;
   month?: number;
+  companyId?: number;
 }
 export type FinancialPulseWidgetProps =
   | AdminDashboardProps
@@ -589,11 +590,11 @@ function TopCustomersCompactVariant({ limit = 5 }: { limit?: number }) {
   );
 }
 
-function ActionBoardVariant({ year, month, className }: { year?: number; month?: number; className?: string }) {
+function ActionBoardVariant({ year, month, companyId, className }: { year?: number; month?: number; companyId?: number; className?: string }) {
   const now = new Date();
   const selectedYear = year ?? now.getFullYear();
   const selectedMonth = month ?? now.getMonth() + 1;
-  const url = `/api/action-board?year=${selectedYear}&month=${selectedMonth}`;
+  const url = `/api/action-board?year=${selectedYear}&month=${selectedMonth}${companyId ? `&companyId=${companyId}` : ""}`;
   const { data, isLoading, error } = useFinancialPulseData<ActionBoardResponse>("action-board", url);
   const rollup = data?.rollup;
   const billed = rollup?.billedThisMonth ?? rollup?.totalInvoiced ?? null;
@@ -636,6 +637,6 @@ export function FinancialPulseWidget(props: FinancialPulseWidgetProps) {
     case "top-customers-compact":
       return <TopCustomersCompactVariant limit={props.limit} />;
     case "action-board":
-      return <ActionBoardVariant year={props.year} month={props.month} className={props.className} />;
+      return <ActionBoardVariant year={props.year} month={props.month} companyId={props.companyId} className={props.className} />;
   }
 }

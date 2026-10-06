@@ -90,7 +90,7 @@ describe("Action Board lane boundaries", () => {
 });
 
 describe("Action Board endpoint authorization and tenant boundary", () => {
-  it("denies field tech and bookkeeper and requires super-admin company scope", async () => {
+  it("denies billing managers, field techs, bookkeepers and unknown roles and requires super-admin company scope", async () => {
     const app = express();
     let role = "field_tech";
     const auth = (req: any, _res: any, next: any) => {
@@ -108,6 +108,11 @@ describe("Action Board endpoint authorization and tenant boundary", () => {
       role = "bookkeeper";
       response = await fetch(`http://127.0.0.1:${port}/api/action-board`);
       assert.equal(response.status, 403);
+      for (role of ["billing_manager", "unknown", ""]) {
+        response = await fetch(`http://127.0.0.1:${port}/api/action-board?companyId=10`);
+        assert.equal(response.status, 403);
+        assert.deepEqual(await response.json(), { message: "Forbidden" });
+      }
       role = "super_admin";
       response = await fetch(`http://127.0.0.1:${port}/api/action-board`);
       assert.equal(response.status, 400);
@@ -133,8 +138,9 @@ describe("Action Board endpoint authorization and tenant boundary", () => {
       { id: 2, companyId: 2, customerId: 2, status: "in_progress", startedAt: "2026-09-01" },
     ]);
     const app = express();
+    let role = "irrigation_manager";
     const auth = (req: any, _res: any, next: any) => {
-      req.authenticatedUserRole = "irrigation_manager";
+      req.authenticatedUserRole = role;
       req.authenticatedUserCompanyId = 1;
       next();
     };
@@ -142,11 +148,13 @@ describe("Action Board endpoint authorization and tenant boundary", () => {
     const server = app.listen(0);
     try {
       const port = (server.address() as any).port;
-      const response = await fetch(`http://127.0.0.1:${port}/api/action-board?companyId=2`);
-      assert.equal(response.status, 200);
-      const body: any = await response.json();
-      assert.deepEqual(body.rows.map((r: any) => r.customerId), [1]);
-      assert.equal(body.excludedWithoutBudgetGoal, 0);
+      for (role of ["irrigation_manager", "company_admin"]) {
+        const response = await fetch(`http://127.0.0.1:${port}/api/action-board?companyId=2`);
+        assert.equal(response.status, 200);
+        const body: any = await response.json();
+        assert.deepEqual(body.rows.map((r: any) => r.customerId), [1]);
+        assert.equal(body.excludedWithoutBudgetGoal, 0);
+      }
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       _resetManagerWorkspaceOverridesForTests();

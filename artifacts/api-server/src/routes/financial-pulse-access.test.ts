@@ -118,7 +118,7 @@ const CSV_REQUESTS = [
   {
     path: "/api/financial-pulse/by-service-type",
     init: { headers: { Accept: "text/csv" } },
-    header: "Key,Label,",
+    header: "Key,Group,Label,Revenue,% of Total,# Invoices,Avg Ticket",
   },
 ] as const;
 
@@ -135,7 +135,18 @@ describe("Financial Pulse access — irrigation managers", () => {
       const response = await request("irrigation_manager", csv.path, 10, csv.init);
       assert.equal(response.status, 200);
       assert.match(response.headers.get("content-type") ?? "", /text\/csv/);
-      assert.match(await response.text(), new RegExp(`^${csv.header}`));
+      const text = await response.text();
+      assert.match(text, new RegExp(`^${csv.header}`));
+      if (csv.path === "/api/financial-pulse/by-service-type") {
+        assert.equal(text, [
+          csv.header,
+          "emergency,urgency,Emergency,0.00,,0,",
+          "standard,urgency,Standard,0.00,,0,",
+          "contract,agreement,Contract,0.00,,0,",
+          "adhoc,agreement,Ad-hoc,0.00,,0,",
+          "",
+        ].join("\n"), "export preserves the seven-column header, groups, numeric formatting and trailing newline");
+      }
     });
   }
 });

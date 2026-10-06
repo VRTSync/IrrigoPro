@@ -24,6 +24,7 @@ export type MigrationStepResult = {
 };
 
 export type MigrationPreview = {
+  requiresAcknowledgement?: boolean;
   steps: MigrationStep[];
   orphanRows: Record<string, number>;
   warnings: string[];

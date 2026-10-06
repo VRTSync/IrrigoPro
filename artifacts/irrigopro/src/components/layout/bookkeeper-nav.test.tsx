@@ -134,8 +134,8 @@ describe("bookkeeperNav — desktop sidebar", () => {
     expect(bookkeeperNav.items.length).toBeGreaterThan(0);
   });
 
-  it("contains exactly Invoices, Customers, and QuickBooks", () => {
-    expect(allPaths(bookkeeperNav).sort()).toEqual(["/customers", "/invoices", "/quickbooks"]);
+  it("contains exactly Invoices, Customers, QuickBooks, and the location audit report", () => {
+    expect(allPaths(bookkeeperNav).sort()).toEqual(["/customers", "/invoices", "/quickbooks", "/reports/missing-location-data"]);
   });
 
   it("omits everything the role is not scoped for", () => {
@@ -160,7 +160,7 @@ describe("bookkeeperNav — desktop sidebar", () => {
     expect(allPaths(bookkeeperNav).length).toBeLessThan(allPaths(billingManagerNav).length);
   });
 
-  it("renders inside DesktopShell with its three entries visible", () => {
+  it("renders inside DesktopShell with its billing and audit entries visible", () => {
     render(
       <QueryClientProvider client={makeQueryClient()}>
         <DesktopShell navConfig={bookkeeperNav}>
@@ -174,6 +174,7 @@ describe("bookkeeperNav — desktop sidebar", () => {
     expect(screen.getAllByText("Invoices").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Customers").length).toBeGreaterThan(0);
     expect(screen.getAllByText("QuickBooks").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Missing Location Data").length).toBeGreaterThan(0);
   });
 
   it("does not render out-of-scope entries in the shell", () => {

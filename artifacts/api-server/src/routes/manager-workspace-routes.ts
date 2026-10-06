@@ -18,7 +18,7 @@ import {
 import { db } from "../db";
 import { storage } from "../storage";
 import { computeCustomerSpend } from "../budget-spend";
-import { CAN_VIEW_BUDGETS, hasCapability } from "@workspace/shared";
+import { CAN_VIEW_ACTION_BOARD, hasCapability } from "@workspace/shared";
 import { buildBudgetStatusRow, loadBudgetAllocations } from "./budget-routes";
 // Task #2027 — the shared QuickBooks verdict. The strip renders more of it
 // than the other two surfaces do; it does not decide any of it.
@@ -1031,7 +1031,7 @@ export function registerManagerWorkspaceRoutes(
     async (req: any, res: any) => {
       try {
         const role = req.authenticatedUserRole as string | undefined;
-        if (!hasCapability(role, CAN_VIEW_BUDGETS)) {
+        if (!hasCapability(role, CAN_VIEW_ACTION_BOARD)) {
           res.status(403).json({ message: "Forbidden" });
           return;
         }

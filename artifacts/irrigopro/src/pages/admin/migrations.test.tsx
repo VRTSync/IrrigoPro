@@ -78,6 +78,32 @@ describe("PreviewModal — clean preview (candidates only, skipped=0, failed=0, 
 
 // ── Case (b): problematic preview — orphans or warnings require acknowledgement ──
 
+describe("PreviewModal — migration-specific retirement acknowledgement", () => {
+  beforeEach(() => vi.clearAllMocks());
+  it("zone creation counts alone do not require acknowledgement", async () => {
+    setupPreview({
+      steps: [{ id: "create", description: "Create zones 1-38" }],
+      orphanRows: { controllers: 1, zonesToCreate: 38, zonesToRetire: 0 },
+      warnings: [], requiresAcknowledgement: false,
+    });
+    await renderModal("backfill-controller-zone-records-v1");
+    expect(await screen.findByRole("button", { name: /Run Migration/i })).not.toBeDisabled();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+  it("zone retirement requires acknowledgement", async () => {
+    setupPreview({
+      steps: [{ id: "retire", description: "Retire zones 31-38" }],
+      orphanRows: { controllers: 1, zonesToRetire: 8 },
+      warnings: ["8 zones will be retired; data is kept"], requiresAcknowledgement: true,
+    });
+    await renderModal("backfill-controller-zone-records-v1");
+    const run = await screen.findByRole("button", { name: /Run Migration/i });
+    expect(run).toBeDisabled();
+    await userEvent.click(screen.getByRole("checkbox"));
+    await waitFor(() => expect(run).not.toBeDisabled());
+  });
+});
+
 describe("PreviewModal — skipped > 0 → checkbox shown, Run disabled until checked", () => {
   beforeEach(() => {
     vi.clearAllMocks();

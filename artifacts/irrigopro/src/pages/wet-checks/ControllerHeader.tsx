@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, parseApiError } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { WetCheckZoneRecord } from "@workspace/db/schema";
@@ -32,8 +32,11 @@ export function ControllerHeader({
     onSuccess: () => {
       toast({ title: "Saved" });
       queryClient.invalidateQueries({ queryKey: ["/api/properties", customerId, "controllers"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/customers/${customerId}/controllers-profile`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/irrigation-controllers/${controller!.id}`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/irrigation-controllers/${controller!.id}/history`] });
     },
-    onError: (e: any) => toast({ title: "Failed", description: e?.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Failed", description: parseApiError(e, "Could not update zone count"), variant: "destructive" }),
   });
 
   if (!controller) return null;
@@ -81,8 +84,8 @@ export function ControllerHeader({
               size="sm"
               disabled={readOnly || updateMut.isPending}
               onClick={() => {
-                const n = parseInt(zc);
-                if (!Number.isFinite(n) || n < 1 || n > 100) return;
+                const n = Number(zc);
+                if (!Number.isInteger(n) || n < 1 || n > 100) return;
                 updateMut.mutate(n);
               }}
               data-testid="btn-save-zone-count"

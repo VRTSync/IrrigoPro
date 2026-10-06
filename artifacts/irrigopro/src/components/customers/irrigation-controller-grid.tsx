@@ -66,7 +66,7 @@ import {
   type ProgramSchedule,
 } from "@workspace/shared";
 import { uploadPhotoToStorage } from "@/pages/wet-checks/helpers";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, parseApiError } from "@/lib/queryClient";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -793,23 +793,18 @@ function ZoneRow({
   programs,
   controllerId,
   onSaved,
-  onDeleted,
   onDraftChange,
   canEditZone,
-  canDeleteZone,
 }: {
   zone: IrrigationProfileZone;
   programs: IrrigationProgram[];
   controllerId: number;
   onSaved: () => void;
-  onDeleted: () => void;
   onDraftChange?: (draft: IrrigationProfileZone) => void;
   canEditZone: boolean;
-  canDeleteZone: boolean;
 }) {
   const { toast } = useToast();
   const [editing, setEditing] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [draft, setDraft] = useState({ ...zone });
   const queryClient = useQueryClient();
 
@@ -832,24 +827,6 @@ function ZoneRow({
     onError: (err: any) => {
       toast({
         title: "Save failed",
-        description: err?.message ?? "Try again",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: () => apiRequest(`/api/irrigation-zones/${zone.id}`, "DELETE"),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [`/api/irrigation-controllers/${controllerId}`],
-      });
-      toast({ title: "Zone deleted" });
-      onDeleted();
-    },
-    onError: (err: any) => {
-      toast({
-        title: "Delete failed",
         description: err?.message ?? "Try again",
         variant: "destructive",
       });
@@ -913,15 +890,6 @@ function ZoneRow({
     <tr className="bg-blue-50/40">
       <td colSpan={9} className="p-3 border border-blue-300">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-3">
-          <div>
-            <Label className="text-xs">Zone #</Label>
-            <Input
-              type="number"
-              value={draft.zoneNumber}
-              onChange={(e) => setDraft({ ...draft, zoneNumber: parseInt(e.target.value) || 0 })}
-              className="h-8 text-sm mt-1"
-            />
-          </div>
           <div>
             <Label className="text-xs">Name</Label>
             <Input
@@ -1038,7 +1006,6 @@ function ZoneRow({
             disabled={saveMutation.isPending}
             onClick={() =>
               saveMutation.mutate({
-                zoneNumber: draft.zoneNumber,
                 name: draft.name,
                 programId: draft.programId,
                 zoneType: draft.zoneType,
@@ -1062,37 +1029,7 @@ function ZoneRow({
           <Button size="sm" variant="ghost" onClick={() => setEditing(false)} className="gap-1.5">
             <X className="w-3.5 h-3.5" /> Cancel
           </Button>
-          {canDeleteZone && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="ml-auto text-red-600 hover:text-red-700 hover:bg-red-50 gap-1.5"
-              onClick={() => setConfirmDelete(true)}
-            >
-              <Trash2 className="w-3.5 h-3.5" /> Delete
-            </Button>
-          )}
         </div>
-        <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete Zone {zone.zoneNumber}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This removes Zone {zone.zoneNumber} — "{zone.name}" from this controller. This
-                cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                className="bg-red-600 hover:bg-red-700"
-                onClick={() => deleteMutation.mutate()}
-              >
-                Delete
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
       </td>
     </tr>
   );
@@ -1101,174 +1038,51 @@ function ZoneRow({
 // ── Add zone row ──────────────────────────────────────────────────────────────
 
 function AddZoneRow({
-  controllerId,
-  programs,
-  nextZoneNumber,
+  controller,
   onAdded,
 }: {
-  controllerId: number;
-  programs: IrrigationProgram[];
-  nextZoneNumber: number;
+  controller: IrrigationController;
   onAdded: () => void;
 }) {
   const { toast } = useToast();
-  const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState({
-    zoneNumber: nextZoneNumber,
-    name: "",
-    programId: null as number | null,
-    zoneType: "other",
-    runTimeMinutes: 10,
-    zoneOrder: nextZoneNumber,
-    isActive: true,
-    notes: null as string | null,
-  });
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
-    mutationFn: (data: typeof draft) =>
-      apiRequest(`/api/irrigation-controllers/${controllerId}/zones`, "POST", data),
+    mutationFn: () =>
+      apiRequest(`/api/irrigation-controllers/${controller.id}/zone-count`, "PUT", { totalZones: (controller.totalZones ?? 0) + 1 }),
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: [`/api/irrigation-controllers/${controllerId}`],
+        queryKey: [`/api/irrigation-controllers/${controller.id}`],
       });
-      setAdding(false);
+      queryClient.invalidateQueries({ queryKey: [`/api/customers/${controller.customerId}/controllers-profile`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/properties", controller.customerId, "controllers"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/irrigation-controllers/${controller.id}/history`] });
       toast({ title: "Zone added" });
       onAdded();
     },
     onError: (err: any) => {
       toast({
         title: "Failed to add zone",
-        description: err?.message ?? "Try again",
+        description: parseApiError(err, "Try again"),
         variant: "destructive",
       });
     },
   });
 
-  if (!adding) {
-    return (
+  return (
       <tr>
         <td colSpan={9} className="px-2 py-2 border border-gray-200 border-t-0">
           <Button
             variant="ghost"
             size="sm"
             className="text-blue-600 gap-1.5"
-            onClick={() => {
-              setDraft({ ...draft, zoneNumber: nextZoneNumber, zoneOrder: nextZoneNumber });
-              setAdding(true);
-            }}
+            disabled={mutation.isPending || (controller.totalZones ?? 0) >= MAX_ZONES}
+            onClick={() => mutation.mutate()}
           >
             <Plus className="w-4 h-4" /> Add Zone
           </Button>
         </td>
       </tr>
-    );
-  }
-
-  return (
-    <tr className="bg-green-50/40">
-      <td colSpan={9} className="p-3 border border-green-300">
-        <p className="text-sm font-medium text-green-700 mb-2">New Zone</p>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-3">
-          <div>
-            <Label className="text-xs">Zone #</Label>
-            <Input
-              type="number"
-              value={draft.zoneNumber}
-              onChange={(e) => setDraft({ ...draft, zoneNumber: parseInt(e.target.value) || 0 })}
-              className="h-8 text-sm mt-1"
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Name *</Label>
-            <Input
-              value={draft.name}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              className="h-8 text-sm mt-1"
-              placeholder="e.g. Front lawn"
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Program</Label>
-            <Select
-              value={draft.programId != null ? String(draft.programId) : "none"}
-              onValueChange={(v) =>
-                setDraft({ ...draft, programId: v === "none" ? null : parseInt(v) })
-              }
-            >
-              <SelectTrigger className="h-8 text-sm mt-1">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">— None —</SelectItem>
-                {programs.map((p) => (
-                  <SelectItem key={p.id} value={String(p.id)}>
-                    Program {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs">Zone Type</Label>
-            <Select
-              value={draft.zoneType}
-              onValueChange={(v) => setDraft({ ...draft, zoneType: v })}
-            >
-              <SelectTrigger className="h-8 text-sm mt-1">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ZONE_TYPES.map((zt) => (
-                  <SelectItem key={zt.value} value={zt.value}>
-                    {zt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs">Run Time (min)</Label>
-            <Input
-              type="number"
-              min={0}
-              value={draft.runTimeMinutes}
-              onChange={(e) =>
-                setDraft({ ...draft, runTimeMinutes: parseInt(e.target.value) || 0 })
-              }
-              className="h-8 text-sm mt-1"
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Zone Order</Label>
-            <Input
-              type="number"
-              value={draft.zoneOrder}
-              onChange={(e) => setDraft({ ...draft, zoneOrder: parseInt(e.target.value) || 0 })}
-              className="h-8 text-sm mt-1"
-            />
-          </div>
-        </div>
-        <div className="flex items-center gap-2 border-t pt-2">
-          <Button
-            size="sm"
-            disabled={mutation.isPending || !draft.name}
-            onClick={() => mutation.mutate(draft)}
-            className="gap-1.5"
-          >
-            {mutation.isPending ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Plus className="w-3.5 h-3.5" />
-            )}
-            Add Zone
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setAdding(false)} className="gap-1.5">
-            <X className="w-3.5 h-3.5" /> Cancel
-          </Button>
-        </div>
-      </td>
-    </tr>
   );
 }
 
@@ -1305,6 +1119,7 @@ function ControllerGridTile({
   const { data: detail, isLoading: detailLoading } = useQuery<ControllerWithDetail>({
     queryKey: [`/api/irrigation-controllers/${controller.id}`],
     enabled: isExpanded,
+    staleTime: 30_000,
   });
 
   useEffect(() => {
@@ -1329,7 +1144,7 @@ function ControllerGridTile({
 
   const updateZoneCount = useMutation({
     mutationFn: async (next: number) =>
-      apiRequest(`/api/irrigation-controllers/${controller.id}`, "PUT", { totalZones: next }),
+      apiRequest(`/api/irrigation-controllers/${controller.id}/zone-count`, "PUT", { totalZones: next }),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: [`/api/customers/${customerId}/controllers-profile`],
@@ -1338,12 +1153,14 @@ function ControllerGridTile({
         queryKey: [`/api/irrigation-controllers/${controller.id}`],
       });
       toast({ title: "Zone count updated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/properties", customerId, "controllers"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/irrigation-controllers/${controller.id}/history`] });
       onRefreshList();
     },
     onError: (err: any) => {
       toast({
         title: "Could not update zone count",
-        description: err?.message ?? "Try again in a moment.",
+        description: parseApiError(err, "Try again in a moment."),
         variant: "destructive",
       });
     },
@@ -1360,13 +1177,15 @@ function ControllerGridTile({
         queryKey: [`/api/customers/${customerId}/controllers-profile`],
       });
       setEditingDetails(false);
+      queryClient.invalidateQueries({ queryKey: [`/api/irrigation-controllers/${controller.id}/history`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/properties", customerId, "controllers"] });
       toast({ title: "Controller saved" });
       onRefreshList();
     },
     onError: (err: any) => {
       toast({
         title: "Save failed",
-        description: err?.message ?? "Try again",
+        description: parseApiError(err, "Try again"),
         variant: "destructive",
       });
     },
@@ -1416,7 +1235,6 @@ function ControllerGridTile({
 
   const programs = detail?.programs ?? [];
   const zones = detail?.zones ?? [];
-  const nextZoneNumber = zones.length > 0 ? Math.max(...zones.map((z) => z.zoneNumber)) + 1 : 1;
 
   const suggestNextProgramName = () => {
     const existing = new Set(programs.map((p) => p.name.toUpperCase()));
@@ -1627,12 +1445,13 @@ function ControllerGridTile({
                         <Label className="text-xs">Total Zones</Label>
                         <Input
                           type="number"
-                          min={0}
+                          min={1}
+                          max={100}
                           value={draft.totalZones ?? ""}
                           onChange={(e) =>
                             setDraft({
                               ...draft,
-                              totalZones: e.target.value ? parseInt(e.target.value) : null,
+                              totalZones: e.target.value ? Number(e.target.value) : (controller.totalZones ?? null),
                             })
                           }
                           className="h-8 text-sm mt-1"
@@ -1827,18 +1646,14 @@ function ControllerGridTile({
                             programs={programs}
                             controllerId={controller.id}
                             onSaved={() => {}}
-                            onDeleted={() => {}}
                             onDraftChange={handleZoneDraftChange}
                             canEditZone={canEditZones}
-                            canDeleteZone={canManageControllers}
                           />
                         ))}
                         {canEditZones && (
                           <AddZoneRow
-                            controllerId={controller.id}
-                            programs={programs}
-                            nextZoneNumber={nextZoneNumber}
-                            onAdded={() => {}}
+                            controller={controller}
+                            onAdded={onRefreshList}
                           />
                         )}
                       </tbody>

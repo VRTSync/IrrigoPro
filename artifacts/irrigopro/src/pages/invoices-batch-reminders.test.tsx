@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
+import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
@@ -240,6 +240,22 @@ const listRequestCount = () => requestedUrls.filter(isListRequest).length;
 const sendRequests = () => requestedUrls.filter((u) => u.includes("/reminders/batch"));
 const previewRequests = () => requestedUrls.filter((u) => u.includes("/reminders/preview"));
 
+function invoiceResponse(rows: Row[], total = rows.length) {
+  return new Response(JSON.stringify(rows), {
+    headers: { "Content-Type": "application/json", "X-Total-Count": String(total) },
+  });
+}
+
+function deferredResponse() {
+  let resolve!: (response: Response) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<Response>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 async function waitForRows() {
   await waitFor(() => expect(screen.getAllByTestId("checkbox-select-invoice-1").length).toBeGreaterThan(0));
 }
@@ -295,6 +311,139 @@ describe("A/R list selection", () => {
     nav.navigate("/invoices?aging=days90");
 
     await waitFor(() => expect(screen.queryByTestId("text-selection-count")).toBeNull());
+  });
+
+  it("clears two selected invoices and their open confirmation before placeholder rows disappear", async () => {
+    rowsForResponse = [overdueInvoice(), overdueInvoice({ id: 2, invoiceNumber: "INV-1002" })];
+    const held = deferredResponse();
+    const realFetch = globalThis.fetch;
+    const filteredFetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (isListRequest(url) && url.includes("search=Bright")) return held.promise;
+      return realFetch(input, init);
+    });
+    vi.stubGlobal("fetch", filteredFetch);
+    const { nav } = renderInvoices();
+    await openConfirmation(1, 2);
+    await screen.findByTestId("batch-reminder-send-row-1");
+
+    act(() => nav.navigate("/invoices?search=Bright"));
+    expect(screen.queryByTestId("text-selection-count")).toBeNull();
+    expect(screen.queryByTestId("batch-reminder-dialog")).toBeNull();
+    expect(screen.getByTestId("invoice-list-rows").getAttribute("aria-busy")).toBe("true");
+    for (const id of [1, 2]) {
+      for (const checkbox of screen.getAllByTestId(`checkbox-select-invoice-${id}`)) {
+        expect(checkbox).toHaveProperty("disabled", true);
+        fireEvent.click(checkbox);
+      }
+    }
+    expect(firstByTestId("checkbox-select-all-invoices")).toHaveProperty("disabled", true);
+    fireEvent.click(firstByTestId("checkbox-select-all-invoices"));
+    expect(screen.queryByTestId("text-selection-count")).toBeNull();
+    expect(sendRequests()).toEqual([]);
+    expect(previewRequests()).toHaveLength(1);
+
+    // Only invoice 2 belongs to the new result. Both dry run and send must
+    // carry just that newly selected ID, never the old two-invoice selection.
+    previewResponse = {
+      ...previewResponse,
+      willSend: [{ ...SEND_ROW, invoiceId: 2, invoiceNumber: "INV-1002" }],
+      willSkip: [],
+      counts: { selected: 1, willSend: 1, willSkip: 0, notFound: 0 },
+    };
+    await act(async () => held.resolve(invoiceResponse([rowsForResponse[1]])));
+    await waitFor(() => expect(screen.queryByTestId("checkbox-select-invoice-1")).toBeNull());
+    await selectRows(2);
+    fireEvent.click(screen.getByTestId("button-batch-remind"));
+    await screen.findByTestId("batch-reminder-send-row-2");
+    expect(postedBodies.preview.at(-1).invoiceIds).toEqual([2]);
+    fireEvent.click(screen.getByTestId("batch-reminder-confirm"));
+    await screen.findByTestId("batch-reminder-results");
+    expect(postedBodies.batch.at(-1).invoiceIds).toEqual([2]);
+  });
+
+  it.each(["success", "failure"])("discards an old select-all %s after the filter changes", async (outcome) => {
+    const held = deferredResponse();
+    const realFetch = globalThis.fetch;
+    let selectAllStarted = false;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (isListRequest(url)) {
+        if (url.includes("limit=500")) {
+          selectAllStarted = true;
+          return held.promise;
+        }
+        return Promise.resolve(invoiceResponse(rowsForResponse, 100));
+      }
+      return realFetch(input, init);
+    }));
+    const { nav } = renderInvoices();
+    await waitForRows();
+    fireEvent.click(firstByTestId("checkbox-select-all-invoices"));
+    expect(selectAllStarted).toBe(true);
+    rowsForResponse = [overdueInvoice({ id: 2, invoiceNumber: "INV-1002" })];
+    act(() => nav.navigate("/invoices?search=Bright"));
+    await waitFor(() => expect(screen.queryByTestId("checkbox-select-invoice-1")).toBeNull());
+    await selectRows(2);
+
+    await act(async () => {
+      if (outcome === "success") held.resolve(invoiceResponse([overdueInvoice({ id: 99 })]));
+      else held.reject(new Error("old select-all failed"));
+      await held.promise.catch(() => {});
+    });
+    expect(firstByTestId("text-selection-count").textContent).toMatch(/1 selected/);
+    fireEvent.click(screen.getByTestId("button-batch-remind"));
+    await screen.findByTestId("batch-reminder-send-row-1");
+    expect(postedBodies.preview.at(-1).invoiceIds).toEqual([2]);
+  });
+
+  it("does not revive an old select-all when the user returns to the original filter", async () => {
+    const held = deferredResponse();
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (isListRequest(url)) {
+        if (url.includes("limit=500")) return held.promise;
+        return Promise.resolve(invoiceResponse(rowsForResponse, 100));
+      }
+      return realFetch(input, init);
+    }));
+    const { nav } = renderInvoices();
+    await waitForRows();
+    fireEvent.click(firstByTestId("checkbox-select-all-invoices"));
+    act(() => nav.navigate("/invoices?aging=days60"));
+    await waitFor(() => expect(screen.getByTestId("invoice-list-rows").getAttribute("aria-busy")).toBe("false"));
+    act(() => nav.navigate("/invoices"));
+    await waitFor(() => expect(firstByTestId("checkbox-select-invoice-2")).toHaveProperty("disabled", false));
+    await selectRows(2);
+    await act(async () => held.resolve(invoiceResponse([overdueInvoice({ id: 99 })])));
+    expect(firstByTestId("text-selection-count").textContent).toMatch(/1 selected/);
+    fireEvent.click(screen.getByTestId("button-batch-remind"));
+    await screen.findByTestId("batch-reminder-send-row-1");
+    expect(postedBodies.preview.at(-1).invoiceIds).toEqual([2]);
+  });
+
+  it("keeps selected IDs when another page loads within the same filter", async () => {
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (isListRequest(url)) {
+        const id = url.includes("offset=1&") ? 2 : 1;
+        return Promise.resolve(invoiceResponse([overdueInvoice({ id })], 2));
+      }
+      return realFetch(input, init);
+    }));
+    renderInvoices("/invoices?aging=days60");
+    await waitForRows();
+    await selectRows(1);
+    fireEvent.click(screen.getByTestId("button-load-more-invoices"));
+    await screen.findAllByTestId("checkbox-select-invoice-2");
+    expect(firstByTestId("text-selection-count").textContent).toMatch(/1 selected/);
+    expect(firstByTestId("checkbox-select-invoice-1").getAttribute("data-state")).toBe("checked");
+    await selectRows(2);
+    fireEvent.click(screen.getByTestId("button-batch-remind"));
+    await screen.findByTestId("batch-reminder-send-row-1");
+    expect(postedBodies.preview.at(-1).invoiceIds.sort()).toEqual([1, 2]);
   });
 
   it("offers the batch action to a bookkeeper and never to a field tech", async () => {

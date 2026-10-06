@@ -21,5 +21,18 @@ exactly when someone uses select-all.
   selection while it is active — select only the displayed rows.
 - Regression-test the combination, not the parts: a filtered, paginated
   select-all must not be able to return an off-view id.
+
+Invoice selections belong to the effective filter, not to whichever rows
+remain visible while a request is pending. Pagination within that filter must
+preserve selection; changing filters must drop it, including open reminder
+confirmations. Returning to a previous filter is a new selection scope.
+
+**Why:** Batch reminders can email customers from an earlier view if retained
+placeholder rows or delayed select-all requests are allowed to restore IDs.
+Matching a request's filter string alone is insufficient for A → B → A.
+
+**How to apply:** Keep loading/focus continuity separate from permission to
+select stale rows. Verify both delayed select-all success and failure paths,
+and assert the actual reminder preview/send IDs after a filter transition.
 - Keep local state only as an input echo (debounced write to the URL); never
   as the thing that decides which rows are shown.

@@ -32,3 +32,11 @@ read is a support ticket. Watch for read-shaped endpoints that are really part o
 
 **Widening a `Role` union surfaces almost nothing in typecheck** when role comparisons are typed
 `string` rather than the union. Do not rely on the compiler to find sites needing a new role.
+
+## Dispatch and audit role policy
+
+Bookkeepers retain read-only Missing Location Data access for billing-quality audits, without gaining mutable ticket access. Action Board access follows the supplied operational-board policy: irrigation managers, company admins, and company-scoped super admins, not billing managers. Billing managers retain Budget Status and Financial Pulse.
+
+**Why:** The user requested preserving the behavior of the supplied permissions patch. That patch separates operational dispatch authority from financial budget access and supersedes the earlier recommendation to retain billing-manager board access.
+
+**How to apply:** Follow the operational-board role policy consistently across navigation, direct pages, and API guards. Keep restricted report projections read-only across role boundaries, and do not remove billing managers' separate budget or financial capabilities.

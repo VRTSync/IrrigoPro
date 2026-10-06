@@ -362,6 +362,7 @@ describe("no other role's nav structure moved (Task #1914)", () => {
       "  leaf /site-maps",
       "group Billing",
       "  leaf /manager-workspace [awaitingApproval]",
+      "  leaf /action-board",
       "  leaf /budget-status",
       "  leaf /financial-pulse",
       "  leaf /billing/command-center",
@@ -416,6 +417,7 @@ describe("no other role's nav structure moved (Task #1914)", () => {
   it("managerNav", () => {
     expect(shape(managerNav.items)).toEqual([
       "leaf /manager-workspace",
+      "leaf /action-board",
       "leaf /budget-status",
       "group Reports",
       "  leaf /reports/missing-location-data",

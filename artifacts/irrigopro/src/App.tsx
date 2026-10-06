@@ -414,7 +414,6 @@ function Router() {
                   <Route path="/" component={ManagerWorkspace} />
                   <Route path="/manager-workspace" component={ManagerWorkspace} />
                   <Route path="/budget-status" component={BudgetStatusPage} />
-                  <Route path="/action-board" component={ActionBoardPage} />
                   <Route path="/billing-workspace" component={RedirectToBillingWorkspace} />
                   <Route path="/billing" component={RedirectToBillingWorkspace} />
                   <Route path="/billing/dashboard" component={RedirectToBillingWorkspace} />

@@ -295,6 +295,29 @@ describe("missing location data report", () => {
     assert.ok(calls.some((call) => call[0] === "rules" && call[1] === 2));
   });
 
+  it("limits bookkeeper deep links to the exact tenant-owned audit record", async () => {
+    const { storage, calls } = makeStorage();
+    const app = makeApp("bookkeeper", 1, storage);
+    const own = await request(app)
+      .get("/api/reports/missing-location-data?ticketType=work_order&ticketId=4&companyId=2");
+    assert.equal(own.status, 200);
+    assert.equal(own.body.count, 1);
+    assert.deepEqual(own.body.rows.map((row: any) => [row.ticketType, row.ticketId, row.companyId]),
+      [["work_order", 4, 1]]);
+    assert.ok(!calls.some((call) => call[0] === "billingSheets"));
+
+    const foreign = await request(app)
+      .get("/api/reports/missing-location-data?ticketType=work_order&ticketId=20&companyId=2");
+    assert.equal(foreign.status, 200);
+    assert.deepEqual(foreign.body, { count: 0, rows: [] });
+    assert.ok(!calls.some((call) => call[1] === 2));
+
+    for (const method of ["post", "patch", "delete"] as const) {
+      const mutation = await request(app)[method]("/api/reports/missing-location-data?ticketId=4");
+      assert.equal(mutation.status, 404, "the report registers no mutation endpoint");
+    }
+  });
+
   it("uses the report-read capability allowlist", async () => {
     for (const role of [
       "company_admin",

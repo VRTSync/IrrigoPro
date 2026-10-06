@@ -28,7 +28,7 @@ import { z } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { customers, irrigationControllers } from "@workspace/db";
-import { storage } from "../storage";
+import { storage, ZoneCountClearError } from "../storage";
 import type { IrrigationImportRow, IrrigationImportRowError, IrrigationZoneTypeEnum } from "../storage";
 
 // ── Role helpers ──────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ export const createControllerBody = z.object({
   location: z.string().nullish(),
   brand: z.string().nullish(),
   model: z.string().nullish(),
-  totalZones: z.coerce.number().int().nonnegative().nullish(),
+  totalZones: z.coerce.number().int().min(1).max(100).nullish(),
   notes: z.string().nullish(),
   settingsPhotoUrl: z.string().nullish(),
   isActive: z.boolean().optional(),
@@ -93,8 +93,7 @@ export const createProgramBody = z.object({
 
 export const updateProgramBody = createProgramBody.partial();
 
-export const createZoneBody = z.object({
-  zoneNumber: z.coerce.number().int().positive(),
+export const updateZoneBody = z.object({
   name: z.string().min(1).max(200),
   zoneType: z
     .enum(["pop_up_spray", "rotor", "drip", "netafim", "bubbler", "other"])
@@ -106,9 +105,7 @@ export const createZoneBody = z.object({
   notes: z.string().nullish(),
   overrideStartTime: z.string().nullish(),
   overrideDays: z.array(z.string()).nullish(),
-});
-
-export const updateZoneBody = createZoneBody.partial();
+}).partial();
 
 export const attachPhotoBody = z.object({
   url: z.string().min(1),
@@ -459,6 +456,7 @@ export function registerIrrigationProfileRoutes(
         if (!updated) return notFound(res, "Controller");
         res.json(updated);
       } catch (e: any) {
+        if (e instanceof ZoneCountClearError) return res.status(400).json({ message: e.message });
         req.log?.error?.({ err: e, id }, "updateIrrigationController failed");
         res.status(500).json({ message: "Could not update controller — please retry" });
       }
@@ -623,9 +621,9 @@ export function registerIrrigationProfileRoutes(
     },
   );
 
-  // ── POST /api/irrigation-controllers/:id/zones ─────────────────────────────
-  app.post(
-    "/api/irrigation-controllers/:id/zones",
+  // Count is the only way to add or retire zone positions.
+  app.put(
+    "/api/irrigation-controllers/:id/zone-count",
     requireAuthentication,
     async (req: any, res: any) => {
       const controllerId = parseId(req.params.id);
@@ -637,8 +635,11 @@ export function registerIrrigationProfileRoutes(
       }
 
       const callerCompanyId = getCallerCompanyId(req);
+      if (callerCompanyId === null && !isSuperAdmin(role)) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
 
-      const parsed = createZoneBody.safeParse(req.body ?? {});
+      const parsed = z.object({ totalZones: z.coerce.number().int().min(1).max(100) }).safeParse(req.body ?? {});
       if (!parsed.success) {
         return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
       }
@@ -647,28 +648,17 @@ export function registerIrrigationProfileRoutes(
       const me = userId ? await storage.getUser(userId) : undefined;
 
       try {
-        const zone = await storage.createIrrigationZone(
+        const result = await storage.setControllerZoneCount(
           isSuperAdmin(role) ? null : callerCompanyId,
           controllerId,
-          {
-            zoneNumber: parsed.data.zoneNumber,
-            name: parsed.data.name,
-            zoneType: parsed.data.zoneType ?? "other",
-            runTimeMinutes: parsed.data.runTimeMinutes ?? 0,
-            zoneOrder: parsed.data.zoneOrder ?? parsed.data.zoneNumber,
-            programId: parsed.data.programId ?? null,
-            isActive: parsed.data.isActive ?? true,
-            notes: parsed.data.notes ?? null,
-            overrideStartTime: parsed.data.overrideStartTime ?? null,
-            overrideDays: parsed.data.overrideDays ?? null,
-          },
+          parsed.data.totalZones,
           me ? { id: me.id, name: me.name } : undefined,
         );
-        if (!zone) return notFound(res, "Controller");
-        res.status(201).json(zone);
+        if (!result) return notFound(res, "Controller");
+        res.json(result);
       } catch (e: any) {
-        req.log?.error?.({ err: e, controllerId }, "createIrrigationZone failed");
-        res.status(500).json({ message: "Could not create zone — please retry" });
+        req.log?.error?.({ err: e, controllerId }, "setControllerZoneCount failed");
+        res.status(500).json({ message: "Could not update zone count — please retry" });
       }
     },
   );
@@ -708,39 +698,6 @@ export function registerIrrigationProfileRoutes(
       } catch (e: any) {
         req.log?.error?.({ err: e, id }, "updateIrrigationZone failed");
         res.status(500).json({ message: "Could not update zone — please retry" });
-      }
-    },
-  );
-
-  // ── DELETE /api/irrigation-zones/:id ──────────────────────────────────────
-  app.delete(
-    "/api/irrigation-zones/:id",
-    requireAuthentication,
-    async (req: any, res: any) => {
-      const id = parseId(req.params.id);
-      if (!id) return badId(res, "zone");
-
-      const role = req.authenticatedUserRole as string | undefined;
-      if (!WRITE_ROLES.has(role ?? "") || role === "field_tech") {
-        return res.status(403).json({ message: "Forbidden" });
-      }
-
-      const callerCompanyId = getCallerCompanyId(req);
-
-      const userId = req.authenticatedUserId as number | undefined;
-      const me = userId ? await storage.getUser(userId) : undefined;
-
-      try {
-        const ok = await storage.deleteIrrigationZone(
-          isSuperAdmin(role) ? null : callerCompanyId,
-          id,
-          me ? { id: me.id, name: me.name } : undefined,
-        );
-        if (!ok) return notFound(res, "Zone");
-        res.json({ ok: true });
-      } catch (e: any) {
-        req.log?.error?.({ err: e, id }, "deleteIrrigationZone failed");
-        res.status(500).json({ message: "Could not delete zone — please retry" });
       }
     },
   );

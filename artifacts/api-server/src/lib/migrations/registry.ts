@@ -12,8 +12,10 @@ import { normalizeUsernamesMigration } from './normalize-usernames';
 import { seedFieldWorkTypesMigration } from './seed-field-work-types';
 import { backfillSeasonalBudgetsMigration } from './backfill-seasonal-budgets';
 import { repairWorkOrderPartsMigration } from './repair-work-order-parts';
+import { backfillControllerZoneRecordsMigration } from './backfill-controller-zone-records';
 
 const REGISTRY = new Map<string, MigrationDefinition>([
+  [backfillControllerZoneRecordsMigration.id, backfillControllerZoneRecordsMigration],
   [repairTicketTotalDriftMigration.id, repairTicketTotalDriftMigration],
   [repairWoMatchEstimateMigration.id, repairWoMatchEstimateMigration],
   [reconcileInspectionPassMigration.id, reconcileInspectionPassMigration],

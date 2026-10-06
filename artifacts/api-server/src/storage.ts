@@ -209,6 +209,8 @@ import {
 } from "./invoice-merge";
 import { recordAuditEvent } from "./routes/audit-log";
 import { normalizeUsername } from "./lib/normalize-username";
+import { ZoneCountClearError, validateZoneCount, zonePlaceholder, zoneCountSummary, type ZoneActor, type ZoneChanges } from "./lib/controller-zone-records";
+export { ZoneCountClearError } from "./lib/controller-zone-records";
 
 
 // Set of issue types that never require a part (labor-only). Built once from
@@ -1353,25 +1355,16 @@ export interface IStorage {
     actor?: { id: number; name: string },
   ): Promise<boolean>;
 
-  createIrrigationZone(
-    companyId: number | null,
-    controllerId: number,
-    data: Omit<InsertIrrigationProfileZone, "companyId" | "controllerId">,
-    actor?: { id: number; name: string },
-  ): Promise<IrrigationProfileZone | null>;
+  setControllerZoneCount(
+    companyId: number | null, controllerId: number, target: number, actor?: ZoneActor,
+  ): Promise<({ controller: IrrigationController } & ZoneChanges) | null>;
 
   updateIrrigationZone(
     companyId: number | null,
     id: number,
-    patch: Partial<Omit<InsertIrrigationProfileZone, "companyId" | "controllerId">>,
+    patch: Partial<Omit<InsertIrrigationProfileZone, "companyId" | "controllerId" | "zoneNumber" | "retiredAt" | "retiredByUserId" | "retiredByName">>,
     actor?: { id: number; name: string },
   ): Promise<IrrigationProfileZone | null>;
-
-  deleteIrrigationZone(
-    companyId: number | null,
-    id: number,
-    actor?: { id: number; name: string },
-  ): Promise<boolean>;
 
   getIrrigationHistory(
     companyId: number | null,
@@ -11362,7 +11355,7 @@ export class DatabaseStorage implements IStorage {
   private async _appendIrrigationSnapshot(
     tx: DbExecutor,
     ctrl: IrrigationController,
-    actor: { id: number; name: string } | undefined,
+    actor: ZoneActor | undefined,
     summary: string,
   ): Promise<void> {
     const programs = await (tx as typeof db)
@@ -11374,7 +11367,7 @@ export class DatabaseStorage implements IStorage {
     const zones = await (tx as typeof db)
       .select()
       .from(irrigationProfileZones)
-      .where(eq(irrigationProfileZones.controllerId, ctrl.id))
+      .where(and(eq(irrigationProfileZones.controllerId, ctrl.id), isNull(irrigationProfileZones.retiredAt)))
       .orderBy(irrigationProfileZones.zoneOrder, irrigationProfileZones.zoneNumber);
 
     await (tx as typeof db).insert(irrigationProfileHistory).values({
@@ -11384,6 +11377,92 @@ export class DatabaseStorage implements IStorage {
       changedByUserId: actor?.id ?? null,
       changedByName: actor?.name ?? null,
       summary,
+    });
+  }
+
+  /** Caller must hold a controller row lock in this transaction. Sole numeric mirror writer. */
+  async _reconcileControllerZones(
+    q: DbExecutor, ctrl: IrrigationController, target: number, actor?: ZoneActor,
+  ): Promise<ZoneChanges> {
+    validateZoneCount(target);
+    // Also lock here to protect internal callers; the transaction owns this lock until commit.
+    await q.select({ id: irrigationControllers.id }).from(irrigationControllers)
+      .where(and(eq(irrigationControllers.id, ctrl.id), eq(irrigationControllers.companyId, ctrl.companyId))).for("update");
+    const rows = await q.select().from(irrigationProfileZones).where(and(
+      eq(irrigationProfileZones.controllerId, ctrl.id), eq(irrigationProfileZones.companyId, ctrl.companyId),
+    )).orderBy(irrigationProfileZones.zoneNumber);
+    const byNumber = new Map(rows.map(row => [row.zoneNumber, row]));
+    const changes: ZoneChanges = { created: [], restored: [], retired: [] };
+    const now = new Date();
+    for (let n = 1; n <= target; n++) {
+      const row = byNumber.get(n);
+      if (!row) {
+        await q.insert(irrigationProfileZones).values({
+          companyId: ctrl.companyId, controllerId: ctrl.id, zoneNumber: n, ...zonePlaceholder(n),
+        });
+        changes.created.push(n);
+      } else if (row.retiredAt) {
+        await q.update(irrigationProfileZones).set({
+          retiredAt: null, retiredByUserId: null, retiredByName: null, updatedAt: now,
+        }).where(eq(irrigationProfileZones.id, row.id));
+        changes.restored.push(n);
+      }
+    }
+    for (const row of rows) {
+      if ((row.zoneNumber > target || row.zoneNumber < 1) && !row.retiredAt) {
+        await q.update(irrigationProfileZones).set({
+          retiredAt: now, retiredByUserId: actor?.id ?? null, retiredByName: actor?.name ?? null, updatedAt: now,
+        }).where(eq(irrigationProfileZones.id, row.id));
+        changes.retired.push(row.zoneNumber);
+      }
+    }
+    if (ctrl.totalZones !== target || Object.values(changes).some(numbers => numbers.length > 0)) {
+      await q.update(irrigationControllers).set({
+        totalZones: target, lastUpdatedAt: now, updatedAt: now,
+        lastUpdatedByUserId: actor?.id ?? null, lastUpdatedByName: actor?.name ?? null,
+      }).where(eq(irrigationControllers.id, ctrl.id));
+    }
+    return changes;
+  }
+
+  async setControllerZoneCount(
+    companyId: number | null, controllerId: number, target: number, actor?: ZoneActor,
+  ): Promise<({ controller: IrrigationController } & ZoneChanges) | null> {
+    return db.transaction(async tx => {
+      const conditions = [eq(irrigationControllers.id, controllerId)];
+      if (companyId !== null) conditions.push(eq(irrigationControllers.companyId, companyId));
+      const [before] = await tx.select().from(irrigationControllers).where(and(...conditions)).for("update");
+      if (!before) return null;
+      const changes = await this._reconcileControllerZones(tx, before, target, actor);
+      const [controller] = await tx.select().from(irrigationControllers).where(and(...conditions));
+      await this._appendIrrigationSnapshot(tx, controller, actor, zoneCountSummary(before.totalZones, target, changes));
+      return { controller, ...changes };
+    });
+  }
+
+  async backfillControllerZoneRecords(companyId: number, id: number, acknowledged: boolean): Promise<number> {
+    return db.transaction(async tx => {
+      const [ctrl] = await tx.select().from(irrigationControllers).where(and(
+        eq(irrigationControllers.companyId, companyId), eq(irrigationControllers.id, id),
+      )).for("update");
+      if (!ctrl) throw new Error("Controller not found");
+      const rows = await tx.select().from(irrigationProfileZones).where(and(
+        eq(irrigationProfileZones.companyId, companyId), eq(irrigationProfileZones.controllerId, id),
+      ));
+      const current = rows.filter(row => !row.retiredAt);
+      const target = ctrl.totalZones ?? (current.length ? Math.max(...current.map(row => row.zoneNumber)) : null);
+      if (target === null) return 0;
+      validateZoneCount(target);
+      if (!acknowledged && current.some(row => row.zoneNumber > target || row.zoneNumber < 1)) {
+        throw new Error("Retirement acknowledgement required");
+      }
+      const expected = Array.from({ length: target }, (_, i) => i + 1);
+      if (ctrl.totalZones === target && current.length === target && expected.every(n => current.some(row => row.zoneNumber === n))) return 0;
+      const actor: ZoneActor = { id: null, name: "Migration backfill-controller-zone-records-v1" };
+      const changes = await this._reconcileControllerZones(tx, ctrl, target, actor);
+      const [updated] = await tx.select().from(irrigationControllers).where(eq(irrigationControllers.id, id));
+      await this._appendIrrigationSnapshot(tx, updated, actor, zoneCountSummary(ctrl.totalZones, target, changes));
+      return changes.created.length + changes.restored.length + changes.retired.length + (ctrl.totalZones !== target ? 1 : 0);
     });
   }
 
@@ -11504,41 +11583,24 @@ export class DatabaseStorage implements IStorage {
           `ensureIrrigationControllers: cannot create controller "${config.name}" — all 26 letters (A–Z) are already in use for this property.`,
         );
       }
-      usedLetters.add(letter);
-
-      const [inserted] = await db
-        .insert(irrigationControllers)
-        .values({
-          companyId,
-          customerId,
-          branchName: branch,
-          name: config.name,
-          letter,
-          totalZones: config.zoneCount ?? null,
-          isActive: true,
-          lastUpdatedAt: new Date(),
-        })
-        .onConflictDoNothing()
-        .returning();
-
-      // Seed placeholder zones 1..zoneCount for the newly created controller.
-      // Only seed when we have a real count — null means "not yet configured".
-      if (inserted && config.zoneCount != null) {
-        for (let z = 1; z <= config.zoneCount; z++) {
-          await db
-            .insert(irrigationProfileZones)
-            .values({
-              companyId,
-              controllerId: inserted.id,
-              zoneNumber: z,
-              name: `Zone ${z}`,
-              zoneType: "other",
-              runTimeMinutes: 0,
-              zoneOrder: z,
-              isActive: true,
-            })
-            .onConflictDoNothing();
-        }
+      // Use the same transactional insert/reconcile/history and letter retry as creation.
+      try {
+        const inserted = await this.createIrrigationController({
+          companyId, customerId, branchName: branch, name: config.name,
+          letter, totalZones: config.zoneCount, isActive: true,
+        });
+        if (inserted.letter) usedLetters.add(inserted.letter);
+        haveNames.add(inserted.name);
+      } catch (err: any) {
+        const unique = err?.code === "23505" || err?.cause?.code === "23505";
+        if (!unique) throw err;
+        // A concurrent ensure may have seeded this exact name; do not silently
+        // swallow a letter collision that failed to create the requested row.
+        const concurrent = await this.listIrrigationControllers(companyId, customerId, branch);
+        const found = concurrent.find(ctrl => ctrl.name === config.name);
+        if (!found) throw err;
+        haveNames.add(found.name);
+        for (const ctrl of concurrent) if (ctrl.letter) usedLetters.add(ctrl.letter);
       }
     }
 
@@ -11578,7 +11640,7 @@ export class DatabaseStorage implements IStorage {
       db
         .select()
         .from(irrigationProfileZones)
-        .where(eq(irrigationProfileZones.controllerId, id))
+        .where(and(eq(irrigationProfileZones.controllerId, id), isNull(irrigationProfileZones.retiredAt)))
         .orderBy(irrigationProfileZones.zoneOrder, irrigationProfileZones.zoneNumber),
     ]);
 
@@ -11602,21 +11664,31 @@ export class DatabaseStorage implements IStorage {
         letter = await this.nextControllerLetter(data.companyId, data.customerId, branch);
       }
       try {
-        const [ctrl] = await db
+        return await db.transaction(async tx => {
+        const [ctrl] = await tx
           .insert(irrigationControllers)
           .values({
             ...data,
             branchName: branch,
+            totalZones: null,
             letter,
             lastUpdatedAt: data.lastUpdatedAt ?? new Date(),
             updatedAt: new Date(),
           })
           .returning();
+        if (typeof data.totalZones === "number") {
+          const actor = data.lastUpdatedByName ? { id: data.lastUpdatedByUserId ?? null, name: data.lastUpdatedByName } : undefined;
+          const changes = await this._reconcileControllerZones(tx, ctrl, data.totalZones, actor);
+          const [current] = await tx.select().from(irrigationControllers).where(eq(irrigationControllers.id, ctrl.id));
+          await this._appendIrrigationSnapshot(tx, current, actor, zoneCountSummary(null, data.totalZones, changes));
+          return current;
+        }
         return ctrl;
+        });
       } catch (err: any) {
         // Unique index violation on letter within scope — retry with next free letter
         const isUniqueViolation =
-          err?.code === "23505" ||
+          err?.code === "23505" || err?.cause?.code === "23505" ||
           (typeof err?.message === "string" && err.message.includes("uniq_irr_ctrl_letter"));
         if (isUniqueViolation && attempt < MAX_RETRIES) {
           letter = undefined; // force re-pick on next iteration
@@ -11643,14 +11715,16 @@ export class DatabaseStorage implements IStorage {
       const [before] = await tx
         .select()
         .from(irrigationControllers)
-        .where(and(...conditions));
+        .where(and(...conditions)).for("update");
       if (!before) return null;
+      const { totalZones, ...details } = patch;
+      if (totalZones === null && before.totalZones !== null) throw new ZoneCountClearError();
 
       const now = new Date();
-      const [updated] = await tx
+      let [updated] = await tx
         .update(irrigationControllers)
         .set({
-          ...patch,
+          ...details,
           lastUpdatedByUserId: actor?.id ?? patch.lastUpdatedByUserId ?? null,
           lastUpdatedByName: actor?.name ?? patch.lastUpdatedByName ?? null,
           lastUpdatedAt: now,
@@ -11660,63 +11734,13 @@ export class DatabaseStorage implements IStorage {
         .returning();
       if (!updated) return null;
 
-      // Non-destructive zone trim: when totalZones decreases, remove trailing
-      // irrigation_profile_zones rows ONLY if they carry no data.
-      // A zone is "safe to delete" when: no programId, runTimeMinutes is 0
-      // or null, and notes is null or empty. Zones with any data are preserved
-      // even if their zoneNumber exceeds the new totalZones cap.
-      const newTotalZones = updated.totalZones;
-      const oldTotalZones = before.totalZones;
-      if (
-        typeof newTotalZones === "number" &&
-        typeof oldTotalZones === "number" &&
-        newTotalZones < oldTotalZones
-      ) {
-        const candidateZones = await tx
-          .select()
-          .from(irrigationProfileZones)
-          .where(
-            and(
-              eq(irrigationProfileZones.controllerId, id),
-              sql`${irrigationProfileZones.zoneNumber} > ${newTotalZones}`,
-            ),
-          );
-
-        for (const zone of candidateZones) {
-          const isEmptyZone =
-            zone.programId === null &&
-            (zone.runTimeMinutes === 0 || zone.runTimeMinutes === null) &&
-            (!zone.notes || zone.notes.trim() === "");
-          if (isEmptyZone) {
-            await tx.delete(irrigationProfileZones).where(eq(irrigationProfileZones.id, zone.id));
-          }
-        }
-      } else if (
-        typeof newTotalZones === "number" &&
-        typeof oldTotalZones === "number" &&
-        newTotalZones > oldTotalZones
-      ) {
-        // Seed placeholder rows for newly added zones.
-        // onConflictDoNothing ensures safety on any race or partial-seeded state.
-        const newZones = [];
-        for (let z = oldTotalZones + 1; z <= newTotalZones; z++) {
-          newZones.push({
-            companyId: updated.companyId,
-            controllerId: updated.id,
-            zoneNumber: z,
-            name: `Zone ${z}`,
-            zoneType: "other" as const,
-            runTimeMinutes: 0,
-            zoneOrder: z,
-            isActive: true,
-          });
-        }
-        if (newZones.length > 0) {
-          await tx.insert(irrigationProfileZones).values(newZones).onConflictDoNothing();
-        }
+      let summary = `Controller "${updated.name}" updated`;
+      if (typeof totalZones === "number") {
+        const changes = await this._reconcileControllerZones(tx, updated, totalZones, actor);
+        [updated] = await tx.select().from(irrigationControllers).where(and(...conditions));
+        summary = zoneCountSummary(before.totalZones, totalZones, changes);
       }
-
-      await this._appendIrrigationSnapshot(tx, updated, actor, `Controller "${updated.name}" updated`);
+      await this._appendIrrigationSnapshot(tx, updated, actor, summary);
       return updated;
     });
   }
@@ -11830,45 +11854,21 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async createIrrigationZone(
-    companyId: number | null,
-    controllerId: number,
-    data: Omit<InsertIrrigationProfileZone, "companyId" | "controllerId">,
-    actor?: { id: number; name: string },
-  ): Promise<IrrigationProfileZone | null> {
-    return db.transaction(async (tx) => {
-      const ctrlConds = [eq(irrigationControllers.id, controllerId)];
-      if (companyId !== null) ctrlConds.push(eq(irrigationControllers.companyId, companyId));
-      const [ctrl] = await tx.select().from(irrigationControllers).where(and(...ctrlConds));
-      if (!ctrl) return null;
-
-      const [zone] = await tx
-        .insert(irrigationProfileZones)
-        .values({ ...data, companyId: ctrl.companyId, controllerId })
-        .returning();
-
-      const stampedCtrl = await this._stampControllerUpdated(tx, controllerId, actor);
-      await this._appendIrrigationSnapshot(
-        tx,
-        stampedCtrl ?? ctrl,
-        actor,
-        `Zone ${zone.zoneNumber} "${zone.name}" added to controller "${ctrl.name}"`,
-      );
-      return zone;
-    });
-  }
-
   async updateIrrigationZone(
     companyId: number | null,
     id: number,
-    patch: Partial<Omit<InsertIrrigationProfileZone, "companyId" | "controllerId">>,
+    patch: Partial<Omit<InsertIrrigationProfileZone, "companyId" | "controllerId" | "zoneNumber" | "retiredAt" | "retiredByUserId" | "retiredByName">>,
     actor?: { id: number; name: string },
   ): Promise<IrrigationProfileZone | null> {
     return db.transaction(async (tx) => {
       const zoneConds = [eq(irrigationProfileZones.id, id)];
       if (companyId !== null) zoneConds.push(eq(irrigationProfileZones.companyId, companyId));
+      const [candidate] = await tx.select().from(irrigationProfileZones).where(and(...zoneConds));
+      if (!candidate) return null;
+      await tx.select({ id: irrigationControllers.id }).from(irrigationControllers)
+        .where(eq(irrigationControllers.id, candidate.controllerId)).for("update");
       const [existing] = await tx.select().from(irrigationProfileZones).where(and(...zoneConds));
-      if (!existing) return null;
+      if (!existing || existing.retiredAt) return null;
 
       const [updated] = await tx
         .update(irrigationProfileZones)
@@ -11890,36 +11890,6 @@ export class DatabaseStorage implements IStorage {
         );
       }
       return updated;
-    });
-  }
-
-  async deleteIrrigationZone(
-    companyId: number | null,
-    id: number,
-    actor?: { id: number; name: string },
-  ): Promise<boolean> {
-    return db.transaction(async (tx) => {
-      const zoneConds = [eq(irrigationProfileZones.id, id)];
-      if (companyId !== null) zoneConds.push(eq(irrigationProfileZones.companyId, companyId));
-      const [existing] = await tx.select().from(irrigationProfileZones).where(and(...zoneConds));
-      if (!existing) return false;
-
-      await tx.delete(irrigationProfileZones).where(eq(irrigationProfileZones.id, id));
-
-      const [ctrl] = await tx
-        .select()
-        .from(irrigationControllers)
-        .where(eq(irrigationControllers.id, existing.controllerId));
-      if (ctrl) {
-        const stampedCtrl = await this._stampControllerUpdated(tx, ctrl.id, actor);
-        await this._appendIrrigationSnapshot(
-          tx,
-          stampedCtrl ?? ctrl,
-          actor,
-          `Zone ${existing.zoneNumber} "${existing.name}" deleted from controller "${ctrl.name}"`,
-        );
-      }
-      return true;
     });
   }
 
@@ -11945,6 +11915,31 @@ export class DatabaseStorage implements IStorage {
     actor?: { id: number; name: string },
     replaceControllers: string[] = [],
   ): Promise<IrrigationImportResult> {
+    if (mode === "preview") return this._importIrrigationProfile(db, companyId, customerId, branchName, rows, mode, actor, replaceControllers);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await db.transaction(async tx => {
+          await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`irrigation-import:${companyId}:${customerId}:${branchName}`}))`);
+          // Read the diff only after taking all controller locks, in a stable order.
+          await tx.select({ id: irrigationControllers.id }).from(irrigationControllers).where(and(
+            eq(irrigationControllers.companyId, companyId), eq(irrigationControllers.customerId, customerId),
+            eq(irrigationControllers.branchName, branchName),
+          )).orderBy(irrigationControllers.id).for("update");
+          return this._importIrrigationProfile(tx, companyId, customerId, branchName, rows, mode, actor, replaceControllers);
+        });
+      } catch (err: any) {
+        if (attempt < 3 && (err?.code === "23505" || err?.cause?.code === "23505")) continue;
+        throw err;
+      }
+    }
+  }
+
+  private async _importIrrigationProfile(
+    executor: DbExecutor, companyId: number, customerId: number, branchName: string,
+    rows: IrrigationImportRow[], mode: "preview" | "commit", actor?: { id: number; name: string },
+    replaceControllers: string[] = [],
+  ): Promise<IrrigationImportResult> {
+    const q = executor as typeof db;
     // ── Group CSV rows by controller name ────────────────────────────────────
     // Build a map: controllerName → { meta, programs: Map<progName,…>, zones: Map<zoneNum,row> }
     type ProgMeta = { wateringDays: string[] | null; startTimes: string[] | null; seasonalAdjustPct: number };
@@ -11957,6 +11952,7 @@ export class DatabaseStorage implements IStorage {
     };
     const ctrlGroups = new Map<string, CtrlGroup>();
     for (const row of rows) {
+      validateZoneCount(row.zoneNumber);
       let group = ctrlGroups.get(row.controllerName);
       if (!group) {
         group = {
@@ -11986,7 +11982,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     // ── Load existing controllers for this (company, customer, branch) ────────
-    const existingCtrlList = await db
+    const existingCtrlList = await q
       .select()
       .from(irrigationControllers)
       .where(
@@ -12019,12 +12015,12 @@ export class DatabaseStorage implements IStorage {
       let existingZones: IrrigationProfileZone[] = [];
       if (existingCtrl) {
         [existingPrograms, existingZones] = await Promise.all([
-          db
+          q
             .select()
             .from(irrigationPrograms)
             .where(eq(irrigationPrograms.controllerId, existingCtrl.id))
             .orderBy(irrigationPrograms.sortOrder, irrigationPrograms.id),
-          db
+          q
             .select()
             .from(irrigationProfileZones)
             .where(eq(irrigationProfileZones.controllerId, existingCtrl.id))
@@ -12033,7 +12029,7 @@ export class DatabaseStorage implements IStorage {
       }
 
       const existingProgByName = new Map(existingPrograms.map((p) => [p.name, p]));
-      const existingZoneByNumber = new Map(existingZones.map((z) => [z.zoneNumber, z]));
+      const existingZoneByNumber = new Map(existingZones.filter(z => !z.retiredAt).map((z) => [z.zoneNumber, z]));
 
       // Diff programs
       const programDiffs: IrrigationImportProgramDiff[] = [];
@@ -12104,8 +12100,17 @@ export class DatabaseStorage implements IStorage {
       let programsToRemove: import("./storage").IrrigationImportRemovedProgram[] = [];
       if (ctrlAction === "update" && replaceControllers.includes(ctrlName)) {
         const csvZoneNumbers = new Set(group.zones.keys());
+        const target = Math.max(0, ...csvZoneNumbers);
         zonesToRemove = existingZones
           .filter((z) => !csvZoneNumbers.has(z.zoneNumber))
+          .filter((z) => z.zoneNumber > target
+            ? !z.retiredAt
+            : z.zoneNumber >= 1 && (
+              !!z.retiredAt || z.name !== `Zone ${z.zoneNumber}` || z.zoneType !== "other" ||
+              z.runTimeMinutes !== 0 || z.zoneOrder !== z.zoneNumber || !z.isActive ||
+              z.programId !== null || z.notes !== null ||
+              z.overrideStartTime !== null || z.overrideDays !== null
+            ))
           .map((z) => ({
             id: z.id,
             zoneNumber: z.zoneNumber,
@@ -12152,9 +12157,7 @@ export class DatabaseStorage implements IStorage {
     // ── Commit mode: apply the merge in a single transaction ─────────────────
     // We drive writes using the pre-computed controllerDiffs so that re-importing
     // an identical CSV is a true no-op (no DB writes, no history snapshots).
-    await db.transaction(async (tx) => {
-      const q = tx as unknown as typeof db;
-
+    {
       for (const ctrlDiff of controllerDiffs) {
         const ctrlName = ctrlDiff.controllerName;
         const group = ctrlGroups.get(ctrlName)!;
@@ -12166,11 +12169,6 @@ export class DatabaseStorage implements IStorage {
         const hasRemovals =
           (ctrlDiff.zonesToRemove?.length ?? 0) > 0 ||
           (ctrlDiff.programsToRemove?.length ?? 0) > 0;
-
-        // No-op: existing controller with nothing to create, update, or remove — skip entirely.
-        if (ctrlDiff.action === "update" && !hasProgramChanges && !hasZoneChanges && !hasRemovals) {
-          continue;
-        }
 
         let ctrlId: number;
 
@@ -12203,7 +12201,7 @@ export class DatabaseStorage implements IStorage {
               location: group.location,
               brand: group.brand,
               model: group.model,
-              totalZones: group.zones.size > 0 ? Math.max(...group.zones.keys()) : null,
+              totalZones: null,
               isActive: true,
               lastUpdatedByUserId: actor?.id ?? null,
               lastUpdatedByName: actor?.name ?? null,
@@ -12214,15 +12212,6 @@ export class DatabaseStorage implements IStorage {
         } else {
           // ── Update existing controller (only fields that actually changed) ─
           ctrlId = existingCtrl!.id;
-          // In Replace mode, totalZones is the exact post-delete zone count
-          // (only the CSV zones survive, so group.zones.size is definitive).
-          // In add/update mode it is the high-water mark of max zone number seen
-          // (grows monotonically, never shrinks).
-          const maxInputZone = group.zones.size > 0 ? Math.max(...group.zones.keys()) : 0;
-          const newTotalZones = isReplaceMode
-            ? (group.zones.size > 0 ? group.zones.size : null)
-            : (maxInputZone > (existingCtrl!.totalZones ?? 0) ? maxInputZone : existingCtrl!.totalZones);
-
           const ctrlPatch: Record<string, unknown> = {};
           if (group.location !== null && group.location !== existingCtrl!.location)
             ctrlPatch.location = group.location;
@@ -12230,7 +12219,6 @@ export class DatabaseStorage implements IStorage {
             ctrlPatch.brand = group.brand;
           if (group.model !== null && group.model !== existingCtrl!.model)
             ctrlPatch.model = group.model;
-          if (newTotalZones !== existingCtrl!.totalZones) ctrlPatch.totalZones = newTotalZones;
 
           // Stamp lastUpdated only when there is actual work to do
           if (Object.keys(ctrlPatch).length > 0 || hasProgramChanges || hasZoneChanges || hasRemovals) {
@@ -12324,7 +12312,7 @@ export class DatabaseStorage implements IStorage {
           const existingZone = existingZoneByNumber.get(zoneNum);
           const zd = zoneDiffByNumber.get(zoneNum);
 
-          if (!existingZone || zd?.action === "create") {
+          if (!existingZone) {
             const resolvedName = resolveZoneName(row.zoneName, undefined, zoneNum);
             await q
               .insert(irrigationProfileZones)
@@ -12340,7 +12328,7 @@ export class DatabaseStorage implements IStorage {
                 isActive: true,
               })
               .onConflictDoNothing();
-          } else if (zd?.action === "update") {
+          } else if (zd?.action === "update" || zd?.action === "create") {
             const resolvedName = resolveZoneName(row.zoneName, existingZone.name, zoneNum);
             await q
               .update(irrigationProfileZones)
@@ -12356,9 +12344,8 @@ export class DatabaseStorage implements IStorage {
           // no_change: skip write entirely
         }
 
-        // ── Replace mode: capture pre-delete snapshot then hard-delete ────────
-        // Zones are deleted before programs to avoid relying on the
-        // `onDelete: "set null"` FK cascade from zones → programs.
+        // Replace resets omitted positions (including retired rows), preserving IDs.
+        // Program deletion keeps its existing policy.
         let removedSnapshot: {
           controller: typeof existingCtrl;
           zones: IrrigationProfileZone[];
@@ -12381,11 +12368,14 @@ export class DatabaseStorage implements IStorage {
           ]);
           removedSnapshot = { controller: existingCtrl, zones: removedZones, programs: removedPrograms };
 
-          // Delete zones first (they reference programs via programId FK)
-          if (zoneIdsToRemove.length > 0) {
-            await q
-              .delete(irrigationProfileZones)
-              .where(inArray(irrigationProfileZones.id, zoneIdsToRemove));
+          const target = Math.max(0, ...group.zones.keys());
+          for (const zone of removedZones) {
+            if (zone.zoneNumber <= target) {
+              await q.update(irrigationProfileZones).set({
+                ...zonePlaceholder(zone.zoneNumber), programId: null, notes: null,
+                overrideStartTime: null, overrideDays: null, updatedAt: new Date(),
+              }).where(eq(irrigationProfileZones.id, zone.id));
+            }
           }
           // Delete programs after zones are cleared
           if (programIdsToRemove.length > 0) {
@@ -12394,6 +12384,17 @@ export class DatabaseStorage implements IStorage {
               .where(inArray(irrigationPrograms.id, programIdsToRemove));
           }
         }
+
+        const [beforeReconcile] = await q.select().from(irrigationControllers).where(eq(irrigationControllers.id, ctrlId));
+        const maxInput = Math.max(0, ...group.zones.keys());
+        const currentRows = await q.select().from(irrigationProfileZones).where(and(
+          eq(irrigationProfileZones.controllerId, ctrlId), isNull(irrigationProfileZones.retiredAt),
+        ));
+        const target = isReplaceMode ? maxInput : Math.max(maxInput, beforeReconcile.totalZones ?? 0, ...currentRows.map(z => z.zoneNumber));
+        let changes: ZoneChanges = { created: [], restored: [], retired: [] };
+        if (target >= 1) changes = await this._reconcileControllerZones(q, beforeReconcile, target, actor);
+        const countChanged = target >= 1 && (target !== beforeReconcile.totalZones || Object.values(changes).some(ns => ns.length));
+        if (ctrlDiff.action === "update" && !hasProgramChanges && !hasZoneChanges && !hasRemovals && !countChanged) continue;
 
         // ── History snapshot: only when actual work was done ─────────────────
         const [updatedCtrl] = await q
@@ -12408,7 +12409,7 @@ export class DatabaseStorage implements IStorage {
         const zones = await q
           .select()
           .from(irrigationProfileZones)
-          .where(eq(irrigationProfileZones.controllerId, ctrlId))
+          .where(and(eq(irrigationProfileZones.controllerId, ctrlId), isNull(irrigationProfileZones.retiredAt)))
           .orderBy(irrigationProfileZones.zoneOrder, irrigationProfileZones.zoneNumber);
 
         if (updatedCtrl) {
@@ -12422,11 +12423,11 @@ export class DatabaseStorage implements IStorage {
             snapshotJson: snapshotJson as any,
             changedByUserId: actor?.id ?? null,
             changedByName: actor?.name ?? null,
-            summary: `CSV import: ${ctrlName}`,
+            summary: `CSV import: ${ctrlName}${target >= 1 ? "; " + zoneCountSummary(beforeReconcile.totalZones, target, changes) : ""}`,
           });
         }
       }
-    });
+    }
 
     return { mode: "commit", controllers: controllerDiffs, summary };
   }

@@ -66,3 +66,7 @@
 - [Merged prerequisites in isolated branches](isolated-branch-prerequisites.md) — task status can say merged before this checkout sees its code; check accessible remotes for the commit.
 - [Mutation fetch test isolation](mutation-fetch-test-isolation.md) — modal background GETs may share the mutation URL prefix; route mocked responses by method as well as path.
 - [Invoice landing policy](invoice-landing-policy.md) — invoice-reading roles must land unfiltered; collections views are deliberate navigation, not automatic defaults.
+- [Irrigation zone rollout](irrigation-zone-rollout.md) — locked identity/retirement semantics and staged rollout; publishing, deployed backfill, and verification remain separate.
+- [Baseline test environments](baseline-test-environment.md) — match isolated source and runtime dependencies; missing-dependency collection failures are not regression evidence.
+- [Invoice selection scope](invoice-selection-query-scope.md) — reset on the filter query, never retained rows or placeholder state; preserve same-filter pagination.
+- [Operational board roles](operational-board-role-policy.md) — dispatch access is separate from financial budget access; bookkeeper location audit remains read-only.

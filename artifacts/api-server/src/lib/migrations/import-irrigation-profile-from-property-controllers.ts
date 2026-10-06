@@ -21,6 +21,7 @@
 // Does not modify property_controllers.
 
 import { db } from '../../db';
+import { storage } from '../../storage';
 import { sql } from 'drizzle-orm';
 import type {
   MigrationDefinition,
@@ -153,43 +154,8 @@ async function loadBackfillCandidates(): Promise<BackfillRow[]> {
  */
 async function seedController(row: LegacyControllerRow): Promise<void> {
   const controllerName = `Controller ${row.controllerLetter}`;
-
-  // Task #1856: include `letter` (NOT NULL + unique) from the legacy
-  // controllerLetter field so this migration does not violate the new constraint.
-  const inserted = await db.execute<{ id: string }>(sql`
-    INSERT INTO irrigation_controllers
-      (company_id, customer_id, branch_name, name, letter, total_zones, is_active, created_at, updated_at)
-    VALUES
-      (${row.companyId}, ${row.customerId}, ${row.branchName}, ${controllerName}, ${row.controllerLetter}, ${row.zoneCount}, true, NOW(), NOW())
-    ON CONFLICT (company_id, customer_id, branch_name, name) DO NOTHING
-    RETURNING id
-  `);
-
-  let controllerId: number;
-  if (inserted.rows.length > 0) {
-    controllerId = Number((inserted.rows[0] as { id: string }).id);
-  } else {
-    const existing = await db.execute<{ id: string }>(sql`
-      SELECT id FROM irrigation_controllers
-      WHERE company_id  = ${row.companyId}
-        AND customer_id = ${row.customerId}
-        AND branch_name = ${row.branchName}
-        AND name        = ${controllerName}
-    `);
-    if (existing.rows.length === 0) return;
-    controllerId = Number((existing.rows[0] as { id: string }).id);
-  }
-
-  for (let z = 1; z <= row.zoneCount; z++) {
-    const zoneName = `Zone ${z}`;
-    await db.execute(sql`
-      INSERT INTO irrigation_profile_zones
-        (company_id, controller_id, zone_number, name, zone_type, run_time_minutes, zone_order, is_active, created_at, updated_at)
-      VALUES
-        (${row.companyId}, ${controllerId}, ${z}, ${zoneName}, 'other', 0, ${z}, true, NOW(), NOW())
-      ON CONFLICT (company_id, controller_id, zone_number) DO NOTHING
-    `);
-  }
+  await storage.ensureIrrigationControllers(row.companyId, row.customerId,
+    [{ name: controllerName, letter: row.controllerLetter, zoneCount: row.zoneCount }], row.branchName);
 }
 
 /**
@@ -200,34 +166,8 @@ async function seedController(row: LegacyControllerRow): Promise<void> {
  *     program assignment, non-zero run time, or notes (data zones are kept).
  */
 async function backfillController(row: BackfillRow): Promise<void> {
-  // 1. Stamp the correct zone count on the controller row (overwrites null or wrong value).
-  await db.execute(sql`
-    UPDATE irrigation_controllers
-    SET total_zones = ${row.zoneCount}, updated_at = NOW()
-    WHERE id = ${row.irrigationControllerId}
-  `);
-
-  // 2. Insert any missing placeholder zone rows up to the new count.
-  for (let z = 1; z <= row.zoneCount; z++) {
-    const zoneName = `Zone ${z}`;
-    await db.execute(sql`
-      INSERT INTO irrigation_profile_zones
-        (company_id, controller_id, zone_number, name, zone_type, run_time_minutes, zone_order, is_active, created_at, updated_at)
-      VALUES
-        (${row.companyId}, ${row.irrigationControllerId}, ${z}, ${zoneName}, 'other', 0, ${z}, true, NOW(), NOW())
-      ON CONFLICT (company_id, controller_id, zone_number) DO NOTHING
-    `);
-  }
-
-  // 3. Remove trailing empty zone rows beyond the new count (data zones are kept).
-  await db.execute(sql`
-    DELETE FROM irrigation_profile_zones
-    WHERE controller_id = ${row.irrigationControllerId}
-      AND zone_number   > ${row.zoneCount}
-      AND program_id    IS NULL
-      AND (run_time_minutes IS NULL OR run_time_minutes = 0)
-      AND (notes IS NULL OR notes = '')
-  `);
+  await storage.setControllerZoneCount(row.companyId, row.irrigationControllerId, row.zoneCount,
+    { id: null, name: "Migration import-irrigation-profile-from-property-controllers-v1" });
 }
 
 async function markDone(): Promise<void> {

@@ -2007,6 +2007,9 @@ export const irrigationProfileZones = pgTable("irrigation_profile_zones", {
   isActive: boolean("is_active").notNull().default(true),
   notes: text("notes"),
   // Per-zone override: when set, this zone starts independently of the
+  retiredAt: timestamp("retired_at", { withTimezone: true }),
+  retiredByUserId: integer("retired_by_user_id").references(() => users.id),
+  retiredByName: text("retired_by_name"),
   // program chain and its own days are used instead of the program's.
   overrideStartTime: text("override_start_time"),
   overrideDays: text("override_days").array(),
@@ -2015,6 +2018,8 @@ export const irrigationProfileZones = pgTable("irrigation_profile_zones", {
 }, (table) => ({
   companyControllerIdx: index("irr_pzone_company_controller_idx")
     .on(table.companyId, table.controllerId),
+  controllerCurrentIdx: index("irr_pzone_controller_current_idx")
+    .on(table.companyId, table.controllerId).where(sql`${table.retiredAt} IS NULL`),
   // Zone numbers are unique within a (company, controller) scope so two
   // companies can each have "Zone 1" without collision.
   uniqZoneNumber: uniqueIndex("uniq_irr_pzone_number")

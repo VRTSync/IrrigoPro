@@ -83,7 +83,8 @@ export function PreviewModal({
     : false;
   const hasWarnings = (preview?.warnings?.length ?? 0) > 0;
 
-  const canRun = (!hasOrphans && !hasWarnings) || acknowledged;
+  const requiresAcknowledgement = preview?.requiresAcknowledgement ?? (hasOrphans || hasWarnings);
+  const canRun = !requiresAcknowledgement || acknowledged;
 
   // Task #1982 — the app sets `staleTime: Infinity` globally, so neither the
   // preview nor the migration list ever refreshes on its own. Without these
@@ -157,12 +158,12 @@ export function PreviewModal({
               )}
             </div>
 
-            {(hasOrphans || preview.warnings.length > 0) && (
+            {(requiresAcknowledgement || preview.warnings.length > 0) && (
               <div className="p-3 bg-red-50 border border-red-200 rounded-lg space-y-1.5">
                 {preview.warnings.map((w, i) => (
                   <p key={i} className="text-sm text-red-700">{w}</p>
                 ))}
-                <label className="flex items-start gap-2 mt-2 cursor-pointer">
+                {requiresAcknowledgement && <label className="flex items-start gap-2 mt-2 cursor-pointer">
                   <Checkbox
                     checked={acknowledged}
                     onCheckedChange={(v) => setAcknowledged(Boolean(v))}
@@ -171,7 +172,7 @@ export function PreviewModal({
                   <span className="text-sm text-red-700">
                     I understand the risks described above and wish to proceed.
                   </span>
-                </label>
+                </label>}
               </div>
             )}
 

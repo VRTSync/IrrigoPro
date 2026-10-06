@@ -193,6 +193,13 @@ export const CAN_VIEW_BUDGETS = new Set<Role>([
   "irrigation_manager",
 ]);
 
+/** Read dispatch and operational oversight on the Action Board. */
+export const CAN_VIEW_ACTION_BOARD = new Set<Role>([
+  "super_admin",
+  "company_admin",
+  "irrigation_manager",
+]);
+
 /** Preview and apply annual budget goals in bulk. */
 export const CAN_MANAGE_BULK_BUDGET_GOALS = new Set<Role>([
   "super_admin",

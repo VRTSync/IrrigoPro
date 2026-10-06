@@ -137,6 +137,8 @@ export const EMPTY_AR_QUERY: ArQuery = {
 
 export function parseAging(search: string): AgingFilter {
   const v = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("aging");
+  // Accept older deep links, but send the canonical bucket to the API.
+  if (v === "days90") return "days90Plus";
   if (
     v === "current" ||
     v === "days30" ||

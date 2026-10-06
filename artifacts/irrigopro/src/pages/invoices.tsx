@@ -1,4 +1,4 @@
-import { Fragment, useState, useMemo, useEffect, useRef } from "react";
+import { Fragment, useState, useMemo, useEffect, useLayoutEffect, useRef } from "react";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import {
@@ -1632,6 +1632,7 @@ export default function InvoicesPage() {
               })
             }
             onRemind={() => {
+              if (isPlaceholderData) return;
               // Reuses the #1888 confirmation flow with a single invoice in it
               // rather than opening a second, one-off send path.
               setSelectedIds(new Set([invoice.id]));
@@ -1763,6 +1764,7 @@ export default function InvoicesPage() {
   }, 0);
 
   const toggleSelected = (id: number) => {
+    if (isPlaceholderData) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -1787,6 +1789,9 @@ export default function InvoicesPage() {
     selectableVisibleIds.length > 0 &&
     selectableVisibleIds.every((id) => selectedIds.has(id));
   const [selectAllPending, setSelectAllPending] = useState(false);
+  // A generation distinguishes A -> B -> A too: an old request must not
+  // repopulate a selection just because the user returned to its filter.
+  const selectionGeneration = useRef(0);
 
   /**
    * Task #1942 — select-all covers the filtered set, not the loaded page.
@@ -1803,6 +1808,8 @@ export default function InvoicesPage() {
    * over-promising.
    */
   const toggleSelectAllVisible = async () => {
+    if (isPlaceholderData || selectAllPending) return;
+    const generation = selectionGeneration.current;
     if (allVisibleSelected) {
       clearSelection();
       return;
@@ -1815,6 +1822,7 @@ export default function InvoicesPage() {
         const res = await fetch(`/api/invoices?limit=500&offset=0${suffix}`);
         if (res.ok) {
           const rows = (await res.json()) as Invoice[];
+          if (generation !== selectionGeneration.current) return;
           const selectable = rows.filter(isMergeable);
           setOffPageSelectionTotals(new Map(selectable.map((r) => [r.id, r.totalAmount])));
           setSelectedIds(new Set(selectable.map((r) => r.id)));
@@ -1824,17 +1832,25 @@ export default function InvoicesPage() {
         // Fall through: selecting what is loaded is still a correct, smaller
         // answer, and the count in the bar says exactly what it selected.
       } finally {
-        setSelectAllPending(false);
+        if (generation === selectionGeneration.current) setSelectAllPending(false);
       }
     }
+    if (generation !== selectionGeneration.current) return;
     setSelectedIds(new Set(selectableVisibleIds));
   };
 
   // Changing the filters changes what "selected" means, and a selection that
   // outlives its filter is a selection nobody has actually looked at. Drop it.
-  useEffect(() => {
+  // Reset before paint, independently of cached/placeholder rows and page
+  // arrivals. Close confirmations belonging to the old scope as well.
+  useLayoutEffect(() => {
+    selectionGeneration.current += 1;
     setSelectedIds(new Set());
     setOffPageSelectionTotals(new Map());
+    setSelectAllPending(false);
+    setBatchReminderOpen(false);
+    setMergeConfirmOpen(false);
+    setSurvivingId(null);
   }, [arParams]);
 
   const openMergeConfirm = () => {
@@ -2317,7 +2333,7 @@ export default function InvoicesPage() {
                                 showing — "select what I am looking at". */}
                             <Checkbox
                               checked={allVisibleSelected}
-                              disabled={selectAllPending}
+                              disabled={selectAllPending || isPlaceholderData}
                               onCheckedChange={() => {
                                 void toggleSelectAllVisible();
                               }}
@@ -2360,6 +2376,7 @@ export default function InvoicesPage() {
                               {isMergeable(invoice) && (
                                 <Checkbox
                                   checked={selectedIds.has(invoice.id)}
+                                  disabled={isPlaceholderData}
                                   onCheckedChange={() => toggleSelected(invoice.id)}
                                   aria-label={`Select invoice ${invoice.invoiceNumber}`}
                                   data-testid={`checkbox-select-invoice-${invoice.id}`}
@@ -2459,6 +2476,7 @@ export default function InvoicesPage() {
                             {canSelectRows && isMergeable(invoice) && (
                               <Checkbox
                                 checked={selectedIds.has(invoice.id)}
+                                disabled={isPlaceholderData}
                                 onCheckedChange={() => toggleSelected(invoice.id)}
                                 aria-label={`Select invoice ${invoice.invoiceNumber}`}
                                 data-testid={`checkbox-select-invoice-mobile-${invoice.id}`}
@@ -2550,6 +2568,7 @@ export default function InvoicesPage() {
                                 })
                               }
                               onRemind={() => {
+                                if (isPlaceholderData) return;
                                 setSelectedIds(new Set([invoice.id]));
                                 setBatchReminderOpen(true);
                               }}
