@@ -4,8 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Droplets, ExternalLink } from "lucide-react";
 import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { useLocation } from "wouter";
-import type { Customer, IrrigationController } from "@workspace/db/schema";
-import { IrrigationControllerGrid } from "./irrigation-controller-grid";
+import type { Customer } from "@workspace/db/schema";
+import { IrrigationControllerGrid, type ControllerWithZones } from "./irrigation-controller-grid";
+import { useAuth } from "@/lib/auth-context";
 
 // Task #1857: customers.totalControllers is no longer written or read here.
 // Controller count is derived from COUNT(*) on irrigation_controllers via the
@@ -17,19 +18,16 @@ interface IrrigationSystemCardProps {
 }
 
 export function IrrigationSystemCard({ customer, canManageControllers }: IrrigationSystemCardProps) {
+  const { user } = useAuth();
   const [, setLocation] = useLocation();
   const customerId = customer.id;
 
-  const { data: controllers = [], isLoading, refetch } = useArrayQuery<IrrigationController>({
+  const { data: controllers = [], isLoading, refetch } = useArrayQuery<ControllerWithZones>({
     queryKey: [`/api/customers/${customerId}/controllers-profile`],
     queryFn: () => apiRequest(`/api/customers/${customerId}/controllers-profile`),
   });
 
-  // Zone total: sum totalZones directly from each controller row.
-  // No letter derivation — letters are stored on irrigation_controllers.letter.
-  const totalZones = controllers.reduce((sum, ctrl) => {
-    return ctrl.totalZones != null ? sum + ctrl.totalZones : sum;
-  }, 0);
+  const totalZones = controllers.reduce((sum, ctrl) => sum + ctrl.zones.length, 0);
 
   // Controller count comes from the loaded profile; fall back to 1 while loading.
   const controllerCount = controllers.length || 1;
@@ -86,7 +84,7 @@ export function IrrigationSystemCard({ customer, canManageControllers }: Irrigat
             controllers={controllers}
             customerId={customerId}
             canManageControllers={canManageControllers}
-            canEditZones={canManageControllers}
+            canEditZones={canManageControllers || user?.role === "field_tech"}
             onRefreshList={() => refetch()}
           />
         )}

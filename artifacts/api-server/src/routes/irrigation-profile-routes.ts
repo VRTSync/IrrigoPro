@@ -25,9 +25,10 @@
 
 import type { Express, RequestHandler } from "express";
 import { z } from "zod";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql, isNull, isNotNull, or } from "drizzle-orm";
 import { db } from "../db";
-import { customers, irrigationControllers } from "@workspace/db";
+import { customers, irrigationControllers, irrigationProfileZones } from "@workspace/db";
+import { isPlaceholderZone } from "@workspace/shared";
 import { storage, ZoneCountClearError } from "../storage";
 import type { IrrigationImportRow, IrrigationImportRowError, IrrigationZoneTypeEnum } from "../storage";
 
@@ -281,7 +282,29 @@ export function registerIrrigationProfileRoutes(
           );
         }
 
-        res.json(controllers);
+        // Pair controller identity with its validated company even for cross-tenant admins.
+        if (controllers.length === 0) return res.json([]);
+        const scope = or(...controllers.map(c => and(
+          eq(irrigationProfileZones.controllerId, c.id),
+          eq(irrigationProfileZones.companyId, c.companyId),
+        )));
+        const [zones, retiredCounts] = await Promise.all([
+          db.select().from(irrigationProfileZones)
+            .where(and(scope, isNull(irrigationProfileZones.retiredAt)))
+            .orderBy(irrigationProfileZones.zoneNumber),
+          db.select({ controllerId: irrigationProfileZones.controllerId, count: sql<number>`count(*)::int` })
+            .from(irrigationProfileZones)
+            .where(and(scope, isNotNull(irrigationProfileZones.retiredAt)))
+            .groupBy(irrigationProfileZones.controllerId),
+        ]);
+        const summaries = new Map<number, { id: number; zoneNumber: number; name: string; zoneType: string; isActive: boolean; setUp: boolean }[]>();
+        for (const z of zones) {
+          const rows = summaries.get(z.controllerId) ?? [];
+          rows.push({ id: z.id, zoneNumber: z.zoneNumber, name: z.name, zoneType: z.zoneType, isActive: z.isActive, setUp: !isPlaceholderZone(z) });
+          summaries.set(z.controllerId, rows);
+        }
+        const counts = new Map(retiredCounts.map(r => [r.controllerId, r.count]));
+        res.json(controllers.map(c => ({ ...c, zones: summaries.get(c.id) ?? [], retiredZoneCount: counts.get(c.id) ?? 0 })));
       } catch (e: any) {
         req.log?.error?.({ err: e, customerId }, "listIrrigationControllers failed");
         res.status(500).json({ message: "Could not load controllers — please retry" });

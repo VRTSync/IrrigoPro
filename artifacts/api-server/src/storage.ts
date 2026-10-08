@@ -1317,7 +1317,7 @@ export interface IStorage {
   getIrrigationController(
     companyId: number | null,
     id: number,
-  ): Promise<(IrrigationController & { programs: IrrigationProgram[]; zones: IrrigationProfileZone[] }) | null>;
+  ): Promise<(IrrigationController & { programs: IrrigationProgram[]; zones: IrrigationProfileZone[]; retiredZones: IrrigationProfileZone[] }) | null>;
 
   createIrrigationController(
     data: InsertIrrigationController,
@@ -11621,7 +11621,7 @@ export class DatabaseStorage implements IStorage {
   async getIrrigationController(
     companyId: number | null,
     id: number,
-  ): Promise<(IrrigationController & { programs: IrrigationProgram[]; zones: IrrigationProfileZone[] }) | null> {
+  ): Promise<(IrrigationController & { programs: IrrigationProgram[]; zones: IrrigationProfileZone[]; retiredZones: IrrigationProfileZone[] }) | null> {
     const conditions = [eq(irrigationControllers.id, id)];
     if (companyId !== null) conditions.push(eq(irrigationControllers.companyId, companyId));
 
@@ -11631,7 +11631,7 @@ export class DatabaseStorage implements IStorage {
       .where(and(...conditions));
     if (!ctrl) return null;
 
-    const [programs, zones] = await Promise.all([
+    const [programs, zones, retiredZones] = await Promise.all([
       db
         .select()
         .from(irrigationPrograms)
@@ -11640,11 +11640,14 @@ export class DatabaseStorage implements IStorage {
       db
         .select()
         .from(irrigationProfileZones)
-        .where(and(eq(irrigationProfileZones.controllerId, id), isNull(irrigationProfileZones.retiredAt)))
+        .where(and(eq(irrigationProfileZones.controllerId, id), eq(irrigationProfileZones.companyId, ctrl.companyId), isNull(irrigationProfileZones.retiredAt)))
         .orderBy(irrigationProfileZones.zoneOrder, irrigationProfileZones.zoneNumber),
+      db.select().from(irrigationProfileZones)
+        .where(and(eq(irrigationProfileZones.controllerId, id), eq(irrigationProfileZones.companyId, ctrl.companyId), isNotNull(irrigationProfileZones.retiredAt)))
+        .orderBy(irrigationProfileZones.zoneNumber),
     ]);
 
-    return { ...ctrl, programs, zones };
+    return { ...ctrl, programs, zones, retiredZones };
   }
 
   async createIrrigationController(

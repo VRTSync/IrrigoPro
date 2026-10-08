@@ -144,7 +144,7 @@ export default function CustomerProfile() {
   const canEditIrrigation =
     userRole === "company_admin" ||
     userRole === "super_admin" ||
-    userRole === "billing_manager";
+    userRole === "irrigation_manager";
   // Task #1886 — the Invoices section and, with it, the Billing Details tab
   // now track this capability. A field tech has neither, so the tab
   // disappears for them entirely instead of rendering empty. An irrigation

@@ -151,3 +151,31 @@ mtime_ms = 1790790300358
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/55f18218-397e-4d64-8ca5-ad5b49cb14a2/603335e0-bde1-4a6f-836e-db04dc8501ce"
 storage_version_token = "1790790344110193"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "0UKwCUpiG72gVGYDNGAAC"
+uri = "file://acceptance/connected-controller-profile-initial.jpg"
+type = "image"
+title = "Connected controller tiles — irrigation profile"
+description = "Signed-in development acceptance using an isolated Controller C fixture; named, placeholder and attention zone chips with record-derived totals."
+logical_id = "41324406-f2a5-40b3-84e8-85c1fd39f664"
+content_hash = "sha256:71335be8d2f7bd8c58b6a4f0fac010545112be53aa8319752434d449091a398d"
+size = 98747
+mtime_ms = 1791481129736
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/41324406-f2a5-40b3-84e8-85c1fd39f664/dd1676b5-6407-47a2-84dc-d217fe70355b"
+storage_version_token = "1791481220853902"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "ejyCz2sBSPhnTSQrm8_Ph"
+uri = "file://acceptance/connected-controller-customer-profile-manager.jpg"
+type = "image"
+title = "Connected controller tiles — customer profile"
+description = "The same shared controller grid in the Irrigation System card, verified in development without changing production data."
+logical_id = "117e0604-6489-422a-8fc6-9f024695e9ab"
+content_hash = "sha256:16e5afd998ab4299f7e393ce6c05bdb059f3e053799ceab504b4f0a2292f8807"
+size = 106696
+mtime_ms = 1791481140860
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/117e0604-6489-422a-8fc6-9f024695e9ab/9f1639dc-4df0-464b-963b-b61c9534922c"
+storage_version_token = "1791481221479549"
+content_type = "image/jpeg"

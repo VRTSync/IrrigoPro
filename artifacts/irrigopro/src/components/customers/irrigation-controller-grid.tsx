@@ -60,6 +60,7 @@ import type {
 } from "@workspace/db/schema";
 import {
   computeRunSchedule,
+  isPlaceholderZone,
   minutesToTime,
   type ScheduleInputProgram,
   type ScheduleInputZone,
@@ -75,9 +76,13 @@ const MAX_ZONES = 100;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+export type ZoneSummary = Pick<IrrigationProfileZone, "id" | "zoneNumber" | "name" | "zoneType" | "isActive"> & { setUp: boolean };
+export type ControllerWithZones = IrrigationController & { zones: ZoneSummary[]; retiredZoneCount: number };
+type ZoneFocus = { id: number; token: number };
 type ControllerWithDetail = IrrigationController & {
   programs: IrrigationProgram[];
   zones: IrrigationProfileZone[];
+  retiredZones: IrrigationProfileZone[];
 };
 
 type HistoryEntry = IrrigationProfileHistory & {
@@ -114,6 +119,11 @@ function fmtDateTime(val: string | Date | null | undefined): string {
 
 function zoneTypeLabel(t: string): string {
   return ZONE_TYPES.find((z) => z.value === t)?.label ?? t;
+}
+
+function setupWording(count: number, setUp: number, heading = false): string {
+  if (!count) return heading ? "Zones (0)" : "No zones yet — use + to add";
+  return `${heading ? `Zones (${count})` : `${count} ${count === 1 ? "zone" : "zones"}`} · ${setUp === count ? "all set up" : `${setUp} set up`}`;
 }
 
 // ── Day pill selector ────────────────────────────────────────────────────────
@@ -795,6 +805,8 @@ function ZoneRow({
   onSaved,
   onDraftChange,
   canEditZone,
+  focus,
+  onFocusConsumed,
 }: {
   zone: IrrigationProfileZone;
   programs: IrrigationProgram[];
@@ -802,11 +814,38 @@ function ZoneRow({
   onSaved: () => void;
   onDraftChange?: (draft: IrrigationProfileZone) => void;
   canEditZone: boolean;
+  focus?: ZoneFocus | null;
+  onFocusConsumed: (token: number) => void;
 }) {
   const { toast } = useToast();
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(!!focus && canEditZone);
   const [draft, setDraft] = useState({ ...zone });
   const queryClient = useQueryClient();
+  const rowRef = useRef<HTMLTableRowElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const [highlighted, setHighlighted] = useState(false);
+  const appliedFocus = useRef<number | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!focus || appliedFocus.current === focus.token) return;
+    appliedFocus.current = focus.token;
+    if (canEditZone) {
+      setDraft({ ...zone });
+      setEditing(true);
+    }
+    rowRef.current?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    setHighlighted(true);
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    highlightTimer.current = setTimeout(() => setHighlighted(false), 2000);
+    onFocusConsumed(focus.token);
+  }, [focus, canEditZone, zone, onFocusConsumed]);
+  useEffect(() => {
+    if (editing && highlighted) nameRef.current?.focus();
+  }, [editing, highlighted]);
+  useEffect(() => () => {
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+  }, []);
 
   useEffect(() => {
     if (editing) onDraftChange?.(draft as IrrigationProfileZone);
@@ -835,7 +874,7 @@ function ZoneRow({
 
   if (!editing) {
     return (
-      <tr className={!zone.isActive ? "bg-amber-50" : undefined}>
+      <tr ref={rowRef} data-testid={`zone-row-${zone.id}`} className={`${!zone.isActive ? "bg-amber-50" : ""} ${highlighted ? "ring-2 ring-blue-400" : ""}`}>
         <td className="px-2 py-2 border border-gray-200 text-center text-sm">{zone.zoneNumber}</td>
         <td className="px-2 py-2 border border-gray-200">
           <div className="flex items-center gap-1.5">
@@ -887,12 +926,14 @@ function ZoneRow({
   }
 
   return (
-    <tr className="bg-blue-50/40">
+    <tr ref={rowRef} data-testid={`zone-row-${zone.id}`} className={`bg-blue-50/40 ${highlighted ? "ring-2 ring-blue-400" : ""}`}>
       <td colSpan={9} className="p-3 border border-blue-300">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-3">
           <div>
             <Label className="text-xs">Name</Label>
             <Input
+              ref={nameRef}
+              aria-label={`Zone ${zone.zoneNumber} Name`}
               value={draft.name}
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
               className="h-8 text-sm mt-1"
@@ -1038,37 +1079,12 @@ function ZoneRow({
 // ── Add zone row ──────────────────────────────────────────────────────────────
 
 function AddZoneRow({
-  controller,
-  onAdded,
+  disabled,
+  onAdd,
 }: {
-  controller: IrrigationController;
-  onAdded: () => void;
+  disabled: boolean;
+  onAdd: () => void;
 }) {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-
-  const mutation = useMutation({
-    mutationFn: () =>
-      apiRequest(`/api/irrigation-controllers/${controller.id}/zone-count`, "PUT", { totalZones: (controller.totalZones ?? 0) + 1 }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [`/api/irrigation-controllers/${controller.id}`],
-      });
-      queryClient.invalidateQueries({ queryKey: [`/api/customers/${controller.customerId}/controllers-profile`] });
-      queryClient.invalidateQueries({ queryKey: ["/api/properties", controller.customerId, "controllers"] });
-      queryClient.invalidateQueries({ queryKey: [`/api/irrigation-controllers/${controller.id}/history`] });
-      toast({ title: "Zone added" });
-      onAdded();
-    },
-    onError: (err: any) => {
-      toast({
-        title: "Failed to add zone",
-        description: parseApiError(err, "Try again"),
-        variant: "destructive",
-      });
-    },
-  });
-
   return (
       <tr>
         <td colSpan={9} className="px-2 py-2 border border-gray-200 border-t-0">
@@ -1076,8 +1092,8 @@ function AddZoneRow({
             variant="ghost"
             size="sm"
             className="text-blue-600 gap-1.5"
-            disabled={mutation.isPending || (controller.totalZones ?? 0) >= MAX_ZONES}
-            onClick={() => mutation.mutate()}
+            disabled={disabled}
+            onClick={onAdd}
           >
             <Plus className="w-4 h-4" /> Add Zone
           </Button>
@@ -1089,13 +1105,17 @@ function AddZoneRow({
 // ── Controller grid tile (collapsed + expandable) ────────────────────────────
 
 interface ControllerGridTileProps {
-  controller: IrrigationController;
+  controller: ControllerWithZones;
   customerId: number;
   canManageControllers: boolean;
   canEditZones: boolean;
   isExpanded: boolean;
   onToggle: () => void;
   onRefreshList: () => void;
+  focus: ZoneFocus | null;
+  onOpenZone: (id: number) => void;
+  onFocusConsumed: (token: number) => void;
+  onExpand: () => void;
 }
 
 function ControllerGridTile({
@@ -1106,11 +1126,18 @@ function ControllerGridTile({
   isExpanded,
   onToggle,
   onRefreshList,
+  focus,
+  onOpenZone,
+  onFocusConsumed,
+  onExpand,
 }: ControllerGridTileProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [editingDetails, setEditingDetails] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [retireZone, setRetireZone] = useState<ZoneSummary | null>(null);
+  const [showRetired, setShowRetired] = useState(false);
+  const countLock = useRef(false);
   const [draft, setDraft] = useState<Partial<IrrigationController>>({});
 
   const [draftPrograms, setDraftPrograms] = useState<IrrigationProgram[]>([]);
@@ -1140,22 +1167,32 @@ function ControllerGridTile({
   // Use the stored letter (Task #1856). Fall back to first character of name for
   // pre-backfill rows that have letter IS NULL.
   const letter = controller.letter ?? controller.name.slice(0, 1).toUpperCase();
-  const zoneCount = controller.totalZones;
+  const zoneCount = controller.zones.length;
+  const setUpCount = controller.zones.filter(z => z.setUp).length;
 
   const updateZoneCount = useMutation({
     mutationFn: async (next: number) =>
       apiRequest(`/api/irrigation-controllers/${controller.id}/zone-count`, "PUT", { totalZones: next }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [`/api/customers/${customerId}/controllers-profile`],
-      });
-      queryClient.invalidateQueries({
+    onSuccess: async (_result, next) => {
+      const detailRefresh = queryClient.invalidateQueries({
         queryKey: [`/api/irrigation-controllers/${controller.id}`],
       });
+      await Promise.all([detailRefresh, queryClient.invalidateQueries({
+        queryKey: [`/api/customers/${customerId}/controllers-profile`],
+      })]);
       toast({ title: "Zone count updated" });
       queryClient.invalidateQueries({ queryKey: ["/api/properties", customerId, "controllers"] });
       queryClient.invalidateQueries({ queryKey: [`/api/irrigation-controllers/${controller.id}/history`] });
       onRefreshList();
+      if (next > zoneCount) {
+        // Fetch after reconciliation; the identity may be restored, not newly created.
+        const refreshed = await queryClient.fetchQuery<ControllerWithDetail>({
+          queryKey: [`/api/irrigation-controllers/${controller.id}`],
+          staleTime: 0,
+        });
+        const top = refreshed.zones.reduce<IrrigationProfileZone | null>((a, z) => !a || z.zoneNumber > a.zoneNumber ? z : a, null);
+        if (top) onOpenZone(top.id);
+      }
     },
     onError: (err: any) => {
       toast({
@@ -1164,7 +1201,24 @@ function ControllerGridTile({
         variant: "destructive",
       });
     },
+    onSettled: () => { countLock.current = false; },
   });
+
+  const increment = () => {
+    if (retireZone || countLock.current || updateZoneCount.isPending || zoneCount >= MAX_ZONES) return;
+    countLock.current = true;
+    onExpand();
+    updateZoneCount.mutate(zoneCount + 1);
+  };
+  const decrement = () => {
+    if (!canManageControllers || countLock.current || updateZoneCount.isPending || zoneCount <= MIN_ZONES) return;
+    const top = controller.zones.reduce((a, z) => z.zoneNumber > a.zoneNumber ? z : a);
+    if (top.setUp) setRetireZone(top);
+    else {
+      countLock.current = true;
+      updateZoneCount.mutate(zoneCount - 1);
+    }
+  };
 
   const saveMutation = useMutation({
     mutationFn: (data: Partial<IrrigationController>) =>
@@ -1250,7 +1304,6 @@ function ControllerGridTile({
       location: controller.location,
       brand: controller.brand,
       model: controller.model,
-      totalZones: controller.totalZones,
       notes: controller.notes,
       isActive: controller.isActive,
     });
@@ -1286,7 +1339,7 @@ function ControllerGridTile({
               </p>
               <p className="text-xs text-gray-500 flex items-center gap-1">
                 <Cpu className="w-3 h-3" />
-                {zoneCount != null ? zoneCount : "—"} {zoneCount === 1 ? "zone" : "zones"}
+                {setupWording(zoneCount, setUpCount)}
                 {controller.location && (
                   <span className="ml-1 truncate">· 📍 {controller.location}</span>
                 )}
@@ -1295,7 +1348,7 @@ function ControllerGridTile({
           </button>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {canManageControllers && !isExpanded && (
+            {canManageControllers && (
               <>
                 <Button
                   type="button"
@@ -1304,16 +1357,14 @@ function ControllerGridTile({
                   className="h-7 w-7"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (!updateZoneCount.isPending && (zoneCount ?? 0) > MIN_ZONES) {
-                      updateZoneCount.mutate((zoneCount ?? 0) - 1);
-                    }
+                    decrement();
                   }}
-                  disabled={updateZoneCount.isPending || (zoneCount ?? 0) <= MIN_ZONES}
+                  disabled={!!retireZone || updateZoneCount.isPending || zoneCount <= MIN_ZONES}
                   data-testid={`button-zone-decrement-${letter}`}
                 >
                   <Minus className="w-3 h-3" />
                 </Button>
-                <span className="w-8 text-center text-sm font-medium tabular-nums">{zoneCount ?? "—"}</span>
+                <span className="w-8 text-center text-sm font-medium tabular-nums">{zoneCount}</span>
                 <Button
                   type="button"
                   variant="outline"
@@ -1321,11 +1372,9 @@ function ControllerGridTile({
                   className="h-7 w-7"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (!updateZoneCount.isPending && (zoneCount ?? 0) < MAX_ZONES) {
-                      updateZoneCount.mutate((zoneCount ?? 0) + 1);
-                    }
+                    increment();
                   }}
-                  disabled={updateZoneCount.isPending || (zoneCount ?? 0) >= MAX_ZONES}
+                  disabled={!!retireZone || updateZoneCount.isPending || zoneCount >= MAX_ZONES}
                   data-testid={`button-zone-increment-${letter}`}
                 >
                   <Plus className="w-3 h-3" />
@@ -1353,14 +1402,18 @@ function ControllerGridTile({
         {/* Zone number chips */}
         {!isExpanded && (
           <div className="flex flex-wrap gap-1.5">
-            {Array.from({ length: zoneCount ?? 0 }, (_, i) => i + 1).map((zone) => (
-              <span
-                key={zone}
-                className="inline-flex items-center justify-center min-w-[28px] h-7 px-1.5 rounded-md bg-white border border-blue-200 text-xs font-medium text-blue-900 shadow-sm"
-                data-testid={`zone-chip-${letter}-${zone}`}
+            {controller.zones.map((zone) => (
+              <button
+                type="button"
+                key={zone.id}
+                onClick={() => onOpenZone(zone.id)}
+                title={!zone.isActive ? `Zone ${zone.zoneNumber} · ${zone.name} · needs attention` : !zone.setUp ? `Zone ${zone.zoneNumber} · not set up yet` : `Zone ${zone.zoneNumber} · ${zone.name} · ${zoneTypeLabel(zone.zoneType)}`}
+                className={`inline-flex items-center justify-center min-w-[28px] h-7 px-1.5 rounded-md text-xs font-medium ${!zone.isActive ? "bg-amber-50 border border-amber-300 text-amber-800" : zone.setUp ? "bg-white border border-blue-200 text-blue-900 shadow-sm" : "bg-gray-50 border border-dashed border-gray-300 text-gray-500"}`}
+                data-testid={`zone-chip-${letter}-${zone.zoneNumber}`}
+                data-state={!zone.isActive ? "attention" : zone.setUp ? "set-up" : "placeholder"}
               >
-                {zone}
-              </span>
+                {zone.zoneNumber}
+              </button>
             ))}
           </div>
         )}
@@ -1441,22 +1494,6 @@ function ControllerGridTile({
                           placeholder="e.g. ESP-Me"
                         />
                       </div>
-                      <div>
-                        <Label className="text-xs">Total Zones</Label>
-                        <Input
-                          type="number"
-                          min={1}
-                          max={100}
-                          value={draft.totalZones ?? ""}
-                          onChange={(e) =>
-                            setDraft({
-                              ...draft,
-                              totalZones: e.target.value ? Number(e.target.value) : (controller.totalZones ?? null),
-                            })
-                          }
-                          className="h-8 text-sm mt-1"
-                        />
-                      </div>
                     </div>
                     <div>
                       <Label className="text-xs">Notes</Label>
@@ -1524,12 +1561,6 @@ function ControllerGridTile({
                         <span className="text-gray-800">{controller.model}</span>
                       </>
                     )}
-                    {controller.totalZones != null && (
-                      <>
-                        <span className="text-gray-500 text-xs">Total Zones</span>
-                        <span className="text-gray-800">{controller.totalZones}</span>
-                      </>
-                    )}
                     {controller.notes && (
                       <div className="col-span-2 sm:col-span-3">
                         <span className="text-gray-500 text-xs block">Notes</span>
@@ -1549,7 +1580,6 @@ function ControllerGridTile({
                     {!controller.location &&
                       !controller.brand &&
                       !controller.model &&
-                      controller.totalZones == null &&
                       !controller.notes && (
                         <p className="col-span-3 text-xs text-gray-400 italic">
                           No details on file. Click "Edit Details" to add.
@@ -1619,10 +1649,11 @@ function ControllerGridTile({
 
               {/* ── Zones table ── */}
               <section>
-                <h3 className="font-medium text-sm text-gray-700 mb-3">Zones</h3>
-                {zones.length === 0 && !canEditZones ? (
-                  <p className="text-sm text-gray-400 italic">No zones configured.</p>
-                ) : (
+                <h3 className="font-medium text-sm text-gray-700 mb-3">{setupWording(zones.length, zones.filter(z => !isPlaceholderZone(z)).length, true)}</h3>
+                {zones.length === 0 && (
+                  <p className="text-sm text-gray-400 italic mb-2">No zones yet. Use + above to add the first zone.</p>
+                )}
+                {(zones.length > 0 || canEditZones) && (
                   <div className="overflow-x-auto -mx-1">
                     <table className="w-full text-sm border-collapse min-w-[700px]">
                       <thead>
@@ -1645,19 +1676,40 @@ function ControllerGridTile({
                             zone={zone}
                             programs={programs}
                             controllerId={controller.id}
-                            onSaved={() => {}}
+                            onSaved={() => {
+                              queryClient.invalidateQueries({ queryKey: [`/api/customers/${customerId}/controllers-profile`] });
+                              queryClient.invalidateQueries({ queryKey: [`/api/irrigation-controllers/${controller.id}/history`] });
+                              onRefreshList();
+                            }}
                             onDraftChange={handleZoneDraftChange}
                             canEditZone={canEditZones}
+                            focus={focus?.id === zone.id ? focus : null}
+                            onFocusConsumed={onFocusConsumed}
                           />
                         ))}
                         {canEditZones && (
                           <AddZoneRow
-                            controller={controller}
-                            onAdded={onRefreshList}
+                            disabled={updateZoneCount.isPending || zoneCount >= MAX_ZONES || !!retireZone}
+                            onAdd={increment}
                           />
                         )}
                       </tbody>
                     </table>
+                  </div>
+                )}
+                {!!detail?.retiredZones.length && (
+                  <div className="mt-3">
+                    <Button variant="ghost" size="sm" onClick={() => setShowRetired(v => !v)}>
+                      {showRetired ? "Hide retired zones" : `Show ${detail.retiredZones.length} retired zones`}
+                    </Button>
+                    {showRetired && (
+                      <div data-testid={`retired-zones-${letter}`} className="text-xs text-gray-500 space-y-2 mt-2">
+                        {detail.retiredZones.map(z => (
+                          <p key={z.id}>Zone {z.zoneNumber} · {z.name} · {zoneTypeLabel(z.zoneType)} — retired {fmtDateTime(z.retiredAt)} by {z.retiredByName ?? "Unknown"}</p>
+                        ))}
+                        <p>Raise the zone count to bring these back.</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </section>
@@ -1676,6 +1728,27 @@ function ControllerGridTile({
         </div>
       )}
 
+      {canManageControllers && (
+        <AlertDialog open={!!retireZone} onOpenChange={open => { if (!open) setRetireZone(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Retire Zone {retireZone?.zoneNumber}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                "{retireZone?.name}" drops out of pickers and wet checks. Its details and history are kept, and raising the count brings it back.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction disabled={updateZoneCount.isPending} onClick={() => {
+                if (!countLock.current && zoneCount > MIN_ZONES) {
+                  countLock.current = true;
+                  updateZoneCount.mutate(zoneCount - 1);
+                }
+              }}>Retire zone</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
       {/* Delete confirmation */}
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
@@ -1704,7 +1777,7 @@ function ControllerGridTile({
 // ── IrrigationControllerGrid (exported shared component) ─────────────────────
 
 export interface IrrigationControllerGridProps {
-  controllers: IrrigationController[];
+  controllers: ControllerWithZones[];
   customerId: number;
   canManageControllers: boolean;
   canEditZones: boolean;
@@ -1719,8 +1792,14 @@ export function IrrigationControllerGrid({
   onRefreshList,
 }: IrrigationControllerGridProps) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [focusZone, setFocusZone] = useState<(ZoneFocus & { controllerId: number }) | null>(null);
+  const focusToken = useRef(0);
+  const consumeFocus = useCallback((token: number) => {
+    setFocusZone(prev => prev?.token === token ? null : prev);
+  }, []);
 
   const handleToggle = (id: number) => {
+    setFocusZone(null);
     setExpandedId((prev) => (prev === id ? null : id));
   };
 
@@ -1742,6 +1821,13 @@ export function IrrigationControllerGrid({
             canEditZones={canEditZones}
             isExpanded={expandedId === ctrl.id}
             onToggle={() => handleToggle(ctrl.id)}
+            onExpand={() => setExpandedId(ctrl.id)}
+            onOpenZone={id => {
+              setExpandedId(ctrl.id);
+              setFocusZone({ id, controllerId: ctrl.id, token: ++focusToken.current });
+            }}
+            focus={focusZone?.controllerId === ctrl.id ? focusZone : null}
+            onFocusConsumed={consumeFocus}
             onRefreshList={onRefreshList ?? (() => {})}
           />
         </div>

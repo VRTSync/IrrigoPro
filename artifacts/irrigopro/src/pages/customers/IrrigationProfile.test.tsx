@@ -59,6 +59,10 @@ const makeController = (overrides: Record<string, unknown> = {}) => ({
   customerId: 42,
   name: "Controller A",
   totalZones: 6,
+  zones: Array.from({ length: Number(overrides.totalZones ?? 6) }, (_, i) => ({
+    id: i + 1, zoneNumber: i + 1, name: `Zone ${i + 1}`, zoneType: "other", isActive: true, setUp: false,
+  })),
+  retiredZoneCount: 0,
   isActive: true,
   lastUpdatedAt: "2026-06-01T10:00:00Z",
   lastUpdatedByName: "Jane Smith",

@@ -33,7 +33,7 @@ import type {
   IrrigationController,
   Customer,
 } from "@workspace/db/schema";
-import { IrrigationControllerGrid } from "@/components/customers/irrigation-controller-grid";
+import { IrrigationControllerGrid, type ControllerWithZones } from "@/components/customers/irrigation-controller-grid";
 import { IrrigationCsvImportModal } from "@/components/customers/IrrigationCsvImportModal";
 import { BackflowSection } from "@/components/customers/BackflowSection";
 
@@ -205,7 +205,7 @@ export default function IrrigationProfile() {
     data: controllers = [],
     isLoading: controllersLoading,
     refetch: refetchControllers,
-  } = useQuery<IrrigationController[]>({
+  } = useQuery<ControllerWithZones[]>({
     queryKey: [`/api/customers/${customerId}/controllers-profile`],
     enabled: !!customerId,
   });
@@ -226,7 +226,7 @@ export default function IrrigationProfile() {
 
   const canImport = canManageControllers;
 
-  const totalZoneCount = controllers.reduce((sum, c) => sum + (c.totalZones ?? 0), 0);
+  const totalZoneCount = controllers.reduce((sum, c) => sum + c.zones.length, 0);
   const lastUpdated = controllers
     .filter((c) => c.lastUpdatedAt)
     .sort(

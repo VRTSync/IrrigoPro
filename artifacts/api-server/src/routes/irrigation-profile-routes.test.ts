@@ -14,7 +14,7 @@
 // Pattern mirrors admin-migrations-routes.test.ts: lightweight Express server,
 // stub requireAuthentication, real storage.
 
-import { describe, it, before, after } from "node:test";
+import { describe, it, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import express, { type RequestHandler } from "express";
 import { createServer, type Server } from "node:http";
@@ -198,6 +198,10 @@ describe("Irrigation Profile routes — Happy path", () => {
     assert.ok(Array.isArray(r.body));
     const ctrl = r.body.find((c: any) => c.name === "Controller A");
     assert.ok(ctrl, "Controller A should appear in list");
+    assert.equal(ctrl.zones.length, 12);
+    assert.equal(ctrl.retiredZoneCount, 0);
+    assert.deepEqual(ctrl.zones.map((z: any) => z.zoneNumber), Array.from({ length: 12 }, (_, i) => i + 1));
+    assert.ok(ctrl.zones.every((z: any) => z.setUp === false), "fresh reconciled rows are placeholders");
   });
 
   it("POST /api/irrigation-controllers/:id/programs creates a program", async () => {
@@ -249,6 +253,57 @@ describe("Irrigation Profile routes — Happy path", () => {
     assert.equal(r.body.programs.length, 2, "should have 2 programs");
     assert.ok(Array.isArray(r.body.zones), "zones should be array");
     assert.equal(r.body.zones.length, 12, "count creates all 12 zones");
+    assert.deepEqual(r.body.retiredZones, []);
+  });
+
+  it("list classification reflects edits; retirement detail is ordered and attributed; restoration preserves identity", async () => {
+    const id = createdControllerIds[0];
+    const before = (await hit(srv.base, "GET", `/api/irrigation-controllers/${id}`)).body;
+    const zone12 = before.zones.find((z: any) => z.zoneNumber === 12);
+    await hit(srv.base, "PUT", `/api/irrigation-zones/${zone12.id}`, { name: "Back slope drip" });
+    const renamed = (await hit(srv.base, "GET", `/api/customers/${customerAId}/controllers-profile`)).body.find((c: any) => c.id === id);
+    assert.equal(renamed.zones.find((z: any) => z.id === zone12.id).setUp, true);
+    assert.equal(renamed.zones.find((z: any) => z.zoneNumber === 11).setUp, false);
+    assert.equal(renamed.zones.find((z: any) => z.zoneNumber === 1).setUp, true, "type/runtime classify independently of name");
+    assert.equal((await hit(srv.base, "PUT", `/api/irrigation-controllers/${id}/zone-count`, { totalZones: 10 })).status, 200);
+    const retired = (await hit(srv.base, "GET", `/api/irrigation-controllers/${id}`)).body;
+    assert.deepEqual(retired.retiredZones.map((z: any) => z.zoneNumber), [11, 12]);
+    assert.equal(retired.retiredZones[1].id, zone12.id);
+    assert.ok(retired.retiredZones.every((z: any) => z.retiredAt && z.retiredByName === "Manager A"));
+    const listed = (await hit(srv.base, "GET", `/api/customers/${customerAId}/controllers-profile`)).body.find((c: any) => c.id === id);
+    assert.equal(listed.zones.length, 10);
+    assert.equal(listed.retiredZoneCount, 2);
+    assert.equal(listed.zones.some((z: any) => z.id === zone12.id), false);
+    await hit(srv.base, "PUT", `/api/irrigation-controllers/${id}/zone-count`, { totalZones: 12 });
+    const restored = (await hit(srv.base, "GET", `/api/irrigation-controllers/${id}`)).body;
+    assert.equal(restored.zones.find((z: any) => z.zoneNumber === 12).id, zone12.id);
+    assert.deepEqual(restored.retiredZones, []);
+  });
+
+  it("list batches current summaries and retired counts rather than querying each controller", async () => {
+    const added = await hit(srv.base, "POST", `/api/customers/${customerAId}/controllers-profile`, { name: "Controller B", totalZones: 2 });
+    assert.equal(added.status, 201);
+    createdControllerIds.push(added.body.id);
+    const original = db.select.bind(db);
+    let zoneReads = 0;
+    const spy = mock.method(db, "select", (...args: any[]) => {
+      const builder = original(...args as Parameters<typeof db.select>);
+      const from = builder.from.bind(builder);
+      builder.from = ((table: any) => {
+        if (table === irrigationProfileZones) zoneReads++;
+        return from(table);
+      }) as typeof builder.from;
+      return builder;
+    });
+    try {
+      const list = await hit(srv.base, "GET", `/api/customers/${customerAId}/controllers-profile`);
+      assert.equal(list.status, 200);
+      assert.equal(list.body.length, 2);
+      assert.equal(zoneReads, 2, "one current-zone query and one retired-count query for the whole list");
+      assert.equal(list.body.find((c: any) => c.id === added.body.id).zones.length, 2);
+    } finally {
+      spy.mock.restore();
+    }
   });
 
   it("PUT /api/irrigation-controllers/:id updates controller and stamps lastUpdatedBy*", async () => {
@@ -395,11 +450,37 @@ describe("Irrigation Profile routes — Tenant isolation", () => {
   it("super_admin GET controller B returns 200", async () => {
     const r = await hit(srvSuperAdmin.base, "GET", `/api/irrigation-controllers/${ctrlBId}`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.zones[0].companyId, companyBId);
+    const list = await hit(srvSuperAdmin.base, "GET", `/api/customers/${customerBId}/controllers-profile`);
+    assert.equal(list.status, 200);
+    assert.equal(list.body.find((c: any) => c.id === ctrlBId).zones[0].id, zoneBId);
   });
 
   it("super_admin GET controller A returns 200", async () => {
     const r = await hit(srvSuperAdmin.base, "GET", `/api/irrigation-controllers/${ctrlAId}`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
+  });
+
+  it("list and detail exclude mismatched-company zones even for super_admin", async () => {
+    const [alien] = await db.insert(irrigationProfileZones).values({
+      companyId: companyAId, controllerId: ctrlBId, zoneNumber: 99, name: "Foreign zone", zoneType: "rotor",
+    }).returning();
+    try {
+      for (const base of [srvB.base, srvSuperAdmin.base]) {
+        const detail = await hit(base, "GET", `/api/irrigation-controllers/${ctrlBId}`);
+        assert.equal(detail.body.zones.some((z: any) => z.id === alien.id), false);
+        const list = await hit(base, "GET", `/api/customers/${customerBId}/controllers-profile`);
+        assert.equal(list.body.find((c: any) => c.id === ctrlBId).zones.some((z: any) => z.id === alien.id), false);
+        await db.update(irrigationProfileZones).set({ retiredAt: new Date(), retiredByName: "Foreign actor" }).where(eq(irrigationProfileZones.id, alien.id));
+        const retired = await hit(base, "GET", `/api/irrigation-controllers/${ctrlBId}`);
+        assert.equal(retired.body.retiredZones.some((z: any) => z.id === alien.id), false);
+        const retiredList = await hit(base, "GET", `/api/customers/${customerBId}/controllers-profile`);
+        assert.equal(retiredList.body.find((c: any) => c.id === ctrlBId).retiredZoneCount, 0);
+        await db.update(irrigationProfileZones).set({ retiredAt: null }).where(eq(irrigationProfileZones.id, alien.id));
+      }
+    } finally {
+      await db.delete(irrigationProfileZones).where(eq(irrigationProfileZones.id, alien.id));
+    }
   });
 
   it("Two companies can each have 'Controller A' / 'Zone 1' without collision", async () => {
