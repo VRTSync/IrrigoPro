@@ -19,7 +19,7 @@ reached production this way with nothing in between ever asking the compiler.
 means a root `[deployment] build` running the typecheck once, before the per-artifact builds.
 
 ## The three drift directions, and who owns each
-- schema diff silently not applied → `drizzle-kit push --force`
+- schema diff silently not applied → normal push with closed stdin and an explicit completion check; destructive prompts require human review
 - database missing what the schema defines → `pnpm --filter db verify`
 - code referencing what the schema does not define → `pnpm run typecheck`
 

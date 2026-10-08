@@ -4,9 +4,9 @@ description: drizzle-kit push exits 0 without applying anything when the diff co
 ---
 
 ## Rule
-Never trust a plain `drizzle-kit push` exit code. When the diff contains data-loss statements (table/column drops), it stops at an interactive confirmation prompt and exits **0 without applying anything** — `set -e` cannot catch it. Automated pushes must be non-interactive (`--force`) and be followed by a drift check (`pnpm --filter db verify`) that asserts the DB matches the schema.
+Never trust a plain `drizzle-kit push` exit code. When the diff contains data-loss statements (table/column drops), it stops at an interactive confirmation prompt and exits **0 without applying anything** — `set -e` cannot catch it. Unattended setup must use normal push with closed stdin, require an explicit completion message, and then verify schema drift. Do not use `--force` or answer drop, rename, or truncation prompts without separate authorization.
 
-**Why:** A retired-table drop in the diff made every automated dev push silently no-op; publish diffs dev↔prod, saw no schema gap, and production shipped code selecting columns that didn't exist (500s).
+**Why:** A retired-table drop in the diff made every automated dev push silently no-op; publish diffs dev↔prod, saw no schema gap, and production shipped code selecting columns that didn't exist (500s). The user subsequently authorized replacing automatic force-push with normal push that stops for human review of destructive prompts.
 
 **How to apply:** If code references a column the DB says doesn't exist, suspect a swallowed data-loss prompt before suspecting the code. Run the drift check first.
 
