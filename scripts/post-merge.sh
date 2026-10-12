@@ -24,4 +24,7 @@ pnpm --filter @workspace/db verify
 # lib/db, and the artifact projects read its emitted declarations, so the
 # schema has to be settled before this step.
 # Coverage, timings and known gaps: docs/merge-gate-drift-checks.md
-pnpm run typecheck
+# Bound setup's compiler load independently of the four validation lanes.
+# Keep the same coverage and build shared declarations before artifact checks.
+pnpm run typecheck:libs
+pnpm -r --workspace-concurrency=1 --filter "./artifacts/**" --filter "./scripts" --if-present run typecheck

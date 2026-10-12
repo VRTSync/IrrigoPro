@@ -41,7 +41,7 @@ for (const message of ["[✓] Changes applied", "[i] No changes detected"]) {
   test(`setup continues after ${message}`, (t) => {
     const result = runSetup(t, message);
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.calls, /--filter @workspace\/db verify\nrun typecheck\n$/);
+    assert.match(result.calls, /--filter @workspace\/db verify\nrun typecheck:libs\n-r --workspace-concurrency=1 --filter \.\/artifacts\/\*\* --filter \.\/scripts --if-present run typecheck\n$/);
     assert.doesNotMatch(result.calls, /push-force|--force/);
   });
 }

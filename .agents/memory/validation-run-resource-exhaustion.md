@@ -62,3 +62,29 @@ maximum of one; that configuration failure is unrelated to the assertions.
 
 **How to apply:** Limit both worker bounds together only when the user permits changing
 or registering focused commands. Preserve existing command flags and timeouts otherwise.
+
+## Merge setup and retired workflow processes
+Inspect live processes as well as the current workflow list after removing many
+workflows. Retired test process trees can outlive their configuration while setup
+is waiting to finish; do not infer bounded load from the new lane configuration.
+
+**Why:** A merge setup timed out under leftover retired check processes even though
+the four replacement lanes were idle. The SIGTERM in the typecheck log came from
+the setup deadline, not a reported compiler diagnostic. No OOM kill or PID-limit
+failure was recorded.
+
+**How to apply:** Match retired commands and isolated process groups before stopping
+obsolete checks; never broadly kill Node processes. Keep merge-time compiler work
+serial without removing coverage or altering the four validation lane commands.
+Re-run setup and distinguish its result from completion-lane validation.
+
+After reconciliation, check managed workflow status rather than trusting the
+reconciliation success flag alone.
+
+**Why:** Leftover dev servers can still serve a healthy preview while replacement
+managed workflows fail with port-in-use errors, so a screenshot alone misses the
+ownership problem.
+
+**How to apply:** Identify the actual listener, its artifact working directory,
+and its process group before stopping an obsolete server; restart the existing
+managed service and verify its running state and expected port.
