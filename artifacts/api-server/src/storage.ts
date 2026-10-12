@@ -209,7 +209,7 @@ import {
 } from "./invoice-merge";
 import { recordAuditEvent } from "./routes/audit-log";
 import { normalizeUsername } from "./lib/normalize-username";
-import { ZoneCountClearError, validateZoneCount, zonePlaceholder, zoneCountSummary, type ZoneActor, type ZoneChanges } from "./lib/controller-zone-records";
+import { ZoneCountClearError, validateZoneCount, zonePlaceholder, zoneCountSummary, compressZoneRanges, parseZoneRanges, zoneEditSummary, ZONE_EDIT_SUMMARY_PREFIX, ZoneProgramError, type BulkZonePatch, type ZoneActor, type ZoneChanges } from "./lib/controller-zone-records";
 export { ZoneCountClearError } from "./lib/controller-zone-records";
 
 
@@ -451,6 +451,7 @@ export interface CustomerSpendInvoiceRow {
 }
 
 export interface IStorage {
+  bulkUpdateIrrigationZones(companyId: number | null, controllerId: number, zoneIds: number[], patch: BulkZonePatch, actor?: ZoneActor): Promise<IrrigationProfileZone[] | null>;
   // Companies
   getCompanies(): Promise<Company[]>;
   getCompany(id: number): Promise<Company | undefined>;
@@ -11361,13 +11362,13 @@ export class DatabaseStorage implements IStorage {
     const programs = await (tx as typeof db)
       .select()
       .from(irrigationPrograms)
-      .where(eq(irrigationPrograms.controllerId, ctrl.id))
+      .where(and(eq(irrigationPrograms.controllerId, ctrl.id), eq(irrigationPrograms.companyId, ctrl.companyId)))
       .orderBy(irrigationPrograms.sortOrder, irrigationPrograms.id);
 
     const zones = await (tx as typeof db)
       .select()
       .from(irrigationProfileZones)
-      .where(and(eq(irrigationProfileZones.controllerId, ctrl.id), isNull(irrigationProfileZones.retiredAt)))
+      .where(and(eq(irrigationProfileZones.controllerId, ctrl.id), eq(irrigationProfileZones.companyId, ctrl.companyId), isNull(irrigationProfileZones.retiredAt)))
       .orderBy(irrigationProfileZones.zoneOrder, irrigationProfileZones.zoneNumber);
 
     await (tx as typeof db).insert(irrigationProfileHistory).values({
@@ -11377,6 +11378,61 @@ export class DatabaseStorage implements IStorage {
       changedByUserId: actor?.id ?? null,
       changedByName: actor?.name ?? null,
       summary,
+    });
+  }
+
+  private async _appendOrFoldZoneEditSnapshot(tx: DbExecutor, ctrl: IrrigationController, actor: ZoneActor | undefined, numbers: number[]): Promise<void> {
+    const [latest] = await tx.select().from(irrigationProfileHistory)
+      .where(and(eq(irrigationProfileHistory.controllerId, ctrl.id), eq(irrigationProfileHistory.companyId, ctrl.companyId)))
+      .orderBy(desc(irrigationProfileHistory.changedAt), desc(irrigationProfileHistory.id)).limit(1);
+    const now = new Date();
+    if (actor?.id != null && latest?.changedByUserId === actor.id &&
+        latest.summary?.startsWith(ZONE_EDIT_SUMMARY_PREFIX) &&
+        now.getTime() - new Date(latest.changedAt).getTime() >= 0 &&
+        now.getTime() - new Date(latest.changedAt).getTime() <= 600_000) {
+      const programs = await tx.select().from(irrigationPrograms).where(and(eq(irrigationPrograms.controllerId, ctrl.id), eq(irrigationPrograms.companyId, ctrl.companyId))).orderBy(irrigationPrograms.sortOrder, irrigationPrograms.id);
+      const zones = await tx.select().from(irrigationProfileZones).where(and(eq(irrigationProfileZones.controllerId, ctrl.id), eq(irrigationProfileZones.companyId, ctrl.companyId), isNull(irrigationProfileZones.retiredAt))).orderBy(irrigationProfileZones.zoneOrder, irrigationProfileZones.zoneNumber);
+      await tx.update(irrigationProfileHistory).set({
+        snapshotJson: { controller: ctrl, programs, zones },
+        summary: zoneEditSummary([...parseZoneRanges(latest.summary.slice(ZONE_EDIT_SUMMARY_PREFIX.length)), ...numbers]),
+        changedAt: now,
+      }).where(eq(irrigationProfileHistory.id, latest.id));
+    } else {
+      await this._appendIrrigationSnapshot(tx, ctrl, actor, zoneEditSummary(numbers));
+    }
+  }
+
+  async bulkUpdateIrrigationZones(companyId: number | null, controllerId: number, zoneIds: number[], patch: BulkZonePatch, actor?: ZoneActor): Promise<IrrigationProfileZone[] | null> {
+    if (new Set(zoneIds).size !== zoneIds.length || !zoneIds.length || zoneIds.length > 100) return null;
+    if (companyId !== null && (!Number.isInteger(companyId) || companyId <= 0)) return null;
+    return db.transaction(async tx => {
+      const [ctrl] = await tx.select().from(irrigationControllers).where(and(
+        eq(irrigationControllers.id, controllerId), companyId === null ? undefined : eq(irrigationControllers.companyId, companyId),
+      )).for("update");
+      if (!ctrl) return null;
+      const scope = and(inArray(irrigationProfileZones.id, zoneIds), eq(irrigationProfileZones.controllerId, ctrl.id), eq(irrigationProfileZones.companyId, ctrl.companyId), isNull(irrigationProfileZones.retiredAt));
+      const zones = await tx.select().from(irrigationProfileZones).where(scope);
+      if (zones.length !== zoneIds.length) return null;
+      let programName = "None";
+      if (patch.programId != null) {
+        const [program] = await tx.select().from(irrigationPrograms).where(and(eq(irrigationPrograms.id, patch.programId), eq(irrigationPrograms.controllerId, ctrl.id), eq(irrigationPrograms.companyId, ctrl.companyId)));
+        if (!program) throw new ZoneProgramError();
+        programName = program.name;
+      }
+      const fields: BulkZonePatch = {};
+      if (patch.zoneType !== undefined) fields.zoneType = patch.zoneType;
+      if (patch.programId !== undefined) fields.programId = patch.programId;
+      if (patch.runTimeMinutes !== undefined) fields.runTimeMinutes = patch.runTimeMinutes;
+      const updated = await tx.update(irrigationProfileZones).set({ ...fields, updatedAt: new Date() }).where(scope).returning();
+      const stamped = await this._stampControllerUpdated(tx, ctrl.id, actor?.id != null ? { id: actor.id, name: actor.name } : undefined);
+      const labels: Record<string, string> = { pop_up_spray: "Pop-up Spray", rotor: "Rotor", drip: "Drip", netafim: "Netafim", bubbler: "Bubbler", other: "Other" };
+      const descriptions = [
+        patch.zoneType === undefined ? null : `Type ${labels[patch.zoneType]}`,
+        patch.programId === undefined ? null : `Program ${programName}`,
+        patch.runTimeMinutes === undefined ? null : `Runtime ${patch.runTimeMinutes} min`,
+      ].filter(Boolean);
+      await this._appendIrrigationSnapshot(tx, stamped ?? ctrl, actor, `Zones ${compressZoneRanges(zones.map(z => z.zoneNumber))} set: ${descriptions.join(", ")}`);
+      return updated;
     });
   }
 
@@ -11885,11 +11941,11 @@ export class DatabaseStorage implements IStorage {
         .where(eq(irrigationControllers.id, existing.controllerId));
       if (ctrl) {
         const stampedCtrl = await this._stampControllerUpdated(tx, ctrl.id, actor);
-        await this._appendIrrigationSnapshot(
+        await this._appendOrFoldZoneEditSnapshot(
           tx,
           stampedCtrl ?? ctrl,
           actor,
-          `Zone ${updated.zoneNumber} "${updated.name}" updated`,
+          [updated.zoneNumber],
         );
       }
       return updated;

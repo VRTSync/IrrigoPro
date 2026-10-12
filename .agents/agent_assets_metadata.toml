@@ -179,3 +179,17 @@ mtime_ms = 1791481140860
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/117e0604-6489-422a-8fc6-9f024695e9ab/9f1639dc-4df0-464b-963b-b61c9534922c"
 storage_version_token = "1791481221479549"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "5qN9ds1PRpLOSusqpxpss"
+uri = "file://attached_assets/fast-zone-entry-evidence/customer-card-bulk.jpg"
+type = "image"
+title = "Fast Zone Entry — 20-zone bulk selection"
+description = "Development browser evidence from the customer profile card; isolated fixture, not production."
+logical_id = "59a9c6a7-e6fe-4574-957c-97a2b130706e"
+content_hash = "sha256:4665fe67a70e88703fccfc0084e990e898c0a467a0b2a2fcfaa8b103db73c4b2"
+size = 130783
+mtime_ms = 1791487918008
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/59a9c6a7-e6fe-4574-957c-97a2b130706e/4bdc1839-14c9-4171-a1a8-fc0747898597"
+storage_version_token = "1791489183135536"
+content_type = "image/jpeg"

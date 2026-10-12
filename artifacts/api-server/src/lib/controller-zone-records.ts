@@ -28,6 +28,30 @@ export function compressZoneRanges(numbers: number[]): string {
   return ranges.join(", ");
 }
 
+export const ZONE_EDIT_SUMMARY_PREFIX = "Zones edited: ";
+export function zoneEditSummary(numbers: number[]): string {
+  // Session summaries list pairs separately, retaining the specified
+  // "3, 4, 7" wording; runs of three or more remain compressed.
+  return ZONE_EDIT_SUMMARY_PREFIX + compressZoneRanges(numbers).replace(/(\d+)-(\d+)/g, (range, start, end) =>
+    Number(end) === Number(start) + 1 ? `${start}, ${end}` : range);
+}
+export function parseZoneRanges(value: string): number[] {
+  const numbers: number[] = [];
+  for (const token of value.split(",")) {
+    const match = /^\s*(\d+)(?:-(\d+))?\s*$/.exec(token);
+    if (!match) return [];
+    const start = Number(match[1]), end = Number(match[2] ?? match[1]);
+    if (start < 1 || end < start || end > 100) return [];
+    for (let n = start; n <= end; n++) numbers.push(n);
+  }
+  return [...new Set(numbers)].sort((a, b) => a - b);
+}
+
+export type BulkZonePatch = { zoneType?: string; programId?: number | null; runTimeMinutes?: number };
+export class ZoneProgramError extends Error {
+  constructor() { super("Program not on this controller"); }
+}
+
 export function zoneCountSummary(old: number | null, target: number, changes: ZoneChanges): string {
   let summary = `Zone count ${old ?? "not set"} → ${target}`;
   if (changes.created.length) summary += `; added zones ${compressZoneRanges(changes.created)}`;

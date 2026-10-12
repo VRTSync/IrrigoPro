@@ -14,3 +14,9 @@ Connected controller tiles keep Add Zone available to zone editors, including fi
 **Why:** The user's explicit permission correction overrides the build-out attachment's manager-only Add Zone statement. Consolidating the increment implementation must not narrow technician access.
 
 **How to apply:** Gate the two increment controls separately; do not place a manager-only guard around their shared action. Field technicians may add/restored zones through Add Zone but must not get profile retirement controls.
+
+Fast-entry history treats individual zone edits as a rolling ten-minute session for one identified actor on one controller. A bulk apply is a separate deliberate action, and a non-zone action interrupts folding.
+
+**Why:** The supplied specification explicitly rejects hundreds of per-cell history entries during large controller build-outs, while preserving bulk operations as readable audit events.
+
+**How to apply:** Keep these audit boundaries when extending zone editing. Never merge across actors, absent actors, intervening actions, or expired sessions.

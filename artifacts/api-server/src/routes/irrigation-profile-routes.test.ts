@@ -27,7 +27,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { registerIrrigationProfileRoutes } from "./irrigation-profile-routes";
 import { storage } from "../storage";
 import { makePropertyControllerPatch } from "./property-controller-patch";
-import { CLEAR_ZONE_COUNT_MESSAGE } from "../lib/controller-zone-records";
+import { CLEAR_ZONE_COUNT_MESSAGE, compressZoneRanges, parseZoneRanges } from "../lib/controller-zone-records";
 
 // ── Test server factory ────────────────────────────────────────────────────────
 
@@ -165,6 +165,144 @@ async function cleanupControllers() {
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+describe("Zone range inverse", () => {
+  it("round-trips compressed unions and rejects malformed ranges", () => {
+    assert.deepEqual(parseZoneRanges(compressZoneRanges([7, 4, 3, 7, 8, 9, 12])), [3, 4, 7, 8, 9, 12]);
+    for (const value of ["", "3-x", "5-3", "0", "1-9999999", "3, nope"]) assert.deepEqual(parseZoneRanges(value), []);
+  });
+});
+
+describe("Fast zone entry — atomic bulk and editing sessions", () => {
+  let srv: ReturnType<typeof makeTestServer>;
+  const actor = () => ({ id: managerAUserId, name: "Manager A" });
+  async function fixture(count = 8) {
+    const ctrl = await storage.createIrrigationController({ companyId: companyAId, customerId: customerAId, name: `Fast entry ${Date.now()} ${Math.random()}`, totalZones: count });
+    createdControllerIds.push(ctrl.id);
+    return (await storage.getIrrigationController(companyAId, ctrl.id))!;
+  }
+  before(async () => {
+    if (!companyAId) await setupCompanies();
+    srv = makeTestServer({ role: "irrigation_manager", companyId: companyAId, userId: managerAUserId });
+  });
+  after(async () => { await cleanupControllers(); await srv.close(); });
+  it("bulk updates five rows, stamps controller and writes one descriptive snapshot", async () => {
+    const ctrl = await fixture();
+    const before = (await storage.getIrrigationHistory(companyAId, ctrl.id)).length;
+    const r = await hit(srv.base, "PUT", `/api/irrigation-controllers/${ctrl.id}/zones/bulk`, {
+      zoneIds: ctrl.zones.slice(2, 7).map(z => z.id), patch: { zoneType: "rotor", runTimeMinutes: 12 },
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.length, 5);
+    assert.ok(r.body.every((z: any) => z.zoneType === "rotor" && z.runTimeMinutes === 12));
+    const history = await storage.getIrrigationHistory(companyAId, ctrl.id);
+    assert.equal(history.length, before + 1);
+    assert.equal(history[0].summary, "Zones 3-7 set: Type Rotor, Runtime 12 min");
+    assert.equal(history[0].changedByUserId, managerAUserId);
+    assert.equal((history[0].snapshotJson as any).zones.length, 8);
+  });
+  it("retired, wrong-controller and mismatched-company IDs reject the whole set with no writes", async () => {
+    const ctrl = await fixture(), other = await fixture(1);
+    await storage.setControllerZoneCount(companyAId, ctrl.id, 7, actor());
+    const [alien] = await db.insert(irrigationProfileZones).values({ companyId: companyBId, controllerId: ctrl.id, zoneNumber: 99, name: "Alien" }).returning();
+    try {
+      const before = await storage.getIrrigationHistory(companyAId, ctrl.id);
+      for (const invalid of [ctrl.zones[7].id, other.zones[0].id, alien.id]) {
+        const r = await hit(srv.base, "PUT", `/api/irrigation-controllers/${ctrl.id}/zones/bulk`, { zoneIds: [ctrl.zones[0].id, invalid], patch: { runTimeMinutes: 99 } });
+        assert.equal(r.status, 404);
+        assert.equal((await storage.getIrrigationController(companyAId, ctrl.id))!.zones[0].runTimeMinutes, 0);
+        assert.equal((await storage.getIrrigationHistory(companyAId, ctrl.id)).length, before.length);
+      }
+    } finally { await db.delete(irrigationProfileZones).where(eq(irrigationProfileZones.id, alien.id)); }
+  });
+  it("foreign program returns 400; None and zero are explicit updates with readable labels", async () => {
+    const ctrl = await fixture(1), other = await fixture(1);
+    const program = await storage.createIrrigationProgram(companyAId, other.id, { name: "B" });
+    const r = await hit(srv.base, "PUT", `/api/irrigation-controllers/${ctrl.id}/zones/bulk`, { zoneIds: [ctrl.zones[0].id], patch: { programId: program!.id } });
+    assert.equal(r.status, 400); assert.equal(r.body.message, "Program not on this controller");
+    const local = await storage.createIrrigationProgram(companyAId, ctrl.id, { name: "Morning" });
+    await storage.bulkUpdateIrrigationZones(companyAId, ctrl.id, [ctrl.zones[0].id], { programId: local!.id, runTimeMinutes: 12 }, actor());
+    assert.equal((await storage.getIrrigationHistory(companyAId, ctrl.id))[0].summary, "Zones 1 set: Program Morning, Runtime 12 min");
+    const cleared = await hit(srv.base, "PUT", `/api/irrigation-controllers/${ctrl.id}/zones/bulk`, { zoneIds: [ctrl.zones[0].id], patch: { programId: null, runTimeMinutes: 0 } });
+    assert.equal(cleared.status, 200); assert.equal(cleared.body[0].programId, null); assert.equal(cleared.body[0].runTimeMinutes, 0);
+  });
+  it("validates duplicate IDs, size limits, permitted fields and runtime bounds", async () => {
+    const ctrl = await fixture(1), id = ctrl.zones[0].id;
+    for (const body of [
+      { zoneIds: [id, id], patch: { zoneType: "rotor" } },
+      { zoneIds: [], patch: { zoneType: "rotor" } },
+      { zoneIds: Array.from({ length: 101 }, (_, i) => i + 1), patch: { zoneType: "rotor" } },
+      { zoneIds: [id], patch: {} }, { zoneIds: [id], patch: { name: "Not allowed" } },
+      { zoneIds: [id], patch: { runTimeMinutes: -1 } }, { zoneIds: [id], patch: { runTimeMinutes: 1000 } },
+    ]) assert.equal((await hit(srv.base, "PUT", `/api/irrigation-controllers/${ctrl.id}/zones/bulk`, body)).status, 400);
+  });
+  it("matches zone write roles, scopes tenants, and permits cross-company super admin", async () => {
+    const ctrl = await fixture(1);
+    for (const [role, companyId, expected] of [
+      ["company_admin", companyAId, 200], ["field_tech", companyAId, 200], ["billing_manager", companyAId, 403],
+      ["bookkeeper", companyAId, 403], ["irrigation_manager", companyBId, 404], ["irrigation_manager", null, 401],
+      ["irrigation_manager", NaN, 401], ["irrigation_manager", -1, 401], ["super_admin", null, 200],
+      ["irrigation_manager", true as any, 401], ["irrigation_manager", {} as any, 401],
+    ] as const) {
+      const test = makeTestServer({ role, companyId, userId: managerAUserId });
+      try {
+        assert.equal((await hit(test.base, "PUT", `/api/irrigation-controllers/${ctrl.id}/zones/bulk`, { zoneIds: [ctrl.zones[0].id], patch: { zoneType: "rotor" } })).status, expected, role);
+      } finally { await test.close(); }
+    }
+  });
+  it("folds three field saves into one latest session; different actors and expired windows split it", async () => {
+    const ctrl = await fixture();
+    for (const n of [3, 4, 7]) assert.equal((await hit(srv.base, "PUT", `/api/irrigation-zones/${ctrl.zones[n - 1].id}`, { name: `Garden ${n}` })).status, 200);
+    let history = await storage.getIrrigationHistory(companyAId, ctrl.id);
+    assert.equal(history.filter(h => h.summary?.startsWith("Zones edited: ")).length, 1);
+    assert.equal(history[0].summary, "Zones edited: 3, 4, 7");
+    assert.equal((history[0].snapshotJson as any).zones.find((z: any) => z.zoneNumber === 7).name, "Garden 7");
+    await storage.updateIrrigationZone(companyAId, ctrl.zones[0].id, { notes: "Different actor" }, { id: managerBUserId, name: "Manager B" });
+    history = await storage.getIrrigationHistory(companyAId, ctrl.id);
+    assert.equal(history[0].summary, "Zones edited: 1");
+    await db.update(irrigationProfileHistory).set({ changedAt: new Date(Date.now() - 660_000) }).where(eq(irrigationProfileHistory.controllerId, ctrl.id));
+    const count = history.length;
+    await storage.updateIrrigationZone(companyAId, ctrl.zones[1].id, { notes: "Expired" }, { id: managerBUserId, name: "Manager B" });
+    assert.equal((await storage.getIrrigationHistory(companyAId, ctrl.id)).length, count + 1);
+  });
+  it("intervening bulk/non-zone entries and missing actors never fold; retired zones stay out of snapshots", async () => {
+    const ctrl = await fixture(3);
+    await storage.updateIrrigationZone(companyAId, ctrl.zones[0].id, { name: "Garden" }, actor());
+    await storage.bulkUpdateIrrigationZones(companyAId, ctrl.id, [ctrl.zones[0].id], { runTimeMinutes: 5 }, actor());
+    await storage.updateIrrigationZone(companyAId, ctrl.zones[1].id, { name: "Lawn" }, actor());
+    let history = await storage.getIrrigationHistory(companyAId, ctrl.id);
+    assert.equal(history.filter(h => h.summary?.startsWith("Zones edited: ")).length, 2);
+    const count = history.length;
+    await storage.updateIrrigationZone(companyAId, ctrl.zones[0].id, { notes: "No actor" });
+    await storage.updateIrrigationZone(companyAId, ctrl.zones[1].id, { notes: "Still no actor" });
+    assert.equal((await storage.getIrrigationHistory(companyAId, ctrl.id)).length, count + 2);
+    await storage.setControllerZoneCount(companyAId, ctrl.id, 2, actor());
+    assert.equal(await storage.updateIrrigationZone(companyAId, ctrl.zones[2].id, { name: "Retired edit" }, actor()), null);
+    await storage.updateIrrigationZone(companyAId, ctrl.zones[0].id, { notes: "After count" }, actor());
+    history = await storage.getIrrigationHistory(companyAId, ctrl.id);
+    assert.equal((history[0].snapshotJson as any).zones.length, 2);
+  });
+  it("controller lock serializes concurrent edits into a fresh full snapshot", async () => {
+    const ctrl = await fixture(3);
+    await Promise.all(ctrl.zones.map(z => storage.updateIrrigationZone(companyAId, z.id, { name: `Garden ${z.zoneNumber}` }, actor())));
+    const history = await storage.getIrrigationHistory(companyAId, ctrl.id);
+    assert.equal(history.filter(h => h.summary?.startsWith("Zones edited: ")).length, 1);
+    assert.equal(history[0].summary, "Zones edited: 1-3");
+    assert.ok((history[0].snapshotJson as any).zones.every((z: any) => z.name.startsWith("Garden")));
+  });
+  it("rolls zone writes and stamp back if history fails", async () => {
+    const ctrl = await fixture(3);
+    const before = await storage.getIrrigationHistory(companyAId, ctrl.id);
+    const spy = mock.method(storage as any, "_appendIrrigationSnapshot", async () => { throw new Error("Injected history failure"); });
+    try {
+      const result = await hit(srv.base, "PUT", `/api/irrigation-controllers/${ctrl.id}/zones/bulk`, { zoneIds: ctrl.zones.map(z => z.id), patch: { runTimeMinutes: 33 } });
+      assert.equal(result.status, 500);
+      const after = (await storage.getIrrigationController(companyAId, ctrl.id))!;
+      assert.ok(after.zones.every(z => z.runTimeMinutes === 0));
+      assert.deepEqual(after.lastUpdatedAt, ctrl.lastUpdatedAt);
+      assert.equal((await storage.getIrrigationHistory(companyAId, ctrl.id)).length, before.length);
+    } finally { spy.mock.restore(); }
+  });
+});
 
 describe("Irrigation Profile routes — Happy path", () => {
   let srv: ReturnType<typeof makeTestServer>;

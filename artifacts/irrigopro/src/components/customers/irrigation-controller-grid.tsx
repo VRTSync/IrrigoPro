@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -51,6 +53,8 @@ import {
   ArrowLeft,
   Minus,
   Cpu,
+  Check,
+  AlertCircle,
 } from "lucide-react";
 import type {
   IrrigationController,
@@ -798,11 +802,16 @@ function ProgramCard({
 
 // ── Zone row ──────────────────────────────────────────────────────────────────
 
-function ZoneRow({
+function ZoneSheetRow({
   zone,
   programs,
   controllerId,
-  onSaved,
+  customerId,
+  index,
+  selected,
+  onSelect,
+  disabled,
+  onBusy,
   onDraftChange,
   canEditZone,
   focus,
@@ -811,15 +820,32 @@ function ZoneRow({
   zone: IrrigationProfileZone;
   programs: IrrigationProgram[];
   controllerId: number;
-  onSaved: () => void;
+  customerId: number;
+  index: number;
+  selected: boolean;
+  onSelect: (shift: boolean) => void;
+  disabled: boolean;
+  onBusy: (id: number, busy: boolean) => void;
   onDraftChange?: (draft: IrrigationProfileZone) => void;
   canEditZone: boolean;
   focus?: ZoneFocus | null;
   onFocusConsumed: (token: number) => void;
 }) {
-  const { toast } = useToast();
-  const [editing, setEditing] = useState(!!focus && canEditZone);
   const [draft, setDraft] = useState({ ...zone });
+  const saved = useRef({ ...zone });
+  const draftRef = useRef(draft);
+  const dirty = useRef(new Set<keyof IrrigationProfileZone>());
+  const queued = useRef(new Map<string, Partial<IrrigationProfileZone>>());
+  const running = useRef<Partial<IrrigationProfileZone> | null>(null);
+  const [pending, setPending] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const errorsRef = useRef(errors);
+  const failed = useRef<string | null>(null);
+  const [emptyName, setEmptyName] = useState(false);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipBlur = useRef<string | null>(null);
   const queryClient = useQueryClient();
   const rowRef = useRef<HTMLTableRowElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -830,250 +856,137 @@ function ZoneRow({
   useEffect(() => {
     if (!focus || appliedFocus.current === focus.token) return;
     appliedFocus.current = focus.token;
-    if (canEditZone) {
-      setDraft({ ...zone });
-      setEditing(true);
-    }
+    if (canEditZone) { nameRef.current?.focus(); nameRef.current?.select(); }
     rowRef.current?.scrollIntoView?.({ block: "center", behavior: "smooth" });
     setHighlighted(true);
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlighted(false), 2000);
     onFocusConsumed(focus.token);
   }, [focus, canEditZone, zone, onFocusConsumed]);
-  useEffect(() => {
-    if (editing && highlighted) nameRef.current?.focus();
-  }, [editing, highlighted]);
   useEffect(() => () => {
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    timers.current.forEach(clearTimeout);
+    if (successTimer.current) clearTimeout(successTimer.current);
   }, []);
 
   useEffect(() => {
-    if (editing) onDraftChange?.(draft as IrrigationProfileZone);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, editing]);
+    const next = { ...zone };
+    for (const field of dirty.current) Object.assign(next, { [field]: draftRef.current[field] });
+    saved.current = { ...zone };
+    draftRef.current = next;
+    setDraft(next);
+  }, [zone]);
+  useEffect(() => { onDraftChange?.(draft); }, [draft, onDraftChange]);
+
+  const change = (field: keyof IrrigationProfileZone, value: unknown) => {
+    dirty.current.add(field);
+    draftRef.current = { ...draftRef.current, [field]: value };
+    setDraft(draftRef.current);
+  };
+  const setFieldErrors = (next: Record<string, string>) => { errorsRef.current = next; setErrors(next); };
 
   const saveMutation = useMutation({
-    mutationFn: (data: Partial<IrrigationProfileZone>) =>
+    mutationFn: (data: Partial<IrrigationProfileZone>): Promise<IrrigationProfileZone> =>
       apiRequest(`/api/irrigation-zones/${zone.id}`, "PUT", data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [`/api/irrigation-controllers/${controllerId}`],
-      });
-      setEditing(false);
-      toast({ title: "Zone saved" });
-      onSaved();
-    },
-    onError: (err: any) => {
-      toast({
-        title: "Save failed",
-        description: err?.message ?? "Try again",
-        variant: "destructive",
-      });
-    },
   });
 
-  if (!editing) {
-    return (
-      <tr ref={rowRef} data-testid={`zone-row-${zone.id}`} className={`${!zone.isActive ? "bg-amber-50" : ""} ${highlighted ? "ring-2 ring-blue-400" : ""}`}>
-        <td className="px-2 py-2 border border-gray-200 text-center text-sm">{zone.zoneNumber}</td>
-        <td className="px-2 py-2 border border-gray-200">
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm">{zone.name}</span>
-            {!zone.isActive && (
-              <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-xs gap-1">
-                <AlertTriangle className="w-3 h-3" /> Needs attention
-              </Badge>
-            )}
-          </div>
-        </td>
-        <td className="px-2 py-2 border border-gray-200 text-xs text-gray-600">
-          {programs.find((p) => p.id === zone.programId)?.name ?? "—"}
-        </td>
-        <td className="px-2 py-2 border border-gray-200 text-xs text-gray-600">
-          {zoneTypeLabel(zone.zoneType)}
-        </td>
-        <td className="px-2 py-2 border border-gray-200 text-sm text-right">{zone.runTimeMinutes}</td>
-        <td className="px-2 py-2 border border-gray-200 text-sm text-center">{zone.zoneOrder}</td>
-        <td className="px-2 py-2 border border-gray-200 text-center">
-          <span
-            className={`text-xs px-1.5 py-0.5 rounded-full ${
-              zone.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
-            }`}
-          >
-            {zone.isActive ? "Active" : "Inactive"}
-          </span>
-        </td>
-        <td className="px-2 py-2 border border-gray-200 text-xs text-gray-500 max-w-[120px] truncate">
-          {zone.notes || "—"}
-        </td>
-        <td className="px-2 py-2 border border-gray-200">
-          {canEditZone && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => {
-                setDraft({ ...zone });
-                setEditing(true);
-              }}
-            >
-              Edit
-            </Button>
-          )}
-        </td>
-      </tr>
-    );
-  }
-
-  return (
-    <tr ref={rowRef} data-testid={`zone-row-${zone.id}`} className={`bg-blue-50/40 ${highlighted ? "ring-2 ring-blue-400" : ""}`}>
-      <td colSpan={9} className="p-3 border border-blue-300">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-3">
-          <div>
-            <Label className="text-xs">Name</Label>
-            <Input
-              ref={nameRef}
-              aria-label={`Zone ${zone.zoneNumber} Name`}
-              value={draft.name}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              className="h-8 text-sm mt-1"
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Program</Label>
-            <Select
-              value={draft.programId != null ? String(draft.programId) : "none"}
-              onValueChange={(v) =>
-                setDraft({ ...draft, programId: v === "none" ? null : parseInt(v) })
-              }
-            >
-              <SelectTrigger className="h-8 text-sm mt-1">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">— None —</SelectItem>
-                {programs.map((p) => (
-                  <SelectItem key={p.id} value={String(p.id)}>
-                    Program {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs">Zone Type</Label>
-            <Select
-              value={draft.zoneType}
-              onValueChange={(v) => setDraft({ ...draft, zoneType: v })}
-            >
-              <SelectTrigger className="h-8 text-sm mt-1">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ZONE_TYPES.map((zt) => (
-                  <SelectItem key={zt.value} value={zt.value}>
-                    {zt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs">Run Time (min)</Label>
-            <Input
-              type="number"
-              min={0}
-              value={draft.runTimeMinutes}
-              onChange={(e) =>
-                setDraft({ ...draft, runTimeMinutes: parseInt(e.target.value) || 0 })
-              }
-              className="h-8 text-sm mt-1"
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Zone Order</Label>
-            <Input
-              type="number"
-              value={draft.zoneOrder}
-              onChange={(e) => setDraft({ ...draft, zoneOrder: parseInt(e.target.value) || 0 })}
-              className="h-8 text-sm mt-1"
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Override Start</Label>
-            <input
-              type="time"
-              value={draft.overrideStartTime ?? ""}
-              onChange={(e) =>
-                setDraft({ ...draft, overrideStartTime: e.target.value || null })
-              }
-              className="h-8 text-sm mt-1 border rounded px-2 py-1 w-full"
-            />
-          </div>
-          <div className="flex items-end gap-2 pb-1">
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={draft.isActive}
-                onCheckedChange={(v) => setDraft({ ...draft, isActive: v })}
-                id={`zone-active-${zone.id}`}
-              />
-              <Label htmlFor={`zone-active-${zone.id}`} className="text-xs">Active</Label>
-            </div>
-          </div>
-        </div>
-        {draft.overrideStartTime && (
-          <div className="mb-3">
-            <Label className="text-xs">Override Days</Label>
-            <div className="mt-1">
-              <DayPillSelector
-                value={draft.overrideDays ?? []}
-                onChange={(days) => setDraft({ ...draft, overrideDays: days })}
-              />
-            </div>
-          </div>
-        )}
-        <div className="mb-3">
-          <Label className="text-xs">Notes</Label>
-          <Input
-            value={draft.notes ?? ""}
-            onChange={(e) => setDraft({ ...draft, notes: e.target.value || null })}
-            className="h-8 text-sm mt-1"
-            placeholder="Optional notes…"
-          />
-        </div>
-        <div className="flex items-center gap-2 border-t pt-2">
-          <Button
-            size="sm"
-            disabled={saveMutation.isPending}
-            onClick={() =>
-              saveMutation.mutate({
-                name: draft.name,
-                programId: draft.programId,
-                zoneType: draft.zoneType,
-                runTimeMinutes: draft.runTimeMinutes,
-                zoneOrder: draft.zoneOrder,
-                isActive: draft.isActive,
-                notes: draft.notes,
-                overrideStartTime: draft.overrideStartTime,
-                overrideDays: draft.overrideDays,
-              })
-            }
-            className="gap-1.5"
-          >
-            {saveMutation.isPending ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Save className="w-3.5 h-3.5" />
-            )}
-            Save
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setEditing(false)} className="gap-1.5">
-            <X className="w-3.5 h-3.5" /> Cancel
-          </Button>
-        </div>
-      </td>
-    </tr>
+  // Serialize each row's requests. A Map coalesces repeated commits while a
+  // different field is in flight; synchronous refs also deduplicate Enter+blur.
+  const drain = async () => {
+    if (running.current || !queued.current.size) return;
+    setPending(true); setSuccess(false); onBusy(zone.id, true);
+    while (queued.current.size) {
+      const [key, patch] = queued.current.entries().next().value!;
+      queued.current.delete(key); running.current = patch;
+      try {
+        const response = await saveMutation.mutateAsync(patch);
+        const next = { ...response };
+        const nextErrors = { ...errorsRef.current };
+        for (const field of Object.keys(patch) as (keyof IrrigationProfileZone)[]) {
+          if (JSON.stringify(draftRef.current[field]) === JSON.stringify(patch[field])) dirty.current.delete(field);
+          delete nextErrors[field];
+        }
+        for (const field of dirty.current) Object.assign(next, { [field]: draftRef.current[field] });
+        saved.current = response; draftRef.current = next; setDraft(next);
+        setFieldErrors(nextErrors);
+        failed.current = Object.keys(nextErrors).at(-1) ?? null;
+        queryClient.setQueryData<ControllerWithDetail>([`/api/irrigation-controllers/${controllerId}`], old => old ? { ...old, zones: old.zones.map(z => z.id === zone.id ? response : z) } : old);
+        queryClient.setQueryData<ControllerWithZones[]>([`/api/customers/${customerId}/controllers-profile`], old => old?.map(c => c.id === controllerId ? { ...c, zones: c.zones.map(z => z.id === zone.id ? { id: response.id, zoneNumber: response.zoneNumber, name: response.name, zoneType: response.zoneType, isActive: response.isActive, setUp: !isPlaceholderZone(response) } : z) } : c));
+        queryClient.invalidateQueries({ queryKey: [`/api/irrigation-controllers/${controllerId}/history`] });
+        setSuccess(true);
+        if (successTimer.current) clearTimeout(successTimer.current);
+        successTimer.current = setTimeout(() => setSuccess(false), 1500);
+      } catch (error) {
+        const message = parseApiError(error, "Could not save zone — please retry");
+        const nextErrors = { ...errorsRef.current };
+        for (const field of Object.keys(patch)) nextErrors[field] = message;
+        setFieldErrors(nextErrors); failed.current = key;
+      } finally { running.current = null; }
+    }
+    setPending(false); onBusy(zone.id, false);
+  };
+  const commit = (field: keyof IrrigationProfileZone) => {
+    const value = draftRef.current[field];
+    if (field === "name" && !String(value).trim()) {
+      change("name", saved.current.name); dirty.current.delete("name");
+      setEmptyName(true); timers.current.push(setTimeout(() => setEmptyName(false), 2000));
+      return;
+    }
+    if (running.current && field in running.current) {
+      if (JSON.stringify(running.current[field]) === JSON.stringify(value)) { queued.current.delete(field); return; }
+    } else if (JSON.stringify(value) === JSON.stringify(saved.current[field]) && !errorsRef.current[field]) {
+      queued.current.delete(field); return;
+    }
+    queued.current.set(field, { [field]: value });
+    void drain();
+  };
+  const input = (field: "name" | "runTimeMinutes" | "zoneOrder" | "notes", label: string) => (
+    <Input ref={field === "name" ? nameRef : undefined} aria-label={`Zone ${zone.zoneNumber} ${label}`} data-testid={`input-zone-${field}-${zone.id}`}
+      data-zone-row={index} data-col={field} disabled={disabled} type={field === "runTimeMinutes" || field === "zoneOrder" ? "number" : "text"} min={0}
+      value={draft[field] ?? ""} title={field === "name" && emptyName ? "A zone needs a name" : errors[field]}
+      className={`h-8 text-sm ${field === "name" ? "min-w-32" : field === "notes" ? "min-w-28" : "w-20"} ${errors[field] || (field === "name" && emptyName) ? "border-red-400" : ""}`}
+      onChange={e => change(field, field === "runTimeMinutes" || field === "zoneOrder" ? Number(e.target.value) : e.target.value)}
+      onBlur={() => { if (skipBlur.current === field) { skipBlur.current = null; return; } commit(field); }}
+      onKeyDown={e => {
+        if (e.key === "Escape") {
+          e.preventDefault(); queued.current.delete(field); change(field, saved.current[field]); dirty.current.delete(field);
+          skipBlur.current = field; e.currentTarget.blur();
+        } else if (e.key === "Enter") {
+          e.preventDefault(); commit(field);
+          const next = rowRef.current?.closest("table")?.querySelector<HTMLInputElement>(`input[data-zone-row="${index + (e.shiftKey ? -1 : 1)}"][data-col="${field}"]`);
+          next?.focus(); next?.select();
+        }
+      }} />
   );
+  const cell = "px-2 py-2 border border-gray-200";
+  return <tr ref={rowRef} data-testid={`zone-row-${zone.id}`} className={`${!draft.isActive ? "bg-amber-50" : ""} ${highlighted ? "ring-2 ring-blue-400" : ""}`}>
+    {canEditZone && <td className={cell}><Checkbox aria-label={`Select Zone ${zone.zoneNumber}`} data-testid={`select-zone-${zone.id}`} checked={selected} disabled={disabled} onClick={e => onSelect(e.shiftKey)} /></td>}
+    <td className={cell}>{zone.zoneNumber}</td>
+    <td className={cell}>{canEditZone ? input("name", "Name") : zone.name}</td>
+    <td className={cell}>{canEditZone ? <Select value={draft.programId == null ? "none" : String(draft.programId)} disabled={disabled} onValueChange={v => { change("programId", v === "none" ? null : Number(v)); commit("programId"); }}>
+      <SelectTrigger aria-label={`Zone ${zone.zoneNumber} Program`} className={`h-8 min-w-28 ${errors.programId ? "border-red-400" : ""}`}><SelectValue /></SelectTrigger>
+      <SelectContent><SelectItem value="none">— None —</SelectItem>{programs.map(p => <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>)}</SelectContent>
+    </Select> : programs.find(p => p.id === zone.programId)?.name ?? "—"}</td>
+    <td className={cell}>{canEditZone ? <Select value={draft.zoneType} disabled={disabled} onValueChange={v => { change("zoneType", v); commit("zoneType"); }}>
+      <SelectTrigger aria-label={`Zone ${zone.zoneNumber} Type`} className={`h-8 min-w-32 ${errors.zoneType ? "border-red-400" : ""}`}><SelectValue /></SelectTrigger>
+      <SelectContent>{ZONE_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+    </Select> : zoneTypeLabel(zone.zoneType)}</td>
+    <td className={cell}><div className="flex items-center gap-1">{canEditZone ? input("runTimeMinutes", "Runtime") : zone.runTimeMinutes}<span className="text-xs">min</span></div></td>
+    <td className={cell}>{canEditZone ? input("zoneOrder", "Order") : zone.zoneOrder}</td>
+    <td className={cell}>{canEditZone ? <Switch aria-label={`Zone ${zone.zoneNumber} Status`} title={draft.isActive ? "Active" : "Needs attention"} checked={draft.isActive} disabled={disabled} className={errors.isActive ? "border-red-400" : ""} onCheckedChange={v => { change("isActive", v); commit("isActive"); }} /> : zone.isActive ? "Active" : "Needs attention"}</td>
+    <td className={cell}>{canEditZone ? input("notes", "Notes") : zone.notes || "—"}</td>
+    <td className={cell}>{canEditZone ? <Popover><PopoverTrigger asChild><Button variant="ghost" size="sm" disabled={disabled}>Override</Button></PopoverTrigger>
+      <PopoverContent className="space-y-3"><Label>Override Start</Label><Input type="time" aria-label={`Zone ${zone.zoneNumber} Override Start`} value={draft.overrideStartTime ?? ""} onChange={e => change("overrideStartTime", e.target.value || null)} className={errors.overrideStartTime ? "border-red-400" : ""} />
+        <Label>Override Days</Label><DayPillSelector value={draft.overrideDays ?? []} onChange={v => change("overrideDays", v)} />
+        <Button disabled={pending || disabled} onClick={() => { queued.current.set("overrideStartTime", { overrideStartTime: draftRef.current.overrideStartTime, overrideDays: draftRef.current.overrideDays }); void drain(); }}>Save</Button>
+      </PopoverContent></Popover> : zone.overrideStartTime ? `${zone.overrideStartTime} ${(zone.overrideDays ?? []).join(", ")}` : "—"}</td>
+    <td className={`${cell} w-8`} data-testid={`zone-state-${zone.id}`}>{pending ? <Loader2 className="w-4 h-4 animate-spin" /> : Object.keys(errors).length ? <button type="button" aria-label={`Retry Zone ${zone.zoneNumber}`} title={errors[failed.current ?? ""] ?? Object.values(errors)[0]} onClick={() => {
+      const field = failed.current as keyof IrrigationProfileZone;
+      if (field === "overrideStartTime" || field === "overrideDays") {
+        queued.current.set("overrideStartTime", { overrideStartTime: draftRef.current.overrideStartTime, overrideDays: draftRef.current.overrideDays }); void drain();
+      } else commit(field);
+    }}><AlertCircle className="w-4 h-4 text-red-600" /></button> : success ? <Check className="w-4 h-4 text-green-600" aria-label="Saved" /> : null}</td>
+  </tr>;
 }
 
 // ── Add zone row ──────────────────────────────────────────────────────────────
@@ -1142,6 +1055,34 @@ function ControllerGridTile({
 
   const [draftPrograms, setDraftPrograms] = useState<IrrigationProgram[]>([]);
   const [draftZones, setDraftZones] = useState<IrrigationProfileZone[]>([]);
+  const previousZones = useRef<IrrigationProfileZone[]>([]);
+  const [selectedZones, setSelectedZones] = useState<Set<number>>(new Set());
+  const lastSelected = useRef<number | null>(null);
+  const [bulkType, setBulkType] = useState("");
+  const [bulkProgram, setBulkProgram] = useState("");
+  const [bulkRuntime, setBulkRuntime] = useState("");
+  const [busyRows, setBusyRows] = useState<Set<number>>(new Set());
+  const bulkLock = useRef(false);
+  const onBusy = useCallback((id: number, busy: boolean) => setBusyRows(prev => {
+    const next = new Set(prev); if (busy) next.add(id); else next.delete(id); return next;
+  }), []);
+  const clearBulk = () => { setSelectedZones(new Set()); setBulkType(""); setBulkProgram(""); setBulkRuntime(""); lastSelected.current = null; };
+  useEffect(() => { if (!isExpanded) clearBulk(); }, [isExpanded]);
+  const bulkMutation = useMutation({
+    mutationFn: ({ ids, patch }: { ids: number[]; patch: { zoneType?: string; programId?: number | null; runTimeMinutes?: number } }) =>
+      apiRequest(`/api/irrigation-controllers/${controller.id}/zones/bulk`, "PUT", { zoneIds: ids, patch }),
+    onSuccess: async (_rows, variables) => {
+      toast({ title: `Updated ${variables.ids.length} zones` });
+      clearBulk();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: [`/api/irrigation-controllers/${controller.id}`] }),
+        queryClient.invalidateQueries({ queryKey: [`/api/customers/${customerId}/controllers-profile`] }),
+        queryClient.invalidateQueries({ queryKey: [`/api/irrigation-controllers/${controller.id}/history`] }),
+      ]);
+    },
+    onError: error => toast({ title: "Update failed", description: parseApiError(error, "Could not update zones — please retry"), variant: "destructive" }),
+    onSettled: () => { bulkLock.current = false; },
+  });
 
   const { data: detail, isLoading: detailLoading } = useQuery<ControllerWithDetail>({
     queryKey: [`/api/irrigation-controllers/${controller.id}`],
@@ -1152,7 +1093,17 @@ function ControllerGridTile({
   useEffect(() => {
     if (detail) {
       setDraftPrograms(detail.programs ?? []);
-      setDraftZones(detail.zones ?? []);
+      const before = previousZones.current;
+      setDraftZones(prev => (detail.zones ?? []).map(z => {
+        const old = before.find(v => v.id === z.id), local = prev.find(v => v.id === z.id);
+        if (!old || !local) return z;
+        const next = { ...z };
+        for (const field of Object.keys(local) as (keyof IrrigationProfileZone)[]) {
+          if (JSON.stringify(local[field]) !== JSON.stringify(old[field])) Object.assign(next, { [field]: local[field] });
+        }
+        return next;
+      }));
+      previousZones.current = detail.zones ?? [];
     }
   }, [detail]);
 
@@ -1650,6 +1601,22 @@ function ControllerGridTile({
               {/* ── Zones table ── */}
               <section>
                 <h3 className="font-medium text-sm text-gray-700 mb-3">{setupWording(zones.length, zones.filter(z => !isPlaceholderZone(z)).length, true)}</h3>
+                {canEditZones && selectedZones.size > 0 && <div className="sticky top-0 z-10 bg-white border rounded-md p-2 flex flex-wrap gap-2 items-center" data-testid={`bulk-zone-bar-${controller.id}`}>
+                  <span>{selectedZones.size} zones selected</span>
+                  <Select value={bulkType} onValueChange={setBulkType} disabled={bulkMutation.isPending}><SelectTrigger aria-label="Bulk Type" className="w-36 h-8"><SelectValue placeholder="Type…" /></SelectTrigger><SelectContent>{ZONE_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select>
+                  <Select value={bulkProgram} onValueChange={setBulkProgram} disabled={bulkMutation.isPending}><SelectTrigger aria-label="Bulk Program" className="w-36 h-8"><SelectValue placeholder="Program…" /></SelectTrigger><SelectContent><SelectItem value="none">— None —</SelectItem>{programs.map(p => <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>)}</SelectContent></Select>
+                  <Input aria-label="Bulk Runtime" type="number" min={0} max={999} placeholder="Runtime (min)" value={bulkRuntime} disabled={bulkMutation.isPending} onChange={e => setBulkRuntime(e.target.value)} className="w-36 h-8" />
+                  <Button size="sm" disabled={bulkMutation.isPending || busyRows.size > 0 || (!bulkType && !bulkProgram && bulkRuntime === "") || (bulkRuntime !== "" && (!Number.isInteger(Number(bulkRuntime)) || Number(bulkRuntime) < 0 || Number(bulkRuntime) > 999))} onClick={() => {
+                    if (bulkLock.current || busyRows.size) return;
+                    bulkLock.current = true;
+                    const patch: { zoneType?: string; programId?: number | null; runTimeMinutes?: number } = {};
+                    if (bulkType) patch.zoneType = bulkType;
+                    if (bulkProgram) patch.programId = bulkProgram === "none" ? null : Number(bulkProgram);
+                    if (bulkRuntime !== "") patch.runTimeMinutes = Number(bulkRuntime);
+                    bulkMutation.mutate({ ids: zones.filter(z => selectedZones.has(z.id)).map(z => z.id), patch });
+                  }}>Apply</Button>
+                  <Button size="sm" variant="ghost" disabled={bulkMutation.isPending} onClick={clearBulk}>Clear</Button>
+                </div>}
                 {zones.length === 0 && (
                   <p className="text-sm text-gray-400 italic mb-2">No zones yet. Use + above to add the first zone.</p>
                 )}
@@ -1658,6 +1625,7 @@ function ControllerGridTile({
                     <table className="w-full text-sm border-collapse min-w-[700px]">
                       <thead>
                         <tr className="bg-gray-50">
+                          {canEditZones && <th className="px-2 border border-gray-200"><Checkbox aria-label="Select all zones" disabled={bulkMutation.isPending} checked={selectedZones.size === zones.length && zones.length > 0 ? true : selectedZones.size ? "indeterminate" : false} onCheckedChange={checked => setSelectedZones(checked ? new Set(zones.map(z => z.id)) : new Set())} /></th>}
                           <th className="text-center px-2 py-1.5 border border-gray-200 text-xs font-medium text-gray-600 w-12">#</th>
                           <th className="text-left px-2 py-1.5 border border-gray-200 text-xs font-medium text-gray-600">Name</th>
                           <th className="text-left px-2 py-1.5 border border-gray-200 text-xs font-medium text-gray-600">Program</th>
@@ -1666,20 +1634,28 @@ function ControllerGridTile({
                           <th className="text-center px-2 py-1.5 border border-gray-200 text-xs font-medium text-gray-600">Order</th>
                           <th className="text-center px-2 py-1.5 border border-gray-200 text-xs font-medium text-gray-600">Status</th>
                           <th className="text-left px-2 py-1.5 border border-gray-200 text-xs font-medium text-gray-600">Notes</th>
-                          <th className="w-16 border border-gray-200"></th>
+                          <th className="w-16 border border-gray-200">Override</th>
+                          <th className="w-8 border border-gray-200"></th>
                         </tr>
                       </thead>
                       <tbody>
-                        {zones.map((zone) => (
-                          <ZoneRow
+                        {zones.map((zone, index) => (
+                          <ZoneSheetRow
                             key={zone.id}
                             zone={zone}
                             programs={programs}
                             controllerId={controller.id}
-                            onSaved={() => {
-                              queryClient.invalidateQueries({ queryKey: [`/api/customers/${customerId}/controllers-profile`] });
-                              queryClient.invalidateQueries({ queryKey: [`/api/irrigation-controllers/${controller.id}/history`] });
-                              onRefreshList();
+                            customerId={customerId}
+                            index={index}
+                            disabled={bulkMutation.isPending}
+                            onBusy={onBusy}
+                            selected={selectedZones.has(zone.id)}
+                            onSelect={shift => {
+                              const start = shift && lastSelected.current !== null ? Math.min(index, lastSelected.current) : index;
+                              const end = shift && lastSelected.current !== null ? Math.max(index, lastSelected.current) : index;
+                              const selecting = !selectedZones.has(zone.id);
+                              setSelectedZones(prev => { const next = new Set(prev); for (let i = start; i <= end; i++) { if (selecting) next.add(zones[i].id); else next.delete(zones[i].id); } return next; });
+                              lastSelected.current = index;
                             }}
                             onDraftChange={handleZoneDraftChange}
                             canEditZone={canEditZones}

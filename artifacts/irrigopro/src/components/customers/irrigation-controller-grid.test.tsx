@@ -2,9 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { IrrigationControllerGrid, type ControllerWithZones } from "./irrigation-controller-grid";
-import type { IrrigationController, IrrigationProfileZone } from "@workspace/db/schema";
+import type { IrrigationController, IrrigationProfileZone, IrrigationProgram } from "@workspace/db/schema";
 import { IrrigationSystemCard } from "./irrigation-system-card";
 import type { Customer } from "@workspace/db/schema";
+const proto = Element.prototype as any;
+proto.hasPointerCapture ??= () => false;
+proto.setPointerCapture ??= () => {};
+proto.releasePointerCapture ??= () => {};
+proto.scrollIntoView ??= () => {};
 
 const { request, toast, auth } = vi.hoisted(() => ({ request: vi.fn(), toast: vi.fn(), auth: { role: "company_admin" } }));
 vi.mock("@/lib/auth-context", () => ({ useAuth: () => ({ user: { role: auth.role } }) }));
@@ -31,8 +36,8 @@ function counted(count: number): ControllerWithZones {
   })) };
 }
 
-function mount(ctrl = controller, canManage = true, canEdit = true, retiredZones: IrrigationProfileZone[] = [], queryFn?: () => Promise<unknown>) {
-  const detail = { ...ctrl, zones: ctrl.zones.map(z => ({ ...zones[0], ...z })), programs: [], retiredZones };
+function mount(ctrl = controller, canManage = true, canEdit = true, retiredZones: IrrigationProfileZone[] = [], queryFn?: () => Promise<unknown>, programs: IrrigationProgram[] = []) {
+  const detail = { ...ctrl, zones: ctrl.zones.map(z => ({ ...zones[0], ...z })), programs, retiredZones };
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity,
     queryFn: queryFn ?? (() => Promise.resolve(detail)) } } });
   if (!queryFn) qc.setQueryData([`/api/irrigation-controllers/${ctrl.id}`], detail);
@@ -45,6 +50,199 @@ function mount(ctrl = controller, canManage = true, canEdit = true, retiredZones
 
 beforeEach(() => { auth.role = "company_admin"; request.mockReset(); toast.mockReset(); request.mockResolvedValue({ controller, created: [], restored: [], retired: [] }); });
 
+async function openSheet(count = 5) {
+  const mounted = mount(counted(count));
+  fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+  await screen.findByRole("textbox", { name: "Zone 1 Name" });
+  return mounted;
+}
+async function selectOption(label: string, option: string) {
+  fireEvent.keyDown(screen.getByRole("combobox", { name: label }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("option", { name: option }));
+}
+
+describe("fast zone sheet", () => {
+  it("blur saves only name, shows a check, and never invalidates detail/list", async () => {
+    const { invalidate } = await openSheet();
+    request.mockResolvedValueOnce({ ...zones[0], name: "Garden" });
+    const name = screen.getByRole("textbox", { name: "Zone 1 Name" });
+    fireEvent.change(name, { target: { value: "Garden" } }); fireEvent.blur(name);
+    await waitFor(() => expect(request).toHaveBeenCalledWith("/api/irrigation-zones/100", "PUT", { name: "Garden" }));
+    expect(await screen.findByLabelText("Saved")).toBeInTheDocument();
+    expect(invalidate.mock.calls.every(([filter]) => String(filter?.queryKey?.[0]).endsWith("/history"))).toBe(true);
+  });
+  it("Enter navigates the same column, Shift+Enter reverses, last row stays; blur deduplicates", async () => {
+    await openSheet();
+    request.mockResolvedValue({ ...zones[2], runTimeMinutes: 12 });
+    const third = screen.getByRole("spinbutton", { name: "Zone 3 Runtime" });
+    third.focus(); fireEvent.change(third, { target: { value: "12" } }); fireEvent.keyDown(third, { key: "Enter" }); fireEvent.blur(third);
+    expect(screen.getByRole("spinbutton", { name: "Zone 4 Runtime" })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "Enter", shiftKey: true });
+    expect(third).toHaveFocus();
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    const last = screen.getByRole("textbox", { name: "Zone 5 Name" }); last.focus(); fireEvent.keyDown(last, { key: "Enter" });
+    expect(last).toHaveFocus();
+  });
+  it("Escape restores saved value without request; empty Name restores and validates temporarily", async () => {
+    await openSheet();
+    const name = screen.getByRole("textbox", { name: "Zone 1 Name" });
+    name.focus(); fireEvent.change(name, { target: { value: "Unsaved" } }); fireEvent.keyDown(name, { key: "Escape" });
+    expect(name).toHaveValue("Zone 1"); expect(request).not.toHaveBeenCalled();
+    fireEvent.change(name, { target: { value: "" } }); fireEvent.blur(name);
+    expect(name).toHaveValue("Zone 1"); expect(name).toHaveAttribute("title", "A zone needs a name");
+    expect(name).toHaveClass("border-red-400"); expect(request).not.toHaveBeenCalled();
+    await waitFor(() => expect(name).not.toHaveClass("border-red-400"), { timeout: 2500 });
+  });
+  it("failure keeps red draft and server feedback; retry uses newer typing and other field saves preserve it", async () => {
+    await openSheet();
+    request.mockRejectedValueOnce(new Error('500: {"message":"Try this field again"}'));
+    const name = screen.getByRole("textbox", { name: "Zone 1 Name" });
+    fireEvent.change(name, { target: { value: "Garden" } }); fireEvent.blur(name);
+    const retry = await screen.findByRole("button", { name: "Retry Zone 1" });
+    expect(retry).toHaveAttribute("title", "Try this field again"); expect(name).toHaveValue("Garden"); expect(name).toHaveClass("border-red-400");
+    request.mockResolvedValueOnce({ ...zones[0], runTimeMinutes: 12 });
+    const runtime = screen.getByRole("spinbutton", { name: "Zone 1 Runtime" });
+    fireEvent.change(runtime, { target: { value: "12" } }); fireEvent.blur(runtime);
+    await waitFor(() => expect(runtime).toHaveValue(12));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry Zone 1" })).toBeInTheDocument());
+    expect(name).toHaveValue("Garden"); expect(name).toHaveClass("border-red-400");
+    fireEvent.change(name, { target: { value: "New garden" } });
+    request.mockResolvedValueOnce({ ...zones[0], runTimeMinutes: 12, name: "New garden" });
+    fireEvent.click(screen.getByRole("button", { name: "Retry Zone 1" }));
+    await waitFor(() => expect(request).toHaveBeenLastCalledWith("/api/irrigation-zones/100", "PUT", { name: "New garden" }));
+    await waitFor(() => expect(name).not.toHaveClass("border-red-400"));
+  });
+  it("serializes rapid commits and preserves another unsaved cell", async () => {
+    await openSheet();
+    let resolve!: (v: unknown) => void;
+    request.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+    const name = screen.getByRole("textbox", { name: "Zone 1 Name" });
+    const notes = screen.getByRole("textbox", { name: "Zone 1 Notes" });
+    fireEvent.change(name, { target: { value: "First" } }); fireEvent.blur(name);
+    fireEvent.change(notes, { target: { value: "Keep this draft" } });
+    fireEvent.change(name, { target: { value: "Second" } }); fireEvent.blur(name);
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    request.mockResolvedValueOnce({ ...zones[0], name: "Second" });
+    resolve({ ...zones[0], name: "First" });
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByLabelText("Saved")).toBeInTheDocument());
+    expect(name).toHaveValue("Second"); expect(notes).toHaveValue("Keep this draft");
+  });
+  it("committing back to the saved value while a request is pending still sends the reversal", async () => {
+    await openSheet();
+    let resolve!: (v: unknown) => void;
+    request.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+    const name = screen.getByRole("textbox", { name: "Zone 1 Name" });
+    fireEvent.change(name, { target: { value: "First" } }); fireEvent.blur(name);
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    fireEvent.change(name, { target: { value: "Zone 1" } }); fireEvent.blur(name);
+    request.mockResolvedValueOnce(zones[0]); resolve({ ...zones[0], name: "First" });
+    await waitFor(() => expect(request).toHaveBeenLastCalledWith("/api/irrigation-zones/100", "PUT", { name: "Zone 1" }));
+    await waitFor(() => expect(screen.getByLabelText("Saved")).toBeInTheDocument());
+    expect(name).toHaveValue("Zone 1");
+  });
+  it("schedule follows typing; bulk waits for cell saves and refetch preserves unsaved notes on another row", async () => {
+    const program = { id: 5, controllerId: 7, name: "Morning", wateringDays: ["Mon"], startTimes: ["06:00"], seasonalAdjustPct: 100, isActive: true, sortOrder: 1 } as IrrigationProgram;
+    const ctrl = counted(2);
+    ctrl.zones[0] = { ...ctrl.zones[0], programId: 5, runTimeMinutes: 5 } as typeof ctrl.zones[0];
+    let serverDetail = { ...ctrl, programs: [program], retiredZones: [], zones: ctrl.zones.map(z => ({ ...zones[0], ...z })) };
+    mount(ctrl, true, true, [], async () => serverDetail, [program]);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    const runtime = await screen.findByRole("spinbutton", { name: "Zone 1 Runtime" });
+    fireEvent.change(runtime, { target: { value: "12" } });
+    const schedule = screen.getByText("Auto Run-Time Schedule").parentElement!;
+    expect(within(schedule).getByText("12 min")).toBeInTheDocument();
+    expect(request).not.toHaveBeenCalled();
+    const note = screen.getByRole("textbox", { name: "Zone 2 Notes" });
+    fireEvent.change(note, { target: { value: "Do not lose me" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all zones" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Bulk Runtime" }), { target: { value: "20" } });
+    let resolve!: (v: unknown) => void;
+    request.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+    fireEvent.blur(runtime);
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+    resolve({ ...zones[0], programId: 5, runTimeMinutes: 12 });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled());
+    const refreshed = { ...ctrl, programs: [program], retiredZones: [], zones: zones.slice(0, 2).map(z => ({ ...z, programId: 5, runTimeMinutes: 20 })) };
+    serverDetail = refreshed;
+    request.mockResolvedValueOnce(refreshed.zones);
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(runtime).toHaveValue(20));
+    expect(note).toHaveValue("Do not lose me");
+    expect(within(schedule).getAllByText("20 min")).toHaveLength(2);
+  });
+  it("Type, Program and Status save immediately with field-only payloads", async () => {
+    await openSheet();
+    request.mockResolvedValue({ ...zones[0], zoneType: "rotor" });
+    await selectOption("Zone 1 Type", "Rotor");
+    await waitFor(() => expect(request).toHaveBeenCalledWith("/api/irrigation-zones/100", "PUT", { zoneType: "rotor" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Zone 1 Status" }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("/api/irrigation-zones/100", "PUT", { isActive: false }));
+  });
+  it("shift-selects 3–7 and applies only Type and Runtime", async () => {
+    const { invalidate } = await openSheet(8);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Zone 3" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Zone 7" }), { shiftKey: true });
+    expect(screen.getByText("5 zones selected")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select all zones" })).toHaveAttribute("data-state", "indeterminate");
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+    await selectOption("Bulk Type", "Rotor");
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Bulk Runtime" }), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("/api/irrigation-controllers/7/zones/bulk", "PUT", { zoneIds: [102, 103, 104, 105, 106], patch: { zoneType: "rotor", runTimeMinutes: 12 } }));
+    await waitFor(() => expect(screen.queryByText("5 zones selected")).toBeNull());
+    expect(toast).toHaveBeenCalledWith({ title: "Updated 5 zones" });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["/api/customers/9/controllers-profile"] });
+  });
+  it("explicit None and zero differ from unset; bulk failure keeps selection, collapse clears it", async () => {
+    await openSheet(2);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all zones" }));
+    expect(screen.getByRole("checkbox", { name: "Select all zones" })).toBeChecked();
+    await selectOption("Bulk Program", "— None —");
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Bulk Runtime" }), { target: { value: "0" } });
+    request.mockRejectedValueOnce(new Error('400: {"message":"Program not on this controller"}'));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("/api/irrigation-controllers/7/zones/bulk", "PUT", { zoneIds: [100, 101], patch: { programId: null, runTimeMinutes: 0 } }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.objectContaining({ description: "Program not on this controller" })));
+    expect(screen.getByText("2 zones selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse" })); fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expect(screen.queryByText("2 zones selected")).toBeNull();
+  });
+  it("read-only rows have text and no editable/select/Override controls", async () => {
+    mount(counted(2), false, false); fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    const row = await screen.findByTestId("zone-row-100");
+    expect(within(row).getByText("Zone 1")).toBeInTheDocument();
+    for (const role of ["textbox", "spinbutton", "checkbox", "combobox", "switch", "button"]) expect(within(row).queryByRole(role)).toBeNull();
+  });
+  it("Override saves its own patch and schedule follows unsaved drafts", async () => {
+    await openSheet();
+    fireEvent.click(within(screen.getByTestId("zone-row-100")).getByRole("button", { name: "Override" }));
+    fireEvent.change(screen.getByLabelText("Zone 1 Override Start"), { target: { value: "08:30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Mon" }));
+    request.mockResolvedValueOnce({ ...zones[0], overrideStartTime: "08:30", overrideDays: ["Mon"] });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("/api/irrigation-zones/100", "PUT", { overrideStartTime: "08:30", overrideDays: ["Mon"] }));
+  });
+  it("chip turns solid in the connected card with no controller-list refetch", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, queryFn: vi.fn() } } });
+    qc.setQueryData(["/api/customers/9/controllers-profile"], [counted(2)]);
+    qc.setQueryData(["/api/irrigation-controllers/7"], { ...baseController, zones: zones.slice(0, 2), programs: [], retiredZones: [] });
+    render(<QueryClientProvider client={qc}><IrrigationSystemCard customer={{ id: 9 } as Customer} canManageControllers /></QueryClientProvider>);
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    request.mockResolvedValueOnce({ ...zones[0], name: "Garden" });
+    const input = screen.getByRole("textbox", { name: "Zone 1 Name" });
+    fireEvent.change(input, { target: { value: "Garden" } }); fireEvent.blur(input);
+    await waitFor(() => expect(qc.getQueryData<ControllerWithZones[]>(["/api/customers/9/controllers-profile"])![0].zones[0].setUp).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
+    expect(screen.getByTestId("zone-chip-A-1")).toHaveAttribute("data-state", "set-up");
+    expect(invalidate.mock.calls.some(([filter]) => String(filter?.queryKey?.[0]).endsWith("controllers-profile"))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expect(screen.getByRole("textbox", { name: "Zone 2 Name" })).toBeInTheDocument();
+  });
+});
+
 describe("zone records — minimal grid adaptation", () => {
   it("38 chips agree with 38 table rows; increment uses the count endpoint and refreshes all readers", async () => {
     const { invalidate } = mount();
@@ -56,7 +254,7 @@ describe("zone records — minimal grid adaptation", () => {
     // Increment opens the table; collapse/re-expand still preserves its rows.
     fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
     fireEvent.click(screen.getByRole("button", { name: "Expand" }));
-    expect(await screen.findAllByText(/^Zone \d+$/)).toHaveLength(38);
+     expect(await screen.findAllByRole("textbox", { name: /^Zone \d+ Name$/ })).toHaveLength(38);
   });
   it("Add Zone is a count increment, with no free-form creation fields", async () => {
     mount(controller, false);
@@ -72,11 +270,13 @@ describe("zone records — minimal grid adaptation", () => {
   it("a zone remains editable, but has neither Delete nor a zone-number input", async () => {
     mount();
     fireEvent.click(screen.getByRole("button", { name: "Expand" }));
-    const row = (await screen.findByText("Zone 1")).closest("tr")!;
-    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    const input = await screen.findByRole("textbox", { name: "Zone 1 Name" });
+    const row = input.closest("tr")!;
     expect(within(row).queryByRole("button", { name: /Delete/ })).toBeNull();
     expect(within(row).queryByText("Zone #")).toBeNull();
-    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+    request.mockResolvedValueOnce({ ...zones[0], name: "Garden" });
+    fireEvent.change(input, { target: { value: "Garden" } });
+    fireEvent.blur(input);
     await waitFor(() => expect(request).toHaveBeenCalled());
     const call = request.mock.calls.find(([url]) => url === "/api/irrigation-zones/100")!;
     expect(call[1]).toBe("PUT"); expect(call[2]).not.toHaveProperty("zoneNumber");
@@ -123,7 +323,7 @@ describe("connected controller tiles", () => {
       expect(!!screen.queryByRole("button", { name: "Add Zone" })).toBe(manage || role === "field_tech");
       expect(!!screen.queryByRole("button", { name: "Edit Details" })).toBe(manage);
       expect(!!screen.queryByTestId("button-zone-decrement-A")).toBe(manage);
-      expect(screen.queryAllByRole("button", { name: "Edit" }).length > 0).toBe(manage || role === "field_tech");
+      expect(screen.queryAllByRole("textbox", { name: /^Zone \d+ Name$/ }).length > 0).toBe(manage || role === "field_tech");
     });
   }
   it("record identities, states, tooltip labels, attention precedence and partial wording", () => {
@@ -164,11 +364,13 @@ describe("connected controller tiles", () => {
     resolve({ ...controller, zones: zones.slice(0, 3), programs: [], retiredZones: [] });
     const input = await screen.findByRole("textbox", { name: "Zone 2 Name" });
     expect(input).toHaveFocus();
+    expect((input as HTMLInputElement).selectionStart).toBe(0);
+    expect((input as HTMLInputElement).selectionEnd).toBe("Zone 2".length);
     expect(screen.getByTestId("zone-row-101")).toHaveClass("ring-2");
     expect(scroll).toHaveBeenCalledWith({ block: "center", behavior: "smooth" });
     fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
     fireEvent.click(screen.getByRole("button", { name: "Expand" }));
-    expect(screen.queryByRole("textbox", { name: "Zone 2 Name" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Zone 2 Name" })).not.toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
     fireEvent.click(screen.getByTestId("zone-chip-A-2"));
     expect(await screen.findByRole("textbox", { name: "Zone 2 Name" })).toHaveFocus();

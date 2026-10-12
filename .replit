@@ -244,6 +244,10 @@ args = "manager-mobile-action-board"
 task = "workflow.run"
 args = "command-center-row-delete"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "irrigation-fast-entry"
+
 [[workflows.workflow]]
 name = "auth-middleware-coverage"
 author = "agent"
@@ -870,6 +874,17 @@ isValidation = true
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/irrigopro exec vitest run src/components/estimates/command-center/estimate-table-delete.test.tsx src/pages/estimate-command-center-create.test.tsx src/lib/current-user-role.test.ts src/lib/lifecycle-parity.test.ts src/components/estimates/estimate-delete-visibility.test.tsx src/components/estimates/estimate-wizard-submit.test.ts --maxWorkers=1 --minWorkers=1 --testTimeout=20000"
+
+[[workflows.workflow]]
+name = "irrigation-fast-entry"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/routes/irrigation-profile-routes.test.ts && pnpm --filter @workspace/irrigopro exec vitest run src/components/customers/irrigation-controller-grid.test.tsx --maxWorkers=1 --minWorkers=1 && pnpm --filter @workspace/shared exec node --import tsx --test --test-reporter=spec src/irrigation-zones.test.ts src/irrigation-schedule.test.ts && pnpm --filter @workspace/api-server typecheck && pnpm --filter @workspace/irrigopro typecheck"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [agent]
 stack = "PNPM_WORKSPACE"

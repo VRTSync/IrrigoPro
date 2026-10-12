@@ -31,6 +31,7 @@ import { customers, irrigationControllers, irrigationProfileZones } from "@works
 import { isPlaceholderZone } from "@workspace/shared";
 import { storage, ZoneCountClearError } from "../storage";
 import type { IrrigationImportRow, IrrigationImportRowError, IrrigationZoneTypeEnum } from "../storage";
+import { ZoneProgramError } from "../lib/controller-zone-records";
 
 // ── Role helpers ──────────────────────────────────────────────────────────────
 
@@ -110,6 +111,15 @@ export const updateZoneBody = z.object({
 
 export const attachPhotoBody = z.object({
   url: z.string().min(1),
+});
+
+export const bulkZoneBody = z.object({
+  zoneIds: z.array(z.number().int().positive()).min(1).max(100).refine(ids => new Set(ids).size === ids.length, "Duplicate zone IDs"),
+  patch: z.object({
+    zoneType: z.enum(["pop_up_spray", "rotor", "drip", "netafim", "bubbler", "other"]).optional(),
+    programId: z.number().int().positive().nullable().optional(),
+    runTimeMinutes: z.coerce.number().int().min(0).max(999).optional(),
+  }).strict().refine(p => Object.values(p).some(v => v !== undefined), "Nothing to apply"),
 });
 
 // ── Deps interface (injected so tests can swap requireAuthentication) ─────────
@@ -724,6 +734,31 @@ export function registerIrrigationProfileRoutes(
       }
     },
   );
+
+  // ── PUT /api/irrigation-controllers/:id/zones/bulk ────────────────────────
+  app.put("/api/irrigation-controllers/:id/zones/bulk", requireAuthentication, async (req: any, res: any) => {
+    const role = req.authenticatedUserRole;
+    if (!canWrite(role)) return res.status(403).json({ message: "Forbidden" });
+    const companyId = getCallerCompanyId(req);
+    const rawCompanyId = req.authenticatedUserCompanyId;
+    const validContext = (typeof rawCompanyId === "number" || (typeof rawCompanyId === "string" && /^[1-9]\d*$/.test(rawCompanyId))) &&
+      Number.isSafeInteger(companyId) && companyId! > 0;
+    if (!isSuperAdmin(role) && !validContext) return res.status(401).json({ message: "Authentication required" });
+    const id = parseId(req.params.id);
+    if (!id) return badId(res, "controller");
+    const parsed = bulkZoneBody.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    try {
+      const me = req.authenticatedUserId ? await storage.getUser(req.authenticatedUserId) : undefined;
+      const rows = await storage.bulkUpdateIrrigationZones(isSuperAdmin(role) ? null : companyId, id, parsed.data.zoneIds, parsed.data.patch, me ? { id: me.id, name: me.name } : undefined);
+      if (!rows) return notFound(res, "Zones");
+      res.json(rows);
+    } catch (error) {
+      if (error instanceof ZoneProgramError) return res.status(400).json({ message: error.message });
+      req.log?.error?.({ err: error }, "bulkUpdateIrrigationZones failed");
+      res.status(500).json({ message: "Could not update zones — please retry" });
+    }
+  });
 
   // ── GET /api/irrigation-controllers/:id/history ────────────────────────────
   app.get(
