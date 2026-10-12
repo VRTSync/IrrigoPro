@@ -3,12 +3,18 @@ name: Validation run thread/PID exhaustion
 description: Diagnose parallel validation resource failures from actual process limits and logs; preserve user-required gates and use bounded direct runs for evidence.
 ---
 
-Completion validation runs every registered command **concurrently**. Symptoms of exhaustion:
+Completion validation runs four serial lanes concurrently. Symptoms of exhaustion:
 `Error: EAGAIN`, `pthread_create: Resource temporarily unavailable`, `uv_thread_create`,
 tinypool `Worker exited unexpectedly`, pino `ERR_WORKER_INIT_FAILED`.
 
 These are never assertion failures. Confirm by reading the inspect log: if there is no
 assertion error, the code under test is not what broke.
+
+The gate now uses four serial lanes, so resource errors with this bounded fan-out
+are regressions to investigate, not background noise. Four bounds top-level suite
+trees only; Node/Vitest threads and workers are not capped at four. Preserve the
+diagnostic cautions below: assertion failures, infrastructure failures, and missing
+results are different evidence, and an unavailable result is never a pass.
 
 **Why:** a previous container had a 1024-process cgroup cap and roughly 309 PIDs in use
 at idle. The cap is environment-dependent, not a project constant. Each Vitest suite
@@ -30,6 +36,21 @@ itself, evidence of process exhaustion.
 
 A shifting failure set with resource errors is a useful diagnostic signal, not proof
 that every unreported failure has the same cause.
+
+Under bounded-lane load, distinguish test lifecycle races from product failures:
+awaiting one scheduler tick is not necessarily joining work started by another
+tick. Tests must observe durable completion/requeue state before changing a
+failure fixture, advancing an injected clock, or asserting delivery.
+
+**Why:** An offline recovery test advanced through a background dispatch using a
+single event-loop turn, while another test spent most of its timed body importing
+an unrelated closed wizard. Neither isolated pass nor a concurrency-only failure
+alone identified the cause.
+
+**How to apply:** Measure import versus render/assertion cost, validate fixtures
+against the real response contract, and await the actual outcome. Keep relevant
+components real; isolate unrelated features locally rather than widening
+timeouts. Verify targeted fixes under the unchanged concurrent lanes.
 
 For a focused Vitest validation under PID pressure, setting only `--maxWorkers=1`
 can fail before tests run with "options.minThreads and options.maxThreads must not

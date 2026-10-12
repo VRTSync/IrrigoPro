@@ -193,3 +193,45 @@ mtime_ms = 1791487918008
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/59a9c6a7-e6fe-4574-957c-97a2b130706e/4bdc1839-14c9-4171-a1a8-fc0747898597"
 storage_version_token = "1791489183135536"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "3SK5OHQ_YM4zASpAQ8riW"
+uri = "file://tmp/validation-evidence/report.txt"
+type = "text"
+title = "Four-lane validation evidence"
+description = "All direct and completion-gate summary tables, inventory checks, exact-command baseline comparison, PID peak, and final scope verification."
+logical_id = "fce3003d-dac0-4d1c-be3e-89f75175f048"
+content_hash = "sha256:b95b578fc82ac53b79a43863a6e79ac520031d6fb808d10a75211a8abb78bdfa"
+size = 7826
+mtime_ms = 1791829119644
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/fce3003d-dac0-4d1c-be3e-89f75175f048/0b209544-b98c-441b-9873-e2f251481633"
+storage_version_token = "1791829129058692"
+content_type = "text/plain"
+
+[[outputs]]
+id = "t-Yrjswkffd6dlz2nWr8x"
+uri = "file://tmp/validation-evidence/retry-report.txt"
+type = "text"
+title = "Validation evidence — authorized retry"
+description = "Retry results for all four lanes, the new offline-recovery assertion failure, PID peak, and prior direct-run and baseline evidence."
+logical_id = "1ddbcaf3-f537-47f6-82eb-1bd45cfa27e3"
+content_hash = "sha256:1163363b88df3757d1b273b61342f43af49e810d3383b128b8860aeb01151e80"
+size = 11596
+mtime_ms = 1791831235886
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/1ddbcaf3-f537-47f6-82eb-1bd45cfa27e3/3d738a02-cd66-4780-8136-6b9d7c846c43"
+storage_version_token = "1791831241916726"
+content_type = "text/plain"
+
+[[outputs]]
+id = "hHnkrj0BuluTp2f2t2I7v"
+uri = "file://tmp/validation-evidence/extension/final-proof/extension-report.txt"
+type = "text"
+title = "Final validation evidence — passed"
+description = "Diagnosis of both intermittent failures, three consecutive concurrent four-lane rounds, every summary table, and the successful completion gate with PID measurements."
+logical_id = "9d9dea97-3499-461d-ba22-376b55b0b4cc"
+content_hash = "sha256:c3d6fbec26d3b692ed98553e7e8ac5e91100ab094fa5c5039ba46244fa69413c"
+size = 15565
+mtime_ms = 1791836144607
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/9d9dea97-3499-461d-ba22-376b55b0b4cc/35f41d47-500f-4a3d-99d6-ea086bf49804"
+storage_version_token = "1791836158139984"
+content_type = "text/plain"

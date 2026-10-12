@@ -193,7 +193,7 @@ describe("a dropped connection does not spend the retry budget", () => {
           typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
         seen.push(url);
         if (url.startsWith("/api/upload/photo")) {
-          return new Response(JSON.stringify({ uploadUrl: "https://s3.example/put", url: "https://cdn.example/p.jpg" }), {
+          return new Response(JSON.stringify({ signedUrl: "https://s3.example/put", url: "https://cdn.example/p.jpg" }), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
@@ -209,21 +209,34 @@ describe("a dropped connection does not spend the retry budget", () => {
       maxAttempts: 3,
       maxRetryAgeMs: 60 * 60 * 1000,
     });
-    engine.setOnline(true);
+    // Queue offline so enqueue's automatic tick cannot race our failure setup.
+    engine.setOnline(false);
     await engine.enqueue(photoUploadMutation());
 
     mockState.failBlobRead = true;
     now += 60_000;
-    await engine.tick();
-    await new Promise((r) => setTimeout(r, 0));
+    engine.setOnline(true);
+    // tick() can return while a scheduled tick owns the dispatch. Join that
+    // dispatch before changing storage availability or advancing the clock.
+    await engine.drainAll(1);
+    const [stalled] = await listAllMutations(await openOfflineDB());
+    expect(stalled.status).toBe("pending");
+    expect(stalled.lastError).toBe("local_storage_unavailable");
+    expect(stalled.attemptCount).toBe(0);
+    expect(seen).toEqual([]);
 
     mockState.failBlobRead = false;
     now += 60_000;
-    await engine.tick();
-    await new Promise((r) => setTimeout(r, 0));
+    await engine.drainAll(1);
 
     // The retry budget was never touched, so the upload proceeds normally
-    // the moment the connection is usable again.
-    expect(seen.some((u) => u.startsWith("/api/upload/photo"))).toBe(true);
+    // the moment the connection is usable again. Observe real upload and
+    // completion, not an arbitrary event-loop turn.
+    await vi.waitFor(async () => {
+      expect(seen.some((u) => u.startsWith("/api/upload/photo"))).toBe(true);
+      const [completed] = await listAllMutations(await openOfflineDB());
+      expect(completed.status).toBe("completed");
+      expect(completed.attemptCount).toBe(0);
+    });
   });
 });

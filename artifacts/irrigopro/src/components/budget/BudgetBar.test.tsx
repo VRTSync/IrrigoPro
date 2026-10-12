@@ -12,6 +12,17 @@ import path from "node:path";
 
 import { BudgetBar } from "./BudgetBar";
 
+// These integration cases assert rendered budget output, not Vite's cold
+// module-transform speed. Load the real surfaces during collection, just as
+// BudgetBar above, instead of charging each first import to a 5s test body.
+// Keep every surface and dependency real; no component is mocked away and no
+// hook/test timeout is extended. Dynamic imports in the cases reuse this cache.
+import "@/pages/field-tech-dashboard";
+import "@/pages/customer-profile";
+import "@/pages/financial-pulse";
+import "@/components/financial-pulse/financial-pulse-widget";
+import "@/components/customer-form";
+
 // ─── Input modes ────────────────────────────────────────────────────────────
 
 describe("BudgetBar input modes", () => {

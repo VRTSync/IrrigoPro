@@ -13,6 +13,21 @@ Production irrigation company management app: estimates → work orders → wet 
 - `node --import tsx/esm artifacts/api-server/src/scripts/backfill-trim-phantom-zones.ts [--dry-run] [--batch=N]` — one-time trim of orphan `not_checked` zone records whose `zoneNumber` exceeds the controller's current `zoneCount` (idempotent; resumes via `app_settings.trimPhantomZones.done`)
 - Required env: `DATABASE_URL` — Postgres connection string; `SENDGRID_API_KEY` — transactional email (estimate sends, password reset, verification, marketing-lead, etc.); optional `SENDGRID_FROM_EMAIL` overrides the default From address (`estimates@highplainsprop.com`)
 
+## Validation
+
+Project runs four validation lanes in parallel: `api-billing`, `api-field`,
+`web`, and `types`. Run one directly with
+`node scripts/run-validation-lane.mjs <lane>`. Each lane runs its entries
+serially, continues after failures, and exits nonzero if any entry fails.
+This bounds concurrent top-level suite trees to four, not Node/Vitest worker
+threads. Project also retains the separate `wc-in-flight-photos` workflow.
+
+New suites belong in `scripts/validation-lanes.json`, never in a new validation
+registration. Keep mixed commands intact. Assign Node API suites to `api-field`,
+Vitest suites to `web`, and typecheck/mobile suites to `types`.
+`node --test scripts/validation-lanes.test.mjs` guards the manifest and warns
+about source tests not named explicitly; it runs first in `types`.
+
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9

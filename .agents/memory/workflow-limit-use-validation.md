@@ -1,27 +1,20 @@
 ---
-name: Workflow limit vs. per-suite test workflows
-description: This project is past the 10-workflow cap, so register new test suites as validation commands instead.
+name: Bounded validation policy
+description: New suites join serial lanes rather than expanding completion-gate concurrency.
 ---
 
-`configureWorkflow` refuses with "Workflow limit exceeded (N/10)". This project
-long ago passed that cap with one workflow per test suite plus the artifact
-services, so **a new test suite cannot get its own workflow.**
+New suites must join the lane manifest, never receive a separate validation
+registration. Explicit test-file lists must include the intended new coverage;
+an existing package-wide test glob does not establish completion-gate coverage.
+Keep intentional overlap and mixed-package commands intact.
 
-Register it as a validation command instead:
-`setValidationCommand({ name, command })` then
-`startValidationRun({ commandIds: [...] })`. Same command string, no cap, and
-the run returns per-command status without needing a log scrape.
+**Why:** Per-suite registrations caused excessive concurrent process trees and
+resource failures. Four serial lanes bound top-level suite concurrency, not
+Node or Vitest worker threads. This policy is deliberate, not a temporary
+workaround for the workflow limit.
 
-**Why:** the alternative is deleting somebody else's test workflow to make
-room, which silently removes a check that a past task deliberately installed.
-
-**How to apply:** default to a validation command for any new test suite here.
-Reserve workflows for long-running processes — artifact services already own
-theirs and must be restarted with the workflow tool, never reconfigured.
-
-**A new api-server test file is not automatically validated.** The package test
-script globs `src/**/*.test.ts`, so a new file joins the full suite for free —
-but the registered validation commands name their test files **explicitly**.
-A file added only to the glob runs in a suite nobody invokes as a gate. When a
-new test belongs to an existing gate, re-register that command with the file
-appended to its argument list (`setValidationCommand` upserts by name).
+**How to apply:** Add Node API suites to the field lane, Vitest suites to the
+web lane, and typecheck/mobile suites to the types lane. Run the manifest guard
+to detect missing named paths and inspect uncovered-test warnings. Reserve
+service workflows for long-running processes; do not remove someone else's
+checks to create space.
