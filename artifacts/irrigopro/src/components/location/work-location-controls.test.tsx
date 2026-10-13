@@ -26,6 +26,7 @@ import {
   WorkLocationControls,
   type WorkLocationRequirementsValue,
 } from "./work-location-controls";
+import type { CustomerControllerZone } from "@/lib/controller-types";
 
 // Radix drives open/close off pointer capture, which jsdom does not implement.
 const proto = Element.prototype as any;
@@ -91,6 +92,7 @@ function registryKey(customerId: number | null): string {
 function renderControls(options: {
   value?: Partial<WorkLocationRequirementsValue>;
   workTypes?: Rule[];
+  controllers?: { controllerLetter: string; zoneCount: number | null; zones?: CustomerControllerZone[] }[];
   enforce?: boolean;
   onChange?: (next: WorkLocationRequirementsValue) => void;
   onGateStateChange?: (complete: boolean, violations: string[]) => void;
@@ -108,7 +110,7 @@ function renderControls(options: {
     [registryKey(CUSTOMER_ID)],
     options.workTypes ?? WORK_TYPES,
   );
-  client.setQueryData(["/api/properties", CUSTOMER_ID, "controllers"], CONTROLLERS);
+  client.setQueryData(["/api/properties", CUSTOMER_ID, "controllers"], options.controllers ?? CONTROLLERS);
 
   const onChange = options.onChange ?? vi.fn();
   const view = render(
@@ -483,6 +485,77 @@ describe("legacy values the controller list disagrees with", () => {
       controllerLetter: null,
       zoneNumber: null,
     });
+  });
+});
+
+describe("record-backed zone picker", () => {
+  const zones = [
+    { id: 10, zoneNumber: 1, name: "Zone 1", setUp: false },
+    { id: 30, zoneNumber: 3, name: "Front Lawn", setUp: true },
+  ];
+
+  it("offers whole named and placeholder labels, with numeric option values", async () => {
+    const { onChange } = renderControls({
+      controllers: [{ controllerLetter: "A", zoneCount: 12, zones }],
+      value: { fieldWorkType: "zone_repair", controllerLetter: "A" },
+    });
+    openSelect("select-zone");
+    expect(await screen.findByRole("option", { name: "Zone 1" })).toBeInTheDocument();
+    const named = screen.getByRole("option", { name: "Zone 3 · Front Lawn" });
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+    fireEvent.click(named);
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ zoneNumber: 3 }));
+  });
+
+  it("uses array length for the controller count even when the mirror disagrees", async () => {
+    renderControls({
+      controllers: [{ controllerLetter: "A", zoneCount: 12, zones }],
+      value: { fieldWorkType: "zone_repair" },
+    });
+    openSelect("select-controller");
+    expect(await screen.findByRole("option", { name: "Controller A (2 zones)" })).toBeInTheDocument();
+  });
+
+  it("falls back to counts for older cached responses without zones", async () => {
+    renderControls({ value: { fieldWorkType: "zone_repair", controllerLetter: "B" } });
+    openSelect("select-zone");
+    expect(await screen.findByRole("option", { name: "Zone 6" })).toBeInTheDocument();
+    expect(screen.getAllByRole("option")).toHaveLength(6);
+  });
+
+  it("keeps a stored retired position inside the mirror range without clearing on mount", async () => {
+    const { onChange } = renderControls({
+      controllers: [{ controllerLetter: "A", zoneCount: 12, zones }],
+      value: { fieldWorkType: "zone_repair", controllerLetter: "A", zoneNumber: 2 },
+    });
+    expect(screen.getByTestId("select-zone")).toHaveTextContent("Zone 2 (not on this controller)");
+    expect(onChange).not.toHaveBeenCalled();
+    openSelect("select-zone");
+    expect(await screen.findByRole("option", { name: "Zone 2 (not on this controller)" })).toBeInTheDocument();
+  });
+
+  it("treats an empty array as authoritative, disables picking, and retains a stored zone", () => {
+    const { onChange } = renderControls({
+      controllers: [{ controllerLetter: "A", zoneCount: 12, zones: [] }],
+      value: { fieldWorkType: "zone_repair", controllerLetter: "A", zoneNumber: 3 },
+    });
+    expect(screen.getByTestId("select-controller")).toHaveTextContent("Controller A (0 zones)");
+    expect(screen.getByTestId("select-zone")).toBeDisabled();
+    expect(screen.getByTestId("select-zone")).toHaveTextContent("Zone 3 (not on this controller)");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("allows record-backed zones with a null mirror and preserves long names", async () => {
+    const name = "Front Lawn " + "very long name ".repeat(30);
+    renderControls({
+      controllers: [{ controllerLetter: "A", zoneCount: null, zones: [{ ...zones[1], name }] }],
+      value: { fieldWorkType: "zone_repair", controllerLetter: "A" },
+    });
+    expect(screen.getByTestId("select-zone")).not.toBeDisabled();
+    openSelect("select-zone");
+    const option = await screen.findByRole("option");
+    expect(option.textContent).toBe(`Zone 3 · ${name}`);
+    expect(option.className).toContain("truncate");
   });
 });
 

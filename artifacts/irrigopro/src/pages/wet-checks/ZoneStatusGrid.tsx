@@ -78,12 +78,18 @@ export function ZoneStatusGrid({
               Controller {ctrl.controllerLetter}
             </div>
             <div className="grid grid-cols-6 sm:grid-cols-10 gap-1.5">
-              {Array.from({ length: ctrl.zoneCount ?? 0 }, (_, i) => i + 1).map((n) => {
+              {(ctrl.zones ?? Array.from({ length: ctrl.zoneCount ?? 0 }, (_, i) => ({
+                zoneNumber: i + 1, name: `Zone ${i + 1}`, setUp: false,
+              }))).map((zone) => {
+                const n = zone.zoneNumber;
                 const r = recordMap.get(`${ctrl.controllerLetter}-${n}`);
                 const status = r?.status ?? "not_checked";
                 const isMarkedComplete =
                   status === "checked_with_issues" && r?.markedCompleteAt != null;
                 const photoCount = photoCountForZone(r);
+                const label = `Controller ${ctrl.controllerLetter} Zone ${n}${zone.setUp ? ` · ${zone.name}` : ""}${
+                  r ? ` — ${r.status}` : " — not checked"
+                }`;
 
                 return (
                   <button
@@ -91,9 +97,8 @@ export function ZoneStatusGrid({
                     className={cellClass(r, ctrl.controllerLetter, n)}
                     onClick={() => onCellClick?.(ctrl.controllerLetter, n)}
                     data-testid={`grid-zone-${ctrl.controllerLetter}-${n}`}
-                    aria-label={`Controller ${ctrl.controllerLetter} Zone ${n}${
-                      r ? ` — ${r.status}` : " — not checked"
-                    }`}
+                    aria-label={label}
+                    title={label}
                   >
                     {n}
 

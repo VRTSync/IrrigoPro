@@ -438,6 +438,7 @@ import { registerCleanupInvoice71256Routes } from "./cleanup-invoice-71256";
 import { registerWetCheckReconciliationRoutes } from "./wet-check-reconciliation-routes";
 import { registerIrrigationProfileRoutes } from "./irrigation-profile-routes";
 import { makePropertyControllerPatch } from "./property-controller-patch";
+import { makePropertyControllerGet } from "./property-controller-get";
 import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
 import { buildWetCheckGrid } from "../wet-check-grid";
 import { scrubEvent, setScrubCustomerNames } from "../lib/scrubEvent";
@@ -16338,82 +16339,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/properties/:customerId/controllers", requireAuthentication, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
-    const customerId = parseInt(req.params.customerId);
-    // Task #315 — optional ?branch= query param for multi-branch customers.
-    // When provided, return only that branch's controllers (and lazily
-    // bootstrap them if the branch has no rows yet). When absent, preserve
-    // the pre-Task-#315 behaviour: return the customer-level (empty-string)
-    // bucket only, exposing branchName: null on the wire.
-    const branchParam = typeof req.query.branch === "string" ? req.query.branch.trim() : null;
-    try {
-      if (branchParam !== null) {
-        // Branch-scoped fetch: return the named branch's controllers.
-        // Lazily bootstrap if the branch is empty (new branch, first tech visit).
-        const customer = await storage.getCustomer(customerId);
-        if (!customer || customer.companyId !== cid) {
-          res.status(404).json({ message: "Customer not found" });
-          return;
-        }
-        // irrigation_controllers is the single source of truth.
-        const irrigCtrlsForBranch = await storage.listIrrigationControllers(cid, customerId, branchParam);
-        let { seedConfigs } = buildWetCheckGrid(irrigCtrlsForBranch);
-        // When no profile exists yet, seed from customers.totalControllers (clamped 1–26).
-        if (seedConfigs.length === 0) {
-          const CTRL_ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-          const n = Math.min(26, Math.max(1, customer.totalControllers ?? 1));
-          seedConfigs = Array.from({ length: n }, (_, i) => ({ name: `Controller ${CTRL_ALPHA[i]}`, zoneCount: null }));
-        }
-        const irrigCtrls = await storage.ensureIrrigationControllers(cid, customerId, seedConfigs, branchParam);
-        // Map IrrigationController → PropertyController-compatible wire shape
-        // so all existing wet-check UI consumers continue to work without frontend changes.
-        res.json(irrigCtrls.map(ctrl => ({
-          id: ctrl.id,
-          companyId: ctrl.companyId,
-          customerId: ctrl.customerId,
-          branchName: branchParam || null,
-          controllerLetter: ctrl.letter,
-          zoneCount: ctrl.totalZones,
-          notes: ctrl.notes ?? null,
-        })));
-        return;
-      }
-      // Customer-level endpoint: irrigation_controllers stores customer-level
-      // rows under branchName='' (empty string), not null.
-      const customerNoBranch = await storage.getCustomer(customerId);
-      if (!customerNoBranch || customerNoBranch.companyId !== cid) {
-        res.status(404).json({ message: "Customer not found" });
-        return;
-      }
-      const irrigCtrlsNoBranch = await storage.listIrrigationControllers(cid, customerId, "");
-      let { seedConfigs: seedConfigsNoBranch } = buildWetCheckGrid(irrigCtrlsNoBranch);
-      // When no profile exists yet, seed from customers.totalControllers (clamped 1–26).
-      if (seedConfigsNoBranch.length === 0) {
-        const NB_ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        const n = Math.min(26, Math.max(1, customerNoBranch.totalControllers ?? 1));
-        seedConfigsNoBranch = Array.from({ length: n }, (_, i) => ({ name: `Controller ${NB_ALPHA[i]}`, zoneCount: null }));
-      }
-      const seededNoBranch = await storage.ensureIrrigationControllers(cid, customerId, seedConfigsNoBranch, "");
-      // Expose customer-level bucket as branchName: null on the wire.
-      res.json(seededNoBranch.map(ctrl => ({
-        id: ctrl.id,
-        companyId: ctrl.companyId,
-        customerId: ctrl.customerId,
-        branchName: null,
-        controllerLetter: ctrl.letter,
-        zoneCount: ctrl.totalZones,
-        notes: ctrl.notes ?? null,
-      })));
-    } catch (e: any) {
-      const { status, message } = classifyAndLog(req, e, {
-        op: "listControllers",
-        ctx: { cid, customerId },
-        fallbackMessage: "Couldn't load controllers — please retry",
-      });
-      res.status(status).json({ message });
-    }
-  });
+  app.get("/api/properties/:customerId/controllers", requireAuthentication,
+    makePropertyControllerGet({ requireCompanyId, classifyAndLog: _classifyAndLog }));
 
   // PATCH /api/properties/:customerId/controllers — body identifies the
   // controller by letter, matching the spec's "get + patch at the same

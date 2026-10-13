@@ -9,6 +9,15 @@
 //
 // `zoneCount` is nullable because it maps `irrigation_controllers.total_zones`,
 // which is null until a controller's zone count has been recorded.
+// Current zone records drive web readers. zones is optional because offline
+// cached responses from before this additive change contain only zoneCount.
+export interface CustomerControllerZone {
+  id: number;
+  zoneNumber: number;
+  name: string;
+  setUp: boolean;
+}
+
 export interface CustomerController {
   id: number;
   companyId: number;
@@ -17,5 +26,6 @@ export interface CustomerController {
   branchName: string | null;
   controllerLetter: string;
   zoneCount: number | null;
+  zones?: CustomerControllerZone[];
   notes: string | null;
 }

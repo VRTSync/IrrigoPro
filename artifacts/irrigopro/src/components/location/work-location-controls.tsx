@@ -120,7 +120,11 @@ export function WorkLocationControls<T extends WorkLocationRequirementsValue>({
   const selectedController = controllers.find(
     (controller) => controller.controllerLetter === value.controllerLetter,
   );
-  const zoneCount = selectedController?.zoneCount ?? 0;
+  const zones = selectedController?.zones ?? Array.from(
+    { length: selectedController?.zoneCount ?? 0 },
+    (_, i) => ({ zoneNumber: i + 1, name: `Zone ${i + 1}` }),
+  );
+  const zoneCount = zones.length;
   // Two questions live a few lines apart here and must not be conflated:
   // what the user may *choose* (the active list, below) and what the code
   // already on this record *requires* (the full registry, here). A retired
@@ -210,7 +214,7 @@ export function WorkLocationControls<T extends WorkLocationRequirementsValue>({
   const storedControllerMissing =
     !!value.controllerLetter && !selectedController && !controllersLoading;
   const storedZoneOutOfRange =
-    value.zoneNumber != null && (!selectedController || value.zoneNumber > zoneCount);
+    value.zoneNumber != null && !zones.some(zone => zone.zoneNumber === value.zoneNumber);
 
   const handleWorkTypeChange = (nextCode: string) => {
     const code = nextCode === NONE_VALUE ? null : nextCode;
@@ -372,7 +376,7 @@ export function WorkLocationControls<T extends WorkLocationRequirementsValue>({
                     value={controller.controllerLetter}
                   >
                     Controller {controller.controllerLetter}{" "}
-                    <span className="text-gray-500">({controller.zoneCount} zones)</span>
+                    <span className="text-gray-500">({controller.zones?.length ?? controller.zoneCount} zones)</span>
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -402,7 +406,7 @@ export function WorkLocationControls<T extends WorkLocationRequirementsValue>({
               }
               disabled={!selectedController || zoneCount === 0}
             >
-              <SelectTrigger data-testid="select-zone">
+              <SelectTrigger data-testid="select-zone" className="min-w-0 [&>span]:truncate">
                 <SelectValue
                   placeholder={!selectedController ? "Pick a controller first" : "Select zone"}
                 />
@@ -417,9 +421,9 @@ export function WorkLocationControls<T extends WorkLocationRequirementsValue>({
                     <span className="text-gray-500">(not on this controller)</span>
                   </SelectItem>
                 )}
-                {Array.from({ length: zoneCount }, (_, index) => index + 1).map((zone) => (
-                  <SelectItem key={zone} value={String(zone)}>
-                    Zone {zone}
+                {zones.map((zone) => (
+                  <SelectItem key={zone.zoneNumber} value={String(zone.zoneNumber)} className="[&>span:last-child]:min-w-0 [&>span:last-child]:truncate">
+                    {`Zone ${zone.zoneNumber}${zone.name === `Zone ${zone.zoneNumber}` ? "" : ` · ${zone.name}`}`}
                   </SelectItem>
                 ))}
               </SelectContent>

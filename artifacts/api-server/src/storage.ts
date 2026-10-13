@@ -173,6 +173,7 @@ import { humanizeIssueType } from "./inspection-issue-labels";
 import { buildInspectionEstimateItems } from "./inspection-estimate-items";
 import {
   computeLifecycleStatus,
+  isPlaceholderZone,
   deriveLifecycleForWrite,
   ESTIMATE_EXPIRATION_DAYS,
   type LifecycleStatus,
@@ -450,7 +451,12 @@ export interface CustomerSpendInvoiceRow {
   createdAt: Date | string | null;
 }
 
+export type CurrentZoneSummary = {
+  id: number; zoneNumber: number; name: string; zoneType: string; isActive: boolean; setUp: boolean;
+};
+
 export interface IStorage {
+  listCurrentZoneSummaries(controllers: { id: number; companyId: number }[]): Promise<Map<number, CurrentZoneSummary[]>>;
   bulkUpdateIrrigationZones(companyId: number | null, controllerId: number, zoneIds: number[], patch: BulkZonePatch, actor?: ZoneActor): Promise<IrrigationProfileZone[] | null>;
   // Companies
   getCompanies(): Promise<Company[]>;
@@ -11540,6 +11546,24 @@ export class DatabaseStorage implements IStorage {
       .where(eq(irrigationControllers.id, controllerId))
       .returning();
     return updated ?? null;
+  }
+
+  async listCurrentZoneSummaries(controllers: { id: number; companyId: number }[]): Promise<Map<number, CurrentZoneSummary[]>> {
+    const summaries = new Map<number, CurrentZoneSummary[]>();
+    if (controllers.length === 0) return summaries;
+    const scope = or(...controllers.map(c => and(
+      eq(irrigationProfileZones.controllerId, c.id),
+      eq(irrigationProfileZones.companyId, c.companyId),
+    )));
+    const zones = await db.select().from(irrigationProfileZones)
+      .where(and(scope, isNull(irrigationProfileZones.retiredAt)))
+      .orderBy(irrigationProfileZones.zoneNumber);
+    for (const z of zones) {
+      const rows = summaries.get(z.controllerId) ?? [];
+      rows.push({ id: z.id, zoneNumber: z.zoneNumber, name: z.name, zoneType: z.zoneType, isActive: z.isActive, setUp: !isPlaceholderZone(z) });
+      summaries.set(z.controllerId, rows);
+    }
+    return summaries;
   }
 
   async listIrrigationControllers(

@@ -28,6 +28,16 @@ package and read the *first* error, not the summary. The same merge can also
 silently drop guard clauses (e.g. a required-env check) from the top of the
 file, so re-read the whole entrypoint rather than only the conflicted hunk.
 
+Handler extraction can introduce a registration-time TDZ even when the inline
+handler was safe. Passing dependencies into a factory reads them immediately;
+an inline closure had deferred those reads until the first request.
+
+**Why:** A route's late local helper alias was safe inside its original async
+closure but crashed server startup when passed directly to an extracted factory.
+
+**How to apply:** Use an already-initialized import or binding for factory
+dependencies, and exercise server startup as well as the isolated handler tests.
+
 **Related:** the type surface of a workspace lib may resolve through its
 generated `.d.ts` output rather than its source. If that output directory is
 gitignored and the package has no build script, editing the lib's source

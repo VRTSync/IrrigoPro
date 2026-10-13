@@ -27,6 +27,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { registerIrrigationProfileRoutes } from "./irrigation-profile-routes";
 import { storage } from "../storage";
 import { makePropertyControllerPatch } from "./property-controller-patch";
+import { makePropertyControllerGet } from "./property-controller-get";
 import { CLEAR_ZONE_COUNT_MESSAGE, compressZoneRanges, parseZoneRanges } from "../lib/controller-zone-records";
 
 // ── Test server factory ────────────────────────────────────────────────────────
@@ -53,6 +54,13 @@ function makeTestServer(user: TestUser): { base: string; close: () => Promise<vo
   // actor.name for stamps; a missing user just produces null stamps.
 
   registerIrrigationProfileRoutes(app, { requireAuthentication: auth });
+  app.get("/api/properties/:customerId/controllers", auth, makePropertyControllerGet({
+    requireCompanyId: (req, res) => {
+      if (req.authenticatedUserCompanyId != null) return req.authenticatedUserCompanyId;
+      res.status(400).json({ message: "Company required" }); return null;
+    },
+    classifyAndLog: (_req, _error, opts) => ({ status: 500, message: opts.fallbackMessage }),
+  }));
   app.patch("/api/properties/:customerId/controllers", auth, makePropertyControllerPatch({
     requireCompanyId: (req, res) => {
       if (req.authenticatedUserCompanyId != null) return req.authenticatedUserCompanyId;
@@ -170,6 +178,110 @@ describe("Zone range inverse", () => {
   it("round-trips compressed unions and rejects malformed ranges", () => {
     assert.deepEqual(parseZoneRanges(compressZoneRanges([7, 4, 3, 7, 8, 9, 12])), [3, 4, 7, 8, 9, 12]);
     for (const value of ["", "3-x", "5-3", "0", "1-9999999", "3, nope"]) assert.deepEqual(parseZoneRanges(value), []);
+  });
+});
+
+describe("Current zone summaries and additive property controller GET", () => {
+  let srv: ReturnType<typeof makeTestServer>;
+  before(async () => {
+    if (!companyAId) await setupCompanies();
+    srv = makeTestServer({ role: "field_tech", companyId: companyAId, userId: managerAUserId });
+  });
+  after(async () => { await cleanupControllers(); await srv.close(); });
+
+  it("empty helper input returns an empty map without querying", async () => {
+    const spy = mock.method(db, "select", () => { throw new Error("Unexpected query"); });
+    try { assert.deepEqual(await storage.listCurrentZoneSummaries([]), new Map()); }
+    finally { spy.mock.restore(); }
+  });
+
+  for (const branch of ["", "North"]) {
+    it(`returns ordered current zones and unchanged legacy fields for ${branch || "customer-level"} GET`, async () => {
+      const ctrl = await storage.createIrrigationController({
+        companyId: companyAId, customerId: customerAId, branchName: branch,
+        name: `Record-backed ${branch || "base"}`, totalZones: 4, notes: "Legacy notes",
+      });
+      createdControllerIds.push(ctrl.id);
+      const graph = (await storage.getIrrigationController(companyAId, ctrl.id))!;
+      // Write in reverse number order to prove ordering comes from the query.
+      await storage.updateIrrigationZone(companyAId, graph.zones[2].id, { name: "Front Lawn" });
+      await storage.updateIrrigationZone(companyAId, graph.zones[1].id, { zoneType: "rotor" });
+      await storage.setControllerZoneCount(companyAId, ctrl.id, 3);
+      const [alien] = await db.insert(irrigationProfileZones).values({
+        companyId: companyBId, controllerId: ctrl.id, zoneNumber: 99, name: "Foreign zone",
+      }).returning();
+      try {
+        const path = `/api/properties/${customerAId}/controllers${branch ? "?branch=%20North%20" : ""}`;
+        const response = await hit(srv.base, "GET", path);
+        assert.equal(response.status, 200, JSON.stringify(response.body));
+        const expectedZones = [
+          { id: graph.zones[0].id, zoneNumber: 1, name: "Zone 1", setUp: false },
+          { id: graph.zones[1].id, zoneNumber: 2, name: "Zone 2", setUp: true },
+          { id: graph.zones[2].id, zoneNumber: 3, name: "Front Lawn", setUp: true },
+        ];
+        assert.deepEqual(response.body.find((c: any) => c.id === ctrl.id), {
+          id: ctrl.id, companyId: companyAId, customerId: customerAId,
+          branchName: branch || null, controllerLetter: ctrl.letter,
+          zoneCount: 3, notes: "Legacy notes", zones: expectedZones,
+        });
+        const row = (await storage.listIrrigationControllers(companyAId, customerAId, branch)).find(c => c.id === ctrl.id)!;
+        const profile = await hit(srv.base, "GET", `/api/customers/${customerAId}/controllers-profile?branchName=${branch}`);
+        assert.equal(profile.status, 200);
+        // Full wire shape including all controller fields and retired counts.
+        assert.deepEqual(profile.body, JSON.parse(JSON.stringify([{
+          ...row, zones: expectedZones.map((z, i) => ({
+            ...z, zoneType: i === 1 ? "rotor" : "other", isActive: true,
+          })), retiredZoneCount: 1,
+        }])));
+
+        // An unreconciled stored mirror must still pass through untouched for mobile.
+        await db.update(irrigationControllers).set({ totalZones: 12 }).where(eq(irrigationControllers.id, ctrl.id));
+        const staleMirror = (await hit(srv.base, "GET", path)).body.find((c: any) => c.id === ctrl.id);
+        assert.equal(staleMirror.zoneCount, 12);
+        assert.deepEqual(staleMirror.zones, expectedZones);
+      } finally { await db.delete(irrigationProfileZones).where(eq(irrigationProfileZones.id, alien.id)); }
+    });
+  }
+
+  it("pairs controller/company scopes for cross-company batches", async () => {
+    const controllers = await storage.listIrrigationControllers(companyAId, customerAId);
+    const foreign = await storage.createIrrigationController({
+      companyId: companyBId, customerId: customerBId, name: "Foreign batch", totalZones: 1,
+    });
+    createdControllerIds.push(foreign.id);
+    const [alien] = await db.insert(irrigationProfileZones).values({
+      companyId: companyAId, controllerId: foreign.id, zoneNumber: 99, name: "Wrong paired company",
+    }).returning();
+    try {
+      const summaries = await storage.listCurrentZoneSummaries([...controllers, foreign]);
+      assert.deepEqual(summaries.get(foreign.id)?.map(z => z.zoneNumber), [1]);
+    } finally { await db.delete(irrigationProfileZones).where(eq(irrigationProfileZones.id, alien.id)); }
+  });
+
+  it("foreign customers return 404 before list, seeding or zone lookup in both variants", async () => {
+    const spies = ["listIrrigationControllers", "ensureIrrigationControllers", "listCurrentZoneSummaries"].map(
+      name => mock.method(storage as any, name, () => { throw new Error(`Unexpected ${name}`); }),
+    );
+    try {
+      for (const suffix of ["", "?branch=North"]) {
+        const response = await hit(srv.base, "GET", `/api/properties/${customerBId}/controllers${suffix}`);
+        assert.deepEqual(response, { status: 404, body: { message: "Customer not found" } });
+      }
+      for (const spy of spies) assert.equal(spy.mock.callCount(), 0);
+    } finally { spies.forEach(spy => spy.mock.restore()); }
+  });
+
+  it("retains lazy seeding, null counts and explicitly empty zone arrays", async () => {
+    const response = await hit(srv.base, "GET", `/api/properties/${customerAId}/controllers?branch=Unconfigured`);
+    assert.equal(response.status, 200);
+    for (const ctrl of response.body) {
+      createdControllerIds.push(ctrl.id);
+      assert.deepEqual(ctrl, {
+        id: ctrl.id, companyId: companyAId, customerId: customerAId,
+        branchName: "Unconfigured", controllerLetter: "A", zoneCount: null, notes: null, zones: [],
+      });
+    }
+    assert.equal(response.body.length, 1);
   });
 });
 
