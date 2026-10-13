@@ -27,6 +27,9 @@ import {
   type WorkLocationRequirementsValue,
 } from "./work-location-controls";
 import type { CustomerControllerZone } from "@/lib/controller-types";
+import { cachedApiRequest } from "@/lib/offline/api";
+
+vi.mock("@/lib/offline/api", () => ({ cachedApiRequest: vi.fn() }));
 
 // Radix drives open/close off pointer capture, which jsdom does not implement.
 const proto = Element.prototype as any;
@@ -110,7 +113,7 @@ function renderControls(options: {
     [registryKey(CUSTOMER_ID)],
     options.workTypes ?? WORK_TYPES,
   );
-  client.setQueryData(["/api/properties", CUSTOMER_ID, "controllers"], options.controllers ?? CONTROLLERS);
+  client.setQueryData(["/api/properties", CUSTOMER_ID, "controllers", null], options.controllers ?? CONTROLLERS);
 
   const onChange = options.onChange ?? vi.fn();
   const view = render(
@@ -134,6 +137,65 @@ function openSelect(testId: string) {
     pointerType: "mouse",
   });
 }
+
+describe("branch-scoped controller requests", () => {
+  beforeEach(() => {
+    vi.mocked(cachedApiRequest).mockReset();
+    vi.mocked(cachedApiRequest).mockResolvedValue(CONTROLLERS);
+  });
+
+  function mount(branchName?: string | null, saved = false) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    client.setQueryData([registryKey(CUSTOMER_ID)], WORK_TYPES);
+    const onChange = vi.fn();
+    const ui = (branch?: string | null) => <QueryClientProvider client={client}>
+      <WorkLocationControls customerId={CUSTOMER_ID} branchName={branch}
+        value={emptyValue({ fieldWorkType: "zone_repair", ...(saved ? { controllerLetter: "A", zoneNumber: 3 } : {}) })}
+        onChange={onChange} />
+    </QueryClientProvider>;
+    const view = render(ui(branchName));
+    return { client, onChange, rerenderBranch: (branch?: string | null) => view.rerender(ui(branch)) };
+  }
+
+  it.each([
+    ["North", "/api/properties/7/controllers?branch=North", "North"],
+    ["North & East", "/api/properties/7/controllers?branch=North%20%26%20East", "North & East"],
+    [undefined, "/api/properties/7/controllers", null],
+    ["", "/api/properties/7/controllers", null],
+  ])("uses the explicit cached URL and four-part key for %s", async (branch, url, keyBranch) => {
+    const { client } = mount(branch);
+    await waitFor(() => expect(cachedApiRequest).toHaveBeenCalledWith(url));
+    await waitFor(() => expect(client.getQueryData(["/api/properties", 7, "controllers", keyBranch])).toEqual(CONTROLLERS));
+    openSelect("select-controller");
+    expect(await screen.findByRole("option", { name: /Controller A/ })).toBeTruthy();
+  });
+
+  it("does not clear on mount, same branch or empty responses; clears real branch changes including customer level", async () => {
+    vi.mocked(cachedApiRequest).mockResolvedValue([]);
+    const { onChange, rerenderBranch } = mount("North", true);
+    await waitFor(() => expect(screen.getByTestId("select-controller").textContent).toContain("no longer on file"));
+    expect(onChange).not.toHaveBeenCalled();
+    rerenderBranch("North");
+    expect(onChange).not.toHaveBeenCalled();
+    rerenderBranch("South");
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ controllerLetter: null, zoneNumber: null }));
+    onChange.mockClear();
+    rerenderBranch(null);
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("customer-level to branch changes clear after mount; prefix invalidation refetches branch queries", async () => {
+    const { client, onChange, rerenderBranch } = mount(null, true);
+    await waitFor(() => expect(cachedApiRequest).toHaveBeenCalledTimes(1));
+    expect(onChange).not.toHaveBeenCalled();
+    rerenderBranch("North");
+    await waitFor(() => expect(cachedApiRequest).toHaveBeenCalledWith("/api/properties/7/controllers?branch=North"));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    vi.mocked(cachedApiRequest).mockClear();
+    await client.invalidateQueries({ queryKey: ["/api/properties", 7, "controllers"] });
+    expect(cachedApiRequest).toHaveBeenCalledWith("/api/properties/7/controllers?branch=North");
+  });
+});
 
 describe("work type picker", () => {
   it("shows the placeholder instead of a blank trigger when nothing is selected", () => {
@@ -189,7 +251,7 @@ describe("work type picker", () => {
     });
     client.setQueryData([registryKey(null)], WORK_TYPES); // another tenant's
     client.setQueryData([registryKey(CUSTOMER_ID)], []);
-    client.setQueryData(["/api/properties", CUSTOMER_ID, "controllers"], CONTROLLERS);
+    client.setQueryData(["/api/properties", CUSTOMER_ID, "controllers", null], CONTROLLERS);
 
     const onGateStateChange = vi.fn();
     render(
@@ -427,7 +489,7 @@ describe("legacy values the controller list disagrees with", () => {
     });
     client.setQueryData([registryKey(options.customerId ?? CUSTOMER_ID)], WORK_TYPES);
     client.setQueryData(
-      ["/api/properties", options.customerId ?? CUSTOMER_ID, "controllers"],
+      ["/api/properties", options.customerId ?? CUSTOMER_ID, "controllers", null],
       options.controllers,
     );
     const onChange = vi.fn();

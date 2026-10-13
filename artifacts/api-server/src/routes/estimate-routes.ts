@@ -195,6 +195,10 @@ export const createEstimateWithItemsSchema = z.object({
   items: z
     .array(
       z.object({
+        sourceItemId: z.number().int().positive().optional(),
+        controllerLetter: z.string().nullable().optional(),
+        zoneNumber: z.number().int().positive().nullable().optional(),
+        issueType: z.string().nullable().optional(),
         description: z.string().optional().default(""),
         partId: z.number().nullable(),
         partName: z.string(),

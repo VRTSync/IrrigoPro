@@ -49,6 +49,7 @@ export interface CustomerLocationValue {
 
 interface Props {
   customer: Customer | null;
+  branchName?: string | null;
   value: CustomerLocationValue;
   onChange: (next: CustomerLocationValue) => void;
   onBack: () => void;
@@ -78,6 +79,7 @@ interface AddressFormValues {
 
 export function CustomerLocationStep({
   customer,
+  branchName,
   value,
   onChange,
   onBack,
@@ -274,6 +276,7 @@ export function CustomerLocationStep({
 
       {customer && (
         <WorkLocationControls
+              branchName={branchName}
           customerId={customer.id}
           value={value}
           onChange={onChange}

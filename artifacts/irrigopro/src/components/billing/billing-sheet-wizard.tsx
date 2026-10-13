@@ -1743,6 +1743,7 @@ export function BillingSheetWizard({
               />
             ) : step === 2 ? (
               <CustomerLocationStep
+                branchName={customerStep.branchName}
                 customer={customerStep.customer}
                 value={locationStep}
                 onChange={setLocationStep}

@@ -814,6 +814,7 @@ export function WorkOrderCompletion({
             >
               <div className="border-t pt-4">
                 <WorkLocationControls
+                  branchName={selectedBranch || workOrder.branchName || null}
                   customerId={workOrder.customerId}
                   value={completionLocation}
                   onChange={(next) =>

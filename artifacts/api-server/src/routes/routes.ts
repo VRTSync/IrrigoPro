@@ -9904,7 +9904,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // match so the partId stack-map fallback path never double-consumes them.
         const consumedPriorIds = new Set<number>();
 
-        const finalItems: Parameters<typeof storage.replaceWorkOrderItemsWithResync>[1] = [];
+        const finalItems: (Parameters<typeof storage.replaceWorkOrderItemsWithResync>[1][number] & { sourceItemId?: number })[] = [];
         for (const part of incomingParts) {
           let prior: (typeof priorItemsForGuard)[number] | undefined;
 
@@ -9948,6 +9948,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const unitPrice = money(prior.partPrice);
             finalItems.push({
               workOrderId,
+              sourceItemId: prior.id,
               partId: part.partId,
               partName: prior.partName,
               partPrice: prior.partPrice,
@@ -13078,13 +13079,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  const workOrderItemsBody = itemsBody.extend({
+    items: z.array(itemsBody.shape.items.element.extend({
+      id: z.number().int().nullable().optional(),
+      sourceItemId: z.number().int().positive().nullable().optional(),
+      controllerLetter: z.string().nullable().optional(),
+      zoneNumber: z.number().int().positive().nullable().optional(),
+    })),
+  });
   // Task #1093 — item replacement for work orders.
   app.patch("/api/work-orders/:id/items", requireAuthentication, requireSameCompanyAsWorkOrder, async (req: any, res) => {
     const role = req.authenticatedUserRole;
     if (role !== "billing_manager" && role !== "company_admin" && role !== "super_admin" && role !== "irrigation_manager") {
       res.status(403).json({ message: "Forbidden" }); return;
     }
-    const parsed = itemsBody.safeParse(req.body ?? {});
+    const parsed = workOrderItemsBody.safeParse(req.body ?? {});
     if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid id" }); return; }
@@ -13092,6 +13101,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const insertItems = parsed.data.items.map((i) => ({
         workOrderId: id,
+        sourceItemId: i.sourceItemId ?? i.id ?? undefined,
+        ...(Object.hasOwn(i, "controllerLetter") ? { controllerLetter: i.controllerLetter } : {}),
+        ...(Object.hasOwn(i, "zoneNumber") ? { zoneNumber: i.zoneNumber } : {}),
         partId: i.partId ?? null,
         partName: i.partName,
         partPrice: String(i.unitPrice),
@@ -13499,6 +13511,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const lineTotal = qty * price;
           return {
             workOrderId: id,
+            sourceItemId: item.sourceItemId ?? item.id ?? undefined,
+            ...(Object.hasOwn(item, "controllerLetter") ? { controllerLetter: item.controllerLetter } : {}),
+            ...(Object.hasOwn(item, "zoneNumber") ? { zoneNumber: item.zoneNumber } : {}),
             partId: item.partId || null,
             partName: item.partName,
             partPrice: price.toString(),

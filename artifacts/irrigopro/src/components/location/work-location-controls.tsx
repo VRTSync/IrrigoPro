@@ -8,6 +8,7 @@ import {
   type LocationGateViolation,
 } from "@workspace/db/field-location-policy";
 import { useArrayQuery } from "@/lib/queryClient";
+import { cachedApiRequest } from "@/lib/offline/api";
 import { useFieldWorkTypeRegistry } from "@/hooks/use-field-work-type-registry";
 import type { CustomerController } from "@/lib/controller-types";
 import { Input } from "@/components/ui/input";
@@ -30,6 +31,7 @@ export interface WorkLocationRequirementsValue {
 
 interface WorkLocationControlsProps<T extends WorkLocationRequirementsValue> {
   customerId: number | null | undefined;
+  branchName?: string | null;
   value: T;
   onChange: (next: T) => void;
   enforceLocationGate?: boolean;
@@ -92,6 +94,7 @@ export function WorkLocationGateStatus({
 
 export function WorkLocationControls<T extends WorkLocationRequirementsValue>({
   customerId,
+  branchName,
   value,
   onChange,
   enforceLocationGate = false,
@@ -106,7 +109,10 @@ export function WorkLocationControls<T extends WorkLocationRequirementsValue>({
 
   const { data: controllers = [], isLoading: controllersLoading } =
     useArrayQuery<CustomerController>({
-      queryKey: ["/api/properties", customerId, "controllers"],
+      queryKey: ["/api/properties", customerId, "controllers", branchName || null],
+      queryFn: () => cachedApiRequest<CustomerController[]>(
+        `/api/properties/${customerId}/controllers${branchName ? `?branch=${encodeURIComponent(branchName)}` : ""}`,
+      ),
       enabled: !!customerId,
     });
   const {
@@ -194,22 +200,28 @@ export function WorkLocationControls<T extends WorkLocationRequirementsValue>({
   }, [violations.join("|")]);
 
   // Switching to a different customer invalidates a controller picked for the
-  // previous one. That is the only automatic clear here, and it is keyed off
+  // previous one. Automatic clearing is keyed off
   // an explicit user action rather than off the fetched list disagreeing with
   // the stored value: `useArrayQuery` reports a failed or forbidden controller
   // fetch as an empty array, and work-order completion persists every onChange
   // immediately, so reconciling against list contents would silently delete a
   // legacy controller the moment the request failed. Values that no longer
   // match the list are surfaced as explicit "no longer on file" options below.
+  // An actual post-mount branch change also invalidates the picked controller.
   const previousCustomerIdRef = useRef(customerId);
+  const previousBranchRef = useRef(branchName || null);
   useEffect(() => {
     const previous = previousCustomerIdRef.current;
+    const previousBranch = previousBranchRef.current;
     previousCustomerIdRef.current = customerId;
-    if (previous == null || previous === customerId) return;
+    previousBranchRef.current = branchName || null;
+    const customerChanged = previous != null && previous !== customerId;
+    const branchChanged = previousBranch !== (branchName || null);
+    if (!customerChanged && !branchChanged) return;
     const current = valueRef.current;
     if (current.controllerLetter == null && current.zoneNumber == null) return;
     onChange({ ...current, controllerLetter: null, zoneNumber: null });
-  }, [customerId, onChange]);
+  }, [customerId, branchName, onChange]);
 
   const storedControllerMissing =
     !!value.controllerLetter && !selectedController && !controllersLoading;

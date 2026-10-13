@@ -5,6 +5,10 @@ import { money } from "./lib/money";
 // POST /api/estimates and is also used by the Wet Check conversion path so
 // both flows compute pricing identically.
 export interface EstimateLineInput {
+  sourceItemId?: number;
+  controllerLetter?: string | null;
+  zoneNumber?: number | null;
+  issueType?: string | null;
   description?: string | null;
   // Null for inspection findings that have no catalog part assigned yet.
   // The server persists null and the DB column is a nullable FK.
@@ -72,6 +76,10 @@ export function processEstimatePayload(input: EstimatePayloadInput): EstimatePay
       laborHours: "0.00",
       totalPrice: totalPrice.toFixed(2),
       sortOrder: item.sortOrder ?? idx,
+      ...(item.sourceItemId != null ? { sourceItemId: item.sourceItemId } : {}),
+      ...(Object.hasOwn(item, "controllerLetter") ? { controllerLetter: item.controllerLetter } : {}),
+      ...(Object.hasOwn(item, "zoneNumber") ? { zoneNumber: item.zoneNumber } : {}),
+      ...(Object.hasOwn(item, "issueType") ? { issueType: item.issueType } : {}),
     } as InsertEstimateItem;
   });
 

@@ -521,6 +521,9 @@ export function registerIrrigationProfileRoutes(
 
         res.json({ ok: true });
       } catch (e: any) {
+        if ((e?.cause?.code ?? e?.code) === "23503") {
+          return res.status(409).json({ message: "This controller has work history (tickets, estimates or wet checks) and can't be deleted. Turn it off instead." });
+        }
         req.log?.error?.({ err: e, id }, "deleteIrrigationController failed");
         res.status(500).json({ message: "Could not delete controller — please retry" });
       }

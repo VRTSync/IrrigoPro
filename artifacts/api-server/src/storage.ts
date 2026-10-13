@@ -233,6 +233,8 @@ export type { WetCheckBillingListItem };
 // transaction parameter type keeps callers honest while still accepting
 // the top-level db handle.
 type DbExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+// Transient, parent-scoped edit hint; never a persisted database column.
+type ReplacementItem<T> = T & { sourceItemId?: number | null };
 
 // Thrown by deleteWetCheck when one or more findings have already been
 // routed to a billing sheet, estimate or work order. Surface mapped to
@@ -456,6 +458,7 @@ export type CurrentZoneSummary = {
 };
 
 export interface IStorage {
+  resolveControllerIdsByLetter(q: DbExecutor, scope: { companyId: number; customerId: number; branchName: string | null }, letters: (string | null | undefined)[]): Promise<Map<string, number | null>>;
   listCurrentZoneSummaries(controllers: { id: number; companyId: number }[]): Promise<Map<number, CurrentZoneSummary[]>>;
   bulkUpdateIrrigationZones(companyId: number | null, controllerId: number, zoneIds: number[], patch: BulkZonePatch, actor?: ZoneActor): Promise<IrrigationProfileZone[] | null>;
   // Companies
@@ -620,7 +623,7 @@ export interface IStorage {
       sentToEmail?: string;
     },
   ): Promise<Estimate | undefined>;
-  updateEstimateWithItems(id: number, estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems>;
+  updateEstimateWithItems(id: number, estimate: InsertEstimate, items: ReplacementItem<InsertEstimateItem>[]): Promise<EstimateWithItems>;
   deleteEstimate(id: number): Promise<boolean>;
   // Task #634 — manager-facing soft delete for draft estimates.
   // Returns true if a draft row was successfully marked deleted.
@@ -706,7 +709,7 @@ export interface IStorage {
   updateWorkOrderItem(id: number, item: Partial<InsertWorkOrderItem>): Promise<WorkOrderItem | undefined>;
   deleteWorkOrderItem(id: number): Promise<boolean>;
   deleteWorkOrderItems(workOrderId: number): Promise<boolean>;
-  replaceWorkOrderItemsInTransaction(workOrderId: number, items: InsertWorkOrderItem[]): Promise<WorkOrderItem[]>;
+  replaceWorkOrderItemsInTransaction(workOrderId: number, items: ReplacementItem<InsertWorkOrderItem>[]): Promise<WorkOrderItem[]>;
   // Task #1437 — tech zone checklist: per-item check-off + zone-linked photos
   setWorkOrderItemCompletion(workOrderId: number, itemId: number, completed: boolean): Promise<WorkOrderItem | undefined>;
   getWorkOrderZonePhotos(workOrderId: number): Promise<WorkOrderZonePhoto[]>;
@@ -1287,7 +1290,7 @@ export interface IStorage {
   /** Task #1093 — inline item replace for billing sheets (atomic with total resync). */
   replaceBillingSheetItemsWithResync(id: number, items: InsertBillingSheetItem[], companyId: number | null): Promise<BillingSheetWithItems>;
   /** Task #1093 — inline item replace for work orders (atomic with total resync). */
-  replaceWorkOrderItemsWithResync(id: number, items: InsertWorkOrderItem[], companyId: number | null): Promise<WorkOrder & { items: WorkOrderItem[] }>;
+  replaceWorkOrderItemsWithResync(id: number, items: ReplacementItem<InsertWorkOrderItem>[], companyId: number | null): Promise<WorkOrder & { items: WorkOrderItem[] }>;
   /** Task #1315 — flat labor hours editor for billing sheets (recomputes labor totals). */
   updateBillingSheetLaborHours(id: number, totalHours: number, companyId: number | null): Promise<BillingSheetWithItems>;
   /** Task #1395 — flat labor hours editor for work orders (recomputes labor totals). */
@@ -3168,6 +3171,7 @@ export class DatabaseStorage implements IStorage {
     estimate: InsertEstimate & { companyId?: number | null },
     items: InsertEstimateItem[],
     explicitEstimateNumber?: string,
+    sourceLocations?: Array<{ controllerLetter: string | null; zoneNumber: number | null; controllerId: number | null }>,
   ): Promise<EstimateWithItems> {
     // Task #669 — every new estimate gets a 5-digit per-company
     // number from the `companies.next_estimate_number` counter,
@@ -3198,11 +3202,19 @@ export class DatabaseStorage implements IStorage {
     });
     // companyId is guaranteed to be a non-null number here — the route
     // stamps it from req.authenticatedUserCompanyId before calling storage.
-    const [newEstimate] = await executor
+    let [newEstimate] = await executor
       .insert(estimates)
-      .values([{ ...estimate, estimateNumber, lifecycle } as typeof estimates.$inferInsert])
+      .values([{ ...estimate, ...(Object.hasOwn(estimate, "controllerLetter") ? { controllerId: null } : {}), estimateNumber, lifecycle } as typeof estimates.$inferInsert])
       .returning();
+    const [stampedHeader] = await this._stampControllerIds(executor, newEstimate, [{ ...estimate, id: newEstimate.id }], "estimates");
+    if (Object.hasOwn(estimate, "controllerLetter")) {
+      [newEstimate] = await executor.update(estimates).set({ controllerId: stampedHeader.controllerId }).where(eq(estimates.id, newEstimate.id)).returning();
+    }
     const createdItems: EstimateItem[] = [];
+    // Only the shared wet-check conversion supplies trusted zone-record identity.
+    items = sourceLocations
+      ? items.map((item, i) => ({ ...item, ...sourceLocations[i] }))
+      : await this._stampControllerIds(executor, newEstimate, items, "estimate_items");
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       const [createdItem] = await executor.insert(estimateItems).values({
@@ -3230,10 +3242,11 @@ export class DatabaseStorage implements IStorage {
     payload: EstimatePayloadInput,
     executor?: DbExecutor,
     explicitEstimateNumber?: string,
+    sourceLocations?: Array<{ controllerLetter: string | null; zoneNumber: number | null; controllerId: number | null }>,
   ): Promise<EstimateWithItems> {
     const { estimate, items } = processEstimatePayload(payload);
     if (executor) {
-      return this._writeEstimateWithItems(executor, estimate, items, explicitEstimateNumber);
+      return this._writeEstimateWithItems(executor, estimate, items, explicitEstimateNumber, sourceLocations);
     }
     if (explicitEstimateNumber) {
       return await db.transaction(async (tx) =>
@@ -3243,6 +3256,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateEstimate(id: number, estimate: Partial<InsertEstimate>): Promise<Estimate | undefined> {
+    return db.transaction(async (tx) => {
     // Task #642 — when the caller patches `status` or `internalStatus`,
     // mirror the change into the canonical `lifecycle` column so the
     // two stay in sync. We read the existing row to merge unspecified
@@ -3256,7 +3270,7 @@ export class DatabaseStorage implements IStorage {
       Object.prototype.hasOwnProperty.call(patch, "status") ||
       Object.prototype.hasOwnProperty.call(patch, "internalStatus");
     if (touchesAxis && !Object.prototype.hasOwnProperty.call(patch, "lifecycle")) {
-      const [existing] = await db.select().from(estimates).where(eq(estimates.id, id));
+      const [existing] = await tx.select().from(estimates).where(eq(estimates.id, id));
       if (existing) {
         const finalStatus = (patch.status ?? existing.status) as string | null | undefined;
         const finalInternal = (patch.internalStatus ?? existing.internalStatus) as string | null | undefined;
@@ -3268,9 +3282,11 @@ export class DatabaseStorage implements IStorage {
         }
       }
     }
-    const [updatedEstimate] = await db.update(estimates).set(patch).where(eq(estimates.id, id)).returning();
+    const stamped = await this._stampDocumentPatch(tx, estimates, id, patch);
+    const [updatedEstimate] = await tx.update(estimates).set(stamped).where(eq(estimates.id, id)).returning();
     if (!updatedEstimate) return undefined;
     return { ...updatedEstimate, lifecycleStatus: computeLifecycleStatus(updatedEstimate) } as Estimate;
+    });
   }
 
   // Task #611 — conditional reject. The WHERE clause pins
@@ -3404,7 +3420,7 @@ export class DatabaseStorage implements IStorage {
     return { ...updated, lifecycleStatus: computeLifecycleStatus(updated) } as Estimate;
   }
 
-  async updateEstimateWithItems(id: number, estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems> {
+  async updateEstimateWithItems(id: number, estimate: InsertEstimate, items: ReplacementItem<InsertEstimateItem>[]): Promise<EstimateWithItems> {
     return await db.transaction(async (tx) => {
       // Task #642 — dual-write the canonical lifecycle column. We
       // already have the full intended (status, internalStatus) here
@@ -3416,10 +3432,13 @@ export class DatabaseStorage implements IStorage {
           internalStatus: (estimate as { internalStatus?: string | null }).internalStatus,
         }),
       } as InsertEstimate;
-      const [updatedEstimate] = await tx.update(estimates).set(merged).where(eq(estimates.id, id)).returning();
+      const stamped = await this._stampDocumentPatch(tx, estimates, id, merged);
+      const [updatedEstimate] = await tx.update(estimates).set(stamped).where(eq(estimates.id, id)).returning();
       if (!updatedEstimate) {
         throw new Error(`Estimate ${id} not found`);
       }
+      const priorItems = await tx.select().from(estimateItems).where(eq(estimateItems.estimateId, id)).orderBy(estimateItems.sortOrder, estimateItems.id);
+      items = await this._prepareReplacementControllerRows(tx, updatedEstimate, items, priorItems, "estimate_items");
       await tx.delete(estimateItems).where(eq(estimateItems.estimateId, id));
       const createdItems: EstimateItem[] = [];
       for (let i = 0; i < items.length; i++) {
@@ -3986,12 +4005,30 @@ export class DatabaseStorage implements IStorage {
       quantity: number;
       laborHours: string;
       totalPrice: string;
+      controllerLetter?: string | null;
+      controllerId?: number | null;
+      zoneNumber?: number | null;
+      issueType?: string | null;
+      findingId?: number | null;
     }>,
+    trustedSourceItems = false,
   ): Promise<WorkOrder> {
-    const [newWorkOrder] = await executor.insert(workOrders).values([workOrder]).returning();
+    let [newWorkOrder] = await executor.insert(workOrders).values([{
+      ...workOrder, ...(Object.hasOwn(workOrder, "controllerLetter") ? { controllerId: null } : {}),
+    }]).returning();
+    const [stampedHeader] = await this._stampControllerIds(executor, newWorkOrder, [{ ...workOrder, id: newWorkOrder.id }], "work_orders");
+    if (Object.hasOwn(workOrder, "controllerLetter")) {
+      [newWorkOrder] = await executor.update(workOrders).set({ controllerId: stampedHeader.controllerId }).where(eq(workOrders.id, newWorkOrder.id)).returning();
+    }
+    if (!trustedSourceItems) items = await this._stampControllerIds(executor, newWorkOrder, items, "work_order_items");
     for (const item of items) {
       await executor.insert(workOrderItems).values([{
         workOrderId: newWorkOrder.id,
+        controllerLetter: item.controllerLetter,
+        controllerId: item.controllerId,
+        zoneNumber: item.zoneNumber,
+        issueType: item.issueType,
+        findingId: item.findingId,
         partId: item.partId ?? null,
         partName: item.partName,
         partPrice: item.partPrice,
@@ -4005,10 +4042,13 @@ export class DatabaseStorage implements IStorage {
 
   async createWorkOrder(workOrder: InsertWorkOrder & { companyId: number }, estimateItemsList?: EstimateItem[]): Promise<WorkOrder> {
     const workOrderNumber = `WO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    return this._writeWorkOrderWithItems(
-      db,
+    return db.transaction(tx => this._writeWorkOrderWithItems(
+      tx,
       { ...workOrder, workOrderNumber } as typeof workOrders.$inferInsert,
       (estimateItemsList ?? []).map(item => ({
+        controllerLetter: item.controllerLetter,
+        zoneNumber: item.zoneNumber,
+        issueType: item.issueType,
         partId: item.partId,
         partName: item.partName,
         partPrice: item.partPrice,
@@ -4016,7 +4056,7 @@ export class DatabaseStorage implements IStorage {
         laborHours: item.laborHours,
         totalPrice: money(item.totalPrice).toFixed(2),
       })),
-    );
+    ));
   }
 
   async createWorkOrderFromEstimate(estimateId: number, companyId?: number | null): Promise<WorkOrder> {
@@ -4146,13 +4186,17 @@ export class DatabaseStorage implements IStorage {
           branchName: (estimate as unknown as { branchName?: string | null }).branchName ?? null,
         };
 
-        const [newWorkOrder] = await tx.insert(workOrders)
+        let [newWorkOrder] = await tx.insert(workOrders)
           .values(toDrizzleInsert<DrizzleWorkOrderInsert>(workOrderData))
           .returning();
+        const [stampedHeader] = await this._stampControllerIds(tx, newWorkOrder, [newWorkOrder], "work_orders");
+        [newWorkOrder] = await tx.update(workOrders).set({ controllerId: stampedHeader.controllerId }).where(eq(workOrders.id, newWorkOrder.id)).returning();
+        const stampedItems = await this._stampControllerIds(tx, newWorkOrder, items, "work_order_items");
 
-        for (const item of items) {
+        for (const item of stampedItems) {
           await tx.insert(workOrderItems).values({
             workOrderId: newWorkOrder.id,
+            controllerId: item.controllerId,
             partId: item.partId,
             partName: item.partName,
             partPrice: item.partPrice,
@@ -4345,14 +4389,18 @@ export class DatabaseStorage implements IStorage {
         branchName: (approvedEstimate as unknown as { branchName?: string | null }).branchName ?? null,
       };
 
-      const [newWorkOrder] = await tx.insert(workOrders)
+      let [newWorkOrder] = await tx.insert(workOrders)
         .values(toDrizzleInsert<DrizzleWorkOrderInsert>(workOrderData))
         .returning();
+      const [stampedHeader] = await this._stampControllerIds(tx, newWorkOrder, [newWorkOrder], "work_orders");
+      [newWorkOrder] = await tx.update(workOrders).set({ controllerId: stampedHeader.controllerId }).where(eq(workOrders.id, newWorkOrder.id)).returning();
+      const stampedItems = await this._stampControllerIds(tx, newWorkOrder, items, "work_order_items");
 
       // 3. Insert work-order items.
-      for (const item of items) {
+      for (const item of stampedItems) {
         await tx.insert(workOrderItems).values({
           workOrderId: newWorkOrder.id,
+          controllerId: item.controllerId,
           partId: item.partId,
           partName: item.partName,
           partPrice: item.partPrice,
@@ -4504,8 +4552,11 @@ export class DatabaseStorage implements IStorage {
     const payload = clearTimestamp
       ? { ...workOrder, returnedForCorrectionAt: null }
       : workOrder;
-    const [updatedWorkOrder] = await db.update(workOrders).set(payload).where(eq(workOrders.id, id)).returning();
-    return updatedWorkOrder || undefined;
+    return db.transaction(async (tx) => {
+      const stamped = await this._stampDocumentPatch(tx, workOrders, id, payload);
+      const [updatedWorkOrder] = await tx.update(workOrders).set(stamped).where(eq(workOrders.id, id)).returning();
+      return updatedWorkOrder || undefined;
+    });
   }
 
   async deleteWorkOrder(id: number): Promise<boolean> {
@@ -4566,13 +4617,21 @@ export class DatabaseStorage implements IStorage {
   }
 
   async addWorkOrderItem(item: InsertWorkOrderItem): Promise<WorkOrderItem> {
-    const [newItem] = await db.insert(workOrderItems).values(item).returning();
-    return newItem;
+    return db.transaction(async (tx) => {
+      const [stamped] = await this._stampWorkOrderRows(tx, item.workOrderId!, [item]);
+      const [newItem] = await tx.insert(workOrderItems).values(stamped).returning();
+      return newItem;
+    });
   }
 
   async updateWorkOrderItem(id: number, item: Partial<InsertWorkOrderItem>): Promise<WorkOrderItem | undefined> {
-    const [updatedItem] = await db.update(workOrderItems).set(item).where(eq(workOrderItems.id, id)).returning();
-    return updatedItem || undefined;
+    return db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(workOrderItems).where(eq(workOrderItems.id, id));
+      if (!existing) return undefined;
+      const [stamped] = await this._stampWorkOrderRows(tx, existing.workOrderId!, [item]);
+      const [updatedItem] = await tx.update(workOrderItems).set(stamped).where(eq(workOrderItems.id, id)).returning();
+      return updatedItem || undefined;
+    });
   }
 
   async deleteWorkOrderItem(id: number): Promise<boolean> {
@@ -4585,8 +4644,12 @@ export class DatabaseStorage implements IStorage {
     return true;
   }
 
-  async replaceWorkOrderItemsInTransaction(workOrderId: number, items: InsertWorkOrderItem[]): Promise<WorkOrderItem[]> {
+  async replaceWorkOrderItemsInTransaction(workOrderId: number, items: ReplacementItem<InsertWorkOrderItem>[]): Promise<WorkOrderItem[]> {
     return await db.transaction(async (tx) => {
+      const [parent] = await tx.select().from(workOrders).where(eq(workOrders.id, workOrderId)).for("update");
+      if (!parent) throw new Error(`Work order ${workOrderId} not found`);
+      const priors = await tx.select().from(workOrderItems).where(eq(workOrderItems.workOrderId, workOrderId)).orderBy(workOrderItems.id);
+      items = await this._prepareReplacementControllerRows(tx, parent, items.map(item => ({ ...item, workOrderId })), priors, "work_order_items");
       await tx.delete(workOrderItems).where(eq(workOrderItems.workOrderId, workOrderId));
       if (items.length === 0) return [];
       const inserted = await tx.insert(workOrderItems).values(items).returning();
@@ -4659,11 +4722,13 @@ export class DatabaseStorage implements IStorage {
       }
     }
     try {
-      const [created] = await db
-        .insert(workOrderZonePhotos)
-        .values({ ...insert, workOrderId })
-        .returning();
-      return created;
+      return await db.transaction(async (tx) => {
+        const [stamped] = await this._stampWorkOrderRows(tx, workOrderId, [insert], "work_order_zone_photos");
+        const [created] = await tx.insert(workOrderZonePhotos)
+          .values({ ...stamped, workOrderId })
+          .returning();
+        return created;
+      });
     } catch (e: any) {
       // Belt-and-suspenders: a concurrent retry (same clientId) that raced
       // past the SELECT above fails on the partial unique index; re-read and
@@ -5288,13 +5353,13 @@ export class DatabaseStorage implements IStorage {
 
   async replaceWorkOrderItemsWithResync(
     id: number,
-    items: InsertWorkOrderItem[],
+    items: ReplacementItem<InsertWorkOrderItem>[],
     companyId: number | null,
   ): Promise<WorkOrder & { items: WorkOrderItem[] }> {
     return db.transaction(async (tx) => {
       const scope = this._companyScope(companyId);
       const cond = scope ? and(eq(workOrders.id, id), scope) : eq(workOrders.id, id);
-      const [wo] = await tx.select().from(workOrders).where(cond);
+      const [wo] = await tx.select().from(workOrders).where(cond).for("update");
       if (!wo) throw Object.assign(new Error(`Work order ${id} not found`), { code: "WO_NOT_FOUND" });
       if (wo.status === "billed" || wo.invoiceId != null) {
         throw Object.assign(new Error(`Work order ${id} is locked`), { code: "WO_LOCKED" });
@@ -5308,7 +5373,8 @@ export class DatabaseStorage implements IStorage {
       const existingItemsForLineage = await tx
         .select()
         .from(workOrderItems)
-        .where(eq(workOrderItems.workOrderId, id));
+        .where(eq(workOrderItems.workOrderId, id))
+        .orderBy(workOrderItems.id);
       // Build a partId-keyed stack so that multiple rows sharing a partId each
       // get their own prior rather than collapsing to the first one.
       const priorStackByPartId = new Map<number | null, typeof existingItemsForLineage>();
@@ -5331,13 +5397,22 @@ export class DatabaseStorage implements IStorage {
         // finalItems, so enrichment is a no-op for that path.  The PATCH
         // /api/work-orders/:id/items route does NOT pass them, so they are
         // resolved here by matching each incoming item to a prior row by partId.
+        const reservedLineageIds = new Set(items.map(item => (item as { sourceItemId?: number; id?: number }).sourceItemId ?? (item as { id?: number }).id));
+        const consumedLineageIds = new Set<number>();
         const enrichedItems = items.map((item) => {
           const issueType: string | null = (item as any).issueType ?? null;
           const findingId: number | null = (item as any).findingId ?? null;
-          if (issueType == null && findingId == null && item.partId != null) {
-            const list = priorStackByPartId.get(item.partId);
-            const prior = list?.shift(); // consume one per matched row
+          if (issueType == null && findingId == null) {
+            const list = priorStackByPartId.get(item.partId ?? null);
+            const hint = (item as { sourceItemId?: number; id?: number }).sourceItemId ?? (item as { id?: number }).id;
+            while (list?.length && (consumedLineageIds.has(list[0].id) || reservedLineageIds.has(list[0].id))) list.shift();
+            const prior = hint != null
+              ? existingItemsForLineage.find(p => p.id === hint && !consumedLineageIds.has(p.id))
+              : item.partId == null
+                ? list?.find(p => p.partName === item.partName && !consumedLineageIds.has(p.id) && !reservedLineageIds.has(p.id))
+                : list?.shift();
             if (prior) {
+              consumedLineageIds.add(prior.id);
               return {
                 ...item,
                 issueType: (prior as any).issueType ?? null,
@@ -5353,7 +5428,8 @@ export class DatabaseStorage implements IStorage {
           workOrderId: id,
           totalPrice: (money(item.quantity) * money(item.partPrice)).toFixed(2),
         }));
-        inserted = await tx.insert(workOrderItems).values(values).returning();
+        const stamped = await this._prepareReplacementControllerRows(tx, wo, values, existingItemsForLineage, "work_order_items");
+        inserted = await tx.insert(workOrderItems).values(stamped).returning();
       }
       const truePartsSubtotal = inserted.reduce((s, r) => s + money(r.totalPrice), 0);
       const laborRate = parseFloat(String(wo.laborRate ?? wo.appliedLaborRate ?? "0")) || 0;
@@ -5534,7 +5610,16 @@ export class DatabaseStorage implements IStorage {
       const { createdAt, updatedAt, ...insertData } = finalSheetDataWithNumber as Record<string, unknown>;
 
       try {
-        const [inserted] = await db.insert(billingSheets).values([toDrizzleInsert<DrizzleBillingSheetInsert>(insertData)]).returning();
+        const inserted = await db.transaction(async (tx) => {
+          let [row] = await tx.insert(billingSheets).values([toDrizzleInsert<DrizzleBillingSheetInsert>({
+            ...insertData, ...(Object.hasOwn(sheetData, "controllerLetter") ? { controllerId: null } : {}),
+          })]).returning();
+          const [stamped] = await this._stampControllerIds(tx, row, [{ ...sheetData, id: row.id }], "billing_sheets");
+          if (Object.hasOwn(sheetData, "controllerLetter")) {
+            [row] = await tx.update(billingSheets).set({ controllerId: stamped.controllerId }).where(eq(billingSheets.id, row.id)).returning();
+          }
+          return row;
+        });
         newSheet = inserted;
         break;
       } catch (err: unknown) {
@@ -5603,8 +5688,11 @@ export class DatabaseStorage implements IStorage {
     const payload = clearTimestamp
       ? { ...billingSheetData, returnedForCorrectionAt: null }
       : billingSheetData;
-    const [updatedSheet] = await db.update(billingSheets).set(payload).where(eq(billingSheets.id, id)).returning();
-    return updatedSheet || undefined;
+    return db.transaction(async (tx) => {
+      const stamped = await this._stampDocumentPatch(tx, billingSheets, id, payload);
+      const [updatedSheet] = await tx.update(billingSheets).set(stamped).where(eq(billingSheets.id, id)).returning();
+      return updatedSheet || undefined;
+    });
   }
 
   async markBillingSheetNoPhotosNeeded(sheetId: number, userId: number): Promise<BillingSheet | undefined> {
@@ -10637,6 +10725,33 @@ export class DatabaseStorage implements IStorage {
 
       const now = new Date();
 
+      // Destination identity is copied from this wet check's zone records,
+      // never re-derived from their editable controller's current letter.
+      const sourceZones = await tx.select().from(wetCheckZoneRecords)
+        .where(eq(wetCheckZoneRecords.wetCheckId, id));
+      const zonesById = new Map(sourceZones.map(z => [z.id, z]));
+      const destinationLocations = async (
+        findings: typeof allFindings,
+        scope: { companyId: number; customerId: number | null; branchName?: string | null },
+        table: string,
+      ) => {
+        type Location = { controllerLetter?: string | null; zoneNumber?: number | null; controllerId?: number | null };
+        const fallback = await this._stampControllerIds<Location>(tx, scope,
+          findings.map(f => zonesById.has(f.zoneRecordId) ? {} : {
+            controllerLetter: (f as any).controllerLetter ?? null,
+            zoneNumber: (f as any).zoneNumber ?? null,
+          }), table);
+        return findings.map((f, i) => {
+          const source = zonesById.get(f.zoneRecordId);
+          return source ? {
+            controllerLetter: source.controllerLetter, zoneNumber: source.zoneNumber, controllerId: source.controllerId,
+          } : {
+            controllerLetter: fallback[i].controllerLetter ?? null,
+            zoneNumber: fallback[i].zoneNumber ?? null, controllerId: fallback[i].controllerId ?? null,
+          };
+        });
+      };
+
       // Rescue: completed-in-field findings at resolution='pending' with no
       // billing route. Mirrors the submit path auto-route block so the convert
       // path reaches parity — these findings are stamped repaired_in_field and
@@ -10732,6 +10847,7 @@ export class DatabaseStorage implements IStorage {
           const snapshotRate = parseFloat(String(priorEst?.appliedLaborRate ?? priorEst?.laborRate ?? laborRate));
           const existingItems = await tx.select().from(estimateItems)
             .where(eq(estimateItems.estimateId, priorEstId));
+          const locations = await destinationLocations(sentEst, priorEst as any, "estimate_items");
           let nextSort = existingItems.reduce((m, it) => Math.max(m, it.sortOrder ?? 0), -1) + 1;
           // Task #657 — append path is flat-only. Sum the labor from the
           // new findings, add it to the persisted estimate-level
@@ -10745,10 +10861,11 @@ export class DatabaseStorage implements IStorage {
             (s, f) => s + calc(f).laborHours,
             0,
           );
-          for (const f of sentEst) {
+          for (const [index, f] of sentEst.entries()) {
             const c = calc(f);
             await tx.insert(estimateItems).values({
               estimateId: priorEstId,
+              ...locations[index],
               description: f.notes ?? f.issueType,
               partId: f.partId as number,
               partName: f.partName ?? f.issueType,
@@ -10856,7 +10973,7 @@ export class DatabaseStorage implements IStorage {
                 sortOrder: idx,
               };
             }),
-          }, tx, estimateNumber);
+          }, tx, estimateNumber, await destinationLocations(sentEst, wc, "estimate_items"));
           estId = est.id;
         }
         estimateId = estId;
@@ -10895,11 +11012,13 @@ export class DatabaseStorage implements IStorage {
           const snapshotRate = parseFloat(String(priorWo?.appliedLaborRate ?? priorWo?.laborRate ?? laborRate));
           const existingItems = await tx.select().from(workOrderItems)
             .where(eq(workOrderItems.workOrderId, priorWoId));
+          const locations = await destinationLocations(deferred, priorWo as any, "work_order_items");
           for (let i = 0; i < deferred.length; i++) {
             const f = deferred[i];
             const l = lines[i];
             await tx.insert(workOrderItems).values({
               workOrderId: priorWoId,
+              ...locations[i],
               partId: f.partId,
               partName: f.partName ?? f.issueType,
               partPrice: l.partPrice.toFixed(2),
@@ -10937,10 +11056,12 @@ export class DatabaseStorage implements IStorage {
           const laborSubtotal = newLaborHours * laborRate;
           const total = newPartsSubtotal + laborSubtotal;
           const woNumber = `WO-WC-${id}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          const locations = await destinationLocations(deferred, wc, "work_order_items");
           const wo = await this._writeWorkOrderWithItems(
             tx,
             {
               workOrderNumber: woNumber,
+              branchName: wc.branchName ?? null,
               customerId: wc.customerId,
               companyId: companyId,
               customerName: cust.name,
@@ -10964,6 +11085,7 @@ export class DatabaseStorage implements IStorage {
             deferred.map((f, i) => {
               const l = lines[i];
               return {
+                ...locations[i],
                 partId: f.partId,
                 partName: f.partName ?? f.issueType,
                 partPrice: l.partPrice.toFixed(2),
@@ -10976,6 +11098,7 @@ export class DatabaseStorage implements IStorage {
                 findingId: f.id,
               };
             }),
+            true,
           );
           woId = wo.id;
         }
@@ -11546,6 +11669,122 @@ export class DatabaseStorage implements IStorage {
       .where(eq(irrigationControllers.id, controllerId))
       .returning();
     return updated ?? null;
+  }
+
+  async resolveControllerIdsByLetter(
+    q: DbExecutor,
+    scope: { companyId: number; customerId: number; branchName: string | null },
+    letters: (string | null | undefined)[],
+  ): Promise<Map<string, number | null>> {
+    const normalized = [...new Set(letters.map(l => l?.trim().toUpperCase()).filter((l): l is string => !!l))];
+    const result = new Map<string, number | null>(normalized.map(l => [l, null]));
+    if (!normalized.length) return result;
+    const rows = await q.select({ id: irrigationControllers.id, letter: irrigationControllers.letter })
+      .from(irrigationControllers).where(and(
+        eq(irrigationControllers.companyId, scope.companyId),
+        eq(irrigationControllers.customerId, scope.customerId),
+        eq(irrigationControllers.branchName, (scope.branchName ?? "").trim()),
+        inArray(sql`upper(trim(${irrigationControllers.letter}))`, normalized),
+      ));
+    for (const letter of normalized) {
+      const matches = rows.filter(r => r.letter?.trim().toUpperCase() === letter);
+      result.set(letter, matches.length === 1 ? matches[0].id : null);
+    }
+    return result;
+  }
+
+  private async _stampControllerIds<T extends { controllerLetter?: string | null; controllerId?: number | null; id?: number }>(
+    q: DbExecutor,
+    scope: { companyId: number; customerId?: number | null; branchName?: string | null; id?: number },
+    rows: T[],
+    table: string,
+  ): Promise<T[]> {
+    const ids = scope.customerId == null ? new Map<string, number | null>() :
+      await this.resolveControllerIdsByLetter(q, { ...scope, customerId: scope.customerId, branchName: scope.branchName ?? null },
+        rows.filter(r => Object.hasOwn(r, "controllerLetter")).map(r => r.controllerLetter));
+    return rows.map(row => {
+      if (!Object.hasOwn(row, "controllerLetter")) return row;
+      const letter = row.controllerLetter?.trim().toUpperCase();
+      const controllerId = letter ? ids.get(letter) ?? null : null;
+      if (letter && controllerId == null) logger.warn({
+        op: "stampControllerId", companyId: scope.companyId, table,
+        documentId: scope.id ?? row.id ?? null, letter: row.controllerLetter,
+      }, "Controller letter did not resolve unambiguously");
+      return { ...row, controllerId };
+    });
+  }
+
+  // Edit forms rebuild item rows. Preserve server-owned location snapshots and
+  // identity from a matched prior row unless the location itself changed.
+  // Explicit source IDs disambiguate repeated parts; legacy clients consume
+  // matching parts in their original order. IDs are only looked up in this parent.
+  private async _prepareReplacementControllerRows<
+    T extends { controllerLetter?: string | null; controllerId?: number | null; zoneNumber?: number | null; partId?: number | null; partName?: string | null; issueType?: string | null },
+  >(
+    q: DbExecutor,
+    scope: { companyId: number; customerId?: number | null; branchName?: string | null; id?: number },
+    rows: T[],
+    priors: Array<T & { id: number }>,
+    table: string,
+  ): Promise<T[]> {
+    const consumed = new Set<number>();
+    const reserved = new Set(rows.map(input => {
+      const row = input as T & { sourceItemId?: number; id?: number };
+      return row.sourceItemId ?? row.id;
+    }));
+    const resolveIndexes: number[] = [];
+    const prepared = rows.map((input, index) => {
+      const { sourceItemId, id, ...row } = input as T & { sourceItemId?: number; id?: number };
+      const hint = sourceItemId ?? id;
+      const prior = hint != null
+        ? priors.find(p => p.id === hint && !consumed.has(p.id))
+        : priors.find(p => !consumed.has(p.id) && !reserved.has(p.id) && (p.partId ?? null) === (row.partId ?? null) && (p.partId != null || p.partName === row.partName));
+      if (prior) consumed.add(prior.id);
+      const merged = prior ? {
+        ...row,
+        controllerLetter: Object.hasOwn(row, "controllerLetter") ? row.controllerLetter : prior.controllerLetter,
+        zoneNumber: Object.hasOwn(row, "zoneNumber") ? row.zoneNumber : prior.zoneNumber,
+        issueType: Object.hasOwn(row, "issueType") ? row.issueType : prior.issueType,
+      } : row;
+      const locationChanged = !prior || (Object.hasOwn(row, "controllerLetter") && row.controllerLetter == null) ||
+        (merged.controllerLetter ?? "").trim().toUpperCase() !== (prior.controllerLetter ?? "").trim().toUpperCase() ||
+        merged.zoneNumber !== prior.zoneNumber;
+      if (locationChanged) resolveIndexes.push(index);
+      return { ...merged, controllerId: locationChanged ? null : prior!.controllerId } as T;
+    });
+    const stamped = await this._stampControllerIds(q, scope, resolveIndexes.map(i => prepared[i]), table);
+    resolveIndexes.forEach((index, i) => { prepared[index] = stamped[i]; });
+    return prepared;
+  }
+
+  private async _stampDocumentPatch(
+    q: DbExecutor, table: typeof estimates | typeof workOrders | typeof billingSheets,
+    id: number, patch: any,
+  ): Promise<any> {
+    const [existing] = await q.select().from(table).where(eq(table.id, id)).for("update");
+    if (!existing) return patch;
+    const scope = { ...existing, ...patch, companyId: existing.companyId };
+    const scopeChanged = scope.customerId !== existing.customerId || scope.branchName !== existing.branchName;
+    const touchesLocation = ["controllerLetter", "customerId", "branchName"].some(key => Object.hasOwn(patch, key));
+    if (!touchesLocation) return patch;
+    const [stamped] = await this._stampControllerIds(q, scope,
+      [{ ...patch, controllerLetter: scope.controllerLetter }], table === estimates ? "estimates" : table === workOrders ? "work_orders" : "billing_sheets");
+    if (scopeChanged && table !== billingSheets) {
+      const itemTable = table === estimates ? estimateItems : workOrderItems;
+      const parentColumn = table === estimates ? estimateItems.estimateId : workOrderItems.workOrderId;
+      const rows = await q.select().from(itemTable).where(eq(parentColumn, id));
+      const items = await this._stampControllerIds(q, scope, rows, table === estimates ? "estimate_items" : "work_order_items");
+      for (const item of items) await q.update(itemTable).set({ controllerId: item.controllerId }).where(eq(itemTable.id, item.id));
+    }
+    return stamped;
+  }
+
+  private async _stampWorkOrderRows<T extends { controllerLetter?: string | null; controllerId?: number | null }>(
+    q: DbExecutor, workOrderId: number, rows: T[], table = "work_order_items",
+  ): Promise<T[]> {
+    const [parent] = await q.select().from(workOrders).where(eq(workOrders.id, workOrderId)).for("update");
+    if (!parent) throw new Error(`Work order ${workOrderId} not found`);
+    return this._stampControllerIds(q, parent, rows, table);
   }
 
   async listCurrentZoneSummaries(controllers: { id: number; companyId: number }[]): Promise<Map<number, CurrentZoneSummary[]>> {

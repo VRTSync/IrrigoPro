@@ -1208,7 +1208,7 @@ function ControllerGridTile({
     onError: (err: any) => {
       toast({
         title: "Delete failed",
-        description: err?.message ?? "Try again",
+        description: parseApiError(err, "Try again"),
         variant: "destructive",
       });
     },

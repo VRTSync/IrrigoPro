@@ -33,6 +33,7 @@ export type LaborRateSource = "customer" | "default" | "stored";
 
 export interface WizardLineItem {
   rowId: string;
+  sourceItemId?: number;
   // Null when the line item came from an inspection finding that had no
   // catalog part assigned yet (e.g. a $0 documentation-only finding).
   // The wizard allows saving and approving these as-is, or the manager

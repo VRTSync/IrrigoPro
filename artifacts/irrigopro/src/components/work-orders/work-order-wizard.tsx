@@ -600,6 +600,7 @@ export function WorkOrderWizard({ open, onClose, onCreated, workOrderId }: WorkO
               />
             ) : step === 2 ? (
               <CustomerLocationStep
+                branchName={customerStep.branchName}
                 customer={customerStep.customer}
                 value={locationStep}
                 onChange={setLocationStep}

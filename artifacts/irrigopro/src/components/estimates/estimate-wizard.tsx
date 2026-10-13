@@ -531,6 +531,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       const qty = Math.max(Number(it.quantity ?? 1), 1);
       return {
         rowId: makeRowId(),
+        sourceItemId: it.id,
         partId: it.partId ?? null,
         partName: it.partName,
         partPrice: parseFloat(String(it.partPrice ?? "0")) || 0,
@@ -852,6 +853,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     const itemsPayload: EstimateApiPayloadItem[] = items.map((it, index) => ({
       partId: it.partId,
       partName: it.partName,
+      sourceItemId: it.sourceItemId,
       partPrice: it.partPrice.toFixed(2),
       quantity: it.quantity,
       // Task #657 — Per-line labor is always zeroed at the payload
@@ -1080,6 +1082,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
               />
             ) : step === 2 ? (
               <CustomerLocationStep
+                branchName={customerStep.branchName}
                 customer={customerStep.customer}
                 value={{
                   projectName: customerStep.projectName,

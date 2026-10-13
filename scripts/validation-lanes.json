@@ -67,6 +67,10 @@
   ],
   "api-field": [
     {
+      "name": "document-controller-stamp",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-force-exit --test-reporter=spec src/document-controller-stamp.test.ts"
+    },
+    {
       "name": "wet-check-zone-filter",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/wet-check-zone-filter.test.ts"
     },

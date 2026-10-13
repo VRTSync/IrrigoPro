@@ -244,6 +244,17 @@ describe("fast zone sheet", () => {
 });
 
 describe("zone records — minimal grid adaptation", () => {
+  it("controller deletion displays the exact work-history message from the HTTP 409 response", async () => {
+    const message = "This controller has work history (tickets, estimates or wet checks) and can't be deleted. Turn it off instead.";
+    request.mockRejectedValueOnce(new Error(`409: ${JSON.stringify({ message })}`));
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    const section = (await screen.findByText("Controller Details")).closest("section")!;
+    fireEvent.click(section.querySelector("svg.lucide-trash2")!.closest("button")!);
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("/api/irrigation-controllers/7", "DELETE"));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith({ title: "Delete failed", description: message, variant: "destructive" }));
+  });
   it("38 chips agree with 38 table rows; increment uses the count endpoint and refreshes all readers", async () => {
     const { invalidate } = mount();
     expect(screen.getAllByTestId(/^zone-chip-A-/)).toHaveLength(38);
