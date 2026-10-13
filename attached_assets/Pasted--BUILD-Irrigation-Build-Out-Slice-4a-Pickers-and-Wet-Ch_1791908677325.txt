@@ -1,0 +1,120 @@
+# BUILD - Irrigation Build-Out Slice 4a - Pickers and Wet-Check Grid Read Zone Records
+
+**Depends on no other task.** Written against main at `c3a12e93`.
+
+## Why
+
+Slices 1–3 made `irrigation_profile_zones` the source of truth. Current zones are rows `1..N` with `retired_at IS NULL`. `irrigation_controllers.total_zones` is now only a mirror, written by `_reconcileControllerZones`.
+
+The field-side readers still build zone lists from a number, so the zone names typed on the customer profile never show up where techs pick a zone. This slice makes those readers list the real zone records.
+
+It does **not** change what gets stored on tickets. Documents still save `controller_letter` / `zone_number`; stamping a zone id is Slice 4b.
+
+## Rules
+
+1. **Edit existing pages only.** No new pages, routes, or workflows.
+2. **Additive wire change.** `GET /api/properties/:customerId/controllers` keeps every current field, including `zoneCount`. Installed mobile builds read `zoneCount` and must keep working unchanged.
+3. **Tenant isolation.** The zone query is scoped by `controller_id` and `company_id` together, using the same pattern as the controllers-profile list in `irrigation-profile-routes.ts` (around line 296). The existing customer `companyId !== cid → 404` check stays first.
+4. **Wet-check scope (Rule 5 declaration).**
+   - In scope: the web field capture flow (`ControllerSelectionPage` → zone grid) and the manager views that render `ZoneStatusGrid` (`ManagerWetCheckDetailPage`, `WetCheckInspectionSummary`, `ZoneOverviewSheet`).
+   - Out of scope: the mobile app (`artifacts/irrigopro-mobile/**`), with no edits there.
+   - Wet-check records stay keyed by controller letter and zone number. Nothing about how findings are saved changes.
+5. **Off limits:** site-map files (`color-coded-map-viewer`, `color-coded-data-review`, `zone-upload`, `zones-data-view`), PDFs, billing, and `ControllerHeader`'s zone-count PATCH.
+6. **Tests join the existing lanes** in `scripts/validation-lanes.json`. Do not register a new validation command or workflow.
+
+## Changes
+
+### 1. One storage helper for current zone summaries
+
+Move the inline query in the controllers-profile list (`irrigation-profile-routes.ts`, the `zones` / `retiredCounts` block) into `storage.ts` as:
+
+```ts
+listCurrentZoneSummaries(controllers: { id: number; companyId: number }[]):
+  Promise<Map<number, { id: number; zoneNumber: number; name: string; zoneType: string; isActive: boolean; setUp: boolean }[]>>
+```
+
+- It returns current zones only (`retired_at IS NULL`), ordered by `zone_number`.
+- `setUp` is `!isPlaceholderZone(z)`.
+- An empty input returns an empty map with no query.
+- The retired-count query can stay in the route or become a second helper. The controllers-profile response must be byte-identical to today's.
+- Switch the controllers-profile list to the helper.
+
+### 2. `GET /api/properties/:customerId/controllers` returns zones
+
+The handler in `routes.ts` (around line 16341) maps controllers to the wire shape twice: the branch path and the customer-level path. Replace both with one local mapper. After `ensureIrrigationControllers`, call `listCurrentZoneSummaries(irrigCtrls)` and add the following to each controller:
+
+```ts
+zones: { id: number; zoneNumber: number; name: string; setUp: boolean }[]   // current only, ordered
+```
+
+- `zoneCount` stays `ctrl.totalZones` exactly as today. Do not derive it.
+- Update `CustomerController` in `artifacts/irrigopro/src/lib/controller-types.ts`:
+  - add `zones?: CustomerControllerZone[]`;
+  - mark it optional, because `cachedApiRequest` can serve a cached response from before this change while offline;
+  - update the header comment.
+
+### 3. Ticket zone picker shows names (`work-location-controls.tsx`)
+
+Build the zone list from `selectedController.zones` when the array is present, and fall back to `1..zoneCount` when it is absent.
+
+- The option value is still `String(zoneNumber)`.
+- Option label:
+  - `Zone 12` when the name equals `Zone 12`, which is the placeholder name;
+  - otherwise `Zone 12 · Front Lawn`;
+  - long names truncate with CSS and are never cut in the string.
+- Controller option `(N zones)` uses `zones.length` when present, else `zoneCount`.
+- Disabled when the controller has no zones (`zones.length === 0`, or `zoneCount` is 0 or null on fallback).
+- `storedZoneOutOfRange` becomes "the stored `zoneNumber` is not in the current list". The existing `(not on this controller)` option keeps rendering, so a ticket that points at a retired zone still shows its value and isn't silently cleared.
+- No change to work-type gating, clearing behaviour, or the query key `["/api/properties", customerId, "controllers"]`.
+
+This component serves `work-order-completion.tsx` and `customer-location-step.tsx`. Both get the change through it, and neither file should need edits.
+
+### 4. Wet-check grid labels zones (`ZoneStatusGrid.tsx`)
+
+- Iterate `ctrl.zones` when present, else fall back to `1..(ctrl.zoneCount ?? 0)` as today.
+- The cell face stays the zone number. Status colours, record lookup (`${letter}-${n}`), click handler and test ids are unchanged.
+- For a set-up zone (`setUp` true), the name goes into `aria-label` and a `title` tooltip: `Controller A Zone 3 · Front Lawn — not checked`. Placeholder zones keep today's label.
+- Do not change `ManagerWetCheckDetailPage`'s total-zone math (line ~805) in this slice.
+
+### 5. Leave alone
+
+- `irrigation-controller-resolver.ts` has no production callers (only its test), so don't extend it. Flag it in the completion report; removal is a later cleanup.
+- `wet-check-grid.ts` only builds seed configs, so leave it unchanged.
+
+## Tests (add to existing lane entries)
+
+**API**, in `src/routes/irrigation-profile-routes.test.ts`, which already runs in the `types` lane under `irrigation-fast-entry`. Alternatively, put them in a new test file appended to that same entry's command.
+
+- Customer-level and `?branch=` GETs both return `zones` with current rows only, in order.
+- A retired zone is excluded. A renamed zone shows its name, and `setUp` matches `isPlaceholderZone`.
+- `zoneCount` still equals `total_zones`, and for a reconciled controller it equals `zones.length`.
+- **Tenancy:**
+  - company B's zone rows on a controller id never appear in company A's response;
+  - a company A user requesting a company B customer gets 404.
+- The controllers-profile list response is unchanged by the helper refactor. Assert one full response shape.
+
+**Web**, in `src/components/location/work-location-controls.test.tsx`, which already runs in the `work-location-controls` and `retired-work-types` entries:
+
+- Options read `Zone 1`, `Zone 2 · Front Lawn` from `zones`.
+- With no `zones` on the response, options fall back to `1..zoneCount`.
+- A stored zone not in the list shows `(not on this controller)` and is not cleared on mount.
+- The controller option shows `(2 zones)` from `zones.length`.
+
+**Web**, a new `src/pages/wet-checks/ZoneStatusGrid.test.tsx`, appended to the `irrigation-fast-entry` command in the same lane, with `--maxWorkers=1 --minWorkers=1` like its neighbour:
+
+- Cells come from `zones`, and a named zone's `aria-label` and `title` include the name.
+- Without `zones`, cells fall back to `zoneCount`.
+- `grid-zone-A-3` test ids are unchanged.
+
+`scripts/validation-lanes.test.mjs` must still pass.
+
+## Done when
+
+- On a customer whose Controller A has zones named on the profile, a work order's Zone picker shows `Zone 3 · Front Lawn`, and the wet-check grid tooltip shows the same name.
+- An installed mobile build loads wet checks with no change.
+- All four lanes are green.
+- The completion report lists:
+  - the files changed;
+  - the lane entries touched;
+  - confirmation that no mobile, site-map, PDF or billing files changed;
+  - the resolver dead-code note.
