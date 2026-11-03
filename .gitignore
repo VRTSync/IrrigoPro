@@ -52,3 +52,6 @@ Thumbs.db
 # machine-specific and must never be committed.
 vitest.config.ts.timestamp-*.mjs
 vite.config.ts.timestamp-*.mjs
+
+# Generated validation and acceptance output
+/generated-artifacts/
