@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { BudgetBar } from "@/components/budget/BudgetBar";
+import { CustomerForm } from "@/components/customer-form";
 import type { BudgetStatus } from "@workspace/shared";
 import {
   ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt, DollarSign,
@@ -318,9 +319,14 @@ export default function CustomerProfile() {
                 <Droplets className="w-4 h-4 mr-1.5" />Controllers &amp; Zones
               </Button>
               {isAdmin && (
-                <Button size="sm" variant="outline" onClick={() => setLocation(`/customers?edit=${id}`)}>
-                  <Edit className="w-4 h-4 mr-1.5" />Edit Customer
-                </Button>
+                <CustomerForm
+                  customer={customer}
+                  trigger={
+                    <Button size="sm" variant="outline">
+                      <Edit className="w-4 h-4 mr-1.5" />Edit Customer
+                    </Button>
+                  }
+                />
               )}
             </div>
           </div>
@@ -770,7 +776,7 @@ export default function CustomerProfile() {
                 </div>
                 <FinancialPulseWidget variant="customer-detail" customerId={parseInt(id!, 10)} />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <BudgetCard customerId={parseInt(id!, 10)} />
+                  <BudgetCard customer={customer} />
                   <RecentBudgetAlertsCard customerId={parseInt(id!, 10)} />
                 </div>
               </>
@@ -947,8 +953,8 @@ interface BudgetUsage {
 
 // Exported so the shared-renderer parity suite can mount the real card with a
 // budget-usage fixture and read the figures it prints (Task #2009).
-export function BudgetCard({ customerId }: { customerId: number }) {
-  const [, setLocation] = useLocation();
+export function BudgetCard({ customer }: { customer: Customer }) {
+  const customerId = customer.id;
   // Task #1911 — isError must be surfaced. The budget-usage route now 500s
   // when the spend lookup fails instead of quietly reporting zero spend, and
   // without this branch the whole card would disappear (`if (!data) return
@@ -990,10 +996,11 @@ export function BudgetCard({ customerId }: { customerId: number }) {
         {bothUnset ? (
           <div className="text-sm text-gray-600">
             <p className="mb-2">No budget goal set for this customer yet.</p>
-            <Button type="button" variant="outline" size="sm"
-              onClick={() => setLocation(`/customers?edit=${customerId}#budget-and-alerts`)}>
-              Set a budget
-            </Button>
+            <CustomerForm
+              customer={customer}
+              initialSection="budget-and-alerts"
+              trigger={<Button type="button" variant="outline" size="sm">Set a budget</Button>}
+            />
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

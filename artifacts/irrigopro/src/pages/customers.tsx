@@ -78,21 +78,6 @@ export default function Customers() {
     deleteCustomerMutation.mutate(customerId);
   };
 
-  // Task #687 — support deep-link from customer-profile Budget card:
-  // /customers?edit=<id>#budget-and-alerts auto-opens the edit dialog
-  // (and the budget-and-alerts anchor scrolls into view once mounted).
-  const [editCustomerId, setEditCustomerId] = useState<number | null>(null);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const raw = params.get("edit");
-    const id = raw ? parseInt(raw, 10) : NaN;
-    if (Number.isFinite(id) && id > 0) setEditCustomerId(id);
-  }, []);
-  const editCustomer = editCustomerId
-    ? customers?.find((c) => c.id === editCustomerId)
-    : undefined;
-
   // Restore deep-link navigation from site-maps page (uses routes instead of inline render)
   useEffect(() => {
     const selectedCustomerId = safeGet('selectedCustomerId');
@@ -146,18 +131,6 @@ export default function Customers() {
           )
         }
       />
-
-      {editCustomer && (
-        <CustomerForm
-          key={`edit-${editCustomer.id}`}
-          customer={editCustomer}
-          defaultOpen
-          onOpenChange={(o) => {
-            if (!o) setEditCustomerId(null);
-          }}
-          trigger={<span />}
-        />
-      )}
 
       <PageContent className="space-y-5">
         <MetricGrid className="grid-cols-2 sm:grid-cols-3">

@@ -305,3 +305,17 @@ mtime_ms = 1793735048915
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/cc604f5c-1dfa-4ed7-9b01-b690744ff3ea/090ee309-5c40-4df2-a05d-cfa4a44ddd37"
 storage_version_token = "1793735113568967"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "mxN4Um-BSpTs3qK0F0SuL"
+uri = "file://generated-artifacts/customer-modal/acceptance-report.html"
+type = "html"
+title = "Customer modal acceptance report"
+description = "All four authenticated browser scenarios, screenshots, real save-selection evidence, clean source searches, and full passing web/types lane output. Includes two unrelated existing observations."
+logical_id = "07e5415a-7665-42cd-8243-379618ae846a"
+content_hash = "sha256:a1cbc5562c313e7d6703bf19c89b40fa6abccbaaa4313c5992c766fa16924a6e"
+size = 1609540
+mtime_ms = 1793740276995
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/07e5415a-7665-42cd-8243-379618ae846a/0a7d19f5-0675-4ca0-9f29-1594e1fe0b38"
+storage_version_token = "1793740285563075"
+content_type = "text/html"

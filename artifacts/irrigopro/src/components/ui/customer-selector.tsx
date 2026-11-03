@@ -1,30 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@/lib/zod-resolver";
-import { z } from "zod/v4";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Search, Plus, User, Building, Mail, Phone, MapPin, FileText } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
+import { Search, Plus, User, Building, Mail, Phone, MapPin } from "lucide-react";
 import { apiRequest, useArrayQuery } from "@/lib/queryClient";
-import { insertCustomerSchema } from "@workspace/db/schema";
+import { CustomerForm } from "@/components/customer-form";
+import { useAuth } from "@/lib/auth-context";
 import type { Customer } from "@workspace/db/schema";
-
-const newCustomerSchema = insertCustomerSchema.extend({
-  laborRate: z.string().optional(),
-  discountPercent: z.string().optional(),
-});
-
-type NewCustomerFormData = z.infer<typeof newCustomerSchema>;
 
 interface CustomerSelectorProps {
   selectedCustomer?: Customer | null;
@@ -54,7 +40,8 @@ export function CustomerSelector({
   autoOpen = false,
 }: CustomerSelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [showNewCustomerDialog, setShowNewCustomerDialog] = useState(false);
+  const { user } = useAuth();
+  const showCreate = canCreateCustomer && user?.role === "company_admin";
   const [isOpen, setIsOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const autoOpenedRef = useRef(false);
@@ -73,8 +60,6 @@ export function CustomerSelector({
     autoOpenedRef.current = true;
     setIsOpen(true);
   }, [autoOpen, selectedCustomer]);
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
 
   const { data: customers = [], isLoading } = useArrayQuery<Customer>({
     queryKey: ["/api/customers", { billingVisible: true }],
@@ -90,48 +75,6 @@ export function CustomerSelector({
       customer.address?.toLowerCase().includes(q)
     );
   }) || [];
-
-  const form = useForm<NewCustomerFormData>({
-    resolver: zodResolver(newCustomerSchema),
-    defaultValues: {
-      name: "",
-      email: "",
-      phone: "",
-      address: "",
-      contractType: "standard",
-      laborRate: "45.00",
-      discountPercent: "0.00",
-      paymentTerms: "net_30",
-      notes: "",
-    },
-  });
-
-  const createCustomer = useMutation({
-    mutationFn: async (data: NewCustomerFormData) => {
-      return await apiRequest("/api/customers", "POST", data);
-    },
-    onSuccess: (newCustomer) => {
-      toast({
-        title: "Customer Created",
-        description: `${newCustomer.name} has been added successfully.`,
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
-      onSelectCustomer(newCustomer);
-      setShowNewCustomerDialog(false);
-      form.reset();
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to create customer",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleCreateCustomer = (data: NewCustomerFormData) => {
-    createCustomer.mutate(data);
-  };
 
   const handleSelectCustomer = (customer: Customer) => {
     onSelectCustomer(customer);
@@ -238,16 +181,17 @@ export function CustomerSelector({
               />
             </div>
 
-            {/* Create New Customer Button */}
-            {canCreateCustomer && (
-              <Button
-                type="button"
-                onClick={() => setShowNewCustomerDialog(true)}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Create New Customer
-              </Button>
+            {/* Create New Customer — the one customer modal */}
+            {showCreate && (
+              <CustomerForm
+                trigger={
+                  <Button type="button" className="w-full bg-blue-600 hover:bg-blue-700 text-white">
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create New Customer
+                  </Button>
+                }
+                onSaved={(created) => handleSelectCustomer(created)}
+              />
             )}
 
             {/* Customer List */}
@@ -318,186 +262,6 @@ export function CustomerSelector({
         </DialogContent>
       </Dialog>
 
-      {/* New Customer Dialog */}
-      <Dialog open={showNewCustomerDialog} onOpenChange={setShowNewCustomerDialog}>
-        <DialogContent className="w-[95vw] max-w-2xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col">
-          <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
-            <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
-              <Plus className="w-5 h-5 text-blue-600" />
-              Create New Customer
-            </DialogTitle>
-            <DialogDescription>
-              Add a new customer to your database
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(handleCreateCustomer)} className="space-y-6">
-              {/* Basic Information */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Company/Name *</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Johnson Family" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email *</FormLabel>
-                      <FormControl>
-                        <Input type="email" placeholder="johnson@example.com" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="phone"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Phone</FormLabel>
-                      <FormControl>
-                        <Input placeholder="(555) 123-4567" {...field} value={field.value ?? ""} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="contractType"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Contract Type</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value ?? undefined}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select contract type" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="standard">Standard</SelectItem>
-                          <SelectItem value="premium">Premium</SelectItem>
-                          <SelectItem value="commercial">Commercial</SelectItem>
-                          <SelectItem value="residential">Residential</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <FormField
-                control={form.control}
-                name="address"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Address</FormLabel>
-                    <FormControl>
-                      <Input placeholder="123 Oak Street, Springfield, IL 62701" {...field} value={field.value || ""} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {/* Contract Details */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="laborRate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Labor Rate ($/hour)</FormLabel>
-                      <FormControl>
-                        <Input type="number" step="0.01" placeholder="45.00" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="paymentTerms"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Payment Terms</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value ?? undefined}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select payment terms" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="due_on_receipt">Due on Receipt</SelectItem>
-                          <SelectItem value="net_15">Net 15</SelectItem>
-                          <SelectItem value="net_30">Net 30</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <FormField
-                control={form.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notes</FormLabel>
-                    <FormControl>
-                      <Textarea 
-                        placeholder="Additional notes about the customer..." 
-                        className="min-h-[80px]"
-                        {...field} 
-                        value={field.value ?? ""}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <div className="flex gap-4 pt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setShowNewCustomerDialog(false)}
-                  className="flex-1"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={createCustomer.isPending}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  {createCustomer.isPending ? "Creating..." : "Create Customer"}
-                </Button>
-              </div>
-              </form>
-            </Form>
-          </div>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

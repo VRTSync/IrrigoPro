@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { BudgetBar } from "./BudgetBar";
+import type { Customer } from "@workspace/db/schema";
 
 // These integration cases assert rendered budget output, not Vite's cold
 // module-transform speed. Load the real surfaces during collection, just as
@@ -499,7 +500,7 @@ describe("migrated surface — customer profile Budget & Alerts card", () => {
 
   it("prints the same dollars and percentage the bucket rows printed", async () => {
     const { BudgetCard } = await import("@/pages/customer-profile");
-    render(<BudgetCard customerId={42} />);
+    render(<BudgetCard customer={{ id: 42 } as Customer} />);
 
     const month = screen.getByTestId("customer-budget-month");
     expect(month.textContent).toContain("This month (2026-09)");
@@ -527,7 +528,7 @@ describe("migrated surface — customer profile Budget & Alerts card", () => {
       isError: false,
     }));
     const { BudgetCard } = await import("@/pages/customer-profile");
-    render(<BudgetCard customerId={42} />);
+    render(<BudgetCard customer={{ id: 42 } as Customer} />);
 
     const year = screen.getByTestId("customer-budget-year");
     expect(year.textContent).toContain("Spent $12,000");
@@ -536,7 +537,7 @@ describe("migrated surface — customer profile Budget & Alerts card", () => {
 
   it("renders one meter per bucket — the card no longer draws its own", async () => {
     const { BudgetCard } = await import("@/pages/customer-profile");
-    const { container } = render(<BudgetCard customerId={42} />);
+    const { container } = render(<BudgetCard customer={{ id: 42 } as Customer} />);
     expect(container.querySelectorAll('[role="progressbar"]')).toHaveLength(2);
   });
 });

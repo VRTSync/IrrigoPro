@@ -172,9 +172,13 @@ interface CustomerFormProps {
   trigger: React.ReactNode;
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Called with the saved customer (the POST/PUT response) after a successful save. */
+  onSaved?: (customer: Customer) => void;
+  /** Scroll this section into view when the dialog opens. */
+  initialSection?: "budget-and-alerts";
 }
 
-export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenChange }: CustomerFormProps) {
+export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenChange, onSaved, initialSection }: CustomerFormProps) {
   const [open, setOpenState] = useState(defaultOpen);
   const setOpen = (next: boolean) => {
     setOpenState(next);
@@ -256,6 +260,15 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
     }
   }, [open, customer, form]);
 
+  // Customer Records Slice 2b — open straight to a section (replaces the old deep link).
+  useEffect(() => {
+    if (!open || !initialSection) return;
+    const handle = window.requestAnimationFrame(() => {
+      document.getElementById(initialSection)?.scrollIntoView({ block: "start" });
+    });
+    return () => window.cancelAnimationFrame(handle);
+  }, [open, initialSection]);
+
   // Update companyId when user data loads
   useEffect(() => {
     if (companyId && !customer) {
@@ -291,13 +304,17 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
         contractEndDate: data.contractEndDate ? new Date(data.contractEndDate).toISOString() : null,
       });
     },
-    onSuccess: (_result, variables) => {
+    onSuccess: (result, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
       // Task #687: the budget-usage snapshot depends on cap/threshold
       // values we just persisted — bust the per-customer cache so the
       // LiveBudgetPreview and the customer-profile Budget card pick up
       // the new server-side classification on the next render.
       if (customer) {
+        // Profiles now edit in place, so refresh their separately keyed row too.
+        queryClient.invalidateQueries({
+          queryKey: [`/api/customers/${customer.id}`],
+        });
         queryClient.invalidateQueries({
           queryKey: [`/api/customers/${customer.id}/budget-usage`],
         });
@@ -305,6 +322,7 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
       justSavedValues.current = variables;
       form.reset(variables);
       setOpen(false);
+      onSaved?.(result as Customer);
       toast({
         title: customer ? "Customer Updated" : "Customer Created",
         description: customer ? "Customer information has been updated successfully." : "New customer has been added to your database.",

@@ -153,6 +153,10 @@
   ],
   "web": [
     {
+      "name": "customer-selector-one-modal",
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/ui/customer-selector.test.tsx"
+    },
+    {
       "name": "wc-customer-picker-filter",
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/pages/wet-checks/CustomerPickerPage.test.tsx"
     },
