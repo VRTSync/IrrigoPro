@@ -71,3 +71,4 @@
 - [Invoice selection scope](invoice-selection-query-scope.md) — reset on the filter query, never retained rows or placeholder state; preserve same-filter pagination.
 - [Operational board roles](operational-board-role-policy.md) — dispatch access is separate from financial budget access; bookkeeper location audit remains read-only.
 - [Shared QuickBooks billing](shared-quickbooks-billing.md) — High Plains CRM shares the QB company; keep ownership safety separate from staged numbering changes.
+- [Customer record ownership plan](customer-record-ownership-plan.md) — saved reference for upcoming slices; CRM → QuickBooks → IrrigoPro replaces two-way customer sync.
