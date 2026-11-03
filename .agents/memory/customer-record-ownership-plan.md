@@ -1,10 +1,10 @@
 ---
 name: Customer record ownership plan
-description: Approved planning reference and scope constraints for upcoming customer-record slices.
+description: Saved customer-route guard plan and instructions for using the latest replacement reference.
 ---
 
-Use `docs/customer-records-plan.md` as the saved reference for the upcoming customer-record slices. The user asked to store the attached 2026-11-03 plan, not to implement it yet.
+Use `docs/customer-records-plan.md` as the saved reference. On 2026-11-03 the user explicitly replaced the broad customer-record ownership plan with the narrower "Guard Single Customer Routes" plan. Saving or replacing this reference is not authorization to implement it.
 
-**Why:** The revised plan explicitly replaces the earlier two-way-sync approach. High Plains CRM is the sole writer of customer billing details to QuickBooks; IrrigoPro reads them and never writes customer details back.
+**Why:** The user wants the new attachment, not the earlier eight-slice overview, stored at the existing plan location.
 
-**How to apply:** Read the full plan before scoping or implementing a slice, and verify its code observations against the current checkout. Preserve the eight-slice order, the default-off company ownership lock, editable IrrigoPro-only details, and the existing inline Labor Rates editor. Customer push to QuickBooks, full external API expansion, and customer-list consolidation are outside this plan. Do not enable High Plains' lock through a migration; an admin enables it after the lock slice ships.
+**How to apply:** Read the current saved plan before scoping future work. It covers only the single-customer tenant guards, server-owned identifiers, and customer CSV retirement. It refers to a separate detailed specification; consult that contract before implementation rather than inventing its exact requirements. Do not expand into shared-modal or later customer-record slices.
