@@ -1,0 +1,26 @@
+Claim 1 confirmed precisely — expired is in QB_BAD_STATUSES (:257-262) but absent from the RANK table (:338-343), so it ties with connected and never becomes "worst". Let me check the other three and the capability membership.
+
+Used 2 tools · 1 note
+
+All five claims verified, with exact evidence:
+
+Claim	Status
+expired in QB_BAD_STATUSES (:257-262) but absent from RANK (:338-343) — ties with connected	Confirmed
+Connection route returns isConnected: false on missing credentials without reading the DB (routes.ts:9077-9090)	Confirmed
+Two company resolutions — resolveCompanyId(req) vs eq(quickbooksIntegration.companyId, String(cid)) in getScopedQbIntegrations (:238-243)	Confirmed
+Zero integrations: disconnected vs unknown	Confirmed (storage.ts:3819, cited range exact)
+CAN_MANAGE_QUICKBOOKS = super_admin, company_admin, billing_manager, bookkeeper — no irrigation_manager (roles.ts:162-167), while FP's ALLOWED_ROLES includes it (:292-297)	Confirmed
+
+The role-reach hole is exactly as described: irrigation manager gets a 403, the client's catch { return {} } swallows it, isQbUnhealthy returns false, banner never shows. Third answer, "no answer."
+
+One change I'd make: swap the diagnosis order. Step 1 says to start with the unranked expired. I'd start with the missing credentials, for three reasons:
+
+The Manager Workspace strip showed "Synced 9/14/2026, 8:25:04 AM" — a recent successful sync, resolved by loadQbSyncStatus from real token refreshes and sync rows. A token that is expired does not produce a successful refresh that morning. The two facts sit badly together.
+
+The credentials short-circuit fits the observation exactly: it returns isConnected: false unconditionally, for every tenant, every role, with no database read. That yields a banner that shows permanently while the strip reads healthy — which is what you've had across 9/14 and 9/15.
+
+And it's the cheapest check by far: look at whether QUICKBOOKS_CLIENT_ID and QUICKBOOKS_CLIENT_SECRET are set in the deployed environment. One look, no query.
+
+If that is the cause, the finding is worse than a wrong verdict — the banner carries no information at all and has been permanently on, which is how warnings get trained out of people. It also doesn't let expired off: consolidating onto loadQbSyncStatus would silently drop a real failure mode, so step 3 stands either way. I'd reword step 1 to work the candidates in cost order — credentials, then expired, then the company-id mismatch, then the zero-row case.
+
+Still missing: the third surface. The invoices page header reads "QuickBooks: out of date" with "Stale sync" flags on the rows, from lastPaymentSyncAt on the aging-summary endpoint — a third derivation from a third endpoint. It matters more than it looks: that's the screen a bookkeeper chasing money is actually on, and after #2013 the balance rule reads paymentSyncedAt through isBalanceFallback, so that page's staleness signal and its money figures now come from the same field. Worth adding to the Current state table and to the agreement test, so the contract covers all three rather than two.

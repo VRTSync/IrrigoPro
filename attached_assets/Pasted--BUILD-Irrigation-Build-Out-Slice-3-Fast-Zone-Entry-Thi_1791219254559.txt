@@ -1,0 +1,145 @@
+# BUILD — Irrigation Build-Out, Slice 3: Fast Zone Entry
+
+This is a single self-contained task. **Requires Slices 1 and 2 merged.** Build on the existing `irrigation-controller-grid.tsx`. No new page, route or component file. Do not change anything Slice 2 settled (chips, stepper, retire dialog, retired list).
+
+## What & Why
+
+Building out a 38-zone controller today means 38 rounds of Edit → open form → change fields → Save, one row at a time (`ZoneRow`, `artifacts/irrigopro/src/components/customers/irrigation-controller-grid.tsx:791-1100`). Each Save also writes a history snapshot. Villas at the Boulders alone is 231 zones. Randy wants the screen "easy to use and easy to enter data into."
+
+This slice turns the zone table into a sheet you type straight into, and lets you set Type, Program and Runtime on many zones at once.
+
+## Locked decisions (do not relitigate)
+
+1. **Every cell is always editable for `canEditZones`; there is no per-row Edit/Save (decided).** Read-only users see the same table as plain text.
+2. **Each field saves on its own (decided).** Text and number inputs save on blur, or on Enter, when the value changed. Selects and the switch save on change. The request carries only that field.
+3. **A failed save keeps what you typed (decided).** The cell turns red with a retry; it never snaps back to the old value.
+4. **One history entry per editing session, not per keystroke (decided).** Zone field saves by the same person on the same controller within 10 minutes fold into one entry. Otherwise one build-out writes 231 entries and View History becomes unreadable.
+5. **Bulk apply covers Type, Program and Runtime only (decided).** These repeat across zones. Names and notes are per zone.
+6. **Zone overrides (start time, days) stay available but out of the row,** behind a per-row "Override" popover. They are rare and would double the row width.
+7. Roles unchanged: the zone PUT and the new bulk PUT both use `canWrite` (`artifacts/api-server/src/routes/irrigation-profile-routes.ts:56-58`, includes `field_tech`).
+
+## Out of scope
+
+- Count, chips, retire flow (Slice 2). Pickers, documents, billing (Slices 4-6).
+- Programs (`ProgramCard`, `:572-790`) keep their current edit flow.
+- Site maps (`controllers`, `irrigation_zones`): do not read or write them.
+
+## Steps
+
+### 1. Server — bulk endpoint
+
+`PUT /api/irrigation-controllers/:id/zones/bulk` in `irrigation-profile-routes.ts`, placed after the zone PUT (`:677-715`):
+
+```ts
+const bulkZoneBody = z.object({
+  zoneIds: z.array(z.number().int().positive()).min(1).max(100),
+  patch: z.object({
+    zoneType: z.enum(["pop_up_spray", "rotor", "drip", "netafim", "bubbler", "other"]).optional(),
+    programId: z.number().int().positive().nullable().optional(),
+    runTimeMinutes: z.coerce.number().int().min(0).max(999).optional(),
+  }).refine((p) => Object.keys(p).length > 0, "Nothing to apply"),
+});
+```
+
+Tenancy as the controller PUT (`:397-468`). New storage method `bulkUpdateIrrigationZones(companyId, controllerId, zoneIds, patch, actor)`, all in one transaction:
+
+- Load the controller with the tenant condition; missing → null → 404.
+- Load the zones `where id in zoneIds and controller_id = controllerId and retired_at is null`. If fewer rows than ids → null → 404, nothing written.
+- If `patch.programId` is set, it must belong to this controller, else 400 `Program not on this controller`.
+- One `update … where id in (…)`, then `_stampControllerUpdated` (`artifacts/api-server/src/storage.ts:11391`), then one history entry via step 2's helper. Summary: `Zones 3-7 set: Type Rotor, Runtime 12 min`. Ranges compressed as in Slice 1; labels from the `ZONE_TYPES` labels and the program name.
+
+Response: the updated zone rows.
+
+### 2. Server — fold zone edits into one history entry
+
+In `storage.ts`, add `ZONE_EDIT_SUMMARY_PREFIX = "Zones edited: "` and a private `_appendOrFoldZoneEditSnapshot(tx, ctrl, actor, zoneNumbers: number[])`:
+
+- Read the newest `irrigation_profile_history` row for `ctrl.id`.
+- If it exists **and** `changedByUserId === actor?.id` (both non-null) **and** `changedAt` is within 10 minutes **and** `summary` starts with the prefix: merge its zone numbers with `zoneNumbers`, then update that row's `snapshotJson` (fresh full state, same shape as `_appendIrrigationSnapshot`, `:11362-11390`), `summary` (`Zones edited: 3, 4, 7-12`) and `changedAt = now`.
+- Otherwise insert a new row through `_appendIrrigationSnapshot` with summary `Zones edited: <numbers>`.
+
+Parse the numbers back out of the summary with a helper that reverses the range compression. Unit-test it.
+
+`updateIrrigationZone` (`storage.ts:11861-11894`) calls `_appendOrFoldZoneEditSnapshot(tx, ctrl, actor, [updated.zoneNumber])` instead of `_appendIrrigationSnapshot` (`:11885-11890`). The bulk method writes its own unfolded entry (step 1), because a bulk apply is one deliberate act.
+
+### 3. Client — the sheet
+
+Replace `ZoneRow` (`:791-1100`) with `ZoneSheetRow`. **Keep** `draftZones` / `handleZoneDraftChange` (`:1303`, `:1322-1324`): they feed the live Run Schedule preview (`RunSchedulePanel`, `:1851-1855`). `ZoneSheetRow` calls `onDraftChange({ ...lastSaved, ...draft })` whenever its draft changes, so the preview follows typing before anything saves, as it does today.
+
+Columns, left to right, on the existing `min-w-[700px]` table (`:1808+`):
+
+| Column | Control (`canEditZones`) | Saves |
+|---|---|---|
+| select | `Checkbox` | — |
+| # | text, not editable | — |
+| Name | `Input` h-8 | blur / Enter |
+| Program | `Select` (`— None —` + programs) | change |
+| Type | `Select` (`ZONE_TYPES`, `:89-96`) | change |
+| Runtime | `Input type=number min=0` + `min` suffix | blur / Enter |
+| Order | `Input type=number min=0` | blur / Enter |
+| Status | `Switch` (`isActive`; off = Needs attention, unchanged meaning) | change |
+| Notes | `Input` | blur / Enter |
+| Override | ghost button `Override` → `Popover` holding the existing start-time input and `DayPillSelector` (`:121`) for that zone, with its own Save | Save |
+| state | 16px status cell | — |
+
+Read-only users get the same columns as text, with no select column and no Override button.
+
+**Save mechanics** (one `useMutation` per row, `PUT /api/irrigation-zones/:id` with `{ [field]: value }`):
+
+- Keep `lastSaved` (server values) and `draft` per row. Blur or Enter with `draft[field] !== lastSaved[field]` → save. Empty Name → do not save; restore `lastSaved.name` and show the cell's red border for 2 s with title `A zone needs a name`.
+- State cell: `Loader2` spinning while pending; `Check` (green-600) for 1.5 s after success; `AlertCircle` (red-600) on error, with `title` = server message. Clicking it retries the last failed field. The failed input keeps `border-red-400` until a save succeeds.
+- On success, update `lastSaved` from the response and update the tile's chip state in place: `queryClient.setQueryData` on the `controllers-profile` key, so the chip goes solid without refetching the list. Invalidate the controller detail key only after bulk apply.
+- **Escape** in an input restores `lastSaved[field]` and blurs without saving.
+- **Enter** saves, then focuses the same column in the next row (Shift+Enter: previous row). Implement with `data-zone-row={index}` and `data-col={field}` on the inputs, and `querySelector` within the table. Enter on the last row stays put.
+- **Tab** uses native order. Do not set `tabIndex` on anything.
+- Slice 2's `focusZoneId` now focuses that row's Name input and selects its text, instead of opening edit mode. Drop the `initialEditing` prop added in Slice 2. The scroll and ring stay.
+
+### 4. Client — select and bulk apply
+
+- Header checkbox: all / none / indeterminate. Shift-click on a row checkbox selects the range from the last clicked row.
+- When ≥1 is selected, a bar sits directly above the table (`sticky top-0 z-10 bg-white border rounded-md p-2 flex flex-wrap gap-2 items-center`):
+  `5 zones selected` · Type `Select` (placeholder `Type…`) · Program `Select` (`Program…`, includes `— None —`) · Runtime `Input type=number` (placeholder `Runtime (min)`) · `Apply` (primary, disabled until at least one of the three is set) · `Clear` (ghost).
+- Apply → bulk PUT with only the fields set. On success: toast `Updated 5 zones`, clear selection and the bar's fields, invalidate the controller detail and `controllers-profile`. On 404/400: toast with the server message; selection kept.
+- Selection clears when the tile collapses.
+
+### 5. Test harness note
+
+The sheet puts Radix `Select`s in every row. Under jsdom, opening one needs the pointer-capture shims. Copy them from `artifacts/irrigopro/src/pages/invoices-ar-collections.test.tsx`; do not debug fresh.
+
+## Tests
+
+Extend `artifacts/irrigopro/src/components/customers/irrigation-controller-grid.test.tsx` (created in Slice 2; run via its validation command, no new workflow):
+
+1. Typing a name and blurring sends exactly `{ name }` to `PUT /api/irrigation-zones/:id`; the state cell shows the check.
+2. Enter in Zone 3's Runtime moves focus to Zone 4's Runtime; Shift+Enter back to 3.
+3. Escape restores the saved value and sends nothing.
+4. A failed save (mock 500) leaves the typed value and the red state; clicking the state cell retries.
+5. Changing Type sends `{ zoneType }` immediately.
+6. Empty Name is not sent and the old name returns.
+7. Selecting zones 3-7 by shift-click, setting Type Rotor and Runtime 12, then Apply sends `{ zoneIds: [ids of 3-7], patch: { zoneType: "rotor", runTimeMinutes: 12 } }`.
+8. Read-only role: no inputs, no checkboxes, no Override.
+9. A placeholder chip turns solid after its zone's name is saved, with no list refetch.
+
+Server, in `artifacts/api-server/src/routes/irrigation-profile-routes.test.ts`:
+
+10. Bulk on 5 zones updates all 5 and writes one history row with the summary format.
+11. Bulk including a retired zone, or a zone from another controller → 404, nothing changed.
+12. Bulk with a program from another controller → 400.
+13. Three single-field saves by one user within 10 minutes → one history row, summary `Zones edited: 3, 4, 7`. A save by a second user → a new row. A save 11 minutes later → a new row.
+14. Tenancy (Rule 1): company B on company A's bulk endpoint → 404.
+
+## Acceptance checklist
+
+- [ ] On Villas at the Boulders Controller A, naming zones 1-10 by typing and pressing Enter down the Name column takes no clicks between rows (screen recording or screenshots).
+- [ ] Setting Type Rotor on 20 zones is one Apply.
+- [ ] View History shows one entry for a naming session, not one per zone.
+- [ ] Chips go solid as zones are named, without reload.
+- [ ] `git grep -n "function ZoneRow(" artifacts/irrigopro/src` returns nothing (`ProgramCard` editing is untouched).
+- [ ] All tests pass; typecheck clean for `@workspace/api-server` and `@workspace/irrigopro`.
+
+## Relevant files
+
+- `artifacts/irrigopro/src/components/customers/irrigation-controller-grid.tsx` — `:89-96`, `:121`, `:791-1100`, `:1303-1325`, `:1800-1855`
+- `artifacts/api-server/src/routes/irrigation-profile-routes.ts` — `:56-58`, `:397-468`, `:677-715`
+- `artifacts/api-server/src/storage.ts` — `:11362-11390`, `:11391`, `:11861-11894`
+- `artifacts/irrigopro/src/pages/invoices-ar-collections.test.tsx` (Radix Select shim to copy)

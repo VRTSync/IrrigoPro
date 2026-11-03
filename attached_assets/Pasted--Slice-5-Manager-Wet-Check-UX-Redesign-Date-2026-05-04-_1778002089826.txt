@@ -1,0 +1,382 @@
+# Slice 5 — Manager Wet Check UX Redesign
+
+**Date:** 2026-05-04
+**Status:** Draft for review (mockup attached in conversation)
+**Decisions locked:**
+- Match the visual language of the existing admin-dashboard components (`HeaderStrip`, `KpiTile`, etc.).
+- Design responsively for both desktop and mobile/tablet — manager flips between contexts.
+- Guide the manager step-by-step without padding the flow with unnecessary clicks.
+- The Slice-3 completed-work summary is labeled **"Wet check work completed in field"** (not "auto-billed" — that wording undersells what the tech actually did).
+- The active finding card lets the manager **edit quantity, part, and labor hours** before routing the decision. Estimated total recomputes live.
+- The "Send to estimate" path **bundles all sent-to-estimate findings within one wet check into a single estimate** (one estimate per wet check). This is already the convert-engine behavior; the wizard surfaces it via a "Building estimate" chip that appears once the manager picks the first estimate-bound finding.
+- The "Queue as work order" path (renamed from "Schedule later visit") **does not require a date**. A queued work order is unscheduled by default and goes into the work order list for scheduling at a later time.
+
+**Depends on:** Slice 3 (tech-driven auto-billing). The "auto-billed read-only summary" section of the review screen only makes sense once Slice 3 ships.
+
+**Roadmap note:** Slice 4 (offline) and Slice 5 (this) are mostly independent and can ship in either order.
+
+---
+
+## Executive Summary
+
+Today's manager wet check screen is functional but passive. It presents findings as a flat list with routing dropdowns. It works, but it doesn't *guide* the manager — they have to figure out what to look at first, what's already handled, and when they're done. After Slice 3 the manager queue narrows to wet checks that genuinely need decisions, but the per-wet-check screen still treats every finding as an undifferentiated row.
+
+This slice redesigns the manager experience as a **deliberate four-stage flow** — Inbox → Review wizard → Confirm → Done — using the same visual vocabulary as the recently-redesigned admin dashboard (Task #250). Each stage has one obvious action. Visual progress is always shown. Decisions surface as large, clearly-labeled cards rather than dropdowns. Auto-billed findings (from Slice 3) are visible but read-only, so the manager always sees the full picture without being asked to act on it.
+
+**Slice 5 ships when:** the manager opens the wet check inbox and sees a clear, color-coded list of pending wet checks with totals; tapping a wet check opens a wizard that surfaces one finding at a time with three large decision cards; submitting all decisions opens a confirmation screen showing what's about to happen; confirming creates the artifacts and shows a celebratory done state with a clear path to the next wet check.
+
+---
+
+## Implementation Slicing
+
+Slice 5 is the design. Implementation ships across **five sub-slices**. Each is independently shippable, reviewable, and rollback-able. Suggested order is 5A → 5B → 5C → 5D → 5E. **5A and 5B touch different code paths and can be done in parallel.** 5C depends on 5A's renames being in place. 5D depends on 5C's wizard. 5E is final polish on top.
+
+### Sub-slice 5A — Terminology + queue rules
+
+**Scope:**
+- Rename "Repaired in field" / "Auto-billed" to "Wet check work completed in field" everywhere it appears (banner copy, KPI labels, pill labels, manager review summary rows, done state, email body if relevant).
+- Rename the field-tech toggle "Mark Complete" to keep verbiage aligned.
+- Rename the manager decision "Schedule later visit" → **"Queue as work order"** with helper text "Adds to the work queue, schedule any time".
+- Make `scheduledDate` optional on the convert path for `deferred_to_work_order` findings. Verify the work order list renders an "Unscheduled" pill for these.
+
+**Ships when:** every UI surface uses the new wording, queueing a work order without a date works end-to-end, the tests pass.
+
+**Dependencies:** none. Can ship before any other sub-slice. Tiny, self-contained, low-risk — could be one Replit session.
+
+### Sub-slice 5B — Manager inbox
+
+**Scope:**
+- New route `/manager/wet-checks` with the inbox layout from this spec.
+- Reuse `HeaderStrip` and `KpiTile` components from `client/src/components/admin-dashboard/`.
+- Two KPI tiles: "Pending review" (amber) and "Wet check work completed today" (blue, scoped to `BS-WC-` prefix).
+- Wet check cards sorted by age descending. Pills, estimated value, "Aging" red pill at >24h.
+- Empty state when queue is clear.
+- Tapping a card opens the **existing** review screen (until 5C replaces it).
+
+**Ships when:** manager can navigate to the inbox, see KPIs and the queue, click into a wet check, and the existing review screen still works.
+
+**Dependencies:** none on other sub-slices. Independent of 5A.
+
+### Sub-slice 5C — Review wizard
+
+**Scope:**
+- Replace the existing flat review screen with the wizard from this spec.
+- One finding at a time. Progress bar with "Decision X of N · %".
+- Active finding card layout (top to bottom): issue type header → location → tech notes → photos → editable parts/qty/labor card with live total recompute → three decision cards.
+- Inline editing wired to `PATCH /api/wet-checks/findings/:id` (qty, partId, laborHours).
+- Decision card click persists edits, then routes via `PATCH .../route`, then advances.
+- Bundle-building chip appears once a finding goes to estimate; updates count and total as more findings are added.
+- "Wet check work completed in field" banner with click-through to the billing sheet.
+- "Up next" preview at the bottom.
+
+**Ships when:** manager can step through every pending finding, edit pricing, pick a routing, see bundle accumulation, and reach the last finding (which exits to the existing convert flow until 5D).
+
+**Dependencies:** 5A's renames must be in place so the wizard uses the right copy.
+
+### Sub-slice 5D — Confirm + Done states
+
+**Scope:**
+- New `/manager/wet-checks/:id/confirm` screen with the summary card from this spec. Four row types (estimate, work order, documented, completed-in-field). "Edit decisions" returns to wizard, "Confirm and convert" calls the existing convert endpoint.
+- New `/manager/wet-checks/:id/done` screen with the hero checkmark, artifact list with links to created docs, and "Review next (X remaining)" / "Done for now" CTAs.
+- Replace the wizard's "exit to old convert flow" path with this two-screen tail.
+
+**Ships when:** the full path from inbox → wizard → confirm → done works without touching any old screen.
+
+**Dependencies:** 5C (the wizard must exist).
+
+### Sub-slice 5E — Polish
+
+**Scope:**
+- Keyboard shortcuts on desktop: `1` / `2` / `3` for decisions, `←` / `→` for navigation, `Esc` to back out.
+- Accessibility audit: `role="button"` / `tabindex="0"` on decision cards, `role="progressbar"` on progress bar, focus moved to new active finding's card on advance, screen-reader labels, 4.5:1 contrast verified.
+- Mobile responsive verification: layouts collapse correctly at <768px, decision cards stack, progress bar stays sticky.
+- One-time tooltip on first wizard open: "Tap a decision card to route this finding". Dismissable, tracked in `tutorial_progress` or local storage.
+
+**Ships when:** keyboard nav works, Lighthouse accessibility audit passes, manual mobile test on a real device passes.
+
+**Dependencies:** 5C and 5D must be in place to polish.
+
+### What to send Replit per sub-slice
+
+For each sub-slice, hand Replit:
+- The relevant section above (scope + ships-when).
+- The full Slice 5 spec for design context.
+- The visual mockup link (the rendered widget in the conversation thread).
+- The list of pre-existing components to reuse from `client/src/components/admin-dashboard/`.
+
+The mockup is the single source of visual truth — when in doubt about layout or color, defer to it.
+
+---
+
+## Why Now
+
+Three reasons:
+
+**The shape of the work changed.** Slice 3 turned the wet check from "a list of routing tasks for the manager" into "a list of *decisions* for the manager." A decision deserves more breathing room and more context than a routing task. The UI needs to reflect that.
+
+**The existing dashboard infrastructure exists.** The admin-dashboard work (Tasks #250, #234) already established a clean professional aesthetic with `HeaderStrip`, `KpiTile`, color-coded health states, and a left-border-accent visual language. Reusing those components makes this slice cheaper and keeps the app coherent.
+
+**Manager retention matters.** A boring or confusing review experience produces a backlog. A clear, even slightly satisfying review experience produces a clean queue. The economic stakes of a 15-second-saved-per-decision compound.
+
+---
+
+## Design Principles
+
+The mockup attached in the conversation shows the four stages. The principles behind it:
+
+**Match the existing aesthetic.** Cards with `border-radius-lg`. Color-coded left-border accents on KPI tiles. Lucide icons in small colored rounded-lg backgrounds. Generous whitespace. Sentence case. Two type weights (regular and 500). Tailwind utility classes.
+
+**One primary action per screen.** Each stage has exactly one thing the manager should do next. Visual hierarchy makes that action unmissable: a single accent-bordered card is the focal point of the review wizard; a single primary button (`Confirm and convert`) ends the confirm stage. Secondary actions exist but are visually subordinate.
+
+**Always show progress.** A progress bar at the top of the review wizard ("Decision 1 of 3 · 33%") tells the manager where they are. The Done state shows time-to-complete ("15 findings handled in 7 minutes") so the manager feels the value of the flow.
+
+**Completed work is visible but read-only.** The Slice 3 contract says the tech is the source of truth for completed work. The manager UX honors that with a green-tinted summary banner labeled **"Wet check work completed in field"** ("12 findings finished by John Tech · billing sheet BS-WC-42 · $370.00"). The manager can click through to the billing sheet but the wizard never asks them to act on these — they're already done. The action stays focused on what genuinely needs a decision.
+
+**Color encodes meaning consistently.**
+
+| Color | Meaning | Examples |
+|---|---|---|
+| Green (`c-green` / `green-50/900`) | Complete, auto-billed, success | Auto-billed banner; Done state checkmark |
+| Amber (`c-amber` / `amber-50/900`) | Pending decision, attention | Inbox urgency, "needs attention" pill, pending finding card icon |
+| Blue (`c-blue` / `blue-50/900`) | Estimate / customer-facing path | "Send to estimate" decision card; primary CTAs |
+| Purple (`c-purple` / `purple-50/900`) | Scheduled future work | "Schedule later visit" decision card; work order summary row |
+| Gray (`c-gray` / neutral) | Documented, archive, no action | "Document only" decision card; documented summary row |
+| Red | Aging / overdue | "Aging" pill on inbox cards more than 24h old |
+
+Every other color choice in the design is derived from these rules.
+
+---
+
+## Stage 1 — Manager Inbox
+
+**Route:** `/manager/wet-checks` (replaces or augments the existing `manager-dashboard` tile)
+
+**Layout (top to bottom):**
+
+1. **HeaderStrip-equivalent.** Reuse the pattern from `client/src/components/admin-dashboard/header-strip.tsx`. Personalized greeting, today's date, a "needs attention" health pill in the corner that flips to "all clear" when the queue is empty.
+2. **KpiTile row** (use the existing `client/src/components/admin-dashboard/kpi-tile.tsx`):
+   - **Pending review** — count of wet checks awaiting decisions. Helper text: "X findings to decide." Accent: amber. `href` opens the inbox list (no-op if already there).
+   - **Wet check work completed today** — dollar total of Slice-3 auto-billed work that came specifically from wet check submissions today. Helper text: "Y wet checks, Z findings." Accent: blue. `href` links to the billing dashboard filtered to wet-check-sourced billing sheets only (i.e., billing numbers prefixed `BS-WC-`). The "wet check" qualifier in the label is deliberate — distinguishes this number from total completed billing across all sources, which is a different metric and lives elsewhere on the billing dashboard.
+
+   Two tiles, not three. If a third metric earns its place later, add it then; better an empty slot than a vanity number.
+3. **Wet check cards.** A list of wet checks needing review, sorted by age descending (oldest first to surface aging items). Each card:
+   - Customer name (medium weight).
+   - Property address, tech name, submitted-when in muted text.
+   - Two pills: green "X auto-billed · $Y" and amber "Z to decide". An optional red "Aging" pill appears when age > 24h.
+   - Estimated total of pending findings on the right (parts × qty + labor × default rate; computed dry — never written until convert).
+   - Tap card → opens Stage 2 for that wet check.
+
+**Empty state.** When the queue is clear, show the HeaderStrip with green "all clear" health, the KPI row, and a friendly empty-state card: *"You're all caught up. New wet checks will appear here as techs submit them."* No fake urgency.
+
+**Filters / sort (V1):** none. Default sort is age descending. Filtering can come in a follow-up if the queue grows large.
+
+---
+
+## Stage 2 — Review Wizard
+
+**Route:** `/manager/wet-checks/:id`
+
+**Layout:**
+
+1. **Compact context header.** Customer name and wet check number in muted text, "Decision X of N" as the heading, a 90px progress bar showing percentage complete. The header also functions as the "go back" affordance — there's a back link to the inbox at the top left.
+2. **"Wet check work completed in field" banner.** A green-tinted card showing the count and total of findings the tech finished in the field plus a link to the billing sheet ("12 findings finished by John Tech · billing sheet BS-WC-42 · $370.00"). Click links to the billing sheet detail. Stays present throughout the wizard so the manager always has full context.
+
+   **Bundle-building chip.** Once the manager picks "Send to estimate" on the first finding, a blue-tinted chip appears below the banner: *"Building estimate: 1 finding · $62.50"*. The chip count and total update each time another finding is sent to the same estimate. This makes the implicit auto-bundling behavior visible — the manager sees the estimate accumulating in real time, and at convert all sent-to-estimate findings become line items on a single estimate document for that wet check.
+3. **Active finding card.** This is the focal point and gets the only `border: 2px solid var(--color-border-info)` accent on the page (consistent with the admin dashboard convention for "featured" cards). The interior layout flows top-to-bottom in this exact order:
+   1. **Issue type header.** Lucide icon in a colored rounded-md background (color derived from `issue_type_configs.issueGroup` — quick fixes amber, advanced blue, zone issues purple), eyebrow label "Pending finding", issue display name (e.g., "Leak repair").
+   2. **Location card.** A muted-bg metric card showing "Controller A · Zone 5".
+   3. **Tech notes card.** A muted-bg card with the tech's free-text notes from the field.
+   4. **Photos.** Horizontal strip of thumbnails (if any).
+   5. **Parts and labor (editable).** A bordered card the manager can adjust before deciding:
+      - Selected part (with a `Change` button that opens the parts picker modal).
+      - Quantity input (`<input type="number" step="1">`, defaults to the tech's value).
+      - Labor hours input (`<input type="number" step="0.25">`, defaults to either the tech's value or `issue_type_configs.defaultLaborHours`).
+      - Labor rate (read-only, shown for context — pulled from the customer's snapshotted rate).
+      - **Estimated total** (computed live, bottom-right of the section): `partPrice × qty + laborHours × laborRate`.
+   6. **"How should this be handled?" decision row.** Three large cards in a `repeat(auto-fit, minmax(180px, 1fr))` grid:
+      - **Send to estimate** (blue accent icon, helper: "Customer must approve before work starts")
+      - **Queue as work order** (purple accent icon, helper: "Adds to the work queue, schedule any time")
+      - **Document only** (gray accent icon, helper: "Logged for the record, no work scheduled")
+
+   Tapping a decision card:
+   - First persists any pending edits via `PATCH /api/wet-checks/findings/:id` (qty, partId, laborHours).
+   - Then sets resolution via `PATCH /api/wet-checks/findings/:id/route`.
+   - Then advances to next finding (or Confirm if last).
+
+   No inline date picker — `Queue as work order` is one click, finished. Scheduling happens later from the work order list.
+4. **"Up next" preview.** Below the active card, a list of the remaining findings in muted, smaller cards. Lets the manager see what's coming without scrolling.
+5. **Skip / save secondary actions.** Bottom of the wizard: `Skip for now` (sets resolution back to pending if the manager wants to come back later) and `Save & next` (only relevant if the manager edited but hasn't picked a decision card; rarely needed).
+
+**Keyboard shortcuts (desktop):**
+- `1` / `2` / `3` → Send to estimate / Queue as work order / Document only.
+- `→` Next finding (after a decision is made).
+- `←` Previous finding.
+- `Esc` Back to inbox.
+
+These are defined for power users; the on-screen click flow is fully usable without them.
+
+**Mobile (≤ 640px):** The wizard collapses to a single column. Decision cards stack vertically. The progress bar stays sticky at the top so the manager always sees where they are.
+
+---
+
+## Stage 3 — Confirm
+
+**Route:** `/manager/wet-checks/:id/confirm`
+
+**Layout:**
+
+1. **Heading.** "Almost done — review and confirm" + subtitle with customer + wet check number.
+2. **Summary card.** A single bordered card with one row per artifact about to be created. Each row has an icon (in the matching accent color), a primary line, and a secondary line:
+   - "1 estimate will be created · $X" / "leak repair at Zone 5 · 1 line item · customer approval email will send" (or "3 line items" if multiple findings were bundled).
+   - "1 work order added to queue · $Y" / "valve issue at Zone 12 · unscheduled · schedule any time from work orders list".
+   - "1 finding documented" / "pressure issue at Zone 3 · no action needed".
+   - "12 findings completed in field · $Z" / "repaired by John Tech during wet check · billing sheet BS-WC-X" — for completeness, even though no action runs on these.
+3. **Two CTAs.**
+   - `Edit decisions` (secondary outline) → goes back to Stage 2 at decision N.
+   - `Confirm and convert` (primary, blue) → calls `POST /api/wet-checks/:id/convert` and transitions to Stage 4.
+
+The confirm step is deliberately a separate screen rather than a dialog. It gives the manager a moment to second-guess a decision before the conversion runs and customer-facing emails fire.
+
+---
+
+## Stage 4 — Done
+
+**Route:** `/manager/wet-checks/:id/done` (or returns to inbox after timeout)
+
+**Layout:**
+
+1. **Hero checkmark.** A single 56px green circle with a check icon. Below: "Wet check complete" + subtitle showing time-to-complete ("15 findings handled in 7 minutes").
+2. **Artifact list.** Four rows summarizing the outcome:
+   - Completed in field (already done): $X
+   - Estimate sent for approval: $Y (with a link to view it)
+   - Added to work queue: $Z (with a link to the work order, currently unscheduled)
+   - Documented (no action): count
+3. **Two CTAs.**
+   - `Review next (X remaining)` (primary, blue) → Stage 1 with the next wet check pre-selected, OR straight to Stage 2 if the user prefers.
+   - `Done for now` (secondary) → goes back to the manager dashboard.
+
+The done state is the smallest moment of celebration — restrained, in keeping with "professional" rather than "playful." A subtle animation on the checkmark (scale-in, 200ms) is appropriate. Confetti is not.
+
+---
+
+## Component Reuse
+
+The slice is cheaper than it looks because the visual language already exists. Build on these:
+
+- `client/src/components/admin-dashboard/header-strip.tsx` — drop-in for Stage 1's header, possibly reused for Stage 4.
+- `client/src/components/admin-dashboard/kpi-tile.tsx` — drop-in for the Stage 1 KPI row.
+- `client/src/components/ui/card.tsx`, `button.tsx`, `badge.tsx`, `progress.tsx` (shadcn/ui) — used throughout.
+- The color accent pattern in `kpi-tile.tsx` (`ACCENTS` map) is the canonical reference for how this slice should color cards.
+
+**New components to add:**
+- `client/src/components/manager/wet-check-card.tsx` — the inbox row.
+- `client/src/components/manager/wet-check-wizard.tsx` — the orchestrator for Stage 2.
+- `client/src/components/manager/finding-card.tsx` — the active finding's display card.
+- `client/src/components/manager/decision-card.tsx` — the three big decision buttons-as-cards.
+- `client/src/components/manager/auto-billed-banner.tsx` — the read-only Slice-3 summary.
+- `client/src/components/manager/wet-check-confirm.tsx` — Stage 3.
+- `client/src/components/manager/wet-check-done.tsx` — Stage 4.
+
+Each component is small (under 100 lines, in most cases). The wizard is the largest at maybe 250 lines.
+
+---
+
+## Data and API
+
+**No new endpoints needed.** All routes already exist from Slices 2 and 3:
+
+- `GET /api/wet-checks/pending-review` — feeds Stage 1 list.
+- `GET /api/wet-checks/:id` — feeds Stages 2 and 3.
+- `PATCH /api/wet-checks/findings/:id` — called when manager edits qty / partId / laborHours on the active finding.
+- `PATCH /api/wet-checks/findings/:id/route` — called when manager picks a decision card.
+- `POST /api/wet-checks/:id/convert` — called from Stage 3's Confirm button.
+
+**Two small server-side augmentations worth considering:**
+
+- Add `estimatedTotalUsd` to the `GET /api/wet-checks/pending-review` response so the inbox doesn't have to compute it client-side. Server-side computation is one source of truth and is consistent with the snapshot discipline.
+- The convert engine for the `deferred_to_work_order` path needs to handle a null `scheduledDate`. Today (per `server/storage.ts:5620+`) the engine already accepts `scheduledDates` as `Record<number, string | null>`, and the work order schema already has `scheduledDate` as nullable, so this should "just work" — confirm in implementation that a queued work order without a date displays correctly in the work orders list (probably with an "Unscheduled" pill).
+
+**State management.** The wizard's state (which decision is active, what's been chosen) is local to the component during the session. Decisions are persisted to the server via `PATCH .../route` immediately on each click — there's no batched save. If the manager closes the browser mid-wizard, they reopen at the same step (the next finding with `resolution = pending` becomes the active one).
+
+---
+
+## Responsive Behavior
+
+The 680px-wide canvas of the mockup approximates a tablet breakpoint, which is the design's "sweet spot" — both desktop (1024+) and phone (375+) are derived from it.
+
+**Desktop (≥ 1024px):**
+- Stage 1: 3-column KPI grid + cards in a single column with more horizontal padding.
+- Stage 2: wizard occupies a max-width container (around 720px) centered on the page. "Up next" can move to a sidebar.
+- Stage 3, 4: max-width container, centered.
+
+**Tablet (768–1023px):**
+- Layouts collapse to what the mockup shows.
+
+**Mobile (≤ 767px):**
+- Stage 1: 1-column KPI stack + 1-column wet check list. Pills wrap.
+- Stage 2: decision cards stack vertically. Progress bar pinned to top of viewport.
+- Stage 3, 4: 1-column.
+
+The shadcn/ui card components handle most of this responsiveness via Tailwind's `sm:` / `md:` / `lg:` prefixes. The mockup HTML I provided uses `repeat(auto-fit, minmax(N, 1fr))` grids which are fully responsive without media queries.
+
+---
+
+## Accessibility
+
+- All decision cards have `role="button"`, `tabindex="0"`, and respond to Enter/Space.
+- The progress bar uses `<progress>` or has appropriate ARIA (`role="progressbar"` with `aria-valuenow`).
+- Color is never the only signal — every color-coded element has an icon and a text label too.
+- Tap targets are at least 44 × 44 px.
+- The wizard is fully keyboard navigable (see the keyboard shortcuts above).
+- Focus is moved to the new active finding's card when advancing, so screen readers and keyboard users follow the flow.
+- Each stage has an `<h1>` or `<h2>` summarizing what the user is doing, so screen reader users get context.
+
+---
+
+## Migration
+
+**No data migration needed.** This is purely a UI redesign on top of the existing data model.
+
+**Old screens:** the existing `client/src/pages/wet-check-review.tsx` is replaced (or progressively replaced) by the new wizard. Recommend keeping the old screen behind a feature flag (`MANAGER_WET_CHECK_REDESIGN`) for a deprecation window — flip the flag on per company / per user when each is ready. The old screen is retired once usage drops to zero.
+
+**Routing:** the new screens introduce `/manager/wet-checks/:id/confirm` and `/manager/wet-checks/:id/done` routes. Both are pure UI and don't require backend changes.
+
+---
+
+## Risks and Rollback
+
+**Risk: managers don't immediately understand the wizard.** Mitigation: include a one-time tooltip on first wizard open ("Tap a decision card to route this finding"). Dismissable. Stored in a per-user `tutorial_progress` JSON column or local storage.
+
+**Risk: the wizard feels slower than the old one for power users.** The wizard adds one screen (Stage 3) compared to the old "click convert and you're done" flow. Mitigation: keyboard shortcuts + the one-key-per-decision pattern keep the click-count comparable. The Confirm screen also catches mistakes that would otherwise become "I just sent that estimate to the wrong customer" support tickets.
+
+**Risk: the inbox sort by age surfaces aging items but hides recent ones.** Mitigation: the inbox always shows everything, just sorted. A 50-item queue would be unusual; if it grows, add filters (by customer, by tech, by age).
+
+**Rollback:** the feature flag flips it off and the old screen returns. No schema changes, no data risk.
+
+---
+
+## Success Criteria
+
+Slice 5 ships when:
+
+1. The new components exist and are visually consistent with the admin-dashboard components (peer review pass).
+2. A manager can open the inbox, see the queue with KPIs, tap into a wet check, decide each finding via the wizard, confirm, and reach the done state — all on desktop and mobile, in a single test run.
+3. Decisions persist immediately on click; closing and reopening the wizard resumes at the correct step.
+4. The four routing paths each work end-to-end and produce the same outputs that the old screen produced.
+5. Keyboard shortcuts work on desktop.
+6. A manager who has never seen this UI can complete a 3-decision wet check in under 90 seconds in a fresh user test.
+7. Lighthouse / accessibility audit passes (color contrast ≥ 4.5:1, keyboard nav, labels, etc.).
+
+---
+
+## What This Unblocks
+
+- **Manager dashboard parity for other domains.** The same "guide-them-through" pattern applies to estimate review, work-order assignment, and billing-sheet approval. Once the visual language is dialed in here, those screens get a free aesthetic upgrade.
+- **Manager mobile use.** A manager who can do this work on their phone in 90 seconds while at their kid's soccer practice is meaningfully more available than one who has to sit at a desk to handle it.
+- **Future slice: aged-queue dashboards.** Once the inbox is a real surface, adding a "wet checks aged > 48h" admin alert or a per-tech rate of "wet checks needing decisions" becomes trivial — the data shape and UI shape are both there.
+
+---
+
+## What's Captured in the Mockup
+
+The visual mockup attached in the conversation shows all four stages. Click the stage buttons to navigate, and within Stage 1 the Tanglewood card is clickable to advance to Stage 2; within Stage 2, any of the three decision cards advances to Stage 3. Use the mockup to validate visual direction before implementation begins. If anything in the mockup feels off, point at it specifically and we'll iterate before this spec gets handed to Replit.

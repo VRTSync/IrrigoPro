@@ -1,0 +1,39 @@
+# Wet Check Report — Exclude Empty Zones (Reflect Current Zone Counts)
+
+**What & Why**
+The wet check report (e.g. "Woodglenn Squares HOA — Wet Check 100") prints a wall of **useless empty zone rows**. Controllers show up to ~100 zones, most of them blank "Not Checked" lines, even though the real system is far smaller (per the Controllers & Zones screenshot: Controller A = 7, B = 9, C = 15, …).
+
+**Root cause:** the PDF renders **one row per `zoneRecord`** (`wet-check-pdf.ts:214` → `zoneRecords.map(renderZoneBlock)`), and the wet check was created using the controller's **default `zoneCount` of 100** (`property_controllers.zoneCount` default 100). So ~100 zone records were created per controller, almost all `not_checked` with no readings, findings, or notes. The tech corrected the real zone counts later in **Controllers & Zones** (`property_controllers.zoneCount`), but the wet check's empty padding records still print.
+
+**Fix:** the report should reflect the zones that actually matter — **exclude empty zones** so only real, inspected zones appear. Display-only; reads are already company-scoped (no multi-tenancy change, no schema change).
+
+## Done looks like
+- The wet check report shows only zones with real data; the trailing empty "Not Checked" padding (the bulk of the 100-zone controllers) is gone.
+- The summary counts (Total Zones / Checked OK / Issues / N/A) reflect the **filtered** set, not 100s of phantom zones.
+- No zone the tech actually touched is ever dropped.
+- Applies to the internal wet-check PDF **and** the customer-facing Wet Check Results Report.
+
+## Steps
+1. **Define an `isEmptyZone(zone)` predicate** (shared helper): a zone is empty when it has **no meaningful data** — `status` is `not_checked` (or empty/null) **and** no findings **and** no readings (`observedPressure` and `observedFlow` both null) **and** `ranSuccessfully` is null **and** no `notes`/`repairLaborHours`. Anything with any of those stays.
+2. **Filter before rendering** in `wet-check-pdf.ts` (`buildWetCheckHtml`, ~207–214): compute `const visibleZones = zoneRecords.filter(z => !isEmptyZone(z));` and drive both the summary counts (`totalZones`, `zonesOk`, `zonesIssues`, `zonesNA`) and `zoneRows` off `visibleZones`.
+3. **Align to current system size (authoritative count).** Where the current per-controller `property_controllers.zoneCount` is available, also cap each controller's zones at its current count, so any in-range-but-untouched padding beyond the real system size is excluded too. (The empty filter already removes the bulk; this keeps the report honest to "zones at this time in the system.")
+4. **Apply the same filter to the customer report** (`wet-check-report-pdf.ts`) so it never shows empty zones either.
+5. Keep the existing "No zones recorded" empty-state when a wet check genuinely has zero inspected zones.
+
+## Tests
+- A wet check with controllers created at the default 100 zones but only a handful inspected renders only the inspected zones; summary counts match the visible rows.
+- A zone with only a reading (PSI/GPM) or only a note — no status — is **kept** (not treated as empty).
+- A zone with findings is kept; a `not_checked` zone with no data is dropped.
+- Total Zones in the summary equals the number of rendered zone rows.
+- Both the internal PDF and the customer report exclude empty zones.
+
+## Out of scope
+- The upstream behavior of creating zone records from the default `zoneCount` at wet-check creation (optional follow-up: create zone records lazily / from the current count so empties never exist — bigger change; the report-side filter is the immediate fix).
+- The Controllers & Zones settings UI (already used to set the real counts).
+- Zone-grouped estimate formatting (separate ticket).
+
+## Relevant files
+- `artifacts/api-server/src/wet-check-pdf.ts` (`zoneRecords`/`zoneRows` ~207–214; `renderZoneBlock` ~138; summary counts ~209–212)
+- `artifacts/api-server/src/wet-check-report-pdf.ts` (customer report — apply same filter)
+- `lib/db/src/schema/schema.ts` (`property_controllers.zoneCount` default 100 ~1301) — current count reference
+- New small shared helper for `isEmptyZone` (used by both renderers)

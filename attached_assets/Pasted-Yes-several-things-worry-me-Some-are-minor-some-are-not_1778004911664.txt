@@ -1,0 +1,30 @@
+Yes, several things worry me. Some are minor, some are not.
+Worries me a lot:
+
+The verification is just a screenshot. For an app that integrates with QuickBooks OAuth, Postmark email, Twilio SMS, MFA/TOTP, push notifications, Puppeteer PDF generation, the PWA service worker, photo uploads, and a custom pricing-visibility middleware that strips money fields per role — "does it look the same" tells you almost nothing about whether the app actually works. You wouldn't find out the QuickBooks OAuth refresh is broken until a customer tries to approve an estimate and the email never sends. There needs to be a functional smoke checklist (login as field tech, login as admin, create a work order, attach a photo, send an estimate approval email, complete a QB token refresh, generate one PDF, register for push) — not a screenshot.
+"Read ONLY the routes file and schema. Do NOT read anything else." Your server has substantial logic that lives outside routes.ts: the applyPricingVisibility() middleware, role guards (requireSiteMapViewAccess, requireWorkOrderUpdateAccess, etc.), MFA enforcement, the Postmark templates, Twilio sender, QuickBooks OAuth refresh logic, Puppeteer PDF rendering, the photo processing pipeline, the billing_number_counters logic, the customer-approval token flow, the push notification machinery. An agent that's told not to read any of that is being asked to port it blind. The copy scripts will move the files, but the agent won't understand what it's wiring up, so when something breaks it won't know what to look at.
+"Use // @ts-ignore to keep moving." Type errors during a port are usually the first signal that something didn't come across correctly — wrong import path, missing type from a moved schema, a renamed export. Suppressing them blanket-style converts type-time errors into runtime errors that you'll find weeks later.
+Zero mention of environment variables or secrets. Your app needs QB client ID/secret, Postmark API key, Twilio creds, Neon DB URL, session secret, VAPID keys for web push, the customer approval token signing secret, etc. If the new artifact's env loading differs from server/'s — even slightly, like loading from artifacts/api-server/.env instead of repo-root — integrations fail silently. Often the failure isn't a crash, it's a null API key passed to a third-party SDK that returns a polite error message that nobody sees.
+The PWA and service worker are not mentioned anywhere. IrrigoPro has a service worker, a manifest, push notifications, and an iOS PWA flow. When the frontend moves into artifacts/<app-name>/, the served paths change, which means the SW scope, the manifest icon paths, and the push subscription endpoints all need to be re-verified. If the SW scope is wrong, push registration silently fails for every existing field tech who already has the app installed.
+
+Worries me a fair bit:
+
+pnpm --filter @workspace/db run push runs against your database. If lib/db's Drizzle schema doesn't perfectly mirror your live Neon schema — including the session table that connect-pg-simple owns, billing_number_counters, photo storage tables, MFA tables — push will modify the live DB. At minimum this should run against a branch/dev DB first.
+The OpenAPI judgment call. IrrigoPro is well over 20 endpoints. The instruction allows the agent to skip the spec for large legacy apps, which it should — but it's framed as a judgment call, and an agent that decides to write the spec will burn a lot of time and rewrite frontend API calls in ways that can introduce subtle bugs. I'd make it explicit: skip the OpenAPI spec, keep the existing fetch layer.
+The pre-emptive instructions to the reviewer. "Don't reject for typecheck errors. Don't reject for X, Y, Z." That language tells me the task author expects a messy diff and is heading off criticism. Combined with screenshot-only verification, the regression-detection net is wide open. Someone — you, ideally — needs to actually exercise the app end-to-end before this is called done.
+.migration-backup/ as the single source of truth. Before this task starts, I would verify that .migration-backup/ actually contains every file from your current repo: not just client/ and server/, but the service worker, the manifest, the Puppeteer templates, attached assets, migration files, .env.example, the docs folder, anything in shared/. A diff -r against your current Documents/Claude/Projects/IrrigoPro/ would catch a missed directory before it becomes a regression.
+Forcing the DB into lib/db. Your DB code isn't generic — it has connect-pg-simple session storage, the billing counter table, the pricing visibility logic baked into route handlers (which import schema types). Fitting this into a scaffold-shaped lib/db package may require more than "targeted edits," and the agent has been told not to relitigate the scaffold.
+
+Worries me a little:
+
+The wouter base={import.meta.env.BASE_URL} callout is good — that one silently breaks navigation if missed, so it's right to call out, but it means every <Link> and useLocation callsite needs the base honored. Worth verifying, not just trusting.
+Fonts/theme. Called out, which is good. Your blue (#3B82F6) and the IrrigoPro logo treatment are brand identity — verify the scaffold's defaults didn't override.
+
+What I'd want before letting this run:
+
+Verify .migration-backup/ has full parity with the current repo (a directory diff).
+Document the env vars and confirm they'll be wired into the new artifact's environment.
+Run the DB push against a branch or dev DB first, not prod.
+Replace "screenshot" verification with a smoke-test checklist (login, work order create, photo upload, email send, QB token refresh, PDF generation, push registration).
+Make the OpenAPI decision explicit upfront: skip the spec, keep the existing fetch layer.
+Tag the current repo state so rollback is one command.

@@ -1,0 +1,28 @@
+All six research findings check out — this is the best-researched ticket in the series so far. Verified:
+
+wet_check_billings genuinely has no company column (schema.ts:1671; customerId only). The cited range 1671-1722 is exact.
+The invoice leg filters on the invoice's own column — _companyScopeForInvoice (storage.ts:3889-3892) returns eq(invoices.companyId, companyId), not the customer's. Step 3's distinction is real and worth keeping.
+"More callers than four" is an understatement: there are 13 call sites across budget-spend.ts, budget-routes.ts, financial-pulse.ts and budget-alert-service.ts. Worth putting the number in the ticket.
+All three test files exist at the cited paths, and the Pulse row type genuinely carries no annual figure.
+
+One correction, in three places: the status-set gap no longer exists. #2013 landed it in wave 1 — computePulseCustomers now gates on INVOICE_EXCLUDED_STATUSES. I confirmed it in the merged diff. But this ticket still says:
+
+What & Why, third gap: "computePulseCustomers excludes a narrower status set… so a merged invoice inflates its budget pill" — no longer true.
+Done looks like: "A merged or failed invoice no longer inflates the Pulse tab budget pill" — already true before this ticket starts.
+Out of scope: "leave the year-to-date accumulation… exactly as it is, including its narrower status set" — there is no narrower set to leave.
+
+Meanwhile the Coordination section correctly states that #2013 already swapped both predicates. So the ticket contradicts itself, and the Out of scope line actively misdescribes what the executor will find — it tells them to preserve something that isn't there.
+
+Fix: drop the third gap (it's two gaps now), drop that Done bullet, and change the Out of scope clause to "leave the year-to-date accumulation in the same loop exactly as it is, still guarded by the canonical predicate #2013 installed." The Coordination section's warning not to delete the predicate along with the spend lines is the important part and it's already right.
+
+Line refs drifted again with #2013:
+
+Cited	Actual
+financial-pulse-math.ts:195	202
+financial-pulse-math.ts:646-760	663 — computeTopCustomers
+financial-pulse-math.ts:1147-1213	1164 — computePulseCustomers
+financial-pulse.ts:1020-1045	989-1045 — the range covers the computeTopCustomers call but misses the handler head, which is where step 7's batch calls go
+
+financial-pulse.ts:161-260 and :1549-1700 are both still accurate, as are budget-spend.ts:48 and budget-status.ts:83-95.
+
+Finding 3 in the ticket — that reworking the test shims is part of this task rather than a follow-up — is the one I'd make sure survives review. It's the most likely thing to get deferred under time pressure, and it's the thing that would let the consolidation land with its safety net quietly weakened.

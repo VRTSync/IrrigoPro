@@ -1,0 +1,179 @@
+# BUILD — Irrigation Build-Out, Slice 1: Zone Records Are the Truth
+
+This is a single self-contained task. Build exactly what is described. Do not deviate, do not re-decide the locked decisions, and do not pull in Slice 2 (tile redesign) or Slice 3 (grid entry). This slice changes no page layout. It makes the data behind the existing irrigation profile honest, so the 38 chips on a tile and the zone table beneath it describe the same 38 zones.
+
+## What & Why
+
+Villas at the Boulders, `/customers/:customerId/irrigation-profile`. Controller A's tile shows 38 chips and the stepper reads 38. Expanded, its Zones table is empty. The wet check and the field location picker both offer zones 1-38.
+
+A controller's zones live in two places that nothing keeps in step:
+
+- `irrigation_controllers.total_zones` (`lib/db/src/schema/schema.ts:1933`), a bare integer. The chips (`artifacts/irrigopro/src/components/customers/irrigation-controller-grid.tsx:1538`), the stepper, the wet check, and the location picker all read it.
+- `irrigation_profile_zones` rows (`schema.ts:1991-2028`). Only the expanded Zones table reads them.
+
+Seven paths write one without the other:
+
+1. `createIrrigationController` (`artifacts/api-server/src/storage.ts:11588-11630`) stores `totalZones` and creates no rows.
+2. `updateIrrigationController` (`storage.ts:11632-11722`) seeds or trims rows only when the old and new counts are both numbers (`:11668`, `:11694`). Null → 38 creates nothing.
+3. `PATCH /api/properties/:customerId/controllers` (`artifacts/api-server/src/routes/routes.ts:16420-16475`), which the wet-check stepper calls (`artifacts/irrigopro/src/pages/wet-checks/ControllerHeader.tsx:31`), writes `totalZones` with a raw `db.update` (`:16450-16453`). No rows, no history.
+4. `createIrrigationZone` / `deleteIrrigationZone` (`storage.ts:11833-11859`, `:11896-11924`) never change the count.
+5. Shrinking deletes only empty rows (`storage.ts:11663-11691`), so rows with data survive above the count.
+6. Zone number is editable (`irrigation-controller-grid.tsx:912-920`; `updateZoneBody`, `artifacts/api-server/src/routes/irrigation-profile-routes.ts:111`), so rows can be renumbered past the count or leave gaps.
+7. CSV import sets the count to the highest zone number for new controllers (`storage.ts:12206`) but to the row count in Replace mode (`:12219-12224`), and Replace mode hard-deletes zones (`:12384-12388`).
+
+This ticket puts every count change behind one function that writes the rows and the count together, then backfills existing controllers.
+
+## Locked decisions (do not relitigate)
+
+1. **Zone records are the truth (decided, Randy 2026-10-05).** For every controller, its non-retired zone rows are exactly zones `1..total_zones`, no gaps. `total_zones` is null only when the controller has no non-retired rows (not set up yet).
+2. **Lowering the count retires zones; nothing deletes a zone (decided, Randy 2026-10-05).** Retired = `retired_at` set. Retired zones keep every field. Raising the count again restores the same row with its data.
+3. **`retired_at` is not the existing `is_active`.** `is_active` is the user's "Needs attention" status (`irrigation-controller-grid.tsx:861-868`) and is unchanged.
+4. **`total_zones` stays for now, written in one place only.** Slice 4 moves its readers to zone rows and drops the column. Until then only `_reconcileControllerZones` writes it.
+5. **Zone numbers are not editable.** They are positions 1..N. To add a zone you raise the count; to remove one you lower it (it retires from the top).
+6. **Count range is 1-100**, matching `MIN_ZONES` / `MAX_ZONES` (`irrigation-controller-grid.tsx:73-74`) and the wet-check body (`routes.ts:16423`).
+7. **Field techs may change the count (decided).** They can today via the wet check (`isFieldRole`, `routes.ts:16428`). The field is where a missed zone gets found (Rule 4). Same function, same history entry.
+8. **Wet-check mode scope: both modes, identical.** The only wet-check change is the PATCH route at item 3 above. It has no mode branch before or after.
+
+## Out of scope
+
+- Any layout or visual change (Slices 2-3). The only client changes here remove calls to deleted endpoints.
+- What pickers, wet checks, documents or invoices read (Slice 4 onward).
+- Site maps. Do not read or write `controllers`, `irrigation_zones`, `/site-maps`, or `/customers/:id/site-maps`.
+
+## Steps
+
+### 1. Schema — retirement columns
+
+`schema.ts`, in `irrigationProfileZones` after `notes` (`:2008`):
+
+```ts
+// Slice 1 — lowering a controller's count retires zones from the top; it never deletes.
+// Null = part of the controller. Distinct from isActive (the "Needs attention" status).
+retiredAt: timestamp("retired_at", { withTimezone: true }),
+retiredByUserId: integer("retired_by_user_id").references(() => users.id),
+retiredByName: text("retired_by_name"),
+```
+
+New file `lib/db/migrations/0023_irrigation_zone_retirement.sql`, in the style of `0021_seasonal_budget_model.sql`:
+
+```sql
+-- Migration 0023: irrigation zone retirement (Irrigation Build-Out Slice 1)
+ALTER TABLE irrigation_profile_zones
+  ADD COLUMN IF NOT EXISTS retired_at timestamptz,
+  ADD COLUMN IF NOT EXISTS retired_by_user_id integer REFERENCES users(id),
+  ADD COLUMN IF NOT EXISTS retired_by_name text;
+CREATE INDEX IF NOT EXISTS irr_pzone_controller_current_idx
+  ON irrigation_profile_zones (company_id, controller_id) WHERE retired_at IS NULL;
+```
+
+### 2. Storage — one reconcile function
+
+In `storage.ts`, next to `_appendIrrigationSnapshot` (`:11362`), add:
+
+```ts
+/**
+ * The only writer of irrigation_controllers.total_zones. Makes the controller's
+ * non-retired zones exactly 1..target: restores retired rows at or below target,
+ * inserts placeholders for missing numbers, retires rows above target.
+ * Runs inside the caller's transaction. Returns the zone numbers it touched.
+ */
+async _reconcileControllerZones(
+  q: DbExecutor,              // existing type used by _appendIrrigationSnapshot (storage.ts:11363)
+  ctrl: IrrigationController,
+  target: number,             // 1..100, validated by the caller
+  actor?: { id: number; name: string },
+): Promise<{ created: number[]; restored: number[]; retired: number[] }>
+```
+
+Behaviour, in this order:
+
+1. Throw `new RangeError("zone count must be 1-100")` if `target` is not an integer in 1..100.
+2. Load every row for `ctrl.id` (retired or not), keyed by `zoneNumber`.
+3. For `n` in `1..target`: if a row exists with `retiredAt` set, update it to `retiredAt: null, retiredByUserId: null, retiredByName: null` → `restored`. If no row exists, insert `{ companyId: ctrl.companyId, controllerId: ctrl.id, zoneNumber: n, name: \`Zone ${n}\`, zoneType: "other", runTimeMinutes: 0, zoneOrder: n, isActive: true }` → `created`.
+4. For every row with `zoneNumber > target` and `retiredAt` null: set `retiredAt: new Date(), retiredByUserId: actor?.id ?? null, retiredByName: actor?.name ?? null` → `retired`.
+5. Update the controller: `totalZones: target, lastUpdatedAt/updatedAt: now`, plus `lastUpdatedByUserId/Name` from `actor`.
+
+Then add the public method, and declare it on the storage interface beside `updateIrrigationZone` (`:1363`):
+
+```ts
+async setControllerZoneCount(
+  companyId: number | null, controllerId: number, target: number,
+  actor?: { id: number; name: string },
+): Promise<{ controller: IrrigationController; created: number[]; restored: number[]; retired: number[] } | null>
+```
+
+It opens `db.transaction`, loads the controller with the tenant condition used at `:11640-11646` (null → return null), calls `_reconcileControllerZones(tx, …)`, re-reads the controller, and calls `_appendIrrigationSnapshot` with summary `Zone count ${old ?? "not set"} → ${target}` followed by any of `; added zones a-b`, `; restored zones a-b`, `; retired zones a-b (history kept)`. Ranges are compressed (`31-38`, `4, 7`).
+
+### 3. Route every count write through it
+
+- **`createIrrigationController` (`storage.ts:11588-11630`).** Wrap each insert attempt in `db.transaction`. Insert with `totalZones: null`. If `data.totalZones` is a number, call `_reconcileControllerZones(tx, inserted, data.totalZones)` in the same transaction. Keep the 23505 retry loop around the whole transaction. `createControllerBody.totalZones` (`irrigation-profile-routes.ts:72`) becomes `z.coerce.number().int().min(1).max(100).nullish()`.
+- **`updateIrrigationController` (`storage.ts:11632-11722`).** Remove `totalZones` from the `.set({...patch})` spread. If `patch.totalZones` is a number and differs from `before.totalZones`, call `_reconcileControllerZones(tx, updated, patch.totalZones, actor)` after the update. If `patch.totalZones === null` and `before.totalZones != null`, throw `new ZoneCountClearError()` (exported class in `storage.ts`); the PUT route (`irrigation-profile-routes.ts:397-468`) maps it to 400 `{ message: "A zone count can't be cleared. Lower it instead — zones above the new count are retired and their history is kept." }`. Delete the trim/seed block `:11663-11717` entirely. `updateControllerBody` inherits the new 1-100 rule.
+- **`ensureIrrigationControllers` seed loop (`storage.ts:11526-11542`).** Replace the loop with `await this._reconcileControllerZones(db, inserted, config.zoneCount)` under the same `if (inserted && config.zoneCount != null)`.
+- **Wet-check PATCH (`routes.ts:16420-16475`).** When `zoneCount !== undefined`, call `storage.setControllerZoneCount(cid, ctrl.id, zoneCount, actor)`, with `actor` built from `req.authenticatedUserId` via `storage.getUser` (as in `irrigation-profile-routes.ts:330-331`). Notes still go through the existing update, now via `storage.updateIrrigationController(cid, ctrl.id, { notes }, actor)`, not raw `db.update`. Delete `:16446-16453`. The response shape is unchanged.
+- **CSV import (`importIrrigationProfile`, `storage.ts:11939-12435`).**
+  - Diff (`:12100-12131`): build `existingZones` from non-retired rows only, so a retired zone is never listed for removal.
+  - New controllers (`:12206`): insert with `totalZones: null`. After the zone inserts, call `_reconcileControllerZones(q, newCtrl, max zone number in file)`, which fills gaps with placeholders. If the file has no zones for the controller, skip it (the count stays null).
+  - Existing controllers (`:12219-12233`): delete the `newTotalZones` calculation and the `ctrlPatch.totalZones` line. After the zone upserts, `target = isReplaceMode ? maxInputZone : Math.max(maxInputZone, existingCtrl.totalZones ?? 0)`; if `target >= 1`, call `_reconcileControllerZones(q, existingCtrl, target, actor)`.
+  - Replace-mode removal (`:12384-12388`): delete the hard `delete(irrigationProfileZones)`. For each id in `zoneIdsToRemove` whose `zoneNumber <= target`, reset it to the placeholder values from step 2.3, keeping `retiredAt` null. Rows above `target` are retired by the reconcile call. Program removal (`:12390-12394`) is unchanged; the FK's `on delete set null` (`schema.ts:1999`) clears program links on retired rows.
+
+### 4. Remove free-form zone creation, deletion and renumbering
+
+- Delete `POST /api/irrigation-controllers/:id/zones` (`irrigation-profile-routes.ts:627-676`), `DELETE /api/irrigation-zones/:id` (`:716-748`), and `createIrrigationZone` / `deleteIrrigationZone` from `storage.ts` (`:11833-11859`, `:11896-11924`) and its interface (`:1356-1376`). `git grep` confirms no other caller.
+- `updateZoneBody` (`:111`) becomes `createZoneBody.omit({ zoneNumber: true }).partial()`. Keep `createZoneBody` only if something still imports it after this change; otherwise delete it and define `updateZoneBody` directly with the same fields minus `zoneNumber`.
+- `updateIrrigationZone` (`storage.ts:11861-11894`): return null (→ 404) when `existing.retiredAt` is set.
+- Add `PUT /api/irrigation-controllers/:id/zone-count`, body `z.object({ totalZones: z.coerce.number().int().min(1).max(100) })`, roles `canWrite(role)` (`:56-58`, includes `field_tech` per decision 7), tenant handling as the controller PUT. Returns `{ controller, created, restored, retired }`.
+- `getIrrigationController` (`storage.ts:11559-11586`) and `_appendIrrigationSnapshot` (`:11362-11408`): read zones with `isNull(irrigationProfileZones.retiredAt)`.
+
+### 5. Client — stop calling the deleted endpoints (no layout change)
+
+In `irrigation-controller-grid.tsx`:
+
+- `updateZoneCount` (`:1330-1350`) calls `PUT /api/irrigation-controllers/${controller.id}/zone-count` with `{ totalZones: next }`. The toast on success becomes `Zone count updated` (unchanged text). On the 400 from decision 4 the toast shows the server message.
+- `AddZoneRow` (`:1101-1180`): its button calls the same zone-count endpoint with `(controller.totalZones ?? 0) + 1`. Delete the form fields; the new row appears in the table as `Zone N`. Pass `controller` instead of `nextZoneNumber`. Delete `nextZoneNumber` (`:1419`).
+- `ZoneRow` (`:791-1100`): delete `deleteMutation` (`:841-856`), the Delete button and its AlertDialog (`:1066-1095`), the `canDeleteZone` prop, the Zone # input (`:916-923`), and `zoneNumber` from the save payload (`:1041`).
+- Edit Details `totalZones` (`:1631-1635`) still saves through the controller PUT, which now reconciles. Its min becomes 1 and the field cannot be emptied once set.
+
+## Data backfill — registry migration
+
+New `artifacts/api-server/src/lib/migrations/backfill-controller-zone-records.ts`, id `backfill-controller-zone-records-v1`, registered in `lib/migrations/registry.ts`. Copy the structure of `trim-phantom-zones.ts` (preview / acknowledge / completion marker). Not a script under `scripts/`.
+
+- **Preview**, per company → customer → controller: `total_zones`, non-retired row count, numbers to create, numbers to retire. Include controllers with `total_zones` null but non-retired rows (`target = max(zone_number)`, gaps filled). Totals line: "N controllers, X zones to create, Y to retire". Villas at the Boulders must show `Controller A: 38 / 0 rows → create 1-38`.
+- **Run:** one transaction per controller, `storage._reconcileControllerZones(tx, ctrl, target, { id: 0, name: "Migration backfill-controller-zone-records-v1" })` plus a history snapshot with the same summary format. Scoped per company (Rule 1).
+- **Acknowledge** is required only when the preview has any zones to retire.
+- **Idempotent:** a second preview shows 0 / 0.
+- **Ops: Randy runs this from `/admin/migrations` on the deployed server after publish.** Merging does not run it.
+
+## Tests
+
+Add to `artifacts/api-server/src/routes/irrigation-profile-routes.test.ts` (real dev DB harness, existing workflow — do not register a new workflow; the repo is past its cap):
+
+1. Create a controller with `totalZones: 38` → 38 non-retired rows, numbers 1-38, all `Zone n`.
+2. Controller created with null, then PUT `totalZones: 38` → 38 rows (closes path 2).
+3. `zone-count` 38 → 30 where zone 34 has notes → zones 31-38 retired, zone 34 still holds its notes; GET detail returns 30 zones.
+4. 30 → 36 → zones 31-36 restored with their old data, 37-38 stay retired, nothing inserted.
+5. PUT `totalZones: null` on a counted controller → 400 with the message in decision 4.
+6. Wet-check `PATCH /api/properties/:id/controllers` with `zoneCount: 12` on a null controller → 12 rows, one history entry.
+7. `PUT /api/irrigation-zones/:id` with `zoneNumber: 99` → zone number unchanged. PUT on a retired zone → 404.
+8. POST `/api/irrigation-controllers/:id/zones` and DELETE `/api/irrigation-zones/:id` → 404 (routes gone).
+9. CSV Replace mode with zones 1-10 over a 12-zone controller → 11-12 retired, not deleted. Add/update mode with zones 1, 2, 5 on a new controller → rows 1-5, 3-4 placeholders.
+10. Tenancy (Rule 1): company B user on company A's `zone-count` → 404; super_admin succeeds.
+
+Migration test `backfill-controller-zone-records.test.ts` next to `trim-phantom-zones.test.ts`: preview counts, run, second preview is 0/0, other company untouched.
+
+## Acceptance checklist
+
+- [ ] `git grep -n "totalZones:" artifacts/api-server/src` shows writes only inside `_reconcileControllerZones`. Reads and the zod bodies are fine.
+- [ ] `git grep -n "createIrrigationZone\|deleteIrrigationZone\|delete(irrigationProfileZones)"` returns nothing.
+- [ ] After the backfill, Villas at the Boulders Controller A expanded shows 38 rows; the chips and the table agree on every controller on the page (screenshot).
+- [ ] Lowering A to 30 and back to 38 restores the same rows; View History shows both entries.
+- [ ] Wet-check stepper on a counted controller adds the row, visible on the profile without reload.
+- [ ] All tests above pass; typecheck clean for `@workspace/db`, `@workspace/api-server`, `@workspace/irrigopro`.
+
+## Relevant files
+
+- `lib/db/src/schema/schema.ts` — `:1933`, `:1991-2028`; new `lib/db/migrations/0023_irrigation_zone_retirement.sql`
+- `artifacts/api-server/src/storage.ts` — `:1356-1376`, `:11362-11408`, `:11526-11542`, `:11559-11586`, `:11588-11630`, `:11632-11722`, `:11833-11924`, `:11939-12435`
+- `artifacts/api-server/src/routes/irrigation-profile-routes.ts` — `:56-58`, `:66-76`, `:96-111`, `:296-366`, `:397-468`, `:627-748`
+- `artifacts/api-server/src/routes/routes.ts` — `:16420-16475`
+- `artifacts/irrigopro/src/components/customers/irrigation-controller-grid.tsx` — `:791-1180`, `:1328-1350`, `:1419`, `:1631-1635`
+- `artifacts/api-server/src/lib/migrations/registry.ts`, `trim-phantom-zones.ts` (template)

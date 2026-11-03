@@ -1,0 +1,95 @@
+# Inspection Flow — Seams 1 & 2: Manager Review Hands Off to Estimates (Stop Impersonating Customer Approval)
+
+**What & Why**
+The inspection review surface is the manager's findings-QA station: review what the tech captured, adjust line items, then **pass the result to the estimate system**. The current implementation instead has `approve-inspection` (`storage.ts:10310`) write the **customer-facing approval axis** — `status='approved'`, `lifecycle='approved'` — the moment the manager clicks Approve. The manager is impersonating the customer. Two breakages follow (confirmed against handlers, 2026-07-07):
+
+- **Seam 1:** the estimate arrives in the estimate system already "customer approved." If the office then emails it, the customer's approval link **409s** ("You have already responded to this estimate" — token approve requires `status='pending'`, `estimate-routes.ts` gate), and the send moves `lifecycle` *backward* (`approved` → `sent`), where the 30-day read-time rule can surface it as `expired`.
+- **Seam 2:** if the estimate is sent and the customer approves **before** the manager clicks Approve, the token path approves it and auto-creates the WO — but `approve-inspection`'s idempotency branch (`storage.ts:10338-10347`) returns without converting the wet check. The wet check is stranded in `submitted` / Needs Review forever with nothing actionable.
+
+**Corrected model (Randy, 2026-07-07):** manager review = internal sign-off only. The hand-off leaves the estimate in the same pre-send state as any manager-drafted estimate. Customer approval rides the standard estimate lifecycle (send → token → signature → auto-WO). The wet check flips to `converted` at hand-off — its job (capture → reviewed output) is done; everything after lives in the estimate system.
+
+**Mode scope (Rule 5):** every change in this spec is **inspection-mode only**. The service flow (triage, snapshot, WCB) is untouched. Each slice states its scope; acceptance includes a service-mode regression.
+
+---
+
+## Intended flow after this spec
+
+1. Tech submits inspection wet check → `submitted`, enters Needs Review.
+2. Manager opens review surface → estimate built/loaded (idempotent, unchanged) → reviews/edits items.
+3. Manager clicks **"Pass to Estimates"** → estimate: `status='pending'`, `internalStatus='approved_internal'`, `lifecycle='pending_review'` (internal sign-off recorded, customer axis untouched). Wet check → `converted`, leaves the queue.
+4. Office sends the estimate to the customer (existing send flow — its CAS already accepts `approved_internal`, `storage.ts:2930` `markEstimateSentToCustomer`). Estimate → `sent`.
+5. Customer approves via token (+signature) → `status='approved'`, WO auto-created + auto-assigned (existing path, unchanged). Or rejects → `rejected`. Or the manager records a verbal approval via the standard manual approve (also creates the WO atomically — existing behavior).
+
+No inspection-specific estimate behavior remains after step 3.
+
+## Slice 1 — Server: replace approve-inspection with pass-to-estimates (inspection only)
+
+### Files
+- `artifacts/api-server/src/storage.ts` (`approveInspectionEstimate` :10310)
+- `artifacts/api-server/src/routes/routes.ts` (`POST /api/wet-checks/:id/approve-inspection` :17338)
+
+### Changes
+- Rename storage method → `passInspectionToEstimates(wcId, companyId)`. Same transaction shape (WC ownership check, estimate row-lock, CAS), but the estimate write becomes: `internalStatus='approved_internal'` only — **do not touch `status`, `lifecycle`, or `approvedAt`**. Keep the mode guard (`wc.mode !== 'inspection'` → error).
+- Wet check → `status='converted'`, `fullyConvertedAt=now` (as today).
+- Idempotency: if the WC is already `converted`, return current state. **Additionally** (Seam 2 self-heal): if the estimate is already customer-approved/sent but the WC is still `submitted`, this call must still convert the WC — the stranded-state case becomes recoverable by clicking the button.
+- New route: `POST /api/wet-checks/:id/pass-to-estimates` (same role guard `isWetCheckManagerRole`, same company scoping — Rule 1 unchanged). Old `/approve-inspection` returns **410** with a pointer message (repo convention, cf. routes.ts:17539). Audit action: `wet_check.inspection_passed_to_estimates`.
+
+## Slice 2 — Needs Review Rule 4 re-key (inspection only)
+
+### Files
+- `artifacts/api-server/src/routes/routes.ts` (needs-review Rule 4, :16066-16092)
+
+### Changes
+- Rule 4 currently keys off `inspEst.lifecycle !== 'approved'` — meaningless once hand-off no longer sets lifecycle. Re-key: an inspection wet check needs review **iff its own status is in ACTIVE_WC** (Rule 1 already provides this; `converted` is excluded via APPROVED_WC). Drop the estimate-lifecycle condition entirely; keep `reviewType='inspection_estimate'` for queue routing (`mode === 'inspection'` is sufficient).
+- Verify the hub tile count (`count` contract, routes.ts:15919) is unchanged in shape.
+
+## Slice 3 — Revert guards for the new semantics (inspection only)
+
+### Files
+- `artifacts/api-server/src/storage.ts` (`unapproveInspectionEstimate` :10397), `routes.ts` (:17374)
+
+### Changes
+- Revert now steps back a **hand-off**, not a customer approval: estimate `internalStatus` → `'pending_approval'` (status/lifecycle untouched — they were never changed); wet check → `submitted`, `fullyConvertedAt=null`.
+- **New guard:** block revert once the estimate has left the building — `internalStatus='sent_to_customer'` or `lifecycle IN ('sent','approved','rejected')` → 409 ("estimate already sent/answered — handle it in the estimate system"). Keep the existing invoiced-WCB block (:10414-10422). Role stays company_admin/super_admin.
+- Update the CAS gates (:10434, :10449) from `lifecycle='approved'` to `internalStatus='approved_internal'`.
+
+## Slice 4 — Review surface UI (inspection only)
+
+### Files
+- `artifacts/irrigopro/src/components/wet-check-review/CombinedReviewSurface.tsx` (`InspectionEstimateSection` :398-470)
+
+### Changes
+- Button "Approve" → **"Pass to Estimates"**; call the new endpoint; toast: "Passed to estimates — send it to the customer from the Estimates page."
+- Post-hand-off state shows a banner with the estimate number **linking to the estimate detail** (Rule 3: the next action must have a reachable entry point in the same change — the office user goes straight from wet check to the estimate they now need to send).
+- Revert dialog copy updated to the new semantics; surface the new 409 message verbatim when revert is blocked.
+
+## Slice 5 — Reconcile stranded rows (admin migration, preview-gated)
+
+### Files
+- Super-Admin migrations page + its route family (`admin-migrations-routes.ts`)
+
+### Changes
+- One-time reconcile, per company (Rule 1 — grouped and reported by `companyId`, super-admin tooling):
+  - **(a) Stranded WCs (Seam 2 casualties):** `mode='inspection'`, status `submitted`, linked estimate `lifecycle IN ('approved') OR status='converted_to_work_order'` → set WC `converted`, stamp `fullyConvertedAt`.
+  - **(b) Legacy over-approved estimates:** inspection-origin estimates stamped `status='approved'`/`lifecycle='approved'` by the old approve-inspection **that were never sent and have no WO** → step back to `status='pending'`, `internalStatus='approved_internal'`, `lifecycle='pending_review'`, `approvedAt=null`, so the office can run the real send-to-customer flow. Estimates with a WO or a customer response are left alone (listed in the preview as "skipped — already acted on").
+- Preview shows exact row counts and IDs before Run (repo convention). Run by Randy from the Super-Admin page — not CLI (Rule 2).
+
+## Tests
+- Pass-to-estimates: estimate ends `pending`/`approved_internal`/`pending_review` with `approvedAt` null; WC `converted`; send → token approve → **201, WO auto-created** (the full Seam 2 chain now green end-to-end).
+- Stranded-state self-heal: estimate customer-approved first → pass-to-estimates still converts the WC.
+- Revert: blocked with 409 after send/response/invoice; works while `approved_internal`.
+- Old `/approve-inspection` → 410. Needs Review: inspection leaves the queue at hand-off; hub count contract intact.
+- **Rule 1:** company A manager cannot pass/revert company B's wet check (404); migration preview is company-grouped.
+- **Rule 5 regression:** service-mode wet checks — triage, snapshot, WCB approve — byte-for-byte unchanged; estimate system behavior for non-inspection estimates unchanged.
+
+## Out of scope
+- Seam 3 (estimate→WO conversion & duplication) — separate investigation in progress.
+- The estimate send/token/signature flows themselves (already correct once the input state is right).
+- WO checklist, billing chain (unchanged).
+
+## Relevant files
+- `artifacts/api-server/src/storage.ts` (:10310 approve, :10397 revert, :2930 send CAS)
+- `artifacts/api-server/src/routes/routes.ts` (:17338 approve route, :17374 revert route, :16066-16092 Rule 4, :15919 count contract)
+- `artifacts/api-server/src/routes/estimate-routes.ts` (token approve gate; auto-WO on customer approval)
+- `artifacts/irrigopro/src/components/wet-check-review/CombinedReviewSurface.tsx` (:398-470)
+- Design origin: `Wet Check Inspection Mode - Document-Only Run-Through that Outputs an Estimate.md`

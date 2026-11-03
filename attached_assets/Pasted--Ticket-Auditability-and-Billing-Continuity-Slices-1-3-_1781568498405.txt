@@ -1,0 +1,221 @@
+# Ticket Auditability and Billing Continuity — Slices 1–3
+
+**Source:** product concern (Randy, 2026-06-15). The irrigation manager approves field work before it passes to billing; at month-end the billing manager sometimes approves and invoices work before the irrigation manager has touched it. Two problems: (a) there is no continuous, attributable record of *who touched a ticket and when* across users, and (b) once something is billed it silently leaves the manager's queue — and Randy's larger worry is work that **hangs and never gets billed at all**.
+
+**Severity:** P1 — this is a financial-continuity and revenue-leakage gap, not cosmetics. Tickets can be approved-and-billed by a single billing-side actor with no durable trail, and hanging work can disappear from view.
+
+**Decisions locked with Randy (2026-06-15):**
+- **Do not block the billing manager.** They have final say, and billed items are already immutable. The fix for the bypass is to **stamp and surface** it, not gate it.
+- The real priority is **full auditability** (who/when on every ticket) and **never silently hiding work that has not actually been billed**.
+
+This is a single self-contained slice family. Do not deviate from the scope below. If a question arises mid-implementation that is not answered here, **stop and flag it** rather than guessing. The three slices are independently shippable **in order** (Slice 1 is the foundation; Slice 2 and Slice 3 each build on Slice 1's audit emitter and the same queue handler).
+
+---
+
+## What this is built on (verified in the current repo, 2026-06-15)
+
+**The lifecycle is already correct in shape** — billing only ever consumes `approved_passed_to_billing` items, so "approved before billed" holds. The gaps are in *attribution* and *visibility*, not ordering.
+
+- **Audit infrastructure already exists and already captures role.** `recordAuditEvent()` (`artifacts/api-server/src/routes/audit-log.ts`) writes the `audit_log` table with `actorUserId`, `actorRole`, `actorLabel`, `actorCompanyId`, `action`, `targetType`, `targetId`, `summary`, `details`. The lifecycle wrapper `recordLifecycleAudit()` (`artifacts/api-server/src/routes/routes.ts` ~line 1076) auto-stamps `actorRole` from `req.authenticatedUserRole` and resolves a human `actorLabel`. A per-resource Activity feed (`fetchActivityForTarget`, same file) already renders these rows in detail modals.
+- **But the emitter is only called for work orders.** In `approve-routes.ts`, **work-order** approve and return-for-correction call `recordLifecycleAudit`; **billing-sheet** approve/return and **wet-check-billing** approve do **not**. They write only the on-row stamp (`approvedBy`, `approvedByUserId`, `approvedAt`), which is overwritten on re-approval and not role-attributed.
+- **Billing writes no audit event at all.** `POST /api/invoices/monthly` (`routes.ts` ~line 6560) stamps `invoiceId` / `billedAt` / `status:'billed'` on each WO/BS/WCB (~lines 7058–7110) but records no lifecycle event for the billing action.
+- **The billing endpoint has no role guard.** `/api/invoices/monthly` is behind `requireAuthentication` only — not `requireBillingAccess`. Any authenticated user can call it. (The PDF/QB-sync invoice routes *are* guarded.)
+- **The approve guards differ by type** (`approve-routes.ts`): WO and BS approve allow `irrigation_manager` / `company_admin` / `super_admin`. **WCB approve also allows `billing_manager`.** So a billing manager can approve+bill a WCB solo, and a `company_admin` can approve+bill anything solo.
+- **Approval rows carry no role.** `workOrders`, `billingSheets`, `wetCheckBillings` each have `approvedBy` (text name), `approvedByUserId`, `approvedAt`, `approvedTotal` — **no `approvedByRole`**.
+- **#1250 hides billed items from the manager queue.** `assignStage()` (`manager-workspace-routes.ts` ~line 362) routes any item with `invoiceId != null` to `billed_7d`, and the queue only includes `billed_7d` items **within 7 days** (~lines 550/643/700). Wet checks linked to invoiced WCBs/BSs are suppressed entirely. Good for genuinely-done work; bad when billing jumped ahead of review — the manager never sees it.
+- **Hanging work is detectable.** `wetCheckFindings` has `resolution` (default `'pending'`) plus mutually-exclusive routing targets (`billingSheetId` / `estimateId` / `workOrderId`); a `pending` finding with no target is an orphan. `wetChecks.status` includes `partially_converted` (some findings routed, rest hanging). A `stale` flag precedent already exists in `billing-workspace-routes.ts` (~line 519: `if (age > 7) flags.push("stale")`).
+
+---
+
+## Design Context (locked decisions)
+
+1. **HARD BOUNDARY — Command Center is never touched.** `/billing/command-center` → `pages/customer-billing.tsx`: zero edits, no redirect, no rename.
+2. **Auditability is the foundation (Slice 1).** Every approve, return-for-correction, and bill on a work order, billing sheet, or wet-check billing emits a durable `audit_log` row through the **existing** `recordLifecycleAudit` emitter (which already stamps `actorRole`). No new audit infrastructure — only new call sites plus two new resource types (`billing_sheet`, parity for `wet_check_billing`).
+3. **The bypass is stamped, not blocked (Slice 2).** Approval rows gain `approvedByRole`. A billed item whose approver role was not `irrigation_manager` is surfaced to the manager as **"billed without manager review."** Billing is never gated; billed items remain immutable as today.
+4. **Billed-without-review stays visible past the 7-day window (Slice 2).** The #1250 7-day cutoff is relaxed *only* for billed-without-review items, and *only* for `irrigation_manager` / `company_admin` / `super_admin` (the billing manager does not need the nag).
+5. **Hanging unbilled work is surfaced, never hidden (Slice 3).** Suppression keys strictly on `invoiceId != null` — **never on a status string alone**. Aging/orphan items get a `flags[]` entry (reusing the existing `stale` pattern) and a header rollup count.
+6. **Aging threshold is 7 days for all four hanging states**, matching the existing `stale` precedent. **This is the one knob to tune** — per-type overrides are a one-line constant change. (Flagged for Randy; default locked at 7d.)
+7. **No behavior change for the field tech or for billed-item immutability.** Server lock guards (`billed` / `invoiceId`) are unchanged everywhere.
+
+---
+
+# Slice 1 — Complete, attributable audit trail on every ticket transition
+
+**Goal:** after this slice, the per-ticket Activity tab shows the full chain — created → approved (by whom, in what role) → billed (by whom, in what role) — for work orders, billing sheets, and wet-check billings, and the billing endpoint is restricted to billing-capable roles.
+
+### 1.1 — Add `billing_sheet` (and `wet_check_billing` parity) as auditable resources
+
+**Files modified**
+- `artifacts/api-server/src/routes/routes.ts` — extend the `LifecycleAuditOpts.resource` union (~line 1062) and the `fetchActivityForTarget` `targetType` union + its company-scoped query (~line 1148) to include `"billing_sheet"`. (`"wet_check_billing"` is already present here.)
+- `artifacts/api-server/src/routes/audit-log.ts` — extend the exported `LifecycleAuditOpts.resource` union (~line 105) to include **both** `"billing_sheet"` and `"wet_check_billing"` so the module copy matches `routes.ts`.
+
+No schema change — `audit_log.target_type` is free text; this only widens the TypeScript unions and the Activity-feed query's allowed targets.
+
+### 1.2 — Emit lifecycle audit on billing-sheet and WCB approve / return
+
+`approve-routes.ts` already receives the emitter via `ApproveRoutesDeps.recordLifecycleAudit` (only the WO handlers use it today). Add calls that mirror the existing WO approve/return calls exactly (same shape, `actorRole` captured automatically):
+
+**Files modified — `artifacts/api-server/src/routes/approve-routes.ts`**
+- **`POST /api/billing-sheets/:id/approve`** — after the successful `updateBillingSheet`, emit:
+  ```ts
+  await recordLifecycleAudit(req, {
+    resource: "billing_sheet",
+    action: "billing_sheet.approved",
+    targetId: id,
+    before: { status: billingSheet.status },
+    after: { status: "approved_passed_to_billing" },
+    summary: `Billing sheet #${id} approved by ${approverName}`,
+  });
+  ```
+- **`POST /api/billing-sheets/:id/return-for-correction`** — emit `action: "billing_sheet.returned_for_correction"`, `after: { status: "draft" }`, `note: notes ?? null`.
+- **`POST /api/wet-check-billings/:id/approve`** — emit `resource: "wet_check_billing"`, `action: "wet_check_billing.approved"`, `before/after` status, summary.
+
+WO approve/return already emit — leave unchanged.
+
+### 1.3 — Emit a billing audit event per ticket when invoiced
+
+**Files modified — `artifacts/api-server/src/routes/routes.ts`**, `POST /api/invoices/monthly`, inside each of the three "mark as billed" loops (~lines 7058–7110). For each ticket, after the `update…` call, emit one lifecycle row:
+
+```ts
+await recordLifecycleAudit(req, {
+  resource: "work_order", // | "billing_sheet" | "wet_check_billing"
+  action: "work_order.billed", // | "billing_sheet.billed" | "wet_check_billing.billed"
+  targetId: workOrder.id,
+  before: { status: workOrder.status },
+  after: { status: "billed", invoiceId: invoice.id },
+  summary: `Work order ${workOrder.workOrderNumber} billed on invoice ${invoice.invoiceNumber}`,
+  extra: { invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber },
+});
+```
+
+`actorRole` is captured automatically, so this is the first durable record of *who billed each ticket, in what role.* Keep it best-effort (the default non-strict path) so an audit write can never fail an invoice that already succeeded in QuickBooks.
+
+### 1.4 — Restrict and attribute the billing endpoint
+
+**Files modified — `artifacts/api-server/src/routes/routes.ts`**
+- Apply the **existing** `requireBillingAccess` guard (~line 490, allows `company_admin` / `billing_manager`) to `POST /api/invoices/monthly` (~line 6560): `app.post("/api/invoices/monthly", requireAuthentication, requireBillingAccess, async …)`.
+- **`super_admin` is intentionally NOT able to create invoices for the time being** (Randy, 2026-06-15). `requireBillingAccess` already omits `super_admin`, which is the desired behavior — do **not** widen it. This matches the existing invoice PDF / QB-sync routes, which use the same guard.
+
+Do **not** change who can *approve* — only who can *create an invoice*. This closes the "any authenticated user can bill" hole without touching the segregation question (that's handled by stamping in Slice 2).
+
+### Tests (Slice 1)
+- `manager-approve-flows.test.ts` (or a sibling): BS approve, BS return, and WCB approve each produce exactly one `audit_log` row with the caller's `actorRole` and the expected `action` string. (The existing test harness mounts the real `registerApproveRoutes` with a stub emitter — assert the emitter is called with the right opts.)
+- New test: `/api/invoices/monthly` returns **403** for `field_tech` / `irrigation_manager` / `super_admin`, **200** for `billing_manager` / `company_admin`. (super_admin is intentionally excluded for now.)
+- New test: a successful monthly invoice emits one `*.billed` lifecycle event per ticket with `actorRole` set.
+
+### Acceptance (Slice 1)
+- The Activity tab for a billing sheet and a WCB shows the approve event with the approver's name **and role**, and a bill event with the biller's name and role.
+- An invoice billed by a billing manager shows `actorRole: "billing_manager"` on every `*.billed` row.
+- A field tech calling `/api/invoices/monthly` gets 403; no items are stamped.
+
+---
+
+# Slice 2 — "Billed without manager review" stamp (visible, never blocking)
+
+**Goal:** when work is approved by a billing-side actor and billed before the irrigation manager reviewed it, the manager still sees it — flagged — after the fact. Nothing is blocked; billed items stay immutable.
+
+### 2.1 — Capture the approver's role on the row
+
+**Files added**
+- `lib/db/migrations/0008_approved_by_role.sql`:
+  ```sql
+  ALTER TABLE work_orders        ADD COLUMN IF NOT EXISTS approved_by_role text;
+  ALTER TABLE billing_sheets     ADD COLUMN IF NOT EXISTS approved_by_role text;
+  ALTER TABLE wet_check_billings ADD COLUMN IF NOT EXISTS approved_by_role text;
+  ```
+  No backfill — legacy approvals are `null` ("unknown", see 2.2).
+
+**Files modified**
+- `lib/db/src/schema/schema.ts` — add `approvedByRole: text("approved_by_role")` to `workOrders`, `billingSheets`, `wetCheckBillings` (next to the existing `approvedBy` stamp fields).
+- `artifacts/api-server/src/routes/approve-routes.ts` — in all three approve handlers, add `approvedByRole: req.authenticatedUserRole` to the `update…` payload (alongside `approvedBy` / `approvedByUserId`).
+
+A row column (not only the audit log) so the queue can filter on it cheaply without scanning `audit_log`.
+
+### 2.2 — Derive "billed without manager review"
+
+Definition (no new column — derived in the queue handler):
+
+> billed (`invoiceId != null`) **AND** `approvedByRole IS NOT NULL` **AND** `approvedByRole != 'irrigation_manager'`.
+
+`null` `approvedByRole` (legacy rows) is **not** flagged — it is "unknown," not "bypassed." New rows always carry a role from 2.1.
+
+### 2.3 — Keep billed-without-review visible past 7 days
+
+**Files modified — `artifacts/api-server/src/routes/manager-workspace-routes.ts`**
+- Compute `billedWithoutReview` (per 2.2) for each item that lands in `billed_7d` and attach it to the queue item payload.
+- Relax the 7-day inclusion filter (~lines 550/643/700): include a `billed_7d` item if it is **within 7 days OR `billedWithoutReview === true`** — but the relaxation applies only when the caller role is `irrigation_manager` / `company_admin` / `super_admin` (for `billing_manager`, keep the plain 7-day cap; they don't need the flag).
+- Cap billed-without-review items at 50 newest to bound the payload.
+- Surface a distinct badge token (e.g. `"no_manager_review"`) in the item `flags[]` so the Billed lane renders it visibly. (Acknowledgement / dismissal is a deliberate **follow-up**, not in this slice — the item stays surfaced.)
+
+`assignStage` itself is unchanged; only the cutoff filter and the per-item flag change.
+
+### Tests (Slice 2)
+- WCB approved by `billing_manager` then billed → queue item has `billedWithoutReview: true` and `flags` includes `no_manager_review`; still present 30 simulated days later for an `irrigation_manager` caller; **absent** for a `billing_manager` caller.
+- WO approved by `irrigation_manager` then billed → `billedWithoutReview: false`; drops out of the Billed lane after 7 days as today.
+- Legacy billed row with `approved_by_role = NULL` → `billedWithoutReview: false` (not flagged).
+
+### Acceptance (Slice 2)
+- A billing-manager-approved, billed WCB appears in the manager's Billed lane with a "No manager review" badge and persists beyond 7 days.
+- Normal manager-approved billed items behave exactly as before.
+- Billing flow, immutability, and the billing manager's own view are unchanged.
+
+---
+
+# Slice 3 — Surface hanging / never-billed work (anti-leakage)
+
+**Goal:** Randy's primary worry. Nothing that is **not** billed should ever silently leave the manager's view. Aging unbilled work, cold reviews, and orphaned findings are flagged and counted.
+
+### 3.0 — Lock the suppression invariant (regression guard)
+
+**Files modified — `artifacts/api-server/src/routes/manager-workspace-routes.ts`** (no logic change expected — assert and lock):
+- Confirm `assignStage` and the wet-check suppression key **only** on `invoiceId != null`, never on a status string alone, so an unbilled item can never be suppressed. Add regression tests (3.x below). If any suppression path is found keying on `status` alone, fix it to require `invoiceId != null`.
+
+### 3.1 — Aging thresholds (locked, adjustable)
+
+Add one module constant, default **7 days** for all four states (matches the existing `stale` precedent):
+```ts
+const HANGING_THRESHOLD_DAYS = 7; // aging_unbilled | cold_review | orphaned_finding | partially_converted
+```
+Per-type overrides are a trivial follow-up; this is the knob Randy can tune.
+
+### 3.2 — Flag hanging items in the queue
+
+**Files modified — `artifacts/api-server/src/routes/manager-workspace-routes.ts`** — add to each item's derived `flags[]` (reusing the `stale`-flag pattern from `billing-workspace-routes.ts`):
+- **`aging_unbilled`** — `status === 'approved_passed_to_billing'` AND `invoiceId == null` AND age > threshold (the `passed_to_billing` stage). "Approved but never invoiced."
+- **`cold_review`** — item in `needs_review` AND age > threshold. "Waiting on the manager and going stale."
+- **`orphaned_finding`** — a `finding` item with `resolution === 'pending'` and no routing target (`billingSheetId`/`estimateId`/`workOrderId` all null) AND age > threshold (the `findings_to_route` stage).
+
+### 3.3 — Ensure `partially_converted` wet checks are visible
+
+**Verify first** (do not assume): trace whether a wet check in `partially_converted` currently appears in the manager-workspace queue. 
+- If it already appears, add a `partially_converted` flag when age > threshold.
+- If it does **not** appear, add it to the wet-check load for the `needs_review`/findings path with a `partially_converted` flag. A wet check with some findings routed and some still `pending` must never fall out of view. **If the current behavior is ambiguous, stop and flag rather than guessing.**
+
+### 3.4 — Header rollup count
+
+**Files modified — `manager-workspace-routes.ts`** — in the existing count/strip rollup that mirrors `assignStage` (~lines 1167–1210), add an `attentionCount` = number of items carrying any of `aging_unbilled` / `cold_review` / `orphaned_finding` / `partially_converted`, so the page can show "N items need attention."
+
+### Tests (Slice 3)
+- **Regression (the #1250 promise):** a WO with `pending_manager_review` **and** an `invoiceId` is **not** in `needs_review` (billed wins). An unbilled `pending_manager_review` WO **is** in `needs_review`. (Lock both directions.)
+- `approved_passed_to_billing` + `invoiceId == null`, 10 days old → `flags` includes `aging_unbilled`; 2 days old → does not.
+- `pending` finding with no routing target, 10 days old → `flags` includes `orphaned_finding`.
+- `cold_review` appears for an aged needs-review item.
+- `attentionCount` equals the number of flagged items.
+
+### Acceptance (Slice 3)
+- An approved-but-unbilled work order older than the threshold shows in **Passed to billing** with an "Aging" badge and counts toward the attention rollup.
+- An orphaned finding shows in **Findings to route** with an "Orphaned" badge.
+- A `partially_converted` wet check is visible (never silently dropped).
+- Genuinely billed items still leave `needs_review` (suppression intact), but **only** because `invoiceId` is set.
+- Changing the threshold is a one-line constant edit.
+
+---
+
+## Out of scope (explicit)
+- Blocking or re-sequencing who may approve or bill (decision: stamp, don't block).
+- Acknowledge/dismiss action on billed-without-review items (follow-up).
+- Any change to Command Center (`customer-billing.tsx`), the wet-check review dashboard, wizards, or QuickBooks sync internals.
+- Per-finding inline routing UI.
+
+## Ship order
+Slice 1 → Slice 2 → Slice 3. Slice 1 is a prerequisite for both others (shared audit emitter + `approvedByRole` write path is introduced in 1/2). Each slice is independently testable and deployable.

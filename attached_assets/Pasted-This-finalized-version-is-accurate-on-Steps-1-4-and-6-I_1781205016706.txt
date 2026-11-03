@@ -1,0 +1,16 @@
+This finalized version is accurate on Steps 1–4 and 6 — I re-checked each against the code and the line references hold (APPROVED_WCB is currently {"approved_passed_to_billing","billed"} so Step 1's new Set(["billed"]) is right; the totalUnbilled field is in the payload at routes.ts:6194/:6250 and read by the frontend, so Step 2's inclusion swap works). The behavioral note about "Approved This Week" = "invoiced this week" for WCBs is internally consistent.
+Two things are wrong or incomplete and should be fixed before it ships:
+1. Step 5 is factually backwards — the test file already exists. artifacts/api-server/src/routes/wcb-invoice-gate.test.ts is present (Task #1090) and it currently asserts the converted gate at all four anchors, including the two visibility sites Steps 2–3 strip:
+
+anchor #1 unbilledWetCheckBillings = wetCheckBillingsForCustomer.filter → routes.ts:6120 (Command Center list — Step 2 removes the gate)
+anchor #2 unbilledWetCheckBillings = wetCheckBillings.filter → routes.ts:6427 (single-customer page — Step 3 removes the gate)
+anchors #3/#4 → the invoice-construction sites (:6482, :6772 — kept)
+
+So after Steps 2–3, assertions #1 and #2 will fail the build, plus there's a fourth assertion ("all four filter sites… found 4") and a header comment ("four filter sites all require converted") that both become false. Step 5 must be "update," not "create": split eligibilitySites into an assert-present group (the 2 invoice anchors) and an assert-absent group (the 2 visibility anchors), drop the found === 4 check, and rewrite the file header. The verdict-table row "must be created" is also wrong — it exists and must be edited. If Replit follows "create (not update)" literally it may not read the existing assertions and will ship red.
+2. Step 2 fixes list inclusion but leaves three other UI elements on the date-windowed approvedTotal, creating $0.00 rows. You're moving inclusion (customer-billing.tsx:597, :714) onto date-independent totalUnbilled, but these still read approvedTotal:
+
+the "N customers need billing" counter at customer-billing.tsx:854 and :1615 (filter(p => approvedTotal > 0))
+the per-card headline figure at :1804 (approvedTotal + unapprovedTotal)
+
+A customer whose only WCB is older than the 30-day window now appears in the list (via totalUnbilled) but renders "$0.00" and isn't counted in "N customers need billing." That's a new "looks broken" artifact in the exact list you're trying to make trustworthy. Step 2 should also point those two displays at totalUnbilled (or explicitly accept the caveat in the spec). Worth adding to the file-changes list for customer-billing.tsx.
+Everything else lines up. Want me to patch these two into the saved slice doc so the version on disk matches — reframing Step 5 as an update with the present/absent split, and extending Step 2's customer-billing.tsx changes to 854/1615/1804?

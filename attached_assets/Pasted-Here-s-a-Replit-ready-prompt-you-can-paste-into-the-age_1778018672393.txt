@@ -1,0 +1,195 @@
+Here's a Replit-ready prompt you can paste into the agent. It tells it exactly which file to edit and what to replace.
+
+---
+
+**Prompt for Replit:**
+
+In `client/src/index.css`, find the existing block that starts with the comment `/* Brand-blue sidebar theme — scoped to admin/billing shell */` and replace the entire `.sidebar-brand-blue` and `.dark .sidebar-brand-blue` block (everything from that comment through the closing `}` of the dark variant) with the CSS below. This redesigns the admin / billing-manager sidebar with a modern deep-navy → ocean-blue gradient background, bright cyan→teal gradient active states with glow, refined hover/group-label styling, and a punchy badge treatment. Do not change any other file.
+
+```css
+/* ============================================================
+   Modern admin / billing-manager sidebar — gradient + glow
+   ============================================================
+   - Deep navy → indigo gradient background for a premium feel
+   - Bright cyan→teal gradient pill for active items with soft glow
+   - Subtle translucent hover overlay
+   - Refined typography on group labels
+   - Vivid badge styling for pending counts
+   ----------------------------------------------------------- */
+.sidebar-brand-blue {
+  /* Token fallbacks (used by Tailwind utilities) */
+  --sidebar-background: 222 47% 11%;
+  --sidebar-foreground: 213 27% 88%;
+  --sidebar-primary: 188 95% 60%;
+  --sidebar-primary-foreground: 222 47% 8%;
+  --sidebar-accent: 188 95% 55%;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-border: 217 33% 22%;
+  --sidebar-ring: 188 95% 65%;
+}
+
+.dark .sidebar-brand-blue {
+  --sidebar-background: 222 47% 6%;
+  --sidebar-foreground: 213 27% 92%;
+  --sidebar-primary: 188 95% 65%;
+  --sidebar-primary-foreground: 222 47% 5%;
+  --sidebar-accent: 188 95% 60%;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-border: 217 33% 14%;
+  --sidebar-ring: 188 95% 70%;
+}
+
+/* Sidebar surface — sophisticated diagonal gradient */
+.sidebar-brand-blue [data-sidebar="sidebar"] {
+  background:
+    radial-gradient(120% 60% at 0% 0%, rgba(56, 189, 248, 0.18) 0%, transparent 55%),
+    radial-gradient(80% 50% at 100% 100%, rgba(20, 184, 166, 0.14) 0%, transparent 60%),
+    linear-gradient(168deg,
+      hsl(222 47% 11%) 0%,
+      hsl(220 50% 14%) 35%,
+      hsl(215 60% 18%) 70%,
+      hsl(210 70% 22%) 100%);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Header / footer separators feel airy, not boxed-in */
+.sidebar-brand-blue [data-sidebar="header"] {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 0.5rem;
+}
+.sidebar-brand-blue [data-sidebar="footer"] {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Group labels — refined, uppercase, tracked */
+.sidebar-brand-blue [data-sidebar="group-label"] {
+  color: rgba(186, 213, 240, 0.55);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Default menu button — relaxed, with icon emphasis */
+.sidebar-brand-blue [data-sidebar="menu-button"] {
+  position: relative;
+  color: rgba(226, 240, 253, 0.78);
+  font-weight: 500;
+  transition: background-color 160ms ease, color 160ms ease, box-shadow 220ms ease, transform 120ms ease;
+}
+.sidebar-brand-blue [data-sidebar="menu-button"] > svg {
+  color: rgba(186, 213, 240, 0.7);
+  transition: color 160ms ease;
+}
+
+/* Hover — soft translucent veil with bright text/icon */
+.sidebar-brand-blue [data-sidebar="menu-button"]:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+.sidebar-brand-blue [data-sidebar="menu-button"]:hover > svg {
+  color: hsl(188 95% 70%);
+}
+
+/* Active — bright cyan→teal gradient pill with glow */
+.sidebar-brand-blue [data-sidebar="menu-button"][data-active="true"] {
+  background: linear-gradient(135deg,
+    hsl(199 95% 52%) 0%,
+    hsl(188 90% 48%) 50%,
+    hsl(174 80% 45%) 100%);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow:
+    0 6px 18px -4px rgba(14, 165, 233, 0.55),
+    0 2px 6px -2px rgba(20, 184, 166, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+.sidebar-brand-blue [data-sidebar="menu-button"][data-active="true"] > svg {
+  color: #ffffff;
+}
+.sidebar-brand-blue [data-sidebar="menu-button"][data-active="true"]:hover {
+  background: linear-gradient(135deg,
+    hsl(199 95% 56%) 0%,
+    hsl(188 90% 52%) 50%,
+    hsl(174 80% 48%) 100%);
+}
+
+/* Sub-menu vertical rule — softer */
+.sidebar-brand-blue [data-sidebar="menu-sub"] {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.sidebar-brand-blue [data-sidebar="menu-sub-button"] {
+  color: rgba(213, 230, 247, 0.7);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+.sidebar-brand-blue [data-sidebar="menu-sub-button"]:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+}
+
+/* Active sub-item — same gradient language, slightly compressed */
+.sidebar-brand-blue [data-sidebar="menu-sub-button"][data-active="true"] {
+  background: linear-gradient(135deg,
+    hsl(199 95% 52%) 0%,
+    hsl(174 80% 45%) 100%);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow:
+    0 4px 12px -3px rgba(14, 165, 233, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* Pending-count badges — punchy red→orange with glow */
+.sidebar-brand-blue [data-sidebar="menu-badge"] {
+  background: linear-gradient(135deg, hsl(0 85% 58%) 0%, hsl(15 90% 55%) 100%) !important;
+  color: #ffffff !important;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  box-shadow:
+    0 2px 8px rgba(239, 68, 68, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* Sidebar rail (resize/collapse strip) — subtle */
+.sidebar-brand-blue [data-sidebar="rail"]:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Trigger / collapse button inside sidebar — lighter on hover */
+.sidebar-brand-blue [data-sidebar="trigger"]:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+
+/* Footer avatar — gradient pill that matches the active accent */
+.sidebar-brand-blue [data-sidebar="footer"] [data-sidebar="menu-button"] [class*="rounded-md"][class*="bg-sidebar-primary"],
+.sidebar-brand-blue [data-sidebar="footer"] [role="img"] > [class*="bg-sidebar-primary"] {
+  background: linear-gradient(135deg, hsl(199 95% 55%) 0%, hsl(174 80% 48%) 100%);
+  color: #ffffff;
+  box-shadow:
+    0 2px 8px rgba(14, 165, 233, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* Custom scrollbar inside the sidebar — subtle, matches theme */
+.sidebar-brand-blue [data-sidebar="content"] {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+.sidebar-brand-blue [data-sidebar="content"]::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar-brand-blue [data-sidebar="content"]::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-brand-blue [data-sidebar="content"]::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+.sidebar-brand-blue [data-sidebar="content"]::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+```
+
+After applying, hard-refresh the preview (Cmd/Ctrl+Shift+R) so Tailwind picks up the new CSS. No other files need to change — `desktop-shell.tsx` already adds the `sidebar-brand-blue` class for `company_admin` and `billing_manager` roles.

@@ -1,0 +1,97 @@
+# Irrigation System Profile — Controllers, Programs, Zones, Run Schedule & Customer Report
+
+**What & Why**
+Techs/managers need to capture a property's full irrigation setup — every controller, its programs, and every zone — so the system knows how each customer's system is programmed and when each zone runs, and can produce a clean **on-demand customer report** (replacing freeform docs like the attached "Woodglen Controllers" PDF).
+
+Today only a thin `property_controllers` (controller *letter* + zone count + notes, to drive the wet-check grid) and minimal zone tables exist. **None** of the programming data is stored. This is a new subsystem.
+
+**Confirmed design decisions:**
+- **Every controller/node is its own controller record** (flat) — each with its own location/address, brand, model, programs, and zones. (The HOA's many addresses each become a controller.)
+- **Schedule: sequential under a program, with optional per-zone override** — zones run in order off the program's start time; a zone may carry its own start time/days when it doesn't follow the program.
+- **Report: downloadable + sendable branded PDF.**
+
+**Visual source of truth:** `irrigation-system-profile-mockup.html` (Capture/Edit + Customer Report).
+
+Multiple slices. New schema. Reuses the existing PDF/email pipeline for the report.
+
+---
+
+## Multi-tenancy (cross-cutting — applies to every slice)
+This system must be tenant-isolated exactly like the rest of the app. **No data may ever cross companies.**
+
+- **`companyId` on every table** (controllers, programs, zones, history) — NOT NULL, set from the authenticated user's company on create; child rows directly company-scopable (don't rely solely on FK chains).
+- **Every read/write is company-scoped.** All endpoints filter by `companyId` derived from `req.authenticatedUserCompanyId` (never from the client/body). Use the existing pattern: `super_admin` → `companyId = null` (cross-tenant); all other roles → their own company only. A row whose `companyId` doesn't match returns **404** (not 403, to avoid leaking existence) — mirror the estimate cross-company ownership guard.
+- **Cross-company ownership guard on nested routes.** Mutating a program/zone/history/photo by id must verify the row's `companyId` (and that its parent controller's `companyId`) matches the caller before acting — a manager from company A must not edit company B's controller/zone even with a guessed id.
+- **Customer scoping too.** A controller's `customerId` must belong to the caller's company; reject otherwise.
+- **Photo authorization.** The settings-photo serve path must authorize these new photos by company — extend `assertCanViewPhoto` (`routes.ts`) to recognize `irrigation_controllers.settingsPhotoUrl` ownership, scoped to the caller's company. (Do **not** repeat the `work_order_zone_photos` 403 gap — a photo store the authz function didn't know about.)
+- **Report endpoints company-scoped.** The PDF download/send routes resolve the customer + profile within the caller's company only.
+- **Uniqueness is per-tenant** (per `(companyId, customerId, branchName)` / `(companyId, controllerId)`), so two companies can both have a "Controller A" / "Zone 1" without collision.
+- **No global/company-agnostic queries** anywhere in the schedule calc, list, or report paths.
+
+---
+
+## Slice 1 — Schema (new tables)
+### File: `lib/db/src/schema/schema.ts` + migration (apply via db push)
+- **`irrigation_controllers`** — `id, companyId, customerId, branchName (default '', for multi-location parity with property_controllers), name, location, brand, model, totalZones, notes, settingsPhotoUrl (nullable), isActive, lastUpdatedByUserId, lastUpdatedByName, lastUpdatedAt, createdAt, updatedAt`.
+- **`irrigation_programs`** — `id, companyId (FK, NOT NULL), controllerId (FK), name (e.g. "A"/"B"/"C"), wateringDays (text[] or bitmask: Mon–Sun), startTimes (text[]/jsonb — supports multiple start times), seasonalAdjustPct (int, default 100), isActive, sortOrder, createdAt, updatedAt`.
+- **`irrigation_zones`** — `id, companyId (FK, NOT NULL), controllerId (FK), programId (FK, nullable), zoneNumber, name, zoneType (enum: pop_up_spray | rotor | drip | netafim | bubbler | other), runTimeMinutes (int), zoneOrder (int — drives sequential schedule), isActive, notes, overrideStartTime (text, nullable), overrideDays (text[], nullable) [per-zone override], createdAt, updatedAt`. (Zone size/area is intentionally **not** stored — deemed unnecessary.)
+- **`irrigation_profile_history`** — append-only snapshots: `id, companyId (FK, NOT NULL), controllerId, snapshotJson (full controller+programs+zones at save time), changedByUserId, changedByName, changedAt, summary`. Powers "basic history of previous settings."
+- **Carry `companyId` (NOT NULL) on every table** — controllers, programs, zones, and history — not just the top table. Child rows must be directly company-scopable without always joining up to the controller (matches the codebase's `company-id-columns` pattern and keeps tenant isolation cheap and enforceable at the query layer).
+- Index controllers by `(companyId, customerId, branchName)`; programs/zones/history by `(companyId, controllerId)`. Uniqueness is **scoped per company/customer** (e.g. controller name unique within `(companyId, customerId, branchName)`; zone number unique within `(companyId, controllerId)`). Photo stored via the existing object-storage path (same as wet-check/WO photos).
+
+## Slice 2 — API
+### Files: `artifacts/api-server/src/routes/` (new `irrigation-profile-routes.ts`), `storage.ts`
+- **All routes company-scoped** per the Multi-tenancy section: `companyId` from `req.authenticatedUserCompanyId` (super_admin → cross-tenant); nested-id routes verify the row's company before mutating; mismatches → 404.
+- CRUD (company-scoped, manager/admin + field_tech capture):
+  - Controllers: `GET/POST /api/customers/:customerId/controllers-profile` (list/create), `GET/PUT/DELETE /api/irrigation-controllers/:id`.
+  - Programs: nested under controller — `POST /api/irrigation-controllers/:id/programs`, `PUT/DELETE /api/irrigation-programs/:id`.
+  - Zones: `POST /api/irrigation-controllers/:id/zones`, `PUT/DELETE /api/irrigation-zones/:id`.
+  - Photo upload reuses `/api/upload/photo` + the zone-photo-style attach.
+- **On every save**, stamp `lastUpdatedBy*`/`lastUpdatedAt` on the controller and append an `irrigation_profile_history` snapshot.
+- **Run-schedule compute** is a pure server+client helper (Slice 4) — no stored schedule; computed on read.
+
+## Slice 3 — Capture / Edit UI
+### Files: new `pages/customers/IrrigationProfile.tsx` (+ components), linked from the customer detail and the "Controllers & Zones" nav.
+- Property header: customer/branch, counts, last-updated-by, **+ Add Controller**, **Generate Report** (see mockup).
+- Controller list → expandable controller detail with: details (name/location/brand/model/total zones/notes/last-updated), **settings photo** (take/upload, reuse camera+library picker), **Programs** (A/B/C cards: days, start time(s), seasonal %, active), **Zones** table (number, name, program, type, run time, active, notes, optional override), the **Auto Run-Time Schedule** (Slice 4), and a **Temporary schedule note** field (sod/seed establishment).
+- Mobile-friendly for field capture; manager edit on desktop.
+- Damaged/compromised controllers/zones can be flagged (isActive=false + note), surfaced as "Needs attention" (mockup) instead of buried in prose.
+
+## Slice 4 — Auto run-time schedule (the calc)
+### Files: shared helper `lib/irrigation-schedule.ts` (used by UI + PDF)
+- For each **active program**: order its zones by `zoneOrder`; walk sequentially from the program `startTime`, each zone's **adjusted run time = round(runTimeMinutes × seasonalAdjustPct/100)**; expected start = running clock, expected end = start + adjusted run; next zone starts at previous end.
+- **Per-zone override:** if a zone has `overrideStartTime`/`overrideDays`, it starts at its own time (not chained) and uses its own days; clearly labeled in the schedule (mockup).
+- Multiple program start times → repeat the sequence per start time.
+- **Recompute instantly** on any change to start time, run time, zone order, or seasonal %. Pure function, no persistence.
+- Output drives both the on-screen schedule table and the report.
+
+## Slice 5 — On-demand customer report (PDF)
+### Files: new `artifacts/api-server/src/irrigation-profile-pdf.ts` (model on `wet-check-report-pdf.ts`); routes; UI buttons.
+- Branded PDF: company logo/header, property, prepared date; **per controller** → its details, each active program (days/start/seasonal), and the **auto run-time schedule** table; attention items flagged (mockup). Customer-friendly — no internal cost data.
+- **`GET /api/customers/:customerId/irrigation-profile/report-pdf`** (download) + **`POST …/report/send`** (email to customer) — reuse the PDF pipeline, public logo URL, and `EmailService`/verified sender, exactly like the Wet Check Results Report.
+- Download + Send buttons on the profile page (manager/admin).
+
+## Slice 6 — Reconcile with existing controllers (don't double-capture)
+- The wet-check capture grid currently uses `property_controllers` (letter + zone count). Plan a path so the **new profile becomes the source of truth**: derive controller letters/zone counts for the wet-check grid from `irrigation_controllers` where a profile exists, falling back to the old table otherwise. **Phase 1: keep them parallel** (don't block this feature); add a follow-up to unify so techs aren't entering controllers twice.
+
+## Tests
+- Create a controller with 2 programs and 4 zones; the auto schedule lays zones out sequentially from the program start with seasonal-adjusted run times; editing a run time / start / order / seasonal % updates it instantly.
+- A zone with an override start time breaks out of the sequence and is labeled.
+- Saving stamps last-updated-by and appends a history snapshot; prior settings are viewable.
+- Settings photo uploads and displays.
+- Report PDF renders per controller with programs + schedule, flags attention items, downloads, and emails to the customer (verified sender, public logo).
+- Multi-controller HOA (the Woodglen data) is representable: many controllers each with their own location/days/start.
+- **Tenant isolation:** a manager in company A cannot list, read, edit, photo-view, or report on company B's controllers/programs/zones (by id or by customer) — every such attempt returns 404; super_admin can across tenants. Two companies can each have a "Controller A" / "Zone 1" without collision.
+
+## Out of scope (for now)
+- Two-wire/decoder nested-node hierarchy (chose flat "node = controller").
+- Live two-way sync with physical controllers / weather-based ET adjustment.
+- Auto-deriving estimates from flagged controllers (the report just points to repairs).
+
+## Relevant files
+- `lib/db/src/schema/schema.ts` (new tables; existing `property_controllers` ~1287 / `propertyZones` ~580 for reference + reconcile)
+- New: `artifacts/api-server/src/routes/irrigation-profile-routes.ts`, `irrigation-profile-pdf.ts`; `lib/irrigation-schedule.ts`
+- `artifacts/api-server/src/storage.ts`; `artifacts/api-server/src/wet-check-report-pdf.ts` (PDF pattern); `email-service.ts` (send)
+- New: `artifacts/irrigopro/src/pages/customers/IrrigationProfile.tsx` (+ components), linked from Customers / "Controllers & Zones" nav
+- Reuse: `/api/upload/photo` + photo components; the camera/library picker
+- Visual reference: `irrigation-system-profile-mockup.html`

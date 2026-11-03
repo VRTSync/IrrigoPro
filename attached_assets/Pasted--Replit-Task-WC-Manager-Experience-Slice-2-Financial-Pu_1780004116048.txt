@@ -1,0 +1,251 @@
+# Replit Task — WC Manager Experience, Slice 2 (Financial Pulse customer-detail: math + label audit)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from `WC Manager Experience - Slice 0 Unification Audit and Plan.md`
+— it is reference material so you understand the intent. The actual work for
+this task is in the **Slice 2** section at the bottom. Do not deviate from any
+file paths, function names, schema field names, or payload shapes specified.
+If you believe a deviation is necessary, surface it and stop rather than
+proceeding.
+
+> **Two-part slice: audit first, then fix.** Part A traces every tile in the
+> customer-detail variant to its underlying query and writes findings to
+> `docs/financial-pulse-customer-detail-audit.md`. Part B applies the fix
+> (math correction, label rename, tooltip, or combination) based on what
+> Part A finds. **Do NOT skip Part A and jump to relabeling.** The user
+> surfaced a real discrepancy that may be a math bug; labels are the wrong
+> first lever if so.
+
+> **Touch only the `customer-detail` variant.** The `billing-header`,
+> `admin-dashboard`, and other variants are out of scope. Verify before
+> editing that the change you're making is gated to
+> `variant === "customer-detail"`.
+
+---
+
+## Design Context (locked decisions)
+
+These are inherited from the WC Manager Experience Slice 0 audit.
+
+**The widget endpoint is `/api/financial-pulse/customer/:customerId/summary`**
+— see `financial-pulse-widget.tsx:493`. That endpoint is the single source
+of truth for the four customer-detail tiles. The audit MUST start from
+the route handler and trace each tile's number back to its query.
+
+**Real-customer spot check.** The user's screenshot shows
+"Prospect at Settlers Chase" with $2,075 Billed MTD against $4,853 of
+pending work for that customer and $38,651 total unbilled across all
+customers. Part A must reconcile the $2,075 figure against the
+`invoices` table for that customer in the current calendar month and
+report whether the number is correct, off-by-some-known-amount, or
+unrelated to the page's other numbers.
+
+**"Billed" is overloaded vocabulary on this page.** The same word means
+three different things on the same surface: (1) "Billed MTD" on the
+Financial Pulse widget = invoiced+pushed-to-QuickBooks; (2) the
+`BilledBadge` on a row = stamped with an `invoiceId`; (3) "0 WC ready"
+in the Unbilled Work card uses "ready to bill" implicitly. Whatever
+Part B chooses, the fix needs to remove that overload — same word for
+three different concepts is the root of the user's confusion.
+
+---
+
+## Slice 2 — Financial Pulse customer-detail: math + label audit
+
+### Scope
+
+**Part A (audit, no production code changes).** Trace the four
+customer-detail tiles to their queries; document findings; spot-check
+one real customer's numbers against the database.
+
+**Part B (fix, based on Part A findings).** Apply one or more of: math
+correction, label rename, tooltip clarification. Touch only the
+`customer-detail` variant. Lock the chosen fix with tests.
+
+### Files modified
+
+**Part A:**
+- New: `docs/financial-pulse-customer-detail-audit.md` — findings doc.
+- No production code changes in Part A.
+
+**Part B (depends on Part A):**
+- `artifacts/api-server/src/routes/financial-pulse.ts` (or wherever the
+  `/api/financial-pulse/customer/:id/summary` handler lives — find via
+  grep for `customer/:customerId/summary`) — for any math correction.
+- `artifacts/irrigopro/src/components/financial-pulse/financial-pulse-widget.tsx`
+  — for any label / tooltip change. Edit the `CustomerDetailVariant`
+  function at `:492+` only; do not touch other variant components.
+- New: `artifacts/irrigopro/src/components/financial-pulse/financial-pulse-customer-detail.test.tsx`
+  — pin the chosen labels / tooltip content.
+- `artifacts/api-server/src/routes/financial-pulse-customer-summary.test.ts`
+  (existing) — extend with any math-correction regression tests.
+
+### Concrete changes
+
+#### Part A — Audit
+
+**(A1) Trace each tile.** Open
+`artifacts/irrigopro/src/components/financial-pulse/financial-pulse-widget.tsx`
+at line 492 (the `CustomerDetailVariant` function). Read the JSX to
+identify the four tiles rendered. Find the matching server handler for
+`GET /api/financial-pulse/customer/:customerId/summary` (grep for the
+literal path or for `customer/:customerId/summary` across
+`artifacts/api-server/src/routes/`). Document each tile in
+`docs/financial-pulse-customer-detail-audit.md` using this table:
+
+```
+| Tile label  | Source field on response | Query (drizzle / SQL) | Date window function | Customer-scoping predicate | "Counts" definition |
+|-------------|--------------------------|-----------------------|----------------------|----------------------------|---------------------|
+| Billed MTD  | (e.g.) billedMtd         | from(invoices)...     | gte(invoices.createdAt, startOfMonth) | eq(invoices.customerId, :customerId) | All invoices created this calendar month for this customer, regardless of paid status |
+| Billed YTD  | ...                      | ...                   | ...                  | ...                        | ... |
+| Money Owed  | ...                      | ...                   | ...                  | ...                        | ... |
+| Avg Time to Get Paid | ...             | ...                   | ...                  | ...                        | ... |
+```
+
+For each tile, also note: does the query filter out CANCELLED / DRAFT /
+VOIDED invoices? Does it use `createdAt`, `txnDate`, or `paidAt` as the
+date anchor? Is the customer-scoping predicate at the SQL level or
+applied in JS after the query?
+
+**(A2) Spot-check the screenshot's numbers.** Pull "Prospect at Settlers
+Chase" from the customers table. Run the same queries Part A1 documented,
+substituting that customer's ID. Compare each result to the screenshot:
+
+```
+Tile          | Screenshot value | Query result | Match? | If not, delta and possible cause
+Billed MTD    | $2,075           |              |        |
+Billed YTD    | $2,075           |              |        |
+Money Owed    | $0               |              |        |
+Avg Time to Get Paid | —         |              |        |
+```
+
+**(A3) Write conclusions.** At the bottom of the audit doc, summarize
+the three possible findings:
+- "Math is correct, label is overloaded — Part B is a relabel + tooltip."
+- "Math is correct, no relabel needed — Part B is a tooltip-only addition."
+- "Math is wrong — Part B is a query fix plus a test regression lock."
+
+State which conclusion the audit supports. Commit the audit doc alone
+as the Part A PR. Do not start Part B without surfacing Part A's
+conclusion to the user first.
+
+#### Part B — Fix (post-audit, in a separate PR)
+
+The exact changes depend on Part A's conclusion. Three options:
+
+**Option B-Math-Fix.** If Part A finds a join, window, or scoping bug:
+- Fix in the route handler. Mirror the existing handler shape; do not
+  introduce a new endpoint.
+- Add a regression test in
+  `financial-pulse-customer-summary.test.ts` with the spot-check
+  customer's data as a fixture: the test fails on `main` and passes
+  after the fix.
+- No frontend change required.
+
+**Option B-Relabel.** If Part A finds the math is right but the word
+"Billed" is overloaded:
+- Edit `CustomerDetailVariant` at `financial-pulse-widget.tsx:492+`.
+- Rename "Billed MTD" → "Invoiced MTD". Rename "Billed YTD" →
+  "Invoiced YTD". Leave "Money Owed" and "Avg Time to Get Paid"
+  as-is (those are unambiguous).
+- Verify the rename does NOT leak into other variants. The other
+  variants live at `financial-pulse-widget.tsx:~242, ~376, ~409` and
+  use the same `label="Billed MTD"` literal. They are NOT in scope —
+  if you find the label is shared via a constant, **do not change the
+  constant**; pass a variant-specific label prop at the
+  `CustomerDetailVariant` call site instead.
+
+**Option B-Tooltip.** Add hover/focus tooltips to each tile explaining
+the metric in plain language:
+- "Billed MTD: invoices created and pushed to QuickBooks this month.
+  Does not include queued unbilled work."
+- "Money Owed: total of unpaid invoices for this customer."
+- Use the existing `Tooltip` / `TooltipProvider` / `TooltipContent`
+  primitives (already imported elsewhere in this file or available from
+  `@/components/ui/tooltip`).
+
+**Combinations are expected.** A common Part A finding will be "math is
+right but the word is overloaded AND first-timers need plain-language
+explanations." That's Option B-Relabel + B-Tooltip together.
+
+### Tests
+
+**Part A:** no tests; the audit doc is the artifact.
+
+**Part B (option-dependent):**
+
+For B-Math-Fix:
+```typescript
+// financial-pulse-customer-summary.test.ts (existing — extend)
+it("Billed MTD for Prospect at Settlers Chase reconciles with invoices.createdAt this month", async () => {
+  await seedInvoices(customer, [
+    { totalAmount: "1000", createdAt: new Date(THIS_MONTH_START.getTime() + 1) },
+    { totalAmount: "1075", createdAt: new Date(THIS_MONTH_START.getTime() + 86400_000) },
+    { totalAmount: "9999", createdAt: new Date(THIS_MONTH_START.getTime() - 86400_000) },  // last month — must NOT count
+  ]);
+  const res = await request(app).get(`/api/financial-pulse/customer/${customer.id}/summary`);
+  expect(res.body.billedMtd).toBe(2075);
+});
+```
+
+For B-Relabel:
+```typescript
+// financial-pulse-customer-detail.test.tsx (new)
+it("customer-detail variant uses 'Invoiced MTD' label, not 'Billed MTD'", () => {
+  render(<FinancialPulseWidget variant="customer-detail" customerId={1} />);
+  expect(screen.getByText("Invoiced MTD")).toBeInTheDocument();
+  expect(screen.queryByText("Billed MTD")).not.toBeInTheDocument();
+});
+
+it("billing-header variant still uses 'Billed MTD' (not regressed)", () => {
+  render(<FinancialPulseWidget variant="billing-header" />);
+  expect(screen.getByText("Billed MTD")).toBeInTheDocument();
+});
+```
+
+For B-Tooltip:
+```typescript
+it("hovering the Invoiced MTD tile shows the explanatory tooltip", async () => {
+  render(<FinancialPulseWidget variant="customer-detail" customerId={1} />);
+  const tile = screen.getByText("Invoiced MTD").closest("[data-tile]");
+  await userEvent.hover(tile);
+  expect(await screen.findByText(/pushed to QuickBooks this month/i)).toBeInTheDocument();
+});
+```
+
+### Acceptance criteria
+
+**Part A:**
+- `docs/financial-pulse-customer-detail-audit.md` exists and contains
+  (a) the four-tile trace table, (b) the spot-check reconciliation
+  table for "Prospect at Settlers Chase," and (c) one of three
+  conclusions stated explicitly.
+- No production code modified.
+
+**Part B (whichever option is chosen):**
+- The chosen fix is implemented end-to-end with at least one test that
+  fails on `main` and passes after the change.
+- Other Financial Pulse variants (`billing-header`, `admin-dashboard`)
+  are unchanged — verify by snapshot test or by reading the rendered
+  output against the existing
+  `financial-pulse-billing-header.test.tsx`.
+- The screenshot's $2,075 / $4,853 / $38,651 confusion is resolved
+  (whether by math correction or by the new label/tooltip making the
+  relationship clear).
+
+### Out of scope
+
+- Other Financial Pulse variants (billing-header, admin-dashboard,
+  etc.).
+- Adding new metrics to the customer-detail tile set (this slice
+  fixes the existing four; new tiles are a product decision).
+- Rewriting the financial pulse query foundations
+  (Tasks #693, #720 — those are upstream).
+- Anything on the customer billing page outside the Financial Pulse
+  widget instances at `customer-billing.tsx:1059` and `:1767`.
+
+### Dependencies
+
+- Independent of Slices 1, 3–11. Can land in parallel with Slice 1
+  (different files).
+- Part A is a prerequisite for Part B — do NOT bundle.

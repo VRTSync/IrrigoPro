@@ -1,0 +1,230 @@
+Slice 11 — Billing Sheet Creation Wizard with Required Location Capture
+Date: 2026-05-06
+Status: Ready for Replit implementation — depends on Slice 10's wizard chrome being shipped first
+Author: Engineering planning
+Type: UI redesign + schema migration
+Estimated effort: 2 days (1 day migration + payload plumbing, 1 day wizard UI)
+Decisions locked:
+
+Q1 = Replace StandaloneBillingSheet create/edit with a multi-step wizard mirroring the work order wizard (Slice 10) and estimate wizard (Slice 8). Five steps.
+Q2 = Add workLocationLat, workLocationLng, workLocationAddress, controllerLetter, zoneNumber columns to the billing_sheets table. This unblocks pin capture on standalone billing sheets, which the current UI silently drops.
+Q3 = Map pin is required to advance from Step 2. Same gate logic as the work order wizard.
+Q4 = The work-order-attached billing sheet (work-orders/billing-sheet.tsx) inherits the WO's pin without re-capturing. No wizard there — it's a post-completion artifact, not an entry point.
+Q5 = Edit mode opens on Step 2 (location is the most-likely-edit step).
+
+Related: Builds on Slice 10. Reuses the wizard chrome, the location step, and the customer step from <WorkOrderWizard> — extracted into a shared module so both wizards consume the same components. Schema migration is the only server-side work; no API endpoints change shape, they just gain the new optional fields.
+
+Executive Summary
+The standalone billing sheet form (client/src/components/billing/standalone-billing-sheet.tsx, 1511 lines) is a sprawling single-form scroll: customer & location, work details, parts table, labor entries, AI description, photos, totals — all on one screen. Location capture follows the same optional-toggle pattern the work order form has, AND it's broken: the form sets form.setValue("workLocationLat", ...) but the billing_sheets table has no workLocationLat, workLocationLng, workLocationAddress, controllerLetter, or zoneNumber columns. Whatever the user pins is silently dropped on submit. There is no controller/zone capture anywhere, even though billing sheets are exactly where this data is most useful (which valve was repaired? which zone failed?).
+Slice 11 does two things: a small, safe schema migration that adds the missing location columns to billing_sheets, and a five-step BillingSheetWizard that mirrors the work order wizard structure with content swapped. Step 2 is Work Location & Site, gated. Submit shape grows by five fields, all nullable.
+Slice 11 ships when: the migration applies cleanly, every existing entry point to "create billing sheet" and "edit billing sheet" opens the wizard, location pin and controller/zone are persisted on submit, the WO-attached billing sheet inherits the WO's pin without re-capture, and the billing-sheet view modal surfaces the pin so it's no longer invisible after creation.
+
+Why Now
+Three concrete failures:
+First, the standalone billing sheet UI lies about location. Managers and techs spend the time to drop a pin and the system throws it away. Either remove the UI or make it work; this slice picks the latter.
+Second, billing sheets are the natural home for controller/zone metadata. A billing sheet is a record of what was repaired and where. Knowing the controller letter and zone is what lets the missing-photos report, the customer's billing history, and any future "where on this property has work happened" map view become useful.
+Third, techs creating billing sheets are physically on-site. They have the best ground truth about where the work was. The wizard's Step 2 capture (combined with the "I'm here" affordance from Slice 10's completion screen) means the data quality on billing sheets jumps from "wherever the customer's billing address is" to "exactly where the wrench was."
+Slice 10 proves the wizard pattern works for non-estimate flows. Slice 11 reuses everything.
+
+What a Billing Sheet Creation Flow Becomes
+Five steps in the same wizard chrome:
+Step 1 — Customer & Work Date. Customer picker, branch (if applicable), per-billing-sheet email/phone overrides, work date. CTA: "Continue to Location →".
+Step 2 — Work Location & Site. Same component as Slice 10's location step. Three sub-cards: Address & Notes, Pin on Map (required), Controller & Zone. Continue gated until pin exists.
+Step 3 — Parts & Labor. The workhorse step. Sticky strip at top: customer + work date + a "Pinned at: ..." chip + a live Running Total (parts subtotal + labor subtotal + total at customer's labor rate). Below: parts table (reuse the line-items pattern from the estimate wizard — compact table on desktop, stacked cards on mobile, inline part picker), labor entries section. CTA: "← Back" / "Continue to Description →" disabled if both parts and labor are empty.
+Step 4 — Description & Photos. Sticky strip same as Step 3. Body: AI-generated short and detailed description fields (preserve the existing AI generation flow), photos via FileUpload. CTA: "← Back" / "Continue to Review →".
+Step 5 — Review & Submit. Read-only summary: customer block, location block (address + pinned address + controller/zone), parts/labor table with totals (parts subtotal, labor subtotal, total), descriptions, photos thumbnails. CTAs: secondary "← Back" and primary "Create Billing Sheet" (or "Save Changes" in edit mode).
+The work-order-attached billing sheet (client/src/components/work-orders/billing-sheet.tsx) is not a wizard — it's a post-completion artifact. It inherits workLocationLat/Lng/Address and controllerLetter/zoneNumber from the parent work order at creation time (server-side join in the existing handler). The view modal surfaces the pin.
+
+Step 0 — Schema Migration
+Before any UI work, add the missing columns to billing_sheets:
+sqlALTER TABLE billing_sheets
+  ADD COLUMN work_location_lat decimal(10, 7),
+  ADD COLUMN work_location_lng decimal(10, 7),
+  ADD COLUMN work_location_address text,
+  ADD COLUMN controller_letter text,
+  ADD COLUMN zone_number integer;
+All nullable. Old rows continue to work — they just have NULL location data, which the UI handles by showing "No pin captured" in the view modal.
+Apply via Drizzle's migration tooling (the existing migrations folder is migrations/). Update shared/schema.ts's billingSheets definition to add the corresponding fields right next to the existing propertyAddress field, with comments explaining the relationship.
+The existing POST /api/billing-sheets and PUT /api/billing-sheets/:id handlers need to accept these fields (they're already on the insertBillingSheetSchema once you add them via createInsertSchema). No new endpoints. No new validation rules beyond Drizzle's column types.
+Verify before shipping: the existing wet-check → billing-sheet auto-conversion path (server/storage.ts and any related logic — search for createBillingSheet or wetCheckToBillingSheet) should pass through any location data the wet check carried. If wet checks don't currently store lat/lng, they fall back to NULL and the manager can refine later via the wizard.
+
+Scope of Slice 11
+In Scope
+
+Schema migration adding five columns to billing_sheets. Drizzle migration file + shared/schema.ts update.
+Server-side payload acceptance. Update the insert/update Zod schemas to include the new fields. No changes to handler logic — the columns are just stored as-is.
+New top-level component client/src/components/billing/billing-sheet-wizard.tsx.
+Five step components co-located in client/src/components/billing/wizard/:
+
+billing-sheet-wizard-customer-step.tsx (Step 1)
+billing-sheet-wizard-location-step.tsx (Step 2 — can be the same component as Slice 10's location step, imported from a shared module)
+billing-sheet-wizard-parts-labor-step.tsx (Step 3)
+billing-sheet-wizard-description-step.tsx (Step 4)
+billing-sheet-wizard-review-step.tsx (Step 5)
+
+
+Extract the shared location step. During Slice 10 → 11 migration, lift work-order-wizard-location-step.tsx into client/src/components/wizard-shared/wizard-location-step.tsx and have both wizards consume it. This avoids drift between the two location flows.
+Replace every existing call site of <StandaloneBillingSheet> (create AND edit) with <BillingSheetWizard>. Affected:
+
+client/src/pages/billing-sheets.tsx
+Any other call site (grep StandaloneBillingSheet).
+
+
+View modal pin display. client/src/components/billing/billing-sheet-view-modal.tsx gets a small "Pinned location" row in its location section, showing the pinned address (or lat/lng) and a "Open in Maps" link that uses the same lat/lng-first URL builder as Slice 10's dispatch button.
+WO-attached billing sheet inherits. client/src/components/work-orders/billing-sheet.tsx has no map UI — it just displays the inherited pin in read mode. The server's WO→billing-sheet creation logic should already carry forward the relevant WO fields; verify and add the new fields to the carry-over set.
+Reuse Slice 9 fixes. All the Enter-on-input, native-spinner, blue-pin-confirmation, controller-loading-state, and inline-helper-text rules apply.
+
+Out of Scope
+
+Customer-facing billing presentation (invoice rendering, PDF generation).
+Wet-check → billing-sheet conversion logic. Verify it still works after the migration; adjust only if it breaks.
+Field-tech offline support for billing sheets. Out of scope.
+"I'm here" affordance on standalone billing sheets. The standalone billing sheet wizard already runs on the tech's device with the pin gate at Step 2; adding a refine-pin affordance there is duplicative. The "I'm here" pattern stays on the WO completion screen (Slice 10) where it's needed.
+Replacing the WO-attached billing sheet UI with a wizard. It's an artifact, not an entry point.
+Any change to the parts catalog or labor rate logic.
+
+
+UI Specification
+Wizard Container
+Identical to Slice 10. STEP_TITLES: 1: "Customer & Work Date", 2: "Work Location & Site", 3: "Parts & Labor", 4: "Description & Photos", 5: "Review & Submit".
+Step 1 — Customer & Work Date
+Three cards:
+
+Customer with email/phone overrides + Slice-9 helper caption.
+Branch when applicable.
+Work Date — a single <Input type="date"> with a label and a "Today" quick-fill button.
+
+CTA: "Continue to Location →" disabled until customer + branch (if applicable) + work date are set.
+Step 2 — Work Location & Site
+Reuse the shared location step component from Slice 10. Same three sub-cards. Same required-pin gate. Same blue confirmation card. Same controller/zone selectors with loading-state distinction.
+CTA: "← Back" / "Continue to Parts & Labor →" disabled until pin exists.
+Step 3 — Parts & Labor
+Sticky strip: customer name + work date + "Pinned at: …" chip + Running Total card (matches the estimate wizard's running total visual, gear: parts subtotal, labor subtotal, total).
+Body, two cards:
+
+Parts — reuse the estimate wizard's parts-table pattern (compact table on desktop, stacked cards on mobile, "+ Add Part" button opens the inline part picker that stays open across multi-add). Per-line: part name (clickable to change), quantity stepper, unit price, line total. Reuse EstimateWizardPartPicker directly — it's already extracted.
+Labor entries — reuse the existing standalone-billing-sheet labor-entries section as a sub-component. If labor is just hours × rate at the billing-sheet level (no per-task breakdown), keep it as a single labor-hours input. Match whatever the current standalone form does.
+
+CTA: "← Back" / "Continue to Description →" disabled if items.length === 0 && totalLaborHours === 0. Inline helper: "Add at least one part or labor entry to continue."
+Step 4 — Description & Photos
+Sticky strip same as Step 3.
+Body, two cards:
+
+Description — preserve the existing AI generation flow exactly. Short description input, detailed description textarea, "Generate with AI" button that hits the existing endpoint with the existing structured inputs. Manager can edit either field after generation.
+Photos — FileUpload component. Photos are required by some workflows (missing-photos report) and optional by others; honor whatever the current standalone form does. If photos are conditionally required, surface that as inline helper text on this step.
+
+CTA: "← Back" / "Continue to Review →".
+Step 5 — Review & Submit
+Read-only summary cards:
+
+Customer with name, branch, email, phone, work date.
+Work Location with address, pinned address (or lat/lng), controller/zone, location notes, access instructions. "Edit pin" link → setStep(2).
+Parts & Labor with the items table, labor subtotal, parts subtotal, total at customer's labor rate.
+Description short + detailed, with a "Generated by AI" badge if applicable.
+Photos thumbnails (collapsed if more than 6).
+
+CTAs: secondary "← Back" and primary "Create Billing Sheet" (or "Save Changes" in edit mode). On submit: POST /api/billing-sheets (or PUT /api/billing-sheets/:id), then close + invalidate ["/api/billing-sheets"] and ["/api/dashboard/stats"].
+Billing Sheet View Modal
+client/src/components/billing/billing-sheet-view-modal.tsx. In its existing location section, add:
+tsx{billingSheet.workLocationLat != null && billingSheet.workLocationLng != null && (
+  <div className="flex items-start gap-1.5">
+    <MapPin className="w-3.5 h-3.5 text-blue-600 mt-0.5 flex-shrink-0" />
+    <div>
+      <span className="text-gray-500">Pinned: </span>
+      <span>{billingSheet.workLocationAddress
+        ?? `${billingSheet.workLocationLat.toFixed(6)}, ${billingSheet.workLocationLng.toFixed(6)}`}</span>
+      
+        href={buildMapsUrl(billingSheet)}
+        target="_blank"
+        rel="noopener"
+        className="ml-2 text-blue-600 hover:text-blue-700 text-xs underline"
+      >
+        Open in Maps
+      </a>
+    </div>
+  </div>
+)}
+{(billingSheet.controllerLetter || billingSheet.zoneNumber != null) && (
+  <div className="flex items-center gap-1.5">
+    <Cpu className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+    <div>
+      {billingSheet.controllerLetter && <><span className="text-gray-500">Controller: </span>{billingSheet.controllerLetter}</>}
+      {billingSheet.controllerLetter && billingSheet.zoneNumber != null && <span className="mx-2 text-gray-300">•</span>}
+      {billingSheet.zoneNumber != null && <><span className="text-gray-500">Zone: </span>{billingSheet.zoneNumber}</>}
+    </div>
+  </div>
+)}
+buildMapsUrl is the same function from Slice 10.
+
+Files Affected
+New
+
+migrations/NNNN_billing_sheet_location.sql (Drizzle migration)
+client/src/components/billing/billing-sheet-wizard.tsx
+client/src/components/billing/wizard/billing-sheet-wizard-customer-step.tsx
+client/src/components/billing/wizard/billing-sheet-wizard-parts-labor-step.tsx
+client/src/components/billing/wizard/billing-sheet-wizard-description-step.tsx
+client/src/components/billing/wizard/billing-sheet-wizard-review-step.tsx
+client/src/components/wizard-shared/wizard-location-step.tsx (extracted from Slice 10)
+
+Modified
+
+shared/schema.ts — add the five new fields to billingSheets, update insertBillingSheetSchema.
+server/routes.ts (or wherever billing-sheet routes live) — Zod input schema gains the new optional fields; pass-through to storage.
+server/storage.ts — billing-sheet insert/update accepts the new columns. WO→billing-sheet conversion carries forward workLocationLat/Lng/Address, controllerLetter, zoneNumber.
+client/src/pages/billing-sheets.tsx — replace <StandaloneBillingSheet> with <BillingSheetWizard>.
+client/src/components/billing/billing-sheet-view-modal.tsx — surface pin and controller/zone in the location section.
+client/src/components/work-orders/work-order-wizard/wizard-location-step.tsx (from Slice 10) — re-import path updated to point at the shared module if extracted.
+
+Deleted (after migration)
+
+client/src/components/billing/standalone-billing-sheet.tsx — only after grep shows zero remaining imports.
+
+
+Acceptance Criteria
+
+Migration applies cleanly to a fresh DB and to a copy of production. Existing rows have NULL for the new columns.
+Existing billing sheets continue to display correctly with NULL location data — view modal shows "No pin captured" or hides the pin row entirely.
+Every "New Billing Sheet" entry point opens <BillingSheetWizard>. Step 1 lands on Customer & Work Date.
+Step 2 Continue is disabled until a pin is dropped. Same inline-helper pattern as Slice 10.
+Submit produces a payload that includes workLocationLat, workLocationLng, workLocationAddress, controllerLetter, zoneNumber. Server persists them.
+Edit mode opens on Step 2 with the existing pin (if any) pre-loaded. Editing the pin and submitting updates the row.
+The billing-sheet view modal shows the pinned address (or lat/lng) and an "Open in Maps" link that navigates to the lat/lng. Controller and zone display when set.
+WO-attached billing sheets carry forward the parent WO's pin, controller, and zone without re-capture.
+AI description generation continues to work exactly as it does today.
+Pressing Enter inside any text or number input does NOT advance the wizard.
+
+
+Test Plan
+Manual
+
+Migration smoke test. Apply the migration, restart the server, open the billing sheets page → existing sheets render. Open one in the view modal → confirm the location section shows "No pin captured" gracefully.
+Required pin gate. Create a new billing sheet → reach Step 2 → don't drop a pin → Continue is disabled. Drop a pin → Continue enables → submit → reload → confirm the lat/lng persisted.
+Edit pin. Open an existing billing sheet that now has a pin → confirm Step 2 pre-loads it. Move the pin → submit → confirm the new lat/lng persisted.
+Old data unchanged. Open an existing billing sheet that pre-dates the migration → edit just the parts list, leave Step 2 alone → submit → confirm workLocationLat is still NULL and the existing fields haven't been corrupted.
+WO-attached carry-over. Complete a work order whose pin was set via the Slice 10 wizard → confirm the resulting billing sheet inherits the lat/lng/controller/zone.
+AI description still works. Generate a description on Step 4 → edit the result → verify the generated text and the user's edits both round-trip.
+View modal pin. Open a billing sheet with a pin → verify the pinned-location row renders, "Open in Maps" navigates correctly.
+
+Automated
+
+Migration test: apply migration to a fixture DB, assert columns exist with the right types.
+Server test: POST a billing-sheet payload with the new fields, GET it back, assert the values round-trip.
+RTL test: same gate test as Slice 10's required-pin test, applied to <BillingSheetWizard>.
+RTL test: render the view modal with a pin → assert the pinned-location row appears with the correct text.
+
+
+Risk Assessment
+Medium. The migration itself is safe (additive, all nullable). The risk is in three places:
+
+WO→billing-sheet conversion logic — this code path needs to be inspected carefully. If it constructs the new billing sheet with an explicit field list, the new fields need to be added to that list or they'll always be NULL even when the parent WO has data.
+Wet-check → billing-sheet auto-conversion — same concern. If wet checks don't currently capture lat/lng, the conversion just leaves the new fields NULL (acceptable). If they do, carry forward.
+The standalone billing sheet form is 1511 lines — replacing it cleanly takes care. Plan one extra dev-day for parts/labor parity testing against the existing flow.
+
+The migration itself is reversible (drop the columns) and can be safely deployed to staging first.
+
+Out-of-Scope Followups
+
+Wet check → billing sheet location carry-over. Once Slice 10 + 11 ship, wet checks become the only entry point that can produce a billing sheet without a pin. Add lat/lng capture to wet checks (probably at the per-zone level, where ground truth is best).
+Map view of all billing sheets for a customer. With pin data now persisted, a "show me everywhere we've worked on this property" view becomes trivial — its own slice.
+Automatic re-bill if the pin moves significantly. A safety check: if a manager edits a billed sheet's pin to be more than X meters from the original, surface a warning.

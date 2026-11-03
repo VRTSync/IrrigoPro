@@ -1,0 +1,60 @@
+# Estimate Signature — Slice 1.1: Show the Signature in the Manager View & on the Work Order
+
+**What & Why**
+Follow-up to **"Estimate — Capture Customer Signature on Approval"** (the main spec). That spec captures the customer's signature, stores it on the `estimates` record, and embeds it on the approved estimate PDF. This slice surfaces that same signature in two more places the team works from:
+1. The **manager's in-app estimate detail** — so staff can see who signed, when, and the signature itself without opening the PDF.
+2. The **work order** created from the estimate — so the field/billing record shows the approval signature too.
+
+**No schema change.** The signature already lives on the estimate (main spec, Slice 1). Work orders link back to their originating estimate via `work_orders.estimateId` (`createWorkOrderFromEstimate` / `getWorkOrdersByEstimate`), so the WO surfaces the signature by **reading through that link** — lineage, not duplication. (Depends on the main spec shipping first.)
+
+Two small slices, display-only.
+
+---
+
+## Slice 1.1a — Signature in the manager estimate detail
+### Files
+- `artifacts/irrigopro/src/components/estimates/estimate-detail-modal.tsx` (manager-facing estimate detail).
+- Ensure the estimate read used by the modal returns the signature fields (`approvalSignatureType`, `approvalSignatureData`, `approvalSignerName`, `approvalSignedAt`, `approvalSignerIp`, `approvalConsentText`, `approvalConsentAcceptedAt`) — add to the select/payload if not already present.
+
+### Changes
+- When an estimate is `approved` **and** has signature fields, render a **"Customer Approved" signature block** in the detail modal (same content as the PDF stamp): the signature (drawn PNG `<img>` from `approvalSignatureData`, or the typed name in a script font), **Signed by** {approvalSignerName}, **Date** {approvalSignedAt}, the stored **consent statement**, and the captured **IP**. Place it near the status/approval area.
+- Approved estimates **without** signature data (older approvals, or internally-approved) show the existing approval info with no empty block. Unapproved estimates: nothing.
+
+### Acceptance
+- Opening a signature-approved estimate in the app shows the signature, signer, date, consent text, and IP — matching the PDF.
+
+---
+
+## Slice 1.1b — Signature on the work order (read-through)
+### Files
+- `artifacts/api-server/src/storage.ts` / work-order read path — when returning a work order that has `estimateId`, include the originating estimate's signature fields (join/lookup) on the work-order payload as read-only `approvalSignature*` (do **not** copy them into the `work_orders` table).
+- `artifacts/irrigopro/src/components/work-orders/work-order-details.tsx` (tech view) and `artifacts/irrigopro/src/components/billing/completed-work-detail-modal.tsx` (manager/admin/billing view).
+
+### Changes
+- For a work order created from an estimate (`estimateId` set) whose estimate carries a signature, render the **same "Customer Approved" signature block** (read-only) in both work-order detail views, so whoever opens the WO sees the approval proof.
+- Work orders **not** originating from a signed estimate (e.g. wet-check-origin, or estimate approved without a signature) show nothing extra.
+- Strictly read-through — no new columns on `work_orders`, no duplication; if the estimate's signature is ever corrected, the WO reflects it automatically.
+
+### Acceptance
+- Opening a work order created from a signature-approved estimate — as tech or as manager/admin/billing — shows the customer's approval signature block.
+- Work orders without a signed-estimate origin are unchanged.
+
+---
+
+## Tests
+- A signature-approved estimate shows the signature block in the estimate detail modal (drawn and typed both render).
+- The work order created from that estimate shows the same block in both the tech and the manager/billing detail views.
+- Older approved estimates without signatures, and non-estimate-origin work orders, render with no empty block.
+- No new columns added to `work_orders`; the WO reads the signature through `estimateId`.
+
+## Out of scope
+- Capturing the signature (main spec).
+- The PDF stamp (main spec, Slice 4).
+- Any change to which estimate a work order belongs to.
+
+## Relevant files
+- `artifacts/irrigopro/src/components/estimates/estimate-detail-modal.tsx`
+- `artifacts/irrigopro/src/components/work-orders/work-order-details.tsx`
+- `artifacts/irrigopro/src/components/billing/completed-work-detail-modal.tsx`
+- `artifacts/api-server/src/storage.ts` (work-order read: surface origin estimate's signature via `estimateId`; `getWorkOrdersByEstimate` ~3367, `createWorkOrderFromEstimate`)
+- Depends on: `Estimate - Capture Customer Signature on Approval.md` (Slices 1–4)

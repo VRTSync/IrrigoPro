@@ -1,0 +1,316 @@
+# Replit Task — WC Manager Experience, Slice 1 (Customer billing WCB tab + Total Work line)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from `WC Manager Experience - Slice 0 Unification Audit and Plan.md`
+— it is reference material so you understand the intent. The actual work for
+this task is in the **Slice 1** section at the bottom. Do not deviate from any
+file paths, function names, schema field names, or payload shapes specified.
+If you believe a deviation is necessary, surface it and stop rather than
+proceeding.
+
+> **Frontend-only slice — no backend changes.** Every endpoint this page calls
+> is already wet-check-aware. The `unbilledWetCheckBillings` field on the
+> customer billing response, the `selectedWetCheckBillingIds` payload on
+> create-invoice, and the WCB view modal are all live in production from
+> WC Command Center Slice 1 and WC Billing Integration Slices 5–6.
+
+> **Pattern: mirror the billing-sheet treatment exactly.** Every change in
+> this slice does for wet check billings what the page already does for
+> billing sheets — same Total Work card row, same tab trigger, same
+> TabsContent block, same row component shape. No new visual vocabulary.
+
+---
+
+## Design Context (locked decisions)
+
+These are inherited from the WC Manager Experience Slice 0 audit and the
+WC Command Center / WC Billing Integration families.
+
+**The Billing Command Center is not being redesigned.** The customer billing
+page (`/billing/command-center` → `customer-billing.tsx`) is the billing
+manager's per-customer detail surface. This slice ADDS the WCB tab and the
+Total Work line; it does not redesign the page.
+
+**The WCB modal is the action surface.** Clicking a WCB row opens
+`WetCheckBillingViewModal`
+(`artifacts/irrigopro/src/components/wet-check-billings/wet-check-billing-view-modal.tsx`)
+which already has the labor-rate edit pencil for billing-manager-and-above
+(WC Billing Integration Slice 5). The new WCB tab's only job is to surface
+WCB rows so the modal is reachable.
+
+**Two tab strips exist on this page** — a top strip at `customer-billing.tsx:1129`
+and a lower strip at `:1841`. Both must be updated identically. The two
+strips serve different layout modes (mobile vs desktop or condensed vs
+expanded — verify by reading the surrounding JSX before editing).
+
+---
+
+## Slice 1 — Customer billing WCB tab + Total Work line
+
+### Scope
+
+Add a 6th tab ("Wet Check Billings (N)") to both `TabsList` blocks on
+`customer-billing.tsx`. Add a new `TabsContent` block per strip that renders
+WCBs in the same row shape as billing sheets. Add a "Wet Check Billings: N"
+row to the Total Work card. Switch the affected `TabsList`s from
+`grid-cols-5` to `grid-cols-6`. No backend changes. No new data fetches —
+the page already receives `customerBillingData.wetCheckBillings` and
+`unbilledWetCheckBillings`.
+
+### Files modified
+
+- `artifacts/irrigopro/src/pages/customer-billing.tsx` — the only
+  production file changed.
+- New: `artifacts/irrigopro/src/pages/customer-billing-wcb-tab.test.tsx`
+  — focused tests for the new tab and Total Work line. Do not extend
+  the existing `customer-billing-wet-check.test.tsx`; keep this slice's
+  assertions in their own file.
+
+### Concrete changes
+
+**(1) Total Work card — add WCB row** at `customer-billing.tsx:~1818+`,
+immediately after the "Billing Sheets:" row:
+
+```jsx
+<div className="flex justify-between text-xs">
+  <span className="text-gray-600">Billing Sheets:</span>
+  <span className="font-medium">{customerBillingData.billingSheets.length}</span>
+</div>
+<div className="flex justify-between text-xs">  {/* NEW */}
+  <span className="text-gray-600">Wet Check Billings:</span>
+  <span className="font-medium">{(customerBillingData.wetCheckBillings ?? []).length}</span>
+</div>
+<div className="flex justify-between text-xs">
+  <span className="text-gray-600">Estimates:</span>
+  ...
+```
+
+The Unbilled Items total at `:1828–1832` already includes
+`unbilledWetCheckBillings` per WC Command Center Slice 1 — do NOT modify
+that line; it is correct as-is.
+
+**(2) Top tab strip — add WCB tab** at `customer-billing.tsx:1129`:
+
+Change `grid-cols-5` to `grid-cols-6` on the `TabsList`. Add a new
+`TabsTrigger` between "billing" (`:1136`) and "estimates" (`:1139`):
+
+```jsx
+<TabsList className="grid w-full grid-cols-6 text-xs h-10">  {/* was grid-cols-5 */}
+  <TabsTrigger value="unbilled" className="text-xs">...</TabsTrigger>
+  <TabsTrigger value="workorders" className="text-xs">...</TabsTrigger>
+  <TabsTrigger value="billing" className="text-xs">...</TabsTrigger>
+  <TabsTrigger value="wet-check-billings" className="text-xs">  {/* NEW */}
+    WC Billings ({(customerBillingData.wetCheckBillings ?? []).length})
+  </TabsTrigger>
+  <TabsTrigger value="estimates" className="text-xs">...</TabsTrigger>
+  <TabsTrigger value="invoices" className="text-xs">...</TabsTrigger>
+</TabsList>
+```
+
+**(3) Top tab strip — add WCB TabsContent** at `customer-billing.tsx:~1359`,
+immediately AFTER the "billing" TabsContent block (which ends at the line
+before `:1360 <TabsContent value="estimates"`):
+
+```jsx
+<TabsContent value="wet-check-billings" className="mt-3">
+  {(customerBillingData.wetCheckBillings ?? []).length === 0 ? (
+    <Card>
+      <CardContent className="p-6 text-center text-gray-500">
+        <Droplets className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+        <div className="font-medium mb-1">No wet check billings yet</div>
+        <div className="text-sm">Approved wet checks will appear here.</div>
+      </CardContent>
+    </Card>
+  ) : (
+    <div className="space-y-2">
+      {customerBillingData.wetCheckBillings.map((wcb) => (
+        <WetCheckBillingRow
+          key={wcb.id}
+          wcb={wcb}
+          onClick={() => setOpenWcbId(wcb.id)}
+        />
+      ))}
+    </div>
+  )}
+</TabsContent>
+```
+
+Use the existing `Droplets` icon import (already used in nav-config); add
+to the lucide-react import block at the top of the file if not present.
+
+**(4) Lower tab strip — same two edits** at `customer-billing.tsx:1841`
+and the corresponding TabsContent insertion point. Find the
+`TabsList grid-cols-5` block at `:1841`; switch to `grid-cols-6`; insert
+the new `TabsTrigger` (use `value="wet_check_billings"` with the underscore
+to match the lower strip's existing naming convention — `work_orders`,
+`billing_sheets`). Insert the matching TabsContent block immediately AFTER
+the existing `billing_sheets` block (which ends just before `:2358
+<TabsContent value="estimates">`):
+
+```jsx
+<TabsContent value="wet_check_billings">  {/* underscore naming */}
+  ... (same body as step 3) ...
+</TabsContent>
+```
+
+**(5) Define the `WetCheckBillingRow` component** at the top of the file
+(below the existing types, above the page component). Mirror the existing
+billing-sheet row component used in the Unbilled tab (find it by grepping
+for `unbilledBillingSheets` and following the render block). The minimum
+fields rendered:
+
+```jsx
+function WetCheckBillingRow({ wcb, onClick }: {
+  wcb: BillingWetCheckBilling;
+  onClick: () => void;
+}) {
+  return (
+    <Card
+      className="hover:bg-gray-50 cursor-pointer transition-colors"
+      onClick={onClick}
+      data-testid={`wcb-row-${wcb.id}`}
+    >
+      <CardContent className="p-3 flex items-center justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 text-sm">
+            <Badge variant="outline" className="text-xs">WC</Badge>
+            <span className="font-mono text-xs">{wcb.billingNumber}</span>
+            <WetCheckBillingStatusBadge status={wcb.status} />
+            {wcb.invoiceId ? <BilledBadge /> : null}
+          </div>
+          <div className="text-xs text-gray-500 mt-1 truncate">
+            {wcb.description || `Work date ${formatDate(wcb.workDate)}`}
+          </div>
+        </div>
+        <div className="text-right text-sm font-medium">
+          ${parseFloat(String(wcb.totalAmount || "0")).toFixed(2)}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+```
+
+Use `WetCheckBillingStatusBadge` from
+`artifacts/irrigopro/src/pages/wet-check-billings.tsx` — extract it to
+`artifacts/irrigopro/src/components/wet-check-billings/status-badge.tsx`
+as part of this slice so it can be reused on the customer billing page
+AND continue to work on the existing list page. Update
+`wet-check-billings.tsx`'s `getStatusBadge` to consume the extracted
+component (one-line swap).
+
+**(6) Add `openWcbId` state and modal wiring** alongside the existing
+`openBillingSheetId` / equivalent state on the page. Modal:
+
+```jsx
+{openWcbId ? (
+  <WetCheckBillingViewModal
+    wcbId={openWcbId}
+    open={true}
+    onClose={() => setOpenWcbId(null)}
+  />
+) : null}
+```
+
+Import `WetCheckBillingViewModal` from
+`@/components/wet-check-billings/wet-check-billing-view-modal`.
+
+### Tests
+
+`customer-billing-wcb-tab.test.tsx`:
+
+```typescript
+describe("Customer billing — WCB tab and Total Work line (Slice 1)", () => {
+  it("renders 'Wet Check Billings: N' in the Total Work card", () => {
+    renderPage({
+      wetCheckBillings: [makeWcb({ id: 1 }), makeWcb({ id: 2 })],
+    });
+    expect(screen.getByText("Wet Check Billings:")).toBeInTheDocument();
+    expect(screen.getByText("Wet Check Billings:").nextElementSibling)
+      .toHaveTextContent("2");
+  });
+
+  it("renders the 'WC Billings (N)' tab on both tab strips", () => {
+    renderPage({ wetCheckBillings: [makeWcb({})] });
+    const tabs = screen.getAllByRole("tab", { name: /WC Billings/ });
+    expect(tabs.length).toBe(2);  // top + bottom strip
+    tabs.forEach((t) => expect(t).toHaveTextContent("WC Billings (1)"));
+  });
+
+  it("renders WCB rows when the WCB tab is selected", async () => {
+    renderPage({
+      wetCheckBillings: [
+        makeWcb({ id: 1, billingNumber: "WC-2026-1042", totalAmount: "350" }),
+      ],
+    });
+    fireEvent.click(screen.getAllByRole("tab", { name: /WC Billings/ })[0]);
+    expect(await screen.findByTestId("wcb-row-1")).toBeInTheDocument();
+    expect(screen.getByText("WC-2026-1042")).toBeInTheDocument();
+    expect(screen.getByText("$350.00")).toBeInTheDocument();
+  });
+
+  it("clicking a WCB row opens the WCB view modal", async () => {
+    renderPage({
+      wetCheckBillings: [makeWcb({ id: 42 })],
+    });
+    fireEvent.click(screen.getAllByRole("tab", { name: /WC Billings/ })[0]);
+    fireEvent.click(await screen.findByTestId("wcb-row-42"));
+    expect(await screen.findByTestId("wcb-view-modal")).toBeInTheDocument();
+  });
+
+  it("renders an empty-state card when there are no WCBs", async () => {
+    renderPage({ wetCheckBillings: [] });
+    fireEvent.click(screen.getAllByRole("tab", { name: /WC Billings/ })[0]);
+    expect(await screen.findByText(/No wet check billings yet/)).toBeInTheDocument();
+  });
+
+  it("does not change the Unbilled tab count math (already includes WCBs)", () => {
+    renderPage({
+      unbilledWorkOrders: [{ id: 1 } as any],
+      unbilledBillingSheets: [{ id: 2 } as any],
+      unbilledWetCheckBillings: [{ id: 3 } as any, { id: 4 } as any],
+    });
+    expect(screen.getByText(/Unbilled \(4\)/)).toBeInTheDocument();
+  });
+});
+```
+
+### Acceptance criteria
+
+- Both `TabsList`s on `customer-billing.tsx` use `grid-cols-6` and include
+  a "WC Billings" / "Wet Check Billings" tab between Billing and Estimates.
+- The Total Work card has a "Wet Check Billings: N" row between Billing
+  Sheets and Estimates.
+- The new tab renders one row per WCB in the customer's billing data,
+  using the same card shape as the billing-sheet rows.
+- Clicking a row opens `WetCheckBillingViewModal` — the same modal the
+  Unbilled tab opens on a WCB row click. Edit pencil (Slice 5) remains
+  reachable.
+- Empty state renders when `wetCheckBillings.length === 0`.
+- All new tests pass. The existing `customer-billing-wet-check.test.tsx`
+  continues to pass unchanged.
+- No backend changes were made. No new endpoints, no payload shape
+  changes.
+- `pnpm typecheck` and `pnpm test` pass across the workspace.
+
+### Out of scope
+
+- Adding "Edit" / "Delete" affordances directly on the WCB row (the modal
+  carries those).
+- Modifying the Unbilled tab's WCB integration (it works per WC Command
+  Center Slice 1; not in scope here).
+- Financial Pulse widget changes (Slice 2 handles those).
+- Renaming the Billing Sheets tab or its content for symmetry with WC
+  Billings.
+- Adding role gates to the new tab — the customer billing page is
+  already role-gated at the route level (billing_manager / company_admin
+  / super_admin only).
+
+### Dependencies
+
+- WC Command Center Slice 1 (deployed — backend returns
+  `wetCheckBillings` and `unbilledWetCheckBillings`).
+- WC Billing Integration Slice 5 (deployed — `WetCheckBillingViewModal`
+  has the labor-rate edit pencil).
+- Independent of all other WC Manager Experience slices. Can land in
+  parallel with Slice 4 (photo bug).

@@ -1,0 +1,64 @@
+# BUILD — Realign the Invoice Correction Engine to Source-of-Truth
+
+**Governed by:** PROJECT RULES **Rule 6** (edit at the source ticket; log the activity stream; invoice is a projection) and **Rule 7** (done means proven). Full diagnosis in `AUDIT - Invoice Correction Engine (Source-of-Truth + Activity Stream).md`. **This supersedes** `BUILD - Fix Invoice Reissue (Apply Correction + Exclude Superseded + Versioning)` — that doc's "apply after-values to the invoice, don't touch the ticket" approach is the wrong direction and must not be built.
+
+**What & Why**
+The correction flow captures the dispute beautifully but never edits the source ticket and never writes to any ticket's activity stream — so the reissue re-derives from the *unedited* billing sheet and produces the original total (Huntington Trails #04723 reissued at $2,796.09 instead of $2,286.09). Fix the architecture: the correction must **edit the source ticket** (through the canonical recompute), **log that edit to the ticket's activity stream**, and let the invoice re-derive. Server-side + invoices-list UI. Rule 1 multi-tenancy throughout.
+
+## Slice 1 — Reissue applies each correction to its source ticket + logs activity (core)
+**File:** `artifacts/api-server/src/routes/invoice-correction-routes.ts` (reissue transaction ~557–681).
+Inside the existing reissue `db.transaction`, **before** `computeLiveTotalsFromTickets`, loop the correction lines and apply each to its source ticket (billing sheet / work order / WCB):
+- **`zero_line`** → set the disputed subtotal on the ticket (e.g. `laborSubtotal = 0`) and recompute `totalAmount` via the canonical helper (`computeBillingSheetTotal` / `_resyncBillingSheetTotalsTx` / `money()`, `total = parts + labor`) — no hand-rolled sum.
+- **`adjust`** → set the ticket to the line's `afterParts` / `afterLabor` and recompute canonically.
+- **`exclude`** → unlink the ticket from the invoice (as today).
+- **For every applied line, write an activity-stream entry** on that ticket via `recordAuditEvent` (`audit_log`, `target_type` = the ticket type): `action: "billing_correction"`, actor = the correction's approver/creator, `summary` = e.g. "Labor zeroed via invoice correction #04723 — reason: pricing_error, requested by Rob Kaplan", `details` = `{ before, after, correctionId, evidence }`.
+- Then the existing `computeLiveTotalsFromTickets` + item-copy produce the corrected total **automatically** (the tickets now hold the edited values). Remove the now-redundant `exclude`-only handling of after-values.
+- **Atomicity:** all of this is in the reissue transaction. A correction that is **canceled** (never reissued) must leave every ticket byte-for-byte unchanged — apply happens only at reissue, never during Correct/Document.
+- Remove the dead `getOpenCorrectionForInvoice` unlock helper (or wire it — but the reissue-time apply above is the chosen path; don't leave it as dead code per Rule 7).
+
+## Slice 2 — Reissued invoice is `generated`, carries QB linkage
+**Same file (~578).** Create the reissued invoice with `status: "generated"` (not `"draft"`). Carry `quickbooksInvoiceId` + `quickbooksSyncToken` from the original onto the reissued invoice so its QB sync updates the same QB invoice in place.
+
+## Slice 3 — Exclude `superseded` from all invoice totals
+- `storage.ts:6768` — `status NOT IN ('draft','cancelled')` → add `'superseded'`.
+- `financial-pulse-math.ts:352` — exclude `superseded` as well as `cancelled`.
+- Audit every place invoices are summed (period/monthly list header, Money-Owed-by-Age, customer totals, Financial Pulse KPIs) and exclude `superseded` consistently.
+
+## Slice 4 — Wire qb-sync to the in-place update (stop the 501 stub)
+**Same file (~696–757).** #1711 (`updateQbInvoiceInPlace` + SyncToken capture) has shipped. Replace the 501 stub: on `POST …/:id/qb-sync` for a `reissued` correction, call `updateQbInvoiceInPlace` on the reissued invoice (using the carried-forward id + token) so QuickBooks shows one invoice at the corrected amount. Refresh the stored SyncToken; on failure leave `qbSyncStatus` retryable (never create a second QB invoice).
+
+## Slice 5 — Version-chain the invoices list
+**File:** `artifacts/irrigopro/src/pages/invoices.tsx`. Render the current invoice (`-R1`) as the row with the superseded predecessor(s) collapsed underneath as version history (use the existing `supersededByInvoiceId` link), not a duplicate sibling row. Superseded rows never contribute to totals (Slice 3) and aren't independently billable.
+
+## Acceptance ("Done looks like")
+- Reissuing #04723 with the $510 `zero_line` correction: **BS-2026-0019's stored `laborSubtotal` becomes 0** and `total = parts`; the **billing sheet's Activity tab shows the correction entry** (actor, before→after, reason, evidence); the reissued **#04723-R1 totals $2,286.09**; it's `generated`; QuickBooks updates the same invoice in place.
+- Canceling a correction leaves every ticket unchanged (no activity entries, no total changes).
+- The superseded #04723 no longer counts in any total; the list shows one Huntington April row with version history nested.
+
+## Verification (Rule 7 — attach proof, do not mark done without it)
+- Behavioral test: `zero_line` correction → source ticket labor = 0 + `total = parts` + an `audit_log` row exists for that ticket.
+- Test: reissued invoice total = corrected; status `generated`; canceled correction mutates no ticket.
+- Test: superseded excluded from period/customer/Financial-Pulse totals.
+- Test: qb-sync calls `updateQbInvoiceInPlace` (no duplicate QB invoice); company isolation on every correction endpoint.
+- **Screenshots required:** (a) BS-2026-0019 Activity tab showing the logged correction; (b) the invoices list showing #04723-R1 at $2,286.09 with #04723 nested as superseded and dropped from the total.
+
+## Relevant files
+- `artifacts/api-server/src/routes/invoice-correction-routes.ts` (reissue apply+log ~557–681; status ~578; qb-sync ~696–757)
+- `artifacts/api-server/src/routes/audit-log.ts` (`recordAuditEvent`) + `routes.ts` `recordLifecycleAudit` (~1080–1160)
+- `artifacts/api-server/src/billing-sheet-total.ts` / `_resyncBillingSheetTotalsTx` / `lib/money.ts` (canonical recompute)
+- `artifacts/api-server/src/storage.ts:6768`, `financial-pulse-math.ts:352` (exclude superseded)
+- `artifacts/api-server/src/routes/routes.ts` (`updateQbInvoiceInPlace` for Slice 4)
+- `artifacts/irrigopro/src/pages/invoices.tsx` (version-chain UI)
+
+---
+
+## Definition of Done (Replit must complete with evidence — do not mark done otherwise)
+- [ ] **Invariants restated:** Rule 1 (tenancy on every correction endpoint), Rule 6 (edit lands on the ticket + activity-stream entry; invoice re-derives), Rule 7 (proof below).
+- [ ] **Self-audit:** each Slice/acceptance bullet → the `file:line` that satisfies it → proof.
+- [ ] **No dead code:** `getOpenCorrectionForInvoice` removed (or wired and called); qb-sync no longer returns 501.
+- [ ] **Diff summary** (files + line ranges) attached.
+- [ ] **Tests passing** (paste run) — including the `zero_line` → ticket-edited + activity-logged behavioral test and the cancel-leaves-ticket-untouched test.
+- [ ] **Screenshots:** BS-2026-0019 Activity tab with the correction entry; invoices list showing #04723-R1 = $2,286.09 with #04723 nested/superseded and excluded from the total.
+- [ ] **Source-of-truth proof:** BS-2026-0019's stored `laborSubtotal` = 0 after reissue (not just the invoice).
+- [ ] **Deployed**, newest deployed commit = this work; deploy timestamp stated.
+- [ ] Commit message matches the diff.

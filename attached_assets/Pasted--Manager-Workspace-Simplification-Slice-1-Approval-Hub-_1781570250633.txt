@@ -1,0 +1,123 @@
+# Manager Workspace Simplification — Slice 1: Approval Hub (Reuse Existing Modals) + Launchpad
+
+**Source:** Randy, 2026-06-15 — "we are trying to do too much… my intention with the approval list was a simple list where each ticket is clickable, pulls up the view/edit modal with a Save & Approve button. Use the parts of the app that work great already rather than this super-complicated page." Full-replacement mandate confirmed ("I missed the mark speccing this last week — full replacement mode").
+**Severity:** P1 — the current merged stage cockpit (inline editing, keyboard nav, five lanes, its own approve/kickback handlers) is a second editing surface competing with the app's real edit modals; it's heavier than the manager needs and a maintenance liability.
+**Prerequisite / sibling specs:** *Findings-to-Route Removal* (removes the findings lane + bulk-route endpoint; see Coordination — Spec B subsumes or follows it). *Wet Check System* (Spec A) provides the wet-check needs-review count this page links to. Built in **parallel** with Spec A.
+**Hard boundary:** **Command Center (`pages/customer-billing.tsx`) is not modified.** The existing entity pages (Work Orders, Billing Sheets) are linked to, not rebuilt.
+
+This is a single self-contained slice family. Do not deviate from the locked decisions. If a question arises that isn't answered here, stop and flag it rather than guessing.
+
+---
+
+## What this page becomes
+
+Manager Workspace stops being a do-everything cockpit and becomes a **lightweight hub**:
+
+1. A **"Needs Approval" list**, **sectioned by ticket type** so the manager gets a per-type rhythm. Clicking a ticket opens **its existing view/edit modal** with a **Save / Approve / Save & Approve** action row. No new inline editor — reuse what already works.
+2. A **launchpad row of tiles** with open-count badges that jump to the relevant pages: **Wet Checks → the new Wet Check System page** (Spec A), **Work Orders → existing page**, **Billing Sheets → existing page**.
+
+Everything else from the current page — `DetailPaneInline` inline editing, the keyboard map, the five stage lanes (Needs my review / Waiting on tech / Findings to route / Passed to billing / Billed 7d), the bulk-route bar — is **removed**.
+
+---
+
+## Design Context (locked decisions)
+
+1. **Full replacement of the stage cockpit.** Remove inline editing (`DetailPaneInline`), keyboard navigation, all five lane lists, the findings bulk-route bar/endpoint, and the page's bespoke approve/kickback handlers. The page no longer edits records inline.
+2. **Needs Approval list, sectioned by type — Work Orders and Billing Sheets only.** Each section lists the items of that type awaiting manager sign-off (the existing review/approval statuses). **Wet checks and their snapshots are NOT in this list** — snapshot approval happens inside the Wet Check System review flow (Spec A), not here. (Decision confirmed: the hub does not grow a wet-check/snapshot approval section.)
+3. **Row click → existing view/edit modal + approve action row.** Reuse `components/billing/billing-sheet-view-modal.tsx` and `components/work-orders/work-order-details.tsx`. Add a **Save / Approve / Save & Approve** action row to each (the one real new piece — see 5). The modal is the app's normal edit experience; approval just becomes available from it.
+4. **Launchpad tiles with open counts.** Three tiles:
+   - **Wet Checks** — count = wet-checks-needing-review (from Spec A's endpoint) → links to the new Wet Check System page (`?tab=needs-review`). Interim, before Spec A ships: link to the existing wet-check review page.
+   - **Work Orders** — count = open work orders → existing Work Orders page.
+   - **Billing Sheets** — count = open billing sheets → existing Billing Sheets page.
+   Tiles are navigation, not a second copy of the approval list.
+5. **Approve action row is the only new build.** The existing modals support inline field saves today but have **no Approve button** (approval lives in separate routes). Add an action row wired to the existing approve / return-for-correction routes (`approve-routes.ts`; `POST /api/{billing-sheets|work-orders}/:id/approve` and `/return-for-correction`). Respect existing `billed`/`invoiceId` locks — approve/save disabled on locked records. **Never** call `/kickback` (doesn't exist); use `return-for-correction`.
+6. **Drop the other lanes entirely.** Waiting on tech, Passed to billing, Billed (7d), Findings to route — gone. They don't serve the manager's approval flow.
+7. **Keep a slim Financial Pulse header** (Billed MTD / Collected MTD / Money Owed) as the page's only "pulse." It's informational, already built, and gives the manager context without lanes. No change to its math.
+8. **Role behavior preserved.** Whoever can approve WOs/BSs today still can; `billing_manager` keeps its current access. Nothing in this simplification widens or narrows approval rights beyond removing the inline-edit role-guards that came with the deleted cockpit.
+
+---
+
+## Slice 1.1 — Tear down the stage cockpit
+
+### Files
+- `artifacts/irrigopro/src/pages/manager-workspace.tsx`
+- `artifacts/api-server/src/routes/manager-workspace-routes.ts`
+
+### Concrete changes
+- Remove the five lane lists, the `DetailPaneInline` inline-edit pane, keyboard navigation, the findings bulk-route bar, and the page's approve/kickback handlers tied to the cockpit.
+- Remove server support for the deleted surfaces: the staged-queue lane assembly, the `findings_to_route` stage and `POST /api/manager-workspace/findings/bulk-route` endpoint, the `findingsNeedingRouting`/stage-count indicators. (If *Findings-Removal* already shipped this, treat as done — see Coordination.)
+- Keep only what 1.2–1.4 need: the data to build the Needs Approval sections and the tile counts.
+
+### Acceptance
+- No inline editor, no keyboard nav, no lane lists, no bulk-route bar remain.
+- Removed endpoints return 404; no client references them.
+
+---
+
+## Slice 1.2 — Needs Approval list (sectioned: Work Orders, Billing Sheets)
+
+### Files
+- `manager-workspace.tsx` (new lightweight list); `manager-workspace-routes.ts` (a simple "needs approval" query per type).
+
+### Concrete changes
+- Two sections, **Work Orders** and **Billing Sheets**, each listing items in their existing manager-review/approval statuses (no `invoiceId`). Reuse the status sets already exported (e.g. `ACTIVE_BS` and the WO review statuses) — import, don't redefine.
+- Each row is compact (number, customer, age, total) and **clickable → opens the type's existing modal** (1.3).
+- Sections render in a fixed order so the manager flows type-by-type.
+
+### Acceptance
+- WO and BS awaiting approval appear in their sections; already-invoiced/locked items don't; row click opens the correct modal.
+
+---
+
+## Slice 1.3 — Approve action row on the existing modals
+
+### Files
+- `components/billing/billing-sheet-view-modal.tsx`
+- `components/work-orders/work-order-details.tsx`
+
+### Concrete changes
+- Add a bottom action row: **Save** (existing inline-save behavior), **Approve** (calls existing `POST /api/{…}/:id/approve`), **Save & Approve** (save then approve in sequence). Add **Return for correction** (existing `…/return-for-correction` with `{ notes }`) where the manager flow needs kickback.
+- Disable Save/Approve when the record is locked (`billed` / `invoiceId` set) — read-only view still opens.
+- On success, close modal + refresh the Needs Approval list so the row drops out.
+
+### Tests
+- Approve from each modal flips status via the real route and removes the row.
+- Save & Approve persists edits then approves.
+- Locked record → actions disabled, view still opens.
+- Return-for-correction uses `return-for-correction`, never `/kickback`.
+
+### Acceptance
+- Both modals can save, approve, and save-and-approve through existing routes; locks respected; list refreshes.
+
+---
+
+## Slice 1.4 — Launchpad tiles
+
+### Files
+- `manager-workspace.tsx`; counts from existing queries + Spec A's wet-check-needs-review count.
+
+### Concrete changes
+- Three tiles (Wet Checks / Work Orders / Billing Sheets), each with an open-count badge and a link to the relevant page. Match the app's card aesthetic. Wet Checks tile → new Wet Check System page (`?tab=needs-review`); interim link to current wet-check review page until Spec A lands.
+
+### Acceptance
+- Tiles show accurate open counts and navigate to the correct pages; Wet Checks tile reaches the wet-check review queue.
+
+---
+
+## Coordination (parallel build with Spec A + Findings-Removal)
+
+- **Findings lane/endpoint removal** (1.1) overlaps the *Findings-Removal* spec. If that spec ships first, 1.1 inherits a clean state and just confirms it. If not, **Spec B performs the removal** as part of teardown. Either way the end state is identical; don't double-implement — whichever runs second verifies rather than re-deletes.
+- **Wet-check needs-review count** comes from Spec A (Slice 1.3 there). Until Spec A ships, the Wet Checks tile uses an interim count/route. This is the only cross-spec data dependency.
+- **No Command Center, no entity-page rebuilds** — Work Orders / Billing Sheets pages are link targets only.
+
+## Out of scope
+- Wet-check or snapshot approval (lives in Spec A's review flow).
+- Rebuilding Work Orders / Billing Sheets pages.
+- Any Command Center change.
+- Any change to Financial Pulse math.
+
+## Verification
+- Manager Workspace = Financial Pulse header + Needs Approval list (WO/BS sections) + three launchpad tiles. Nothing else.
+- Clicking a ticket opens the app's existing modal with working Save / Approve / Save & Approve; locks respected.
+- No inline cockpit, no lanes, no keyboard nav, no findings/bulk-route remnants.
+- Tiles count and link correctly; Wet Checks tile routes to the wet-check review queue.

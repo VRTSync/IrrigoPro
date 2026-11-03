@@ -1,0 +1,22 @@
+Three dead links on the Financial Pulse page. The only registered customer routes are /customers, /customers/:id/profile, /customers/:customerId/irrigation-profile and /customers/:customerId/site-maps. There is no /customers/:id. The widget's /profile link is correct; the Financial Pulse page navigates to /customers/${id} in three places:
+
+financial-pulse.tsx:898 — clicking a row in the Pulse tab's In-Flight by Customer table
+financial-pulse.tsx:1367 — clicking a row in the Accounting tab's By Customer table
+financial-pulse.tsx:1416 — the kebab menu's "View customer"
+
+Those are the primary click targets on both tabs' customer tables, and they all fall through to the catch-all. #2016 correctly scopes itself out of that file, but #2015's brief is windows, labels and charts — so unless you add it explicitly, this falls straight through the gap between the two tickets. It's a one-line fix in three spots and it's the kind of thing that stays broken for a year.
+
+The substance of #2016 all checks out. The duplicate union member and duplicate interface are both still there; the Collected MTD fallback, its percentage-reconstruction helper and the stale comment above them are all still present; the tips are as described; the widget's customer route is the correct one.
+
+But five of the line ranges are stale, three badly enough to point at absent code:
+
+Cited	Actual
+widget 280-345 (fallback)	helper at 276, fallback at 321, stale comment at 267 — range misses the helper and the comment
+widget 450-462 (customer-detail tips)	invoicedMtd 439, invoicedYtd 441 — range misses both
+widget 700-720 (customer route)	575
+financial-pulse-math.ts:193-197	229
+invoice-list-routes.ts:770-800	resolveInvoiceScope at 210
+
+The widget shrank 94 lines when #2013 deleted the ar-aging variant, and the math file grew across #2013, #2014 and #2017. These refs were written against a pre-wave-1 snapshot.
+
+This is the fourth ticket where the refs went stale, and it's now the most common defect in the set. Your Coordination section already says ownership is "stated by function and predicate rather than line number... every wave moves them" — apply that same rule to Relevant files, as #2019 does. List the symbols (deriveCollectedMtdDeltaPct, BILLING_HEADER_TIPS, CUSTOMER_DETAIL_TIPS, TopCustomersCompactVariant, INVOICE_EXCLUDED_STATUSES, resolveInvoiceScope) and add the "locate by symbol, not by line" note. It costs nothing and it stops being wrong after every wave.

@@ -1,0 +1,94 @@
+# BUILD — Invoice Correction & Reissue (Guided Dispute Flow)
+
+**What & Why**
+Billing disputes are routine (e.g., Huntington Trails / Invoice #04723: customer agrees the $510 pump reassembly labor on BS-2026-0019 isn't chargeable → reduce to $2,286.09 and reissue). Today there's no first-class way to correct an already-issued invoice, and the "why" behind an adjustment isn't captured well. This ticket adds a **guided, auditable Invoice Correction process** launched from the Invoices page that walks the user through: pick the disputed ticket → edit the source ticket → document the reason (with evidence) → review → reissue a corrected invoice and resync QuickBooks.
+
+**Core architectural principle — forward flow, not backward propagation.** The invoice is a projection of its tickets (billing sheets / work orders / WCBs); "totalAmount is authoritative" and edits carry forward. This flow must **edit the source ticket** and let the invoice re-derive — it must NOT store edited values on the invoice and push them backward into tickets (that reintroduces the dual-source drift the money-integrity work eliminated). The UX *feels* like "editing the final bill," but every write targets the source ticket and totals recompute through the existing canonical path (`money()`, `total = parts + labor`). Server-side only; do not modify `customer-billing.tsx`. Multi-tenancy intact. **Never auto-void QuickBooks** — the QB step is always an explicit, user-confirmed action.
+
+**Visual reference:** the interactive mockup shown in chat (5-step flow: Dispute → Correct → Document → Review → Reissue).
+
+## Done looks like
+- From the Invoices page, an issued invoice has a "Correct / reissue" action that opens a guided 5-step flow.
+- The user selects the disputed ticket(s), edits the **source ticket** (zero a line, adjust qty/price, or exclude the ticket), and sees the corrected invoice total update live.
+- A structured **correction record** captures reason category, requester, approver, source, free-text detail, the before/after amounts, and attached evidence (e.g., the customer email).
+- Reissue creates a corrected invoice that **supersedes** the original (original kept immutable, never deleted), re-derived from the edited tickets.
+- The final step surfaces the QuickBooks change and requires explicit confirmation before syncing.
+- The whole thing is reversible until reissue, and every step is company-scoped and permission-gated.
+
+---
+
+## Slice 1 — Data model: the correction/adjustment record
+### File: `lib/db/src/schema/schema.ts` + migration
+New **`invoice_corrections`** table (the audit spine):
+- `id, companyId (FK NOT NULL), customerId (FK)`.
+- `originalInvoiceId (FK)`, `reissuedInvoiceId (FK, nullable until reissue)`.
+- `status` enum: `draft | reviewed | reissued | qb_synced | canceled`.
+- `reasonCategory` enum: `customer_dispute | pricing_error | duplicate_charge | goodwill_credit | scope_change | tech_error | other`.
+- `requestSource` enum: `email | phone | in_person | sms | other`.
+- `requestedBy (text)`, `approvedByUserId (FK)`, `reasonDetail (text)`.
+- `evidenceUrl (nullable)` / `evidenceNote (text)` — attach or paste the customer message.
+- `originalTotal, correctedTotal, deltaAmount (decimal)` — snapshot at reissue.
+- `qbSyncStatus` enum (`pending | synced | failed | skipped`), `qbSyncedAt`, `qbNote`.
+- `createdByUserId, createdAt, updatedAt`.
+New **`invoice_correction_lines`** (one per edited ticket): `id, companyId, correctionId (FK), ticketType (billing_sheet|work_order|wcb), ticketId, beforeParts, beforeLabor, beforeTotal, afterParts, afterLabor, afterTotal, action (zero_line|adjust|exclude), lineNote`.
+- Company-scoped (Rule 1); `before*` snapshots make the correction reversible/auditable.
+
+## Slice 2 — Controlled edit of an already-invoiced ticket (reopen semantics)
+### Files: `routes.ts`, `storage.ts`
+Today a ticket on an issued/billed invoice is **locked** (billed/`invoiceId` set). Add a **correction-scoped unlock** so the edit is deliberate and traceable, not a hole in the lock:
+- A ticket may be edited only within an open `invoice_corrections` draft that references its invoice. Outside that context, the existing lock stands.
+- Edits go through the **existing canonical recompute** (`_resyncBillingSheetTotalsTx` for item changes; `computeBillingSheetTotal` for header edits; `money()` throughout) — no new total math. Zeroing the labor line = set `laborSubtotal = 0` and recompute; excluding a ticket = drop it from the reissued invoice's membership (don't delete the ticket).
+- Snapshot each ticket's before-values into `invoice_correction_lines` at edit time.
+
+## Slice 3 — The correction API + reissue
+### Files: `routes.ts` (new `/api/invoice-corrections/*`), `storage.ts`, invoice service
+- `POST /api/invoice-corrections` (open draft for an invoice), `PATCH …/:id` (record edits/reason), `POST …/:id/reissue`, `POST …/:id/cancel`. All `requireBillingAccess`, company-scoped from `req.authenticatedUserCompanyId`.
+- **Reissue** (`…/reissue`): create a new invoice from the corrected ticket set (re-derived from live ticket totals, the same path monthly/preview invoices use), assign a **revision number** (`04723-R1`; increment on subsequent corrections), set `originalInvoice.status = 'superseded'` + `supersededByInvoiceId`, stamp `reissuedInvoiceId` + `originalTotal/correctedTotal/deltaAmount` on the correction. The original invoice and its PDF remain retrievable (audit).
+- Validate the reissued total equals the sum of its tickets (`parts + labor`) — the PDF validator must pass (no drift).
+
+## Slice 4 — QuickBooks resync (update the SAME invoice in place — never two)
+### Files: `routes.ts`, QB integration service. **Depends on `BUILD - QuickBooks SyncToken Capture + In-Place Invoice Update`.**
+The QB requirement — never two invoices in QuickBooks for a correction — is met by **updating the existing QB invoice in place**, not creating a second one and voiding the first. This depends on the SyncToken ticket (capture + `updateQbInvoiceInPlace`).
+- `POST …/:id/qb-sync`: since the original invoice is already in QuickBooks (`quickbooksInvoiceId` set), carry that `quickbooksInvoiceId` + `quickbooksSyncToken` onto the reissued invoice and call **`updateQbInvoiceInPlace`** — a sparse update that replaces the QB invoice's lines with the corrected set and sets `DocNumber = 04723-R1`. QuickBooks ends with a **single** invoice at the corrected total. No duplicate, no manual void.
+- Refresh the stored `SyncToken` from the update response; handle stale-token (`5010`) via the re-fetch-and-retry-once logic in the dependency ticket.
+- Require explicit user confirmation before the sync runs (still surface exactly what changes). On failure, leave the correction `reissued` (not `qb_synced`), retryable — never fall back to creating a second invoice.
+- Only when an invoice was **never** pushed to QB (no `quickbooksInvoiceId`) does this create fresh.
+- Record `qbSyncStatus/qbSyncedAt/qbNote`.
+
+## Slice 5 — Guided UI (the flow)
+### Files: new `pages/invoices/InvoiceCorrectionFlow.tsx` (+ steps), Invoices page entry point
+Five steps (see mockup), each with the running corrected total visible:
+1. **Dispute** — show the invoice broken into its tickets; select the disputed one(s).
+2. **Correct** — edit the selected source ticket (zero line / adjust / exclude); live invoice total.
+3. **Document** — reason category, source, requested by, approver, detail, attach/paste evidence. Required before continuing.
+4. **Review** — original → corrected, delta, reason summary, evidence.
+5. **Reissue** — reissue as `-R1`, keep original superseded, then the confirmed QB resync + send-to-customer.
+- Reversible/cancelable until reissue. Wire the entry point on the Invoices page (do not build a parallel invoices screen). Match app styling; company_admin / billing_manager only.
+
+## Guardrails
+- **Forward-flow only:** all edits write to tickets; the invoice re-derives. No edited totals stored on/pushed from the invoice.
+- **Immutability:** originals are superseded, never deleted; corrections and before-snapshots are permanent.
+- **Integrity:** reuse `money()` + the canonical recompute; the reissued invoice must pass the PDF total validator.
+- **Permissions + tenancy:** billing roles only; every read/write scoped to `req.authenticatedUserCompanyId`; cross-company → 404.
+- **QB safety:** explicit confirmation; never auto-void; retryable on failure.
+
+## Tests
+- Open correction on #04723 → zero BS-2026-0019 labor → corrected total $2,286.09; ticket total $510 → $0 via canonical recompute; reissued invoice validates (parts+labor).
+- Reissue creates `04723-R1`, marks #04723 superseded, both retrievable; correction record holds before/after + reason + evidence.
+- Edit blocked outside a correction draft (lock still holds); allowed within one.
+- QB sync requires confirmation; a simulated QB failure leaves status `reissued`, retryable, nothing auto-voided.
+- Company isolation: can't open a correction on another company's invoice.
+- Excluding a whole ticket removes it from the reissue without deleting the ticket.
+
+## Out of scope
+- `customer-billing.tsx` / Command Center screens.
+- Bulk/multi-invoice corrections (single invoice per flow for now).
+- Redesigning the invoice PDF (reissued invoice uses the existing renderer with the revision label).
+
+## Relevant files
+- `lib/db/src/schema/schema.ts` (new `invoice_corrections`, `invoice_correction_lines`)
+- `artifacts/api-server/src/routes/routes.ts` (`/api/invoice-corrections/*`; reissue; qb-sync), `storage.ts` (correction CRUD, reopen-scoped edit, reissue)
+- `artifacts/api-server/src/invoice-pdf-service.ts` (validator must pass on reissue), the QuickBooks integration service
+- `artifacts/api-server/src/billing-sheet-total.ts` / `_resyncBillingSheetTotalsTx` / `lib/money.ts` (reuse — no new total math)
+- `artifacts/irrigopro/src/pages/invoices/InvoiceCorrectionFlow.tsx` (new) + Invoices page entry point
+- Do NOT modify: `artifacts/irrigopro/src/pages/customer-billing.tsx`

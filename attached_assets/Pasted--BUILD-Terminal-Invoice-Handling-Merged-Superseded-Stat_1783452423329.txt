@@ -1,0 +1,62 @@
+# BUILD — Terminal Invoice Handling: Merged + Superseded (Status, Totals Exclusion, Version-Chain, Backfill)
+
+**What & Why**
+When two invoices are merged, the absorbed one is set to `cancelled` (`storage.ts:6966`), keeps its old total, has no link to the survivor, and still clutters the list and affects totals — and "cancelled" wrongly conflates *merged* (work is being billed elsewhere) with *voided* (never billed). This ticket **generalizes terminal-invoice handling** so both **merged** and **superseded** (from correction reissue, #1739) invoices are treated the same way: a real terminal status, a link to their live successor, excluded from every total, collapsed under the survivor in the list, and logged in the activity stream. Reuses the terminal-invoice infrastructure from **#1739** (superseded exclusion + version-chain) — extend it, don't duplicate. Governed by Rule 6 (activity stream) and Rule 7 (proof).
+
+## The model (unify merged + superseded)
+- **Active invoices (count in totals):** `generated`, `sent`, `paid`, `overdue`.
+- **Terminal / non-active (excluded from ALL totals, kept for audit, never zeroed):** `draft`, `cancelled`, `superseded`, `merged`, `failed`.
+- Each terminal invoice links to its live successor: `supersededByInvoiceId` (correction) **or** `mergedIntoInvoiceId` (merge). Same list-collapse and exclusion logic keys off "has a successor link / is a non-active status."
+
+## Slice 1 — Schema
+- Add `mergedIntoInvoiceId: integer("merged_into_invoice_id")` to `invoices` (mirror `supersededByInvoiceId`).
+- (Status is free-text; no enum change needed — `merged` joins the documented set.)
+
+## Slice 2 — Merge sets `merged` (not `cancelled`) + link + activity log + QB void
+**File:** `storage.ts` `mergeInvoices` (~6878–6975).
+- Change the merged-out update from `status: "cancelled"` to **`status: "merged"`** and set **`mergedIntoInvoiceId = survivingId`**. Keep the invoice's stored total intact (audit of what it originally was) — do **not** zero it.
+- **Activity stream (Rule 6):** via `recordAuditEvent` (already imported), write:
+  - on the **survivor**: `action: "invoice_merge_in"`, `targetType: "invoice"`, `targetId: survivingId`, summary "Merged in #B ($X), #C ($Y) by {user}", details = merged ids/numbers/amounts.
+  - on **each merged invoice**: `action: "invoice_merged"`, `targetType: "invoice"`, `targetId: mergedId`, summary "Merged into #A", details = survivor id/number. (So both sides show it on their Activity tab.)
+- **QuickBooks:** the survivor's QB link is already cleared (re-sync as a clean create — existing behavior). For each merged-out invoice that had a QB counterpart (`mergedFromQuickbooksIds`), **void it in QuickBooks** (it's no longer billed) — or, if void isn't wired, surface it as a guided step + record `qbNote`, per the never-auto-void rule. (Confirm which; don't leave orphaned QB invoices silently.)
+
+## Slice 3 — Exclude all terminal statuses from every total
+Ensure `merged`, `superseded`, and `cancelled` are excluded **everywhere invoices are summed** — coordinate with #1739 (which adds `superseded`); this adds `merged` to the same lists:
+- `storage.ts:6768` (`getThisMonthBilledForCompany`): `status NOT IN ('draft','cancelled','superseded','merged','failed')`.
+- `financial-pulse-math.ts` (KPIs / gross margin / unbilled): exclude the same set.
+- Money-Owed-by-Age, customer totals, the period/monthly list header sums.
+- **Grep** `NOT IN ('draft','cancelled')` and `status === "draft"` / `=== "cancelled"` to catch every site; apply the full non-active set consistently.
+
+## Slice 4 — Version-chain the list for both links
+**File:** `artifacts/irrigopro/src/pages/invoices.tsx`. Extend the #1739 collapse so a terminal invoice nests under its successor via **either** `supersededByInvoiceId` **or** `mergedIntoInvoiceId`:
+- Render the **live successor** as the row; collapse its terminal predecessors beneath as history ("Merged in — #B, superseded on {date}", etc.), not as sibling rows.
+- A small badge on the successor ("merged from 2" / "Rev 2"). Terminal rows never contribute to displayed totals and aren't independently selectable/billable.
+
+## Slice 5 — Backfill migration: existing merge-cancelled → `merged` (Super Admin)
+Existing merged-out invoices are `cancelled` with no successor link. Distinguish them from genuine cancels using the **merge audit events** already in `audit_log` (each merge recorded `survivingInvoiceId` + merged ids in details).
+- New `MigrationDefinition` `backfill-merged-invoice-status-v1`, registered in `registry.ts`, on the Super Admin page.
+- `check`/`preview`/`run`: for each historical merge audit event, set its merged-out invoices to `status: "merged"` + `mergedIntoInvoiceId = survivingId` (only those currently `cancelled` and referenced by a merge event — leave genuine cancels alone). Idempotent; company-scoped; preview lists each invoice → survivor; write a `total_status_backfill` activity entry per invoice.
+- After this, existing merged invoices drop out of totals and nest correctly in the list.
+
+## Done looks like
+- A new merge sets the absorbed invoices to `merged` + `mergedIntoInvoiceId`; both survivor and merged show the merge on their Activity tab; merged-out QB invoices are voided (or flagged); the merged invoices count in **no** total and nest under the survivor in the list.
+- All of `cancelled`/`superseded`/`merged` are excluded from every total consistently.
+- The backfill migration converts existing merge-`cancelled` invoices to `merged` (genuine cancels untouched); after running, they leave totals and nest in the list.
+- Nothing is zeroed — terminal invoices keep their historical amounts for audit.
+
+## Definition of Done (attach proof — Rule 7)
+- [ ] `file:line` for: `mergedIntoInvoiceId` column + migration; merge status/link/activity/QB change; each totals-exclusion site; list-collapse extension; backfill migration + registry entry.
+- [ ] Screenshot: after a merge, the survivor row with merged invoices nested (not siblings); both invoices' Activity tabs showing the merge entries.
+- [ ] Screenshot: a period total that no longer includes the merged invoice's amount (before/after).
+- [ ] Screenshot: backfill migration visible on Super Admin; preview listing existing merge-cancelled invoices → survivor; post-run, they show `merged` and drop from totals.
+- [ ] Test: merge → merged status + link + both activity entries + totals exclude it; genuine cancel is untouched by backfill; company isolation.
+- [ ] Deployed; commit message matches diff.
+
+## Relevant files
+- `lib/db/src/schema/schema.ts` (`invoices`: add `merged_into_invoice_id`) + migration
+- `artifacts/api-server/src/storage.ts` (`mergeInvoices` ~6878–6975: `merged` status + link + activity + QB void; totals exclusion ~6768)
+- `artifacts/api-server/src/financial-pulse-math.ts` (exclusion set)
+- `artifacts/api-server/src/routes/audit-log.ts` (`recordAuditEvent` — `targetType`/`targetId`)
+- `artifacts/irrigopro/src/pages/invoices.tsx` (version-chain collapse for both links)
+- `artifacts/api-server/src/lib/migrations/backfill-merged-invoice-status.ts` (new) + `registry.ts`
+- Related: `BUILD - Realign Invoice Correction Engine …` / `#1739` (superseded terminal handling — reuse its exclusion set + list collapse)

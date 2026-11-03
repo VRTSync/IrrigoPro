@@ -1,0 +1,320 @@
+# Replit Task — WC Separate System, Slice 7 (Navigation + frontend cleanup)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader rebuild — it is reference material so you understand
+the intent. The actual work for this task is in the **Slice 7** section at the
+bottom. Do not deviate from any file paths, function names, schema field names,
+or payload shapes specified. If you believe a deviation is necessary, surface it
+and stop rather than proceeding.
+
+> **Deploy after Slice 5's migration script has been RUN successfully** (not
+> just deployed) and reconciliation has been verified. The BS-WC
+> prefix-sniffing removals in this slice would break the manager-wet-checks
+> "auto-billed today" stat during the gap between Slice 6 deploy and Slice 5
+> migration run.
+
+> **Rule of thumb for this slice:** this is the finalization slice. The
+> changes are coherent (nav, prefix removal, public method rename) but
+> small. Resist the urge to "clean up while you're in there" — deeper dead
+> code removal (the `getBillingSheetWetCheckView` method, the
+> `WetCheckHasBillingSheetError` class, the `wet_check_findings.billingSheetId`
+> column) is deliberately out of scope and listed at the bottom. Those need
+> an extended production stability period before being removed.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in conversation and are referenced by every slice in this
+rebuild.
+
+**Scope.** Only the wet check ecosystem is affected. Work-order and
+standalone BS sheets are unchanged.
+
+**Numbering.** After migration, wet check billings use `WC-YYYY-NNNN`
+format. BS-WC- numbering no longer exists.
+
+**Layout for detail view.** Zone-grouped via the existing `WetCheckBillingView`
+component, surfaced through the new `WetCheckBillingViewModal` from Slice 4.
+
+**Wet checks feel like their own thing.** Wet check billings are presented
+through dedicated nav and pages, not mixed into the billing-sheets surfaces.
+
+---
+
+## Slice 7 — Navigation + frontend cleanup
+
+**Scope.** Three coherent changes that finalize the separation: (a) add a new
+"Wet Check" sidebar nav group containing Wet Checks, Wet Check Reviews, and
+Wet Check Billings — surfacing the new page in the UI; (b) remove the legacy
+BS-WC prefix-sniffing call sites that no longer make sense once wet check
+billings live in their own table; (c) rename the public
+`convertWetCheckToBillingSheet` storage method to
+`convertWetCheckToWetCheckBilling` for semantic consistency. **Do NOT remove
+`getBillingSheetWetCheckView`, drop the `wet_check_findings.billingSheetId`
+column, or remove the `WetCheckHasBillingSheetError` class** — those are
+deeper dead-code cleanups that should follow an extended production stability
+period and are out of scope here.
+
+**Files modified.**
+- `artifacts/irrigopro/src/components/layout/nav-config.ts` — add Wet Check
+  nav group to three role configs
+- `artifacts/irrigopro/src/pages/manager-wet-checks.tsx` (~lines 59–90, 142)
+  — replace BS-WC prefix filter with the new endpoint
+- `artifacts/irrigopro/src/pages/billing-sheets.tsx` (~lines 120–134) —
+  remove `?prefix=BS-WC-` deep-link handling
+- `artifacts/irrigopro/src/components/manager/wet-check-confirm.tsx` (~line
+  222) — update display label
+- `artifacts/api-server/src/storage.ts` — rename
+  `convertWetCheckToBillingSheet` → `convertWetCheckToWetCheckBilling` (and
+  update its interface signature)
+- All callers of the renamed method (grep `convertWetCheckToBillingSheet`
+  across the repo and update each call site)
+- New: `artifacts/irrigopro/src/components/layout/nav-config.test.ts`
+  (extend if exists, create if not) — assert Wet Check group is present in
+  each role
+- New or extended:
+  `artifacts/irrigopro/src/pages/manager-wet-checks.test.tsx` — verify the
+  new endpoint is consumed
+
+**Concrete changes.**
+
+**(1) Add Wet Check nav group** to
+`artifacts/irrigopro/src/components/layout/nav-config.ts`.
+
+Add this group definition at the top of the file (or co-located with the
+other reusable group definitions):
+
+```typescript
+const wetCheckGroup = {
+  type: "group" as const,
+  label: "Wet Check",
+  icon: Droplets,
+  items: [
+    { type: "leaf" as const, label: "Wet Checks", path: "/wet-checks", icon: Droplets },
+    { type: "leaf" as const, label: "Wet Check Reviews", path: "/wet-checks/pending-review", icon: ShieldCheck, badgeKey: "wetCheckReviews" },
+    { type: "leaf" as const, label: "Wet Check Billings", path: "/wet-check-billings", icon: ClipboardList },
+  ],
+};
+```
+
+Use the existing icon imports — `Droplets`, `ShieldCheck`, `ClipboardList`
+are all already imported at the top of the file. Verify before adding to
+the imports list.
+
+In each role config that currently surfaces wet-check items in the Operations
+group, REMOVE those items from Operations and add `wetCheckGroup` as a
+top-level entry:
+
+- **`billingManagerNav`** (~line 87): Remove the "Wet Check Reviews" leaf
+  from the Operations group (~lines 117–123). Add `wetCheckGroup` after the
+  Operations group entry.
+- **`companyAdminNav`** (~line 192): Remove the "Wet Checks" and "Wet Check
+  Reviews" leaves from the Operations group (~lines 210–214). Add
+  `wetCheckGroup` after the Operations group entry.
+- **`superAdminNav`** (~line 155): Remove the "Wet Checks" leaf from the
+  Operations group (~line 175). Add `wetCheckGroup` after the Operations
+  group entry.
+
+Field tech nav (if a separate config exists for field techs) should NOT get
+the Wet Check group — field techs interact with wet checks through their
+dedicated tech flow, not via this manager-facing surface. If field tech nav
+currently has a wet-check entry, leave it alone.
+
+If any other role config exists (e.g., `irrigationManagerNav`) that includes
+wet-check items, repeat the same pattern: remove from Operations, add the
+Wet Check group.
+
+**(2) Remove BS-WC prefix-sniffing** in
+`artifacts/irrigopro/src/pages/manager-wet-checks.tsx`.
+
+The page currently fetches the full billing-sheets list and filters
+client-side by `billingNumber.startsWith("BS-WC-")` to compute an
+"auto-billed today" stat (lines 59–90 approximately). After migration, BS-WC
+sheets don't exist anymore — this filter returns 0.
+
+Replace with a fetch from the new endpoint:
+
+```typescript
+// Replaces the existing useArrayQuery(["/api/billing-sheets"]) block.
+const { data: wetCheckBillings = [] } = useArrayQuery<WetCheckBillingListItem>({
+  queryKey: ["/api/wet-check-billings"],
+  queryFn: () => fetch('/api/wet-check-billings').then(r => r.json()),
+});
+
+// Today's auto-bills: wet check billings with workDate === today
+const today = new Date().toDateString();
+const autoBilledToday = wetCheckBillings.filter(wcb =>
+  new Date(wcb.workDate).toDateString() === today
+);
+```
+
+Update the JSX that consumed the old filtered list to use `autoBilledToday`
+instead. Preserve the same display semantics (count, total amount, link to
+detail).
+
+Replace the link at line 142:
+
+```typescript
+// OLD:
+href="/billing-sheets?prefix=BS-WC-"
+// NEW:
+href="/wet-check-billings"
+```
+
+Drop any imports that become unused after this change (likely `BillingSheet`
+type if it was only used here).
+
+**(3) Remove `?prefix=BS-WC-` deep-link handling** in
+`artifacts/irrigopro/src/pages/billing-sheets.tsx` (~lines 120–134).
+
+Delete:
+
+```typescript
+// Deep-link support: ?prefix=BS-WC- narrows the page to billing sheets
+// whose billing number starts with the given prefix. Used by the manager
+// wet check inbox KPI to drill into wet-check-sourced billing.
+const filterPrefix = (() => {
+  if (typeof window === "undefined") return null;
+  const v = new URLSearchParams(window.location.search).get("prefix");
+  return v && v.length > 0 ? v : null;
+})();
+```
+
+And update the `scopedSheets` block to drop the `filterPrefix` filter:
+
+```typescript
+// BEFORE:
+const scopedSheets = billingSheets
+  ? billingSheets
+      .filter(s => (filterIdSet ? filterIdSet.has(s.id) : true))
+      .filter(s => (filterPrefix ? (s.billingNumber ?? "").startsWith(filterPrefix) : true))
+  : undefined;
+
+// AFTER:
+const scopedSheets = billingSheets
+  ? billingSheets
+      .filter(s => (filterIdSet ? filterIdSet.has(s.id) : true))
+  : undefined;
+```
+
+Preserve the `?ids=` deep-link handling — that's used by the missing-photos
+outreach SMS and is unrelated.
+
+**(4) Update display label** in
+`artifacts/irrigopro/src/components/manager/wet-check-confirm.tsx` (~line
+222).
+
+The string `` `billing sheet BS-WC-${repairedSheetId}` `` assumes the old
+numbering format. After migration, the linked billing artifact is a wet
+check billing with `WC-YYYY-NNNN` format.
+
+Replace the label construction to query the wet check billing for its real
+billing number, OR if `repairedSheetId` is now a wet check billing ID, look
+up the billing number from the wet check billings endpoint. Simplest: if
+`repairedSheetId` is available, render the link as
+`wet check billing #${repairedSheetId}` (using the internal ID) and let
+users click through to see the formatted billing number on the detail page.
+Avoid trying to reconstruct the billing number from the ID.
+
+Specifically, change:
+
+```typescript
+// OLD:
+secondary={`repaired by ${wc.technicianName} during wet check${repairedSheetId ? ` · billing sheet BS-WC-${repairedSheetId}` : ""}`}
+
+// NEW:
+secondary={`repaired by ${wc.technicianName} during wet check${repairedSheetId ? ` · wet check billing #${repairedSheetId}` : ""}`}
+```
+
+If `repairedSheetId` here is semantically a `wet_check_billings.id` after
+Slice 6, the label is now accurate. **If it could still be a
+`billing_sheets.id` for legacy pre-migration records, surface a question
+and stop** — the variable name should be renamed to clarify intent.
+
+**(5) Rename `convertWetCheckToBillingSheet` →
+`convertWetCheckToWetCheckBilling`** in
+`artifacts/api-server/src/storage.ts`.
+
+This is the public method on `IStorage` and the concrete class. Rename both
+the interface declaration and the implementation. Then grep for
+`convertWetCheckToBillingSheet` across the entire repo and update every
+call site to use the new name.
+
+Update any test files that mock or call this method.
+
+If the method signature has parameters or return type that no longer make
+sense (e.g., returns `billingSheetId: number`), update them too — but keep
+the rename surgical. The actual implementation behavior (writing to
+`wet_check_billings`) was done in Slice 6; this is purely a name change.
+
+**(6) Tests.**
+
+`nav-config.test.ts` — if this file exists, extend it to assert:
+- `billingManagerNav` contains a `Wet Check` group with three leaves.
+- `companyAdminNav` contains the same.
+- `superAdminNav` contains the same.
+- The Operations group in each no longer contains wet-check items.
+
+If the file doesn't exist, create a minimal one asserting these properties.
+Use the existing test patterns for any other nav-config tests.
+
+`manager-wet-checks.test.tsx` — verify:
+- The page now consumes `/api/wet-check-billings`, not `/api/billing-sheets`.
+- The "auto-billed today" stat computes correctly from the new endpoint.
+- The link href is `/wet-check-billings` (not
+  `/billing-sheets?prefix=BS-WC-`).
+
+**Acceptance criteria.**
+- Three role configs (`billingManagerNav`, `companyAdminNav`,
+  `superAdminNav`) have a new `Wet Check` group containing Wet Checks, Wet
+  Check Reviews, and Wet Check Billings. The wet-check items have been
+  removed from those configs' Operations groups.
+- `manager-wet-checks.tsx` consumes `/api/wet-check-billings` and computes
+  the auto-billed-today stat from that source.
+- The drill-in link from manager-wet-checks points at `/wet-check-billings`
+  (no prefix query param).
+- `billing-sheets.tsx` no longer has `?prefix=BS-WC-` deep-link logic.
+- `wet-check-confirm.tsx` no longer renders the BS-WC- prefix in any
+  user-facing string.
+- `convertWetCheckToBillingSheet` is renamed to
+  `convertWetCheckToWetCheckBilling` in both the interface and the
+  implementation. All call sites are updated.
+- All updated and new tests pass.
+- All existing tests pass (no behavior regression on unrelated paths).
+- Field tech nav (if separate) is unchanged.
+
+**Out of scope (deferred to a future deep-cleanup pass).**
+- Removing the `getBillingSheetWetCheckView` storage method. It still
+  exists for defensive use against any legacy un-migrated row that somehow
+  survives migration; remove only after extended production stability.
+- Removing the `WetCheckHasBillingSheetError` class and its safety-patch
+  second pass in `deleteWetCheck`. Same reasoning — defensive against
+  legacy rows.
+- Removing the BS-WC detection branch in `invoice-pdf-service.ts` (the
+  path that calls `getBillingSheetWetCheckView`). Same reasoning.
+- Removing the BS-WC detection branch in `completed-work-detail-modal.tsx`.
+  Same reasoning — it returns null (no view) for non-WC billing sheets,
+  which is correct fallback behavior.
+- Dropping the `wet_check_findings.billingSheetId` column. Requires a
+  separate schema migration AND extended verification that no wet check
+  finding still references it. Defer to a focused cleanup pass after 30+
+  days of post-migration stability.
+- Dropping the `invoice_items.billingSheetId` column. Still in active use
+  for regular (non-wet-check) billing sheets — do not drop.
+- Updating the schema comment on `billing_sheets.laborMode` that mentions
+  "ignored for BS-WC sheets." The note is technically obsolete (BS-WC
+  sheets no longer exist) but harmless. Update if you're cleaning up the
+  schema file anyway; otherwise leave.
+- Designing the wet check billing edit flow (Slice 8 — needs its own
+  design conversation, not just a spec).
+- Any backend changes beyond the public method rename.
+- Any modal changes — the new `WetCheckBillingViewModal` from Slice 4 is
+  the read-only detail surface; edit flow is Slice 8.
+- Sidebar nav changes for field techs.
+
+**Dependencies.** All prior Phase 2 slices merged. Phase 2 Slice 5
+migration script must have been RUN successfully in production (not just
+deployed) before this slice deploys, otherwise the prefix-sniffing
+removals break the manager-wet-checks stat during the gap between Slice 6
+deploy and Slice 5 migration run.

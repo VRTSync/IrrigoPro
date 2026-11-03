@@ -1,0 +1,228 @@
+# Replit Slice 4 / 4 — Financial Pulse: Budget Alerts Wired Up
+
+**Goal:** Close the loop. When an invoice is finalized, detect whether the customer has just crossed a soft (default 75%) or hard (default 100%) budget threshold for the month or the year. If so, fire alerts through the configured channels (in-app, push, email) to the configured recipients — and never fire the same alert twice in the same period.
+
+**Audience:** No new UI surfaces for end users (recipients get notifications through the existing channels). Admin-facing only: a small "Recent alerts" sub-section on the customer detail page.
+
+**Depends on:** Slice 1 (schema, `customer_budget_alert_events` table, customer profile settings). Slices 2 and 3 are not strict prerequisites but make end-to-end verification easier — you can see the customer's budget meter flip to red and a notification land in the same session.
+
+---
+
+## 1. Where the trigger lives
+
+Hook into the invoice finalization flow — the moment an invoice transitions to a billed/issued state. Likely candidates in `artifacts/api-server/src/routes/routes.ts`:
+
+- The route that moves a billing sheet from `approved_passed_to_billing` to `billed` (creating the invoice).
+- Any direct invoice-creation route.
+- Any QuickBooks-driven invoice creation path (if invoices can originate there).
+
+Centralize the trigger logic in a service module so all these paths call the same function:
+
+**File:** `artifacts/api-server/src/services/budget-alert-service.ts`
+
+Exported function:
+
+```ts
+async function checkBudgetThresholds(invoice: Invoice): Promise<void>
+```
+
+Call it after the invoice has been persisted, ideally in the same DB transaction. If the transaction commit happens first, that's acceptable — but log any failure inside `checkBudgetThresholds` rather than letting it bubble up and roll back the invoice itself. **Invoice creation must never fail because of an alert failure.**
+
+---
+
+## 2. Threshold detection algorithm
+
+```
+function checkBudgetThresholds(invoice):
+  customer = load customer for invoice
+  if customer.monthlyBudgetCap is null and customer.annualBudgetCap is null:
+    return  // nothing to check
+
+  monthKey = format(invoice.invoiceDate, "YYYY-MM")
+  yearKey  = format(invoice.invoiceDate, "YYYY")
+
+  mtdSpend = sum invoices for customer where invoiceMonth == monthKey
+  ytdSpend = sum invoices for customer where invoiceYear == yearKey
+
+  // monthly
+  if customer.monthlyBudgetCap is not null:
+    pct = mtdSpend / customer.monthlyBudgetCap * 100
+    maybeFire(customer, 'monthly', 'soft', monthKey, pct, customer.budgetSoftThresholdPercent, invoice)
+    maybeFire(customer, 'monthly', 'hard', monthKey, pct, customer.budgetHardThresholdPercent, invoice)
+
+  // annual
+  if customer.annualBudgetCap is not null:
+    pct = ytdSpend / customer.annualBudgetCap * 100
+    maybeFire(customer, 'annual',  'soft', yearKey,  pct, customer.budgetSoftThresholdPercent, invoice)
+    maybeFire(customer, 'annual',  'hard', yearKey,  pct, customer.budgetHardThresholdPercent, invoice)
+
+function maybeFire(customer, period, threshold, periodKey, pct, thresholdPct, invoice):
+  if pct < thresholdPct:
+    return
+  // Try to insert into customer_budget_alert_events.
+  // The unique index on (customerId, period, threshold, periodKey) makes this a no-op on duplicate.
+  inserted = insertIgnoreConflict({ customerId, period, threshold, periodKey, triggeringInvoiceId: invoice.id })
+  if not inserted:
+    return  // already fired this period
+  dispatch(customer, period, threshold, periodKey, pct, invoice)
+```
+
+The unique index handles deduplication atomically — no race conditions, no per-period reset cron needed. A new month or year produces a new `periodKey`, so the next billing cycle is free to fire again.
+
+---
+
+## 3. Dispatch logic
+
+For each recipient in `customer.budgetAlertRecipientUserIds`:
+
+```ts
+if (channels.inApp) await insertNotification(...)
+if (channels.push)  await sendPush(...)
+if (channels.email) await sendEmail(...)
+```
+
+If `customer.budgetNotifyCustomerContact === true` and `customer.email` is present, send a softer-toned email to the customer using the external template (see below).
+
+All channel sends should be wrapped in their own try/catch — one failed channel must not block the others. Log channel failures with the customer + invoice IDs for debugging.
+
+### In-app notification
+
+Insert into the existing `notifications` table:
+
+```ts
+{
+  userId: recipientUserId,
+  type: threshold === 'hard' ? 'budget_exceeded' : 'budget_warning',
+  title: threshold === 'hard'
+    ? `${customer.name} exceeded ${period} budget`
+    : `${customer.name} approaching ${period} budget`,
+  message: `${formatCurrency(pct)}% of ${formatCurrency(cap)} ${period} cap used (${formatCurrency(spend)}).`,
+  relatedEntityType: 'customer',
+  relatedEntityId: customer.id,
+  isRead: false,
+}
+```
+
+### Push notification
+
+Reuse the existing web-push pipeline (the same one wired into `use-push-notifications.ts`). Payload:
+
+```json
+{
+  "title": "Budget alert: Westfield HOA",
+  "body": "112% of $7,500 monthly cap used.",
+  "url": "/customers/<id>",
+  "tag": "budget-<customerId>-<period>-<threshold>"
+}
+```
+
+The `tag` field lets the browser collapse repeat notifications for the same customer/period.
+
+### Email — internal (to recipients)
+
+Two new templates:
+
+- `customer-budget-warning.html` — "Customer X has used 78% of their monthly cap."
+- `customer-budget-exceeded.html` — "Customer X has exceeded their annual cap."
+
+Use the existing `EmailService`. Both templates should include:
+- Customer name + link
+- Period (monthly / annual)
+- Cap, current spend, percentage
+- Triggering invoice number + link
+
+### Email — external (to customer contact, optional)
+
+Two more templates, softer tone, customer-facing:
+
+- `customer-budget-warning-external.html`
+- `customer-budget-exceeded-external.html`
+
+Example tone: "Hi {{customerName}}, this is a courtesy note from {{companyName}}. Our records show your services this month have reached approximately {{pct}}% of the budget you've set with us. We just wanted to keep you in the loop. Reach out anytime if you'd like to adjust or discuss."
+
+---
+
+## 4. Admin-facing UI addition
+
+On the customer detail page, below the Budget card from Slice 1, add a small **Recent Budget Alerts** sub-section:
+
+- Query `GET /api/customers/:id/budget-alert-events?limit=10`.
+- Render rows: `[icon] May 2026 — Monthly hard threshold crossed (112%) — triggered by INV-2304 on May 14`.
+- Empty state: "No budget alerts on file."
+
+### `GET /api/customers/:id/budget-alert-events?limit=10`
+
+Returns the most recent rows from `customer_budget_alert_events` for the customer, joined with the triggering invoice.
+
+```json
+{
+  "events": [
+    {
+      "id": "uuid",
+      "period": "monthly",
+      "threshold": "hard",
+      "periodKey": "2026-05",
+      "firedAt": "2026-05-14T18:32:00Z",
+      "triggeringInvoiceId": "uuid",
+      "triggeringInvoiceNumber": "INV-2304"
+    }
+  ]
+}
+```
+
+Same role guard as the rest of the Financial Pulse endpoints.
+
+---
+
+## 5. Testing & verification
+
+### Unit / integration tests
+
+1. **Single soft cross fires once.** Seed a customer with `monthlyBudgetCap = 1000`, soft = 75, hard = 100. Generate an $800 invoice. Verify exactly one `budget_warning` row in `notifications` per recipient, one row in `customer_budget_alert_events`.
+2. **Soft already fired does not fire again.** Same customer, generate another $50 invoice (still under hard). Verify **no** new alert.
+3. **Hard fires separately from soft.** Continue: generate a $300 invoice taking spend to $1,150. Verify a `budget_exceeded` alert fires (and a second `customer_budget_alert_events` row appears with threshold=`hard`).
+4. **New month resets.** Advance the clock to next month (or test by inserting an invoice with a different `invoiceDate`). Verify soft can fire again under the new `periodKey`.
+5. **Annual works independently.** Customer with annual cap only, no monthly cap — verify annual alerts fire and monthly path is skipped.
+6. **No cap → no alerts.** Customer with no caps generates a $10k invoice — no rows anywhere.
+7. **No recipients → no notifications, but event row still inserts.** Edge case: customer has caps and the customer chose to notify external only. The event row should still record that the threshold was crossed.
+8. **Channel failure isolation.** Force push to throw; verify in-app and email still deliver.
+9. **Invoice creation succeeds even if alert dispatch errors.** Force `checkBudgetThresholds` to throw at the top. Verify the invoice is still created.
+
+### Manual end-to-end (with Slice 1–3 in place)
+
+- Open a test customer, set `$5,000` monthly cap, add yourself as a recipient with all three channels on.
+- Generate invoices totaling $3,800. Verify nothing fires.
+- Generate a $400 invoice (total now $4,200, soft = 84%). Verify:
+  - In-app notification appears in the bell.
+  - Push notification appears in the browser.
+  - Email arrives in the dev inbox / Mailpit / equivalent.
+  - The Budget card on the customer page is now amber.
+  - The "Recent Budget Alerts" section shows the new event.
+- Generate another $1,000 invoice. Verify hard-threshold alert fires through all channels, card flips red, and a second event row appears.
+- Generate a $200 invoice immediately after. Verify **no** new alerts (already crossed).
+
+---
+
+## 6. Explicitly out of scope for this slice
+
+- SMS alerts (the SmsService exists but adding it here doubles the test surface — propose for a future slice).
+- Daily "you have N customers over budget" digest email.
+- Webhook/Zapier dispatch.
+- Snooze / acknowledge UI on individual alerts.
+- Auto-pausing service when hard threshold is crossed.
+
+---
+
+## 7. Implementation checklist
+
+- [ ] `budget-alert-service.ts` with `checkBudgetThresholds` and helpers
+- [ ] Wire trigger into every invoice-creation path
+- [ ] Insert-with-conflict-do-nothing on `customer_budget_alert_events`
+- [ ] In-app notification dispatch using existing `notifications` table
+- [ ] Push notification dispatch with collapsing `tag`
+- [ ] Email templates × 4 (warning/exceeded × internal/external)
+- [ ] `GET /api/customers/:id/budget-alert-events`
+- [ ] Recent Budget Alerts section on customer detail page
+- [ ] Unit/integration tests covering the nine scenarios above
+- [ ] Manual end-to-end verification documented
+- [ ] Logging on every channel send (success and failure)

@@ -1,0 +1,164 @@
+# Replit Slice 1 / 4 — Financial Pulse: Foundation (Schema + Customer Profile)
+
+**Goal:** Lay the data foundation for the Financial Pulse feature and give billing managers a way to set per-customer monthly and annual budget caps with visible usage. Nothing fires alerts yet, and there is no dashboard yet — those come in later slices.
+
+**Why this slice first:** Every other slice depends on these columns and tables existing. Shipping this also unlocks immediate, testable value: a billing manager can set a cap on a customer and see usage on the customer page, even with no automation behind it.
+
+**Depends on:** Nothing.
+
+---
+
+## 1. Schema changes
+
+### `customers` — add columns
+
+```ts
+monthlyBudgetCap: decimal("monthly_budget_cap", { precision: 10, scale: 2 }),
+annualBudgetCap: decimal("annual_budget_cap", { precision: 10, scale: 2 }),
+budgetSoftThresholdPercent: integer("budget_soft_threshold_percent").default(75),
+budgetHardThresholdPercent: integer("budget_hard_threshold_percent").default(100),
+budgetAlertRecipientUserIds: jsonb("budget_alert_recipient_user_ids").$type<string[]>().default([]),
+budgetAlertChannels: jsonb("budget_alert_channels").$type<{ inApp: boolean; push: boolean; email: boolean }>().default({ inApp: true, push: true, email: false }),
+budgetNotifyCustomerContact: boolean("budget_notify_customer_contact").default(false),
+```
+
+All optional. Null caps mean "no budget set" (default state for every existing customer).
+
+### `users` — add column
+
+```ts
+hourlyWage: decimal("hourly_wage", { precision: 10, scale: 2 }),
+```
+
+Used later (Slice 2) to compute labor margin. Add server-side scrubbing so field-tech-facing payloads never include this field — match the existing `PRICING_FIELDS_TO_STRIP` pattern.
+
+### New table — `customer_budget_alert_events`
+
+Used by Slice 4 to record which thresholds have already fired so the same alert doesn't repeat within a period. Adding it now keeps the migration count low.
+
+```ts
+export const customerBudgetAlertEvents = pgTable("customer_budget_alert_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  customerId: uuid("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  period: text("period").notNull(),         // 'monthly' | 'annual'
+  threshold: text("threshold").notNull(),   // 'soft' | 'hard'
+  periodKey: text("period_key").notNull(),  // e.g. '2026-05' for monthly, '2026' for annual
+  firedAt: timestamp("fired_at").notNull().defaultNow(),
+  triggeringInvoiceId: uuid("triggering_invoice_id").references(() => invoices.id),
+}, (t) => ({
+  uniq: uniqueIndex("customer_budget_alert_events_uniq").on(t.customerId, t.period, t.threshold, t.periodKey),
+}));
+```
+
+The unique index is what prevents duplicate fires in Slice 4.
+
+### Notification type additions
+
+Extend the `notifications.type` string union / enum with:
+- `budget_warning`
+- `budget_exceeded`
+
+No firing logic yet — just register the types so Slice 4 isn't blocked.
+
+### Migration
+
+Single Drizzle migration in `lib/db/drizzle/`. Filename suggestion: `XXXX_financial_pulse_foundation.sql`. No data backfill needed — every new field is nullable or defaulted.
+
+---
+
+## 2. New endpoint
+
+### `GET /api/customers/:id/budget-usage`
+
+Powers the Budget card on the customer detail page and the live preview in the edit form. Guarded by `company_admin | billing_manager | super_admin`.
+
+```json
+{
+  "monthlyCap": 7500.00,
+  "monthlySpend": 4820.00,
+  "monthlyPctUsed": 64,
+  "monthlyStatus": "healthy",       // healthy | approaching | over | unset
+  "annualCap": 75000.00,
+  "annualSpend": 41200.00,
+  "annualPctUsed": 55,
+  "annualStatus": "healthy",
+  "currentMonthKey": "2026-05",
+  "currentYearKey": "2026"
+}
+```
+
+Compute spend by summing `invoices.totalAmount` where `customerId` matches and `invoiceDate` falls in the current month / year. Status mapping: `< soft = healthy`, `soft ≤ pct < hard = approaching`, `>= hard = over`, `cap is null = unset`.
+
+---
+
+## 3. UI changes
+
+### Customer edit form — new "Budget & Alerts" section
+
+Likely lives in `artifacts/irrigopro/src/components/customers/customer-edit-form.tsx` (or whatever file currently holds the billing-preferences section — drop the new section next to it). Visible only to `company_admin` and `billing_manager`.
+
+Fields, in this order:
+
+- **Monthly cap** — currency input, optional, placeholder "No cap"
+- **Annual cap** — currency input, optional, placeholder "No cap"
+- **Soft threshold %** — number input, default `75`, min 1, max 99
+- **Hard threshold %** — number input, default `100`, min 2, max 200 (allow >100 if a customer wants a hard alert at 120% of cap)
+- **Alert recipients** — multi-select of users in the same company; default to current billing manager(s)
+- **Channels** — three toggles in a row: `In-app` (default on), `Push` (default on), `Email` (default off)
+- **Notify customer contact** — single toggle, default off, with helper text: "Sends a softer-toned email to the customer's primary contact when thresholds are crossed."
+
+Validation: if any cap is set, soft must be < hard.
+
+Below the form, a **live preview card** that calls `GET /api/customers/:id/budget-usage` and renders the same meter described below.
+
+### Customer detail page — new "Budget" card
+
+Add a compact card near the top of the customer detail page that's always visible. Two rows: monthly usage and annual usage. Each row shows:
+
+```
+Monthly       $4,820 / $7,500   (64%)   [Healthy]
+[==========================----------]
+```
+
+Color rules for the meter and pill:
+- `unset` (no cap) — gray, no meter, just text "No cap set"
+- `healthy` (< soft) — green
+- `approaching` (soft ≤ pct < hard) — amber
+- `over` (>= hard) — red
+
+If both caps are unset, hide the card or show a small "Set a budget" link to the edit form.
+
+---
+
+## 4. Acceptance criteria
+
+1. Drizzle migration runs cleanly against the current database; existing customers and users are unaffected.
+2. `users.hourlyWage` is **not** present in any payload returned to a field-tech token (add to the existing strip list).
+3. A `company_admin` can open a customer, set `monthlyBudgetCap = 5000`, `annualBudgetCap = 60000`, save, reload, and see the values persisted.
+4. With a customer that has $3,200 of invoices in the current month and a $5,000 monthly cap, the Budget card renders 64% with the green meter and "Healthy" pill.
+5. Crossing the soft threshold (e.g., $4,000 spend on the $5,000 cap) flips the meter to amber and the pill to "Approaching".
+6. Crossing the hard threshold flips both to red and "Over".
+7. `GET /api/customers/:id/budget-usage` returns a 403 for a field-tech token.
+8. `customer_budget_alert_events` table exists and accepts inserts but is empty after this slice (Slice 4 will populate it).
+
+---
+
+## 5. Explicitly out of scope for this slice
+
+- The `/financial-pulse` page itself (Slice 2).
+- Any KPIs, charts, drill-down tables, or projections (Slices 2 and 3).
+- Any actual notification firing — just the type registration (Slice 4).
+- Bulk-editing budgets across many customers.
+- Per-property caps (we are doing per-customer only).
+
+---
+
+## 6. Implementation checklist
+
+- [ ] Drizzle schema edits (`lib/db/src/schema/schema.ts`)
+- [ ] Migration file generated and committed
+- [ ] `hourlyWage` added to the server-side strip list for field-tech responses
+- [ ] `GET /api/customers/:id/budget-usage` route + role guard
+- [ ] Customer edit form section + validation
+- [ ] Customer detail page Budget card
+- [ ] Tests: budget-usage endpoint (200 for admin/billing, 403 for field tech), threshold status math, live preview re-fetches on cap change

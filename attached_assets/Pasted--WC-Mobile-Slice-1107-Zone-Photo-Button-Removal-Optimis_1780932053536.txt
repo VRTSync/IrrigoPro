@@ -1,0 +1,204 @@
+# WC Mobile — Slice 1107: Zone Photo Button Removal + Optimistic Finding Display
+
+**Source:** Conversation 2026-06-08 — tech reported "Couldn't attach photo" 500 error and findings not appearing until manual refresh.  
+**Severity:** P1 (broken photo flow causes loose-photo warnings; finding disappearance breaks tech confidence in data being saved).  
+**Prerequisite slices:** None.  
+**Single file touched:** `artifacts/irrigopro-mobile/app/wet-check/[id]/zone/[zoneRecordId].tsx`
+
+---
+
+## Why
+
+### Bug 1 — Zone-level "Add Photo" button is inherently broken
+
+`onAddPhoto` (line 538) calls `captureZonePhoto` with `findingId: null` (line 556). The server requires every wet check photo to be attached to a specific finding — a null `findingId` produces a 500 "Couldn't attach photo" error every time. There is no fix that makes zone-level photos work without a finding; the concept itself is invalid. The per-finding Photo button (rendered per finding row) already handles photo attachment correctly and is the only valid entry point.
+
+Side effect: any upload attempt via this button adds a `PendingPhoto` to state, which renders the "1 loose photo — not attached to a work item" warning strip. Removing the button eliminates both the 500 and the spurious warning.
+
+### Bug 2 — Newly added findings don't appear until manual refresh
+
+`addFindingMutation.onSuccess` (line 413) only calls `queryClient.invalidateQueries`. This marks the cache stale and fires a background refetch — but the finding doesn't appear in the list until the server round-trip completes. The tech sees an empty list after tapping Save and has no confirmation the finding was recorded.
+
+The `statusMutation` immediately above (lines 344–387) already implements the correct pattern: optimistic `setQueryData` in `onMutate`, rollback on `onError`, and `invalidateQueries` on `onSettled`. `addFindingMutation` needs the same treatment.
+
+---
+
+## Scope
+
+1. Delete the zone-level Add Photo button and all code that exists solely to support it.
+2. Add optimistic update to `addFindingMutation` so the new finding renders immediately on Save.
+
+---
+
+## Part 1 — Delete zone-level photo infrastructure
+
+### What to delete (all in `zoneRecordId.tsx`)
+
+**Imports (top of file):**
+```
+captureZonePhoto   (line 28)
+ensureCameraPermission  (line 30)
+```
+Only remove these if nothing else in the file imports them. Verify with a quick search for other callers before deleting.
+
+**State:**
+```ts
+// line 197–201
+type PendingPhoto = LocalPhoto & { ... }
+const [pendingPhotos, setPendingPhotos] = useState<PendingPhoto[]>([]);
+```
+Delete the `PendingPhoto` type alias and the `pendingPhotos` state declaration. Also delete the `useEffect` block that was introduced to clean up stale `pendingPhotos` entries from the offline queue (search for the cleanup effect referencing `pendingPhotos` — it will be nearby).
+
+**Mutations and callbacks:**
+- `uploadPhotoMutation` (lines 460–536) — delete entirely. It is only called from `onAddPhoto` and is not referenced by `onRetryPendingPhoto` (that callback uses the queue drain path, explicitly avoiding `uploadPhotoMutation.mutate`).
+- `onAddPhoto` (lines 538–567) — delete entirely.
+- `onRetryPendingPhoto` (lines 577–~593) — delete entirely (nothing to retry without `pendingPhotos`).
+- `onCancelPendingPhoto` (lines 594–~615) — delete entirely.
+
+**Photos section UI (around lines 978–1133):**
+
+The Photos section title references `pendingPhotos.length`:
+```ts
+// line 978
+title={`Photos (${zonePhotos.length + pendingPhotos.length})`}
+```
+Change to:
+```ts
+title={`Photos (${zonePhotos.length})`}
+```
+
+Delete the pending-photo thumbnail block — the entire `{pendingPhotos.map(...)}` render block (lines 998–~1056) including retry/cancel buttons.
+
+Delete the zone-level Add Photo button block (lines ~1114–1133):
+```tsx
+{!isLocked ? (
+  <Pressable onPress={onAddPhoto} ...>
+    ...Add Photo...
+  </Pressable>
+) : null}
+```
+
+After deletion, the Photos section should render only the committed `zonePhotos` thumbnails (server-fetched) and nothing else when there are no photos.
+
+**State variable `photoError` and `setPhotoError`:** Only remove these if they are only set/read by the deleted code paths (`onAddPhoto`, `uploadPhotoMutation.onError`). Search for all other references to `photoError` before deleting — if it's also used by the per-finding delete-photo flow or anywhere else, leave it.
+
+---
+
+## Part 2 — Optimistic update for `addFindingMutation`
+
+Mirror the `statusMutation` pattern exactly. The `WetCheckDetail` cache shape has a `zoneRecords` array; each zone record has a `findings` array. The optimistic update inserts a placeholder finding into the correct zone's `findings` list immediately on `onMutate`, then lets `onSettled` replace it with the real server row via `invalidateQueries`.
+
+### Updated `addFindingMutation` (lines 390–427)
+
+```ts
+const addFindingMutation = useMutation({
+  mutationKey:
+    wetCheckId != null && zoneRecordId != null
+      ? wetCheckMutationKey(wetCheckId, "finding-add", zoneRecordId)
+      : ["wet-check", "mutation", -1, "finding-add"],
+  mutationFn: async (input: {
+    issueType: string;
+    partId: number | null;
+    partName: string | null;
+    partPrice: string | null;
+    quantity: number;
+    laborHours: string;
+    notes: string | null;
+  }) => {
+    if (zoneRecordId == null) throw new Error("Missing zone id");
+    return wetCheckMutate<WetCheckFinding, typeof input>({
+      path: `/api/wet-checks/zone-records/${zoneRecordId}/findings`,
+      method: "POST",
+      body: input,
+      wetCheckId: wetCheckId ?? undefined,
+      label: "Add finding",
+    });
+  },
+  onMutate: async (input) => {
+    if (wetCheckId == null || zoneRecordId == null) return { previous: undefined };
+    await queryClient.cancelQueries({ queryKey: wetCheckDetailQueryKey(wetCheckId) });
+    const previous = queryClient.getQueryData<WetCheckDetail>(
+      wetCheckDetailQueryKey(wetCheckId),
+    );
+    if (previous) {
+      // Build a placeholder finding to render immediately.
+      // id: -1 is a sentinel — the real row (with its server id) replaces
+      // it when onSettled fires invalidateQueries.
+      const placeholder: WetCheckFinding = {
+        id: -1,
+        zoneRecordId: zoneRecordId,
+        issueType: input.issueType,
+        partId: input.partId,
+        partName: input.partName,
+        partPrice: input.partPrice,
+        quantity: input.quantity,
+        laborHours: input.laborHours,
+        notes: input.notes,
+        status: "needs_manager_review",
+        photos: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      queryClient.setQueryData<WetCheckDetail>(
+        wetCheckDetailQueryKey(wetCheckId),
+        {
+          ...previous,
+          zoneRecords: previous.zoneRecords.map((z) =>
+            z.id === zoneRecordId
+              ? { ...z, findings: [...z.findings, placeholder] }
+              : z,
+          ),
+        },
+      );
+    }
+    return { previous };
+  },
+  onSuccess: () => {
+    setFindingError(null);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+      () => undefined,
+    );
+    setEditorOpen(false);
+  },
+  onError: (err, _input, ctx) => {
+    // Roll back the optimistic insert.
+    if (wetCheckId != null && ctx?.previous) {
+      queryClient.setQueryData(wetCheckDetailQueryKey(wetCheckId), ctx.previous);
+    }
+    const m = errorMessage(err);
+    if (m != null) setFindingError(m);
+  },
+  onSettled: () => {
+    // Replace the placeholder with the real server row.
+    if (wetCheckId != null) {
+      queryClient.invalidateQueries({ queryKey: wetCheckDetailQueryKey(wetCheckId) });
+    }
+  },
+});
+```
+
+### Notes on the placeholder shape
+
+`WetCheckFinding` is the type returned by the server. Check the actual interface (search `WetCheckFinding` in the mobile codebase) and make sure the placeholder satisfies it — particularly any non-nullable fields. If the type has required fields not in `input` (e.g. `resolution`, `convertedAt`, `findingIndex`), set them to their zero/null/default values. The placeholder only needs to render without crashing — `onSettled` replaces it with the canonical server row as soon as the POST completes.
+
+If the finding list renders a `key` based on `finding.id`, use `id: -1` as a stable key. If there's any chance of two simultaneous adds (unlikely on mobile), use a negative uuid instead.
+
+---
+
+## Acceptance criteria
+
+- Tapping the zone-level "Add Photo" / camera button no longer exists anywhere on the zone screen. The Photos section shows only server-fetched committed photos.
+- The "1 loose photo — not attached to a work item" warning strip does not appear when there are no unattached photos.
+- After tapping Save in the Add Finding modal, the new finding appears in the list immediately — before the server round-trip completes.
+- If the POST fails (e.g. network error), the placeholder finding disappears and the error message is shown — no ghost row left in the list.
+- The per-finding Photo button behavior is unchanged.
+- No TypeScript errors or unused-variable warnings from deleted state/callbacks.
+
+---
+
+## Out of scope
+
+- Removing the Photos section UI entirely — the committed photo thumbnails (server-fetched `zonePhotos`) remain.
+- Changing how per-finding photos are captured or uploaded.
+- Offline queue behavior — the queue drain and offline-queued photo flow are untouched.
+- Any changes to the Add Finding modal (`FindingEditor` or equivalent) itself — only the mutation and its cache interactions change.

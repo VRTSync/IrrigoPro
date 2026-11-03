@@ -1,0 +1,111 @@
+# BUILD — Invoice Editability & Walk-Back
+
+**What & Why**
+Once an invoice is created it's effectively frozen — the only actions are send, mark-sent, QuickBooks sync, and PDF regenerate. There's no way to fix a wrong **date range**, add/remove which **tickets** it covers, or **walk it back** when it was issued prematurely. This ticket adds a controlled editability + rollback lifecycle: edit invoice metadata, edit membership (in a draft state), **Return to Draft**, and a hard **Void & Release**. The backend recipe for releasing tickets already exists (the reissue-unwind re-points member `invoiceId`s and deletes the invoice) — this exposes those capabilities as safe, audited, QuickBooks-aware user actions. Governed by the standing rules: source-of-truth = tickets, canonical recompute (`money()`, `total = parts + labor`), company-scoped (Rule 1), never auto-void QuickBooks, activity-stream logging (Rule 6), done-means-proven (Rule 7).
+
+## Current state (confirmed)
+- Invoices are created `status: 'generated'` with `invoiceMonth/invoiceYear/periodStart/periodEnd` (`routes.ts` monthly generator ~`:6960`).
+- **No** `PATCH /api/invoices/:id`, no cancel/void/return-to-draft, no membership edit. Only `pdf/send`, `pdf/regenerate`, `sync-quickbooks`, `mark-sent`, `monthly`, `preview`.
+- Ticket→invoice link is `invoiceId`; the unbilled list and monthly generator both exclude tickets with an `invoiceId` set. Releasing a ticket = clear its `invoiceId` (it returns to unbilled). The reissue-unwind migration already does exactly this (re-point `invoiceId`, delete PDFs/items, delete invoice).
+- The correction/reissue engine (#1710/#1739) handles **amount** corrections on an issued invoice (edit ticket → Rev 2). This new work is complementary — it's for fixing *scope/metadata* or *undoing* an invoice, not restating its numbers.
+
+## Lifecycle model (the spine of this feature)
+```
+generated ──Return to Draft──▶ draft ──Finalize──▶ generated
+   │  │                          (edit metadata + membership here)
+   │  └────────── Void & Release ──────────▶ cancelled (terminal, tickets released)
+   ▼
+ sent ──▶ paid
+```
+- **Return to Draft** is allowed only **pre-send** (`generated`, not yet `sent`) — so a customer never has a copy that silently reverts. Once `sent`, use the correction/reissue engine for amount changes, or Void & Release to cancel.
+- **Metadata edit** (period label, due date, notes) is allowed while **unpaid** (`generated` or `sent`) — it's cosmetic/labels and doesn't move money.
+- **Membership edit** (add/remove tickets) is allowed **only in `draft`** (Return to Draft first) — because it changes totals and ticket links.
+- **Void & Release** is allowed while **unpaid**; blocked once **paid** (money changed hands → credit-memo territory, out of scope).
+- **Paid** invoices are locked for all of the above.
+
+## Slice 1 — Edit invoice metadata
+`PATCH /api/invoices/:id` (`requireAuthentication` + `requireBillingAccess`), allowed while unpaid.
+- Editable fields: `periodStart`, `periodEnd`, `invoiceMonth`, `invoiceYear`, `dueDate`, `notes`. Reject any other field.
+- **Clarify to the user** that editing the period **label** does not change which tickets are on the invoice — membership is edited separately (Slice 3). Keep the two concepts distinct in the UI.
+- If the invoice is synced to QuickBooks and `dueDate`/period maps to the QB `TxnDate`/`DueDate`, push an **in-place** QB update (reuse the DocNumber-first sync + #1774 date logic) so QB stays consistent; never create a second QB invoice.
+- Company-scoped (404 cross-company); audit the change on the invoice's activity stream.
+
+## Slice 2 — Return to Draft
+`POST /api/invoices/:id/return-to-draft`, allowed from `generated` only (pre-send), unpaid.
+- Set `status: 'draft'`. **Tickets stay attached** (their `invoiceId` is unchanged) — the invoice is simply unlocked for editing, not dissolved.
+- Keep the same invoice number and `revision` (this is not a correction — it was never issued to the customer).
+- The QB invoice (if any) is left as-is; it will be updated in place on Finalize. Show the user that QB is "pending re-issue" while in draft.
+- Audit.
+
+## Slice 3 — Edit membership (draft only)
+`POST /api/invoices/:id/tickets` (add) and `DELETE /api/invoices/:id/tickets/:ticketRef` (remove), allowed only when `status: 'draft'`.
+- **Add**: attach a ticket (work_order / billing_sheet / wet_check_billing) that's currently unbilled (`invoiceId` null) and belongs to the same customer + company; stamp its `invoiceId`, add its line items, **recompute** the invoice `partsSubtotal/laborSubtotal/totalAmount` canonically.
+- **Remove**: clear that ticket's `invoiceId` (it returns to the unbilled list), remove its line items, recompute totals.
+- An add/remove picker in the draft edit surface can reuse the Command Center's unbilled-ticket selection UI.
+- Every add/remove is audited on both the invoice and the ticket.
+
+## Slice 4 — Finalize (draft → generated)
+`POST /api/invoices/:id/finalize`, from `draft`.
+- Recompute totals from final membership (`money()`, `total = parts + labor`); set `status: 'generated'`.
+- **QuickBooks**: update the existing QB invoice **in place** (DocNumber-first sync) to reflect the new membership/period; if it was never in QB, create it. Same one-invoice-ever guarantee as #1764.
+- Same invoice number/revision. Audit.
+
+## Slice 5 — Void & Release
+`POST /api/invoices/:id/void`, allowed while unpaid (`generated` or `sent`); **blocked if `paid`** (return 409 with a message pointing to the correction/credit path).
+- **Release every member ticket** (clear `invoiceId` on all attached work orders / billing sheets / WCBs) so they return to the unbilled list to be re-billed.
+- Set the invoice to a **terminal `cancelled`** status (kept for audit, excluded from all totals — reuse the terminal-status exclusion set from #1756). Do **not** hard-delete (preserve the record + number history).
+- **QuickBooks (never auto-void)**: if the invoice exists in QB, **prompt the user to confirm** the QB action — either void it in QuickBooks or unlink and set a `qbNote` for manual cleanup (reuse the `qbNote` pattern). Never silently touch QB.
+- Atomic (all-or-nothing) + audited on the invoice and every released ticket.
+
+## Slice 6 — UI (invoices page ⋯ menu + draft edit surface)
+On the invoices page (`invoices.tsx`), add to the same ⋯ menu that hosts Correct & Reissue:
+- **Edit invoice** (metadata) — available while unpaid.
+- **Return to Draft** — visible only for `generated` (pre-send).
+- **Void & Release** — visible while unpaid; destructive styling + a confirm dialog that spells out "tickets return to unbilled" and the QuickBooks step.
+- A **draft edit surface** for `draft` invoices: editable period fields, an add/remove ticket list (with live-recomputed total), and a **Finalize** button. A **Draft** badge on the invoice row; a **Void** badge on cancelled invoices (reuse the terminal-status list collapse).
+- Gate all actions to billing access; respect the lifecycle guards (don't show Return-to-Draft on a sent invoice, etc.).
+
+## Boundary with the correction/reissue engine (keep them distinct)
+- **Pre-send** (`generated`): use Return to Draft → edit → Finalize, or Void & Release.
+- **Post-send, unpaid** (`sent`): amount changes go through **Correct & Reissue** (Rev 2, preserving sent history); Void & Release can still cancel it.
+- **Paid**: locked — credit/correction path only (out of scope here).
+
+## QuickBooks & SyncToken handling (cross-cutting)
+Every QB-touching action reuses the existing SyncToken machinery (#1764/#1774) — do **not** add new QB plumbing.
+- **Resolve the token live at operation time.** Because a draft can be edited long after it was issued, the stored `quickbooksSyncToken` may be stale. Each QB update must use the **DocNumber-first lookup** to fetch the current Id + SyncToken from QBO right before writing, and handle the `5010` stale-token fault with a re-fetch-and-retry. Persist the refreshed token back on the invoice after each successful update.
+- **Touch QB once, at Finalize — not on every draft edit.** While an invoice is in `draft`, membership add/remove and metadata edits do **not** call QuickBooks. The single in-place QB update happens on **Finalize** (Slice 4), so QBO only ever reflects a settled invoice and the token is bumped once per finalize.
+- **Return to Draft and note-only edits don't call QB** (no token used). A period/due-date metadata edit on an already-`generated`/`sent` invoice (Slice 1) does update QB in place and therefore uses/refreshes the token.
+- **Void & Release uses the token too** — QBO's void/delete requires `Id + SyncToken` — but only after the user confirms the QB step (never auto-void); it fetches the live token at that moment, and if the user chooses "unlink instead," it writes a `qbNote` and leaves QBO untouched.
+- **One invoice, ever.** All updates are in-place against the matched DocNumber; none of these actions may create a second QB invoice.
+
+## Done looks like
+- A wrongly-dated invoice can have its period label, due date, and notes edited in place while unpaid.
+- A prematurely-issued (unsent) invoice can be returned to draft, have tickets added/removed with live-recomputed totals, and be re-finalized — updating the same QB invoice in place.
+- Any unpaid invoice can be voided, releasing its tickets back to the unbilled list; the void is terminal, excluded from totals, and the QuickBooks step is explicit (never automatic).
+- Paid invoices are locked; the correction/reissue engine is untouched and still handles post-send amount corrections.
+- Every action is atomic, company-scoped, and logged to the activity stream.
+
+## Tests
+- Metadata PATCH edits only the allowed fields; rejects others; blocked when paid; QB in-place update fires when period/due changes on a synced invoice.
+- Return to Draft only from `generated`; tickets stay attached; blocked once `sent`/`paid`.
+- Membership add/remove only in draft: add stamps `invoiceId` + recomputes; remove clears `invoiceId` (ticket reappears in unbilled) + recomputes; company/customer scoping enforced.
+- Finalize recomputes and updates the same QB invoice in place (no duplicate).
+- Void & Release: releases all member tickets, sets terminal `cancelled`, excluded from totals; blocked when paid; QB requires explicit confirm/flag (never auto-void); atomic rollback on failure.
+- **SyncToken**: draft membership edits make **no** QB calls; Finalize makes exactly one in-place QB update; a stale token at Finalize/metadata-edit (`5010`) self-heals via DocNumber re-fetch + retry; the refreshed token is persisted; no duplicate QB invoice is ever created.
+- Company isolation on every endpoint (cross-company → 404).
+- The correction/reissue flow and monthly generation are unchanged (regression).
+
+## Definition of Done (attach proof — Rule 7)
+- [ ] `file:line` for each endpoint (metadata PATCH, return-to-draft, membership add/remove, finalize, void) + the lifecycle guards + the UI actions.
+- [ ] Screenshots: editing an invoice's period; a draft invoice with a ticket removed and the total recomputed; a voided invoice with its tickets back in the unbilled list.
+- [ ] Test output for the lifecycle guards, membership recompute, void-release, paid-lock, and QB in-place/void-confirm cases.
+- [ ] Confirmation that paid invoices are locked and the correction/reissue engine is unchanged.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+- `artifacts/api-server/src/routes/routes.ts` (new invoice endpoints; reuse the monthly generator's invoice-build/recompute core and the ticket `invoiceId` stamp/clear)
+- `artifacts/api-server/src/routes/qb-invoice-ops.ts` + the DocNumber-first sync (`#1764`/`#1774`) for in-place QB updates on finalize/metadata; the `qbNote`/void-confirm path for Void & Release
+- `artifacts/api-server/src/storage.ts` (`deleteInvoiceItemsByInvoiceId`, invoice/ticket updates; terminal-status exclusion from `#1756`)
+- `artifacts/irrigopro/src/pages/invoices.tsx` (⋯ menu actions + draft edit surface + Draft/Void badges)
+- `lib/db/src/schema/schema.ts` (`invoices.status` values; reuse terminal `cancelled` exclusion)
+- Reference: `invoice-revision-backfill.ts` (the proven release-and-delete recipe) and `BUILD - Terminal Invoice Handling (#1756)` (terminal-status exclusion + list collapse)

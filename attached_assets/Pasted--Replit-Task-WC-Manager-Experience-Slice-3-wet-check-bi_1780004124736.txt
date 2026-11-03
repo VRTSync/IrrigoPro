@@ -1,0 +1,297 @@
+# Replit Task — WC Manager Experience, Slice 3 (/wet-check-billings list page polish)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from `WC Manager Experience - Slice 0 Unification Audit and Plan.md`
+— it is reference material so you understand the intent. The actual work for
+this task is in the **Slice 3** section at the bottom. Do not deviate from any
+file paths, function names, schema field names, or payload shapes specified.
+If you believe a deviation is necessary, surface it and stop rather than
+proceeding.
+
+> **Frontend-only slice — visual parity work.** The
+> `/wet-check-billings` page already exists and renders correctly. This
+> slice converges its visual vocabulary with `/billing-sheets` so the two
+> list pages feel like siblings of one design, and surfaces the WCB Edit
+> affordances (from WC Billing Integration Slice 5) on the row's overflow
+> menu, not just inside the modal.
+
+> **Pattern: extract shared, then converge.** Where the two pages render
+> the same conceptual thing differently (status badge, billed indicator,
+> row chrome, empty state), extract the shared component once and have
+> both pages consume it. Don't fork; converge.
+
+---
+
+## Design Context (locked decisions)
+
+Inherited from WC Manager Experience Slice 0.
+
+**The page is at `artifacts/irrigopro/src/pages/wet-check-billings.tsx`.**
+The user-facing path is `/wet-check-billings`. The page is registered for
+billing manager, super admin, and company admin (and the irrigation
+manager once Slice 5 lands).
+
+**Status badges and `BilledBadge` are the visible delta.** `/billing-sheets`
+and `/wet-check-billings` use slightly different badge styling for the
+same conceptual states. Slice 1 of this family extracts the
+`WetCheckBillingStatusBadge`; this slice goes further and converges with
+the BS list page's status pill family.
+
+**Row overflow menus are the action surface on list pages.** `/billing-sheets`
+has a `⋯` per-row overflow with Edit / Delete / Reassign etc.
+`/wet-check-billings` today has none — opening a row goes straight to the
+modal. This slice adds the same overflow pattern so the Slice 5
+labor-rate edit and zone-labor edit are reachable as menu items, not
+only via deep navigation through the modal.
+
+---
+
+## Slice 3 — /wet-check-billings list page polish
+
+### Scope
+
+Four coherent, low-risk changes:
+1. Extract shared status-badge + `BilledBadge` components if not already
+   shared. Update both `/billing-sheets` and `/wet-check-billings` to
+   consume the extracted version.
+2. Add per-row overflow menu (`⋯`) on `/wet-check-billings` with the
+   actions the existing modal supports.
+3. Converge column order, column widths, sort affordances, filter chips,
+   and empty-state copy with `/billing-sheets`.
+4. Add snapshot test asserting visual parity between the two list page
+   row components for a same-shape fixture.
+
+### Files modified
+
+- `artifacts/irrigopro/src/pages/wet-check-billings.tsx` — primary
+  changes (row markup, overflow menu wiring, filter bar).
+- `artifacts/irrigopro/src/pages/billing-sheets.tsx` — consume shared
+  status-badge component if currently using inline.
+- New: `artifacts/irrigopro/src/components/shared/list-row-overflow-menu.tsx`
+  — extracted overflow menu primitive (small).
+- New: `artifacts/irrigopro/src/components/shared/list-page-empty-state.tsx`
+  — extracted empty state primitive (small).
+- `artifacts/irrigopro/src/components/wet-check-billings/status-badge.tsx`
+  (created by WC Manager Experience Slice 1) — verify exists; extend if
+  needed to cover all four statuses.
+- New: `artifacts/irrigopro/src/pages/wet-check-billings-parity.test.tsx`
+  — snapshot parity test.
+
+### Concrete changes
+
+**(1) Audit the visual deltas.** Open
+`wet-check-billings.tsx` and `billing-sheets.tsx` side-by-side. Produce
+a small table in the PR description:
+
+```
+| Element            | /billing-sheets | /wet-check-billings | Resolution |
+|--------------------|-----------------|---------------------|------------|
+| Status badge       | inline switch   | inline switch       | Use shared StatusBadge (Slice 1 extracted) |
+| Billed indicator   | <BilledBadge /> | <BilledBadge />     | Same — confirm same import |
+| Row chrome         | <tr>            | <tr>                | Same — confirm padding/border tokens match |
+| Filter chips       | All / Pending / Approved / Billed | Awaiting / Billed (2 sections) | Converge to single chip row |
+| Empty state        | Card with icon  | Plain text          | Use shared EmptyState primitive |
+| Per-row actions    | ⋯ overflow      | (none)              | Add overflow with View / Edit labor rate / Edit zone labor |
+| Column widths      | (record actual) | (record actual)     | Converge to BS's widths |
+| Sort affordance    | (record actual) | (record actual)     | Converge |
+```
+
+Resolution column drives the rest of the slice.
+
+**(2) Extract `ListRowOverflowMenu`** to
+`components/shared/list-row-overflow-menu.tsx`. Signature:
+
+```typescript
+export interface ListRowAction {
+  label: string;
+  icon?: React.ReactNode;
+  onSelect: () => void;
+  destructive?: boolean;
+  disabled?: boolean;
+  hidden?: boolean;
+}
+
+export function ListRowOverflowMenu({
+  actions,
+  testIdSuffix,
+}: {
+  actions: ListRowAction[];
+  testIdSuffix: string | number;
+}): JSX.Element;
+```
+
+Implementation wraps the shadcn `DropdownMenu` already used elsewhere
+(`@/components/ui/dropdown-menu`). The button trigger is the `⋯`
+icon (use `MoreHorizontal` from lucide-react).
+
+**(3) Wire the overflow menu on `/wet-check-billings`.** In the row
+render at `wet-check-billings.tsx:~52+`, add the overflow column at the
+right edge of the row. The role-gated actions:
+
+```typescript
+const actions: ListRowAction[] = [
+  {
+    label: "View",
+    icon: <Eye className="w-4 h-4" />,
+    onSelect: () => setOpenWcbId(wcb.id),
+  },
+  {
+    label: "Edit labor rate",
+    icon: <Pencil className="w-4 h-4" />,
+    onSelect: () => setEditingWcbLaborRate(wcb.id),
+    hidden: !canEditLaborRate(userRole) || wcb.status === "billed" || wcb.invoiceId != null,
+  },
+  {
+    label: "Edit zone labor",
+    icon: <Pencil className="w-4 h-4" />,
+    onSelect: () => setEditingWcbZoneLabor(wcb.id),
+    hidden: !canEditZoneLabor(userRole) || wcb.status === "billed" || wcb.invoiceId != null,
+  },
+  {
+    label: "Open in QuickBooks",
+    icon: <ExternalLink className="w-4 h-4" />,
+    onSelect: () => openQbInvoice(wcb.invoiceId),
+    hidden: !wcb.invoiceId,
+  },
+];
+```
+
+`canEditLaborRate` / `canEditZoneLabor` mirror the role list on the
+backend endpoints (billing_manager / company_admin / super_admin — see
+`routes.ts:9656` and `:9706`).
+
+Wire the "Edit labor rate" action to open
+`WetCheckBillingViewModal` with a `?focus=labor-rate` URL param OR with
+an `initialAction="labor-rate"` prop that the modal interprets to
+auto-focus the pencil. Choose the prop approach — cleaner than URL
+state for a modal.
+
+**(4) Converge filter chips.** Today
+`wet-check-billings.tsx:197+` uses two collapsible sections
+("Awaiting Invoice" / "Billed"). Replace with a single chip row that
+matches `/billing-sheets`:
+
+```jsx
+<div className="flex gap-2 mb-3">
+  <FilterChip active={!filter} onClick={() => setFilter(null)}>All</FilterChip>
+  <FilterChip active={filter === "submitted"} onClick={() => setFilter("submitted")}>Submitted</FilterChip>
+  <FilterChip active={filter === "pending_manager_review"} onClick={() => setFilter("pending_manager_review")}>Pending review</FilterChip>
+  <FilterChip active={filter === "approved_passed_to_billing"} onClick={() => setFilter("approved_passed_to_billing")}>Approved</FilterChip>
+  <FilterChip active={filter === "billed"} onClick={() => setFilter("billed")}>Billed</FilterChip>
+</div>
+```
+
+Use the existing `FilterChip` component from `/billing-sheets` if it
+exists; if not, extract it the same way as `ListRowOverflowMenu`.
+
+**(5) Extract `ListPageEmptyState`** to
+`components/shared/list-page-empty-state.tsx`:
+
+```typescript
+export function ListPageEmptyState({
+  icon: Icon,
+  title,
+  description,
+  cta,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  cta?: { label: string; onClick: () => void };
+}): JSX.Element;
+```
+
+Use it on both pages with appropriate icons (`Droplets` for WCBs,
+`ClipboardList` for BS).
+
+**(6) Converge column widths and sort.** Match the column widths from
+`/billing-sheets`. Add the same sort affordances (click header to sort).
+Where one page has a column the other doesn't, decide per-column whether
+to add or remove — small deltas like "WC # column" (specific to WCBs)
+or "Project name" (specific to BSs) are legitimate; render-style deltas
+("WC # uses font-mono, BS # uses font-sans" — converge to font-mono on
+both) are NOT.
+
+### Tests
+
+**Parity test** — new `wet-check-billings-parity.test.tsx`:
+
+```typescript
+describe("/wet-check-billings + /billing-sheets parity (Slice 3)", () => {
+  it("status pills render with the same chrome on both pages", () => {
+    const wcbRow = render(<WcbRow wcb={makeWcb({ status: "approved_passed_to_billing" })} />);
+    const bsRow = render(<BsRow bs={makeBs({ status: "approved_passed_to_billing" })} />);
+    const wcbBadge = wcbRow.container.querySelector("[data-testid='status-badge']");
+    const bsBadge = bsRow.container.querySelector("[data-testid='status-badge']");
+    expect(wcbBadge?.className).toBe(bsBadge?.className);
+  });
+
+  it("both row types render an overflow menu (⋯) when actions are available", () => {
+    render(<WcbRow wcb={makeWcb({ status: "approved_passed_to_billing", invoiceId: null })} userRole="billing_manager" />);
+    expect(screen.getByLabelText("More")).toBeInTheDocument();
+  });
+
+  it("Edit labor rate action is hidden for already-invoiced WCBs", () => {
+    render(<WcbRow wcb={makeWcb({ invoiceId: 999, status: "billed" })} userRole="billing_manager" />);
+    fireEvent.click(screen.getByLabelText("More"));
+    expect(screen.queryByText("Edit labor rate")).not.toBeInTheDocument();
+  });
+
+  it("Edit labor rate action is hidden for field_tech regardless of WCB status", () => {
+    render(<WcbRow wcb={makeWcb({ status: "approved_passed_to_billing", invoiceId: null })} userRole="field_tech" />);
+    fireEvent.click(screen.getByLabelText("More"));
+    expect(screen.queryByText("Edit labor rate")).not.toBeInTheDocument();
+  });
+
+  it("clicking Edit labor rate opens the modal with initialAction='labor-rate'", () => {
+    const onOpen = vi.fn();
+    render(<WcbRow wcb={makeWcb({})} userRole="billing_manager" onOpenModal={onOpen} />);
+    fireEvent.click(screen.getByLabelText("More"));
+    fireEvent.click(screen.getByText("Edit labor rate"));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ initialAction: "labor-rate" }));
+  });
+});
+```
+
+Extend `wet-check-billings.test.tsx` (existing) with one filter-chip
+test and one empty-state test.
+
+### Acceptance criteria
+
+- `ListRowOverflowMenu` and `ListPageEmptyState` exist as shared
+  components and are consumed by both `/billing-sheets` and
+  `/wet-check-billings`.
+- Status badges use the shared `WetCheckBillingStatusBadge`
+  (extracted by Slice 1) on both pages.
+- `/wet-check-billings` has a single filter-chip row replacing the
+  two-section collapse.
+- Each row on `/wet-check-billings` shows a `⋯` overflow menu with
+  View / Edit labor rate / Edit zone labor / Open in QuickBooks,
+  role-gated and status-gated correctly.
+- Selecting "Edit labor rate" or "Edit zone labor" opens
+  `WetCheckBillingViewModal` with the appropriate edit affordance
+  pre-focused. (This requires a small `initialAction` prop add to the
+  modal — write the change there too.)
+- Snapshot/parity tests pass; existing tests continue to pass.
+- `pnpm typecheck` and `pnpm test` pass.
+
+### Out of scope
+
+- Adding new actions to the overflow menu beyond what the existing
+  modal supports.
+- Backend changes — every endpoint and role gate already exists.
+- Changing the modal's behavior beyond accepting the new
+  `initialAction` prop.
+- The `/wet-check-billings` page's URL or routing.
+- Filter persistence (URL state, localStorage) — not in scope.
+- Bulk actions on the WCB list (not in scope; defer to Slice 7's
+  unified list page).
+
+### Dependencies
+
+- WC Manager Experience Slice 1 (`WetCheckBillingStatusBadge` extracted)
+  — soft dependency. If Slice 1 hasn't landed when this slice starts,
+  extract the badge as part of this slice instead.
+- WC Billing Integration Slice 5 (deployed — labor-rate edit endpoint
+  and modal pencil exist).
+- Independent of Slices 2, 4–11.

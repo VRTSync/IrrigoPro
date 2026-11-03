@@ -1,0 +1,328 @@
+# #735 — Harden QuickBooks Integration Against Recurring Outages
+
+> **CRITICAL:** This ticket is **eight independent changes**, not one. It is **forbidden** to bundle more than one numbered item into a single deploy. Each item has its own risk grade, feature flag (where applicable), rollback plan, and acceptance test. Land them in the **Rollout Sequence** order below. The whole reason this ticket exists is that small QB changes have been accumulating without isolation — do not repeat that pattern while fixing it.
+
+## What & Why
+
+The #734 patch unblocks the current outage but leaves the QuickBooks integration exposed to several other failure modes. This ticket closes them so the integration doesn't go down again.
+
+Failures covered (in priority order):
+
+- **P0 — Recurrence risk on every deploy**: config drift (env vars missing), in-memory OAuth state lost on autoscale restarts, no surfaced error messages so debugging requires an audit.
+- **P1 — Slow-burn outages**: cold-start autoscale misses the 24h token-health sweep; sandbox vs. production credential mixups silently fail every API call; reconnect-required state hides from operators until the next billing cycle.
+- **P2 — Code hygiene**: duplicate / dead routes and helpers in the QB surface area that make the next change risky.
+
+## Done Looks Like
+
+A production deploy can survive: a missing-secret regression at boot, an autoscale-restart during an OAuth flow, ≥30 days of low traffic without losing a refresh token, a sandbox/prod credential mixup, and a silent `reconnect_required` flip — without producing a user-visible outage or requiring an audit to diagnose.
+
+## Out of Scope
+
+- Replacing the OAuth library or switching to Intuit's official SDK.
+- Multi-realm-per-company support.
+- Migrating to session-cookie auth.
+- Any UX changes to the QB integration page beyond the toast error fix.
+
+---
+
+## Pre-Flight Checklist (before any deploy in this ticket)
+
+1. **#734 must be live and green first.** Confirm Connect actually redirects to Intuit in production. Do not start hardening on a still-broken integration.
+2. **Verify all three QB secrets exist in the deployed api-server's Secrets pane**: `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_REDIRECT_URI`. This is non-negotiable for item #1.
+3. **Confirm Replit deployment rollback works.** From the Replit deployment history pane, practice rolling back a trivial no-op deploy. Know how to execute a rollback in under 60 seconds before you ship anything in this ticket.
+4. **One numbered item per deploy.** Each merge maps 1:1 to a deploy. No batching, ever.
+5. **Each deploy gets a 24h soak.** Watch the api-server logs and the App Health dashboard for at least one business day before starting the next item.
+6. **All feature flags default to OFF.** Every flag below ships disabled. Enable in production *after* the deploy is live and logs are clean, never in the same deploy as the code change.
+
+---
+
+## Rollout Sequence (strict order)
+
+Do them in this exact order. Each line is one deploy. Do not proceed to the next line until the previous deploy has soaked for 24h without incident.
+
+1. **#734** — URL fixes + production secret (already speced separately)
+2. **#7** — delete duplicate disconnect route (zero behavior change)
+3. **#8** — delete dead `lib/quickbooks.ts` helper (zero behavior change)
+4. **#3** — surface real error in Connect toast (frontend-only)
+5. **#4** — external daily probe endpoint, flag OFF (additive)
+6. **#4-enable** — turn on the cron schedule (separate deploy)
+7. **#1a** — env-presence logging at boot, no throw yet
+8. **#1b** — convert log to `throw` (only after #1a logs confirm secrets present in prod)
+9. **#6** — email on `reconnect_required` with throttle and `DISABLE_QB_RECONNECT_EMAILS` kill-switch
+10. **#2** — OAuth state in Postgres, behind `USE_DB_OAUTH_STATE` feature flag, default OFF
+11. **#2-enable** — flip `USE_DB_OAUTH_STATE=1` in prod (separate deploy)
+12. **#5a** — sandbox/prod credential audit (startup log only, no rejection)
+13. **#5b** — credential rejection on save, behind `STRICT_QB_ENV_CHECK` flag, default OFF
+14. **#5-enable** — flip `STRICT_QB_ENV_CHECK=1` in prod (separate deploy)
+
+Total: 14 deploys minimum. That sounds like a lot. It is the cost of not taking the integration down again.
+
+## Risk Summary Per Item
+
+| #  | Item                              | Risk    | Reversible    | Blast radius if broken              |
+|----|-----------------------------------|---------|---------------|-------------------------------------|
+| 7  | Delete duplicate disconnect       | None    | Yes (revert)  | None — dead code                    |
+| 8  | Delete dead helper                | None    | Yes (revert)  | None — dead code                    |
+| 3  | Real error in toast               | Very low| Yes (revert)  | Ugly toast text                     |
+| 4  | External daily probe              | Low     | Disable cron  | Identical to today's behavior       |
+| 1a | Env-presence logging              | None    | Yes (revert)  | Extra log lines                     |
+| 1b | Convert log to throw              | Medium  | Yes (revert)  | **Entire API fails to boot**        |
+| 6  | Email on reconnect_required       | Low-Med | Kill-switch   | Possible email storm if throttle wrong |
+| 2  | OAuth state in Postgres           | Medium  | Feature flag  | OAuth callbacks fail                |
+| 5  | Sandbox/prod credential detection | Med-High| Feature flag  | New Connect attempts fail           |
+
+---
+
+## P0 — Must Land First
+
+### 7. Remove duplicate `/api/quickbooks/disconnect` registration
+
+> **Risk: None.** The second route is dead code (Express keeps the first). Removing it cannot change runtime behavior. Sequenced first because it's the safest possible warm-up deploy.
+
+**Why**: `routes/routes.ts:13563` registers `app.post("/api/quickbooks/disconnect", ...)` with no auth middleware. The earlier registration at `routes/routes.ts:8296` with `requireQuickBooksAccess` already handles disconnect properly. Express keeps the first, so the second is dead — but the next person editing the file may not realize that and "fix" the wrong handler.
+
+**Steps**: Delete lines 13562-13587 in `routes/routes.ts`.
+
+**Feature flag**: None needed.
+
+**Rollback**: Git revert the commit.
+
+**Done**: `git grep -n 'app\.post.*quickbooks/disconnect'` returns exactly one result.
+
+---
+
+### 8. Resolve the dead `lib/quickbooks.ts` helper
+
+> **Risk: None** (after confirming grep).
+
+**Why**: `artifacts/irrigopro/src/lib/quickbooks.ts` exports a `quickbooksService` object that calls `/api/quickbooks/auth-url` and `/api/quickbooks/connection-status` — neither route is registered. A grep confirmed no callers of `quickbooksService.*` anywhere in `artifacts/` or `lib/`.
+
+**Steps**:
+
+1. Run `git grep -n 'quickbooksService\.\|from.*lib/quickbooks'` in `artifacts/irrigopro/src` to confirm zero callers.
+2. If zero: delete `artifacts/irrigopro/src/lib/quickbooks.ts`.
+3. If non-zero (unexpected — stop and report back): rename the endpoint strings to match the registered routes (`/api/quickbooks/auth` and `/api/quickbooks/connection`) and add a comment pointing at the live caller.
+
+**Feature flag**: None needed.
+
+**Rollback**: Git revert the commit.
+
+**Done**: Either the file is gone or every URL string in it matches a registered route.
+
+---
+
+### 3. Surface the real server error in the Connect toast
+
+> **Risk: Very low.** Frontend-only change, isolated to one `catch` block. Worst case is ugly toast text. Cannot affect server behavior.
+
+**Why**: `handleQuickBooksConnect` at `artifacts/irrigopro/src/components/quickbooks/quickbooks-integration.tsx:275-281` catches the API error and shows a generic "Failed to connect to QuickBooks." Today's outage took an audit because the toast hid the server's actual message ("QuickBooks redirect URI is not configured"). Every future failure will take another audit until this is fixed.
+
+**Steps**:
+
+1. In the `catch (error)` block at line 275, parse `error.message` (which is the `${status}: ${text}` string thrown by `throwIfResNotOk` in `lib/queryClient.ts:62-67`).
+2. If the text portion is JSON with a `message` field, use that; otherwise show the raw text. Fall back to "Failed to connect to QuickBooks" only if no message is available.
+3. Set `variant: "destructive"` and `duration: 10_000` so the operator has time to read it.
+4. Apply the same change to the reconnect path (the second call site at line 369 in the same file).
+
+**Feature flag**: None needed.
+
+**Rollback**: Git revert the commit.
+
+**Done**: Triggering an error response from `/api/quickbooks/auth` (e.g. by hitting it with a `field_tech` role) makes the toast show "Access denied. QuickBooks integration is not available for your role." instead of the generic message.
+
+---
+
+### 4. External daily health probe (additive)
+
+> **Risk: Low.** Adds a new endpoint and a cron. Nothing existing is removed or changed. Ship the endpoint first, enable the cron later — two separate deploys.
+
+**Why**: `startQbTokenHealthJob` (`routes/routes.ts:14191`) is a `setInterval` inside the api-server process. Autoscale deployments can scale to zero on idle; on cold start the interval is re-scheduled from "now," so a long idle period can miss the 24h sweep window. With Intuit's 100-day refresh-token revocation, missed sweeps during low-traffic periods can eventually revoke the token and force a manual reconnect.
+
+**Steps**:
+
+1. **Deploy 4 (code)**: Add a new internal route in `routes/routes.ts`: `POST /api/internal/qb/health-sweep`, authenticated by a shared bearer token (`process.env.QB_HEALTH_PROBE_TOKEN`). If the token isn't set, the route returns 503 ("not configured"). The handler runs the same `runProactiveRefreshForRealm` loop the interval job runs.
+2. Add `QB_HEALTH_PROBE_TOKEN` to the documented required env vars list (but do **not** add it to the fail-fast list in item #1 — its absence should not crash the server).
+3. The endpoint returns `{ checked: N, refreshed: N, reconnect_required: [...realmIds] }` so the cron's logs are useful for forensics.
+4. Keep the in-process `setInterval` at `routes.ts:14191` as belt-and-suspenders. Do **not** remove it.
+5. **Deploy 4-enable (config, separate)**: Set `QB_HEALTH_PROBE_TOKEN` in Replit Secrets, then configure a Replit scheduled task (or external cron) to `POST` that endpoint once per day with the bearer token. Do this only after deploy 4 has soaked.
+
+**Feature flag**: The endpoint is implicitly disabled until the env var is set.
+
+**Rollback**: Unset `QB_HEALTH_PROBE_TOKEN`. The endpoint will 503; the cron will fail and email you; nothing user-visible breaks.
+
+**Done**: Disabling the in-process interval and relying solely on the external probe still keeps tokens fresh in a one-week sandbox soak test.
+
+---
+
+### 1. Fail-fast env validation at boot (TWO PHASES — do not combine)
+
+> **Risk: Medium for the throw phase.** This is the only item in P0 that can take the **entire API** down if misconfigured, not just QB. The two-phase split is mandatory.
+
+**Why**: Today's outage was a missing `QUICKBOOKS_REDIRECT_URI`. The server booted happily; the route returned 400 forever; users saw a generic toast. A 10-line check would have caught it at deploy time.
+
+#### Phase 1a — Log-only (safe)
+
+**Steps**:
+
+1. In `artifacts/api-server/src/index.ts`, before `createApp()`, add `auditProductionEnv()` that, when `process.env.NODE_ENV === 'production'`, checks for `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_REDIRECT_URI`.
+2. Log one of two lines: `[boot] QB env vars present` (all three set) or `[boot] QB env vars MISSING: ...` (list which).
+3. **Do not throw.** Server boots either way.
+4. Leave the in-route guards at `routes/routes.ts:8091,8098` unchanged as defense in depth.
+
+**Rollback (1a)**: Git revert. Phase 1a cannot break anything.
+
+**Done (1a)**: After deploy, find `[boot] QB env vars present` in the production api-server's startup logs. If you see `MISSING`, fix the secrets pane **before** proceeding to 1b. Soak for at least 48h so any deploy/restart cycles also log present.
+
+#### Phase 1b — Convert to throw (medium risk)
+
+**Steps**:
+
+1. Replace the log line in `auditProductionEnv()` with `throw new Error(...)` listing the missing vars by name. Pattern: `throw new Error("PORT environment variable is required...")` at `index.ts:18`.
+2. Still gated on `NODE_ENV === 'production'`. Dev must still boot.
+
+**Rollback (1b)**: Git revert. If the throw fires in production, the api-server crash-loops — Replit will eventually mark the deploy unhealthy and you can roll back to the prior deploy from the Replit deployment history pane.
+
+**Pre-condition for 1b**: At least 48h of clean `present` logs from 1a. Do not ship 1b without this evidence.
+
+**Done (1b)**: Manually removing one of the three secrets from the deployed env causes the api-server to exit on next restart with a log line naming the missing variable. Restoring the secret recovers.
+
+---
+
+## P1 — Close the Slow-Burn Paths
+
+### 6. Email company admins on `reconnect_required` flip
+
+> **Risk: Low-medium.** Wraps an existing storage method. Main risk is email-storming a customer if the throttle is implemented wrong. Ship with a kill-switch.
+
+**Why**: Today, a stale token flips `connectionStatus` to `reconnect_required` and shows a banner — but only on the QuickBooks page, only to roles that can see it. The PagerDuty `integration_down` rule (`lib/rules/integration-down.ts`) requires >5 failure events in 10 minutes, so a quietly broken connection no one is syncing against doesn't page. Result: weekend / month-end outages are discovered Monday morning.
+
+**Steps**:
+
+1. Add a new method to `EmailService` (`email-service.ts`) following the pattern of `sendBudgetAlertEmail` at line 951: `sendQuickBooksReconnectRequiredEmail(args: { companyId, companyName, reason, dashboardUrl })`.
+2. Add a `lastReconnectEmailAt timestamptz` column to `quickbooks_integration` for the throttle. Migration required.
+3. In `storage.markQuickBooksReconnectRequired` (`storage.ts:2745`):
+   - Check `DISABLE_QB_RECONNECT_EMAILS` env var. If set (any truthy value), skip the email block entirely.
+   - In a transaction with the status update: if `lastReconnectEmailAt` is null OR more than 24h ago, set it to `now()` and fan out emails to users of role `company_admin` and `billing_manager` for that `companyId`. Otherwise skip.
+   - Wrap the email send itself in try/catch so an email failure doesn't roll back the status update.
+4. Include the runbook URL from `lib/integration-catalog.ts` (`qb` entry) in the email body.
+
+**Feature flag**: `DISABLE_QB_RECONNECT_EMAILS` env var. Ship with this set to `1` in production. After one quiet week, unset to enable.
+
+**Rollback**: Set `DISABLE_QB_RECONNECT_EMAILS=1` in Replit Secrets. No redeploy required; takes effect on next request hitting `markQuickBooksReconnectRequired`. For a deeper rollback, git revert.
+
+**Done**: With the kill-switch off, forcing `markQuickBooksReconnectRequired('test_realm', 'manual test')` in a Node REPL sends one email per active company admin within 60 seconds and does not send a second within the next 24 hours.
+
+---
+
+### 2. Move OAuth state out of in-memory `Map` into Postgres (BEHIND FLAG)
+
+> **Risk: Medium.** Rewires the OAuth callback path. The biggest behavior change in this ticket. Must ship behind a feature flag so you can flip back to the in-memory `Map` instantly without a redeploy.
+
+**Why**: `oauthStateStore` (`routes/routes.ts:951`) is a module-level `Map`. On the autoscale deployment (`.replit:deploymentTarget = "autoscale"`), the api-server can be replaced or scale up/down between the Connect click and Intuit's callback POST — losing the state and giving the user a "Security verification failed" page. This will look like a flaky bug every time the deployment scales.
+
+**Steps**:
+
+1. Add a new table `oauth_state` to `lib/db/src/schema/schema.ts` (sibling to `quickbooks_integration` at `schema.ts:562`):
+   ```
+   state           TEXT PRIMARY KEY
+   provider        TEXT NOT NULL          -- 'quickbooks' (allow future providers)
+   company_id      TEXT
+   expires_at      TIMESTAMPTZ NOT NULL
+   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+   ```
+   Add an index on `expires_at` for the sweep.
+2. Generate a Drizzle migration for the new table. Ship this migration in the **same deploy** as the code change so the column exists when the flag is flipped on.
+3. Add three storage methods in `artifacts/api-server/src/storage.ts` mirroring the current Map operations: `saveOauthState(state, provider, companyId, expiresAt)`, `consumeOauthState(state, provider): { companyId } | null` (atomic SELECT + DELETE in a single transaction), `pruneExpiredOauthStates()`.
+4. **Critical:** `consumeOauthState` must be a single SQL `DELETE ... RETURNING company_id` to avoid race-window replay attacks. Do not implement it as SELECT-then-DELETE in app code.
+5. In `routes/routes.ts`, route by `process.env.USE_DB_OAUTH_STATE`:
+   - If unset/false (the default): use the existing `oauthStateStore` Map (no behavior change).
+   - If set: use the new storage methods.
+6. Keep both code paths in place after the flag is on. Removal is a future cleanup ticket, not part of this one.
+7. Replace the `setInterval` sweep at lines 952-957 with one that calls both: `pruneExpiredOauthStates()` (always, cheap) and the Map cleanup (only when flag is off).
+
+**Feature flag**: `USE_DB_OAUTH_STATE`. Ship unset.
+
+**Rollback**: Unset `USE_DB_OAUTH_STATE` in Replit Secrets. No redeploy required; the next request uses the Map again. For a deeper rollback, git revert.
+
+**Done (flag off, post-deploy)**: Connect still works exactly as today.
+**Done (flag on, after flip)**: Connecting QuickBooks, restarting the api-server (`pm2 restart` or redeploy) before the Intuit callback completes, and finishing the redirect still works — `connectionStatus` becomes `connected` and the banner does not say "Security verification failed."
+
+---
+
+### 5. Detect sandbox/prod credential mixup (TWO PHASES — do not combine)
+
+> **Risk: Medium-high.** Changes the OAuth token-save path. If the new dual-host probe has a bug, **new connections fail**. Existing realms unaffected. Ship in two phases with a feature flag on the rejection logic.
+
+**Why**: `routes/routes.ts:8062-8064` and `storage.ts:2684` both pick the QB environment purely from `process.env.NODE_ENV`. If someone ever puts sandbox credentials into a production deployment (or vice versa), the OAuth handshake succeeds, tokens persist, the health job refreshes them against the wrong API host, and every API call silently 401s — looking like a token problem rather than a credential mismatch.
+
+#### Phase 5a — Startup audit, log-only
+
+**Steps**:
+
+1. On api-server boot, scan `quickbooks_integration` rows. If any `tokenEnvironment` doesn't match `NODE_ENV`, log one P1 warning line per row including `companyId` and the mismatch. Do not auto-disconnect.
+2. No changes to the save path.
+
+**Rollback (5a)**: Git revert. Cannot break anything.
+
+**Done (5a)**: With deliberately-mismatched rows in a dev DB, the audit logs the mismatches at boot.
+
+#### Phase 5b — Reject mismatched credentials on save (behind flag)
+
+**Steps**:
+
+1. In `exchangeCodeForTokens` (`routes.ts:8022`), after the token exchange but before saving, perform a `companyinfo` GET against **both** Intuit hosts (`https://quickbooks.api.intuit.com` and `https://sandbox-quickbooks.api.intuit.com`). The one that returns 2xx tells you which environment the credentials actually belong to.
+2. Store that detected environment as `tokenEnvironment` instead of deriving it from `NODE_ENV` at `storage.ts:2684`.
+3. **Behind `STRICT_QB_ENV_CHECK` flag (default OFF):**
+   - If flag is OFF: detect, store, log a warning on mismatch, but allow the save.
+   - If flag is ON: refuse to save on mismatch, log a P1 line, surface the mismatch back to the user via the toast (covered by item #3).
+
+**Feature flag**: `STRICT_QB_ENV_CHECK`. Ship unset (detect-and-log only).
+
+**Rollback (5b)**: Unset `STRICT_QB_ENV_CHECK`. Detection still happens, rejection does not. For a deeper rollback, git revert.
+
+**Pre-condition for flipping the flag on**: 5a logs (and 5b detect-only logs) show no unexpected mismatches in production for at least a week.
+
+**Done (5b, flag on)**: Pasting sandbox credentials into a production deploy with `NODE_ENV=production` and clicking Connect ends with the toast saying "Credentials are sandbox but server is production" and no row persisted.
+
+---
+
+## Relevant Files (consolidated)
+
+- `artifacts/api-server/src/index.ts` — item 1
+- `artifacts/api-server/src/routes/routes.ts:951,8110,8146,8164,14191` — items 2, 4
+- `artifacts/api-server/src/routes/routes.ts:8022,8062-8064,13562-13587` — items 5, 7
+- `artifacts/api-server/src/storage.ts:2684,2745,2770` — items 5, 6
+- `artifacts/api-server/src/email-service.ts:951` (pattern reference) — item 6
+- `artifacts/api-server/src/lib/integration-catalog.ts` — item 6
+- `artifacts/irrigopro/src/components/quickbooks/quickbooks-integration.tsx:275-281,369` — item 3
+- `artifacts/irrigopro/src/lib/quickbooks.ts` — item 8
+- `lib/db/src/schema/schema.ts:562` (pattern reference) — item 2
+
+## New Env Vars Introduced By This Ticket
+
+| Var                              | Item   | Default      | Purpose                                       |
+|----------------------------------|--------|--------------|-----------------------------------------------|
+| `QB_HEALTH_PROBE_TOKEN`          | #4     | unset        | Bearer for the external daily probe           |
+| `DISABLE_QB_RECONNECT_EMAILS`    | #6     | unset (off)  | Kill-switch for reconnect-required email      |
+| `USE_DB_OAUTH_STATE`             | #2     | unset (off)  | Feature flag to switch OAuth state to Postgres|
+| `STRICT_QB_ENV_CHECK`            | #5     | unset (off)  | Feature flag to reject sandbox/prod mixups    |
+
+## Migrations Introduced
+
+- `oauth_state` table — item 2
+- `quickbooks_integration.lastReconnectEmailAt` column — item 6
+
+Both migrations must be additive (no drops, no NOT NULL on existing data without defaults). Run via Drizzle in the same deploy as the code that reads from the new column/table.
+
+## What This Ticket Does NOT Touch
+
+Confirming the safety perimeter so the implementing agent knows where to stop:
+
+- `exchangeCodeForTokens` core logic (only adds the env-probe in 5b)
+- `refreshQuickBooksToken` and `makeQuickBooksRequest` (untouched)
+- `runProactiveRefreshForRealm` and `startQbTokenHealthJob` (untouched — the new probe in #4 reuses them)
+- The QuickBooks integration UI in `quickbooks-integration.tsx` beyond the two `catch` blocks in #3
+- The pitch-deck QuickBooks slide and any other non-functional QB references
+- Existing `quickbooks_integration` rows (no backfill, no migration of existing data)
+
+If the implementing agent finds itself editing anything outside this list, **stop and ask** rather than expanding scope.

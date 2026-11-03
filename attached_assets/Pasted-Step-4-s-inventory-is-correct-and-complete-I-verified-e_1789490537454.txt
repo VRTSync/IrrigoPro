@@ -1,0 +1,21 @@
+Step 4's inventory is correct and complete — I verified every item, including fp-aging-bucket-* at widget :600, the six strip assertions in invoices-ar-first-layout.test.tsx, the one in invoices-ar-collections.test.tsx:394, and the Financial Pulse page's own ar-aging-card at financial-pulse.tsx:1703. The widget ranges you updated are right against current HEAD; that file shifted in the budget-meter commit.
+
+But the math and route cites drifted when #2011 landed:
+
+Cited	Actually	
+financial-pulse-math.ts:195	197	INVOICE_EXCLUDED_STATUSES
+financial-pulse-math.ts:233	235	computeOutstandingAr
+financial-pulse-math.ts:569-600	574	computeArAging
+financial-pulse-math.ts:1164	1163	pulse customers predicate
+financial-pulse-math.ts:1236	1235	pulse technicians predicate
+financial-pulse.ts:1199-1240	1197	/ar-aging route
+
+financial-pulse.ts:214 is still exact.
+
+Small enough to navigate, but it points at something structural worth fixing now rather than at wave 4: the carve-outs between tickets should name functions and predicates, not line numbers. The coordination clause I gave you says #2014 must not touch "the exclusion predicate at financial-pulse-math.ts:1164 or :1236" — those lines have already moved, and every wave will move them again. Two files in this cluster have drifted twice already: the widget by 18–30 lines from the budget commit, the math file by 1–5 from #2011. Ownership boundaries expressed as line numbers are the one thing guaranteed to go stale between waves; "the status predicate in computePulseCustomers" survives any amount of drift.
+
+Worth a find-and-replace across the remaining tickets' Coordination sections.
+
+One addition to step 4's Keep list: ar-aging-card-skeleton-* (invoice-aging-strip.tsx:119). It's a strip testid like the others and belongs with them, but it isn't named in your inventory — and the inventory's whole purpose is to be exhaustive enough that nobody reaches for the string.
+
+One gap from dropping the test-placement block. Step 7 keeps the validation-command and shared-DB points, which are the important ones. But financial-pulse-math.test.ts is in your Relevant files list and is not in the seasonal-budget-financial-pulse command — so the bucket-sum invariant, the most valuable test in this ticket, could land somewhere validation never runs it. One sentence covers it: put new tests in this ticket's own file and add that file to the seasonal-budget-financial-pulse command; note financial-pulse-math.test.ts is not in that command.

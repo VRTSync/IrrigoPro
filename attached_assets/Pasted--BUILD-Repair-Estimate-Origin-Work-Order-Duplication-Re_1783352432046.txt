@@ -1,0 +1,82 @@
+# BUILD — Repair Estimate-Origin Work-Order Duplication (Rebuild From Estimate) + Stop the Completion-Append Recurrence
+
+**Why a new ticket.** The #1698 `repair-duplicated-work-order-items` migration ran against production and could not fix the 7 affected work orders: it auto-repaired **0**, flagged all **7** for manual review, and the run itself **failed**. Investigation shows the migration's whole approach is wrong for these records. This ticket replaces the repair strategy and closes the actual root cause. Server-side only; do not touch `customer-billing.tsx`. Multi-tenancy intact. Migrations run by Randy from Super Admin. This repair **reduces** over-billed totals (not add-parts) — surface that in the acknowledgement gate.
+
+## Confirmed root cause & why the current migration can't work
+All 7 flagged WOs are **estimate-origin** (number format `WO-{timestamp}-{random}`, `workType = 'estimate_based'`, `estimateId` set) — none are deferred-from-findings (`WO-WC-…`). Their duplication is the **completion-append bug**, not the conversion race:
+
+1. **Estimate → WO** copies items with the estimate **snapshot**: `partPrice = item.partPrice`, `laborHours = item.laborHours`, snapshot `totalPrice` (`storage.ts createWorkOrderFromEstimate`).
+2. **Completion** (`routes.ts:9483-9495`) loops `usedParts` (prefilled from those same items) and **appends** a second row per part via `addWorkOrderItem`, **re-looking-up the part master**: `partPrice = partDetails.price` (current), `partName = partDetails.name` (current), and **`laborHours = "0"`**. It never deletes the originals.
+
+So every completed estimate-WO ends up with the original items **plus** a second, **non-identical** copy (labor 0, possibly drifted price/name). This breaks the current migration three ways:
+- **Wrong verification source:** it checks `wet_check_findings.work_order_id = wo.id` — but estimate-origin WOs have no findings linked to the WO (findings link through the *estimate*), so it can't verify any of them → flags all 7.
+- **Wrong repair method:** exact-identity dedup can't collapse the copies because they differ in `laborHours`/`partPrice` → 4 WOs showed `delta=0.00`, WO #26 only partially reduced (`$8,872.40 → $4,433.70`, still well above its estimate).
+- **The run throws** (preview OK, run failed 9:20 AM) — a code error, not surfaced.
+
+**Also not yet shipped (verify against deploy):** in the branch visible here, completion still **appends** (`routes.ts:9483`) and its totals are still un-`money()`-guarded (`routes.ts:9429-9435`). If those didn't land, new estimate-WOs keep doubling — Phase 1 is mandatory.
+
+## Done looks like
+- Completion writes exactly one row per confirmed part, at the **approved (snapshot) price**, and never appends a second copy or re-prices.
+- Each of the 7 estimate-origin WOs is rebuilt from its **approved estimate** to the correct total; WO #26 lands at its estimate's total, not $4,433.70.
+- Genuine field-added parts (used in the field, not on the estimate) are preserved, and any WO the rebuild can't fully explain is flagged for human sign-off — never silently overwritten.
+- The repair run completes (no throw) and is idempotent.
+
+---
+
+## Phase 1 — Stop the recurrence (code; deploy before any repair)
+### Slice 1A — Completion must REPLACE, not append, and must NOT re-price
+**File:** `routes.ts` `/api/work-orders/complete` (~9483-9495); `work-order-completion.tsx` (prefill ~301).
+- Build the final item set from `usedParts` **once** and write it via `replaceWorkOrderItemsWithResync(workOrderId, finalItems, companyId)` (delete + insert + recompute in one tx) — remove the `for (part of usedParts) addWorkOrderItem(...)` loop.
+- **Do not re-look-up current part price/name.** For a part that originated from the estimate, keep the estimate **snapshot** `partPrice`, `partName`, and `laborHours` (carry them through `usedParts` so completion never reprices an approved line). Current-master lookup is what made the duplicates non-identical and would silently reprice approved work.
+- Preserve `field_added` parts (real field additions) in the final set; stamp `findingId = null` for them.
+- **Guard:** if `usedParts` is empty on a completion that had prior items, treat as "no change" and log — never wipe a WO to zero.
+
+### Slice 1B — Completion NaN guard
+**File:** `routes.ts` `/api/work-orders/complete` (~9429-9435). Route `totalHours`, `totalPartsCost`, `appliedLaborRate` through `money()`; `total = money(parts) + money(labor)`. (Same fix as the earlier Slice 2 — confirm it actually ships this time.)
+
+---
+
+## Phase 2 — Correct repair: rebuild from the approved source (new migration)
+**File:** replace/supersede the current repair with `repair-wo-items-from-source.ts`, registered in `registry.ts`, following the `MigrationDefinition` contract (`check`/`preview`/`run`, per-WO audit log, per-step try/catch that **surfaces the real error**, idempotent done-marker, reduction-acknowledgement gate).
+
+**Strategy — rebuild each WO from its authoritative source, don't dedup:**
+- **Estimate-origin WO** (`estimateId` set / `workType='estimate_based'`): the authoritative billable set is the **approved `estimate_items`** (via `wo.estimateId`) — one row per estimate item at its snapshot price/qty/laborHours/zone. This is what the customer approved and how the WO was originally built.
+- **Deferred-origin WO** (`WO-WC-…`, findings linked via `work_order_id`): rebuild one row per `deferred_to_work_order` finding via the existing `calc()`/`money()` logic. (None of the current 7, but keep the branch complete.)
+
+**Per WO (transactional, wet-check/estimate row-locked):**
+1. Snapshot current `work_order_items` + header totals to a scratch table / audit log — reversible.
+2. Rebuild the base set from the authoritative source (estimate_items or findings), all `money()`-guarded, stamping `findingId` where applicable.
+3. **Preserve genuine field-adds:** any current WO item whose `partId` is **not** present in the source set is a real field addition → keep it (it's distinguishable because the duplicated copies share the estimate part's `partId`). 
+4. Write the rebuilt set via `replaceWorkOrderItemsWithResync(woId, items, companyId)`; recompute header `partsSubtotal / laborSubtotal / totalAmount / totalItems` (`total = parts + labor`, `money()`).
+5. **Reconciliation & flagging:** compare the rebuilt parts total to the source (estimate/findings) total.
+   - Clean match (rebuilt = source, only duplicate copies removed) → **auto-repair**, report the (negative) delta.
+   - Rebuilt set includes field-adds, or the current actuals suggest the tech removed/changed parts vs the estimate → **flag for manual review** with the specifics, don't auto-finalize.
+
+**Preview must show, per WO:** origin type, source (estimate #/findings), current total → rebuilt total → source total, the delta, and any field-adds. Verify **WO-1781807328597-643** rebuilds to its estimate's total (resolve `wo.estimateId`; confirm whether it's EST-50009 and report that total) before running.
+
+**Safety:** company-scoped; idempotent (clean re-run finds 0); hold billing on all 7 until each rebuilt total is signed off; run **after** Phase 1 is deployed (so a stray completion can't re-double a freshly-repaired WO).
+
+---
+
+## Phase 3 — Run sequence & human sign-off
+1. ☐ Phase 1 (1A replace-not-append + no-reprice, 1B NaN guard) merged, deployed, tests green.
+2. ☐ `reconcile-billing-sheet-invoice-totals` → BS-2026-0235 (already 0 / verify).
+3. ☐ `repair-nan-totals` → 0 remaining (already clean).
+4. ☐ `repair-wo-items-from-source` → **Preview**; for each of the 7, confirm rebuilt total vs its estimate; review field-adds; verify WO #26.
+5. ☐ Run; review the WOs it flags for manual review; correct those by hand against their estimate + actual field parts.
+6. ☐ Release billing only after every one of the 7 is verified.
+
+## Tests
+- **Completion replace + no-reprice (Slice 1A):** complete an estimate-WO → exactly one row per part at the **estimate snapshot price** (not current master); re-submit completion → no new copies; a `field_added` part appears once.
+- **Completion NaN (Slice 1B):** `/complete` with `totalPartsCost="NaN"` / NaN rate → finite total = parts + labor.
+- **Rebuild correctness (Phase 2):** seed an estimate-WO doubled by an append with `laborHours=0`/drifted price (exactly the production shape) → repair rebuilds to the estimate total; a genuine field-add survives; re-run → 0 changes.
+- **Flagging:** a WO whose actuals diverge from its estimate → flagged, not auto-overwritten.
+- **Property assertion** after every WO money mutation: `Number.isFinite(totalAmount) && totalAmount === partsSubtotal + laborSubtotal`.
+
+## Relevant files
+- `artifacts/api-server/src/routes/routes.ts` — `/api/work-orders/complete` (~9483-9495 replace-not-append + no-reprice; ~9429-9435 `money()` guard)
+- `artifacts/irrigopro/src/components/work-orders/work-order-completion.tsx` — carry estimate snapshot price/name/laborHours through `usedParts`
+- `artifacts/api-server/src/storage.ts` — `createWorkOrderFromEstimate` / `approveEstimateAndCreateWorkOrder` (item snapshot source); `replaceWorkOrderItemsWithResync` (~4905)
+- `lib/db/src/schema/schema.ts` — `estimate_items` (rebuild source), `work_order_items`
+- `artifacts/api-server/src/lib/migrations/repair-wo-items-from-source.ts` (new) + `registry.ts`; supersede the current `repair-duplicated-work-order-items`
+- **Sync note:** the current repair migration and any shipped completion changes are in the deployed env but not in the local pull — Replit should reconcile branch state so the fix lands where production runs.

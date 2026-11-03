@@ -1,0 +1,122 @@
+# Multi-Tenancy Hardening — Corrected Replit Prompts
+
+Role model (authoritative):
+- **super_admin** — unrestricted: create the company_admin for each new company; create/edit/touch ANY user, ANY role, ANY company.
+- **company_admin** — manage users **in their own company only**, at roles **strictly below** company_admin (field_tech, billing_manager, irrigation_manager). Cannot create/assign company_admin or super_admin.
+- Lower roles — no user-management access.
+
+Run in order P1 → P5. All code below is plain text (no markdown autolinks). All in `artifacts/api-server/src/routes/routes.ts` unless noted.
+
+---
+
+## Prompt 1 — Delete the unauthenticated dev routes
+Delete these three route blocks entirely (handler + callback). They are unauthenticated and must not exist:
+- `app.get("/api/test-auth", ...)` (~line 5390)
+- `app.post("/api/admin/reset-users", ...)` (~line 5410)
+- `app.post("/api/reset-randy-password", ...)` (~line 5451)
+Do not replace them. Then grep the whole repo for those three paths in tests/comments/client code and remove any remaining references.
+
+---
+
+## Prompt 2 — Lock down the global user routes
+**POST /api/users (~4948):** super_admin only — first line in the handler:
+```
+const callerRole = req.authenticatedUserRole;
+if (callerRole !== 'super_admin') {
+  res.status(403).json({ message: "Access denied. Super admin only." });
+  return;
+}
+```
+**PUT /api/users/:id (~4966) and PATCH /api/users/:id (~5130):** add the guards below after parsing `userData` and `userId` (= `parseInt(req.params.id)`). **super_admin is fully exempt** (touches any user/role/company). The ceiling only fires when the role is actually changing (so self-profile edits that echo the current role aren't blocked):
+```
+const ROLE_RANK = { field_tech: 1, billing_manager: 2, irrigation_manager: 2, company_admin: 3, super_admin: 4 };
+if (req.authenticatedUserRole !== 'super_admin') {
+  const targetUser = await storage.getUser(userId);
+  // Cross-company: non-super-admin may only edit users in their own company
+  if (!targetUser || targetUser.companyId !== req.authenticatedUserCompanyId) {
+    res.status(403).json({ message: "Access denied." });
+    return;
+  }
+  // Role ceiling: only when the role is actually changing, and never to >= caller's rank
+  if (userData.role && userData.role !== targetUser.role) {
+    const callerRank = ROLE_RANK[req.authenticatedUserRole] ?? 0;
+    const targetRank = ROLE_RANK[userData.role] ?? 0;
+    if (targetRank >= callerRank) {
+      res.status(403).json({ message: "Cannot assign a role equal to or higher than your own." });
+      return;
+    }
+  }
+}
+```
+
+---
+
+## Prompt 3 — Authenticate AND role-gate the company user family
+These routes use `requireCompanySetup` (which trusts a spoofable `x-user-role` header) and never run `requireAuthentication`. Add `requireAuthentication` BEFORE `requireCompanySetup` on each:
+- `app.get("/api/company/:companyId/users", ...)` (~5211)
+- `app.post("/api/company/:companyId/users", ...)` (~5224)
+- `app.put("/api/company/:companyId/users/:userId", ...)` (~5282)
+- `app.post("/api/company/:companyId/users/:userId/deactivate", ...)` (~5326)
+- `app.post("/api/company/:companyId/users/:userId/change-password", ...)` (~5351)
+i.e. `app.METHOD(path, requireAuthentication, requireCompanySetup, async (req,res) => {`
+
+Then, in **POST** and **PUT** (the create/edit-role paths), enforce the company + role-ceiling model. After parsing `companyId` (= `parseInt(req.params.companyId)`) and the body:
+```
+const callerRole = req.authenticatedUserRole;
+// Only super_admin or a company_admin acting on their OWN company may manage users here
+if (callerRole !== 'super_admin') {
+  if (callerRole !== 'company_admin' || req.authenticatedUserCompanyId !== companyId) {
+    res.status(403).json({ message: "Access denied." });
+    return;
+  }
+}
+// Role ceiling (skipped for super_admin): company_admin can only create/assign roles below company_admin
+const ROLE_RANK = { field_tech: 1, billing_manager: 2, irrigation_manager: 2, company_admin: 3, super_admin: 4 };
+const requestedRole = /* the role field from the body */;
+if (callerRole !== 'super_admin' && requestedRole) {
+  const callerRank = ROLE_RANK[callerRole] ?? 0;
+  const targetRank = ROLE_RANK[requestedRole] ?? 0;
+  if (targetRank >= callerRank) {
+    res.status(403).json({ message: "Cannot create or assign a role equal to or higher than your own." });
+    return;
+  }
+}
+```
+(For PUT, mirror the "only when role changes" refinement from Prompt 2 if it edits roles.) Result: a company_admin can create/manage field techs and managers in their own company; only a super_admin can mint a company_admin or super_admin.
+
+---
+
+## Prompt 4 — Scope the unscoped list endpoints
+Use everywhere:
+```
+const callerCompanyId = req.authenticatedUserRole === 'super_admin' ? null : (req.authenticatedUserCompanyId ?? null);
+```
+- **GET /api/customers (~6096):** already authed — change `storage.getCustomers()` → `storage.getCustomers(callerCompanyId ?? undefined)`.
+- **GET /api/invoices (~9682):** add `requireAuthentication`; keep its existing companyId derivation.
+- **GET /api/billing-sheets (~9983):** add `requireAuthentication`; in the `?technician=` branch call `storage.getBillingSheetsByTechnician(parseInt(technician), callerCompanyId)`. Update `getBillingSheetsByTechnician(technicianId, companyId: number | null)` in `storage.ts` to add `companyId !== null ? eq(billingSheets.companyId, companyId) : undefined` to the WHERE.
+- **GET /api/wet-check-billings (~9741):** add a companyId param to `getAllWetCheckBillingsWithCounts(companyId)` (with a WHERE filter) and call it with `callerCompanyId`.
+- **GET /api/wet-check-billings/:id (~9750):** change `getWetCheckBillingById(id, null)` → `getWetCheckBillingById(id, callerCompanyId)`.
+- **GET /api/parts/field-tech (~7940):** add `requireAuthentication`; add an optional `companyId` to `storage.getParts(companyId?)` and call `storage.getParts(callerCompanyId ?? undefined)`.
+
+---
+
+## Prompt 5 — Ownership-check the batch signed-URL endpoint (no parallel copy)
+`POST /api/photos/signed-urls` (~13924) returns signed URLs for any photo id with no ownership check. **Do not write a new 3-table `canViewPhoto`** — the existing `assertCanViewPhoto` (~13978) checks SIX stores (wet_check_photos, work_orders.photos, billing_sheets.photos, estimates.photos, work_order_zone_photos, irrigation_controllers.settingsPhotoUrl); a partial copy would wrongly deny estimate / WO-zone / irrigation photos.
+
+Refactor for one source of truth:
+1. Extract the existing checks into a boolean core `async function canViewPhoto(req, photoId): Promise<boolean>` containing ALL SIX table checks (same queries `assertCanViewPhoto` runs today), returning `true`/`false` and writing nothing to `res`.
+2. Make `assertCanViewPhoto` a thin wrapper: `if (await canViewPhoto(req, photoId)) return true; res.status(403)...; return false;` — so the single-photo routes are unchanged in behavior.
+3. In the batch map, use the boolean core and silently deny:
+```
+const results = await Promise.all(photoIds.map(async (raw) => {
+  const photoId = String(raw || "");
+  if (!photoId) return { photoId, url: null };
+  if (!(await canViewPhoto(req, photoId))) return { photoId, url: null };
+  /* existing signed-URL logic unchanged */
+}));
+```
+
+---
+
+## Verification (after all five)
+Company-isolation test: a company-A user cannot list or fetch company-B customers, invoices, billing sheets, wet-check-billings, parts, users, or photos (each returns scoped/empty/404, never another company's data); super_admin sees across tenants. Self-profile edits still work. Company_admin can create a field tech in their own company but gets 403 trying to create a company_admin or a user in another company.

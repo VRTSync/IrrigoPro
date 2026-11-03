@@ -1,0 +1,93 @@
+# FIX — Financial Pulse: Finish the One Budget Spend Consolidation
+
+**What & Why**
+Task #1864 made `computeCustomerSpend` the single answer to "how much has this customer spent," and migrated three surfaces onto it. Two more were never in scope and still hand-roll their own loops: the Financial Pulse **Accounting tab "By Customer"** meters and the **Pulse tab** budget pills. So there are five surfaces and three answers, and the two that disagree are the two on the same page as each other.
+
+Right now the divergence is invisible: on 2026-09-11 every one of the 49 customers reads "Unset" on both tabs, because no monthly allocation exists for September and no annual goal is set. That makes this the cheap moment to fix it. The moment budget goals are entered, the same customer can read Healthy on the Pulse tab, Approaching in the Accounting drill-down and Over on their own profile, on the same afternoon, with no data having changed.
+
+## Current state (confirmed in code)
+
+| Surface | Spend basis | Month window |
+|---|---|---|
+| `computeCustomerSpend` (`budget-spend.ts:48`) — customer profile, Command Center widget, budget routes, budget alerts | invoices **+ uninvoiced wet-check billings by `workDate`** | full calendar month (`budget-status.ts:83`) |
+| `computeTopCustomers` (`financial-pulse-math.ts:646`) — Accounting tab meters and Status pill | invoices only, by `createdAt` | month start → `now + 1ms` (`:654`) |
+| `computePulseCustomers` (`financial-pulse-math.ts:1147`) — Pulse tab budget pill | invoices only, by `createdAt` | `d >= monthStart`, **no upper bound** (`:1170`) |
+
+Three consequences:
+
+- **Wet-check work is invisible to both Financial Pulse tabs.** A customer whose month is mostly wet checks reads near-zero usage on Financial Pulse and correctly-high usage on their own profile. This is the largest of the three gaps.
+- **The Pulse tab has no upper bound**, so a future-dated invoice counts against the current month.
+- **Annual diverges the same way**: `computeTopCustomers` uses `yearStart → now + 1ms` (`:656`) while the canonical `getYearWindow` (`budget-status.ts:90`) is the full calendar year.
+
+## Slice 1 — A batch spend function, one implementation
+
+`computeCustomerSpend` issues two queries per customer. The Accounting tab loads up to 500 customers across two windows, so calling it per customer is hundreds of round trips. Add a set-based sibling in the same module:
+
+```ts
+computeCustomerSpendBatch(
+  customerIds: number[],
+  companyId: number | null,
+  window: { start: Date; end: Date },
+): Promise<Map<number, CustomerSpendResult>>   // { invoiced, pendingNotBilled, total }
+```
+
+- Two queries total: invoices in the window grouped by `customerId`, and uninvoiced wet-check billings in the window grouped by `customerId`.
+- **Identical rules to the single-customer function**: exclusions from `INVOICE_EXCLUDED_STATUSES`, invoices bucketed by `createdAt`, wet-check billings by `workDate` and only where `invoiceId` is null.
+- **`computeCustomerSpend` is rewritten as a thin wrapper** over the batch for a single id. One implementation, not two that must be kept in step. Its existing signature and return shape do not change, so its four current callers are untouched.
+- Company-scoped (Rule 1): `companyId` narrows both queries; `null` is super-admin global only.
+
+## Slice 2 — Both Financial Pulse surfaces call it
+
+`computeTopCustomers` and `computePulseCustomers` are pure helpers and should stay pure. Pass the spend in rather than having them fetch it.
+
+- Both gain a `spendByCustomer: { month: Map<number, CustomerSpendResult>; year: Map<number, CustomerSpendResult> }` input and use it for `monthlySpend` / `annualSpend`, deleting their own accumulation loops (`financial-pulse-math.ts:694–695` and `:1166–1171`).
+- `/top-customers` (`financial-pulse.ts:1024`) and `/pulse-summary` (`financial-pulse.ts:1571`) each call `computeCustomerSpendBatch` twice — once with `getMonthWindow(now)`, once with `getYearWindow(now)` — and hand the maps in.
+- **Windows come from `budget-status.ts`**, not from locally-built dates. That removes the unbounded Pulse window and the `now + 1ms` truncation in one move.
+- `revenue` on the Accounting table is a *revenue* column, not a budget column. It keeps following the MTD/YTD period selector and keeps using invoice `createdAt`. Only the budget meters, the Status pill and the annual meter switch to the shared spend.
+
+## Out of scope
+
+- The budget meter component itself. A separate ticket consolidates the five renderers; this one only makes the number they render correct.
+- Setting budget goals, the seasonal Apr–Oct spread, or anything about `customer_budget_months` beyond reading the current month's allocation as both Financial Pulse surfaces already do.
+- Alert behaviour. The alert service already uses the canonical function and is untouched here.
+
+## Decisions
+
+- One spend calculation across all five surfaces, batched for the list paths. (decided)
+- Financial Pulse budget meters adopt the canonical full-month and full-year windows, including their treatment of future-dated invoices, rather than keeping their own. Consistency across surfaces beats a locally-preferable window. (decided)
+- Uninvoiced wet-check work counts toward budget usage on Financial Pulse, as it already does everywhere else. Expect meters to read higher after this lands.
+
+## Done looks like
+
+- Five surfaces, one spend number for a given customer, window and day.
+- Uninvoiced wet-check work counts on both Financial Pulse tabs.
+- No Financial Pulse helper accumulates customer spend itself.
+- The Accounting tab's 500-customer view does not issue per-customer queries.
+
+## Tests
+
+- A customer with a $500 invoice and a $300 uninvoiced wet-check billing in the month: all five surfaces report $800. Before this fix, both Financial Pulse tabs reported $500.
+- The same customer's `monthlyUsedPct` and Status pill match between the Pulse tab, the Accounting drill-down and the customer profile widget.
+- A future-dated invoice inside the current calendar month counts once, on every surface — the Pulse tab no longer differs.
+- A wet-check billing already attached to an invoice is not double-counted.
+- `computeCustomerSpendBatch` over N customers returns, for each, exactly what `computeCustomerSpend` returns for that customer alone.
+- Query count: loading `/top-customers` for 500 customers issues a fixed number of spend queries, not one per customer.
+- Tenancy (Rule 1): a company A caller's batch never returns a company B customer's spend; super_admin spans companies.
+
+## Definition of Done (attach proof — Rule 7)
+
+- [ ] `file:line` for the batch function, the rewritten single-customer wrapper, and both deleted accumulation loops.
+- [ ] Grep proof that no surface outside `budget-spend.ts` sums invoice totals into a customer spend figure.
+- [ ] Screenshot of one customer at the same moment on the Pulse tab, the Accounting drill-down and their customer profile, showing the same spend and the same status.
+- [ ] Query-count evidence for the 500-customer path.
+- [ ] Test output for the wet-check-inclusive case and the batch-equals-single case.
+- [ ] Tenancy test passing.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+
+- `artifacts/api-server/src/budget-spend.ts` (`computeCustomerSpend` :48 — home for the batch sibling)
+- `artifacts/api-server/src/budget-status.ts` (`getMonthWindow` :83, `getYearWindow` :90)
+- `artifacts/api-server/src/financial-pulse-math.ts` (`computeTopCustomers` :646 with loops :694–695, `computePulseCustomers` :1147 with loop :1166–1171)
+- `artifacts/api-server/src/routes/financial-pulse.ts` (`/top-customers` :1020, `/pulse-summary` :1571, `loadCustomers` allocation read :176)
+- Tests: `financial-pulse-math.test.ts`, `financial-pulse-slice3.test.ts`, `budget-routes.test.ts`

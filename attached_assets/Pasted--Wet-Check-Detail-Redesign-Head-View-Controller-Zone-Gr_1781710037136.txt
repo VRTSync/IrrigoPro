@@ -1,0 +1,68 @@
+# Wet Check Detail Redesign — Head View + Controller Zone Grid
+
+**What & Why**
+The wet-check detail "head view" (the property overview) and the controller zone grid are flat and under-built. This redesign makes the **inspection health** the hero, turns each controller into a real **status card**, and builds out the zone grid with summary metrics + legend — all using the app's existing color language so it matches the rest of the wet-check system.
+
+**Purely presentational.** No data, schema, route, or workflow changes. All existing actions (Export CSV, Download PDF, convert, zone capture/editing, photos) and the field-tech `in_progress` flow stay exactly as they are — this restyles the *view*, it doesn't touch behavior.
+
+**Visual source of truth:** the two approved mockups —
+- `wet-check-head-view-redesign.html`
+- `controller-zone-grid-redesign.html`
+(Build to match these; they already use the correct palette.)
+
+Two slices. No backend change.
+
+---
+
+## Design Context (locked decisions)
+
+1. **One color language — the app's existing Tailwind palette** (do not invent colors; reuse the classes already in `WetCheckSystemPage.tsx` / `CombinedReviewSurface.tsx` / `ZoneScreen.tsx`):
+   - **Ran OK / healthy / converted** → green / emerald (`green-500/600` fills, `emerald-50/700` badges).
+   - **Needs work** → red (`red-500` fills, `red-50/700` badges).
+   - **N/A / not inspected** → neutral gray.
+   - **Brand / links / actions** → `blue-600` (the droplet, "View zones", "Review findings").
+   - **Pending (where shown)** → amber (`amber-50/700`).
+2. **Health is the hero.** The dominant element on each view is a green/red/gray summary of zone state (Ran OK / Needs work / N/A) with counts and percentages — not a flat text list.
+3. **Wording:** a controller with all-N/A zones reads **"not inspected"** (clearer than "N/A · 21"); individual zones keep **"N/A"**. (If "N/A" is preferred at the controller level too, that's a one-word swap.)
+4. **No behavior change.** Buttons, links, mutations, edit/read-only gating, and the field-tech capture path are unchanged — only markup/styling.
+
+---
+
+## Slice 1 — Head view (`WetCheckDetail.tsx`)
+
+Match `wet-check-head-view-redesign.html`.
+
+### Files
+- `artifacts/irrigopro/src/pages/wet-checks/WetCheckDetail.tsx`
+- Reuse `components/activity/ActivityTab` for the activity entry styling if practical.
+
+### Concrete changes
+- **Header:** property name + a droplet icon (`blue-600`), the wet-check **status** as a colored pill (converted → emerald), and a compact meta row (controllers · zones · photos · technician · date). Keep the existing **Export CSV / Download PDF** actions, restyled as the outline buttons top-right.
+- **Inspection health card (the hero):** a horizontal stacked bar — green (Ran OK) / red (Needs work) / gray (N/A) — sized by zone counts, with the counts inside the segments and a legend row beneath (`Ran OK 13 · 29%`, `Needs work 11 · 24%`, `N/A 21 · 47%`). Surface a `Needs work` flag in red where it draws the eye.
+- **Controller cards:** one card per controller, in a responsive grid, each with:
+  - a **left-edge accent** encoding state (red if it has needs-work zones, gray if not inspected, green if all OK),
+  - a status pill (e.g. "11 need work" / "not inspected"),
+  - a **mini health bar** for that controller,
+  - a footer row: ok count, repairs, photos, and a `View zones →` link (`blue-600`) that opens the existing controller drill-down.
+- **Activity:** the existing activity feed, restyled as a clean timeline entry (status transition, who, when).
+- Preserve all existing data wiring (`controllers` query, `zoneRecords`, photo counts, convert/actions) and the `in_progress` vs read-only behavior.
+
+### Acceptance
+- Head view matches the mockup; colors are the app's green/red/gray/blue; all existing actions still work; field-tech editing flow unaffected.
+
+---
+
+## Slice 2 — Controller zone grid (`ControllerHeader.tsx` + the zone-tile grid)
+
+Match `controller-zone-grid-redesign.html`.
+
+### Files
+- `artifacts/irrigopro/src/pages/wet-checks/ControllerHeader.tsx` (header + zone-count adjuster)
+- The component that renders the numbered zone-tile grid for a controller (confirm: rendered within `WetCheckDetail.tsx` / `ZoneOverviewSheet.tsx` — wire the redesign into wherever the grid currently lives).
+
+### Concrete changes
+- **Controller header:** controller name + property + zone count, with the existing **"Adjust zone count" input + Save** restyled (keep the exact behavior/`data-testid`s).
+- **Summary metrics row:** three metric cards — Ran OK (green-50), Needs work (red-50), N/A (gray-50) — with counts.
+- **Health bar:** a thin green/red(/gray) bar for the controller, above the grid.
+- **Zone tiles:** the numbered grid, each tile colored by state (green = Ran OK, red = Needs work, gray = N/A), with the existing **finding-count badge** on needs-work zones (small circle, bottom-right). Keep tap/click behavior (open the zone) unchanged.
+- **Footer:** a legend (Ran OK / Needs work / N/A / ...

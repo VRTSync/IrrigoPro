@@ -1,0 +1,411 @@
+# Slice 4 — Offline Support for Field Wet Checks
+
+**Date:** 2026-05-04
+**Status:** Draft for review
+**Decisions locked:**
+- **Full offline.** A tech can run an entire wet check from start to finish with no network signal, then sync when connectivity returns. Not just "resilient online" — genuinely offline-first.
+- **Server-wins on conflicts.** If the manager converts a finding while the tech is editing it offline, the server's state is authoritative on replay. The tech sees a non-blocking notice and continues working.
+- **Photo compression on capture.** Photos are compressed client-side to ~1MB max before storing in IndexedDB. The full original is not preserved.
+- **Idempotency via `clientId`.** Already in production from Slice 2 — every wet check, zone record, finding, and photo carries a UUID `clientId`, and POST endpoints dedupe on it.
+- **Manager UI stays online-only.** Managers work at desks; offline support is field-tech-only.
+
+**Depends on:** Slice 2 (the foundations — `clientId` columns, idempotent POSTs, indexes — are all in place). Independent of Slice 3, Slice 5.
+
+---
+
+## Executive Summary
+
+Field techs work in spotty coverage. Today the wet check capture experience assumes connectivity: every interaction (mark a zone OK, add a finding, attach a photo) is a synchronous API call that fails the moment cell signal drops. That's a frequent reality at the kinds of sites IrrigoPro serves — basements, hillsides, large HOA properties with patchy coverage in odd corners. The result is wet checks that get half-done and lost, or techs reverting to paper.
+
+This slice makes the field-tech wet check experience genuinely offline-first. The tech opens a wet check (online or freshly cached). They walk the property, tap zones, capture findings, take photos — all of it works whether the device has signal or not. When connectivity returns, a sync engine drains the local mutation queue against the API. The data model already supports this end-to-end: every mutation is idempotent and order-preserving via `clientId`. What's missing is the client-side machinery to capture, queue, replay, and surface that to the user.
+
+The slice has **four sub-slices**: a service worker with app shell + read-cache (4A), a mutation queue with replay engine for text data (4B), photo capture and upload (4C), and the sync UI plus conflict handling (4D). Each is independently shippable. A tech with 4A installed can launch the app offline; with 4B, they can edit findings; with 4C, they can take photos; with 4D, they see what's syncing.
+
+**Slice 4 ships when:** a tech can launch the app, complete a 30-zone wet check with photos, enter airplane mode for the entire walk, then re-enter cell coverage and watch the wet check sync to the server with no manual intervention. Conflict cases (a manager converted a finding mid-walk) surface as non-blocking notices.
+
+---
+
+## Why Now
+
+Three reasons.
+
+**The data foundations are in place.** Slice 2 added `clientId` columns and idempotent POST endpoints precisely to enable this work. Every day we delay shipping offline is a day those foundations sit underused while the field experience is fragile.
+
+**Slice 3's submit transaction is bigger.** With auto-billing, hitting Submit no longer just flips a status — it creates a billing sheet, billing items, and snapshots prices. A tech who hits Submit while the network is degraded gets a worse failure mode than under the old workflow. Offline-first turns that from "submit failed, lose work" into "submit queued, will sync."
+
+**Replit's recent photo pipeline work (Tasks #175, #189, #199) already optimized for upload speed and size.** The pieces of the photo path that offline depends on — the photo pipeline, the object storage — are in their best shape ever. Building offline now lands on a stable photo path; doing it later might mean re-doing the wiring.
+
+---
+
+## What Slice 4 Adds
+
+| Layer | Already exists (Slice 2) | New in Slice 4 |
+|---|---|---|
+| `clientId` columns on the four wet check tables | ✓ | — |
+| Partial unique indexes on `clientId` | ✓ | — |
+| Idempotent POST endpoints | ✓ | — |
+| Stable client-supplied timestamps | ✓ | — |
+| Service worker + app shell caching | — | 4A |
+| Read-cache for parts catalog, issue types, property controllers | — | 4A |
+| IndexedDB store mirroring wet check schema | — | 4B |
+| Mutation queue + replay engine | — | 4B |
+| Photo compression on capture | — | 4C |
+| Photo blob storage in IndexedDB | — | 4C |
+| Resumable photo upload on sync | — | 4C |
+| Sync indicator (header badge) | — | 4D |
+| Queue view (pending mutations list) | — | 4D |
+| Conflict UX (409 handling) | — | 4D |
+
+---
+
+## Architecture Overview
+
+The field-tech app becomes a real PWA. Three new client-side layers, each with a clear responsibility:
+
+**1. Service worker (`vite-plugin-pwa`).**
+Intercepts network requests. Serves the app shell (HTML, JS, CSS) from cache so the app launches offline. For static API data (parts catalog, issue type configs, property controllers per customer), uses a network-first-with-cache-fallback strategy. For wet check mutations, passes through to fetch but the response/failure is observed by the sync engine.
+
+**2. IndexedDB store (via `idb` library).**
+Mirrors the server's wet check schema for read access. Adds a `mutation_queue` object store that holds pending API calls. All wet check writes go through the IndexedDB layer first, then the sync engine drains the queue against the API.
+
+**3. Sync engine (custom, ~300 lines of TS).**
+Watches `navigator.onLine` plus a 30-second heartbeat ping (since `onLine` lies on iOS in particular). When online, drains the mutation queue in dependency order with exponential backoff. Surfaces state to the UI via a small reactive store (Zustand or similar — IrrigoPro likely already has Zustand for app state; check `client/src/stores/` for existing pattern).
+
+The data flow when a tech taps "Mark complete" on a finding while offline:
+
+```
+User taps the toggle
+  ↓
+optimistic update writes to IndexedDB (resolution = repaired_in_field)
+  ↓
+mutation queued: PATCH /api/wet-checks/findings/:id { resolution, clientId }
+  ↓
+UI re-renders from IndexedDB (instantly responsive)
+  ↓
+sync engine sees queue has work, network is offline
+  ↓
+queue waits
+  ↓
+[later] network returns
+  ↓
+sync engine drains queue: each mutation replays, server dedupes via clientId
+  ↓
+sync indicator transitions: spinner → green check
+```
+
+If any step fails (4xx, 5xx, network), the sync engine retries with backoff or surfaces a manageable error.
+
+---
+
+## Library Choices
+
+These aren't strict requirements but they're the standards Replit should reach for unless they have a reason not to:
+
+- **`vite-plugin-pwa`** (https://vite-pwa-org.netlify.app/) — service worker generation, manifest, asset precaching. Auto-handles new-version prompt. Adding it to `vite.config.ts` is a few lines.
+- **`idb`** by Jake Archibald (https://github.com/jakearchibald/idb) — small Promise-based wrapper around the raw IndexedDB API. The raw API is a callback-based mess; nobody uses it directly.
+- **`browser-image-compression`** (https://github.com/Donaldcwl/browser-image-compression) — client-side photo compression using Canvas. Configurable max size, max dimensions, output format. Handles HEIC via the same path Replit's existing pipeline uses.
+- **A small reactive store** for sync state — pick whatever IrrigoPro already uses (likely Zustand or React Query's mutation state). Don't introduce a new state management library for this.
+
+---
+
+## Data Layer
+
+### IndexedDB schema (mirror of server, plus the queue)
+
+```ts
+// Database: irrigopro_offline, version: 1
+
+// Mirrors of server tables — populated by the sync engine on read,
+// updated optimistically by the field UI.
+// Indexed on the columns the field UI queries by.
+
+stores.wetChecks                  // keyPath: id, indexes: [clientId, customerId, status]
+stores.wetCheckZoneRecords        // keyPath: id, indexes: [clientId, wetCheckId, (wetCheckId+controllerLetter+zoneNumber)]
+stores.wetCheckFindings           // keyPath: id, indexes: [clientId, zoneRecordId, wetCheckId]
+stores.wetCheckPhotos             // keyPath: id, indexes: [clientId, wetCheckId, findingId, zoneRecordId]
+
+// Read-cached static data — refreshed when online, served from cache when offline.
+stores.parts                       // keyPath: id, indexes: [category]
+stores.issueTypeConfigs           // keyPath: id, indexes: [issueType]
+stores.propertyControllers        // keyPath: id, indexes: [customerId]
+
+// Mutation queue — the heart of the sync engine.
+stores.mutationQueue              // keyPath: id (UUID), indexes: [status, parentClientId]
+```
+
+A wet check pulled from the server is denormalized into the four mirror stores. Local edits update both the mirror (for instant render) and append to the mutation queue (for eventual sync). When the queue drains and the server returns the canonical row, the mirror is updated with the server's response — `clientId` matches both sides so the rows reconcile cleanly.
+
+### `mutation_queue` row shape
+
+```ts
+interface QueuedMutation {
+  id: string;                    // local UUID, unrelated to clientId on the body
+  method: 'POST' | 'PATCH' | 'DELETE';
+  url: string;                   // e.g. "/api/wet-checks/42/zone-records"
+  body: unknown;                 // includes clientId for idempotency
+  clientId: string;              // mirror of body.clientId, hoisted for index
+  parentClientId: string | null; // ordering dependency (e.g., a finding depends on its zone record's clientId)
+  attemptCount: number;
+  lastAttemptAt: number | null;
+  lastError: string | null;
+  status: 'pending' | 'syncing' | 'failed' | 'completed';
+  createdAt: number;
+}
+```
+
+The `parentClientId` field captures dependency — a finding can't replay until its zone record's POST has succeeded, because the finding's body references `zoneRecordId` which only exists after the zone record's POST returns the server-assigned id. The replay engine's first job is topological-sort the queue.
+
+The actual ordering rule:
+
+| Mutation type | Depends on |
+|---|---|
+| Create wet check | (nothing) |
+| Update wet check | wet check creation |
+| Create zone record | wet check |
+| Update zone record | zone record creation |
+| Create finding | zone record |
+| Update finding | finding creation |
+| Create photo | the most specific parent (finding > zone record > wet check) |
+| Submit | all of the above |
+
+In practice the queue rarely has deep chains because the field tech edits one wet check at a time. A topological sort plus a parent-completed gate handles it.
+
+---
+
+## Sync Engine
+
+The engine is a small singleton that runs in the background tab.
+
+**Network detection.** `navigator.onLine` is unreliable — on iOS Safari it returns `true` whenever the network adapter has an IP, even if no traffic flows. The engine combines:
+
+- The `online` and `offline` window events as the primary signal.
+- A heartbeat `GET /api/health` every 30 seconds while the app is in the foreground. A failure flips the engine to `offline` mode.
+- Every actual API call serves as a heartbeat too — a 5xx or network error counts.
+
+**Replay loop.** Triggered when:
+
+- The engine transitions to `online`.
+- A new mutation is enqueued while online (immediate sync).
+- The user taps "Retry" on a failed mutation.
+
+Each loop iteration:
+
+1. Find all queue entries with `status: pending` whose dependencies are `completed`.
+2. Sort by `createdAt` ascending.
+3. For each, set `status: syncing`, attempt the API call.
+4. On success: set `status: completed`, update the mirror with the server response.
+5. On 409: set `status: completed` (the server already had this), refresh the mirror from the server, surface a conflict notice.
+6. On other 4xx: set `status: failed`, surface the error, do not auto-retry.
+7. On 5xx or network error: bump `attemptCount`, schedule retry with exponential backoff (1s → 2s → 4s → 8s → 30s cap).
+8. After the loop drains, prune `status: completed` entries older than 24 hours.
+
+**Backoff schedule.** Per-mutation, not global. If mutation A is failing 5xx, mutation B can still proceed if it doesn't depend on A.
+
+**Concurrency.** Two parallel in-flight mutations max. The server can handle more, but the goal is calm sync, not maximum throughput. A rapid burst of 100 zone records replaying serially over 2 connections takes about 30 seconds — fine.
+
+---
+
+## Photo Handling
+
+Photos are heavy: a 30-finding wet check with 2 photos each is 60 photos, ~30MB at the iPhone default of ~500KB per photo. iPhone Pro models with HEIC produce smaller files; Android Pixels produce larger. Without compression, an offline wet check could hold 200MB+ of photos. IndexedDB can store that, but the upload phase becomes the bottleneck.
+
+**Compression on capture (4C):**
+- Use `browser-image-compression` to compress to:
+  - `maxSizeMB: 1.0`
+  - `maxWidthOrHeight: 1920` (covers retina display detail at typical zoom levels)
+  - `useWebWorker: true` (don't block the UI thread)
+  - `fileType: 'image/jpeg'` (the existing pipeline expects JPEG; HEIC is converted)
+- The full original is not retained. The 1MB compressed Blob becomes the source of truth.
+- This matches the server-side optimization Replit landed in Task #199 ("Drop preserved-original photo uploads").
+
+**Storage:**
+- Store compressed Blob directly in IndexedDB. `idb` handles Blobs natively.
+- Photo metadata row goes in `stores.wetCheckPhotos` with a reference to the Blob's queue entry.
+- The mutation queue holds the multipart upload as the body.
+
+**Upload:**
+- Reuse the existing `POST /api/wet-checks/:id/photos` endpoint via the queue.
+- For files >2MB after compression (rare but possible), use multipart upload — the existing photo pipeline already supports this.
+- Upload progress is observable per-mutation; the sync indicator shows "Uploading photo 3 of 12..."
+
+**Failure modes:**
+- Upload interrupted mid-stream → mutation retries with backoff. The endpoint is idempotent on `clientId` so a retry doesn't create duplicates.
+- Compression fails on capture → fall back to original-size upload, log a warning, surface to user only if the file is >10MB.
+
+---
+
+## Sync UI
+
+The sync state is visible to the tech but never blocks the work.
+
+**Header badge.** A small pill in the wet check screen header. Three states:
+
+| State | Visual | Tap behavior |
+|---|---|---|
+| All synced | Green check + "Synced" | Open queue view (read-only history) |
+| Syncing | Spinner + "Syncing N items" | Open queue view (live progress) |
+| Errors | Amber/red exclamation + "N items need attention" | Open queue view with the failed items expanded |
+
+**Queue view.** A bottom sheet or full screen modal. Lists pending and recent mutations:
+
+- Active mutations show a progress indicator and "Cancel" option.
+- Failed mutations show the error and a "Retry" button.
+- Recent successful mutations (last hour) are listed for confidence — "Saved 3 minutes ago" is reassuring.
+
+**Offline indicator.** When fully offline (no network), a thin amber strip pinned to the top of the wet check screen: *"Offline — your work is saved locally and will sync when you're back online."* Disappears when online.
+
+**Conflict notice.** When a mutation returns 409 (the manager already converted the finding), a small toast: *"Your manager already handled this finding while you were offline. Your latest edits weren't applied."* With a button: *"View what they did."* The notice is non-blocking — the tech keeps working on the rest of the wet check.
+
+---
+
+## Conflict Policy (Server-Wins)
+
+The 409 cases that can occur:
+
+1. **Tech edits a finding offline; manager converts the wet check before tech reconnects.** The finding has `convertedAt != null` and `billingSheetId / estimateId / workOrderId` set. Server-side, the existing `convertedAt IS NULL` gate on edits returns 409. Client-side, the queue marks the mutation completed with a notice and refreshes the mirror.
+2. **Tech submits a wet check that's already been submitted from another device** (rare — would only happen if the tech had two devices going). The wet check status is no longer `in_progress` so submit returns 409. Client surfaces "This wet check was already submitted from another device — its current state has been loaded."
+3. **Tech adds a finding to a zone record that the manager has already routed.** Less common but possible if there's a workflow like "manager pre-routes during a wet check in progress." The finding insert succeeds (the zone record still exists); manager just sees a new finding in `pending` state on the next refresh. No conflict.
+
+Server-wins is right because:
+- The data model is mostly append-only. Genuine merge conflicts are rare.
+- Manager decisions are downstream of tech captures; if a manager has already acted, their action represents a more-informed state.
+- Implementing client-merge would require a three-way diff UI nobody would understand. Server-wins with a clear notice is much simpler and preserves audit integrity.
+
+---
+
+## Sub-Slicing
+
+Slice 4 is large. Four sub-slices, each shippable on its own:
+
+### Sub-slice 4A — Service worker + read-cache
+
+**Scope:**
+- Add `vite-plugin-pwa` to `vite.config.ts` with the right manifest, icons, and precache strategy.
+- Cache the app shell (HTML + JS + CSS bundles) so the app launches with no network.
+- Network-first with cache fallback for these read-only endpoints:
+  - `GET /api/parts` (filtered to issue category — but cache the full list per company)
+  - `GET /api/wet-checks/issue-types`
+  - `GET /api/properties/:customerId/controllers`
+  - `GET /api/wet-checks/:id` (for the active wet check the tech is working on — cached when fetched)
+- Add a "version updated" prompt when the service worker installs a new version.
+
+**Ships when:** the tech can put their phone in airplane mode after opening the app once and re-launch the app — the app shell loads, the parts catalog loads from cache, the active wet check displays from cache. **No writes are functional yet** (4A is read-only offline).
+
+**Dependencies:** none on the other sub-slices.
+
+### Sub-slice 4B — Mutation queue + replay (text data)
+
+**Scope:**
+- Add `idb` and define the IndexedDB schema (mirror tables + mutation_queue).
+- Wrap the field-tech API client in a layer that:
+  - Reads from IndexedDB first; falls back to network if cold.
+  - Writes optimistically to IndexedDB and enqueues the mutation.
+- Build the sync engine (replay loop, dependency ordering, exponential backoff).
+- Wire the wet check creation, zone record creation/update, and finding creation/update/delete paths through the queue.
+- **Photos are not yet handled offline in 4B.** Capturing a photo while offline shows "Photos require connectivity — try when you're back online" and skips photo upload. (This degrades gracefully — most fields don't need a photo.)
+
+**Ships when:** the tech can run a complete wet check (no photos) end-to-end while in airplane mode, and on reconnect the wet check syncs to the server in under 60 seconds with no errors.
+
+**Dependencies:** 4A. The service worker isn't strictly required, but launching the app offline in the first place needs 4A.
+
+### Sub-slice 4C — Photo capture + offline upload
+
+**Scope:**
+- Add `browser-image-compression` and wire it into the photo capture path.
+- Store compressed photo Blobs in IndexedDB.
+- Queue photo uploads through the same mutation queue as text mutations.
+- Upload progress per photo, observable in the queue.
+- Reuse existing `POST /api/wet-checks/:id/photos` — the endpoint is already idempotent on `clientId`.
+
+**Ships when:** the tech can capture photos while offline, the compressed Blob is stored locally, and on reconnect all photos upload via the queue.
+
+**Dependencies:** 4B. The mutation queue must exist.
+
+### Sub-slice 4D — Sync UI + conflict handling
+
+**Scope:**
+- Header badge with three states (synced / syncing / errors).
+- Queue view (bottom sheet or modal) listing pending, syncing, completed, and failed mutations.
+- Offline indicator strip at the top of the wet check screen.
+- 409 conflict toast with "view what they did" link.
+- Per-mutation Retry button on failed items.
+
+**Ships when:** all sync state is visible to the tech, and a manager-converts-while-tech-edits scenario produces a clear, non-blocking notice on the tech's side.
+
+**Dependencies:** 4B. UI for the queue requires the queue to exist.
+
+---
+
+## Server-Side Requirements
+
+Mostly already done. A few small additions needed:
+
+- **`GET /api/health`** — a tiny endpoint returning `{ ok: true }` for the heartbeat. Probably already exists; if not, three lines.
+- **Verify 409 responses** are returned correctly when the queue replays a stale mutation. Specifically: `PATCH /api/wet-checks/findings/:id` on a finding with `convertedAt != null` should 409 with a clear error body. Confirm via integration test.
+- **Confirm idempotency on photo upload.** `POST /api/wet-checks/:id/photos` should accept a `clientId` in the form body and dedupe on it. Slice 2 added the column and index; double-check the route handler honors them.
+- **Optional: batch endpoint.** `POST /api/wet-checks/:id/sync` that accepts an array of mutations. Performance optimization — the 30-zone wet check generates ~60 mutations on reconnect. Sequential POSTs over a single TCP connection take 5-10 seconds. A batch endpoint reduces that to one round-trip. **Not required for shipping**, but worth considering after 4B if real-world sync feels slow.
+
+---
+
+## Migration
+
+No schema changes. All forward-only client work.
+
+- **Existing field techs install a new app version** that includes the service worker. First load registers the service worker, caches the shell, and downloads the read-cache data on next online window.
+- **Existing wet checks in flight** continue to work — the new client reads them from the server (online) or from cache (offline). No data migration.
+- **Old client versions** (without service worker) continue to work normally with the API. The two coexist for the deprecation window.
+
+---
+
+## Risks and Rollback
+
+**The biggest risk is "phantom syncs."** A queue mutation that fails silently or gets stuck mid-replay can produce wet checks that look complete on the device but never reach the server. Mitigation: aggressive logging in the sync engine, the queue view always shows pending/failed items prominently, the daily check-in includes a `/api/wet-checks/by-tech-with-mismatch` admin query that compares the tech's last-active wet check IDs to what's in the database. Anything in-flight for >24h is flagged for manual investigation.
+
+**The second-biggest risk is photo loss.** A photo captured offline is in IndexedDB only until it syncs. If the user clears site data (rare but possible) or the browser reclaims storage under pressure (the storage manager can evict), photos that haven't synced yet are gone. Mitigation: request persistent storage via `navigator.storage.persist()` on first wet check, check available quota and warn the user if it's tight, never delete a photo from IndexedDB until sync confirms server-side persistence.
+
+**The third risk is the surprise of installing a service worker.** Service workers can cache aggressively and a bad deploy can leave users stuck on a stale version. Mitigation: `vite-plugin-pwa` defaults handle versioning; add a "new version available, reload" prompt; document the manual unregister procedure ("Settings → Advanced → Clear site data") in case of emergency.
+
+**Rollback per sub-slice:**
+- 4A: ship behind a feature flag `OFFLINE_SERVICE_WORKER`. Flip off → next page load unregisters the SW. Safe.
+- 4B: behind `OFFLINE_QUEUE`. Flip off → the wrapper falls back to direct API calls. Existing wet checks in IndexedDB orphan, which is fine if everyone's online.
+- 4C: behind `OFFLINE_PHOTOS`. Flip off → photo capture requires online, same as today.
+- 4D: behind `OFFLINE_SYNC_UI`. Flip off → the queue still works but the UI hides itself. The wet check screen looks like today's online-only UI.
+
+All flags are independent, so any sub-slice can be reverted without touching the others.
+
+---
+
+## Testing Strategy
+
+Offline behavior is hard to test. Three layers:
+
+1. **Unit tests for the sync engine.** Pure-function tests for the dependency ordering, retry/backoff schedules, and conflict handling. Mock `fetch` and the IndexedDB store with `fake-indexeddb`. These run in `vitest` or `node:test` like the existing tests.
+2. **Integration tests with `fake-indexeddb`.** Set up a fresh database, simulate a wet check capture flow, simulate going offline (mock fetch to throw), simulate online (mock fetch to succeed), assert the server received the right calls in the right order with the right `clientId`s. Run as part of the existing `tests/` workflow.
+3. **Manual end-to-end checklist.** Before each release: a tech runs a 12-zone wet check on a real device, in airplane mode, with photos. Reconnects on cellular. Verifies all data and photos arrive at the server. Documented in a `tests/MANUAL_OFFLINE_CHECKLIST.md` so it's reproducible.
+
+The manual test is non-negotiable. Offline is hard enough to model that you don't trust it until you've watched a real device do it.
+
+---
+
+## Success Criteria
+
+Slice 4 ships when, in order:
+
+1. The sub-slices have all landed: 4A (service worker + read cache), 4B (mutation queue + replay), 4C (photos), 4D (sync UI + conflicts).
+2. The manual offline checklist passes on iOS Safari and Android Chrome.
+3. A tech can run a 30-zone wet check end-to-end in airplane mode, including 30 photos, then reconnect on cellular and have everything sync within 2 minutes with no errors.
+4. A 409 conflict is reproducible (manager converts while tech is offline) and produces the expected non-blocking toast.
+5. The unit and integration test suites pass.
+6. Storage usage on a typical wet check (12 zones, 6 findings, 12 photos) is under 30MB in IndexedDB.
+
+---
+
+## What This Unblocks
+
+**Real field reliability.** A tech who's lost network mid-wet-check no longer loses work. This is the single biggest reliability gain available to IrrigoPro.
+
+**Multi-day wet checks.** A tech who needs to come back tomorrow to finish the property doesn't depend on connectivity in either visit. The wet check exists locally.
+
+**A truer offline product story.** Once 4 ships, the marketing line "works in the field, with or without signal" becomes literally true rather than aspirational.
+
+**Foundations for offline manager view (someday).** This slice is field-tech-only by decision, but the same pattern (mirror + queue + replay) could later be extended to the manager UX if there's demand. The work is mostly done at that point.

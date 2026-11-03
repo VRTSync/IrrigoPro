@@ -1,0 +1,451 @@
+# Replit Task #1150 — Invoice Detail PDF Cleanup, Slice 1 (Reconciliation WC line, duplicate footer, VRT logo, per-zone labor)
+
+This is a single self-contained task addressing four defects plus a small
+set of layout-efficiency changes on the **monthly invoice detail PDF**
+(`generateInvoiceDetailPDF`). All four defects were surfaced from a real
+production export: *Prospect at Settlers Chase — Irrigation Billing
+Detail (5/1/26–5/31/26), Invoice #94354*. Do not deviate from the file
+paths, function names, or formula shapes specified. If you believe a
+deviation is necessary, surface it and stop.
+
+> **TL;DR.** Four bugs, one template family:
+> 1. The reconciliation page never lists the Wet Check Billing rows, yet
+>    `totals.grandTotal` already includes them — so the itemized list
+>    doesn't reconcile to the grand total. (For #94354: Billing Sheets
+>    subtotal $2,840.85 + WCB $3,473.91 = $6,314.76 grand total, but the
+>    $3,473.91 line is invisible.)
+> 2. A second, in-body footer (`pageFooter()`) renders on every page
+>    showing "Invoice #94354 · Page 0" directly above the real puppeteer
+>    footer. The CSS page counter can't resolve inside a `position:fixed`
+>    body element, so it prints `0` on every page. It's pure duplication —
+>    delete it.
+> 3. The VRT-generated "Repairs Summary" section needs the VRT logo in
+>    its header.
+> 4. The per-zone wet-check breakdown shows only a **parts** subtotal per
+>    zone. Add a per-zone **labor** line so labor is clearly broken out,
+>    honoring the Slice 4c stale-labor guard.
+>
+> Plus layout-efficiency changes (Change 5) that remove ~1.5 pages of
+> duplication and dead columns.
+
+> **Existing infrastructure to NOT rebuild.**
+> - The canonical page footer is the puppeteer `footerTemplate` in
+>   `generateInvoiceDetailPDF` (`pdf-generator.ts:284–289`) — "Powered by
+>   VRT · vrtsync.com | Page X of Y". It is correct and stays. Do NOT
+>   add page numbering anywhere else.
+> - `WetCheckBillingView` already exposes `zoneLaborSubtotal`,
+>   `repairLaborHours`, and `zonesHaveStaleLaborData` per Slice 4c
+>   (`wet-check-billing-view.ts:296,292,349`). Reuse them — do NOT
+>   re-derive per-zone labor.
+> - `vm.totals` already folds WCB labor/parts/total into the invoice
+>   totals (`pdf-view-model.ts:376–389`). The reconciliation grand total
+>   is already right; only the *itemized list* is missing the WCB rows.
+>   Do NOT change `totals`.
+
+---
+
+## Design Context (locked decisions)
+
+**The reconciliation list must enumerate every reference that feeds the
+grand total.** Today `reconciliationPage` (`pdf-helpers.ts:722`)
+destructures only `workOrders` and `billingSheets` from the view model
+and renders sections for each, but `vm.wetCheckBillings` is never
+iterated. Because `totals.grandTotal` *does* include the WCB rows, the
+printed list silently fails to reconcile. The fix is presentational
+only: add a "Wet Check Billings" section (rows + subtotal) to the recon
+table, in both the branch-grouped and the non-branch code paths. No
+totals math changes.
+
+**One footer, owned by puppeteer.** The in-body `pageFooter()` call
+(`pdf-generator.ts:327`) and its `.pdf-footer` CSS
+(`pdf-helpers.ts:1607–1627`) are a vestige from the pre-`displayHeaderFooter`
+era. `counter(page)` evaluates to `0` inside the fixed element, which is
+where "Page 0" comes from. Delete the call, the `pageFooter` export, and
+the now-dead CSS. The puppeteer footer remains the single source.
+
+**The "Repairs Summary" block is the VRT-branded section.** That section
+header (`partsBlockForWetCheckBS`, `pdf-helpers.ts:510`) is where the
+VRT logo belongs — it labels the machine-generated wet-check repair
+rollup. The logo is a fixed brand asset (not the customer's company
+logo), so it is bundled with the PDF code, not passed through
+`logoDataUri`.
+
+**Per-zone labor is best-effort, exactly as Slice 4c established.** When
+`view.zonesHaveStaleLaborData === true`, do NOT print a fabricated
+per-zone labor number — show the zone parts subtotal, omit the per-zone
+labor line, and rely on the WCB ticket's FINANCIAL BREAKDOWN labor total
+(which is snapshot-backed). When labor data is fresh, show it per zone.
+
+---
+
+## Slice 1 — Five changes
+
+### Change 1 — Add the Wet Check Billings section to the reconciliation page
+
+In `reconciliationPage` (`pdf-helpers.ts:722`), `vm.wetCheckBillings` is
+currently unused. Add a WCB section mirroring the existing Billing Sheets
+section, in **both** branches of the function.
+
+**Non-branch path** (`pdf-helpers.ts:799–864`). After the `bsSubtotal`
+block, add:
+
+```typescript
+const wcbGroupTotal = wetCheckBillings.reduce(
+  (s, r) => s + parseFloat(String(r.wetCheckBilling.totalAmount || '0')),
+  0,
+);
+
+const wcbSectionHeader = wetCheckBillings.length > 0 ? `
+  <tr class="recon-group-header recon-group-wcb">
+    <td colspan="3">Wet Check Billings</td>
+  </tr>` : '';
+
+const wcbRows = wetCheckBillings.map(r => `
+  <tr>
+    <td class="recon-ref recon-ref-wcb">${r.wetCheckBilling.billingNumber}</td>
+    <td class="recon-type recon-type-wcb">Wet Check</td>
+    <td class="recon-total">${formatCurrency(parseFloat(String(r.wetCheckBilling.totalAmount || '0')))}</td>
+  </tr>`).join('');
+
+const wcbSubtotal = wetCheckBillings.length > 0 ? `
+  <tr class="recon-subtotal">
+    <td colspan="2" class="recon-subtotal-label">Wet Check Billings Subtotal</td>
+    <td class="recon-total">${formatCurrency(wcbGroupTotal)}</td>
+  </tr>` : '';
+```
+
+Then insert `${wcbSectionHeader}${wcbRows}${wcbSubtotal}` into the
+`<tbody>` **between** `${bsSubtotal}` and `${warningRow}`
+(`pdf-helpers.ts:857–858`). Add `wetCheckBillings` to the destructure on
+line 723.
+
+**Branch-grouped path** (`pdf-helpers.ts:733–797`). Resolved against
+source: `PdfBranchSubtotal` (`pdf-view-model.ts:158–161`) carries only
+`workOrders` and `billingSheets`, and the branch grouping
+(`pdf-view-model.ts:405–432`) never folds WCBs into a branch. Therefore
+render WCBs as a **single ungrouped "Wet Check Billings" section after
+all branch blocks** and before the grand-total row (same three snippets
+as above). Do NOT attempt to attach WCBs to individual branches — that
+would require extending `PdfBranchSubtotal` and is out of scope for this
+slice. `vm.wetCheckBillings` is the full list to render in both paths;
+`invoice-pdf-service.ts` already populates it via `buildPdfViewModel`
+(`invoice-pdf-service.ts:391`), so no service-layer change is needed.
+
+Add CSS for the new classes next to the existing `recon-ref-bs` /
+`recon-type-bs` rules so WCB rows are visually distinct (reuse the
+existing color tokens; e.g. tint `recon-group-wcb` like
+`recon-group-bs`).
+
+**Acceptance:** For Invoice #94354 the recon table shows, in order:
+Billing Sheets section (7 rows + $2,840.85 subtotal), Wet Check Billings
+section (WC-2026-1008 → $3,473.91 + $3,473.91 subtotal), then GRAND
+TOTAL $6,314.76. Billing-Sheets subtotal + WCB subtotal == grand total.
+
+### Change 2 — Delete the duplicate in-body footer ("Page 0")
+
+1. In `pdf-generator.ts`, remove the `${pageFooter(invoice.invoiceNumber)}`
+   line from `generateInvoiceDetailHTML` (currently `pdf-generator.ts:327`,
+   immediately after `<body>`).
+2. Remove `pageFooter` from the import block (`pdf-generator.ts:10–20`).
+3. In `pdf-helpers.ts`, delete the `pageFooter` export
+   (`pdf-helpers.ts:883–889`).
+4. In `buildFullCSS` (`pdf-helpers.ts`), delete the `.pdf-footer`,
+   `.pdf-footer-invoice`, `.pdf-footer-page`, and `.pdf-page-num::before`
+   rules (`pdf-helpers.ts:1607–1627`). Keep the `@page { margin: … }` rule
+   if present — only the footer/page-num rules go.
+5. The `.container` currently has `padding: 0 20px 80px 20px`
+   (`pdf-helpers.ts:907`) — the `80px` bottom padding reserved space for
+   the in-body footer. Reduce it to `padding: 0 20px 20px 20px`; the
+   puppeteer footer lives in the page margin and needs no body reserve.
+
+**Acceptance:** No "Invoice #… · Page 0" strip appears anywhere. Each
+page shows exactly one footer: "Powered by VRT · vrtsync.com" left,
+"Page X of Y" right, with correct sequential numbers.
+
+### Change 3 — VRT logo in the Repairs Summary header
+
+The VRT logo is a fixed brand asset. Add it as a base64 data-URI
+constant so the PDF stays self-contained (no network fetch at render
+time, consistent with how photos are pre-embedded).
+
+1. Add a new file `artifacts/api-server/src/assets/vrt-logo.ts` exporting
+   `export const VRT_LOGO_DATA_URI = "data:image/png;base64,…";`
+   (or `image/svg+xml;base64,…`). **Randy will supply the actual VRT logo
+   file** — until then, encode the wordmark already used in the footer
+   ("VRT") as a simple SVG so the build is not blocked. Flag this
+   placeholder in your summary so it can be swapped for the real asset.
+2. In `partsBlockForWetCheckBS` (`pdf-helpers.ts:473`), import the
+   constant and render it in the Repairs Summary section header
+   (`pdf-helpers.ts:508–511`). Replace the plain label line with a
+   header that places the VRT logo left of the label text:
+
+```typescript
+const repairsSummaryBlock = summaryRows
+  ? `
+  <div class="ticket-section ticket-parts-section">
+    <div class="ticket-section-label vrt-section-label">
+      <img src="${VRT_LOGO_DATA_URI}" class="vrt-section-logo" alt="VRT">
+      <span>Repairs Summary &mdash; ${view.repairsSummary}</span>
+    </div>
+    <table class="items-table"> … unchanged … </table>
+  </div>`
+  : `…`;
+```
+
+3. Add CSS in `buildFullCSS`:
+
+```css
+.vrt-section-label { display: flex; align-items: center; gap: 8px; }
+.vrt-section-logo { height: 16px; width: auto; object-fit: contain; }
+```
+
+**Acceptance:** The Repairs Summary section header shows the VRT logo
+inline before "Repairs Summary — N repairs across M zones". The logo
+does not appear on per-zone sub-blocks (only the summary header).
+
+### Change 4 — Per-zone labor line in the wet-check breakdown
+
+In `partsBlockForWetCheckBS` (`pdf-helpers.ts:527–584`), each zone block
+currently ends with a single parts-only subtotal row
+(`pdf-helpers.ts:541–545`). Add a per-zone labor line and make the zone
+subtotal = parts + labor, gated on the Slice 4c stale-data flag.
+
+`partsBlockForWetCheckBS` needs the labor rate. **Add a `laborRate:
+number` parameter** and pass it from `ticketPageWCB` (it already computes
+`laborRate` at `pdf-helpers.ts:359`). Update both call sites in
+`ticketPageWCB` (`pdf-helpers.ts:390–392`).
+
+For each zone, when `!view.zonesHaveStaleLaborData`:
+
+```typescript
+const zoneLaborHrs = parseFloat(zone.repairLaborHours) || 0;
+const zoneLaborAmt = parseFloat(zone.zoneLaborSubtotal) || 0;
+const zonePartsAmt = parseFloat(zone.zonePartsSubtotal) || 0;
+const zoneTotal = zonePartsAmt + zoneLaborAmt;
+
+const laborRow = zoneLaborHrs > 0 ? `
+  <tr class="zone-labor-row">
+    <td colspan="4">Zone ${zone.zoneLabel} Labor (${zoneLaborHrs} hrs × ${formatCurrency(laborRate)}/hr)</td>
+    <td class="text-right">${formatCurrency(zoneLaborAmt)}</td>
+  </tr>` : '';
+
+const subtotalRow = `
+  <tr class="zone-subtotal-row">
+    <td colspan="4" style="font-weight:700; color:${black};">Zone ${zone.zoneLabel} Subtotal</td>
+    <td class="text-right" style="font-weight:700; color:${brown};">${money(String(zoneTotal))}</td>
+  </tr>`;
+```
+
+Render `${laborRow}` immediately before `${subtotalRow}` inside the zone
+`<tbody>`.
+
+When `view.zonesHaveStaleLaborData === true`: omit the labor row, keep
+the subtotal as parts-only (current behavior), and render one small note
+under the Repairs Summary header:
+
+```html
+<div class="zone-labor-note">Per-zone labor is summarized in the
+Financial Breakdown above; zone subtotals below reflect parts only.</div>
+```
+
+Add CSS:
+
+```css
+.zone-labor-row td { color: #6b7280; font-size: 12px; }
+.zone-labor-note { font-size: 11px; color: #6b7280; margin: 4px 0 8px; }
+```
+
+**Acceptance:**
+- For a wet check with fresh labor data, each zone block shows a labor
+  line ("Zone A-2 Labor (0.50 hrs × $75.00/hr) … $37.50") and a subtotal
+  that equals parts + labor.
+- The sum of all per-zone subtotals equals the WCB ticket's TOTAL
+  (FINANCIAL BREAKDOWN) within $0.01.
+- For a wet check flagged `zonesHaveStaleLaborData`, no fabricated labor
+  appears; the note is shown and zone subtotals stay parts-only.
+
+### Change 5 — Layout efficiency (recommended; confirm before shipping if unsure)
+
+These remove duplicated content and dead columns. They are presentational
+and independent of Changes 1–4.
+
+**5a. Collapse the flat Repairs Summary table into an aggregated
+rollup.** Today the Repairs Summary table
+(`partsBlockForWetCheckBS`, `summaryRows`, `pdf-helpers.ts:493–522`)
+lists **every individual line item**, and then the per-zone blocks below
+list the **same** items again — ~1.5 redundant pages on #94354. Replace
+the per-line summary with an aggregate grouped by `issueDisplayLabel`
+(+ `partName`): one row per repair type with summed Qty and summed Parts
+Total, plus a final "Repairs Total" row. The exhaustive per-zone
+breakdown below remains the line-item record. Example shape:
+
+| Repair Type | Part | Qty | Parts Total |
+|---|---|---|---|
+| Nozzle Replace | Set Nozzle 8/10/12/15 | 71 | $248.50 |
+| Regular Head Replace | K-Rain 1804 Pop-Up | 38 | $902.50 |
+| … | | | |
+
+**5b. Drop the always-zero "Labor Hrs" column from per-sheet parts
+tables.** In `partsTableFromBS` and `partsTableFromWO`
+(`pdf-helpers.ts:589–653`), the "Labor Hrs" column is always `0` because
+labor is billed as the separate "Irrigation Labor" line in FINANCIAL
+BREAKDOWN. Remove the column (header + cell) to declutter; keep Part
+Description / Qty / Unit Price / Total.
+
+**5c. De-duplicate the part description on billing-sheet rows.** Several
+rows print the part name both above and below the row (e.g. "Head –
+K-Rain 1804…" twice; "1\" FEBCO Seal Kit" / "1\" FEBCO Repair Kit"). In
+`partsTableFromBS` (`pdf-helpers.ts:626–636`) the `subLines` currently
+appends `partDescription` even when it equals `partName`. Only render
+`partDescription`/`notes` when they differ from `partName`.
+
+**5d. (Optional) Cover page polish.** The cover wraps the company name
+and billing period awkwardly and shows a bare street address ("14847
+Madison St", no city/state/zip, and a raw phone "7208109673"). If the
+company record has structured address fields, format them; otherwise
+leave as-is. Flag this as a data-shape question rather than guessing.
+
+**Acceptance for Change 5:** Page count for #94354 drops (the duplicated
+flat repairs list is gone); no parts table shows a Labor Hrs column; no
+row prints its part name twice. Per-zone line items are unchanged and
+still complete.
+
+---
+
+### Tests
+
+**Backend — reconciliation includes WCB section (Change 1):**
+
+```typescript
+// artifacts/api-server/src/pdf-view-model.test.ts (extend) OR a new
+// pdf-recon-wcb.test.ts that renders reconciliationPage() to a string.
+describe("reconciliationPage — Wet Check Billings section (Slice 1)", () => {
+  it("renders a WCB row + subtotal when wetCheckBillings is non-empty", () => {
+    const html = reconciliationPage(vmWith({
+      billingSheets: [bs({ billingNumber: "BS-1", rowTotal: 2840.85 })],
+      wetCheckBillings: [wcb({ billingNumber: "WC-1008", totalAmount: "3473.91" })],
+      totals: { grandTotal: 6314.76, laborSubtotal: 3502.50, partsSubtotal: 2812.26 },
+    }));
+    expect(html).toContain("Wet Check Billings");
+    expect(html).toContain("WC-1008");
+    expect(html).toContain("$3,473.91");
+    expect(html).toContain("Wet Check Billings Subtotal");
+  });
+
+  it("omits the WCB section when there are no wet check billings", () => {
+    const html = reconciliationPage(vmWith({ wetCheckBillings: [] }));
+    expect(html).not.toContain("Wet Check Billings");
+  });
+
+  it("BS subtotal + WCB subtotal equals grand total (reconciles)", () => {
+    // Assert the three printed dollar figures are internally consistent.
+  });
+});
+```
+
+**Backend — no duplicate footer markup (Change 2):**
+
+```typescript
+it("generated invoice detail HTML contains no in-body pdf-footer", () => {
+  const html = (PDFGenerator as any).generateInvoiceDetailHTML(vm);
+  expect(html).not.toContain("pdf-footer");
+  expect(html).not.toContain("pdf-page-num");
+});
+```
+
+**Backend — VRT logo in repairs summary (Change 3):**
+
+```typescript
+it("repairs summary header includes the VRT logo", () => {
+  const html = partsBlockForWetCheckBS(viewWithZones, DEFAULT_BRAND_COLORS, 75);
+  expect(html).toContain("vrt-section-logo");
+});
+```
+
+**Backend — per-zone labor (Change 4), extend pdf-helpers-wcb.test.ts:**
+
+```typescript
+it("renders a per-zone labor line when labor data is fresh", () => {
+  const view = viewWithZones({
+    zonesHaveStaleLaborData: false,
+    zones: [{ zoneLabel: "A-2", repairLaborHours: "0.50",
+              zoneLaborSubtotal: "37.50", zonePartsSubtotal: "10.50",
+              lineItems: [/* … */] }],
+  });
+  const html = partsBlockForWetCheckBS(view, DEFAULT_BRAND_COLORS, 75);
+  expect(html).toContain("Zone A-2 Labor (0.5 hrs × $75.00/hr)");
+  expect(html).toContain("$37.50");
+  expect(html).toContain("Zone A-2 Subtotal");
+  expect(html).toContain("$48.00"); // 10.50 parts + 37.50 labor
+});
+
+it("omits per-zone labor and shows the note when data is stale", () => {
+  const view = viewWithZones({ zonesHaveStaleLaborData: true, /* … */ });
+  const html = partsBlockForWetCheckBS(view, DEFAULT_BRAND_COLORS, 75);
+  expect(html).toContain("zone-labor-note");
+  expect(html).not.toContain("zone-labor-row");
+});
+```
+
+**Backend — no Labor Hrs column (Change 5b):**
+
+```typescript
+it("partsTableFromBS no longer renders a Labor Hrs column", () => {
+  const html = partsTableFromBS(items);
+  expect(html).not.toContain("Labor Hrs");
+});
+```
+
+### Acceptance criteria (whole slice)
+
+- Reconciliation page lists Wet Check Billing rows under a "Wet Check
+  Billings" section with its own subtotal; Billing Sheets subtotal + WCB
+  subtotal == GRAND TOTAL. (For #94354: $2,840.85 + $3,473.91 =
+  $6,314.76.)
+- No "Page 0" / in-body footer anywhere; exactly one puppeteer footer per
+  page with correct "Page X of Y".
+- The Repairs Summary section header displays the VRT logo.
+- Each wet-check zone shows a labor line and a parts+labor subtotal when
+  labor data is fresh; falls back to parts-only + note when
+  `zonesHaveStaleLaborData`.
+- Flat repairs-summary duplication removed (aggregated rollup); no
+  always-zero Labor Hrs column; no doubled part descriptions.
+- `pnpm typecheck` and `pnpm test` pass; existing
+  `pdf-view-model.test.ts`, `pdf-helpers-wcb.test.ts`, and
+  `pdf-helpers-wet-check.test.ts` continue to pass.
+
+### Out of scope
+
+- Any change to `vm.totals` math (`pdf-view-model.ts`) — the grand total
+  is already correct; this slice fixes presentation only.
+- The QuickBooks invoice push, the on-screen WCB modal, and the
+  Financial Pulse audit — all read snapshot columns and are unaffected.
+- Backfilling stale `zone.repair_labor_hours` — covered by the WC Labor
+  Model backfill slice; Change 4's stale guard handles display.
+- Replacing the actual VRT brand asset — Change 3 ships a placeholder
+  wordmark; swap in the real logo file when Randy provides it.
+
+### Relevant files
+
+- `artifacts/api-server/src/pdf-helpers.ts` — recon page, WCB ticket,
+  `partsBlockForWetCheckBS`, `buildFullCSS`, `pageFooter` (delete).
+- `artifacts/api-server/src/pdf-generator.ts` — remove in-body footer
+  call + import.
+- `artifacts/api-server/src/pdf-view-model.ts` — reference only
+  (`PdfBranchSubtotal`, `totals`); no math change.
+- `artifacts/api-server/src/wet-check-billing-view.ts` — reference only
+  (`zoneLaborSubtotal`, `repairLaborHours`, `zonesHaveStaleLaborData`).
+- `artifacts/api-server/src/invoice-pdf-service.ts` — reference only;
+  already passes `wetCheckBillings` to `buildPdfViewModel`.
+- `artifacts/api-server/src/assets/vrt-logo.ts` — **new** (VRT data-URI).
+- Tests: `pdf-view-model.test.ts`, `pdf-helpers-wcb.test.ts`,
+  `pdf-helpers-wet-check.test.ts`, plus new `pdf-recon-wcb.test.ts`.
+
+### Dependencies
+
+- WC ME Slice 4c (snapshot-first totals + `zonesHaveStaleLaborData`) —
+  shipped. Change 4 consumes its flag and `zoneLaborSubtotal`.
+- Task #843 (per-zone photo groups) — shipped; Change 4 and 5a edit the
+  same `partsBlockForWetCheckBS` function, leave the photo logic intact.
+
+Independent of all other slices in flight.

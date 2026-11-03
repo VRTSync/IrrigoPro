@@ -1,0 +1,327 @@
+# Slice 3 — Tech-Driven Auto-Billing
+
+**Date:** 2026-05-04
+**Status:** Approved for implementation
+**Decisions locked:**
+- A wet check with only complete-marked findings skips the manager queue entirely.
+- Manager review screen shows auto-billed findings as a read-only summary alongside actionable pending findings.
+- Submit shows a confirmation summary with totals before creating the billing sheet.
+
+**Reorders the roadmap:** What was previously planned as **Slice 2.5 (Offline Support)** moves to **Slice 4**. This slice ships first because it changes the contract between the tech and the manager — building offline UX on top of the old contract would mean reworking offline once Slice 3 lands.
+
+---
+
+## Executive Summary
+
+Today's wet check workflow asks the manager to make a routing decision on every finding, including findings the tech already fixed in the field. The manager rubber-stamps work that's already done, which is friction without value, and it inflates the manager queue with wet checks that have nothing genuinely needing a decision.
+
+This slice shifts the workflow so the tech is the source of truth for completed work. When a tech marks a finding "Complete" in the field, that finding goes straight to a billing sheet at wet check submission — no manager review required. The manager queue narrows to wet checks that contain at least one finding genuinely needing a decision: estimate, deferred work order, or documented-only.
+
+The change is mostly UX and workflow. The data model and the conversion engine are largely the same — we're splitting *when* the conversion happens (some at submit, some at manager convert) rather than *how*. No schema changes.
+
+**Slice 3 ships when:** a tech can mark findings complete, submit the wet check, see a confirmation summary, and have a billing sheet created automatically. Wet checks with zero pending findings skip the manager queue. Wet checks with mixed findings show up in the manager queue with the auto-billed portion visible read-only, and the manager only routes the truly pending findings.
+
+---
+
+## Why Now
+
+Three reasons.
+
+**The manager review queue is the wrong shape.** Today every submitted wet check lands in front of the manager whether or not anything actually needs a decision. A monthly maintenance visit where the tech adjusted four heads, replaced two missing nozzles, and did nothing else still goes to the manager queue with seven decisions to confirm. Multiply by 50 properties and the manager spends meaningful time clicking "Repaired in field" buttons that the tech already pre-tagged.
+
+**The tech is the source of truth for completed work.** They were on site, they did the repair, they know what was used. Asking a manager to confirm something they didn't witness adds an approval step that creates the appearance of oversight without the substance of it.
+
+**Slice 4 (offline) gets simpler.** The offline UX needs to know what becomes "final" when the tech submits versus what stays mutable awaiting manager input. Today's answer is "everything stays mutable until manager convert"; the new answer is "completed findings become final at submit, pending findings stay mutable." The new contract is much easier to model offline.
+
+---
+
+## The New Workflow
+
+Side-by-side with Slice 2's workflow:
+
+| Step | Slice 2 (today) | Slice 3 (this slice) |
+|---|---|---|
+| Tech captures finding | Picks issue type, qty, part, optional notes/photo. Optional "Repaired in field" pre-tag. | Picks issue type, qty, part, optional notes/photo. Toggle becomes a clearer **"Mark Complete"**. |
+| Tech submits | Wet check status → `submitted`. Goes to manager queue. No billing sheet yet. | Submit shows confirmation: *"X complete will auto-bill ($Y), Z need manager decision."* On confirm, billing sheet is created for completed findings in the same transaction. |
+| Status after submit | Always `submitted`. | `converted` if all findings were complete, `partially_converted` if some pending, `submitted` if no auto-bill (no completes). |
+| Manager queue | Every submitted wet check. | Only wet checks with at least one pending finding. The fully-auto-billed ones never appear. |
+| Manager review screen | All findings with routing dropdowns. | Two sections: "Auto-Billed" (read-only, links to billing sheet) and "Needs Decision" (actionable, only the pending findings). |
+| Manager convert | Routes all four target types. | Routes only estimate / work order / documented (the auto-billed are already done). |
+
+The data model needs no changes — `wet_check_findings.resolution` already supports all four states, and the FK linkage fields already track which findings have converted.
+
+---
+
+## Scope
+
+### In Scope
+
+1. Refactor `convertWetCheck` in `server/storage.ts` to extract the repaired-in-field branch into a reusable helper (`_convertRepairedInFieldFindings`) that can be called from both submit and convert paths.
+2. Update `POST /api/wet-checks/:id/submit` to:
+   - Accept the existing submit body unchanged.
+   - In a single transaction: check for findings with `resolution = repaired_in_field`, run the helper to create a billing sheet, stamp `convertedAt` and `billingSheetId` on those findings.
+   - Compute final wet check status: `converted` if no findings remain pending, `partially_converted` if pending findings exist alongside auto-billed, `submitted` if no auto-billing occurred (the legacy path).
+3. Add `POST /api/wet-checks/:id/submit-preview` returning the dry-run summary the field UI shows in the confirm modal: `{ autoBilledCount, autoBilledPartsTotal, autoBilledLaborTotal, autoBilledGrandTotal, pendingCount, pendingByGroup }`. Computed without writing.
+4. Update `POST /api/wet-checks/:id/convert` to skip the repaired-in-field branch (it now always runs at submit). The convert endpoint's eligibility filter already gates on `convertedAt IS NULL`, so this is mostly a comment-and-cleanup change rather than a behavior change.
+5. Update `GET /api/wet-checks/pending-review` to filter wet checks where at least one finding has `resolution = pending` OR a non-null routing target that hasn't yet been converted. (Today it's "status = submitted"; new logic is finer-grained.)
+6. Field UI:
+   - Rename the "Repaired in field" toggle to "**Mark Complete**" with helper text *"Will auto-bill on submit"*. Same data flag, clearer label.
+   - Add a sticky summary chip on the wet check detail screen: `"12 complete · 3 needs decision · 0 N/A"` with live counts.
+   - Replace the bare submit button with a confirm modal that calls `submit-preview` first, renders the summary, and shows `[Cancel]` and `[Submit & Bill]` buttons.
+7. Manager review screen (`client/src/pages/wet-check-review.tsx`):
+   - Render two sections: an "Auto-Billed" card at the top (read-only, with link to the billing sheet), and a "Needs Decision" section below with the routing dropdowns.
+   - Show a wet-check-level total at the top: auto-billed amount + projected pending amounts (estimates and WOs).
+   - The "Convert" button label updates to "Convert Pending Findings" and is disabled if no pending findings exist (which would only happen mid-edit if all pending got resolved).
+8. Manager dashboard tile (already exists) — update its underlying query to count wet checks with pending findings, not just wet checks in `submitted` status.
+9. Add tests covering:
+   - Submit with all findings complete → status `converted`, single billing sheet, no manager queue entry.
+   - Submit with mixed findings → status `partially_converted`, billing sheet for completes, manager queue entry for pending.
+   - Submit with zero completes → unchanged from today's behavior (status `submitted`).
+   - Submit-preview dry-run matches the actual submit output.
+   - Submit failure (e.g., a finding marked complete but missing a part) rolls back the entire submission — no orphan billing sheet.
+
+### Out of Scope
+
+- Schema changes. Same six wet check tables, same columns.
+- Letting techs pre-tag "send to estimate" or "defer to work order" — those stay manager-only decisions.
+- Letting managers reverse an auto-billed finding from inside the wet check review screen. They can edit/delete the resulting billing sheet through the existing billing UI; this slice doesn't add a wet-check-side undo button.
+- Offline support — that's now Slice 4.
+
+---
+
+## API Changes
+
+```
+POST /api/wet-checks/:id/submit
+   Body: unchanged from Slice 2
+   Behavior: NEW — in a single transaction, auto-bills findings with
+     resolution = repaired_in_field, then sets wet check status:
+       - 'converted'           if no findings remain pending
+       - 'partially_converted' if pending findings exist
+       - 'submitted'           if no auto-bill occurred
+   Returns: { wetCheck, billingSheetId | null, autoBilledCount, pendingCount }
+
+POST /api/wet-checks/:id/submit-preview                              [NEW]
+   Body: empty
+   Returns: {
+     autoBilledCount: number,
+     autoBilledPartsTotal: string,
+     autoBilledLaborTotal: string,
+     autoBilledGrandTotal: string,
+     pendingCount: number,
+     pendingByGroup: { quick_fix: number, advanced: number, zone_issue: number }
+   }
+   Read-only. No DB writes. Used by the field UI confirm modal.
+
+POST /api/wet-checks/:id/convert
+   Body: unchanged
+   Behavior: now skips the repaired-in-field branch entirely (it ran at submit).
+   The eligibility filter (convertedAt IS NULL + null FK columns) means this
+   was already correct in Slice 2's code; the change is mostly a code-comment
+   refactor making the new contract explicit.
+
+GET /api/wet-checks/pending-review
+   Behavior change: returns wet checks with at least one finding where
+     resolution = 'pending'
+     OR (resolution != 'pending' AND convertedAt IS NULL)
+   The second clause catches manager-routed-but-not-yet-converted findings.
+```
+
+---
+
+## Storage Refactor
+
+The current `convertWetCheck` in `server/storage.ts` is around 300 lines and handles all four routing branches in one function. Slice 3 extracts the repaired-in-field branch:
+
+```ts
+// New private helper — used by both submit and convert paths.
+private async _convertRepairedInFieldFindings(
+  tx: DbExecutor,
+  wetCheck: WetCheck,
+  customer: Customer,
+  findings: WetCheckFinding[],
+  laborRate: number,
+): Promise<{ billingSheetId: number; total: number }> {
+  // ... existing repaired-in-field branch logic, refactored to take findings
+  // explicitly rather than filtering them out of allFindings ...
+}
+```
+
+`convertWetCheck` becomes the orchestrator:
+
+```ts
+async convertWetCheck(...) {
+  return await db.transaction(async (tx) => {
+    // ... lookup wetCheck, customer, eligible findings ...
+    const repaired = eligible.filter(f => f.resolution === 'repaired_in_field');
+    const sentEst  = eligible.filter(f => f.resolution === 'sent_to_estimate');
+    const deferred = eligible.filter(f => f.resolution === 'deferred_to_work_order');
+    const documented = eligible.filter(f => f.resolution === 'documented_only');
+
+    if (repaired.length > 0) {
+      // Should not happen post-Slice 3 (submit handles these), but kept
+      // for safety: any finding whose state somehow didn't auto-bill at
+      // submit can still convert here.
+      await this._convertRepairedInFieldFindings(tx, wc, cust, repaired, laborRate);
+    }
+    // ... existing estimate, WO, documented branches unchanged ...
+  });
+}
+```
+
+`submitWetCheck` (the new behavior on the submit endpoint) calls the same helper:
+
+```ts
+async submitWetCheck(id: number, companyId: number) {
+  return await db.transaction(async (tx) => {
+    // ... lookup, validate, fetch findings ...
+    const repaired = findings.filter(f => f.resolution === 'repaired_in_field');
+    let billingSheetId: number | null = null;
+    if (repaired.length > 0) {
+      const result = await this._convertRepairedInFieldFindings(tx, wc, cust, repaired, laborRate);
+      billingSheetId = result.billingSheetId;
+    }
+    // Compute final status
+    const remaining = await tx.select(...).from(wetCheckFindings)
+      .where(and(eq(wetCheckFindings.wetCheckId, id), isNull(wetCheckFindings.convertedAt)));
+    const status = remaining.length === 0
+      ? 'converted'
+      : (billingSheetId != null ? 'partially_converted' : 'submitted');
+    await tx.update(wetChecks).set({
+      status,
+      submittedAt: new Date(),
+      fullyConvertedAt: remaining.length === 0 ? new Date() : null,
+    }).where(eq(wetChecks.id, id));
+    // ... return ...
+  });
+}
+```
+
+The pricing-discipline guarantees from Slice 2 are preserved: the helper writes `appliedLaborRate` to the billing sheet, and partial-conversion logic (manager later runs convert) reuses the existing billing sheet's snapshot rather than the live rate. Nothing about that changes.
+
+---
+
+## UI Changes
+
+### Field UI (`client/src/pages/wet-checks.tsx`)
+
+The toggle on the finding sheet today reads "Repaired in field". Rename to **"Mark Complete"** with helper text below: *"Will auto-bill on submit"*. The data flag is unchanged (`resolution = repaired_in_field`); only the label changes.
+
+Add a sticky chip at the top of the wet check screen showing live counts: `12 complete · 3 needs decision · 0 N/A`. Tap the chip to scroll to a section grouping findings by their resolution status, useful for the tech to verify before submitting.
+
+Replace the bare "Submit Wet Check" button with a button that opens a confirm modal:
+
+```
+┌──────────────────────────────────────────────┐
+│  Submit wet check?                           │
+│                                              │
+│  ✅ 12 marked complete — will be billed:     │
+│     Parts:    $245.00                        │
+│     Labor:    $125.00 (2.5 hr × $50/hr)      │
+│     Total:    $370.00                        │
+│                                              │
+│  🔵 3 need manager decision                  │
+│     1 quick fix                              │
+│     2 advanced                               │
+│                                              │
+│  [Cancel]              [Submit & Bill]       │
+└──────────────────────────────────────────────┘
+```
+
+The modal calls `submit-preview` to compute these totals fresh — never trusts a stale local cache.
+
+If a wet check has only auto-bills, the modal collapses the "needs decision" section and the button reads `[Submit & Bill]`. If a wet check has only pending, the totals section collapses and the button reads `[Submit]`.
+
+### Manager Review Screen (`client/src/pages/wet-check-review.tsx`)
+
+Two sections, top to bottom:
+
+```
+Wet Check #42 — Tanglewood HOA           [Approve]  [Convert Pending]
+Tech: John Doe   Date: 2026-05-04
+─────────────────────────────────────────────────────────────────
+✅ AUTO-BILLED (12 findings)              [View Billing Sheet →]
+   Total: $370.00 — sent to BS-WC-42-1234567890
+
+   ▾ Show details (collapsible — read-only list)
+
+🔵 NEEDS DECISION (3 findings)
+   ┌─ Controller A · Zone 5 ──────────────────────────────┐
+   │  Leak Repair × 1     ($45 + 1.0hr)                   │
+   │  Resolution: ▼ Pending           ⚠️ needs decision   │
+   └──────────────────────────────────────────────────────┘
+   ...
+```
+
+The "Convert Pending Findings" button is disabled if no findings remain in `pending` state. The wet check is moved out of the manager queue automatically once `convertWetCheck` finishes successfully and `fullyConvertedAt` is set.
+
+---
+
+## Migration
+
+This slice has **no schema changes**. The migration is purely behavioral:
+
+1. Code change to `submitWetCheck` adds the auto-bill step.
+2. Code change to `convertWetCheck` extracts the helper.
+3. New endpoint `submit-preview`.
+4. Filter change on `pending-review`.
+
+No data migration required. Existing wet checks in the database are unaffected:
+- Wet checks already in `converted` state stay converted.
+- Wet checks in `submitted` or `partially_converted` continue to work; the manager review screen still handles them, including any `repaired_in_field` findings that were submitted under the old flow (the helper handles them safely).
+- New wet checks submitted after deploy use the new auto-bill path.
+
+A short deprecation note in the manager UI for any wet check with un-converted `repaired_in_field` findings: *"This wet check was submitted under the old workflow. Run convert to finalize."* Cleared once those wet checks are converted.
+
+---
+
+## Risks and Rollback
+
+**The submit transaction is now bigger.** Today's submit just flips a status field; tomorrow's submit creates a billing sheet, billing items, and stamps multiple finding rows. If any step fails, the whole transaction rolls back — the existing `db.transaction` wrapper handles that. The risk is performance, not correctness: a wet check with 50 complete findings now does ~100 inserts at submit time. That's fine for typical wet checks but worth measuring on the large end.
+
+**Tech submits prematurely.** If a tech taps Submit with findings they didn't intend to bill, the billing sheet exists. The confirm modal mitigates this — the tech sees the totals before commit. After commit, the manager has to delete or edit the billing sheet through the billing UI; there's no wet-check-side undo. This is a deliberate tradeoff: simpler model, slightly more work to recover from a mistake. Worth flagging to techs in the rollout.
+
+**Manager dashboard tile count drops.** After this ships, the count of "wet checks awaiting review" will go down sharply because monthly-maintenance wet checks (mostly auto-bill) won't appear there anymore. That's the intended behavior, but worth communicating so the manager doesn't think wet checks are getting lost. A separate tile "Recently auto-billed wet checks" giving the past 7 days as read-only context might be a small follow-on if the manager wants periodic visibility.
+
+Rollback: every code change is gated by a feature flag `WET_CHECK_AUTO_BILL` (default on after ship, can be flipped off per-environment). No schema change, so flipping the flag off restores the prior workflow with no data cleanup.
+
+---
+
+## Success Criteria
+
+Slice 3 ships when, in order:
+
+1. The refactor is in place: `_convertRepairedInFieldFindings` exists as a private helper and both submit and convert paths use it.
+2. A tech can submit a wet check with all findings marked complete and the wet check goes directly to `converted` with a billing sheet created — no manager queue entry.
+3. A tech can submit a wet check with mixed findings and the wet check goes to `partially_converted`, with the auto-billed portion already in a billing sheet and the pending portion visible to the manager.
+4. The submit-preview endpoint returns totals that match the actual submit by penny.
+5. The manager review screen shows a clean two-section layout: read-only auto-billed at top, actionable pending below.
+6. Manager queue list filters out wet checks with no pending findings.
+7. Tests pass for: all-complete submit, mixed submit, no-complete submit (legacy path), submit-preview parity, transaction rollback on failure.
+8. Manual end-to-end run: tech does a fake wet check on a test property with 4 quick fixes (all complete) and 1 leak repair (pending). Submit. Confirm: billing sheet created with $X total, manager sees the wet check with the 4 complete read-only and the 1 leak in the actionable section.
+
+---
+
+## Roadmap Update
+
+The slice ordering changes:
+
+| Was | Now |
+|---|---|
+| Slice 2.5 — Offline support | **Slice 4** — Offline support |
+| (no Slice 3) | **Slice 3** — Tech-driven auto-billing (this doc) |
+
+Slice 4 (offline) becomes substantially simpler with this contract change because the boundary between "tech-final" and "manager-mutable" data is now explicit at submission time. The offline replay engine can mark auto-billed findings as locked the moment submit succeeds, rather than waiting for an indeterminate manager review.
+
+---
+
+## What This Unblocks
+
+After Slice 3 ships:
+
+- The manager queue becomes meaningfully smaller and contains only items that genuinely need a decision. Manager spends less time clicking and more time judging.
+- Slice 4 (offline) gets a cleaner state-transition model.
+- Reporting becomes more useful: "average time from submit to billing" collapses to ~zero for the auto-bill path and stays meaningful for the pending path. Two distinct funnels instead of one mixed one.
+- A future "tech bill summary" mobile screen — *"Here's everything you've billed this week"* — has clean data to draw from, without having to filter for manager-confirmed routings.
+
+The downstream slices anticipated earlier (VRTSync map crossover, recurring-failure reporting, wet-check templates) all benefit from this contract simplification but don't strictly depend on it.

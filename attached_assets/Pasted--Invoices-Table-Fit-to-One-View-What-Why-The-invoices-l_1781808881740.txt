@@ -1,0 +1,39 @@
+# Invoices Table — Fit to One View
+
+**What & Why**
+The invoices list (table style) overflows horizontally — content runs off the page. Every cell is `whitespace-nowrap` and the container is `overflow-hidden`, so the table just clips. Three columns are eating the width: a row of full-text action buttons, a separate QuickBooks "Synced / Not synced" text column, and a full date-range Period column. This is a focused layout pass to make it fit in one view.
+
+**Presentation only.** No data, endpoint, or behavior changes — same actions, same columns of information, just compacted.
+
+Single slice. File: `artifacts/irrigopro/src/pages/invoices.tsx`.
+
+---
+
+## Done looks like
+- The invoices table fits within the page width (no horizontal overflow / no clipped content) at standard desktop widths.
+- All current row actions are still available (Audit, View PDF, Export CSV, Mark sent, Merge/Delete where applicable) — just relocated.
+- QuickBooks sync state and the billing period are still visible, just compact.
+- On narrow screens the table stacks into readable cards instead of overflowing.
+
+## Steps
+1. **Collapse the Actions column into a "⋯" menu.** Replace the row of labeled buttons (`Audit`, `View PDF`, `Export CSV`, the upcoming `Mark sent`, Merge/Delete) with a single icon button per row that opens a dropdown menu (reuse the app's existing `DropdownMenu`). Keep each action's existing handler, role-gating, and `data-testid`s — just move them into menu items. This reclaims the most width.
+2. **Fold QuickBooks sync into a small icon.** Remove the separate "Synced / Not synced" text column; show a small icon (e.g. green check/cloud = synced, gray = not) next to the status badge with a tooltip/`title`. Drop the column header.
+3. **Compact the Period column.** Replace the `periodStart – periodEnd` date range with a short month label (e.g. "May 2026") built from the existing `invoiceMonth` / `invoiceYear`. (Keep the full range in a `title` tooltip if useful.)
+4. **Responsive fallback.** Below a breakpoint (e.g. `md`), render each invoice as a stacked card (customer + invoice # + status, amount, period, and the ⋯ menu) instead of the table, so it never overflows on narrow/mobile. Use the existing card primitives.
+5. Resulting columns: **Customer · Invoice # · Status (+QB icon) · Amount · Period · ⋯** — keep `max-w` + `truncate` on customer as today.
+
+## Tests
+- The table renders within the page at desktop width with no horizontal scroll/overflow.
+- Every prior action is reachable from the ⋯ menu and still works (PDF, Audit, CSV, Mark sent, Merge).
+- QB sync state and period are still shown (icon + month label).
+- Narrow viewport renders cards, not an overflowing table.
+- Role-gating on actions is unchanged (e.g. CSV/merge only for billing-capable roles).
+
+## Out of scope
+- Any invoice data, status, endpoint, or QuickBooks behavior.
+- The "Mark sent" feature itself (separate ticket) — just include its button in the ⋯ menu when present.
+- Sorting/filtering logic (unchanged).
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/invoices.tsx` (table headers ~755–764, row cells ~782–880, actions ~823+, QB cell ~789, period ~820)
+- `components/ui/dropdown-menu`, `components/ui/card` (existing primitives to reuse)

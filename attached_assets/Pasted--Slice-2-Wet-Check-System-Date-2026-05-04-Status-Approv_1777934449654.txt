@@ -1,0 +1,669 @@
+# Slice 2 — Wet Check System
+
+**Date:** 2026-05-04
+**Status:** Approved for implementation (capture); offline UX scoped to Slice 2.5
+**Author:** Engineering planning
+**Decisions locked:**
+- Each zone-level finding is independently routable (repaired-in-field → billing sheet, send-to-estimate, deferred to work order, documented-only).
+- Tech picks the part SKU from the catalog for every billable finding.
+- Each controller defaults to 100 zone slots, with per-controller override available in the field. The tech's override writes back to the property's canonical record so it persists across visits.
+- Issue-type defaults (labor hours per issue type) live in a config table, seeded with reasonable starting values; an admin edit UI is deferred to a later slice.
+- Inventory tracking (truck stock decrement) is out of scope for V1.
+- Offline support is committed in principle and gets its own sub-slice (**Slice 2.5**); Slice 2 lays the foundations (client-generated IDs, idempotent POST endpoints) so 2.5 is mechanical.
+- Wet check templates (spring start-up, blowout, etc.) are deferred; the data model leaves room for a `templateId` FK.
+
+**Depends on:** Slice 1 (estimate strip-down) for the send-to-estimate routing path. Capture and other routing paths can ship without it.
+
+---
+
+## Executive Summary
+
+A **wet check** is a structured, full-property irrigation system audit. A technician walks the property, runs each zone, and captures findings in a fixed format: which zones run cleanly, which have issues, what those issues are, how many of each, and what part is needed to fix them. The output is a list of independently routable findings — some get repaired on the spot and billed immediately, some need customer approval and become estimates, some get deferred to a future visit as scheduled work orders, and some are simply documented for the record.
+
+This is a deliberately separate system from estimates. An estimate is a scoped quote for one project that the customer must approve before work happens. A wet check is a recurring, exhaustive sweep that happens on a schedule (often monthly for contracted properties) and produces a *bag of small things*, each routed individually. Forcing wet check data into the estimate model produced the brittle hybrid that Slice 1 just dismantled.
+
+The design priority is **technician speed in the field**. Every UI decision is graded on whether it lets a tech finish a 36-zone property in under 25 minutes. The data model is graded on whether the resulting findings can flow into billing without recompute or manual cleanup downstream — the same lesson the billing audit kept teaching the codebase.
+
+**Slice 2 ships when:** a tech can run a wet check end-to-end on a property, capture findings against zones, mark some as repaired-in-field, submit, and the resulting findings produce correctly-priced billing sheets and (once Slice 1 is in production) flat estimates and deferred work orders.
+
+---
+
+## What a Wet Check Is
+
+A wet check is:
+
+- A complete, controller-by-controller, zone-by-zone audit of a property's irrigation system.
+- Belongs to one customer/property and one technician (a single visit; if work spans days, the wet check stays open as in-progress and the tech resumes).
+- Produces structured findings — one row per (zone, issue type, part). A zone with two heads to replace and three nozzles to replace generates two findings.
+- Each finding has a routing decision: repaired-in-field, send-to-estimate, deferred-to-work-order, or documented-only.
+- After submission, a manager reviews the wet check, confirms or adjusts the routing, then converts. Conversion is deterministic and snapshots all pricing.
+
+A wet check is not:
+
+- An estimate. (Estimates are non-contracted scoped quotes requiring customer approval.)
+- A work order. (Work orders are units of scheduled work to be executed.)
+- A billing sheet. (Billing sheets are records of completed work to be invoiced.)
+
+A wet check **produces** all three of those, on a per-finding basis.
+
+---
+
+## The Four Routing Targets
+
+Every finding ends up in one of four states. The router lives in the manager review screen, but the technician can pre-tag two of them in the field.
+
+| Routing | When | Output | Typical example |
+|---|---|---|---|
+| **Repaired in field** | Tech fixed it on the spot | Billing sheet line item (next invoice cycle) | Adjusted a misaligned head; replaced a missing nozzle from truck stock |
+| **Send to estimate** | Customer approval needed | Flat estimate via Slice 1's `POST /api/estimates` | Replace failed PVB ($425); not in contract scope |
+| **Defer to work order** | In contract scope but needs return visit | Direct work order with `workType='maintenance'`, scheduled later | Leak repair requiring excavation; wait for ground to dry |
+| **Documented only** | Captured for the record, no action | No conversion | Zone 14 has slightly low pressure; will monitor |
+
+Findings start as `pending` and are resolved during review. The tech can pre-tag a finding as `repaired_in_field` at capture time; the manager confirms or adjusts at review.
+
+---
+
+## Scope of Slice 2
+
+This spec describes the full feature. During implementation we may split it into 2A (capture only) and 2B (review + routing + conversion). 2A doesn't depend on Slice 1; 2B depends on Slice 1 being deployed for the send-to-estimate path.
+
+### In Scope
+
+1. New tables: `wet_checks`, `wet_check_zone_records`, `wet_check_findings`, `wet_check_photos`.
+2. API for the field flow: create wet check, update zone records, add/edit/delete findings, attach photos, submit.
+3. API for the manager flow: list submitted wet checks, route findings, convert.
+4. Conversion engine producing billing sheets, flat estimates (depends on Slice 1), and direct work orders.
+5. Field UI: property → controllers → zone grid → zone screen with the user's preset structure (YES/NO, Quick Fixes / Advanced / Zone Issues, qty + part picker + notes + photo + repaired-in-field toggle).
+6. Manager review UI: list of submitted wet checks, drill-in showing findings grouped by zone, per-finding routing dropdown, convert button.
+7. Property-default part SKUs (set up implicitly: parts the tech picks frequently at this property bubble to the top of the picker).
+8. Photo upload via existing `server/photo-pipeline.ts` and `objectStorage.ts`.
+
+### Out of Scope (Slice 2)
+
+- Per-controller zone-count override. V1 is hard-coded 100 zones per controller.
+- VRTSync map integration. Slice 3+ wires wet check controllers to canonical `controllers` table for GPS visualization.
+- Truck inventory tracking. Repaired-in-field decrements nothing in V1.
+- Recurring high-failure-zone reports. Data model supports it; reporting UI is a later slice.
+- Issue type config UI. The issue-type list is hard-coded in V1; a config layer is added later if business needs change.
+- Customer-facing wet check report PDF. Internal data only in V1.
+
+---
+
+## Data Model
+
+### `property_controllers` (new — supports Q1)
+
+Holds per-controller-per-property data that persists across visits. The first wet check at a property writes default rows (Controller A/B/C, 100 zones each); subsequent overrides update them in place.
+
+```ts
+export const propertyControllers = pgTable("property_controllers", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id).notNull(),
+  controllerLetter: text("controller_letter").notNull(),  // "A", "B", "C", ...
+  zoneCount: integer("zone_count").notNull().default(100),
+  notes: text("notes"),
+  // Future hook: link to canonical controllers table once VRTSync wires GPS in.
+  controllerId: integer("controller_id").references(() => controllers.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+// UNIQUE INDEX on (customer_id, controller_letter)
+```
+
+When a tech overrides Controller A from 100 to 12 zones mid-wet-check, the API updates the matching `property_controllers` row. The wet check grid re-renders with 12 cells. Any zone records already created for zone numbers > 12 are auto-marked `not_applicable` with `notes = "Auto-N/A: controller resized to 12 zones"` so the audit trail is preserved.
+
+### `issue_type_configs` (new — supports Q2)
+
+The list of issue types the tech sees on the zone screen, plus their defaults. Seeded in a migration with starting values; editable later via an admin UI.
+
+```ts
+export const issueTypeConfigs = pgTable("issue_type_configs", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  issueType: text("issue_type").notNull(),       // stable enum string used as FK in findings
+  issueGroup: text("issue_group").notNull(),     // quick_fix | advanced | zone_issue
+  displayLabel: text("display_label").notNull(), // "Head Replace", "Nozzle Replace", etc.
+  defaultLaborHours: decimal("default_labor_hours", { precision: 5, scale: 2 }).notNull(),
+  partCategoryFilter: text("part_category_filter"), // e.g. "Head" — narrows part picker
+  isActive: boolean("is_active").notNull().default(true),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+// UNIQUE INDEX on (company_id, issue_type)
+```
+
+Seed values for V1, applied per company:
+
+| issueType | issueGroup | displayLabel | defaultLaborHours | partCategoryFilter |
+|---|---|---|---|---|
+| head_replacement | quick_fix | Head Replace | 0.25 | Head |
+| nozzle_replacement | quick_fix | Nozzle Replace | 0.10 | Nozzle |
+| head_adjustment | quick_fix | Adjust | 0.05 | *(none — labor only)* |
+| leak_repair | advanced | Leak | 1.00 | Fitting |
+| pressure_issue | advanced | Pressure Issue | 0.50 | *(none)* |
+| coverage_issue | advanced | Coverage Issue | 0.50 | *(none)* |
+| valve_issue | zone_issue | Valve | 1.50 | Valve |
+| wiring_issue | zone_issue | Wiring | 1.00 | Wire |
+| controller_issue | zone_issue | Controller | 1.00 | Controller |
+| other | advanced | Other | 0.50 | *(none)* |
+
+These are starting points to tune from real data — Randy noted he doesn't have the actuals yet. The admin UI for editing comes later; the table is in place from day one so changes are config, not code.
+
+### `wet_checks`
+
+```ts
+export const wetChecks = pgTable("wet_checks", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id).notNull(),
+  technicianId: integer("technician_id").references(() => users.id).notNull(),
+  technicianName: text("technician_name").notNull(),                  // snapshot
+  customerName: text("customer_name").notNull(),                       // snapshot
+  propertyAddress: text("property_address"),                           // snapshot
+  numControllers: integer("num_controllers").notNull(),                // copied from customer.totalControllers at start
+  status: text("status").notNull().default("in_progress"),
+  // Status flow: in_progress → submitted → approved → partially_converted → converted
+  weather: text("weather"),
+  notes: text("notes"),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  submittedAt: timestamp("submitted_at"),
+  approvedAt: timestamp("approved_at"),
+  approvedBy: integer("approved_by").references(() => users.id),
+  approvedByName: text("approved_by_name"),
+  fullyConvertedAt: timestamp("fully_converted_at"),
+  clientId: text("client_id"),  // UUID for offline idempotency; null for server-created records
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+// UNIQUE INDEX on client_id WHERE client_id IS NOT NULL
+```
+
+### `wet_check_zone_records`
+
+```ts
+export const wetCheckZoneRecords = pgTable("wet_check_zone_records", {
+  id: serial("id").primaryKey(),
+  wetCheckId: integer("wet_check_id").references(() => wetChecks.id, { onDelete: "cascade" }).notNull(),
+  controllerLetter: text("controller_letter").notNull(),    // "A", "B", "C", ...
+  zoneNumber: integer("zone_number").notNull(),             // 1..100
+  status: text("status").notNull().default("not_checked"),
+  // Status flow: not_checked → checked_ok | checked_with_issues | not_applicable
+  ranSuccessfully: boolean("ran_successfully"),             // null until checked
+  observedPressure: decimal("observed_pressure", { precision: 6, scale: 2 }),  // optional measured PSI
+  observedFlow: decimal("observed_flow", { precision: 6, scale: 2 }),          // optional measured GPM
+  notes: text("notes"),
+  checkedAt: timestamp("checked_at"),
+  checkedBy: integer("checked_by").references(() => users.id),
+  clientId: text("client_id"),  // UUID for offline idempotency
+});
+// UNIQUE INDEX on client_id WHERE client_id IS NOT NULL
+```
+
+A unique index on `(wetCheckId, controllerLetter, zoneNumber)` prevents duplicates. Rows are inserted lazily — only when the tech taps a zone for the first time. A wet check on a 36-zone property generates ~36 rows, not 300.
+
+### `wet_check_findings`
+
+```ts
+export const wetCheckFindings = pgTable("wet_check_findings", {
+  id: serial("id").primaryKey(),
+  zoneRecordId: integer("zone_record_id").references(() => wetCheckZoneRecords.id, { onDelete: "cascade" }).notNull(),
+  wetCheckId: integer("wet_check_id").references(() => wetChecks.id).notNull(),  // denormalized for fast queries
+  // Issue classification
+  issueType: text("issue_type").notNull(),
+  // Enum: head_replacement | nozzle_replacement | head_adjustment |
+  //       leak_repair | pressure_issue | coverage_issue |
+  //       valve_issue | wiring_issue | controller_issue | other
+  issueGroup: text("issue_group").notNull(),
+  // Enum: quick_fix | advanced | zone_issue (computed; used for UI grouping)
+  severity: text("severity"),  // optional: low | medium | high (V1 captured but not consumed)
+  // Pricing snapshot — captured at finding creation, never recomputed
+  partId: integer("part_id").references(() => parts.id),     // nullable for adjustment-only findings
+  partName: text("part_name"),                                // snapshot
+  partPrice: decimal("part_price", { precision: 10, scale: 2 }), // snapshot
+  quantity: integer("quantity").notNull(),
+  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
+  notes: text("notes"),
+  // Routing
+  resolution: text("resolution").notNull().default("pending"),
+  // Enum: pending | repaired_in_field | sent_to_estimate | deferred_to_work_order | documented_only
+  resolutionDecidedAt: timestamp("resolution_decided_at"),
+  resolutionDecidedBy: integer("resolution_decided_by").references(() => users.id),
+  // Conversion linkage — set when conversion executes
+  billingSheetId: integer("billing_sheet_id").references(() => billingSheets.id),
+  estimateId: integer("estimate_id").references(() => estimates.id),
+  workOrderId: integer("work_order_id").references(() => workOrders.id),
+  convertedAt: timestamp("converted_at"),
+  clientId: text("client_id"),  // UUID for offline idempotency
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+// UNIQUE INDEX on client_id WHERE client_id IS NOT NULL
+```
+
+The `issueGroup` field is denormalized for UI sort/group performance. It's derived from `issueType` per the table below and stored at write time; the rare changes (renaming an issue) get a one-time migration.
+
+| issueType | issueGroup |
+|---|---|
+| head_replacement, nozzle_replacement, head_adjustment | quick_fix |
+| leak_repair, pressure_issue, coverage_issue | advanced |
+| valve_issue, wiring_issue, controller_issue | zone_issue |
+| other | (whichever group the manager assigns; defaults to advanced) |
+
+The conversion linkage fields (`billingSheetId`, `estimateId`, `workOrderId`) are mutually exclusive — exactly one is non-null after conversion. Enforced by a CHECK constraint:
+
+```sql
+CHECK (
+  (CASE WHEN billing_sheet_id IS NOT NULL THEN 1 ELSE 0 END) +
+  (CASE WHEN estimate_id IS NOT NULL THEN 1 ELSE 0 END) +
+  (CASE WHEN work_order_id IS NOT NULL THEN 1 ELSE 0 END)
+  <= 1
+)
+```
+
+### `wet_check_photos`
+
+```ts
+export const wetCheckPhotos = pgTable("wet_check_photos", {
+  id: serial("id").primaryKey(),
+  wetCheckId: integer("wet_check_id").references(() => wetChecks.id, { onDelete: "cascade" }).notNull(),
+  zoneRecordId: integer("zone_record_id").references(() => wetCheckZoneRecords.id, { onDelete: "set null" }),
+  findingId: integer("finding_id").references(() => wetCheckFindings.id, { onDelete: "set null" }),
+  url: text("url").notNull(),
+  caption: text("caption"),
+  takenAt: timestamp("taken_at").defaultNow().notNull(),
+  takenBy: integer("taken_by").references(() => users.id).notNull(),
+  clientId: text("client_id"),  // UUID for offline idempotency
+});
+// UNIQUE INDEX on client_id WHERE client_id IS NOT NULL
+```
+
+A photo can be attached at three levels: the wet check overall, a specific zone record, or a specific finding. Most photos will attach at finding-level. Stored via the existing photo pipeline.
+
+---
+
+## API Design
+
+All endpoints scope by `companyId` from the authenticated user, matching the existing pattern.
+
+### Field-tech endpoints
+
+```
+POST   /api/wet-checks                        # Start a new wet check for a customer
+GET    /api/wet-checks/:id                    # Get a wet check with zone records and findings
+PATCH  /api/wet-checks/:id                    # Update notes, weather, etc.
+POST   /api/wet-checks/:id/submit             # Tech submits when complete
+
+POST   /api/wet-checks/:id/zone-records       # Lazily create or update a zone record
+                                              #   Body: { controllerLetter, zoneNumber, status,
+                                              #           ranSuccessfully?, observedPressure?,
+                                              #           observedFlow?, notes? }
+PATCH  /api/wet-checks/zone-records/:id       # Update an existing zone record
+
+POST   /api/wet-checks/zone-records/:id/findings   # Add a finding to a zone
+PATCH  /api/wet-checks/findings/:id                # Edit a finding (qty, part, notes, repair tag)
+DELETE /api/wet-checks/findings/:id                # Remove a finding before submission
+
+POST   /api/wet-checks/:id/photos             # Upload a photo (multipart, uses photo-pipeline)
+                                              #   Body: { zoneRecordId?, findingId?, caption? }
+DELETE /api/wet-checks/photos/:id             # Remove a photo
+```
+
+### Manager-review endpoints
+
+```
+GET    /api/wet-checks?status=submitted       # List wet checks awaiting review
+POST   /api/wet-checks/:id/approve            # Approve (no conversion yet — review locks the data)
+PATCH  /api/wet-checks/findings/:id/route     # Set resolution for a single finding
+                                              #   Body: { resolution: "repaired_in_field" |
+                                              #           "sent_to_estimate" |
+                                              #           "deferred_to_work_order" |
+                                              #           "documented_only" }
+POST   /api/wet-checks/:id/convert            # Execute all routings; produces
+                                              # billing sheets, estimates, work orders
+```
+
+### Helper endpoints
+
+```
+GET    /api/wet-checks/parts/by-issue?issueType=head_replacement&customerId=42
+                                              # Returns parts filtered by issue category
+                                              # (joined via issue_type_configs.partCategoryFilter),
+                                              # sorted by frequency at this property + recent.
+                                              # Used by the part picker in the field UI.
+
+GET    /api/wet-checks/issue-types            # Returns active issue_type_configs rows for this
+                                              # company. Tech UI fetches once at app start, caches
+                                              # locally, refreshes when admin edits the config.
+
+GET    /api/properties/:customerId/controllers
+                                              # Returns property_controllers rows for the customer
+                                              # (creating defaults if none exist). Used by the
+                                              # wet-check start flow to render controller cards.
+
+PATCH  /api/properties/:customerId/controllers/:letter
+                                              # Updates a property_controllers row. Body:
+                                              # { zoneCount?: number, notes?: string }.
+                                              # Reducing zoneCount auto-N/As any out-of-range
+                                              # zone records on in-progress wet checks.
+```
+
+All POST endpoints accept an optional `clientId` (UUID) in the body. The server treats it as an idempotency key: if a row with the same `clientId` already exists, the existing row is returned with `200 OK` instead of creating a duplicate. This is the foundation that Slice 2.5's offline replay relies on.
+
+---
+
+## Field UX (matches your sketch)
+
+### Step 1: Wet check start
+
+Tech opens "Wet Checks" tab → list of properties scheduled for today (and a search). Tap property → creates a wet check (or resumes the existing in-progress one). `numControllers` is copied from `customer.totalControllers`.
+
+### Step 2: Controller selection
+
+Wet check screen shows controller cards: A, B, C (count from `numControllers`, hydrated by reading `property_controllers` rows for this customer). Each card displays:
+
+- Controller letter
+- Configured zone count (default 100, or whatever the property record says)
+- Progress: "12 of 24 zones checked" (denominator = configured zone count)
+- Status dot: gray (not started), yellow (in progress), green (complete)
+- Edit icon (small pencil) — tap to override zone count for this controller
+
+Tap edit → numeric input modal with current zone count pre-populated. Save → `PATCH /api/properties/:customerId/controllers/:letter` updates the canonical `property_controllers.zoneCount`. The wet check grid re-renders with the new count. Any zone records already created for zone numbers above the new count are auto-marked `not_applicable` server-side. The override persists for every future wet check at this property — the tech only enters it once.
+
+If a property has never been wet-checked before, `property_controllers` rows are created on the fly when the wet check starts: one row per letter A through whatever `customer.totalControllers` says, all defaulting to 100 zones. The tech corrects them as they go.
+
+Tap controller → enters zone grid.
+
+### Step 3: Zone grid
+
+10×10 grid of numbered cells (1–100). Each cell is a tappable square showing the zone number. Color coding:
+
+- **Gray** — not checked
+- **Green** — checked, ran OK, no issues
+- **Amber** — checked, has issues
+- **Blue ring** — currently in progress (zone record exists but not finalized)
+- **Slash** — marked not applicable
+
+Above the grid: a sticky header with "Mark as not applicable" toggle for bulk operations and a back button. Below: progress text "12 / 100 inspected, 88 remaining."
+
+### Step 4: Zone screen (matches your sketch exactly)
+
+Tap a cell → enters the zone screen.
+
+```
+Controller A — Zone 5
+─────────────────────────────────
+Zone working?
+  [  YES  ]    [  NO  ]    [ N/A ]
+
+(if YES tapped → save & advance to next unchecked zone)
+(if NO tapped → reveals issue grid below)
+
+──────── If NO ────────
+
+Quick Fixes
+  [ Head Replace ]  [ Nozzle Replace ]  [ Adjust ]
+
+Advanced
+  [ Leak ]  [ Pressure Issue ]  [ Coverage Issue ]
+
+Zone Issues
+  [ Valve ]  [ Wiring ]  [ Controller ]
+```
+
+Tap any preset → opens the **Finding Sheet** (a bottom-sheet modal):
+
+```
+Head Replace — Zone 5
+─────────────────────────────────
+Quantity: [ 1  ]  ← auto-focus, default 1
+Part:     [ Tap to select part →   ]
+Notes:    [                        ]
+Photos:   [ + Add Photo ]
+☐ Repaired in field (already done)
+
+[ Save & next finding ]   [ Save & exit ]
+```
+
+The **Part** picker opens a fast-search modal:
+
+- Pre-filtered to the issue's category (Head Replace → category="Head" or wherever your parts catalog stores rotors/sprays)
+- First section: "Recent at this property" (last 5 picks at this customer — bubbled by frequency)
+- Second section: "All parts in category" (alphabetical, search bar)
+- Tap a part → returns to finding sheet with part populated and price snapshotted
+
+After save, finding sheet either resets for next finding (same zone, different issue) or closes back to zone screen. Zone screen now shows the finding chip ("Head Replace × 1") at the bottom; tap to edit or delete. Tap the green checkmark to mark zone complete and advance to next unchecked zone.
+
+### Step 5: Submit
+
+Once enough zones are checked, the wet check screen shows a "Submit Wet Check" button. The tech can submit before all 100 zones per controller are touched — submission requires only that:
+
+- Every zone in `not_checked` state is treated as `not_applicable` automatically (no UI noise)
+- At least one zone has been actively checked
+
+This avoids the "must touch all 100 cells" tedium while preserving the audit trail. The implicit-N/A rule is logged so we can see how often techs skip vs check.
+
+### Step 6: Tech-tagged repaired-in-field
+
+The "Repaired in field" toggle on the finding sheet pre-tags `resolution = repaired_in_field` at capture. The manager review still confirms, but the default is preserved through review.
+
+---
+
+## Manager Review UX
+
+### Step 1: Inbox
+
+Manager opens "Wet Checks → Pending Review" → list of submitted wet checks with summary chips: customer name, finding count by group, total estimated billable amount.
+
+### Step 2: Review screen
+
+Tap wet check → review screen. Sections:
+
+- Header: customer, technician, date, weather, overall notes.
+- **Routing decisions** — findings grouped by zone, sorted by issueGroup. Each finding row:
+
+```
+Controller A — Zone 5
+─────────────────────────────────
+Head Replace × 1  ($24.50 part + 0.25 hr labor)  [photo thumbnail]
+   Resolution: ▼ Repaired in field   (pre-tagged by tech)
+   [ Edit ]
+─────────────────────────────────
+Nozzle Replace × 3  ($18.00 ea + 0.10 hr each)
+   Resolution: ▼ Repaired in field
+─────────────────────────────────
+Leak Repair × 1  ($45.00 fittings + 1.00 hr labor)
+   Resolution: ▼ Pending           ⚠️ needs decision
+```
+
+The dropdown options: Repaired in field / Send to estimate / Defer to work order / Documented only. Manager can edit quantity, swap parts, and override labor hours inline.
+
+### Step 3: Convert
+
+"Convert" button at bottom. Once tapped, the conversion engine runs in a single transaction:
+
+- Findings with `repaired_in_field` → grouped by *property* (one billing sheet per wet check), creating one `billingSheets` row + N `billingSheetItems` rows with all snapshots locked.
+- Findings with `sent_to_estimate` → grouped by *property* (one estimate per wet check, with ALL such findings as line items). Estimate generated via Slice 1's `POST /api/estimates`. Customer approval email sent.
+- Findings with `deferred_to_work_order` → grouped by *property* (one direct work order per wet check, `workType='maintenance'`). Manager can set scheduled date inline before convert.
+- Findings with `documented_only` → no conversion; just stamped `convertedAt` and a marker.
+
+The wet check status moves through `partially_converted` (if any findings remain `pending`) → `converted` (when none remain).
+
+The grouping rule is "one output per wet check per routing target." If a wet check has 8 repaired-in-field findings, they all flow into ONE billing sheet for that property. This matches how monthly invoicing already aggregates billing sheets at `schema.ts:579+`.
+
+---
+
+## Conversion Engine — Pricing Discipline
+
+The reason this slice exists is that estimates were doing too many jobs. The reason it has to be careful with conversion is the lesson from `docs/billing-audit-report.md`: every layer that recomputes is a layer that can drift.
+
+The conversion engine follows the snapshot rule already enforced in `storage.createWorkOrderFromEstimate` (line 2052): **at conversion time, copy the totals to the destination row and never recompute downstream.**
+
+```
+For each finding being converted:
+  partsSubtotal_for_finding = partPrice * quantity
+  laborSubtotal_for_finding = laborHours * customer.laborRate
+  lineTotal_for_finding     = partsSubtotal_for_finding + laborSubtotal_for_finding
+
+For the destination row (billing sheet / estimate / work order):
+  partsSubtotal = SUM(parts subtotals of contributing findings)
+  laborSubtotal = SUM(labor subtotals)
+  totalAmount   = partsSubtotal + laborSubtotal
+
+Snapshot to the destination row. The wet check finding is also stamped
+with the calculated values for forensic traceability.
+```
+
+The customer's `laborRate` at conversion time is locked into the destination row's `appliedLaborRate` field — same pattern as the existing work order schema (`schema.ts:533`). If the customer's rate changes later, in-flight billing sheets and estimates do not change.
+
+---
+
+## Migration
+
+Forward-only migrations (production has no wet check data yet):
+
+```sql
+-- 1. property_controllers
+CREATE TABLE property_controllers (
+  id SERIAL PRIMARY KEY,
+  -- columns from data model ...
+);
+CREATE UNIQUE INDEX uniq_prop_ctrl ON property_controllers (customer_id, controller_letter);
+
+-- 2. issue_type_configs (seeded with 10 rows per company in a separate seed step)
+CREATE TABLE issue_type_configs (...);
+CREATE UNIQUE INDEX uniq_issue_type ON issue_type_configs (company_id, issue_type);
+
+-- 3. wet_checks
+CREATE TABLE wet_checks (...);
+CREATE UNIQUE INDEX uniq_wet_check_client_id
+  ON wet_checks (client_id) WHERE client_id IS NOT NULL;
+
+-- 4. wet_check_zone_records
+CREATE TABLE wet_check_zone_records (...);
+CREATE UNIQUE INDEX uniq_wet_check_zone
+  ON wet_check_zone_records (wet_check_id, controller_letter, zone_number);
+CREATE UNIQUE INDEX uniq_zone_record_client_id
+  ON wet_check_zone_records (client_id) WHERE client_id IS NOT NULL;
+
+-- 5. wet_check_findings
+CREATE TABLE wet_check_findings (
+  ...
+  CONSTRAINT one_routing_target CHECK (
+    (CASE WHEN billing_sheet_id IS NOT NULL THEN 1 ELSE 0 END) +
+    (CASE WHEN estimate_id IS NOT NULL THEN 1 ELSE 0 END) +
+    (CASE WHEN work_order_id IS NOT NULL THEN 1 ELSE 0 END)
+    <= 1
+  )
+);
+CREATE INDEX idx_findings_wet_check ON wet_check_findings (wet_check_id);
+CREATE INDEX idx_findings_zone ON wet_check_findings (zone_record_id);
+CREATE UNIQUE INDEX uniq_finding_client_id
+  ON wet_check_findings (client_id) WHERE client_id IS NOT NULL;
+
+-- 6. wet_check_photos
+CREATE TABLE wet_check_photos (...);
+CREATE INDEX idx_photos_wet_check ON wet_check_photos (wet_check_id);
+CREATE UNIQUE INDEX uniq_photo_client_id
+  ON wet_check_photos (client_id) WHERE client_id IS NOT NULL;
+```
+
+A separate seed migration inserts the ten default `issue_type_configs` rows per company.
+
+---
+
+## Risks and Rollback
+
+The risk surface concentrates around the conversion engine — it touches billing sheets, estimates, and work orders in one transaction. Three specific risks worth pre-mitigation:
+
+**Conversion partial-failure.** If the engine starts a transaction, creates a billing sheet, then fails on the estimate creation, we want everything rolled back. Use a single `db.transaction()` block and the existing storage methods for each output type. The `convert` endpoint either fully succeeds or fully fails; no partial output.
+
+**Routing decision drift.** The manager could mark a finding `repaired_in_field` then change their mind. Until conversion runs, the routing is mutable. After conversion, it's locked (the row has a `billingSheetId` etc.). The UI hides the routing dropdown when the finding is converted; the API rejects PATCH on routing for converted findings.
+
+**Tech-tagged findings the manager doesn't notice.** If 30 findings come pre-tagged `repaired_in_field` and the manager just clicks Convert without reviewing each, the manager rubber-stamps the tech. This is expected and probably desirable — the manager's job is the exception cases — but the review UI should make it obvious by showing a per-group summary at the top: "X findings pre-tagged repaired-in-field, Y still pending decision."
+
+Rollback: `git revert` plus a Drizzle migration that drops the four new tables. No upstream system loses data.
+
+---
+
+## Success Criteria
+
+Slice 2 ships when, in order:
+
+1. The four tables exist with the correct constraints. Migration ran cleanly.
+2. A tech can start a wet check on a property with `totalControllers = 3`, see three controllers (A/B/C) each with a 100-cell zone grid.
+3. The tech can complete a 10-zone walkthrough — mixing OK zones, zones with single findings, and zones with multiple findings — in under 5 minutes (rough manual benchmark).
+4. The part picker returns property-frequency-sorted, category-filtered results for each issue type in under 200ms.
+5. Photos attach correctly at zone or finding level via the existing pipeline.
+6. The manager review screen groups findings by zone, shows per-group counts, and supports per-finding routing changes.
+7. Convert produces:
+   - Exactly one billing sheet per wet check that has repaired-in-field findings, with all line items, snapshot prices, and a totalAmount that matches the sum.
+   - Exactly one estimate per wet check that has send-to-estimate findings (depends on Slice 1).
+   - Exactly one direct work order per wet check that has deferred findings.
+8. After convert, every finding's resolution is locked and shows the linkage (billingSheetId / estimateId / workOrderId).
+9. End-to-end test: a 36-zone property with 4 head replacements (repaired in field), 1 PVB replacement (sent to estimate), and 1 mainline leak (deferred to work order) produces three downstream artifacts with correct totals, all reconciling against the source findings.
+
+---
+
+## Slice 2.5 — Offline Support (planned follow-on)
+
+Field techs work in spotty coverage; treating the wet check as online-only would hurt the product. Offline support is committed but earns its own sub-slice because it's a meaningful engineering investment and we want capture working in the hands of techs first.
+
+### What Slice 2 ships (foundations)
+
+- **Client-generated UUIDs.** The field client mints a `clientId` (UUIDv4) for every new wet check, zone record, finding, and photo before sending. Servers dedupe on `clientId`, so re-sending the same operation is safe.
+- **Idempotent POST endpoints.** All `POST` routes accept `clientId` in the body. If a row with that `clientId` already exists, the API returns `200 OK` with the existing row instead of inserting a duplicate. The unique partial indexes from the migration enforce this at the DB layer too.
+- **Stable timestamps.** All client-side timestamps (`checkedAt`, `takenAt`) are sent in the request body, not generated server-side, so a delayed replay still records when the tech actually did the thing.
+
+### What Slice 2.5 adds (the actual offline UX)
+
+- **Service worker.** Caches the app shell, the parts catalog, and the active wet check's data so the tech can keep working when the network drops.
+- **IndexedDB queue.** Every API mutation while offline is enqueued locally with `clientId` set and the request body serialized. Reads against in-flight wet checks are served from IndexedDB.
+- **Replay engine.** When connectivity returns, the queue replays in order. Each replay is idempotent thanks to `clientId`. Failures retry with exponential backoff.
+- **Sync indicator.** Header-bar badge: green check (synced), amber spinner (syncing N items), red exclamation (sync errors that need attention).
+- **Conflict UX.** If the manager already converted a finding while the tech was offline editing it, the replay returns a 409. Client surfaces a non-blocking notice ("This finding was converted to billing while you were offline; your edits weren't applied"). No data loss; no merge required because the wet check workflow is largely append-only and the routing decision is the only mutable post-submit field.
+
+### Why split it
+
+Slice 2.5 needs:
+- A service worker, which is its own deployment and rollback story.
+- An IndexedDB schema mirroring the API request shapes, plus migrations of that schema as the API evolves.
+- Manual QA in actual offline conditions (hard to script).
+- A polished sync indicator that's visible enough to trust without being noisy.
+
+That's a real chunk of work. If we tried to land Slice 2 + 2.5 together, the "first ship" date for capture pushes out by weeks. Splitting lets capture land first, get real-world feedback, and then 2.5 hardens the experience.
+
+The data-model and API decisions in Slice 2 already support 2.5 — no rework is required to add offline once 2 is in production. That's the whole point of including the foundations now.
+
+---
+
+## Decisions Locked (recap)
+
+The five questions raised in the initial draft have been resolved. Captured here for the implementation record.
+
+| # | Decision | Implication |
+|---|---|---|
+| Q1 | Per-controller zone-count override is added in V1, and the tech's input writes back to the property's canonical record. | New `property_controllers` table; override persists across visits. Reducing the count auto-N/As out-of-range zone records. |
+| Q2 | Issue-type defaults live in a config table seeded with reasonable starting values. | New `issue_type_configs` table. Admin edit UI is deferred. Field UI fetches the list from `/api/wet-checks/issue-types`. |
+| Q3 | Truck inventory tracking is out of scope. | `repaired_in_field` findings produce billing only. Inventory deltas are a Slice 4+ feature if we ever add truck inventory. |
+| Q4 | Offline support is committed; foundations ship in Slice 2, full UX ships in Slice 2.5. | `clientId` columns and idempotent POSTs in Slice 2. Service worker, IndexedDB queue, sync indicator, conflict UX in Slice 2.5. |
+| Q5 | Wet check templates are deferred but the data model leaves room. | A nullable `templateId` FK on `wet_checks` and a future `wet_check_templates` table are anticipated; not built in V1. |
+
+---
+
+## What This Unblocks
+
+Slice 2 plus Slice 1 together give IrrigoPro three distinct, properly-scoped tools:
+
+- **Wet check** — recurring exhaustive audit, structured findings, multi-target routing.
+- **Estimate** — non-contracted scoped quote, single approval gate, customer-facing.
+- **Work order / Billing sheet** — execution and billing artifacts, snapshot-locked.
+
+Future slices that become straightforward after Slice 2 lands:
+
+- **Slice 3 — VRTSync map crossover.** Wire `wet_check_zone_records` to canonical `irrigation_zones` and `controllers` (including GPS) so the field tech can tap a zone on a map. Same data model; just adds geo references.
+- **Slice 4 — Recurring failure reporting.** Query wet check findings across visits at the same property to surface "Zone 14 has failed 3 wet checks in 6 months — recommend valve replacement." Manager dashboard widget.
+- **Slice 5 — Wet check templates.** Pre-populate expected findings for seasonal start-up / blowout / monthly checks.
+
+The wet check system is also the natural seed for VRTSync — the pile of structured zone-level data over time *is* the value layer that map-overlay visualization renders. Slice 2 is the data investment that pays dividends across slices 3–5.

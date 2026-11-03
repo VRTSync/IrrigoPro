@@ -1,0 +1,78 @@
+# Inspection Estimate — Zone-Grouped Detail
+
+**What & Why**
+The estimate produced by an Inspection wet check (e.g. EST-50009 from Inspection #93) is a flat, zone-less parts list — 40+ rows with raw enum labels (`bad_solenoid`, `head_adjustment`), `0.00h` labor on every line plus one aggregate labor lump, and heavy duplication. Wet checks are inherently zone-detailed (exact controller + zone + work), and the estimate throws all of that away.
+
+The fix: make the inspection estimate **mirror the WC Snapshot's zone-grouped structure** — a repairs-summary-by-zone table, then per controller+zone detail blocks with per-zone labor and zone subtotals. Same proven detail format already in the system, framed as a quote.
+
+**Visual source of truth:** `inspection-estimate-zone-detail-redesign.html` (approved mockup; uses the real EST-50009 numbers).
+
+Two slices. Slice 1 is data (carry zone onto line items); Slice 2 is the PDF rendering. **Only inspection-origin estimates change** — manually-created estimates (no zone data) render flat as today.
+
+---
+
+## Locked decisions (from review of the mockup)
+- **Group by Controller → Zone**, mirroring the snapshot: repairs-summary table on top, zone-detail blocks below, per-zone labor line + zone subtotal, then Parts / Labor / Grand totals.
+- **Labels:** the real part name is the line title; the issue type is a small humanized tag ("Valve issue", "Nozzle", "Leak"), not the raw enum, and never printed twice. Labor-only work (head adjustment, bad solenoid) shows the work as the title with a **"labor only"** tag and a dash for price (cost folded into zone labor) — kept visible to the customer.
+- **Consolidation:** within a zone, merge line items with the same part + issue type (sum quantities); keep distinct work types as distinct rows.
+- **Per-zone labor:** real per-line labor hours roll up into a "Zone labor · X hrs × $rate" line per zone; no more `0.00h` on every row.
+- **Lineage:** header shows "From wet check: Inspection #N".
+(If any of these should change — e.g. hide labor-only rows, or drop the issue tags — it's a small tweak; flag before build.)
+
+---
+
+## Slice 1 — Carry controller / zone / issue / per-line labor onto inspection estimate items
+
+### Files
+- `lib/db/src/schema/schema.ts` + migration — `estimate_items`.
+- `artifacts/api-server/src/storage.ts` — the inspection-estimate generator (~9174–9260, idempotent on `originWetCheckId`).
+
+### Concrete changes
+- **Schema:** add to `estimate_items` (all nullable, no backfill):
+  - `controllerLetter text`
+  - `zoneNumber integer`
+  - `issueType text`
+  Run `drizzle-kit push` and add the next numbered SQL migration (latest is `0008`).
+- **Generation:** when building estimate items from findings, for each line populate `controllerLetter`, `zoneNumber`, `issueType` from the source finding; set the line's `laborHours` from the finding's labor (not 0); set `partName` to the real part (or the humanized work label for labor-only) and keep `description`/raw enum out of the visible title.
+- **Consolidation:** within a `(controllerLetter, zoneNumber, partId/partName, issueType)` group, merge into one item with summed `quantity` and summed `laborHours`.
+- Idempotency unchanged: still keyed on `originWetCheckId` (re-generate replaces, never duplicates).
+
+### Acceptance
+- An inspection estimate's items each carry their controller, zone, issue type, and real labor hours; identical work within a zone is merged; non-inspection estimates are unaffected.
+
+---
+
+## Slice 2 — Zone-grouped estimate PDF
+
+### Files
+- `artifacts/api-server/src/estimate-pdf.ts` (line-item rendering ~111–355).
+
+### Concrete changes
+- **Branch on zone data:** if the estimate's items carry `controllerLetter`/`zoneNumber` (inspection-origin), render the **zone-grouped layout**; otherwise render the existing flat table unchanged.
+- **Repairs summary by zone** (top table): one row per zone — `Controller A · Zone 3`, repairs count, parts $, labor hrs, zone total — then a totals row.
+- **Zone detail blocks:** one block per controller+zone (sorted by controller then zone), blue zone header with the zone total, the work rows (clean title + issue tag + part sub-line + qty + unit + parts total), a **"Zone labor · X hrs × $rate"** line (sum of that zone's line labor × estimate labor rate), and a **zone subtotal** (parts + zone labor).
+- **Labels:** humanize `issueType` (`nozzle_replacement` → "Nozzle replacement", etc.) via a shared map; labor-only rows (no part) show the work label + "labor only" tag + dash.
+- **Lineage:** header line "From wet check: Inspection #{originWetCheckId}".
+- **Totals:** Parts subtotal, Labor (total hrs × rate), Grand total — unchanged math, matching today's figures.
+- Reuse the snapshot/WCB zone-grouping presentation conventions for visual consistency (blue zone headers, zone subtotal styling).
+
+### Tests
+- An inspection estimate renders grouped by controller+zone with a repairs-summary table; per-zone labor + zone subtotals present; Parts/Labor/Grand totals equal the pre-redesign figures for the same data.
+- Labor-only findings appear with a "labor only" tag and no part price.
+- A non-inspection (manual) estimate renders the existing flat table (no regression).
+- Raw enum strings (`bad_solenoid`, etc.) no longer appear; humanized labels do.
+
+---
+
+## Out of scope
+- Non-inspection / manually-created estimates (flat layout retained).
+- The estimate lifecycle, approval, or estimate→WO conversion.
+- Snapshot/billing-sheet PDFs (separate; the clock+zone work shipped already).
+- Any pricing/total math change — only structure and labels.
+
+## Relevant files
+- `lib/db/src/schema/schema.ts` (`estimate_items` + migration)
+- `artifacts/api-server/src/storage.ts` (inspection estimate generation ~9174–9260)
+- `artifacts/api-server/src/estimate-pdf.ts` (PDF rendering)
+- Mockup: `inspection-estimate-zone-detail-redesign.html`
+- Pattern reference: the WC Snapshot zone-grouped view / `pdf-helpers.ts` `ticketPageWCB`

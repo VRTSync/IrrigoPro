@@ -1,0 +1,53 @@
+# AMENDMENT to #2040 — date the month by `startedAt`, not `submittedAt`
+
+One change. Everything else in #2040 stands, including the catches it made that the source spec missed.
+
+## The decision to reverse
+
+#2040 says the due decision "reads a submitted-or-later check and dates it by `submittedAt`, not by `startedAt`", and warns that the existing newest-wet-check queries order by `startedAt` so "reusing one unexamined gives the wrong answer."
+
+**The status half is right. The date half is backwards, and the warning is inverted.**
+
+Correct rule: **status must be `submitted` or later; the month is decided by `startedAt`.**
+
+## Why — the reason that decides it
+
+`wetChecks.startedAt` is `defaultNow().notNull()` (`schema.ts:1534`). It is always present.
+
+`wetChecks.submittedAt` is nullable (`schema.ts:1535`), **and there is a production path that sets the status to `submitted` without ever setting it**:
+
+```
+// migrations/0005-reconcile-approved-wet-checks.ts:113-116
+if (buckets.submitted.length > 0) {
+  await tx.update(wetChecks)
+    .set({ status: "submitted", updatedAt: new Date() })
+    .where(inArray(wetChecks.id, buckets.submitted));
+}
+```
+
+Every wet check that reconcile migration touched carries `status = 'submitted'` and `submittedAt = null`. Dating the month by `submittedAt` drops all of them out of every month — those customers read as never having had a check, permanently, and no amount of doing the work fixes it. A null date in a month comparison either excludes the row silently or throws, and neither failure is visible on the board.
+
+`storage.ts:11323-11329` also flips a wet check back to `submitted` when a converted estimate is reverted, without touching `submittedAt`. Less dangerous, since such a row was submitted once before, but it confirms the column is not maintained as an invariant.
+
+## Why — the reason that makes it correct anyway
+
+The standard is one wet check per customer per month, and the thing being counted is **the visit**. A tech on the property on 30 September did September's visit; paperwork landing on 1 October does not move it. Dating by `submittedAt` puts that visit in October, so September reads as missed forever and October reads as satisfied by a visit that never happened there — two errors from one off-by-a-day.
+
+## The consequence for the implementation, restated
+
+- The status filter is the new part: only `submitted`, `approved`, `partially_converted` or `converted` count. A row at `in_progress` never satisfies the month, however recently it was started. That is the abandoned-check case, and it is the whole reason the status gate exists.
+- **The date column is not the new part.** The existing newest-wet-check queries already order by `startedAt` and that is correct — reuse it. What they lack is the status filter, not a different date.
+- The completed-state text on the row ("Done 1 Sep", "last 24 Jul") shows the **`startedAt`** date, so the date the manager reads is the day the crew was there, and it is the same fact the lane applied.
+- A check started 30 September and submitted 15 October shows September as due until it is submitted, then satisfies September. That flip is correct: the month was genuinely unsatisfied until the work was confirmed done.
+
+## Add to the tests
+
+- A wet check with `status = 'submitted'` and `submittedAt = null` — the migration-0005 shape — still satisfies its month. This is the regression that proves the column choice.
+- A check with `startedAt` on the last day of the month and `submittedAt` in the next month satisfies the **earlier** month, and does not satisfy the later one.
+- A check at `in_progress` started inside the month leaves the month due (already in #2040 — keep it).
+
+## Relevant files
+
+- `lib/db/src/schema/schema.ts:1534-1535` (`startedAt` notNull, `submittedAt` nullable)
+- `artifacts/api-server/src/migrations/0005-reconcile-approved-wet-checks.ts:113-116`
+- `artifacts/api-server/src/storage.ts:11323-11329`

@@ -1,0 +1,71 @@
+# Wet Check Page — Fix Unclickable Tabs + Remove Stale Nav Links
+
+Two small frontend fixes on the new Wet Check System page. No backend, no schema.
+
+---
+
+## Fix 1 — Tabs are not clickable (wouter query-string quirk)
+
+**Root cause (`artifacts/irrigopro/src/pages/wet-checks/WetCheckSystemPage.tsx`, ~line 443):**
+```js
+const [location, navigate] = useLocation();
+const params = new URLSearchParams(location.split("?")[1] ?? "");
+const tab = parseTab(params.get("tab"));
+```
+wouter's `useLocation()` returns the **pathname only** — it does not include the query string. So `location.split("?")[1]` is always `undefined`, `tab` is always the default (`"all"`), and clicking a tab calls `setTab` → `navigate("/wet-checks?tab=…")` which updates the URL but the component **never re-reads** the tab. Result: tabs appear unclickable (the content never switches).
+
+### Done looks like
+- Clicking All / Needs Review / Approved switches the visible tab.
+- Deep-linking / refreshing on `?tab=needs-review` (and `approved`) lands on the right tab.
+- The active tab styling reflects the current tab.
+
+### Steps
+1. Read the query string **reactively** instead of from `location`. Use wouter's `useSearch` hook:
+   ```js
+   import { useLocation, useSearch } from "wouter";
+   // ...
+   const [, navigate] = useLocation();
+   const search = useSearch();                       // reactive query string
+   const tab = parseTab(new URLSearchParams(search).get("tab"));
+   function setTab(t: Tab) {
+     navigate(`/wet-checks?tab=${t}`, { replace: true });
+   }
+   ```
+   (Alternatively, hold the active tab in `useState`, initialized from the URL once, and update both state and URL in `setTab` — either approach fixes it; `useSearch` keeps the URL as the source of truth.)
+2. Verify the three `TabButton`s pass `isActive={tab === "…"}` and `onClick={() => setTab("…")}` against the now-correct `tab` value.
+
+### Tests
+- Clicking each tab renders that tab's content and marks it active.
+- Loading `/wet-checks?tab=approved` directly opens the Approved tab.
+
+---
+
+## Fix 2 — Remove stale "Wet Check Reviews" and "Wet Check Billings" nav links
+
+**Where (`artifacts/irrigopro/src/components/layout/nav-config.ts`, the "Wet Check" group, ~lines 111–122):**
+- Keep: `{ label: "Wet Checks", path: "/wet-checks" }` — the new tabbed page.
+- **Remove:** `{ label: "Wet Check Reviews", path: "/wet-checks/pending-review", badgeKey: "wetCheckReviews" }` — now redirects into the Needs Review tab.
+- **Remove:** `{ label: "Wet Check Billings", path: "/wet-check-billings" }` — now redirects into the Approved tab.
+
+### Done looks like
+- The sidebar "Wet Check" group shows only "Wet Checks" (→ the tabbed page); the two redundant links are gone for every role that had them.
+- No dead/duplicate entries; the redirect routes themselves can stay (harmless), but they're no longer surfaced in nav.
+
+### Steps
+1. Delete the two leaf entries above from the "Wet Check" group in `nav-config.ts`.
+2. If the `wetCheckReviews` `badgeKey` (and its type-union member, ~line 30) is now unused anywhere else, remove it; if still referenced, leave it.
+3. Update `nav-config.test.ts` if it asserts on the removed entries.
+
+### Tests
+- Nav renders the "Wet Check" group with a single "Wet Checks" leaf; no "Wet Check Reviews" / "Wet Check Billings" items.
+
+---
+
+## Out of scope
+- The redirect routes (`/wet-check-billings`, `/wet-checks/pending-review`) — leave them; they harmlessly forward anyone with an old link/bookmark into the new tabs.
+- Any change to tab *content* (the All / Needs Review / Approved components).
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/wet-checks/WetCheckSystemPage.tsx` (tab read)
+- `artifacts/irrigopro/src/components/layout/nav-config.ts` (nav leaves)
+- `artifacts/irrigopro/src/components/layout/nav-config.test.ts` (if it asserts the removed leaves)

@@ -1,0 +1,43 @@
+# BUILD — Match the Irrigation Manager Sidebar Theme to Company Admin + Billing Manager
+
+**What & Why**
+On the desktop web app, the irrigation manager's left nav (sidebar) renders in the plain white/gray default theme, while company admin and billing manager get the navy-blue branded sidebar. They should all look the same. The cause is a single role check in the shell that themes the sidebar for only two of the three roles. This is a small, contained styling fix — the manager, billing manager, and company admin already use the same `DesktopShell`, so one condition brings the manager into the same brand theme.
+
+## Root cause (confirmed)
+All three roles render through the same `DesktopShell` (company_admin via `CompanyAdminApp` → `DesktopShell navConfig={companyAdminNav}`; billing_manager and irrigation_manager use `DesktopShell` directly). The shell decides whether to apply the branded sidebar class `sidebar-brand-blue` here:
+
+`artifacts/irrigopro/src/components/layout/desktop-shell.tsx:402–403`
+```ts
+const brandThemed =
+  userRole === "company_admin" || userRole === "billing_manager";
+```
+`irrigation_manager` is absent, so `brandThemed` is `false` for the manager and the sidebar falls back to the default white/gray tokens instead of the navy `.sidebar-brand-blue` theme (`index.css:102`). The top header bar (`bg-white`, `:279`) and the content wrappers (`px-4`) are already identical across these roles, so the sidebar theme is the only visual divergence.
+
+## The fix
+Add `irrigation_manager` to the `brandThemed` condition so the manager sidebar uses the same `sidebar-brand-blue` theme:
+```ts
+const brandThemed =
+  userRole === "company_admin" ||
+  userRole === "billing_manager" ||
+  userRole === "irrigation_manager";
+```
+No other changes are needed — the `sidebar-brand-blue` CSS, nav items, header, and content padding are shared. `SidebarUserMenu` already receives `brandThemed`, so the footer/user menu picks up the theme automatically.
+
+## Optional (same latent inconsistency)
+`super_admin` also renders through `DesktopShell` and is **not** in the `brandThemed` list, so the super admin sidebar is likewise unbranded. Not part of the reported issue, but if you want every internal role's chrome consistent, add `super_admin` to the same condition. (Leave out if super admin is intentionally kept visually distinct.)
+
+## Done looks like
+- The irrigation manager's sidebar renders in the same navy/blue branded theme as company admin and billing manager on desktop — same background gradient, text, icon, active-item, and badge colors.
+- No change to nav items, routes, header bar, or content layout — only the sidebar color theme.
+- Billing manager and company admin sidebars are visually unchanged.
+
+## Definition of Done (attach proof)
+- [ ] `file:line` of the `brandThemed` change.
+- [ ] Side-by-side desktop screenshots of the sidebar for irrigation_manager, billing_manager, and company_admin showing they now match.
+- [ ] Confirmation the top header, nav items, and content padding are unchanged for all three.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+- `artifacts/irrigopro/src/components/layout/desktop-shell.tsx` (`brandThemed` at `:402–403`)
+- `artifacts/irrigopro/src/index.css` (`.sidebar-brand-blue` theme, `:102+` — reference only, no change)
+- `artifacts/irrigopro/src/App.tsx` (role → shell wiring, reference only)

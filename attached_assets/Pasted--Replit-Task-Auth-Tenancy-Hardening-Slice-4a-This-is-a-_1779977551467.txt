@@ -1,0 +1,649 @@
+# Replit Task — Auth & Tenancy Hardening, Slice 4a
+
+This is a single self-contained task. The **Design Context** is in
+`Auth-Tenancy - Slice 0 Hotfix.md` — re-read it before starting. The
+actual work for this task is in the **Slice 4a** section below. Do not
+deviate from any file paths, function names, schema field names, or
+payload shapes specified. If you believe a deviation is necessary,
+surface it and stop rather than proceeding.
+
+> **Architectural note.** Slice 4 added `company_id` columns to four
+> tables, but the production deploy was blocked by `drizzle-kit push`
+> proposing destructive `truncate cascade` SQL (because the schema
+> declared the columns `.notNull()` while the production database
+> didn't have them yet). Slice 4a fixes this **permanently** by
+> introducing an in-app super-admin "Database Migrations" page that
+> becomes the canonical workflow for any schema migration that
+> requires careful sequencing (add column → backfill → tighten
+> constraint → index). The pattern reuses the existing
+> `bs-wc-migration` admin HTTP shape and the `app_settings` checkpoint
+> mechanism already in `storage.ts`. After this slice ships, the
+> production path is: code deploys → super admin opens the page → runs
+> the migration with full visibility → schema and DB are in sync. The
+> `drizzle-kit push` destructive-preview screen never has to be
+> confirmed in production again.
+>
+> **One-time transitional state.** Because we cannot ship the
+> migration page from a state where the deploy preview is already
+> destructive, Slice 4a also temporarily relaxes `companyId` to
+> nullable in `schema.ts` on the four affected tables. After the
+> migration page completes on production (column added, backfilled,
+> NOT NULL applied at the DB level), a small follow-up slice
+> (`Slice 4b`) flips `companyId` back to `.notNull()` in the schema.
+> Drizzle Kit will then see no diff and the schema will once again be
+> the type-correct source of truth.
+
+---
+
+## Slice 4a — Super-admin Database Migration page + transitional schema relaxation
+
+**Scope.**
+
+1. Relax `companyId` from `.notNull()` to nullable in `schema.ts` on
+   the four Slice-4 tables (`work_orders`, `billing_sheets`,
+   `invoices`, `estimates`). This is **transitional** — Slice 4b
+   flips it back. The relaxation makes the deploy preview safe to
+   confirm.
+2. Add `webSessions` table declaration to `schema.ts` so Drizzle Kit
+   stops proposing to drop the runtime-managed sessions table.
+3. Build a migration registry (`lib/migrations/registry.ts`) and the
+   first registry entry, `company-id-columns-v1`, which wraps the
+   existing `applyCompanyIdColumns()` logic from `storage.ts` into a
+   structured runner.
+4. Build the super-admin HTTP surface (`routes/admin-migrations-routes.ts`).
+5. Build the React admin page (`pages/admin/migrations.tsx`).
+6. Add a small type-guard helper to keep handler code clean during
+   the transitional nullable window.
+
+After Slice 4a deploys cleanly, the super admin runs the migration
+from the page, production schema converges with the runtime
+expectations, and Slice 4b ships a few days later to tighten the
+schema back to `.notNull()`.
+
+**Files modified.**
+
+- `lib/db/src/schema/schema.ts`
+  - `workOrders.companyId`: drop `.notNull()` (~line 657).
+  - `billingSheets.companyId`: drop `.notNull()` (~line 233).
+  - `invoices.companyId`: drop `.notNull()` (~line 767).
+  - `estimates.companyId`: drop `.notNull()` (~line 423).
+  - Add `webSessions` table declaration near the bottom of the file
+    (next to other infrastructure tables).
+- `artifacts/api-server/src/storage.ts` — no functional change; the
+  existing `applyCompanyIdColumns()` startup migration stays in place
+  as a belt-and-braces no-op (idempotent via the `app_settings`
+  marker). The registry's runner is a refactor of the same logic
+  with structured progress reporting; the startup version keeps
+  running on boot so a missed admin-page click is not a production
+  blocker.
+- `artifacts/api-server/src/routes/routes.ts` — register the new
+  admin routes inside `registerRoutes` next to the other admin
+  endpoints.
+- `artifacts/irrigopro/src/App.tsx` (or the router root, whichever
+  file declares the routes) — register the new `/admin/migrations`
+  page.
+- `artifacts/api-server/src/routes/routes.ts` — at the two existing
+  callsites that handle a nullable `companyId` read (Slice 1's
+  `requireSameCompanyAsWorkOrder`, Slice 2's
+  `requireSameCompanyAsBillingSheet`), confirm the existing null
+  check still produces a 404. No code change expected; this is a
+  verification step.
+
+**Files created.**
+
+- `artifacts/api-server/src/lib/migrations/registry.ts`
+- `artifacts/api-server/src/lib/migrations/company-id-columns.ts`
+- `artifacts/api-server/src/lib/migrations/types.ts`
+- `artifacts/api-server/src/lib/migrations/assert-company-id.ts`
+- `artifacts/api-server/src/routes/admin-migrations-routes.ts`
+- `artifacts/api-server/src/routes/admin-migrations-routes.test.ts`
+- `artifacts/api-server/src/lib/migrations/registry.test.ts`
+- `artifacts/irrigopro/src/pages/admin/migrations.tsx`
+- `artifacts/irrigopro/src/components/admin/MigrationRunner.tsx`
+- `artifacts/irrigopro/src/components/admin/MigrationStatusBadge.tsx`
+
+**Concrete changes.**
+
+### 1. Schema relaxation + `webSessions` declaration
+
+In `lib/db/src/schema/schema.ts`:
+
+```ts
+// before (workOrders ~line 657, same shape on the other three tables)
+companyId: integer("company_id").references(() => companies.id).notNull(),
+
+// after
+companyId: integer("company_id").references(() => companies.id),
+// Slice 4a transitional: nullable while the migration admin page
+// applies NOT NULL at the DB level via the company-id-columns-v1
+// migration. Slice 4b will flip this back to .notNull() once
+// production has the constraint in place.
+```
+
+Apply the same change to `billingSheets.companyId`, `invoices.companyId`,
+and `estimates.companyId`.
+
+Add `webSessions` near the bottom of `schema.ts`, after any
+session-related imports (`varchar`, `json` may need to be added to
+the `drizzle-orm/pg-core` import line):
+
+```ts
+// connect-pg-simple session store. Declared here so Drizzle Kit
+// recognizes the runtime-created table and doesn't propose to drop
+// it on schema sync. Owned by express-session via connect-pg-simple
+// in app.ts (createTableIfMissing: true).
+export const webSessions = pgTable("web_sessions", {
+  sid: varchar("sid").primaryKey(),
+  sess: json("sess").notNull(),
+  expire: timestamp("expire", { precision: 6 }).notNull(),
+}, (t) => ({
+  expireIdx: index("IDX_web_sessions_expire").on(t.expire),
+}));
+```
+
+Do **not** export `webSessions` from any barrel file used by app
+code; it's a declaration purely for Drizzle Kit's diff engine.
+
+### 2. Migration registry types
+
+`artifacts/api-server/src/lib/migrations/types.ts`:
+
+```ts
+// Slice 4a — Database migration registry types.
+
+export type MigrationStatus =
+  | { state: 'not_started' }
+  | { state: 'partially_applied'; details: string }
+  | { state: 'completed'; completedAt: string };
+
+export type MigrationStep = {
+  id: string;
+  description: string;
+};
+
+export type MigrationStepResult = {
+  id: string;
+  status: 'success' | 'skipped' | 'failed';
+  durationMs: number;
+  rowsAffected?: number;
+  error?: string;
+};
+
+export type MigrationPreview = {
+  steps: MigrationStep[];
+  orphanRows: Record<string, number>;
+  warnings: string[];
+};
+
+export type MigrationProgress = {
+  jobId: string;
+  migrationId: string;
+  startedAt: string;
+  state: 'running' | 'succeeded' | 'failed' | 'aborted';
+  steps: MigrationStepResult[];
+  finishedAt?: string;
+  errorMessage?: string;
+};
+
+export type ProgressEmitter = (event: {
+  step: string;
+  status: 'running' | 'success' | 'skipped' | 'failed';
+  rowsAffected?: number;
+  error?: string;
+}) => void;
+
+export type MigrationDefinition = {
+  id: string;
+  title: string;
+  description: string;
+  appSettingsKey: string;
+  check(): Promise<MigrationStatus>;
+  preview(): Promise<MigrationPreview>;
+  run(emit: ProgressEmitter): Promise<MigrationStepResult[]>;
+};
+```
+
+### 3. Migration registry
+
+`artifacts/api-server/src/lib/migrations/registry.ts`:
+
+```ts
+import type { MigrationDefinition } from './types';
+import { companyIdColumnsMigration } from './company-id-columns';
+
+const REGISTRY = new Map<string, MigrationDefinition>([
+  [companyIdColumnsMigration.id, companyIdColumnsMigration],
+]);
+
+export function listMigrations(): MigrationDefinition[] {
+  return Array.from(REGISTRY.values());
+}
+
+export function getMigration(id: string): MigrationDefinition | undefined {
+  return REGISTRY.get(id);
+}
+```
+
+### 4. First registry entry — `company-id-columns-v1`
+
+`artifacts/api-server/src/lib/migrations/company-id-columns.ts`:
+
+Implement all five exported functions. The SQL is the same as
+`storage.ts:applyCompanyIdColumns()` but split into discrete steps
+with structured progress emission. Reuses the same `app_settings`
+marker (`'company-id-columns-v1'`) so the startup migration and the
+admin page share state.
+
+```ts
+import { db } from '../../db';
+import { sql } from 'drizzle-orm';
+import type { MigrationDefinition, MigrationStatus, MigrationPreview, MigrationStepResult, ProgressEmitter } from './types';
+
+const MIGRATION_KEY = 'company-id-columns-v1';
+
+async function check(): Promise<MigrationStatus> {
+  // Read app_settings marker
+  const marker = await db.execute(sql`
+    SELECT value FROM app_settings WHERE key = ${MIGRATION_KEY}
+  `);
+  if (marker.rows.length > 0 && marker.rows[0].value === 'completed') {
+    return { state: 'completed', completedAt: '' /* read updated_at if needed */ };
+  }
+  // Introspect column existence and nullability
+  const cols = await db.execute<{ table_name: string; is_nullable: string }>(sql`
+    SELECT table_name, is_nullable FROM information_schema.columns
+    WHERE column_name = 'company_id'
+      AND table_name IN ('work_orders', 'billing_sheets', 'invoices', 'estimates')
+  `);
+  if (cols.rows.length < 4) {
+    return { state: 'not_started' };
+  }
+  const stillNullable = cols.rows.filter((r) => r.is_nullable === 'YES');
+  if (stillNullable.length > 0) {
+    return {
+      state: 'partially_applied',
+      details: `${stillNullable.length} of 4 tables still have nullable company_id`,
+    };
+  }
+  return { state: 'completed', completedAt: '' };
+}
+
+async function preview(): Promise<MigrationPreview> {
+  const orphans: Record<string, number> = {};
+  for (const table of ['work_orders', 'billing_sheets', 'invoices', 'estimates']) {
+    const r = await db.execute<{ orphans: string }>(sql`
+      SELECT COUNT(*)::text AS orphans FROM ${sql.identifier(table)} t
+      LEFT JOIN customers c ON t.customer_id = c.id
+      WHERE c.id IS NULL OR c.company_id IS NULL
+    `);
+    orphans[table] = parseInt(r.rows[0]?.orphans ?? '0', 10);
+  }
+  const warnings: string[] = [];
+  for (const [tbl, n] of Object.entries(orphans)) {
+    if (n > 0) warnings.push(`${n} ${tbl} rows reference a missing or company-less customer — backfill cannot assign them; fix before running.`);
+  }
+  return {
+    steps: [
+      { id: 'step1_add_columns',      description: 'Add nullable company_id columns to all four tables' },
+      { id: 'step2_backfill',         description: 'Backfill company_id from customer link' },
+      { id: 'step3_assert_no_nulls',  description: 'Verify zero NULL rows remain' },
+      { id: 'step4_apply_not_null',   description: 'Apply NOT NULL constraints' },
+      { id: 'step5_create_indexes',   description: 'Create indexes' },
+      { id: 'step6_mark_completed',   description: 'Mark migration completed in app_settings' },
+    ],
+    orphanRows: orphans,
+    warnings,
+  };
+}
+
+async function run(emit: ProgressEmitter): Promise<MigrationStepResult[]> {
+  const results: MigrationStepResult[] = [];
+
+  // step1 — add columns
+  let t = Date.now();
+  emit({ step: 'step1_add_columns', status: 'running' });
+  try {
+    await db.execute(sql`ALTER TABLE "work_orders"    ADD COLUMN IF NOT EXISTS "company_id" integer REFERENCES "companies"("id")`);
+    await db.execute(sql`ALTER TABLE "billing_sheets" ADD COLUMN IF NOT EXISTS "company_id" integer REFERENCES "companies"("id")`);
+    await db.execute(sql`ALTER TABLE "invoices"       ADD COLUMN IF NOT EXISTS "company_id" integer REFERENCES "companies"("id")`);
+    await db.execute(sql`ALTER TABLE "estimates"      ADD COLUMN IF NOT EXISTS "company_id" integer REFERENCES "companies"("id")`);
+    results.push({ id: 'step1_add_columns', status: 'success', durationMs: Date.now() - t });
+    emit({ step: 'step1_add_columns', status: 'success' });
+  } catch (err: any) {
+    results.push({ id: 'step1_add_columns', status: 'failed', durationMs: Date.now() - t, error: err?.message ?? String(err) });
+    emit({ step: 'step1_add_columns', status: 'failed', error: err?.message ?? String(err) });
+    return results;
+  }
+
+  // step2 — backfill (capture rowsAffected per table)
+  // step3 — assert no nulls (abort if any > 0)
+  // step4 — apply NOT NULL
+  // step5 — create indexes
+  // step6 — mark completed in app_settings
+  // ... follow the same pattern: emit running → run SQL → emit success/failed → push result.
+  // If step3 finds nulls, the rest are skipped and the function returns with state=failed.
+
+  return results;
+}
+
+export const companyIdColumnsMigration: MigrationDefinition = {
+  id: MIGRATION_KEY,
+  title: 'Add company_id columns + backfill (Slice 4)',
+  description:
+    'Adds company_id to work_orders, billing_sheets, invoices, and tightens ' +
+    'estimates.company_id to NOT NULL. Backfills from the customer link, ' +
+    'verifies no orphans remain, applies constraints, creates indexes. ' +
+    'Idempotent — safe to re-run.',
+  appSettingsKey: MIGRATION_KEY,
+  check,
+  preview,
+  run,
+};
+```
+
+Complete the elided step bodies — same SQL as `storage.ts:applyCompanyIdColumns()`,
+just split per step with progress emission.
+
+### 5. Type-guard helper
+
+`artifacts/api-server/src/lib/migrations/assert-company-id.ts`:
+
+```ts
+// Slice 4a transitional helper.
+//
+// During the window when companyId is nullable in schema.ts but the
+// database has the column set to NOT NULL (after the admin migration
+// runs), TypeScript treats reads as `number | null` while the runtime
+// guarantees `number`. Handlers that already passed the
+// requireSameCompanyAsWorkOrder / requireSameCompanyAsBillingSheet
+// guards have a confirmed non-null companyId; this helper asserts
+// that for TypeScript.
+//
+// Slice 4b removes this helper when schema.ts is flipped back to
+// .notNull().
+
+export function assertCompanyId<T extends { companyId: number | null }>(
+  row: T,
+  context: string,
+): asserts row is T & { companyId: number } {
+  if (row.companyId == null) {
+    throw new Error(
+      `[migration-transition] Row missing companyId at ${context}. ` +
+      `Run the company-id-columns-v1 migration from /admin/migrations.`,
+    );
+  }
+}
+```
+
+Apply at the two sites in `routes.ts` where Slice 1 / Slice 2 guards
+loaded the row and stashed it on `req.tenantScopedWorkOrder` /
+`req.tenantScopedBillingSheet` — after the existing null check, call
+`assertCompanyId(row, 'tenant-guard')` before any code path that
+treats `row.companyId` as `number`. This is the minimum surface
+needed; broader TS errors discovered during typecheck get the same
+helper applied at the leaf read.
+
+### 6. HTTP routes
+
+`artifacts/api-server/src/routes/admin-migrations-routes.ts`:
+
+```ts
+import type { Express, Request, Response } from 'express';
+import { listMigrations, getMigration } from '../lib/migrations/registry';
+import type { MigrationProgress } from '../lib/migrations/types';
+import { randomUUID } from 'crypto';
+
+// In-process job store. Migrations are short (< 30s) so persistence
+// across server restarts is not required.
+const JOBS = new Map<string, MigrationProgress>();
+
+function requireSuperAdmin(req: any, res: Response): boolean {
+  if (req.authenticatedUserRole !== 'super_admin') {
+    res.status(403).json({ message: 'Super admin only' });
+    return false;
+  }
+  return true;
+}
+
+export function registerAdminMigrationsRoutes(app: Express, requireAuthentication: any) {
+  // GET /api/admin/migrations
+  app.get('/api/admin/migrations', requireAuthentication, async (req: any, res) => {
+    if (!requireSuperAdmin(req, res)) return;
+    const defs = listMigrations();
+    const rows = await Promise.all(defs.map(async (d) => ({
+      id: d.id,
+      title: d.title,
+      description: d.description,
+      status: await d.check(),
+    })));
+    res.json(rows);
+  });
+
+  // GET /api/admin/migrations/:id/preview
+  app.get('/api/admin/migrations/:id/preview', requireAuthentication, async (req: any, res) => {
+    if (!requireSuperAdmin(req, res)) return;
+    const d = getMigration(req.params.id);
+    if (!d) { res.status(404).json({ message: 'Migration not found' }); return; }
+    const preview = await d.preview();
+    res.json(preview);
+  });
+
+  // POST /api/admin/migrations/:id/run
+  app.post('/api/admin/migrations/:id/run', requireAuthentication, async (req: any, res) => {
+    if (!requireSuperAdmin(req, res)) return;
+    const d = getMigration(req.params.id);
+    if (!d) { res.status(404).json({ message: 'Migration not found' }); return; }
+    const jobId = randomUUID();
+    const progress: MigrationProgress = {
+      jobId,
+      migrationId: d.id,
+      startedAt: new Date().toISOString(),
+      state: 'running',
+      steps: [],
+    };
+    JOBS.set(jobId, progress);
+    // Fire-and-forget the runner; the client polls /status.
+    void (async () => {
+      try {
+        const results = await d.run((event) => {
+          // Mirror live events into the job's step list.
+          const existing = progress.steps.findIndex((s) => s.id === event.step);
+          if (existing >= 0) {
+            progress.steps[existing] = { ...progress.steps[existing], status: event.status as any, error: event.error };
+          } else {
+            progress.steps.push({ id: event.step, status: event.status as any, durationMs: 0, error: event.error });
+          }
+        });
+        progress.steps = results;
+        progress.state = results.some((r) => r.status === 'failed') ? 'failed' : 'succeeded';
+        progress.finishedAt = new Date().toISOString();
+      } catch (err: any) {
+        progress.state = 'failed';
+        progress.errorMessage = err?.message ?? String(err);
+        progress.finishedAt = new Date().toISOString();
+      }
+    })();
+    res.json({ jobId });
+  });
+
+  // GET /api/admin/migrations/:id/status?jobId=...
+  app.get('/api/admin/migrations/:id/status', requireAuthentication, async (req: any, res) => {
+    if (!requireSuperAdmin(req, res)) return;
+    const jobId = typeof req.query.jobId === 'string' ? req.query.jobId : '';
+    const job = JOBS.get(jobId);
+    if (!job) { res.status(404).json({ message: 'Job not found' }); return; }
+    res.json(job);
+  });
+}
+```
+
+Register the routes inside `registerRoutes` in `routes.ts`:
+
+```ts
+// Near the other admin route registrations.
+registerAdminMigrationsRoutes(app, requireAuthentication);
+```
+
+### 7. React admin page
+
+`artifacts/irrigopro/src/pages/admin/migrations.tsx`:
+
+- Top-level layout: title "Database Migrations" + super-admin badge.
+- Loads `GET /api/admin/migrations` via React Query. Renders one
+  card per migration with: title, description, status badge.
+- "Preview" button opens a modal showing the step list and orphan
+  counts. If any orphan count is > 0, the modal renders a red warning
+  banner and the "Run Migration" button in the parent card is
+  disabled until the user explicitly acknowledges (a "I understand
+  orphan rows will block this migration" checkbox).
+- "Run Migration" calls `POST .../run`, receives a jobId, then polls
+  `GET .../status?jobId=...` every 500ms. Renders each step as it
+  comes back: pending (gray) → running (spinner) → success (green
+  check) → failed (red x).
+- On `state: 'succeeded'`, show a green completion banner.
+- On `state: 'failed'`, show the error and a "Re-run" button (the
+  migration is idempotent — re-running is safe).
+
+Gate the route in the React router with the same super-admin check
+used elsewhere. If the user's `role !== 'super_admin'`, redirect to
+the dashboard.
+
+`MigrationRunner.tsx` and `MigrationStatusBadge.tsx` are small
+helpers — the runner component manages the polling state machine,
+the badge maps `MigrationStatus` to a colored pill.
+
+**Test files.**
+
+`artifacts/api-server/src/lib/migrations/registry.test.ts`:
+- Registry contains exactly one entry (`company-id-columns-v1`) at the
+  time of this slice.
+- `check()` against a DB without the columns returns
+  `{ state: 'not_started' }`.
+- `check()` against a DB with the columns but still nullable returns
+  `{ state: 'partially_applied' }`.
+- `check()` against a fully migrated DB (marker set, all columns NOT
+  NULL) returns `{ state: 'completed' }`.
+- `preview()` returns the six-step plan; orphan counts are zero on a
+  clean fixture.
+- `run()` against a fresh DB applies all six steps successfully and
+  the final marker is in `app_settings`.
+- Re-running on an already-completed DB is a no-op (every step
+  either skips or no-ops; final state is still `completed`).
+- If a synthetic orphan row is inserted before `run()`, step 3
+  reports the orphan and steps 4–6 are skipped; state is `failed`.
+
+`artifacts/api-server/src/routes/admin-migrations-routes.test.ts`:
+- Super-admin caller can list, preview, run, and poll status.
+- `company_admin`, `billing_manager`, `irrigation_manager`,
+  `field_tech` callers all get 403 on every endpoint.
+- Unauthenticated caller gets 401.
+- An unknown migration id returns 404 on preview, run, status.
+- A run job goes from `running` → `succeeded` over the poll window.
+
+Add a static-source assertion in
+`routes/auth-middleware-coverage.test.ts`: every
+`app.<method>("/api/admin/migrations` registration must carry
+`requireAuthentication` AND a super-admin check.
+
+**Acceptance criteria.**
+
+- `schema.ts` declares `companyId` as **nullable** on
+  `workOrders`, `billingSheets`, `invoices`, and `estimates`.
+- `schema.ts` declares `webSessions`.
+- `lib/migrations/registry.ts` exists with exactly one registered
+  migration.
+- The four migration HTTP routes exist, super-admin-gated, and the
+  static-source coverage test confirms it.
+- The React `/admin/migrations` page renders for super admins,
+  redirects everyone else.
+- The migration runner persists per-job progress in process memory;
+  polling works.
+- All new tests pass.
+- All Slices 0–4 tests continue to pass (the transitional nullable
+  change may surface TypeScript errors at storage callsites that
+  expect `number`; resolve each with `assertCompanyId(row, ...)` at
+  the relevant leaf read).
+- `npm run typecheck` passes.
+- The Replit deploy preview for this slice, against the current
+  production database state, shows **only** safe operations:
+  - `ADD COLUMN company_id` (nullable) on three tables.
+  - `ALTER TABLE estimates ALTER COLUMN company_id DROP NOT NULL`
+    (or no change, depending on prod state — both are safe).
+  - The `DROP TABLE web_sessions` line is gone.
+  - **No `truncate ... cascade` lines.** If a truncate line appears,
+    do not deploy; the schema change is incorrect.
+
+**Deploy procedure (this slice).**
+
+1. Replit Agent finishes the slice and commits.
+2. Pull the branch locally; sanity-check that `schema.ts` no longer
+   has `.notNull()` on the four columns (and `web_sessions` is
+   declared).
+3. Open the Replit deploy preview.
+4. Confirm the preview matches the "acceptance criteria" expected
+   shape. If yes, confirm the deploy. If a `truncate` line is
+   present, abort and surface as a bug.
+5. After deploy: sign in as a super admin, navigate to
+   `/admin/migrations`. The `company-id-columns-v1` entry should
+   appear with status `not_started` or `partially_applied`.
+6. Click **Preview**. Confirm all orphan counts are zero. If any are
+   non-zero, the preview will block running and tell you which rows
+   to fix.
+7. Click **Run Migration**. Watch the six steps complete.
+8. Page reports `completed`. Re-load — status is now `completed`.
+9. Verify production writes are working: complete a work order, save
+   a billing sheet, generate an invoice.
+
+**Out of scope.**
+
+- Slice 4b (flip schema back to `.notNull()`). That's the follow-up
+  that ships after this slice is verified in production.
+- Migrating any of the other ad-hoc startup migrations
+  (`repairDivergedBillingSheets`, etc.) into the registry. That's
+  cleanup for a future slice — the registry is designed to absorb
+  them but the migration of existing entries is not in this slice.
+- Switching the project to `drizzle-kit migrate` (file-based, ordered
+  migrations applied via journal). That's the longer-term workflow
+  change — call it Slice 4c if scheduled — and is independent of
+  Slice 4a.
+- Persisting job progress across server restarts. Migrations are
+  short; an in-process map is sufficient for now.
+- Adding any additional migrations to the registry. Slice 6 (RLS)
+  and Slice 7's `tenant_boundary_attempts` table will each register
+  their own entries when those slices land.
+- Removing the existing `applyCompanyIdColumns()` startup migration
+  from `storage.ts`. Leave it in place as a belt-and-braces
+  fallback so a missed admin-page click does not result in a broken
+  production startup. It will no-op via the shared `app_settings`
+  marker once the page-driven run completes.
+
+**Dependencies.** Slices 0, 1, 2, 3, and 4 merged.
+
+---
+
+## Slice 4b — Tighten companyId back to NOT NULL
+
+Companion slice, ships a few days after Slice 4a once production has
+been verified.
+
+**Scope.**
+
+1. Flip `companyId` from nullable to `.notNull()` in `schema.ts` on
+   `workOrders`, `billingSheets`, `invoices`, `estimates`.
+2. Remove every call to `assertCompanyId(...)` added in Slice 4a —
+   TypeScript now treats the field as `number` again.
+3. Delete `artifacts/api-server/src/lib/migrations/assert-company-id.ts`.
+
+**Acceptance.**
+- `schema.ts` matches the original Slice-4 spec (`.notNull()` on all
+  four).
+- No imports of `assertCompanyId` remain.
+- `npm run typecheck` passes.
+- The Replit deploy preview shows **no** schema changes (the DB
+  already has the column NOT NULL from the admin-page run).
+
+**Out of scope.** Same as Slice 4a's out-of-scope list.
+
+**Dependencies.** Slice 4a merged AND the admin page has been used
+to complete the `company-id-columns-v1` migration in production
+(verified via the page showing status `completed`).

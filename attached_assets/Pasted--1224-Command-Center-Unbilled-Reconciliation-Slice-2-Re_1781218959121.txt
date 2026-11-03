@@ -1,0 +1,157 @@
+# #1224 — Command Center Unbilled Reconciliation, Slice 2: Real Cross-Endpoint Parity Test
+
+This is a single self-contained, **test-only** task. It adds no behavior. Do not
+modify route logic, the selector, or the UI. If a test reveals a real bug, surface
+it and stop — fixing it is a separate task.
+
+> **TL;DR.** #1221 made both Command Center headline numbers (left-list "Total" and
+> right-panel "Unbilled Work" badge) flow through one shared selector
+> (`computeUnbilledPartition`). The intended invariant is: for the same customer and
+> the same `selectedMonth`, `/api/customers/billing-preview` total **equals**
+> `/api/customers/:id/billing` `totalUnbilledAmount`. The current tests in
+> `billing-cutoff.test.ts` **do not actually test this.** The block named
+> `describe('route-level parity — preview/detail produce identical approvedTotal')`
+> calls `computeUnbilledPartition` twice with the *same hardcoded arrays* — it proves
+> the function is pure, not that the two **routes** agree. The two routes fetch from
+> different storage methods (`getWorkOrdersByCustomer` vs `getWorkOrders`;
+> `getBillingSheetsByCustomer` vs `getAllBillingSheets`) and each independently
+> resolves `selectedMonth` and the company scope. Those paths reconcile **today** (by
+> manual inspection), but nothing guards them. A future change to one route's fetch,
+> status filter, month threading, or scope would silently re-open the original $80
+> bug with the suite still green. This task adds a true HTTP-level integration test
+> that exercises **both real endpoints** and asserts equality, and renames the
+> misleading block.
+
+---
+
+## Why the current test is false confidence
+
+In `artifacts/api-server/src/routes/billing-cutoff.test.ts`, the "route-level parity"
+case does:
+
+```ts
+const preview = computeUnbilledPartition(wos, bss, [], cutoff); // comment: "simulates billing-preview route"
+const detail  = computeUnbilledPartition(wos, bss, [], cutoff); // comment: "simulates billing-detail route"
+assert.equal(preview.total, detail.total);
+```
+
+`wos` / `bss` are the *same* in-memory arrays passed twice, so this can never fail
+unless the function is non-deterministic. It does **not** call the routes, does not
+go through `storage.getWorkOrdersByCustomer` / `getWorkOrders` /
+`getAllBillingSheets` / `getBillingSheetsByCustomer`, does not resolve
+`selectedMonth` per route, and does not apply company scoping. The real invariant —
+**two endpoints, one truth** — is untested.
+
+---
+
+## Done looks like
+
+- A new integration test seeds a real customer with a deliberately mixed fixture set
+  and asserts, over actual HTTP (or the real registered handlers), that for the same
+  `?selectedMonth=`:
+  - the customer's `total` in `/api/customers/billing-preview` **===**
+    `/api/customers/:id/billing` `totalUnbilledAmount`, and
+  - both **===** `approvedTotal + unapprovedTotal` from the detail payload.
+- The assertion is checked for **three** month selections: the in-fixture month, an
+  earlier month (fewer items pass the cutoff), and `all` (no cutoff).
+- The misleading `describe` block in `billing-cutoff.test.ts` is renamed to reflect
+  that it tests selector purity, not route parity (e.g.
+  `describe('computeUnbilledPartition — deterministic / pure')`), and its
+  "simulates the ... route" comments are removed so no one reads it as cross-endpoint
+  coverage.
+- No production code changes. Existing tests still pass.
+
+---
+
+## Steps
+
+### 1. Add `customer-billing-parity.test.ts` (new file)
+
+`artifacts/api-server/src/routes/customer-billing-parity.test.ts`. Use the **real
+app / supertest** harness, not the storage-mirroring style of
+`customer-billing-detail-wet-check.test.ts`. Copy the app-bootstrap pattern from an
+existing route integration test that drives the actual Express app
+(e.g. `billing-workspace-routes.test.ts` — `registerRoutes` / supertest `request(app)`).
+The whole point is to go through real route wiring, real storage fetches, and real
+`selectedMonth` resolution.
+
+### 2. Seed one customer with a mixed fixture (real DB inserts)
+
+Follow the `db.execute(sql\`INSERT ...\`)` fixture pattern from
+`customer-billing-preview-wet-check.test.ts` (`before` hook; unique `TAG`; `after`
+hook cleans up). Seed, for a single company + customer, with `invoice_id IS NULL`
+unless noted:
+
+- **(a)** an **approved** billing sheet (`approved_passed_to_billing`) with
+  `work_date` inside the target billing month;
+- **(b)** an **approved** work order (`approved_passed_to_billing`) with
+  `completed_at` in an **earlier** month (prior-period, never billed) — must be
+  included under the open-start cutoff;
+- **(c)** an **approved** work order with `completed_at` in the month **after** the
+  cutoff (next period) — must be **excluded** from the in-month view;
+- **(d)** an **unapproved** billing sheet (`pending_manager_review`) with `work_date`
+  inside the target month;
+- **(e)** an unbilled item (BS or WO) with a **null** work/completed date — must be
+  included and flagged `undated` in every month;
+- **(f)** one **billed** item (non-null `invoice_id`) — must be excluded from both
+  totals (guards against the selector counting invoiced work).
+
+Pick the **target billing month** as a fixed past month (e.g. the month of (a)/(d))
+rather than "current minus one," so the test is stable regardless of the date it runs.
+Authenticate the request as a role allowed on these routes (e.g. `company_admin`)
+scoped to the fixture company.
+
+### 3. Assert cross-endpoint parity for three month selections
+
+For each of `selectedMonth` ∈ { target month, an earlier month, `all` }:
+
+- `GET /api/customers/billing-preview?selectedMonth=<m>` → find the fixture customer
+  row; read its `total` (and `allOpenTotal` for the `all` case).
+- `GET /api/customers/<id>/billing?selectedMonth=<m>` → read `totalUnbilledAmount`,
+  `approvedTotal`, `unapprovedTotal`.
+- Assert: `preview.total === detail.totalUnbilledAmount` and
+  `detail.totalUnbilledAmount === detail.approvedTotal + detail.unapprovedTotal`
+  (compare with a cent tolerance, e.g. `Math.abs(a-b) < 0.005`).
+
+Also assert the **membership** the parity number depends on, so a regression names
+itself rather than just showing a number drift:
+
+- target month: (a)+(b)+(d)+(e) present; (c) and (f) absent.
+- earlier month (before (a)/(d), after (b)): (b)+(e) present; (a),(c),(d),(f) absent.
+- `all`: (a)+(b)+(c)+(d)+(e) present; (f) absent; and
+  `preview.allOpenTotal === detail.totalUnbilledAmount` for `all`.
+
+### 4. Rename the misleading block in `billing-cutoff.test.ts`
+
+Rename `describe('route-level parity — preview/detail produce identical approvedTotal')`
+to something that states what it actually verifies (selector determinism / purity),
+and delete the `// simulates billing-preview route` / `// simulates billing-detail
+route` comments. Leave the assertions themselves intact — they're fine as purity
+tests; they were just mislabeled.
+
+---
+
+## Out of scope
+
+- Any change to `computeUnbilledPartition`, the routes, the UI, or storage.
+- Fixing a divergence if the new test finds one — surface it as a separate bug; this
+  task only adds the guard.
+- Financial Pulse parity (it's all-time; reconciles to `allOpenTotal`, covered
+  separately in #1221 Step 9).
+
+---
+
+## Relevant files
+
+- New: `artifacts/api-server/src/routes/customer-billing-parity.test.ts`
+- Edit (rename block + drop comments only):
+  `artifacts/api-server/src/routes/billing-cutoff.test.ts`
+- Harness reference (real app/supertest):
+  `artifacts/api-server/src/routes/billing-workspace-routes.test.ts`
+- Fixture-seeding reference (DB inserts + TAG + cleanup):
+  `artifacts/api-server/src/routes/customer-billing-preview-wet-check.test.ts`
+- Routes under test:
+  `artifacts/api-server/src/routes/routes.ts` — `/api/customers/billing-preview`
+  (`:6017`+, customer `total`) and `/api/customers/:id/billing` (`:6322`+,
+  `totalUnbilledAmount = detailPartition.total`)
+- Selector: `artifacts/api-server/src/billing-unbilled-selectors.ts`

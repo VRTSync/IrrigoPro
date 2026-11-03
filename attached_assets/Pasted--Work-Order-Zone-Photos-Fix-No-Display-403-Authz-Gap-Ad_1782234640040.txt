@@ -1,0 +1,73 @@
+# Work Order Zone Photos — Fix "No Display" (403 Authz Gap) + "Add Add photo" Label
+
+**What & Why**
+On an inspection-origin work order, completed-work photos upload successfully (the "(1)" count appears) but render as a **broken image** — they never display. Root cause is a **server authorization gap**, not the upload.
+
+**Root cause:** Per-zone photos are stored in the structured **`work_order_zone_photos`** table (added with #1460; the zone checklist reads/writes `/api/work-orders/:id/zone-photos`). But the photo-serving authorization gate **`assertCanViewPhoto`** (`artifacts/api-server/src/routes/routes.ts:13926`) only authorizes photos found in:
+1. `wet_check_photos` (joined via `wet_checks`),
+2. the flat `work_orders.photos` text[] array,
+3. `billing_sheets.photos` text[],
+4. `estimates.photos` text[].
+
+It **never checks `work_order_zone_photos`.** So when `<PhotoImage>` requests the signed URL / bytes for a zone photo, `assertCanViewPhoto` finds no owning record and returns **403 Forbidden** → the image fails → broken-image icon. Wet-check photos display because they live in a table the gate *does* check.
+
+This affects **all** zone photos (camera *and* camera-roll) — it's independent of the recent camera-roll change, which is working correctly.
+
+Plus a cosmetic bug in the same view: the button reads **"Add Add photo."** `FileUpload` renders its button as `Add ${label}` (`file-upload.tsx:652`), and the zone checklist passes `label="Add photo"`, producing "Add Add photo."
+
+Two small fixes. No schema change.
+
+---
+
+## Fix 1 — Authorize `work_order_zone_photos` (the real bug)
+### File
+- `artifacts/api-server/src/routes/routes.ts` — `assertCanViewPhoto` (~13926–13982), used by both `GET /api/photos/{*photoId}/signed-url` and `GET /api/photos/{*photoId}`.
+
+### Change
+Add a check for `work_order_zone_photos`, scoped to the caller's company via `work_orders → customers`, mirroring the existing checks (and using the same `candidates` array that already normalizes leading-slash / variant-suffix / double-`photos/` forms):
+
+```ts
+// 5) work_order_zone_photos rows owned by this company
+//    (structured per-zone store — #1460).
+const wozRows = await db
+  .select({ id: workOrderZonePhotos.id })
+  .from(workOrderZonePhotos)
+  .innerJoin(workOrders, eq(workOrders.id, workOrderZonePhotos.workOrderId))
+  .innerJoin(customers, eq(customers.id, workOrders.customerId))
+  .where(and(
+    eq(customers.companyId, user.companyId),
+    sql`${workOrderZonePhotos.url} = ANY(${sql.param(candidates)}::text[])`,
+  ))
+  .limit(1);
+if (wozRows.length > 0) return true;
+```
+
+Place it alongside the other company-scoped checks (before the final `403`). Import `workOrderZonePhotos` from the schema if not already imported in this file. Super-admin cross-tenant access already short-circuits above — unchanged.
+
+---
+
+## Fix 2 — "Add Add photo" label
+### File
+- `artifacts/irrigopro/src/components/work-orders/inspection-zone-checklist.tsx` (~382, the `FileUpload` for zone photos).
+
+### Change
+`FileUpload` already prefixes "Add ", so pass the noun only: change `label="Add photo"` → **`label="photo"`** (button then reads "Add photo"). Confirm other `FileUpload` callers pass a bare noun too; fix any that double up.
+
+---
+
+## Tests
+- Upload a completed-work photo on an inspection work order (camera and camera-roll): the thumbnail **displays** (no broken-image icon); opening it works.
+- The signed-url / serve routes return 200 for a zone photo owned by the caller's company, and still **403** for a photo belonging to another company (cross-tenant still blocked); super-admin still sees cross-tenant.
+- Wet-check, flat work-order, billing-sheet, and estimate photos still display (no regression to the existing four checks).
+- The button reads "Add photo," not "Add Add photo."
+
+## Out of scope
+- The camera-roll picker (already shipped and working).
+- Photo upload/finalize pipeline (unchanged — the bytes are stored fine).
+- The false "loose photo" wet-check fix (separate ticket).
+
+## Relevant files
+- `artifacts/api-server/src/routes/routes.ts` (`assertCanViewPhoto` ~13926; photo routes ~13984 & ~14009)
+- `lib/db/src/schema/schema.ts` (`workOrderZonePhotos` = `work_order_zone_photos`, ~1564)
+- `artifacts/irrigopro/src/components/work-orders/inspection-zone-checklist.tsx` (zone `FileUpload` ~380; reads `/api/work-orders/:id/zone-photos`)
+- `artifacts/irrigopro/src/components/ui/file-upload.tsx` (`Add ${label}` button ~652; for reference)

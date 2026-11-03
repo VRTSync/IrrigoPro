@@ -1,0 +1,91 @@
+# #2019 — Financial Pulse: Attribution and Double-Counts
+
+## What & Why
+
+Three drill-downs report more money than the company made, because each credits the same dollar to more than one row. Against a Billed MTD of **$47,782**:
+
+| Surface | Reported | Ratio | Captured |
+|---|---|---|---|
+| By Technician, Revenue column (4 techs) | $110,526 | 2.31x | 2026-09-11 |
+| Pulse tab, technician YTD column (6 techs) | $636,462 against ~$309,469 invoiced YTD | 2.06x | 2026-09-11 |
+| Revenue mix, "Parts vs Labor" donut total | $92,803 | 1.94x | 2026-09-15 |
+| By Service Type, "% of total" column | 200% | 2.00x | 2026-09-11 |
+
+The In-Flight column on the same technician table sums to $23,623 against a tile of $23,624, so the attribution machinery is not broken everywhere. It is specifically the crediting of **invoice** revenue that duplicates: each record type is joined to its invoice, and then the whole invoice is credited to every row that touched it.
+
+## Done looks like
+
+- The By Technician Revenue column sums to Billed MTD for the same company and period, within rounding. The Pulse tab's technician YTD column sums to Invoiced YTD.
+- No invoice contributes more than its `totalAmount` to any drill-down, on any tab.
+- The "Parts vs Labor" donut counts each wet check's parts and labor exactly once.
+- Each service-type group's percentages sum to 100%, and the two groups are visibly separate rather than four rows under one header.
+- An invoice billed at the emergency rate is classified from the ticket's own rate mode, not from matching a rate to two decimal places.
+- The By Technician table has no Margin % column, in the UI or the CSV, and `marginPct` is gone from the row type.
+- Labor cost stays exactly as it is.
+
+## Decisions already made — implement these, do not relitigate
+
+- **Invoice revenue is split proportionally by hours** across the technicians credited to that invoice. When the contributing rows carry no usable hours, split equally. A single-technician invoice is unchanged — that is the common case.
+- **The technician table must reconcile to the billed total.** That is a test, not a comment.
+- **Margin % is deleted, not hidden.** It is empty in production today — no user has an `hourlyWage`, so every row renders "—" — and it subtracts labor but not parts, on the same page as a "Profit Margin" tile that subtracts both. Two unqualified margins that disagree is the defect this series exists to close. Shipping a half-corrected version would be the first time that column ever displayed a number, and it would be wrong. Hiding it behind a flag pending another ticket is a deferred problem and a crutch (Rule 8) — remove it.
+- **Labor cost stays.** It is correct but unpopulated: a real cost that appears the moment wages are entered. Margin % is wrong by construction whether or not wages exist. Delete the structurally incomplete one; keep the one waiting on data.
+- **Per-technician margin returns only once a real per-line parts cost exists** — the parts-cost work adds it back as a deliberate feature, computed the same way the tile is. It is not restored by this ticket.
+- **Emergency classification comes from `rateMode`**, with the existing rate comparison kept only as a fallback for rows predating that column.
+
+## Out of scope
+
+- The Profit Margin tile's own cost bases. That is the parts-cost ticket; this one only removes the technician table's competing margin.
+- The parts-vs-labor stacked chart being empty before 2026-04, and the revenue trend's year-over-year asymmetry.
+- Whether `partsSubtotal + laborSubtotal` should equal `totalAmount`. It does not for older invoices with null subtotals — a data question, not a mix question.
+- Attributing invoice revenue to technicians anywhere outside these two tables.
+
+## Steps
+
+1. **Split invoice revenue across the technicians who earned it.** Build the per-invoice technician shares from the work orders, billing sheets and wet-check billings already loaded for the window — each carries hours and a technician. Allocate the invoice's `totalAmount` in proportion to hours; where an invoice's contributing rows have no usable hours, split it equally; where it has one technician, that technician takes all of it. Apply the identical allocation to `partsRevenue`. No new query is needed — the three loaders already return hours and technician ids.
+
+2. **Apply the same allocation on the Pulse tab.** `computePulseTechnicians` credits whole invoices through its `creditInvoice` helper; replace that with the shared allocation so the Pulse tab's YTD column reconciles to Invoiced YTD. Leave the in-flight accumulation alone — it already attributes correctly, which is why that column sums to its tile today.
+
+3. **Rename what avg ticket now means.** With fractional attribution, avg ticket is attributed revenue over invoices worked, not the value of a whole ticket. Retitle the column and its CSV header to "Avg per invoice worked" so it is not read as a ticket value.
+
+4. **Remove the Margin % column.** Delete `marginPct` from the technician row type, from the table header and body, and from the CSV header and row — all three together, or dead data stays in the API for a later surface to pick up. Leave Labor cost and its `hasWageSet` flag untouched.
+
+5. **Stop re-adding invoiced wet-check subtotals to the revenue mix.** Invoice generation already builds `invoices.partsSubtotal` and `laborSubtotal` as work orders plus billing sheets plus wet-check billings, so the mix's invoiced-WCB loop counts every invoiced wet check's parts and labor a second time. Delete that loop, and delete the collection in the route that feeds it — which also removes an O(n²) scan over a year of invoice ids. The **uninvoiced** wet-check leg is correct and stays: that work is in no invoice yet. Remove the parameter from the helper's signature rather than passing an empty array, so nothing can quietly start feeding it again.
+
+6. **Render service type as two splits.** Each row gains a group — urgency for emergency/standard, agreement for contract/adhoc — and `pctOfTotal` is computed **within the row's own group** so each sums to 100%. The table renders two labelled sections rather than four rows under one header; the CSV gains the same group column. The `# invoices` column stops double-counting for the same reason.
+
+7. **Classify emergency from the ticket, not the rate.** Work orders and billing sheets both carry `rateMode` ('normal' | 'emergency'), which is the authoritative record of how the work was billed. Classify from it; fall back to the existing rate comparison only for rows that predate the column; and treat a customer whose emergency rate equals their standard rate as never emergency, since the comparison cannot distinguish them.
+
+8. **Tests.** Cover: one $1,000 invoice with two technicians at 6h and 2h giving $750 and $250 (the regression for the 2.31x — both got $1,000 before); the same invoice with no hours recorded giving $500 each; a single-technician invoice unchanged; the sum invariant, that the technician Revenue column equals billed revenue for the window to the cent and the Pulse YTD column equals Invoiced YTD; an invoiced wet-check billing contributing its parts and labor exactly once to the mix, and an uninvoiced one exactly once; each service-type group summing to 100% with each invoice appearing once per group; an invoice whose source ticket has `rateMode: "emergency"` classified emergency even when its labor rate matches the standard rate, and a customer with equal rates classified standard; and tenancy, so attribution never crosses companies.
+
+## Proof to attach when done
+
+- `file:line` for the allocation helper, both call sites, the deleted invoiced-WCB loop, the grouped service-type output, and the three places Margin % was removed.
+- Grep output showing no helper sums `inv.totalAmount` into more than one technician's row, and that `marginPct` has no remaining references.
+- A screenshot of the By Technician table with its Revenue column visibly summing to the Billed MTD tile in the same frame.
+- Before/after for the mix donut's Parts vs Labor total against Billed MTD — today $92,803 against $47,782.
+- Test output for the two-technician split, the sum invariant, and the tenancy case.
+
+## Relevant files
+
+- `artifacts/api-server/src/financial-pulse-math.ts` — `computeByTechnician` :801, its whole-invoice credit :877-878, `marginPct` :883 and the row field :788, `avgTicket` :892; `computePulseTechnicians` :1221 with `creditInvoice` :1243; `computeRevenueMix` :1000 with the invoiced-WCB loop :1044; `computeByServiceType` :918 with the rate match :957 and `pctOfTotal` :988
+- `artifacts/api-server/src/routes/financial-pulse.ts` — invoiced-WCB collection :960, `techniciansCsv` :1867 with the "Labor Cost" and "Margin %" headers :1873-1874
+- `artifacts/irrigopro/src/pages/financial-pulse.tsx` — `TechniciansTab` :1433 with the Labor cost and Margin % headers :1476-1477, `ServiceTypeTab` :1576
+- `lib/db/src/schema/schema.ts` — `billing_sheets.rateMode` :336, `work_orders.rateMode` :787
+- `artifacts/api-server/src/financial-pulse-math.test.ts`, `artifacts/api-server/src/routes/financial-pulse-slice3.test.ts`
+
+Line numbers are current as of the #2011 merge and drift with every wave — locate by symbol, not by line.
+
+## Coordination with the other Financial Pulse tickets
+
+Nine tickets change Financial Pulse. They run in five waves; this one is in wave 3, alongside #2012.
+
+- **Owns the technician crediting** in `computeByTechnician` and `computePulseTechnicians`, and the revenue-mix and service-type helpers. #2012 runs in the same wave and edits the Last Cycle block in the same route file. The split is by concern, not by line: #2012 owns the cycle selection and the Last Cycle value and count; this ticket owns the technician crediting. Do not edit the other's code even where the spans touch.
+- **Do not touch the exclusion predicates** in `computePulseCustomers` and `computePulseTechnicians`. Task #2013 set them to the canonical excluded-status set in wave 1; leave them exactly as it left them and do not reintroduce a narrow inline list.
+- **Do not edit `docs/financial-metrics.md`.** It exists and is the reconciliation contract, but task #2018 owns it and rewrites it last, against what actually shipped.
+- This ticket must land **after** the parts-cost ticket only if per-technician margin were being kept. It is not — Margin % is removed here — so this ticket has no build dependency on it.
+
+## Test placement
+
+Put this ticket's new tests in a file of its own; do not append to `financial-pulse.test.ts` or `financial-pulse-math.test.ts`, which several tickets each touch. **Add the new file to the `seasonal-budget-financial-pulse` validation command in `.replit`** — that command names its test files explicitly, so an unlisted file never runs in validation even though the package script globs `src/**/*.test.ts`. Note `financial-pulse-math.test.ts` is itself absent from that command, so pure-math assertions belong in this ticket's own registered file, not there. Do not add a workflow; this repo is past the workflow cap.
+
+Prefer pure-math assertions — they need no database. Where a route test is required, assert invariants rather than absolutes: a column summing to its total, two endpoints returning the same number. Exact-count assertions like `equal(count, 3)` fail on rows left by other suites in the shared dev database and read as a regression in this ticket when they are not one.

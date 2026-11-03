@@ -1,0 +1,129 @@
+# QB Customer Sync — Pull Latest Customer Data (update existing + structured address)
+
+**Source:** Conversation 2026-06-08 — after reconnecting QuickBooks, the customer sync should pull the *latest* customer data (address, email, phone) from QuickBooks, including updates to customers that already exist in IrrigoPro.
+**Severity:** P2 (feature gap, not an outage).
+**Scope:** `POST /api/quickbooks/sync-customers` (routes.ts ~8815–8960) only. No storage or schema changes — `updateCustomer(id, Partial<InsertCustomer>)` (storage.ts:1852) and the structured address columns (`street`/`city`/`state`/`zip`/`country`, schema.ts) already exist.
+
+## Why
+
+Two gaps in the current sync:
+
+1. **Existing customers are never updated.** The loop fetches QB customers, and for any that already exist (matched by `quickbooksId`) it just counts them as "already synced" and pushes `{ action: 'exists' }` — it writes nothing. So re-syncing never pulls changed addresses/emails/phones. Only brand-new customers get any data.
+2. **Address is flattened, structured fields ignored.** The mapping concatenates `BillAddr` into the single-line `address` string and never populates the structured `street`/`city`/`state`/`zip`/`country` columns the schema added in Task #347. So even new customers come in without usable structured address data.
+
+## Done looks like
+
+- Re-running the sync updates existing customers with the latest QuickBooks `BillAddr`, email, and phone.
+- Both new and updated customers have the structured `street`/`city`/`state`/`zip`/`country` fields populated (plus the legacy single-line `address` kept for back-compat).
+- A blank value in QuickBooks does **not** wipe an existing non-empty IrrigoPro value (no destructive overwrites).
+- IrrigoPro-specific fields (`irrigoName`, `laborRate`, `propertyNotes`, `propertyBoundary`, contract terms, budgets, etc.) are never touched by the sync.
+- The response reports `customersAdded`, `customersUpdated`, and `customersUnchanged`.
+- Cross-company safety preserved: the sync only updates customers belonging to the caller's company.
+
+## Steps
+
+### 1. Map structured address fields from QuickBooks `BillAddr`
+
+Extend the `.map(...)` that builds `quickBooksCustomers` (currently ~8896) to also pull structured parts. Keep the existing single-line `address` for back-compat:
+
+```ts
+const bill = (customer.BillAddr as Record<string, string> | undefined) ?? {};
+const street = [bill.Line1, bill.Line2, bill.Line3].filter(Boolean).join(', ');
+// ...
+return {
+  qb_id: customer.Id as string,
+  name: (String(customer.DisplayName || '').trim() || String(customer.CompanyName || '').trim() || String(customer.Name || '').trim()),
+  email: ((customer.PrimaryEmailAddr as Record<string, string> | undefined)?.Address || ''),
+  phone: ((customer.PrimaryPhone as Record<string, string> | undefined)?.FreeFormNumber || ''),
+  street,
+  city: bill.City || '',
+  state: bill.CountrySubDivisionCode || '',
+  zip: bill.PostalCode || '',
+  country: bill.Country || '',
+  address: [street, bill.City, bill.CountrySubDivisionCode, bill.PostalCode].filter(Boolean).join(' ').trim(), // legacy single-line
+};
+```
+
+### 2. Build a non-destructive QB→customer field object
+
+Add a small helper that includes a field only when QuickBooks actually has a value, so a missing QB field never blanks good local data. `email` is `NOT NULL` in the schema, so it must never be set to `''`.
+
+```ts
+function qbFields(qb: typeof quickBooksCustomers[number]) {
+  const f: Partial<InsertCustomer> = {};
+  if (qb.name)    f.name = qb.name;
+  if (qb.email)   f.email = qb.email;          // never overwrite with '' (NOT NULL)
+  if (qb.phone)   f.phone = qb.phone;
+  if (qb.street)  f.street = qb.street;
+  if (qb.city)    f.city = qb.city;
+  if (qb.state)   f.state = qb.state;
+  if (qb.zip)     f.zip = qb.zip;
+  if (qb.country) f.country = qb.country;
+  if (qb.address) f.address = qb.address;
+  return f;
+}
+```
+
+### 3. Update existing customers (the core fix)
+
+In the per-customer loop, replace the `else` "already synced" no-op with an update path. Guard on company so a `quickbooksId` collision can never touch another tenant's row:
+
+```ts
+const companyIdNum = parseInt(userCompanyId, 10);
+// ...
+const existingCustomer = await storage.getCustomerByQuickBooksId(qbCustomer.qb_id);
+
+if (!existingCustomer) {
+  const newCustomer = await storage.createCustomer({
+    ...qbFields(qbCustomer),
+    email: qbCustomer.email || '',        // satisfy NOT NULL on create
+    quickbooksId: qbCustomer.qb_id,
+    companyId: companyIdNum,
+  });
+  customersAdded++;
+  results.push({ action: 'created', customer: newCustomer });
+} else if (existingCustomer.companyId !== companyIdNum) {
+  // Belongs to another company — never cross-tenant write.
+  results.push({ action: 'skipped_other_company', qbId: qbCustomer.qb_id });
+} else {
+  const updates = qbFields(qbCustomer);
+  const updated = await storage.updateCustomer(existingCustomer.id, updates);
+  customersUpdated++;
+  results.push({ action: 'updated', customer: updated });
+}
+```
+
+*(Optional polish: skip the write and count `customersUnchanged` when every field in `updates` already equals the existing value — avoids no-op DB writes and noisy `updated_at` churn. Compare the `qbFields` keys against `existingCustomer` before calling `updateCustomer`.)*
+
+### 4. Report the new counts
+
+```ts
+res.json({
+  success: true,
+  customersAdded,
+  customersUpdated,
+  customersUnchanged,           // if you add change-detection; else omit
+  totalCustomers: quickBooksCustomers.length,
+  results,
+  message: `${customersAdded} added, ${customersUpdated} updated`,
+});
+```
+
+## Out of scope / deliberate choices
+
+- **QuickBooks is the source of truth for contact + address fields only** (name, email, phone, BillAddr). The sync does not modify any IrrigoPro-managed field. If you later want two-way sync or local-edit protection, that's a separate task.
+- **`ShipAddr` not used** — irrigation service/billing uses `BillAddr`. Add `ShipAddr` mapping later only if a service-address use case appears.
+- **Matching is by `quickbooksId` only.** Customers created manually in IrrigoPro (no `quickbooksId`) are not auto-linked to QB records by name; that fuzzy-matching is a separate task.
+
+## Verify
+
+- Edit a customer's address in QuickBooks → run sync → the IrrigoPro customer shows the new `street`/`city`/`state`/`zip` and updated single-line `address`; response shows `customersUpdated >= 1`.
+- A QB customer with no phone does not blank an existing IrrigoPro phone.
+- A customer's `irrigoName`, `laborRate`, and `propertyNotes` are unchanged after sync.
+- As Company A, sync never creates or edits a Company B customer (check the `companyId` guard with a seeded collision).
+
+## Relevant files
+
+- `artifacts/api-server/src/routes/routes.ts:8815–8960` — the sync route (mapping + loop).
+- `artifacts/api-server/src/storage.ts:1852` (`updateCustomer`), `:createCustomer` — used as-is.
+- `lib/db/src/schema/schema.ts` — `customers` structured address fields (reference only).

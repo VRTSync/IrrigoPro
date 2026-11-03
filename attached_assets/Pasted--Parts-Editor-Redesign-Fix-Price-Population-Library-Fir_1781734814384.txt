@@ -1,0 +1,46 @@
+# Parts Editor Redesign — Fix Price Population + Library-First Layout
+
+**What & Why**
+The parts editor in the Command Center modal (`PartsListEditorDialog` in `completed-work-detail-modal.tsx`) is hard to use and has a real bug: selecting a part by typing its name does **not** populate the price. This redesign fixes the price bug and makes the editor intuitive — library-first adding, auto-filled editable prices, source badges, and live totals — without rebuilding the dialog or its save flow.
+
+**Visual source of truth:** `parts-editor-redesign.html` (approved mockup).
+
+**The price bug (root cause):** the `parts` table column is `price`, and `/api/parts` returns parts with a `price` field. But the editor stores the catalog as `{ id, name, unitPrice }` (`setCatalog(data)` directly) and the type-to-search handler reads `match.unitPrice` — which is always `undefined`, so it falls back to `"0"`. The price never lands. (The "Add from Library" path reads `part.price` and works.)
+
+Single slice, one component (+ the catalog fetch mapping). No schema change. Applies to both work orders and billing sheets (the dialog already serves both).
+
+---
+
+## Done looks like (per the mockup)
+- **Library-first adding:** "Add from library" is the primary action (opens the existing `PartPicker`); "Add custom line" is a secondary button for off-catalog work. The old free-text **type-to-search datalist is removed** (it was the buggy path).
+- **Price auto-fills and stays editable:** selecting a library part drops in its name and **unit price** (read from the part's real `price`), shown with a `$` prefix in a right-aligned numeric field you can override.
+- **Source badge per row:** a green **"Catalog"** badge for library parts (have a `partId`), a gray **"Custom"** badge for hand-entered lines.
+- **Live math:** each row shows its **line total** (qty × unit price); the footer shows a live **Parts subtotal** and **Labor** hours total that update as you edit.
+- **Clean columns:** Part · Qty · Unit $ · Labor h · Line total · remove.
+- Same dialog, same Save / Cancel, same `PATCH /api/{work-orders|billing-sheets}/:id/items` save (with server resync). Existing billed/invoiced locks respected.
+
+## Steps
+1. **Fix the catalog price mapping.** When building `catalog` from `/api/parts`, map each part's `price` into the field the editor reads (e.g. `data.map(p => ({ id: p.id, name: p.name, unitPrice: p.price }))`), or change the consumer to read `price`. Either way, a selected catalog part must populate `unitPrice` from its real price.
+2. **Library-first add.** Make "Add from library" the primary `PartPicker` trigger; on select, insert/merge a row with `partId`, `partName`, `unitPrice = part.price`, default qty 1 (the `handleSelectFromLibrary` logic is already mostly right — just confirm price). "Add custom line" inserts a blank row (`partId: null`) for manual entry.
+3. **Remove the datalist.** Delete the `<datalist>` autocomplete + the `handlePartNameChange` catalog-match branch; the part-name input on a custom line is plain free text. (Catalog rows show the name read-only or editable per preference — recommend read-only name once a `partId` is set, editable price/qty/labor.)
+4. **Source badge.** Render "Catalog" (green) when `partId != null`, "Custom" (gray) otherwise.
+5. **Live totals.** Compute and show per-row line total (`qty × unitPrice`) and a footer Parts subtotal + Labor-hours total, recomputing on every input change. (Display only — the authoritative recompute still happens server-side on save.)
+6. **Layout** per the mockup: column headers, `$`-prefixed right-aligned price, right-aligned numeric qty/labor, trash icon to remove, primary/secondary add buttons, footer subtotal + Save/Cancel.
+
+## Tests
+- Selecting a library part populates its unit price (not `$0`); line total = qty × price.
+- A custom line lets you type name + price; badge shows "Custom".
+- Editing qty / unit price / labor updates the row line total and the footer subtotal live.
+- Save PATCHes items and the server resync returns correct totals (WO and BS).
+- Billed/invoiced record → editor read-only.
+
+## Out of scope
+- `customer-billing.tsx` (Command Center page) — unchanged; only the modal.
+- Backend `/api/parts` and the items-resync endpoints (reused as-is).
+- Labor-section editing/recalc parity (separate ticket — already specced).
+
+## Relevant files
+- `artifacts/irrigopro/src/components/billing/completed-work-detail-modal.tsx` (`PartsListEditorDialog`, catalog fetch, handlers, row layout)
+- `artifacts/irrigopro/src/components/parts/part-picker.tsx` (`PartPicker`)
+- `lib/db/src/schema/schema.ts` (reference: `parts.price`)
+- Mockup: `parts-editor-redesign.html`

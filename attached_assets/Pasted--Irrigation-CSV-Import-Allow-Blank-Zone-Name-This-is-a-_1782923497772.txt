@@ -1,0 +1,112 @@
+# Irrigation CSV Import — Allow Blank Zone Name
+
+This is a single self-contained bug fix. Do not deviate or expand scope beyond what's specified here.
+
+**What & Why**
+The CSV import (`Irrigation Profile - CSV Import (One Row Per Zone, Preview + Merge).md`) hard-rejects any row with a blank **Zone Name**, both client-side and server-side. Real-world source data (technician run sheets, older controller printouts) frequently has zone numbers and types but no per-zone names — Randy hit this importing "Villas at the Boulders" (229/229 rows rejected, all on the same "Zone Name is required" error, screenshot attached to this task). `Location`, `Brand`, and `Model` are already correctly optional end-to-end (schema, Zod, client parser) — this fix is scoped to **Zone Name only**.
+
+**Root cause (verified in code, not inferred):**
+- Client: `artifacts/irrigopro/src/components/customers/IrrigationCsvImportModal.tsx:320-324` — `parseCsv` rejects the row if `Zone Name` is empty.
+- Server: `artifacts/api-server/src/routes/irrigation-profile-routes.ts:755-758` — the import route re-validates and rejects blank `zoneName` again (defense in depth, same rule).
+- DB: `lib/db/src/schema/schema.ts:1815` — `irrigation_profile_zones.name` is `text(...).notNull()`. This fix does **not** change that column to nullable — it keeps the column NOT NULL and instead resolves a real name before any write, so no migration is needed.
+
+**Design decision — how a blank Zone Name resolves:**
+- New zone (no existing row at that zone number for the controller): name defaults to **`Zone {zoneNumber}`** (e.g. `Zone 1`).
+- Existing zone being updated by the merge: a blank Zone Name in the CSV means **"don't touch the name"** — keep whatever name is already saved. Blank must never clobber a real name a manager already set. This matches the import's existing non-destructive merge philosophy (never delete/blank out data the CSV doesn't explicitly provide).
+- This resolution must happen identically in the **preview diff** and the **commit write**, so what the manager sees in preview is exactly what gets saved (build one resolver function and call it from both paths, not two copies of the logic).
+
+## Slice 1 — Client: stop rejecting blank Zone Name
+
+### Files: `artifacts/irrigopro/src/components/customers/IrrigationCsvImportModal.tsx`
+
+- `ParsedRow.zoneName` type (line 261): change from `string` to `string | null`.
+- `parseCsv`, lines 320-324: remove the reject block entirely:
+  ```ts
+  const zoneName = (raw["Zone Name"] ?? "").trim();
+  if (!zoneName) {
+    errors.push({ row: rowNum, field: "Zone Name", message: "Zone Name is required" });
+    return;
+  }
+  ```
+  Replace with a non-rejecting parse, consistent with how `Location`/`Brand`/`Model` are already handled elsewhere in this function:
+  ```ts
+  const zoneName = (raw["Zone Name"] ?? "").trim() || null;
+  ```
+- Row push (around line 371): `zoneName` now carries the `string | null` value straight through (no other change needed there).
+- `REQUIRED_HEADERS` (lines 271-277): leave `"Zone Name"` in this list as-is — it governs which **columns** must exist in the CSV header row, not whether each row's value is filled in. The template should keep the column; only per-row values become optional.
+- No preview-table changes needed — the preview table renders `diff.zones[].zoneName`, which is the **server's resolved** name (see Slice 2), not the raw parsed value, so it will always show a real string (either the CSV's name or the `Zone N` / existing-name fallback).
+
+## Slice 2 — Server: accept blank, resolve a real name before diff/write
+
+### Files: `artifacts/api-server/src/routes/irrigation-profile-routes.ts`, `artifacts/api-server/src/storage.ts`
+
+**`irrigation-profile-routes.ts`, lines 755-758:** remove the reject block:
+```ts
+if (!raw.zoneName || typeof raw.zoneName !== "string") {
+  rowErrors.push({ row: rowNum, field: "Zone Name", message: "Zone Name is required" });
+  continue;
+}
+```
+No replacement check needed — a missing/blank `zoneName` is now valid input.
+
+**Same file, `validRows.push(...)` around line 802:** change
+```ts
+zoneName: String(raw.zoneName).trim(),
+```
+to
+```ts
+zoneName: raw.zoneName ? String(raw.zoneName).trim() || null : null,
+```
+
+**`storage.ts`, `IrrigationImportRow` type (~line 1331):** change `zoneName: string;` to `zoneName: string | null;`.
+
+**`storage.ts`, add one small resolver used by both the preview-diff loop and the commit-write loop:**
+```ts
+function resolveZoneName(rowZoneName: string | null, existingName: string | undefined, zoneNumber: number): string {
+  if (rowZoneName) return rowZoneName;
+  if (existingName) return existingName;
+  return `Zone ${zoneNumber}`;
+}
+```
+
+**Diff loop (`importIrrigationProfile`, ~lines 10906-10939):**
+- Line 10914 (create branch): `zoneName: row.zoneName,` → `zoneName: resolveZoneName(row.zoneName, undefined, zoneNum),`
+- Lines 10921-10923 (update branch, change detection): only flag a zoneName change when the CSV actually supplied one —
+  ```ts
+  if (row.zoneName && existingZone.name !== row.zoneName) {
+    changes.push({ field: "zoneName", from: existingZone.name, to: row.zoneName });
+  }
+  ```
+- Line 10933 (update branch, diff object): `zoneName: row.zoneName,` → `zoneName: resolveZoneName(row.zoneName, existingZone.name, zoneNum),`
+
+**Commit-write loop (~lines 11096-11129):**
+- Insert branch, line 11109: `name: row.zoneName,` → `name: resolveZoneName(row.zoneName, undefined, zoneNum),`
+- Update branch, line 11120: `name: row.zoneName,` → `name: resolveZoneName(row.zoneName, existingZone.name, zoneNum),`
+
+This guarantees: brand-new zones always get a real, non-null name (`Zone N` if the CSV didn't supply one); existing zones never get their name blanked out by a CSV that omits it; and the preview the manager approves matches the row that actually gets written, because both call the same resolver.
+
+## Tests
+
+- CSV with every Zone Name blank, importing into a **new** controller → all zones created, named `Zone 1`, `Zone 2`, … matching their zone numbers; no row errors. (This is the Villas at the Boulders case — 229 zones, all currently-blank names.)
+- CSV with a blank Zone Name for a zone that **already exists** with a real name (e.g. "Front Lawn") → re-import updates run time/type/program as needed but the name stays "Front Lawn"; the diff does not show a spurious `zoneName` change.
+- CSV that supplies a Zone Name for an existing zone with a different name → diff shows the `zoneName` change and commit updates it (unchanged existing behavior — verify the fix didn't regress this path).
+- Mixed file: some rows have Zone Name, some don't, within the same controller → each resolves independently per the rules above.
+- Column-header check still rejects a CSV missing the `Zone Name` column entirely (unchanged — this fix only relaxes per-row values, not required headers).
+- Re-importing the same all-blank-name CSV twice is idempotent (no-op on the second run, per the existing import contract) — confirms the fallback name doesn't itself look like a "change" on repeat import.
+
+## Acceptance checklist
+
+- [ ] Blank Zone Name no longer produces a row error, client or server side.
+- [ ] New zones with blank Zone Name are created as `Zone {zoneNumber}`.
+- [ ] Existing zones with blank Zone Name in the CSV keep their current saved name (never overwritten with blank or with `Zone N`).
+- [ ] Preview diff and commit write produce the same resolved name (single shared resolver, not duplicated logic).
+- [ ] Zone Name remains a required **column header** in the template/upload (only the per-row value is now optional).
+- [ ] No DB migration required — `irrigation_profile_zones.name` stays `NOT NULL`.
+- [ ] Existing behavior for a CSV that *does* supply Zone Name is unchanged (verified by test above).
+
+## Out of scope
+
+- Making `Location`, `Brand`, or `Model` more lenient — already optional end-to-end, not touched here.
+- Relaxing `Zone Type`, `Controller`, or `Zone #` requirements — these remain required; they're structurally necessary (grouping key, schedule-relevant type, unique identity) and weren't the reported failure.
+- Schema changes to `irrigation_profile_zones.name` (stays NOT NULL; resolved before write instead).
+- Bulk-renaming already-imported zones currently sitting at a literal `"Zone N"` name from a *prior* buggy import attempt — if any exist from failed partial imports, that's a separate cleanup, not part of this fix (this bug returned 422 with zero writes per the preview-gate, so no bad data should exist yet — worth a quick DB check before considering this done).

@@ -1,0 +1,172 @@
+Slice 9 — Estimate Wizard Polish
+Save as docs/slice-09-estimate-wizard-polish.md, or paste straight into Replit.
+
+Slice 9 — Estimate Wizard Polish & UX Tightening
+Date: 2026-05-06
+Status: Ready for Replit implementation
+Author: Engineering review
+Type: Polish / bug fix (no schema, API, or storage changes)
+Estimated effort: 4–6 hours
+Related: Builds on Slice 8 (Estimate Creation Wizard Redesign). Touches the same five files (estimate-wizard.tsx + the four under wizard/). Server-side processEstimatePayload and the storage layer are not modified. The fixes here resolve real UX failures from Slice 8 and tighten the visual language now that the map pin / controller-zone additions have stretched the customer step.
+
+Executive Summary
+The estimate wizard ships, but field testing and review have surfaced a cluster of small but compounding issues: pressing Enter inside a quantity field bounces the manager to the Review step; project addresses are locked read-only on every edit; native drag-and-drop thrashes the line-items list as the cursor crosses row midpoints; the customer step has grown to 485 lines with five sub-sections crammed into one card; the part picker keyboard navigation doesn't scroll the focused row into view; mobile tooltips never appear because there's no hover; and a manager-approved estimate silently reverts to pending_approval on every edit because the wizard never passes internalStatus through.
+Slice 9 ships when: every issue in §"Issues Found" is closed, the customer step reads as a clean two-step layout (Customer → Project) instead of one big card with hidden sub-sections, the line items step's drag-reorder is calm, the part picker keyboard flow scrolls the active row into view, and the wizard's edit mode preserves project address editability, customer email/phone overrides, and internalStatus correctly.
+
+Issues Found
+Real bugs (high priority)
+
+Enter on a text/number input bounces to the next step. estimate-wizard.tsx handleKeyDown excludes TEXTAREA, BUTTON, and A, but not INPUT. Editing a quantity, labor-hours, description, or any text field and pressing Enter advances the wizard. (Lines 356–375.)
+Edit-mode project address is locked read-only. estimate-wizard.tsx line 215 hardcodes useDifferentAddress: false in the hydration block. Combined with addressReadOnly = !!value.customer && !value.useDifferentAddress in the customer step, the address can't be edited until the user clicks "Use a different address" — even though the existing estimate's address may already differ from the customer's record.
+Native drag-and-drop reorders on onDragOver, not on drop. estimate-wizard-line-items-step.tsx lines 144–154. The cursor crossing back and forth between two adjacent rows thrashes the list during the drag. Reorder should fire on onDrop (or guarded by midpoint check on onDragOver).
+Edits silently flip estimates back to pending_approval. The wizard never passes internalStatus in the payload, so server-side processEstimatePayload defaults it to "pending_approval". Editing a manager-approved estimate sends it back through the queue. Confirm with whoever owns the approval workflow whether this is intentional; if not, pass existing.internalStatus through on edit.
+Controllers query has a misleading "empty" state. estimate-wizard-customer-step.tsx line 415: when controllers.length === 0 the Select is disabled with placeholder "No controllers on file". During the initial fetch this string flashes even when the customer DOES have controllers — should distinguish loading vs truly-empty using useQuery's isLoading.
+Tooltip on disabled Continue button is invisible on touch. estimate-wizard-line-items-step.tsx lines 514–531. Mobile users see a greyed-out "Continue to Review" with no explanation. Replace with inline helper text (matching the Step 1 pattern that already does this for "Project Name *").
+
+Layout / hierarchy issues (high priority)
+
+The customer step is one card with five sub-sections. Project name → address toggle → LocationFields (address, location notes, access instructions) → border-t map picker → border-t controller/zone. On mobile that's a long uninterrupted scroll with weak section boundaries (just hairlines). Should split into discrete cards: Customer (existing), Project Details (name + address + notes + access), Work Location (map + pin), Controller & Zone (selectors). One concern per card. The same icon-in-rounded-tile header pattern already used.
+Customer email/phone editable inputs read as customer-record edits. Without an explanatory caption, a manager will assume they're updating the customer's contact info. Add a helper line under the email/phone pair: "Used for this estimate only — won't update the customer record."
+Pinned-location card uses green (success state) but it's an informational confirmation, not a success. Same green is already used for running total and submit CTA — over-greens the wizard. Switch the pinned-location confirmation to blue (info) with the same border-l-4 border-l-blue-500 pattern used elsewhere for highlighted-info surfaces.
+Mobile cards in line items use a 2×2 grid for Qty / Unit / Labor / Line Total. Cramped on 360px screens. Stack fully vertically on <400px or use a 1-column layout with right-aligned values for unit price + line total. The spec called for "stacked cards"; current is gridded.
+
+Polish (medium priority)
+
+Part picker doesn't scroll the active row into view on ArrowUp/ArrowDown. With 200 visible rows, the keyboard cursor disappears below the fold within a few presses. Track an array of refs (or compute via getElementById from the row's data-testid) and call scrollIntoView({ block: "nearest", behavior: "auto" }) on activeIdx change.
+Part picker shows no result count. A small caption under the search field ("Showing 47 of 234 parts" / "Showing 200 of 1,247 — refine your search to see more") helps users understand whether their search is too broad or too narrow.
+Number inputs show native browser spinners alongside the explicit +/– buttons. Redundant, looks busy on desktop Chrome. Hide native spinners with [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none (Tailwind v3+ syntax) on the Qty / Labor Hrs inputs.
+Mobile sticky-footer button verbs are inconsistent ("Continue" → "Review" → "Save"/"Submit") while the desktop footer uses ("Continue" → "Continue to Review" → "Submit for Approval"). Align mobile to the desktop verbs (truncated): "Continue" → "Continue" → "Submit" is fine, but use the same verb across both layouts so the user learns one mental model.
+The map button label "Hide Map" / "Select Location on Map" is verbose and asymmetric. Use "Open map" / "Close map" or pair with an icon: <MapPin /> Pin location / <X /> Close.
+Variable names in callers still say showEstimateModal / setShowEstimateModal / estimateModalOpen. Affected: pages/estimates.tsx, pages/dashboard.tsx, pages/manager-dashboard.tsx, pages/operations.tsx, components/manager/estimates-manager.tsx, components/customers/customer-profile.tsx. Functionally identical but a renaming pass to showEstimateWizard improves readability.
+Edit-mode wizard header doesn't indicate loading. While existingLoading && !hydratedRef.current, the header still reads "Step 2 of 3 · Line Items" with the wizard title Edit Estimate #N. Add a subtle "Loading…" inline next to the title, or replace the step caption with "Loading estimate…" until hydration completes.
+Discard-confirm dialog wording is generic. "You have unsaved changes. Closing the wizard will discard them." Tighten to action-oriented copy: "Discard this estimate? Your line items, customer details, and uploads won't be saved." Same dialog used in both new and edit; copy can branch on isEdit.
+
+Optional / nice-to-haves
+
+No step-transition animation. A 150ms slide-fade between steps would add polish (CSS animate-in slide-in-from-right-4 fade-in on the active step container, keyed on step). Cheap.
+No localStorage draft persistence. Refreshing the page mid-edit drops everything. Persist customerStep + items + photos.urls + attachments.urls to localStorage keyed by estimateId ?? "new", restore on open. Out of scope unless requested.
+Reverse-geocode the dropped pin. When a user clicks a spot on the map and no address comes back, the confirmation shows raw lat/lng. Reverse-geocoding (via the existing geocoding utility) would let the confirmation read as a real address. Out of scope.
+
+
+Scope
+In Scope (this slice)
+Items 1–18 above. All changes are local to:
+
+client/src/components/estimates/estimate-wizard.tsx
+client/src/components/estimates/wizard/estimate-wizard-customer-step.tsx
+client/src/components/estimates/wizard/estimate-wizard-line-items-step.tsx
+client/src/components/estimates/wizard/estimate-wizard-part-picker.tsx
+client/src/components/estimates/wizard/estimate-wizard-review-step.tsx
+The renaming pass in §16 touches the six caller files.
+
+Out of Scope
+
+Items 19–21 (animations, draft persistence, reverse-geocode).
+Any change to processEstimatePayload, server endpoints, or schema.
+Replacing or unifying parts-search-modal.tsx (still used by billing flows; future slice).
+Any change to the parts catalog data model.
+
+
+Implementation Notes
+estimate-wizard.tsx
+Issue 1 — Enter handling. In handleKeyDown, add if (tag === "INPUT") return; after the existing TEXTAREA guard. Step navigation should only fire from a fully-blurred body click context, never from inside form fields. Continue/Submit are still triggered by clicking their buttons or by tab-then-space/enter on the focused button.
+Issue 2 — Edit-mode address. In the hydration useEffect (line 204), set useDifferentAddress: !!existing.projectAddress. If the estimate has a project address recorded, default to "different address mode" so the field is editable. Manager can flip back to customer-address with the toggle if they want.
+Issue 4 — internalStatus round-trip. Add workLocation etc. follow this pattern; do the same for internalStatus. In EstimateApiPayloadEstimate, add internalStatus: string | null. In handleSubmit, set internalStatus: existing?.internalStatus ?? null (server defaults to "pending_approval" when null, preserving the current new-estimate behavior). Confirm the desired edit-mode behavior with the team — if "edits should re-trigger approval" is the intent, leave it alone and add a banner on Step 3 in edit mode warning the user.
+Issue 17 — Loading header copy. While existingLoading && !hydratedRef.current, render the header step caption as "Loading estimate…" (or render the existing caption with a small <Loader2 />).
+Issue 18 — Discard dialog copy. Branch on isEdit:
+
+new: "Discard this estimate? Your line items, customer details, and uploads won't be saved."
+edit: "Discard your changes? The estimate will revert to its last saved state."
+
+estimate-wizard-customer-step.tsx
+Issue 7 — Split into discrete cards. Restructure the step's render tree so each conceptual chunk is its own <Card> with its own icon header:
+
+Customer (icon: User, blue-l-4 when locked) — selector or display + email/phone inputs.
+Project Details (icon: Briefcase) — Project Name, address-toggle, LocationFields.
+Work Location (icon: MapPin) — toggle + LocationPicker + pinned confirmation.
+Controller & Zone (icon: Cpu, with "(optional)" suffix) — two selects.
+
+Drop the border-t separators inside Project — each section is now its own Card.
+Issue 5 — Controller loading state. Use const { data: controllers = [], isLoading: controllersLoading } = useQuery(...). In the SelectValue placeholder: controllersLoading ? "Loading controllers…" : controllers.length === 0 ? "No controllers on file" : "Select controller".
+Issue 8 — Email/phone "for this estimate only" caption. Below the email/phone grid (~line 274), add <p className="text-xs text-gray-500">Used for this estimate only — won't update the customer record.</p>.
+Issue 9 — Pinned location color. Change the pinned-location confirmation bg-green-50 border border-green-200 to bg-blue-50 border-l-4 border-l-blue-500 (matches the customer card's accent). Update the heading text from text-green-900 / button from text-green-700 to text-blue-900 / text-blue-700. The "Clear" button stays as a variant="ghost" blue.
+Issue 15 — Map button label. Change {showLocationPicker ? "Hide Map" : "Select Location on Map"} to icon + "Open map" / icon + "Close map". Use <MapPin /> and <X /> from lucide.
+estimate-wizard-line-items-step.tsx
+Issue 3 — Drag-reorder thrashing. Track the dragged row in dragRowId (already done). Replace the onDragOver reorder logic with a midpoint check, OR move the splice into a new onDrop handler. Recommended:
+tsconst onDrop = (rowId: string) => (e: React.DragEvent) => {
+  e.preventDefault();
+  if (!dragRowId || dragRowId === rowId) return;
+  const fromIdx = items.findIndex((i) => i.rowId === dragRowId);
+  const toIdx = items.findIndex((i) => i.rowId === rowId);
+  if (fromIdx < 0 || toIdx < 0) return;
+  const next = [...items];
+  const [moved] = next.splice(fromIdx, 1);
+  next.splice(toIdx, 0, moved);
+  onItemsChange(next);
+};
+const onDragOver = () => (e: React.DragEvent) => { e.preventDefault(); };
+Wire onDrop on each <tr> and keep onDragEnd resetting dragRowId.
+Issue 6 — Tooltip → inline helper. Replace the <TooltipProvider> block (~lines 514–531) with the disabled Continue button plus an inline caption above or below the desktop footer when empty: <p className="text-xs text-gray-500">Add at least one part to continue.</p>. Mobile already has the title-attribute on the disabled Review button (line 406) — replace with the same inline caption above the sticky footer when items.length === 0.
+Issue 10 — Stack mobile cards fully on small viewports. Change the <400px breakpoint by replacing the grid grid-cols-2 gap-2 (line 430) with space-y-2 and let each row flex its label + value horizontally. Optionally, keep the 2×2 at 400–767px and stack at <400px.
+Issue 13 — Hide native number-input spinners. Add [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none to the qty Input (lines 317, 442) and labor Input (lines 339, 469). Or extract a small <NumberInputClean> wrapper.
+Issue 14 — Sticky-footer verb alignment. Change the mobile sticky footer button labels in estimate-wizard.tsx to match desktop: "Continue" → "Continue" (already), "Review" → "Continue", "Save"/"Submit" → "Submit". Or reverse — pick one verb set and use it in both places.
+estimate-wizard-part-picker.tsx
+Issue 11 — Scroll active row into view. Hold a ref array rowRefs = useRef<(HTMLButtonElement | null)[]>([]). On activeIdx change (useEffect), call rowRefs.current[activeIdx]?.scrollIntoView({ block: "nearest" }). Reset the array length to visible.length each render so old refs don't linger.
+Issue 12 — Result count caption. In the picker's filter section (under the search bar / chips), add <p className="text-xs text-gray-500 px-1">{filtered.length === 0 ? "No matches" : Showing visible.length{visible.length}
+visible.length{overflow ?  of ${filtered.length} : ""} parts}</p>.
+estimate-wizard-review-step.tsx
+No changes required for §1–18 except a styling sync if §9 is applied — review-step already uses blue-l-4 on the Customer card, so it stays.
+Caller renaming pass (§16)
+Find/replace per-file:
+OldNewshowEstimateModalshowEstimateWizardsetShowEstimateModalsetShowEstimateWizardestimateModalOpenestimateWizardOpensetEstimateModalOpensetEstimateWizardOpen
+Files: pages/estimates.tsx, pages/dashboard.tsx, pages/manager-dashboard.tsx, pages/operations.tsx, components/manager/estimates-manager.tsx, components/customers/customer-profile.tsx.
+
+Acceptance Criteria
+
+Pressing Enter inside any text or number input on any step does NOT advance the wizard.
+Opening an existing estimate to edit shows the project address as fully editable, with the toggle reading "Use customer address" by default. Toggling to customer-address mode locks it to the customer's stored address.
+Editing a manager-approved estimate does not silently flip its internalStatus back to pending_approval (or, if intentional, surfaces a clear banner on Step 3 explaining that submitting will re-route through approval).
+Drag-reordering line items on desktop only commits on drop; hovering between rows does not thrash the list.
+The customer step renders as four discrete cards: Customer, Project Details, Work Location, Controller & Zone — each with its own icon header.
+The customer-email and customer-phone inputs are accompanied by helper copy clarifying they're estimate-scoped overrides.
+The pinned-location confirmation card uses the wizard's blue accent, not green.
+Mobile cards in line items stack their fields cleanly at narrow viewports (≤400px).
+The part picker scrolls the active keyboard row into view on Up/Down and shows a result count (or "No matches") under the chips.
+The "Continue to Review" / "Review" CTA on Step 2 has inline helper text when disabled — no tooltip required.
+The discard-changes dialog reads correctly in both new and edit modes.
+Native browser number-spinners are not visible on Qty / Labor Hrs inputs in any browser.
+Caller files use showEstimateWizard / setShowEstimateWizard consistently; no EstimateModal-named state remains.
+Online and offline behavior of the existing flows are unchanged. processEstimatePayload is not modified. Server endpoints unchanged.
+
+
+Test Plan
+Manual
+
+Enter handling. Open new estimate → pick customer → focus Project Name → type "Test" → press Enter. Verify wizard does NOT advance. Click Continue. Add a part. Focus Qty input → press Enter. Verify NO advance.
+Edit address. Open an existing estimate with a project address → verify the address field is editable on open. Verify the toggle reads "Use customer address". Click toggle → field locks to customer's address. Click toggle again → field becomes editable, restoring the prior project address.
+Drag stability. Add 4 parts. Drag the second row's grip and slowly hover over rows 3, 2, 3, 2, 3. Release on row 4. Verify the row only moves on release, ending up at position 4.
+Approval flow. (Coordinate with whoever owns the approval queue.) Approve an estimate → edit → submit. Confirm internalStatus matches expected behavior.
+Customer step layout. Visual review on desktop and mobile: four discrete cards, each with its own icon header. Section borders are card edges, not hairlines.
+Email/phone caption. Pick a customer → see helper text under email/phone. Change the email value → submit → verify the customer's record is unchanged in /customers.
+Part picker keyboard. Open picker. Press ArrowDown 30 times. Verify the active row stays scrolled into view. Verify result count caption updates as you type.
+Mobile cards. On a 360px viewport, verify line-item card fields are not cramped.
+Discard dialog. New estimate, type project name, hit Esc → see "Discard this estimate?" copy. Edit existing, change qty, hit Esc → see "Discard your changes?" copy.
+
+Automated
+No existing tests cover wizard UX interactions. Optional additions:
+
+RTL test mounting <EstimateWizard open estimateId={42} /> with a hydrated existing estimate, verifying that pressing Enter on a Qty input does not call setStep(3).
+RTL test for the customer-step layout asserting four <Card>s in the rendered tree.
+Picker test asserting scrollIntoView is called on the active row's ref when activeIdx changes.
+
+
+Risk Assessment
+Low. All changes are local to five wizard files plus a mechanical rename across six caller files. Server payload shape is unchanged except for the addition of internalStatus (which processEstimatePayload already handles). No schema, no migrations. Online and offline flows untouched.
+The one substantive question is §4 (edit-mode internalStatus round-trip). Confirm intent before shipping; the rest is mechanical.
+
+Out-of-Scope Followups
+
+Step transition animation (item 19) — small, low-risk, but separate.
+Draft persistence in localStorage (item 20) — useful for long estimates; needs its own design.
+Reverse-geocode the map pin (item 21) — touches the geocoding utility; deserves its own slice.
+Unify parts-search-modal.tsx and the wizard picker — there are now two part pickers; the billing flows still use the older one. Worth folding into a shared <PartPicker> component eventually.

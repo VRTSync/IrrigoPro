@@ -1,0 +1,39 @@
+# Company Logo — Fix Profile "Save" Clobbering the Just-Uploaded Logo
+
+**What & Why**
+As a company admin, uploading a logo appears to work (file uploads, logo briefly shows, "Logo uploaded" toast), but hitting the profile **Save** button makes the logo disappear with a "Success" message. The logo upload itself is **not** the bug — a second, independent save path overwrites it.
+
+**Root cause (in `artifacts/irrigopro/src/pages/company-profile.tsx`):** two save paths that fight.
+1. `ObjectUploader`'s `onComplete` (line ~394) calls `PUT /api/company/:id/logo` with the uploaded URL and refetches — this correctly persists the logo. ✅
+2. But `onComplete` **never syncs the form** — it does not call `form.setValue('logo', …)`. The form still holds its initial `logo: ""` (default at line ~90, reset from `company.logo` only on load).
+3. When the admin clicks the profile **Save** button, `updateCompanyMutation` sends the **entire form** — including the stale `logo: ""` — to `PUT /api/company/:companyId/profile` (line ~112). The server runs `updateCompanyProfile(companyId, updates)` with `logo: ""`, which **overwrites** the freshly-uploaded logo back to empty. Success toast fires; logo is gone.
+
+This is why the upload-path investigation looks correct in isolation — the clobber happens on the *next* save, from a different request.
+
+Single small slice. No schema change.
+
+---
+
+## Done looks like
+- Uploading a logo and then saving the company profile **keeps** the logo.
+- The profile Save can never blank or change the logo (logo is managed only by its dedicated endpoints).
+- The displayed logo and the form stay in sync after an upload.
+
+## Steps
+1. **Decouple logo from the profile Save (primary fix).** In `company-profile.tsx`, exclude `logo` from the payload sent by `updateCompanyMutation` to `PUT /api/company/:companyId/profile`. The logo is owned by the dedicated `/logo` (upload) and `/logo-reset` endpoints; the profile form handles name/email/phone/address/etc. only. Simplest: strip `logo` before mutate (`const { logo, ...rest } = data; mutate(rest)`), or remove `logo` from `companyProfileSchema` submission.
+2. **Keep the form in sync (belt-and-suspenders).** In the `ObjectUploader` `onComplete` handler, after the successful `PUT /logo`, call `form.setValue('logo', <normalized path/url returned>)` so the form never carries a stale logo value.
+3. **Server guard (defensive).** In `PUT /api/company/:companyId/profile` (routes.ts ~4624), treat a missing/blank `logo` as **no change** — only update `logo` when a non-empty value is provided (e.g. `if (updates.logo === '' || updates.logo == null) delete updates.logo;` before `updateCompanyProfile`). This prevents any other caller from accidentally blanking the logo via a profile update.
+4. Confirm `/logo-reset` is still the **only** intentional way to clear a logo (it sets `logo: null` directly — keep it).
+
+## Tests
+- Upload a logo, then click profile Save → `GET /api/company/:id/profile` still returns the logo; the banner/nav still render it.
+- `PUT /api/company/:id/profile` with no `logo` field (or `logo: ""`) does **not** change the stored logo.
+- `PUT /api/company/:id/logo` still sets it; `PUT /api/company/:id/logo-reset` still clears it.
+
+## Out of scope
+- The object-storage upload mechanism / presigned URL flow (works).
+- The logo display/normalization (`logoApiUrl`, `/api/company-logo/:id`) — unchanged.
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/company-profile.tsx` (the two save paths)
+- `artifacts/api-server/src/routes/routes.ts` (`PUT /api/company/:companyId/profile` ~4624; `PUT /api/company/:companyId/logo` ~4715; `/logo-reset`)

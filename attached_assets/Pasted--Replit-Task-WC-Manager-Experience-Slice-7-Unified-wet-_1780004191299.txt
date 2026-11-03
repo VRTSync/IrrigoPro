@@ -1,0 +1,438 @@
+# Replit Task — WC Manager Experience, Slice 7 (Unified wet-check list page: one tool, role-gated views)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from `WC Manager Experience - Slice 0 Unification Audit and Plan.md`
+— it is reference material so you understand the intent. The actual work for
+this task is in the **Slice 7** section at the bottom. Do not deviate from any
+file paths, function names, schema field names, or payload shapes specified.
+If you believe a deviation is necessary, surface it and stop rather than
+proceeding.
+
+> **This is the centerpiece of the cross-role unification.** Today
+> `manager-wet-checks.tsx` (171 LOC), `admin-wet-checks.tsx` (588 LOC),
+> and `wet-checks.tsx` (18 LOC, a barrel re-export) are three separate
+> files built in isolation. The user's direction is "one tool, different
+> views based on role." After this slice, there is one component, three
+> role-gated lenses, and the legacy files are gone.
+
+> **Pattern: shared elements must not vary by role.** Columns, badges,
+> row layout, filter bar shape, empty state copy — all identical
+> regardless of role. Only the COLUMNS rendered and the ACTIONS available
+> are role-gated. If a stylistic difference creeps in, the unification
+> fails.
+
+> **Largest LOC change in the family.** Plan for a careful migration with
+> the legacy pages deleted at the end, not in the middle.
+
+---
+
+## Design Context (locked decisions)
+
+Inherited from WC Manager Experience Slice 0 (Findings D1, D2; Slice 7).
+
+**The canonical path is `/wet-checks`.** Today this resolves to a
+"customer picker" page for the irrigation manager (per `App.tsx:335`).
+That picker becomes the empty state of the new unified list when no
+wet checks exist for the user — the picker doesn't go away, it gets
+absorbed.
+
+**The three legacy pages:**
+- `artifacts/irrigopro/src/pages/manager-wet-checks.tsx` (171 LOC) —
+  manager dashboard slice with KpiTile / WetCheckCard.
+- `artifacts/irrigopro/src/pages/admin-wet-checks.tsx` (588 LOC) —
+  admin list with company-scoped filters, bulk operations.
+- `artifacts/irrigopro/src/pages/wet-checks.tsx` (18 LOC) — barrel
+  re-export pointing to `./wet-checks/WetChecksPage`.
+
+The barrel re-export at `wet-checks.tsx` stays as a compatibility
+shim — many other modules import from `@/pages/wet-checks` and that
+import path continues to work. The DEFAULT export changes to the new
+unified page.
+
+**Slice 6's `DismissibleHelp` primitive** is consumed here. If Slice 6
+hasn't landed, surface the question and stop.
+
+---
+
+## Slice 7 — Unified wet-check list page
+
+### Scope
+
+Six coherent migration steps:
+1. Audit the three legacy pages and capture deltas.
+2. Build a single `WetCheckListPage` component with role-prop gates.
+3. Extract shared row component, status badge (already done in Slice
+   1), filter bar.
+4. Consume `DismissibleHelp` from Slice 6 for first-timer guides.
+5. Update App.tsx routes to point all three legacy paths at the new
+   component.
+6. Delete the legacy pages and their nav references.
+
+### Files modified
+
+- New: `artifacts/irrigopro/src/pages/wet-checks/WetChecksListPage.tsx`
+  — the new unified component.
+- New: `artifacts/irrigopro/src/components/wet-checks/wet-check-row.tsx`
+  — shared row component used by the list page (and any future
+  consumers).
+- New:
+  `artifacts/irrigopro/src/components/wet-checks/wet-check-filter-bar.tsx`
+  — shared filter bar.
+- `artifacts/irrigopro/src/pages/wet-checks.tsx` (barrel) — update the
+  `default` export to re-export the new page.
+- `artifacts/irrigopro/src/App.tsx` — three changes:
+  - Replace `Route path="/manager/wet-checks" component={ManagerWetChecksPage}` with the
+    unified `WetChecksListPage` (or 301-redirect via a shim component).
+  - Replace `Route path="/wet-checks/admin" component={AdminWetChecksPage}` similarly.
+  - Replace `Route path="/wet-checks" component={WetCustomerPickerPage}`
+    with the unified `WetChecksListPage`. (The picker becomes the
+    empty state of the new page.)
+- DELETE: `artifacts/irrigopro/src/pages/manager-wet-checks.tsx`,
+  `artifacts/irrigopro/src/pages/admin-wet-checks.tsx`. Verify no
+  other file imports them via grep before deletion.
+- `artifacts/irrigopro/src/components/layout/nav-config.ts` — remove
+  any nav leaves that pointed at the legacy paths. (The
+  `wetCheckGroup` already points at `/wet-checks` which is the new
+  canonical path, so likely no change needed.)
+- New: `artifacts/irrigopro/src/pages/wet-checks/wet-checks-list-page.test.tsx`
+  — comprehensive role-impersonation parity tests.
+
+### Concrete changes
+
+#### Step 1 — Audit (PR description artifact, no production code)
+
+Read all three legacy pages. Capture the deltas in a table in the PR
+description:
+
+```
+| Element / Feature       | manager-wet-checks | admin-wet-checks | wet-checks (picker) | Resolution in unified |
+|-------------------------|--------------------|------------------|---------------------|------------------------|
+| Data fetch              | /api/wet-checks?status=submitted | /api/wet-checks (all) | /api/customers | Use /api/wet-checks with role-aware default filter |
+| Columns                 | WC#, customer, age, $ | WC#, customer, company, tech, status, findings | (n/a — customer cards) | Unified set with role-gated company column |
+| Filters                 | (none)             | company, status, tech | (none) | Single filter bar: status / customer / tech (admin gets company) |
+| Bulk select             | no                 | yes (delete)     | no                  | Role-gated: company_admin + super_admin only |
+| Empty state             | "No reviews"       | "No wet checks"  | customer picker     | One unified empty state with customer-picker affordance |
+| Row click target        | /manager/wet-checks/:id | /wet-checks/:id | /wet-checks/c/:customerId/new | All → /wet-checks/:id (canonical) |
+| KPI tiles               | yes (HeaderStrip)  | no               | no                  | Optional — keep only if user explicitly requests (likely defer) |
+```
+
+The Resolution column drives the rest of the slice.
+
+#### Step 2 — `WetChecksListPage` component
+
+```typescript
+// artifacts/irrigopro/src/pages/wet-checks/WetChecksListPage.tsx
+
+interface WetChecksListPageProps {
+  // No props — role and userId come from getCurrentUser().
+}
+
+export default function WetChecksListPage(): JSX.Element {
+  const user = getCurrentUser();
+  const role = user?.role ?? "field_tech";
+
+  // Role-aware defaults
+  const defaultStatusFilter = useMemo(() => {
+    if (role === "irrigation_manager") return "submitted,pending_manager_review";
+    if (role === "billing_manager") return "approved_passed_to_billing,billed";
+    return ""; // company_admin / super_admin see all
+  }, [role]);
+
+  const [statusFilter, setStatusFilter] = useState(defaultStatusFilter);
+  const [customerFilter, setCustomerFilter] = useState<number | null>(null);
+  const [techFilter, setTechFilter] = useState<number | null>(null);
+  const [companyFilter, setCompanyFilter] = useState<number | null>(null); // super_admin only
+
+  const wetChecks = useArrayQuery<WetCheck>({
+    queryKey: ["/api/wet-checks", { status: statusFilter, customerId: customerFilter, technicianId: techFilter, companyId: companyFilter }],
+    // ...
+  });
+
+  if (wetChecks.length === 0 && !statusFilter && !customerFilter && !techFilter) {
+    // No wet checks at all — show the customer picker affordance.
+    return <WetChecksEmptyStateWithPicker />;
+  }
+
+  return (
+    <PageContainer>
+      <PageHeader
+        title="Wet checks"
+        subtitle={subtitleForRole(role, wetChecks.length)}
+        actions={role !== "billing_manager" ? <NewWetCheckButton /> : undefined}
+      />
+      <PageContent>
+        <DismissibleHelp guideId="wc-list-first-time" variant="info">
+          Click any row to open the review page. Use the filter chips to
+          narrow by status, customer, or technician.
+        </DismissibleHelp>
+
+        <WetCheckFilterBar
+          status={statusFilter}
+          onStatusChange={setStatusFilter}
+          customer={customerFilter}
+          onCustomerChange={setCustomerFilter}
+          tech={techFilter}
+          onTechChange={setTechFilter}
+          company={role === "super_admin" ? companyFilter : null}
+          onCompanyChange={role === "super_admin" ? setCompanyFilter : undefined}
+        />
+
+        <table className="w-full">
+          <thead>
+            <tr>
+              <th>WC #</th>
+              <th>Customer</th>
+              <th>Tech</th>
+              <th>Date</th>
+              <th>Status</th>
+              <th>Findings</th>
+              {role === "super_admin" ? <th>Company</th> : null}
+              <th aria-label="Actions" />
+            </tr>
+          </thead>
+          <tbody>
+            {wetChecks.map((wc) => (
+              <WetCheckRow
+                key={wc.id}
+                wc={wc}
+                role={role}
+              />
+            ))}
+          </tbody>
+        </table>
+
+        {(role === "company_admin" || role === "super_admin") ? (
+          <BulkActionBar wetChecks={wetChecks} />
+        ) : null}
+      </PageContent>
+    </PageContainer>
+  );
+}
+```
+
+#### Step 3 — Shared `WetCheckRow` component
+
+```typescript
+// artifacts/irrigopro/src/components/wet-checks/wet-check-row.tsx
+export interface WetCheckRowProps {
+  wc: WetCheck;
+  role: UserRole;
+}
+
+export function WetCheckRow({ wc, role }: WetCheckRowProps) {
+  const navigate = useNavigate();
+  const onClick = () => navigate(`/wet-checks/${wc.id}`);
+  const actions = useRoleGatedActions(wc, role);
+
+  return (
+    <tr
+      onClick={onClick}
+      className="cursor-pointer hover:bg-gray-50"
+      data-testid={`wc-row-${wc.id}`}
+    >
+      <td><span className="font-mono text-xs">WC-{wc.id}</span></td>
+      <td className="truncate">{wc.customerName}</td>
+      <td className="text-gray-600">{wc.technicianName ?? "—"}</td>
+      <td className="text-gray-600">{formatDate(wc.workDate)}</td>
+      <td><WetCheckStatusBadge status={wc.status} /></td>
+      <td className="text-gray-600">{wc.findingCounts?.total ?? 0}</td>
+      {role === "super_admin" ? <td>{wc.companyName ?? "—"}</td> : null}
+      <td onClick={(e) => e.stopPropagation()}>
+        <ListRowOverflowMenu actions={actions} testIdSuffix={wc.id} />
+      </td>
+    </tr>
+  );
+}
+```
+
+`useRoleGatedActions` is a small helper that returns the action list
+appropriate for the role:
+
+```typescript
+function useRoleGatedActions(wc: WetCheck, role: UserRole): ListRowAction[] {
+  const navigate = useNavigate();
+  return [
+    { label: "Open review", icon: <Eye className="w-4 h-4" />, onSelect: () => navigate(`/wet-checks/${wc.id}`) },
+    { label: "View PDF", icon: <FileText className="w-4 h-4" />, onSelect: () => window.open(`/api/wet-checks/${wc.id}/pdf`), hidden: !wc.pdfReady },
+    { label: "Reassign technician", icon: <UserPlus className="w-4 h-4" />, onSelect: () => openReassignDialog(wc), hidden: !["company_admin", "super_admin"].includes(role) },
+    { label: "Delete", icon: <Trash className="w-4 h-4" />, destructive: true, onSelect: () => openDeleteDialog(wc), hidden: !["company_admin", "super_admin"].includes(role) },
+  ];
+}
+```
+
+#### Step 4 — Shared `WetCheckFilterBar`
+
+```typescript
+// artifacts/irrigopro/src/components/wet-checks/wet-check-filter-bar.tsx
+export function WetCheckFilterBar({
+  status, onStatusChange,
+  customer, onCustomerChange,
+  tech, onTechChange,
+  company, onCompanyChange,
+}: WetCheckFilterBarProps) {
+  return (
+    <div className="flex gap-2 mb-3 flex-wrap">
+      <FilterChipGroup>
+        <FilterChip active={!status} onClick={() => onStatusChange("")}>All</FilterChip>
+        <FilterChip active={status.includes("submitted")} onClick={() => onStatusChange("submitted")}>Submitted</FilterChip>
+        <FilterChip active={status.includes("pending_manager_review")} onClick={() => onStatusChange("pending_manager_review")}>Pending review</FilterChip>
+        <FilterChip active={status.includes("approved_passed_to_billing")} onClick={() => onStatusChange("approved_passed_to_billing")}>Approved</FilterChip>
+        <FilterChip active={status.includes("billed")} onClick={() => onStatusChange("billed")}>Billed</FilterChip>
+      </FilterChipGroup>
+      {customer != null || onCustomerChange ? <CustomerPicker value={customer} onChange={onCustomerChange} /> : null}
+      {tech != null || onTechChange ? <TechPicker value={tech} onChange={onTechChange} /> : null}
+      {onCompanyChange ? <CompanyPicker value={company} onChange={onCompanyChange} /> : null}
+    </div>
+  );
+}
+```
+
+#### Step 5 — Update App.tsx routes
+
+In each of the four role-scoped route blocks (irrigation_manager,
+billing_manager, super_admin, company_admin via company-admin-app.tsx):
+
+- Replace `Route path="/wet-checks"` to point at the new
+  `WetChecksListPage`.
+- Replace `/manager/wet-checks` and `/wet-checks/admin` with shim
+  components that 301-redirect to `/wet-checks`:
+
+```typescript
+function RedirectToWetChecks() {
+  const [, setLocation] = useLocation();
+  useEffect(() => { setLocation("/wet-checks"); }, []);
+  return null;
+}
+```
+
+Wire these redirects so any existing bookmark or external link
+arrives at the canonical path.
+
+#### Step 6 — Delete legacy pages
+
+Before deletion: grep the repo for imports of the legacy files.
+Expected imports come from App.tsx and possibly some test files.
+Update each consumer.
+
+After grep is clean:
+- Delete `artifacts/irrigopro/src/pages/manager-wet-checks.tsx`.
+- Delete `artifacts/irrigopro/src/pages/admin-wet-checks.tsx`.
+- Delete or update `manager-wet-checks.test.tsx` and
+  `admin-wet-checks-auth.test.tsx` (the auth tests likely still belong
+  but should be rewritten to target the new page).
+
+### Tests
+
+`wet-checks-list-page.test.tsx`:
+
+```typescript
+describe("WetChecksListPage — role parity (Slice 7)", () => {
+  it.each([
+    ["irrigation_manager", { showsCompanyCol: false, showsBulk: false, showsNewBtn: true }],
+    ["billing_manager", { showsCompanyCol: false, showsBulk: false, showsNewBtn: false }],
+    ["company_admin", { showsCompanyCol: false, showsBulk: true, showsNewBtn: true }],
+    ["super_admin", { showsCompanyCol: true, showsBulk: true, showsNewBtn: true }],
+  ])("renders correctly for %s", (role, expectations) => {
+    renderPage({ role, wetChecks: [makeWc({})] });
+    expect(!!screen.queryByTestId("col-company")).toBe(expectations.showsCompanyCol);
+    expect(!!screen.queryByTestId("bulk-action-bar")).toBe(expectations.showsBulk);
+    expect(!!screen.queryByText("New wet check")).toBe(expectations.showsNewBtn);
+  });
+
+  it("shared row chrome is byte-identical across roles (snapshot)", () => {
+    const wc = makeWc({ id: 1, status: "submitted" });
+    const im = render(<WetCheckRow wc={wc} role="irrigation_manager" />).container.innerHTML;
+    const bm = render(<WetCheckRow wc={wc} role="billing_manager" />).container.innerHTML;
+    // Strip the overflow-menu content (legit role-gated) then compare.
+    const stripMenu = (s: string) => s.replace(/<dropdown.*?<\/dropdown>/, "");
+    expect(stripMenu(im)).toBe(stripMenu(bm));
+  });
+
+  it("irrigation_manager default filter is submitted + pending_manager_review", () => {
+    const fetchSpy = vi.spyOn(global, "fetch");
+    renderPage({ role: "irrigation_manager" });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("status=submitted%2Cpending_manager_review"),
+      expect.any(Object)
+    );
+  });
+
+  it("billing_manager default filter is approved + billed", () => {
+    const fetchSpy = vi.spyOn(global, "fetch");
+    renderPage({ role: "billing_manager" });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("status=approved_passed_to_billing%2Cbilled"),
+      expect.any(Object)
+    );
+  });
+
+  it("renders the customer-picker empty state when no wet checks exist", async () => {
+    renderPage({ wetChecks: [] });
+    expect(await screen.findByText(/Pick a customer to start a new wet check/i)).toBeInTheDocument();
+  });
+
+  it("DismissibleHelp first-timer guide renders and dismisses", async () => {
+    localStorage.clear();
+    renderPage({ wetChecks: [makeWc({})] });
+    expect(screen.getByTestId("help-wc-list-first-time")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("help-dismiss-wc-list-first-time"));
+    expect(screen.queryByTestId("help-wc-list-first-time")).not.toBeInTheDocument();
+    // Re-renders don't bring it back.
+    renderPage({ wetChecks: [makeWc({})] });
+    expect(screen.queryByTestId("help-wc-list-first-time")).not.toBeInTheDocument();
+  });
+});
+```
+
+Plus a parity snapshot test:
+
+```typescript
+it("snapshot parity: irrigation_manager, billing_manager, company_admin all render the same row chrome for the same fixture", () => {
+  const wc = makeWc({ id: 1 });
+  ["irrigation_manager", "billing_manager", "company_admin"].forEach((role) => {
+    const html = render(<WetCheckRow wc={wc} role={role as any} />).container.innerHTML;
+    expect(html).toMatchSnapshot(`row-${role}`);
+  });
+});
+```
+
+Three snapshots; the only legit diffs are the overflow menu contents.
+
+### Acceptance criteria
+
+- One file (`WetChecksListPage.tsx`) is the entry point for all wet
+  check list surfaces.
+- Three legacy files (`manager-wet-checks.tsx`,
+  `admin-wet-checks.tsx`, and the old wet-checks customer picker) are
+  deleted or absorbed.
+- App.tsx routes are consolidated; legacy paths 301-redirect.
+- Shared row component, filter bar, and status badge are used by all
+  three role lenses.
+- Role-gated columns and actions work as specified.
+- DismissibleHelp from Slice 6 is consumed for first-timer guides.
+- Snapshot parity test passes (row chrome identical across roles).
+- Feels-fast bounds mirror Slice 6's: < 800ms first interactive paint
+  on a primed cache; no skeleton flash on second visits.
+- All new and updated tests pass.
+- `pnpm typecheck` and `pnpm test` pass.
+
+### Out of scope
+
+- KPI tile strip on the list page (was in
+  `manager-wet-checks.tsx`). Defer to `/manager-workspace` (Slice 8)
+  where KPIs naturally live.
+- Bulk-edit operations beyond delete (the existing admin page only
+  has delete). Add more if surfaced as a follow-up.
+- The wet check DETAIL page (Slice 6).
+- Mobile list page (Slice 10).
+
+### Dependencies
+
+- Slice 6 (`DismissibleHelp` primitive) — hard dependency.
+- WC Manager Experience Slice 1 (`WetCheckBillingStatusBadge`) — soft
+  dependency; if not landed, extract here.
+- Slice 3 (`ListRowOverflowMenu`) — soft dependency; if not landed,
+  extract here.
+- Slice 5 (`managerNav`) — soft dependency; the irrigation manager's
+  nav points at `/wet-checks` either way, but Slice 5 ensures they
+  see the link in their sidebar.

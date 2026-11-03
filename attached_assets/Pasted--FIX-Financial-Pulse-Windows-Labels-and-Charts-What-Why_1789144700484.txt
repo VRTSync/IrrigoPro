@@ -1,0 +1,110 @@
+# FIX — Financial Pulse: Windows, Labels and Charts
+
+**What & Why**
+A collection of defects where the number is computed over the wrong span, or is correct but described wrongly on screen. None is individually large; together they are why the page is hard to trust. Each is small and independently testable.
+
+## Slice 1 — Comparison windows that do not overlap
+
+`getPrevMonthWindow` (`financial-pulse-math.ts:150`) builds its end as `new Date(y, m-1, now.getDate(), ...)`. When the prior month is shorter than today's date, JavaScript rolls the overflow forward into the current month:
+
+```
+now = Mar 31  ->  prev window = [Feb 1 .. Mar  3)    all of February plus 3 days of March
+now = Mar 30  ->  prev window = [Feb 1 .. Mar  2)
+now = May 31  ->  prev window = [Apr 1 .. May  1)    all of April
+now = Jul 31  ->  prev window = [Jun 1 .. Jul  1)
+```
+
+On the 29th through 31st of any month following a shorter one, the "prior month" baseline is inflated by days that also belong to the current month. That baseline drives the `deltaPct` on **Billed MTD** and **Collected MTD** (`financial-pulse.ts:609`, `:662`) and `prevMonthSameDay` on `/projections`. It does not bite today — on the 11th there is no overflow — which is why it has survived.
+
+`getPrevYearYtdWindow` (`:176`) has the same shape and misfires on Feb 29: a 2028-02-29 run produces a prior-year end of 2027-03-01.
+
+- **Fix:** clamp the day to the target month's length before constructing the end date. Feb has 28 days, so "the 31st, last month" is the 28th.
+- Add a helper and use it in both places rather than repeating the clamp.
+
+## Slice 2 — The period toggle tells the truth
+
+The MTD/YTD toggle (`financial-pulse.tsx:499`) is threaded into `/kpis`, but server-side `period` selects only the gross-margin window (`financial-pulse.ts:689`). Every other tile is period-independent. Switching to YTD therefore changes exactly one number on a band of nine, and the tile that changes — **Profit Margin** — is the only periodic tile with **no window badge** (`financial-pulse.tsx:1947`). Nothing on screen indicates the basis moved.
+
+- Give the Profit Margin tile a `windowBadge` bound to the selector, so it reads MTD or YTD to match what it just computed.
+- Add a one-line caption under the toggle naming what it governs: the margin tile, the revenue mix, and the three drill-down tables. A control that appears to govern the whole page but moves one tile is worse than no control.
+
+## Slice 3 — Charts that agree with their own data
+
+**The year-over-year comparison is asymmetric.** `/revenue-trend` buckets both series with `bucketMonthlyRevenue` (`financial-pulse.ts:834`), then adds uninvoiced wet-check billings **to the current series only** (`:840–853`). `prevYearRevenue` never gets the same treatment, and the chart tooltip computes a YoY percentage from the two (`financial-pulse.tsx:2006`). The current year is augmented and the prior year is not, so YoY is overstated by however much uninvoiced wet-check work sits in recent months.
+
+- Either apply the uninvoiced leg to both series, or to neither. **Neither is the right answer for a revenue trend**: drop the augmentation, so both lines are invoiced revenue and the comparison is like-for-like. Uninvoiced work has its own tile.
+
+**The parts-vs-labor bars are empty for most of the window.** The stacked chart (`financial-pulse.tsx:2038`) renders `partsRevenue` and `laborRevenue` from `invoices.partsSubtotal` / `laborSubtotal`. On production those columns are null on older invoices — invoice generation notes the case explicitly (`routes.ts:6819`, "if laborSubtotal is null (pre-fix record) ... totalAmount is authoritative"). The result: a 13-month chart that shows **no parts or labor revenue at all before 2026-04**, implying the company billed nothing, next to a revenue line on the other tab showing it billed plenty.
+
+- Where an in-window invoice has null subtotals, exclude that month from the parts/labor series rather than plotting it as zero, and render the excluded months as a visibly empty region with a caption naming why ("parts/labor split not recorded before <month>").
+- Do **not** synthesise a split from `totalAmount`. A guessed breakdown is worse than an honest gap.
+
+**The mix donut's "Total" means three different things.** The centre label renders whichever tab is active (`financial-pulse.tsx:2124`, shown `:2176`), and the three tabs have three bases. Captured 2026-09-11 against a Billed MTD of $47,782: Parts vs Labor **$91,854**, Emergency vs Standard **$82,757**, Contract vs Ad-hoc **$47,782**.
+
+- Label the centre for what it is on each tab — "Parts + labor", "Line-item revenue", "Invoiced total" — instead of a bare "Total".
+- The Parts vs Labor figure also carries the wet-check double count, removed in ticket 6 of 8; after that it should land near invoiced revenue rather than double it.
+
+## Slice 4 — Captions that match the code
+
+- `INFO_TIPS` (`financial-pulse.tsx:302–320`) says "excludes draft, cancelled" on four tiles. The code excludes five statuses — draft, cancelled, superseded, merged, failed. Say so. `BILLING_HEADER_TIPS` (`financial-pulse-widget.tsx:96`) repeats the same wording on Manager Workspace; fix both.
+- The `unbilledExposure` tip describes "Work orders + billing sheets" and omits wet-check billings, which are included (`financial-pulse.ts:539`).
+- The customer-detail tip for **Invoiced YTD** mentions the wet-check leg (`financial-pulse-widget.tsx:458`) while **Invoiced MTD** does not, though both carry it.
+- Drop the disabled "custom date range" input (`financial-pulse.tsx:518`), whose tooltip still reads "coming in Slice 3" — Slice 3 shipped. Either wire `asOf`, which every endpoint already validates and then ignores (`financial-pulse.ts:102`), or remove the control and the parameter together. Do not leave a disabled input promising a shipped slice.
+
+## Slice 5 — The surfaces that read these numbers
+
+- **Admin Dashboard "invoices this month" is capped at 25.** `invoicesThisMonth` (`admin-dashboard.tsx:212`) filters `invoicesQ.data`, fetched as `/api/invoices?limit=25` (`:116`). The count can never exceed 25 and applies no status filter, so drafts and cancelled invoices are counted — while every Financial Pulse figure beside it excludes them. It renders twice, as a KPI tile (`:432`) and in the Operations Pipeline panel (`:473`). Source it from a count endpoint with the canonical exclusions.
+- **Truncation reported as a total.** `CustomersTab` requests `limit=500` (`financial-pulse.tsx:1200`) and the pager prints `{rows.length} customers` (`:1411`) — the truncated count, presented as complete. The endpoint already returns `total` (`financial-pulse.ts:1039`); render it, and say when the view is truncated.
+- **Delete the Collected MTD fallback.** `BillingHeaderVariant` falls back to `billedMtd − outstandingAr` (`financial-pulse-widget.tsx:338`), with `deriveCollectedMtdDeltaPct` (`:293`) reconstructing a prior month from two percentages. Billed MTD is a monthly flow and Money Owed is an all-time balance; their difference is not collected revenue. `/kpis` always returns `collectedMtd`, so the path is unreachable today and the comment above it (`:284`) is stale — but it is a landmine. Remove it and render the tile's error state instead.
+- **One route to a customer.** `top-customers-compact` navigates to `/customers/:id/profile` (`financial-pulse-widget.tsx:712`); the page's own tables navigate to `/customers/:id` (`financial-pulse.tsx:1359`, `:873`). Confirm which is canonical under Rule 3 and use it in both.
+- **Dead declarations.** `BillingHeaderProps` is declared twice (`financial-pulse-widget.tsx:40`, `:54`), appears twice in the union (`:59`, `:63`), and `"billing-header"` appears twice in `FinancialPulseVariant` (`:27`, `:31`).
+- **Screen and CSV disagree on cents.** Tiles and tables format at zero decimals (`metric-tile.tsx:69`, `financial-pulse.tsx:276`); the CSV exports two (`financial-pulse.ts:1829`). Reconciling a screen against its own export shows a rounding difference on every row. Keep whole dollars on tiles; show cents in tables that a bookkeeper reconciles against.
+
+## Out of scope
+
+- Backfilling `partsSubtotal` / `laborSubtotal` on historical invoices. This ticket stops the chart from lying about them; the backfill is its own decision.
+- The technician and mix double-counts (6 of 8) and the YTD split (5 of 8).
+
+## Decisions
+
+- Comparison windows never overlap the current period. (decided)
+- The revenue trend plots invoiced revenue only, on both series. (decided)
+- An honest gap beats a synthesised split. (decided)
+- A disabled control promising a shipped feature is removed, not left in place.
+
+## Done looks like
+
+- Month-over-month deltas are correct on the 31st.
+- The period toggle's effect is visible and its scope is stated.
+- No chart plots zero where the truth is "not recorded".
+- Every tooltip names the same exclusions the code applies.
+- No surface reports a truncated count as a total, and no widget can fabricate a Collected MTD.
+
+## Tests
+
+- `getPrevMonthWindow(2026-03-31)` ends 2026-02-28, not 2026-03-03; `getPrevMonthWindow(2026-05-31)` ends 2026-04-30. Regression test with the dates above.
+- `getPrevYearYtdWindow(2028-02-29)` stays inside 2027-02.
+- A month whose invoices have null subtotals is absent from the parts/labor series rather than plotted as zero.
+- The trend's two series are computed on identical rules; a fixture with uninvoiced wet-check work produces the same YoY as one without.
+- Switching the period toggle updates the Profit Margin tile's badge.
+- The Admin Dashboard invoice count exceeds 25 when more than 25 invoices exist that month, and excludes drafts.
+- `top-customers` beyond 500 rows: the UI states the view is truncated and shows `total`.
+- Tenancy (Rule 1) holds for the new invoice-count endpoint.
+
+## Definition of Done (attach proof — Rule 7)
+
+- [ ] `file:line` for the window clamp, the trend change, the badge, and each Slice 5 item.
+- [ ] Test output for the Mar-31 and May-31 window cases.
+- [ ] Screenshot of the parts-vs-labor chart showing the honest gap with its caption.
+- [ ] Screenshot of the mix donut on all three tabs with distinct centre labels.
+- [ ] Grep proof that the Collected MTD fallback and the duplicate declarations are gone.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+
+- `artifacts/api-server/src/financial-pulse-math.ts` (`getPrevMonthWindow` :150, `getPrevYearYtdWindow` :176, `bucketMonthlyRevenue` :519)
+- `artifacts/api-server/src/routes/financial-pulse.ts` (deltas :609 and :662, trend :834–853, `parseAsOfParam` :102, `total` :1039, `fmtNum` :1829)
+- `artifacts/irrigopro/src/pages/financial-pulse.tsx` (toggle :499, tips :302–320, date input :518, margin tile :1947, charts :2006 and :2038, donut :2124 and :2176, pager :1411)
+- `artifacts/irrigopro/src/components/financial-pulse/financial-pulse-widget.tsx` (fallback :293 and :338, tips :96 and :458, duplicates :40 :54 :59 :63, route :712)
+- `artifacts/irrigopro/src/pages/admin-dashboard.tsx` (count :212, fetch :116, renders :432 and :473)
+- Tests: `financial-pulse-math.test.ts`, `financial-pulse-qb-banner.test.ts`, `financial-pulse-billing-header.test.tsx`

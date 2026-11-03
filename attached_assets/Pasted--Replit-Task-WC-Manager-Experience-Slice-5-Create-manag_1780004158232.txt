@@ -1,0 +1,283 @@
+# Replit Task — WC Manager Experience, Slice 5 (Create managerNav config)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from `WC Manager Experience - Slice 0 Unification Audit and Plan.md`
+— it is reference material so you understand the intent. The actual work for
+this task is in the **Slice 5** section at the bottom. Do not deviate from any
+file paths, function names, schema field names, or payload shapes specified.
+If you believe a deviation is necessary, surface it and stop rather than
+proceeding.
+
+> **Small, structural slice.** The irrigation manager role has no nav config
+> today (verified at `App.tsx:297+` — the role block renders `<Navigation />`
+> without passing a `navConfig`). This slice creates `managerNav` and wires
+> it into the irrigation_manager route block so the manager finally sees
+> the Wet Check Reviews leaf in their left rail.
+
+> **Pattern: mirror billingManagerNav minus admin sections.** The irrigation
+> manager's nav matches the billing manager's structure (the same
+> DesktopShell + NavConfig contract) but excludes QuickBooks admin, the
+> migration admin page, and any superuser-only entries.
+
+---
+
+## Design Context (locked decisions)
+
+Inherited from WC Manager Experience Slice 0.
+
+**The role name is `irrigation_manager`.** Verified at `App.tsx:297`.
+NOT `manager`. Every reference in this slice and downstream slices uses
+`irrigation_manager`.
+
+**The nav configs that exist:** `billingManagerNav`
+(`nav-config.ts:104`), `superAdminNav` (`:166`), `companyAdminNav`
+(`:203`). All three are wired in their respective App.tsx route blocks
+via `<DesktopShell navConfig={...}>`. The irrigation manager block at
+`App.tsx:297–356` renders `<Navigation />` directly without a config,
+which is the root cause of the missing nav.
+
+**`wetCheckGroup` is the shared sidebar group** at `nav-config.ts:87`.
+It is already a member of the other three configs (lines 136, 189, 223
+per the existing test at `nav-config.test.ts`). This slice adds it to
+`managerNav` as well.
+
+**The DesktopShell expects a `NavConfig`.** Its shape is defined at
+`nav-config.ts:51` (`export interface NavConfig`). Adopt that interface
+exactly; do not invent a parallel structure for the irrigation manager.
+
+---
+
+## Slice 5 — Create managerNav config + wire into App.tsx
+
+### Scope
+
+Three coherent changes:
+1. Add `export const managerNav: NavConfig` to `nav-config.ts`.
+2. Wire it into the irrigation_manager route block in `App.tsx` via
+   `<DesktopShell navConfig={managerNav}>`.
+3. Update the existing `nav-config.test.ts` to assert `wetCheckGroup`
+   is present in all FOUR configs (currently asserts three).
+
+### Files modified
+
+- `artifacts/irrigopro/src/components/layout/nav-config.ts` — add new
+  exported `managerNav`.
+- `artifacts/irrigopro/src/App.tsx` — wrap the irrigation_manager route
+  block (`:297–356`) in `<DesktopShell navConfig={managerNav}>`.
+- `artifacts/irrigopro/src/components/layout/nav-config.test.ts` —
+  extend with managerNav assertion.
+
+### Concrete changes
+
+**(1) Add `managerNav` at `nav-config.ts:~166` (place between
+`billingManagerNav` and `superAdminNav`):**
+
+```typescript
+// Irrigation manager — web shell. Mirrors billingManagerNav's structure
+// but defaults to manager-focused defaults: Wet Check Reviews up top,
+// QuickBooks admin omitted, financial-pulse admin omitted.
+export const managerNav: NavConfig = {
+  header: {
+    label: "Manager",
+    icon: ClipboardCheck,
+    href: "/manager-workspace",  // Slice 8 lands the page; until then the route falls back to /
+  },
+  groups: [
+    wetCheckGroup,            // Wet Checks / Wet Check Reviews / Wet Check Billings
+    {
+      type: "group",
+      label: "Operations",
+      icon: Briefcase,
+      items: [
+        { type: "leaf", label: "Customers", path: "/customers", icon: Users },
+        { type: "leaf", label: "Work Orders", path: "/work-orders", icon: Wrench },
+        { type: "leaf", label: "Billing Sheets", path: "/billing-sheets", icon: ClipboardList },
+        { type: "leaf", label: "Estimates", path: "/estimates", icon: FileText },
+        { type: "leaf", label: "Site Maps", path: "/site-maps", icon: Map },
+      ],
+    },
+    {
+      type: "group",
+      label: "Parts",
+      icon: Wrench,
+      items: [
+        { type: "leaf", label: "Parts Catalog", path: "/parts", icon: Wrench },
+        { type: "leaf", label: "Parts List", path: "/parts-list", icon: List },
+      ],
+    },
+  ],
+};
+```
+
+Use the icon imports that are already at the top of `nav-config.ts`
+(`Droplets`, `ShieldCheck`, `ClipboardList`, `ClipboardCheck`,
+`Briefcase`, `Users`, `Wrench`, `FileText`, `Map`, `List` — verify
+each is imported; add to the import block if missing).
+
+The exact composition of Operations / Parts groups should mirror what
+the irrigation manager has in their `App.tsx:297–356` route table.
+Cross-reference each leaf path against the existing routes — if a
+route doesn't exist for the irrigation manager, don't add it to the
+nav.
+
+**(2) Wire managerNav into App.tsx** at the irrigation_manager block
+starting at `:297`:
+
+Replace the existing structure:
+
+```jsx
+if (user.role === "irrigation_manager") {
+  return (
+    <TooltipProvider>
+      <QueryClientProvider client={queryClient}>
+        <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0 flex flex-col">
+          <Navigation />
+          <div className="px-4 flex-1">
+            <Suspense fallback={<RouteSuspenseFallback />}>
+              <Switch>
+                ... routes ...
+              </Switch>
+            </Suspense>
+          </div>
+          <PoweredByFooter />
+        </div>
+        <Toaster />
+      </QueryClientProvider>
+    </TooltipProvider>
+  );
+}
+```
+
+With:
+
+```jsx
+if (user.role === "irrigation_manager") {
+  return (
+    <TooltipProvider>
+      <QueryClientProvider client={queryClient}>
+        <DesktopShell navConfig={managerNav}>
+          <div className="px-4">
+            <Suspense fallback={<RouteSuspenseFallback />}>
+              <Switch>
+                ... routes unchanged ...
+              </Switch>
+            </Suspense>
+          </div>
+        </DesktopShell>
+        <Toaster />
+      </QueryClientProvider>
+    </TooltipProvider>
+  );
+}
+```
+
+Add `import { managerNav } from "@/components/layout/nav-config";` to
+the import block at the top of App.tsx (line ~85 — extend the existing
+nav-config import: `import { billingManagerNav, managerNav, superAdminNav } from "@/components/layout/nav-config";`).
+
+`DesktopShell` is already imported and used by the billing_manager and
+super_admin blocks at `App.tsx:363` and `:419`. Reuse the same import.
+
+Remove the now-unused `<Navigation />` and `<PoweredByFooter />` calls
+from the irrigation_manager block — `DesktopShell` carries those
+itself (verify by reading `DesktopShell`'s implementation; if it
+doesn't, keep `PoweredByFooter` inside the shell).
+
+**(3) Update `nav-config.test.ts`:**
+
+Find the existing test that iterates over the three configs (around
+`nav-config.test.ts:39+`):
+
+```typescript
+const configs: [string, NavConfig][] = [
+  ["billingManagerNav", billingManagerNav],
+  ["companyAdminNav", companyAdminNav],
+  ["superAdminNav", superAdminNav],
+];
+```
+
+Add `managerNav`:
+
+```typescript
+import {
+  billingManagerNav,
+  companyAdminNav,
+  managerNav,            // NEW
+  superAdminNav,
+} from "./nav-config";
+
+const configs: [string, NavConfig][] = [
+  ["billingManagerNav", billingManagerNav],
+  ["companyAdminNav", companyAdminNav],
+  ["managerNav", managerNav],    // NEW
+  ["superAdminNav", superAdminNav],
+];
+```
+
+The existing parameterized assertions (wetCheckGroup present, leaf
+paths correct) then run against `managerNav` automatically.
+
+Add one new assertion specifically for `managerNav`:
+
+```typescript
+it("managerNav omits QuickBooks admin and migration admin entries", () => {
+  const allPaths = collectAllLeafPaths(managerNav);
+  expect(allPaths).not.toContain("/admin/quickbooks");
+  expect(allPaths).not.toContain("/admin/migrate-wet-check");
+});
+```
+
+Where `collectAllLeafPaths` is a small helper (write it inline if it
+doesn't already exist in the test file).
+
+### Tests
+
+The extended `nav-config.test.ts` is the primary test. Also add one
+smoke test for the App.tsx wiring at
+`artifacts/irrigopro/src/pages/app-irrigation-manager-shell.test.tsx`:
+
+```typescript
+it("renders DesktopShell with managerNav for irrigation_manager role", () => {
+  const { container } = render(
+    <App user={{ role: "irrigation_manager", id: 1, name: "M. Davis" }} />
+  );
+  expect(container.querySelector("[data-testid='desktop-shell']")).toBeInTheDocument();
+  expect(screen.getByText("Wet Check Reviews")).toBeInTheDocument();
+});
+```
+
+(Adapt the harness to whatever the existing App.tsx tests use — there
+may already be a role-impersonation pattern in the repo.)
+
+### Acceptance criteria
+
+- `managerNav` is exported from `nav-config.ts` with the same
+  `NavConfig` shape as the other three configs.
+- `managerNav` includes `wetCheckGroup`.
+- `managerNav` omits QuickBooks admin and migration admin sections.
+- The irrigation_manager route block in `App.tsx` wraps its routes in
+  `<DesktopShell navConfig={managerNav}>`.
+- The irrigation manager, when logged in, sees a Wet Checks /
+  Wet Check Reviews / Wet Check Billings group in their left rail
+  (verify by impersonation).
+- `nav-config.test.ts` asserts `wetCheckGroup` is present in all four
+  configs.
+- `pnpm typecheck` and `pnpm test` pass.
+
+### Out of scope
+
+- The `/manager-workspace` page itself (Slice 8).
+- Reorganizing the nav groups for any other role.
+- Adding new leaves to the wetCheckGroup (it's locked).
+- Mobile navigation (Slice 10).
+- The role resolver in App.tsx beyond wrapping the irrigation_manager
+  block in DesktopShell.
+
+### Dependencies
+
+- Independent of all other WC Manager Experience slices.
+- Must land before Slice 8 (otherwise the header.href on managerNav
+  points to a non-existent route — that's tolerable temporarily but
+  not ideal).
+- Soft dependency: if Slice 8 lands first, this slice can land
+  immediately after with no friction.

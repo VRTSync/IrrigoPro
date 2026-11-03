@@ -1,0 +1,403 @@
+# Replit Task — WC Manager Experience, Slice 10 (Mobile shell role-aware dashboard)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from `WC Manager Experience - Slice 0 Unification Audit and Plan.md`
+— it is reference material so you understand the intent. The actual work for
+this task is in the **Slice 10** section at the bottom. Do not deviate from any
+file paths, function names, schema field names, or payload shapes specified.
+If you believe a deviation is necessary, surface it and stop rather than
+proceeding.
+
+> **Mobile-only slice; no backend changes.** The mobile app's
+> "Today" tab is currently the same for every role. This slice makes
+> it role-aware: the irrigation manager sees field-focused entry
+> points; the field tech continues to see their existing scheduled-jobs
+> list. Same role definition, different shells.
+
+> **This slice lands the shell-vs-role distinction in code.** The
+> backend has one `irrigation_manager` role; the web shell shows them
+> /manager-workspace (per Slice 8); the mobile shell shows them
+> field-action launches. Same identity, two presentations.
+
+---
+
+## Design Context (locked decisions)
+
+Inherited from WC Manager Experience Slice 0 (Slice 10 section) and
+the audit's role-split answer (locked: shell-based, not role-based).
+
+**The mobile app is at `artifacts/irrigopro-mobile/`.** The home tab
+is `app/(tabs)/index.tsx`. The tab layout is at `app/(tabs)/_layout.tsx`
+with three tabs: Today, Wet Checks, Profile.
+
+**The "Today" tab today is field-tech-shaped.** It renders a list of
+the day's work orders pulled from `/api/work-orders?assigned=me`.
+That's correct for field techs. For an irrigation manager logging in
+on mobile, that view answers the wrong question — the manager isn't
+looking for "my assigned WOs," they're looking for "what action do I
+need to take today?"
+
+**The irrigation manager's mobile-relevant actions are:**
+- Start a new wet check on a customer (the field-but-also-managers
+  responsibility).
+- Create a work order on the fly.
+- Assign a tech to an open WO.
+- Quick-review a recently submitted wet check (lighter than the web
+  review page; mostly "approve or kick back to look at later").
+
+**Shared role, distinct shells.** The role is `irrigation_manager` on
+both web and mobile. The mobile shell looks at the role and renders
+the manager dashboard; the web shell does the same. The decision is
+made in the SHELL, not in a separate API or a different role.
+
+---
+
+## Slice 10 — Mobile shell role-aware dashboard
+
+### Scope
+
+Mobile-only frontend work. Replace the field-tech-shaped Today tab
+with a role-conditional renderer. Irrigation managers see a manager
+dashboard with field-action launches and a compact wet-check review
+queue. Field techs continue to see the existing assigned-jobs list.
+
+### Files modified
+
+- `artifacts/irrigopro-mobile/app/(tabs)/index.tsx` — convert to a
+  role-conditional renderer.
+- New:
+  `artifacts/irrigopro-mobile/components/manager-today-screen.tsx`
+  — the manager's Today screen.
+- New:
+  `artifacts/irrigopro-mobile/components/field-tech-today-screen.tsx`
+  — extract the existing Today behavior into a named component (no
+  behavior change).
+- New:
+  `artifacts/irrigopro-mobile/components/manager-today-screen.test.tsx`
+  — manager dashboard tests.
+- `artifacts/irrigopro-mobile/app/(tabs)/_layout.tsx` — no change
+  (the three-tab structure stays); confirm by inspection.
+
+### Concrete changes
+
+**(1) Extract existing Today screen** into a named component.
+
+Move the current implementation of `app/(tabs)/index.tsx` (the
+work-order list, the `STATUS_LABELS`, the sync-status pill, etc.)
+into `components/field-tech-today-screen.tsx` as
+`export function FieldTechTodayScreen()`. No behavior change; this is
+a pure extraction.
+
+`index.tsx` becomes:
+
+```typescript
+import React from "react";
+import { useAuth } from "@/lib/auth-context";
+import { FieldTechTodayScreen } from "@/components/field-tech-today-screen";
+import { ManagerTodayScreen } from "@/components/manager-today-screen";
+
+export default function TodayScreen() {
+  const { user } = useAuth();
+  const role = user?.role ?? "field_tech";
+  if (role === "irrigation_manager" || role === "company_admin" || role === "super_admin") {
+    return <ManagerTodayScreen />;
+  }
+  return <FieldTechTodayScreen />;
+}
+```
+
+**(2) Build `ManagerTodayScreen`** in
+`components/manager-today-screen.tsx`. Structure:
+
+```typescript
+import React, { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "expo-router";
+import { Feather } from "@expo/vector-icons";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { useColors } from "@/hooks/useColors";
+import { apiRequest } from "@/lib/api";
+import { LoadingScreen } from "@/components/Loading";
+import { SyncStatusPill } from "@/components/SyncStatusPill";
+
+interface PendingReviewSummary {
+  count: number;
+  oldestAgeHours: number | null;
+}
+
+interface DashboardData {
+  wcsPendingReview: PendingReviewSummary;
+  wosAwaitingApproval: PendingReviewSummary;
+  findingsNeedingRouting: PendingReviewSummary;
+}
+
+export function ManagerTodayScreen() {
+  const router = useRouter();
+  const colors = useColors();
+
+  const { data, isLoading } = useQuery<DashboardData>({
+    queryKey: ["/api/manager-workspace/status-strip"],
+    queryFn: () => apiRequest("/api/manager-workspace/status-strip", "GET"),
+    refetchInterval: 60_000,
+  });
+
+  if (isLoading) return <LoadingScreen />;
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <ScrollView contentContainerStyle={styles.scroll}>
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: colors.foreground }]}>Today</Text>
+          <SyncStatusPill />
+        </View>
+
+        <View style={styles.actionsGrid}>
+          <FieldActionButton
+            icon="droplet"
+            label="Start wet check"
+            onPress={() => router.push("/wet-check/new")}
+          />
+          <FieldActionButton
+            icon="clipboard"
+            label="Create work order"
+            onPress={() => router.push("/work-order/new")}
+          />
+          <FieldActionButton
+            icon="users"
+            label="Assign tech"
+            onPress={() => router.push("/work-order/assign")}
+          />
+          <FieldActionButton
+            icon="map-pin"
+            label="Today's schedule"
+            onPress={() => router.push("/schedule")}
+          />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>Action needed</Text>
+          <ActionTile
+            label="Wet checks pending review"
+            count={data?.wcsPendingReview?.count ?? 0}
+            subtitle={subtitleForAge(data?.wcsPendingReview?.oldestAgeHours)}
+            onPress={() => router.push("/wet-checks?status=pending_manager_review")}
+          />
+          <ActionTile
+            label="WOs awaiting approval"
+            count={data?.wosAwaitingApproval?.count ?? 0}
+            subtitle={subtitleForAge(data?.wosAwaitingApproval?.oldestAgeHours)}
+            onPress={() => router.push("/work-orders?status=pending_manager_review")}
+          />
+          <ActionTile
+            label="Findings needing routing"
+            count={data?.findingsNeedingRouting?.count ?? 0}
+            subtitle={subtitleForAge(data?.findingsNeedingRouting?.oldestAgeHours)}
+            onPress={() => router.push("/wet-checks/pending-review")}
+          />
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function FieldActionButton({ icon, label, onPress }: { icon: keyof typeof Feather.glyphMap; label: string; onPress: () => void }) {
+  const colors = useColors();
+  return (
+    <Pressable onPress={onPress} style={[styles.fab, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <Feather name={icon} size={20} color={colors.primary} />
+      <Text style={[styles.fabLabel, { color: colors.foreground }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function ActionTile({ label, count, subtitle, onPress }: { label: string; count: number; subtitle: string | null; onPress: () => void }) {
+  const colors = useColors();
+  if (count === 0) {
+    return (
+      <View style={[styles.tile, { backgroundColor: colors.card, borderColor: colors.border, opacity: 0.6 }]}>
+        <Text style={[styles.tileLabel, { color: colors.mutedForeground }]}>{label}</Text>
+        <Text style={[styles.tileCount, { color: colors.mutedForeground }]}>0</Text>
+      </View>
+    );
+  }
+  return (
+    <Pressable onPress={onPress} style={[styles.tile, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.tileLabel, { color: colors.foreground }]}>{label}</Text>
+        {subtitle ? <Text style={[styles.tileSubtitle, { color: colors.mutedForeground }]}>{subtitle}</Text> : null}
+      </View>
+      <Text style={[styles.tileCount, { color: colors.primary }]}>{count}</Text>
+      <Feather name="chevron-right" size={20} color={colors.mutedForeground} />
+    </Pressable>
+  );
+}
+
+function subtitleForAge(oldestAgeHours: number | null | undefined): string | null {
+  if (oldestAgeHours == null) return null;
+  if (oldestAgeHours < 1) return "Just now";
+  if (oldestAgeHours < 24) return `Oldest: ${Math.floor(oldestAgeHours)}h ago`;
+  return `Oldest: ${Math.floor(oldestAgeHours / 24)}d ago`;
+}
+
+const styles = StyleSheet.create({
+  scroll: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 32 },
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
+  title: { fontSize: 28, fontWeight: "600" },
+  actionsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 24 },
+  fab: { flex: 1, minWidth: "45%", padding: 16, borderRadius: 12, borderWidth: 0.5, alignItems: "center", gap: 8 },
+  fabLabel: { fontSize: 14, fontWeight: "500" },
+  section: { marginBottom: 16 },
+  sectionTitle: { fontSize: 13, fontWeight: "500", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 },
+  tile: { flexDirection: "row", alignItems: "center", padding: 14, borderRadius: 12, borderWidth: 0.5, marginBottom: 8, gap: 8 },
+  tileLabel: { fontSize: 15, fontWeight: "500" },
+  tileSubtitle: { fontSize: 12, marginTop: 2 },
+  tileCount: { fontSize: 18, fontWeight: "600", marginHorizontal: 8 },
+});
+```
+
+**(3) `oldestAgeHours` requires a small server-side addition.** The
+existing `/api/manager-workspace/status-strip` from Slice 8 returns
+counts only. Extend it to also return `oldestAgeHours` per indicator:
+
+```typescript
+// In manager-workspace-routes.ts, augment the status-strip response:
+const oldestAgeHours = (rows: any[], statusSet: Set<string>): number | null => {
+  const matching = rows.filter((r) => statusSet.has(r.status));
+  if (matching.length === 0) return null;
+  const oldest = matching.reduce((min, r) => {
+    const t = new Date(r.createdAt).getTime();
+    return t < min ? t : min;
+  }, Infinity);
+  return (Date.now() - oldest) / 3_600_000;
+};
+
+res.json({
+  indicators: {
+    wcsPendingReview: {
+      count: wcsPendingReviewCount,
+      oldestAgeHours: oldestAgeHours(wetChecks, ACTIVE_WC),
+    },
+    // ... and so on for each indicator
+  },
+});
+```
+
+This is a small additive backend change to Slice 8's endpoint. If
+Slice 8 has already landed when Slice 10 is picked up, this is a
+small follow-up edit in `manager-workspace-routes.ts`. If Slices 8 and
+10 land together, bundle the change.
+
+The web `/manager-workspace` page's `StatusTile` ignores the
+`oldestAgeHours` field — additive, no regression.
+
+**(4) Route the field-action buttons.** The mobile routes
+`/wet-check/new`, `/work-order/new`, `/work-order/assign`,
+`/schedule` may or may not exist today. Verify each:
+
+- `/wet-check/new`: likely exists (or maps to the customer-picker flow
+  at `app/wet-check/[id].tsx` parent route).
+- `/work-order/new`: may need wiring to the existing WO create flow.
+- `/work-order/assign`: may need a new screen, OR map to an existing
+  WO list with an "unassigned" filter.
+- `/schedule`: existing.
+
+For any route that doesn't exist, write a stub `routes-todo` comment
+in the PR description and surface those as separate small follow-up
+slices. Do NOT block this slice on building four new mobile screens.
+
+### Tests
+
+`manager-today-screen.test.tsx`:
+
+```typescript
+describe("ManagerTodayScreen", () => {
+  it("renders four field-action buttons", () => {
+    renderWithRole("irrigation_manager");
+    expect(screen.getByText("Start wet check")).toBeTruthy();
+    expect(screen.getByText("Create work order")).toBeTruthy();
+    expect(screen.getByText("Assign tech")).toBeTruthy();
+    expect(screen.getByText("Today's schedule")).toBeTruthy();
+  });
+
+  it("renders action tiles with counts from /api/manager-workspace/status-strip", async () => {
+    mockApi("/api/manager-workspace/status-strip", {
+      indicators: {
+        wcsPendingReview: { count: 3, oldestAgeHours: 5 },
+        wosAwaitingApproval: { count: 1, oldestAgeHours: 30 },
+        findingsNeedingRouting: { count: 0, oldestAgeHours: null },
+      },
+    });
+    renderWithRole("irrigation_manager");
+    await waitFor(() => {
+      expect(screen.getByText("3")).toBeTruthy();
+      expect(screen.getByText("Oldest: 5h ago")).toBeTruthy();
+      expect(screen.getByText("Oldest: 1d ago")).toBeTruthy();
+    });
+  });
+
+  it("renders the zero-count tile in a muted style", async () => {
+    mockApi("/api/manager-workspace/status-strip", {
+      indicators: {
+        wcsPendingReview: { count: 0, oldestAgeHours: null },
+        wosAwaitingApproval: { count: 0, oldestAgeHours: null },
+        findingsNeedingRouting: { count: 0, oldestAgeHours: null },
+      },
+    });
+    renderWithRole("irrigation_manager");
+    await waitFor(() => {
+      const tiles = screen.getAllByText(/Wet checks|WOs|Findings/);
+      tiles.forEach((tile) => {
+        expect(tile.parent?.props.style).toMatchObject(expect.objectContaining({ opacity: 0.6 }));
+      });
+    });
+  });
+});
+
+describe("TodayScreen role routing", () => {
+  it("renders ManagerTodayScreen for irrigation_manager", () => {
+    renderWithRole("irrigation_manager");
+    expect(screen.getByText("Start wet check")).toBeTruthy();
+  });
+
+  it("renders FieldTechTodayScreen for field_tech (no regression)", () => {
+    renderWithRole("field_tech");
+    expect(screen.queryByText("Start wet check")).toBeNull();
+  });
+});
+```
+
+### Acceptance criteria
+
+- Mobile Today tab renders ManagerTodayScreen for irrigation_manager,
+  company_admin, super_admin.
+- Mobile Today tab continues to render FieldTechTodayScreen for
+  field_tech (no behavior regression).
+- ManagerTodayScreen displays four field-action buttons and three
+  action tiles (Wet checks pending review / WOs awaiting approval /
+  Findings needing routing).
+- Action tile counts come from `/api/manager-workspace/status-strip`.
+- Zero-count tiles render in a muted style.
+- `oldestAgeHours` is computed server-side and surfaced as a "Oldest:
+  Xh ago" subtitle on the tiles.
+- All tests pass.
+- Mobile linting (`pnpm --filter irrigopro-mobile lint`) passes.
+
+### Out of scope
+
+- New mobile screens for routes that don't yet exist (note them in
+  the PR; spec separately).
+- Touching the Wet Checks tab or Profile tab.
+- Changing the tab bar structure (Today / Wet Checks / Profile stays).
+- Push notifications.
+- Offline-first behavior for the manager dashboard
+  (the queries refetch when online; offline behavior is the same
+  pattern as elsewhere in the mobile app).
+
+### Dependencies
+
+- Slice 8 (`/api/manager-workspace/status-strip` endpoint) — hard
+  dependency. The `oldestAgeHours` extension is small and can be
+  bundled with this slice if Slice 8 has already landed.
+- Independent of Slices 1, 2, 3, 4, 5, 6, 7, 9, 11.

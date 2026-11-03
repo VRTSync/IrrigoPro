@@ -1,0 +1,55 @@
+# Estimate Numbers — Use the Short Per-Company Sequence (Stop the `EST-<timestamp>` Fallback)
+
+**What & Why**
+New estimates come through with long numbers like `EST-1778541777944` (a millisecond timestamp). They should be short, sequential, per-company numbers (e.g. **#1001, #1002, …**).
+
+**The short-number system already exists** and is the intended path:
+- `allocateNextEstimateNumber(executor, companyId)` (`storage.ts:2467`) atomically bumps `companies.next_estimate_number` and returns the prior value — a clean integer like `50000`, `50001`.
+- `_writeEstimateWithItems` (`storage.ts:2504`) already calls it for every create and **ignores any client-supplied number**.
+- Schema has `companies.startingEstimateNumber` (default 50000) and `companies.nextEstimateNumber`; the super-admin can set the starting value.
+- A cleanup script `scripts/renumber-estimates.ts` already converts legacy/timestamp numbers to the per-company sequence.
+
+**The bug:** `allocateNextEstimateNumber` falls back to `` `EST-${Date.now()}` `` **only when `companyId == null`** (`storage.ts:2471–2473`). So `EST-1778541777944` means the estimate was created **without a company id threaded onto it** — the allocator never ran. The fix is to make sure `companyId` is always present on create, plus clean up the existing rows.
+
+No schema change. Two parts: thread `companyId` (code) + renumber existing (script, run by Replit) + pick a starting number (config).
+
+---
+
+## Part 1 — Thread `companyId` onto every estimate create (the real fix)
+### Files
+- `artifacts/api-server/src/routes/estimate-routes.ts` — the create handler(s) (`POST /api/estimates`, the wizard submit path, and any inspection/wet-check → estimate creation that doesn't already pass it).
+- `artifacts/api-server/src/estimate-payload.ts` (`processEstimatePayload`) and `storage.ts` (`createEstimate` / `createEstimateFromPayload` / `_writeEstimateWithItems`).
+
+### Changes
+- Ensure the estimate object passed into `_writeEstimateWithItems` always carries **`companyId`** — sourced from the authenticated user's company (`req.authenticatedUserCompanyId`) on the route, threaded through `processEstimatePayload` so it isn't dropped. (The wet-check conversion path already allocates from the sequence via `allocateNextEstimateNumber` / `explicitEstimateNumber` — confirm it passes `companyId` too.)
+- After this, `allocateNextEstimateNumber` runs for real creates and returns the short sequential number; the timestamp fallback is hit only by genuinely company-less legacy/test paths.
+- **Hardening (optional but recommended):** make the `companyId == null` fallback log a warning (so a future dropped-company regression is visible) rather than silently minting a timestamp number.
+
+### Acceptance
+- A newly created estimate (standard and inspection-origin) gets a short per-company number (e.g. `1001`), not `EST-<timestamp>`.
+- Concurrent creates don't collide (the `UPDATE … RETURNING` allocator guarantees this).
+
+## Part 2 — Renumber existing estimates (cleanup)
+- Run `scripts/renumber-estimates.ts` (already built) to convert existing legacy/timestamp/ad-hoc numbers to the per-company 5-digit sequence and pin `companies.nextEstimateNumber`. **Run by Replit** (Randy has no prod terminal).
+- **Recommended:** wrap it as an admin migration in the existing framework (`lib/migrations/…`, surfaced at `/admin/migrations`) so Randy can preview + run it from the super-admin UI, consistent with the other migrations. Money/identity-sensitive, so preview-gate it (show old → new mapping before running).
+
+## Part 3 — Choose the starting number (config)
+- Set High Plains' **`companies.startingEstimateNumber`** to the desired start (the renumber script uses `startingEstimateNumber ?? 50000`, and new creates count up from `nextEstimateNumber`). If Randy wants estimates to read like **#1001**, set starting/next to `1001`.
+- Confirm there's a super-admin company-settings field for `startingEstimateNumber` (storage already supports updating it, `storage.ts:1403–1420`); if not exposed in the UI, add it so Randy can set it himself later.
+
+## Tests
+- New estimate → short sequential number from the company counter; client-supplied numbers still ignored on create.
+- Renumber script (dry-run then live): legacy numbers map to the sequence, no collisions, `nextEstimateNumber` lands at `start + count`.
+- Subject/PDF/email all show the short number (they read `estimateNumber` via `formatEstimateNumber`).
+- Two estimates created back-to-back get consecutive numbers.
+
+## Out of scope
+- Work-order / invoice numbering (still `WO-<timestamp>` etc. — separate if wanted).
+- The email subject/from change and body redesign (separate tickets) — they just render whatever `estimateNumber` is.
+
+## Relevant files
+- `artifacts/api-server/src/storage.ts` (`allocateNextEstimateNumber` 2467; `_writeEstimateWithItems` 2504; `createEstimate`/`createEstimateFromPayload` 2556–2581; company counter update 1403–1420)
+- `artifacts/api-server/src/routes/estimate-routes.ts` (create handlers — thread `companyId`)
+- `artifacts/api-server/src/estimate-payload.ts` (`processEstimatePayload` — carry `companyId`)
+- `artifacts/api-server/src/scripts/renumber-estimates.ts` (existing cleanup; consider wrapping as an admin migration)
+- `lib/db/src/schema/schema.ts` (`companies.startingEstimateNumber` / `nextEstimateNumber`)

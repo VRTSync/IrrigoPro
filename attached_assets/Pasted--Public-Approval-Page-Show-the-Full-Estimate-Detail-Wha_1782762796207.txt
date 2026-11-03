@@ -1,0 +1,47 @@
+# Public Approval Page — Show the Full Estimate Detail
+
+**What & Why**
+The customer-facing approval page (the token link) shows a **stripped-down** estimate: a parts-only line-item table and a single lump **Total** that doesn't reconcile (e.g. ~$85 of parts under a **$1,434.75** total — the labor is hidden). No scope of work, no labor breakdown, no location/map, and inspection estimates aren't zone-grouped. A customer can't tell what they're approving or why the total is what it is.
+
+Bring the approval page to **full parity with the estimate PDF** — everything from the estimate, not just the parts list.
+
+**Root cause:** `pages/estimate-approval.tsx` renders only Part/Qty/Unit/Total columns and `Total {totalAmount}`, omitting labor and subtotals, even though the data (per-item `laborHours`, `totalLaborHours`, `laborRate`, `workDescription`, location, photos) is largely available. The `view-by-token` payload signs photos and returns items but should be confirmed to include everything below.
+
+Frontend-heavy; small backend payload completeness check. Public token page — already token-scoped (no auth), returns only that estimate.
+
+## Done looks like
+The approval page shows, like the PDF:
+- **Scope of Work / work description** (full text).
+- **Line items with labor** — each line shows part, qty, unit, **labor (hours + $)**, line total.
+- **Totals that reconcile** — **Parts subtotal**, **Labor subtotal** (hours × rate), **Total** — so the big number is explained.
+- **Location** — project address **and** the pinned spot with a "View on map" link (lat/lng), as on the email.
+- **Photos** — site photos and any inspection/finding photos, signed for the unauthenticated viewer.
+- **Attachments** — listed/downloadable.
+- **Inspection estimates render zone-grouped** (Repairs-Summary-by-zone → per Controller·Zone), matching the estimate detail/PDF; standard estimates use the improved flat table with labor.
+- Existing branded header/footer, secure-link note, Approve (→ signature)/Decline unchanged.
+
+## Steps
+1. **Line items + totals** (`estimate-approval.tsx` ~720–755): add a **Labor** column (hours + $) to the line-item table, and replace the single Total with a **Parts subtotal / Labor subtotal (h × rate) / Total** block — reuse the same computation as the estimate email redesign so the math matches the PDF. The total must equal parts + labor.
+2. **Scope of Work**: render `workDescription` (and any scope/notes) as its own section above line items.
+3. **Location**: render `projectAddress` **and** the pinned spot — `workLocationAddress` + a Google Maps "View on map" link from `workLocationLat/Lng` (mirror the email's location block).
+4. **Photos**: ensure all relevant photos (site + inspection/finding photos tied to the estimate) are included and pre-signed by `view-by-token`; render the gallery (already present) — just make sure the data flows for inspection-origin estimates too, not only manually attached site photos.
+5. **Zone grouping for inspection estimates**: when the estimate is inspection-origin (items carry `controllerLetter`/`zoneNumber`/`issueType`), render the **zone-grouped** layout (reuse `groupEstimateItemsByZone` / the shared `EstimateZoneGroupedView`) instead of the flat table — same as the in-app estimate detail and PDF.
+6. **Backend payload check** (`view-by-token` in `estimate-routes.ts`): confirm the response includes everything the page now needs — per-item `laborHours`, `totalLaborHours`, `laborRate`, `workDescription`, `projectAddress`, `workLocationLat/Lng/Address`, `controllerLetter/zoneNumber/issueType`, all signed photo URLs, attachments, and the totals (or enough to compute them). Add any missing field. Keep it token-scoped (no extra data leakage beyond this estimate).
+
+## Tests
+- The approval page total equals Parts subtotal + Labor subtotal; labor is visible per line and in the subtotal (no more unexplained lump total).
+- Scope of work, project address, and pinned-spot map link all render when present.
+- Site and inspection photos display (signed) on the public page; attachments list.
+- An inspection-origin estimate renders zone-grouped (matches its PDF); a standard estimate renders the flat table with labor.
+- Approve (signature step) and Decline still work; branded header/footer/secure-link intact.
+- Only the linked estimate's data is returned (token-scoped); no auth required.
+
+## Out of scope
+- Signature capture mechanics, the standalone-page branding, resend, and the 404/route fixes (separate, already specced) — this is the body detail.
+- The estimate PDF (it's the reference/source of truth for layout).
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/estimate-approval.tsx` (line items ~720–755; add labor/subtotals/scope/location/zone-grouping)
+- `artifacts/api-server/src/routes/estimate-routes.ts` (`view-by-token` payload completeness + photo signing)
+- `artifacts/irrigopro/src/lib/estimate-zone-grouping.ts` + `components/estimates/estimate-zone-grouped-view` (reuse for inspection estimates)
+- Reference: `email-service.ts` parts/labor/total + location block; the estimate PDF

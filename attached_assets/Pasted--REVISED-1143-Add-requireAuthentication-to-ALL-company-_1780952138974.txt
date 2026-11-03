@@ -1,0 +1,55 @@
+# REVISED #1143 — Add `requireAuthentication` to ALL company-scoped QB routes
+
+**Corrects the original #1143, which fixed only `/api/quickbooks/auth`.** The same defect breaks four other QB routes; patching one produces another half-fix (you'll be able to connect, but status still shows "not connected" and sync still 400s).
+
+## Root cause (the real one)
+
+`requireQuickBooksAccess` (routes.ts:904) only *reads* `req.authenticatedUserRole` to gate by role — it never authenticates and never sets `req.authenticatedUserCompanyId`. The middleware that populates `authenticatedUserCompanyId` and `authenticatedUserRole` is `requireAuthentication` (sets them at routes.ts:863), and it is **not global**.
+
+Five QB routes run `requireQuickBooksAccess` *without* `requireAuthentication`, so `authenticatedUserCompanyId` is `undefined` and `resolveCompanyId(req)` returns null in production:
+
+| Route | Line | Current middleware | Needs `requireAuthentication`? |
+|---|---|---|---|
+| `/api/quickbooks/auth` | 8419 | requireQuickBooksAccess | **yes** |
+| `/api/quickbooks/disconnect` | 8680 | requireQuickBooksAccess | **yes** |
+| `/api/quickbooks/connection` | 8704 | requireQuickBooksAccess | **yes** |
+| `/api/quickbooks/sync-customers` | 8815 | requireQuickBooksAccess | **yes** |
+| `/api/quickbooks/sync-estimate/:id` | 8961 | requireQuickBooksAccess | **yes** |
+| `/api/quickbooks/connection/stale` | 8748 | requireAuthentication ✓ | already correct |
+| `/api/quickbooks/health` | 8772 | requireAuthentication ✓ | already correct |
+
+The two routes that already work (`stale`, `health`) are the ones that already have `requireAuthentication` — that asymmetry is the whole bug.
+
+## Done looks like
+
+- Production: Connect → OAuth → success page; the integration is saved bound to the correct company.
+- After connecting, `/connection` shows connected **for that company**, and a customer sync succeeds (not just the connect step).
+- Role gate still blocks `irrigation_manager` / `field_tech` (now actually enforced, since the role is populated).
+- Unauthenticated requests to these five routes get 401 (previously they slipped through the role gate).
+
+## Steps
+
+1. **Add `requireAuthentication` before `requireQuickBooksAccess` on all five routes** — chain becomes `requireAuthentication, requireQuickBooksAccess`. `requireAuthentication` sets `authenticatedUserCompanyId` + `authenticatedUserRole`; `requireQuickBooksAccess` then reads the now-populated role. No change to `resolveCompanyId` — it starts returning the real company once the field is populated.
+   - 8419 `/api/quickbooks/auth`
+   - 8680 `/api/quickbooks/disconnect`
+   - 8704 `/api/quickbooks/connection`
+   - 8815 `/api/quickbooks/sync-customers`
+   - 8961 `/api/quickbooks/sync-estimate/:id`
+2. **Null guard on `/auth`** (keep from original #1143) — after `resolveCompanyId(req)`, if still null, return `400 { message: "Company context is required to initiate QuickBooks connection" }` instead of storing null in the state.
+3. **Verify the callback's null-company 400 HTML** reads well and has the "Return to IrrigoPro" button (already present).
+
+## Out of scope
+
+- `USE_DB_OAUTH_STATE` — leave as-is.
+- `resolveCompanyId` / `getQuickBooksCustomerStatus` logic — Task 1 already correct; this only ensures the input is populated.
+- Non-QuickBooks routes.
+
+## Verify
+
+- `grep -nE 'app\.(get|post)\("/api/quickbooks/(auth|connection|disconnect|sync-customers|sync-estimate)' routes.ts` → every line shows `requireAuthentication, requireQuickBooksAccess`.
+- Production: connect, confirm green for your company, run a customer sync end-to-end.
+- Cross-tenant: Company B (no connection) still sees "not connected" on `/connection`.
+
+## Relevant files
+
+- `artifacts/api-server/src/routes/routes.ts:904` (requireQuickBooksAccess), `:863` (requireAuthentication sets the field), `:8419,8680,8704,8815,8961` (the five routes), `:8465-8554` (callback null guard).

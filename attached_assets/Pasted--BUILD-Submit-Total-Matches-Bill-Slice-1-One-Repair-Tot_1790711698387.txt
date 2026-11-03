@@ -1,0 +1,236 @@
+# BUILD — Submit Total Matches Bill, Slice 1: One Repair-Totals Calculator
+
+This is a single self-contained task. Build exactly what is described. Do not deviate, do not
+re-decide the locked decisions below, and do not merge this with Slice 2 (field finding hours).
+Slice 1 ships first and stands alone.
+
+## What & Why
+
+A field tech's "Submit & Bill" dialog shows a different total from the WC Snapshot the submit
+creates. Artisan Pines HOA, submitted 2026-09-28 (Brady Mangel): the tech confirmed
+**Labor $935.00 / Total $1,482.15**. The snapshot billed **Labor $2,044.25 / Total $2,638.90**.
+
+The bill is correct. The dialog runs its own separate copy of the math and has not been updated
+since May:
+
+- **Dialog** — `previewWetCheckSubmit`, `artifacts/api-server/src/storage.ts:9395-9458`. Labor is
+  `Σ finding.laborHours × rate` (`:9437-9446`). One finding of 3 heads counts 0.25 h.
+- **Bill** — `_writeRepairedInFieldBilling`, `storage.ts:9486-9700`. Labor is
+  `(wc.totalLaborHours + Σ zone.repairLaborHours) × rate` (`:9552-9575`). The zone hours are
+  catalog `defaultLaborHours × quantity` per finding (`_recomputeZoneRepairLaborIfAuto`,
+  `:9792-9836`), or the zone's manual value when `repairLaborManuallySet` is true. 3 heads = 0.75 h.
+
+The two copies drifted when Task #753 (2026-05-20), Task #891 (2026-05-24) and the quantity fix
+(2026-05-31, `84a457bd`) changed only the bill. This ticket removes the second copy: one
+calculator, called by both the preview and the submit.
+
+## Design context (locked decisions — do not relitigate)
+
+1. **The bill's formula is correct and is the one that survives (decided).** Catalog hours ×
+   quantity per zone, manual zone value when set. The preview adopts it. No billed number changes.
+2. **One calculator, two callers — no mirrored copy (decided).** The preview must call the same
+   function the submit calls. A comment saying "mirrors submit" is exactly what failed last time.
+3. **Parts use the existing `computeWetCheckBillingPartsSubtotal`** (`wet-check-billing-view.ts:192-199`)
+   in both callers. It is already the parts rule for the WC Snapshot quantity editor (#2000). The
+   submit's own `lines` calculation (`storage.ts:9527-9540`) is deleted. It gives identical results
+   for every finding the routes can create: the create route forces `noPartNeeded=false` whenever a
+   part is set (`routes/routes.ts:17775`).
+4. **The billable-finding rule is shared.** Today the submit uses `canAutoBill` (`storage.ts:9269-9272`,
+   includes `LABOR_ONLY_ISSUE_TYPES`), but the preview uses a narrower filter (`:9427`, omits labor-only
+   types). Both switch to one exported predicate.
+5. **`wc.totalLaborHours` stays in the formula for this ticket (decided, deferred).** Nothing in the
+   app writes it for a wet check. The create body (`routes/wet-check-create-gate.ts:12-23`) and the
+   PATCH body (`routes/routes.ts:17281-17285`) do not accept it, so it is always `0.00`. Removing it
+   touches four billing sites and three display sites; that is a separate cleanup ticket. Here the
+   calculator takes it as an input so preview and bill stay equal even if it is ever non-zero.
+6. **The append branch (`priorWcbId != null`, `storage.ts:9578-9640`) is not touched.** It runs only
+   on manager conversion of an already-billed wet check, never from the tech's submit.
+7. **Mode scope: service only in effect; inspection unchanged.** Inspection findings are never
+   `repaired_in_field`, so their preview is all zeros today and stays all zeros.
+
+## Done looks like
+
+- On any in-progress service wet check, the dialog's Parts, Labor and Total equal, to the cent, the
+  `partsSubtotal`, `laborSubtotal` and `totalAmount` of the WC Snapshot that submitting it creates.
+- The dialog shows labor hours next to labor dollars: `Labor 24.05 hrs · $2,044.25`.
+- All money in the dialog uses `formatCurrency`: `$2,638.90`, not `$2638.90`.
+- `grep -n "laborHours \* laborRate\|laborHours) \* laborRate" artifacts/api-server/src/storage.ts`
+  returns no match inside `previewWetCheckSubmit`.
+- Inspection wet checks: the preview response is unchanged.
+
+## Out of scope
+
+- Slice 2 (making each finding's shown hours equal catalog × quantity in the field). Separate ticket.
+- Removing `wc.totalLaborHours` from the formula (decision 5).
+- Zone labor counting findings that were not billed. `_recomputeZoneRepairLaborIfAuto` sums every
+  finding in the zone, including ones the submit reroutes to `needs_review` (`storage.ts:9274-9278`).
+  That is a billing-correctness question for its own ticket. This ticket reproduces today's bill
+  exactly; it does not change what is billed.
+- The Expo app (`artifacts/irrigopro-mobile`). It has no submit preview.
+- Any change to the WC Snapshot view, PDFs or invoices.
+
+## Steps
+
+1. **Create `lib/shared/src/wet-check-labor.ts`** and add `export * from "./wet-check-labor.js";` to
+   `lib/shared/src/index.ts`. It holds the one piece of arithmetic both the server and the field
+   screen (Slice 2) need, so neither keeps its own copy:
+
+   ```ts
+   /** Catalog labor for one finding: perUnit × qty. qty NaN/null/< 1 counts as 1; bad perUnit = 0. */
+   export function catalogLaborHours(
+     perUnit: string | number | null | undefined,
+     quantity: number | string | null | undefined,
+   ): number;
+   ```
+
+   Moved from `storage.ts:9824-9832` exactly: `parseFloat(String(perUnit)) || 0` times
+   `(isNaN(q) || q < 1 ? 1 : q)` where `q = typeof quantity === "number" ? quantity : parseInt(String(quantity ?? "1"), 10)`.
+
+   **Then create `artifacts/api-server/src/lib/wet-check-repair-totals.ts`** (performs no queries):
+
+   ```ts
+   import { resolveIssueTypeKey } from "../seeds/issue-type-configs";
+   import { computeWetCheckBillingPartsSubtotal } from "../wet-check-billing-view";
+
+   export type LaborCatalog = Map<string, string | null>; // resolved issueType -> defaultLaborHours
+
+   export function buildLaborCatalog(
+     configs: Array<{ issueType: string; defaultLaborHours: string | null }>,
+   ): LaborCatalog;
+   // new Map(configs.map(c => [resolveIssueTypeKey(c.issueType), c.defaultLaborHours]))
+
+   /** Catalog hours for one finding: perUnit × qty; qty that is NaN or < 1 counts as 1; unknown type = 0. */
+   export function catalogLaborHoursForFinding(
+     f: { issueType: string; quantity: number | null }, catalog: LaborCatalog,
+   ): number;
+
+   /** Auto zone hours = Σ catalogLaborHoursForFinding over every finding in the zone. */
+   export function computeAutoZoneRepairLaborHours(
+     findings: Array<{ issueType: string; quantity: number | null }>, catalog: LaborCatalog,
+   ): number;
+
+   /** Submit's billability rule. Moved verbatim from storage.ts:9269-9272. */
+   export function canAutoBillFinding(
+     f: { partId: number | null; noPartNeeded: boolean | null; issueType: string | null },
+     laborOnlyTypes: ReadonlySet<string>,
+   ): boolean;
+
+   export type RepairTotals = {
+     partsSubtotal: number; laborHours: number; laborSubtotal: number; grandTotal: number;
+   };
+
+   export function computeRepairedInFieldTotals(input: {
+     billed: Array<{ zoneRecordId: number; noPartNeeded: boolean; partPrice: string | null; quantity: number | null }>;
+     zones: Array<{ id: number; repairLaborHours: string | null; repairLaborManuallySet: boolean }>;
+     zoneFindings: Map<number, Array<{ issueType: string; quantity: number | null }>>;
+     catalog: LaborCatalog;
+     wcBaseLaborHours: number;
+     laborRate: number;
+   }): RepairTotals;
+   ```
+
+   `computeRepairedInFieldTotals`: for each unique `zoneRecordId` in `billed`, zone hours = the zone's
+   stored `repairLaborHours` when `repairLaborManuallySet`, otherwise
+   `computeAutoZoneRepairLaborHours(zoneFindings.get(id) ?? [], catalog)`. Each zone counts once.
+   `laborHours = wcBaseLaborHours + Σ zone hours`. `partsSubtotal =
+   computeWetCheckBillingPartsSubtotal(billed)`. `laborSubtotal = laborHours × laborRate`. No rounding
+   inside; callers `.toFixed(2)` exactly as they do today.
+
+   `catalogLaborHoursForFinding` = look up `catalog.get(resolveIssueTypeKey(f.issueType))`; missing
+   entry → 0; otherwise `catalogLaborHours(entry, f.quantity)` from `@workspace/shared`.
+
+2. **Repoint `_recomputeZoneRepairLaborIfAuto`** (`storage.ts:9792-9836`): keep the manual-override
+   early return and the write. Replace the inline loop (`:9811-9832`) with
+   `buildLaborCatalog(configs)` + `computeAutoZoneRepairLaborHours(findings, catalog)`.
+
+3. **Add one storage loader** in `storage.ts`, directly above `previewWetCheckSubmit`:
+
+   ```ts
+   private async _loadRepairTotalsInput(
+     exec: DbExecutor, wc: WetCheck, billed: WetCheckFinding[],
+   ): Promise<Omit<Parameters<typeof computeRepairedInFieldTotals>[0], "laborRate">>
+   ```
+
+   It reads: zone rows `{ id, repairLaborHours, repairLaborManuallySet }` where
+   `id IN (unique billed.zoneRecordId)` **and** `wetCheckId = wc.id`; every finding
+   `{ zoneRecordId, issueType, quantity }` in those zones; and `issueTypeConfigs` where
+   `companyId = wc.companyId`. `wcBaseLaborHours = parseFloat(String(wc.totalLaborHours ?? "0")) || 0`.
+   The `wetCheckId` and `companyId` filters are the tenancy guard (Rule 1); both are required.
+
+4. **Submit uses it** — in `_writeRepairedInFieldBilling`:
+   - Replace the guard at `:9507` with `!canAutoBillFinding(f, LABOR_ONLY_ISSUE_TYPES)`.
+   - Keep the per-zone recompute loop (`:9562-9564`) so zone rows stay persisted. Keep
+     `wcBaseLaborHours` (`:9552`); the append branch still reads it at `:9616`.
+   - Delete `lines` and its reduce (`:9527-9540`) and `newZoneRows` / `newZoneRepairHours` /
+     `newLaborHours` (`:9566-9575`). In their place, **after** the recompute loop:
+     ```ts
+     const totals = computeRepairedInFieldTotals({
+       ...(await this._loadRepairTotalsInput(tx, wc, repaired)),
+       laborRate: customerLaborRate,
+     });
+     const newPartsSubtotal = totals.partsSubtotal;
+     const newLaborHours = totals.laborHours;
+     ```
+     The new-WCB branch (`:9641-9690`) and the append branch keep consuming these two names unchanged.
+   - In `submitWetCheck`, replace the local `canAutoBill` (`:9269-9272`) with
+     `canAutoBillFinding(f, LABOR_ONLY_ISSUE_TYPES)`.
+
+5. **Preview uses it** — rewrite the body of `previewWetCheckSubmit` (`:9406-9446`):
+   - Rate: `parseFloat(String(cust?.laborRate ?? "45.00"))` — identical to submit (`:9301`).
+   - `repaired`: same filter as today (`:9413-9418`).
+   - `billable = repaired.filter(f => canAutoBillFinding(f, LABOR_ONLY_ISSUE_TYPES))`.
+   - When `autoBillEnabled && billable.length > 0`: `totals = computeRepairedInFieldTotals({
+     ...(await this._loadRepairTotalsInput(db, wc, billable)), laborRate })`. Otherwise all zeros.
+   - Return adds one field, `autoBilledLaborHours: totals.laborHours.toFixed(2)`. Add it to the
+     return type here and in `IStorage` (`storage.ts:1069-1078`). Every other field keeps its name.
+
+   The preview does not write. Auto zones are computed in memory, which is why the calculator
+   recomputes them rather than trusting the stored column.
+
+6. **Dialog** — `artifacts/irrigopro/src/pages/wet-checks/WetCheckDetail.tsx`:
+   - Add `autoBilledLaborHours: string` to `SubmitPreview` (`:129-137`).
+   - Replace the detail line and total (`:1278-1283`) with:
+     `{preview.autoBilledCount} finding(s) marked complete · Parts {formatCurrency(preview.autoBilledPartsTotal)} · Labor {preview.autoBilledLaborHours} hrs · {formatCurrency(preview.autoBilledLaborTotal)}`
+     and `Total: {formatCurrency(preview.autoBilledGrandTotal)}`. Import from `@/lib/format-currency`.
+     Keep both `data-testid`s.
+
+## Tests
+
+The repo is past its workflow cap. Register each new test file as a **validation command**, not a
+workflow.
+
+**New `artifacts/api-server/src/lib/wet-check-repair-totals.test.ts`** (no DB) **and `lib/shared/src/wet-check-labor.test.ts`**:
+1. 3× head_replacement at 0.25 → 0.75 h.
+2. Unknown issue type → 0; quantity 0 and null → counted as 1.
+3. Two findings in one zone → that zone counted once.
+4. Manual zone (2.00, manually set) → 2.00 used regardless of findings.
+5. `wcBaseLaborHours` 1.50 is added once across three zones.
+6. `catalogLaborHours` (in `lib/shared/src/wet-check-labor.test.ts`): ("0.25", 3) → 0.75; ("0.25", 0) → 0.25; (null, 2) → 0; ("abc", 2) → 0.
+7. `canAutoBillFinding`: part set → true; `noPartNeeded` → true; labor-only type → true; none → false.
+
+**New `artifacts/api-server/src/wet-check-submit-preview-parity.test.ts`** (real DB; copy the
+fixture pattern from `wc-labor-quantity-multiplier.test.ts`):
+8. Service wet check: zone A with head_replacement qty 3 + nozzle_replacement qty 2 (parts set),
+   zone B manual 1.25 h with leak_repair qty 1, one labor-only `noPartNeeded` finding. Call
+   `previewWetCheckSubmit`, then `submitWetCheck`. Assert preview `autoBilledPartsTotal`,
+   `autoBilledLaborTotal`, `autoBilledGrandTotal`, `autoBilledLaborHours` equal the created WCB's
+   `partsSubtotal`, `laborSubtotal`, `totalAmount`, `totalHours`, as strings.
+9. Same with a labor-only issue type (from `LABOR_ONLY_ISSUE_TYPES`) and no part/`noPartNeeded`:
+   counted in both.
+10. Inspection-mode wet check: preview returns `autoBilledCount 0` and all totals `"0.00"`.
+11. A preview for company B's wet check id called with company A's id → not found (tenancy).
+
+Existing tests that must still pass unchanged: `wc-labor-quantity-multiplier.test.ts`,
+`storage/zone-labor-auto-compute.test.ts`, `routes/wet-check-submit-autobill-error.test.ts`,
+`routes/wet-check-convert-creates-wcb.test.ts`, `wet-check-billing-view.test.ts`.
+
+## Acceptance checklist (Rule 7 — every line needs file:line + proof)
+
+- [ ] `wet-check-repair-totals.ts` exists; `computeRepairedInFieldTotals` is called from exactly two
+      places: `_writeRepairedInFieldBilling` and `previewWetCheckSubmit` (grep output).
+- [ ] No per-finding labor sum remains in `previewWetCheckSubmit` (grep output).
+- [ ] `canAutoBill` local in `submitWetCheck` is gone; guard at old `:9507` uses the shared predicate.
+- [ ] Tests 1-11 pass; the five existing files pass.
+- [ ] Screenshot: the Submit dialog on a service wet check with quantity > 1 findings, next to the
+      WC Snapshot created by submitting it, with matching Parts / Labor / Total.
+- [ ] Deploy status stated.

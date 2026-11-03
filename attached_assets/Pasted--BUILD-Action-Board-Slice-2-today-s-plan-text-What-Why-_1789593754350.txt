@@ -1,0 +1,114 @@
+# BUILD — Action Board, Slice 2: today's plan text
+
+## What & Why
+
+The board is how the manager reasons. The text is what he sends. His actual act at 5:45am is composing a message to Admiel and Brady, and a screen he has to read and translate has moved the work rather than removed it.
+
+This slice adds a generated plain-text plan and a copy button, on the page and on the phone. It is the deliverable the whole feature exists for.
+
+**Format is decided and specific.** The plan states a **do-not-exceed amount**, not a revenue figure. Crews get an instruction and a spending ceiling; they do not need to know what the work bills for. Properties that cannot be worked are listed by name and nothing more.
+
+## Prerequisite
+
+Ships after **Action Board Slice 1**. It renders from the same rows that page already computes — no new reads.
+
+## The format
+
+```
+Wed Sep 3
+
+Huntington Trails
+  DNE $6,000
+  2 work orders - WO-1042, WO-1051
+
+Ashford Park
+  DNE $2,000
+  1 work order - WO-1048
+  Wet check due
+
+Copper Ridge HOA
+  DNE $2,400
+  Wet check due - last was 24 Jul
+
+Sunrise Estates HOA
+  2 work orders - pre-approved,
+  outside the budget. Go ahead.
+  Wet check also due - INSPECTION
+  ONLY. Document, do not repair.
+  It comes back as an estimate.
+
+Not clear to work
+  Desert Springs CC
+  Stonebridge Villas
+
+Work orders are in the app
+under each property.
+```
+
+Rules that produce it:
+
+- One block per property in the **Clear to send** lane, in the lane's order.
+- Line 1 is the property name. Line 2 is `DNE $<headroom>`, omitted when the property's only work is pre-approved (there is no discretionary ceiling to state). Line 3 onward is what to do: work order count and numbers, and/or `Wet check due` with the last check's date.
+- A pre-approved property says so in words, because "go ahead while the app says 169%" needs an explanation the crew can read.
+- An over-budget property with a due wet check carries the inspection instruction in plain language.
+- **Not clear to work** is a bare list of property names. No amounts, no counts, no reasons — the manager knows why, the crew does not need to.
+- A closing line pointing at where the work orders live.
+- Wrapped to a width that survives a text message; no tables, no box drawing, no emoji.
+
+## Done looks like
+
+- The manager taps Copy and pastes a complete, readable plan into a message without editing it.
+- Every property that is clear to send appears with a do-not-exceed amount or an explicit pre-approved note.
+- Over-budget properties appear only as names under "Not clear to work", except one with a due wet check, which appears with the inspection instruction.
+- The text is editable before copying, so he can add crew names or drop a property.
+- The same text is produced on desktop and phone from the same function.
+- Copy works on iOS Safari, where clipboard access outside a user gesture is refused.
+
+## Out of scope
+
+- Assigning properties to crews. The manager writes the names himself; work orders carry `assignedTechnicianId` but nothing writes to it here.
+- Sending the message. No SMS integration, no share sheet beyond the platform's own.
+- Deep links into the app from the message. The plan names work orders and points at the app; a real deep link needs mobile routing that does not exist.
+- Saving or scheduling plans. Nothing is persisted; the text is generated on demand.
+- Any change to the board's rows, lanes, or reads.
+
+## Steps
+
+1. **Generate the text in one pure function.** Input: the rows Slice 1 already computed. Output: a string. No formatting decisions in the component, and one implementation shared by the desktop panel and the phone screen — two would drift, and this is the artefact people actually read.
+
+2. **Render the panel on the page.** Below the lanes, in a monospace block that shows the text exactly as it will paste, with a Copy button in its header.
+
+3. **Make it editable before copying.** A textarea seeded with the generated text. Edits are local and discarded on reload; regenerating replaces them, and the button that does so says it will.
+
+4. **Copy reliably.** Use the async clipboard API inside the click handler, with a `document.execCommand` fallback for older webviews, and show a confirmation. On failure, select the text so the user can copy manually rather than leaving them with a button that silently does nothing.
+
+5. **Add the phone screen.** The plan on its own screen with Copy and the platform share action, per the mockup. It is the screen the manager is actually on at 5:45am.
+
+6. **Format for a message, not a terminal.** Wrap long property names rather than truncating, keep indentation to two spaces, and never let a line depend on a monospace grid to be readable — it will be pasted into a proportional font.
+
+7. **Tests, registered as validation commands.** Golden-output tests for the generator across the cases: a property with only work orders, only a due wet check, both, a pre-approved property on an over-budget customer, an over-budget property with a due wet check, and one with neither. An empty board produces a plan that says so rather than a bare date. Assert the "Not clear to work" section contains names only — no dollar amounts — because that is a rule someone will helpfully break later. Assert desktop and phone call the same generator.
+
+8. **Verify by pasting.** The proof is a screenshot of the generated text pasted into a real message app, not of the panel.
+
+## Notes for the executor
+
+- The DNE line is the same number the board's do-not-exceed column shows, from the same function. If Slice 1 put that arithmetic in one place as instructed, this reads it; if it did not, fix that first rather than recomputing here.
+- Do not include work order dollar values in the text. The board shows them to the manager; the crew gets a ceiling and a task list. This was an explicit instruction.
+- "DNE" is the customer's wording and stays as an abbreviation — it is what the crews already understand.
+- An over-budget property with pre-approved work is the one case where the plan gives an instruction that contradicts the budget bar. Say why in the text, or a crew will call to check.
+
+## Definition of Done (attach proof — Rule 7)
+
+- [ ] `file:line` for the generator, the desktop panel, the phone screen, and the copy handler.
+- [ ] Screenshot of the plan pasted into a real message app on a phone.
+- [ ] Screenshot of the panel on the page with the Copy confirmation shown.
+- [ ] Golden-output test results for all six row cases plus the empty board.
+- [ ] Grep proof that only one plan generator exists.
+- [ ] Test output asserting no dollar amounts appear in the "Not clear to work" section.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+
+- `artifacts/irrigopro/src/pages/action-board.tsx` (from Slice 1)
+- The row/lane function from Slice 1 (the generator's input)
+- `attached_assets/` — the pasted Action Board mockup HTML, which carries the exact target format

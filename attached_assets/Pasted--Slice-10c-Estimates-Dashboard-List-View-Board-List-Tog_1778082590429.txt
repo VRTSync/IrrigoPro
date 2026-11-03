@@ -1,0 +1,301 @@
+# Slice 10c — Estimates Dashboard: List View + Board/List Toggle + Save-as-Draft
+
+**Date:** 2026-05-06
+**Status:** Ready for Replit implementation
+**Author:** Engineering planning
+**Decisions locked:**
+- Q1 = **List view is a polished sortable table with color-coded status badges,** not the legacy active/completed accordion. The old layout is gone after 10b; 10c builds the proper list view from scratch.
+- Q2 = **The Board/List toggle lives in the page header,** styled as a segmented control (`Board | List`). Selection persists across reloads via `localStorage` using the existing `safeGet`/`safeSet` helpers in `client/src/utils/safeStorage`.
+- Q3 = **Both views share filter state and data fetch.** `EstimateBoard` and `EstimateList` are sibling renderers under one `Estimates` page component; the Filter popover, the customer multi-select, and the status chips are owned by the page and passed down.
+- Q4 = **The wizard gets a Save-as-Draft button** alongside Submit for Approval. Save-as-Draft posts `internalStatus: 'draft'` to the existing `POST /api/estimates` endpoint; toast says "Saved to drafts"; the wizard closes; the new estimate appears in the Drafts column on next refetch.
+- Q5 = **Editing a draft from the board uses the same wizard,** opening on Step 2 (line items) like normal edit mode. The wizard's footer in edit mode now shows two CTAs side-by-side: "Save changes" (default) and "Submit for Approval" (which transitions the estimate from `draft` to `pending_approval` via `POST /api/estimates/:id/transition { action: 'submit_for_review' }`). For a non-draft edit, the footer is unchanged from Slice 8.
+- Q6 = **List view default sort: `estimateDate` desc.** Column headers click to re-sort: Customer (alpha), Amount (numeric), Status (lifecycle order), Date (chronological). Active sort indicator is a small chevron in the header.
+- Q7 = **Status badges in list view use the same column tints as the board.** This is the "color-coordinated" requirement — at-a-glance read between views is consistent.
+
+**Related:** Depends on Slice 10a (`lifecycleStatus`, `POST /api/estimates/:id/transition`) and Slice 10b (board view + filter popover). Hands off to Slice 10d (Resend flow) which now has a Resend action to wire on both views.
+
+---
+
+## Executive Summary
+
+Slice 10b shipped the board as the only view on `/estimates`. 10c adds the alternative — a polished, sortable list view with color-coded status badges that match the board's column tints — plus a segmented Board/List toggle in the page header that persists across reloads. The two views share data, filters, and modal entry points; switching is instant and stateless except for the toggle preference.
+
+10c also closes the wizard loop introduced by 10a's draft state. The estimate creation wizard gets a second CTA on Step 3 — "Save as draft" — that creates an estimate with `internalStatus: 'draft'`, lands it in the Drafts column without going through the billing manager review queue, and lets the irrigation manager come back to finish or submit it later. Editing a draft from the board opens the same wizard with a dual-CTA footer: "Save changes" keeps it as a draft; "Submit for Approval" transitions it to `pending_approval` via the new transition endpoint.
+
+**Slice 10c ships when:** the page renders both views and the toggle works on desktop and mobile; the toggle preference persists across reloads; both views show the same filtered data; the list view's column headers sort correctly; the wizard's "Save as draft" button creates a draft estimate that appears in the Drafts column; editing a draft surfaces the dual-CTA footer; submitting a draft via the dual-CTA correctly transitions it to Pending review; the Slice 7 queue and customer approval flow continue to work.
+
+---
+
+## Why Now
+
+Three motivations.
+
+First, **a list view is a strict requirement for users who manage many estimates at once.** A kanban is excellent for at-a-glance lifecycle reads but inefficient for sorting by amount, scanning a single customer's full history, or comparing dollar values across statuses. The list view fills that gap. Color-coordinated badges keep the lifecycle-at-a-glance benefit when scanning the table.
+
+Second, **drafts are the wizard's missing exit.** Today the only way to close the wizard with unsaved work is to discard. Field operators commonly start an estimate at a job site and finish it later from a desk; without a Save-as-draft path, they re-enter the data twice. 10a made `'draft'` a real state; 10c is what makes that state reachable from the UI.
+
+Third, **the dual-CTA footer in edit-mode-on-a-draft is the bridge between drafts and the rest of the lifecycle.** Without it, a draft is a one-way street (you'd have to do a second edit pass after submitting). The dual-CTA gives the irrigation manager the choice on each save.
+
+---
+
+## What `/estimates` Becomes
+
+After Slice 10c, `/estimates` has a Board/List toggle in the header. Both views render the same filtered estimate set.
+
+**Page header strip** (replaces the 10b strip):
+- Title "Estimates" + subtitle "{N} active · last 90 days".
+- Right side, in order: Board/List toggle (segmented control), Filter button, `+ New Estimate` button.
+
+**Board view** (10b):
+- Unchanged from Slice 10b. Filter, columns, expired strip, column-expand all work the same.
+
+**List view** (new in 10c):
+- A single sortable table replaces the column grid. Columns:
+  | Column | Behaviour |
+  |---|---|
+  | Customer | Customer name + project name in muted secondary type below. Click sort: alpha. |
+  | Amount | `$X,XXX`. Right-aligned. Click sort: numeric desc/asc. |
+  | Status | Color-coded badge using same column tints as board. Click sort: lifecycle order (Drafts → Pending review → Sent → Approved → Rejected → Expired). |
+  | Age | `Nd` / `Nw`. Click sort: chronological. Default sort. |
+  | Actions | Three-dot menu — "Open", "Edit", and (for expired only) "Resend" placeholder (10d wires it). |
+- Row hover: `bg-gray-50`. Click anywhere on a row except the actions menu → opens the detail modal (same as board cards).
+- Default sort: Date desc. Sort indicator is a small chevron next to the active column header.
+- Empty state: centered placeholder with "+ New Estimate" link.
+
+**Both views share**:
+- The same `useQuery` for `/api/estimates`.
+- The same Filter popover (Customer multi-select + Status chips, identical from 10b).
+- The same `EstimateDetailModal` open-flow.
+- The same expired callout — but the rendering shape differs:
+  - Board: horizontal callout strip below columns (10b).
+  - List: rows with `lifecycleStatus = 'expired'` appear inline in the table with their badge styled with a strikethrough text-decoration as in the visual mock.
+
+**Wizard changes**:
+- **Step 3 footer adds a "Save as draft" secondary button** alongside "Submit for Approval". Layout: Back (left), Save as draft (right-secondary), Submit for Approval (right-primary).
+- "Save as draft" calls the existing `POST /api/estimates` with `internalStatus: 'draft'` in the payload. Toast "Saved to drafts." Wizard closes.
+- **Edit mode footer**: when the loaded estimate has `lifecycleStatus === 'draft'`, the footer shows two primary-styled CTAs: "Save changes" (left) and "Submit for Approval" (right). Save changes does a `PUT /api/estimates/:id` with the current edits, status unchanged. Submit for Approval does the same `PUT` plus a follow-up `POST /api/estimates/:id/transition { action: 'submit_for_review' }`. Toast on the latter: "Submitted for review."
+- For estimates not in `draft` status, edit-mode footer is unchanged from Slice 8 (single primary "Save changes").
+
+**Toggle behavior**:
+- Stored in `localStorage` under key `estimates_view_preference` (string: `'board'` | `'list'`). Default: `'board'`.
+- Read at page mount via `safeGet('estimates_view_preference', 'board')`.
+- Written on every toggle click via `safeSet('estimates_view_preference', value)`.
+- The toggle is a segmented control: two pill-shaped buttons inside a rounded container; selected button gets `bg-gray-100`, unselected is plain.
+
+---
+
+## Scope of Slice 10c
+
+### In Scope
+
+1. New component `client/src/components/estimates/list/estimate-list.tsx` — a sortable table view rendering the same `Estimate[]` array the board renders.
+
+2. Co-located component files under `client/src/components/estimates/list/`:
+   - `estimate-list-row.tsx` — single row component with hover, click-through, three-dot menu.
+   - `estimate-list-status-badge.tsx` — the color-coded badge component (also exported and reused if needed). Maps `LifecycleStatus` → tint + text.
+
+3. New component `client/src/components/estimates/board-list-toggle.tsx` — segmented control reading and writing `localStorage` via `safeGet`/`safeSet`. Renders two buttons, fires `onChange(view)`.
+
+4. **Update** `client/src/pages/estimates.tsx`:
+   - Add `view` state initialized from `safeGet('estimates_view_preference', 'board')`.
+   - Add the toggle to the header strip (between subtitle and Filter button).
+   - Conditionally render `<EstimateBoard ...>` or `<EstimateList ...>` based on `view`.
+   - Lift the Filter state from `EstimateBoard` to the page level so `EstimateList` reads the same filters. Pass filters down as props to both.
+   - Lift the customer query to the page level for the same reason.
+
+5. **Update** `client/src/components/estimates/board/estimate-board.tsx` to accept filters as a prop instead of owning them.
+
+6. **Update** the wizard:
+   - `client/src/components/estimates/wizard/estimate-wizard-review-step.tsx` (Step 3) gains a "Save as draft" secondary button.
+   - The wizard's submit handler (in `estimate-wizard.tsx`) gains a `mode: 'draft' | 'submit'` argument and sets `internalStatus` accordingly in the POST payload.
+   - For edit mode on a draft estimate, the wizard's footer renders both CTAs. The Submit-for-Approval path does the PUT + transition sequence.
+
+7. **Update** `client/src/components/estimates/estimate-detail-modal.tsx` (or whatever opens for non-draft cards) so that drafts get a clear "Continue editing" affordance that opens the wizard in edit mode. This may already exist — verify and adjust copy if needed.
+
+8. **List-view sort logic**:
+   - Sort state: `{ field: 'customer' | 'amount' | 'status' | 'date', direction: 'asc' | 'desc' }`.
+   - Default: `{ field: 'date', direction: 'desc' }`.
+   - Click on a header: if active field, toggle direction; if not, set field to clicked + direction to `desc` (or `asc` for alpha sorts).
+   - Lifecycle sort order constant in `shared/lifecycle.ts`: `LIFECYCLE_STATUSES` already provides this; reuse.
+
+9. **Visual language matching the visual mock**:
+   - Status badges: pill-shaped, `text-xs font-medium px-2 py-0.5 rounded-full`. Tint comes from a small constant map.
+   - Expired badge: same color but with `text-decoration: line-through` per the mock.
+   - Row hover: `hover:bg-gray-50`.
+   - Header row: `text-xs text-gray-500 font-medium uppercase tracking-wider` with `bg-gray-50` background.
+   - Sort indicator: lucide `ChevronDown` / `ChevronUp` 12px next to the active column header.
+
+10. **Mobile (<768px)**: list view collapses each row to a stacked card layout (one card per estimate with all fields visible). Sort headers hide; instead, a small "Sort by" dropdown appears above the list with the four options.
+
+11. **Three-dot menu** (per row) using the existing shadcn `DropdownMenu`:
+    - "Open" — opens detail modal.
+    - "Edit" — opens wizard in edit mode.
+    - "Resend" — only visible if `lifecycleStatus === 'expired'`. Disabled placeholder in 10c (wired in 10d). Tooltip "Available in next update".
+
+### Out of Scope
+
+- The actual Resend wiring (10d). The menu item exists, disabled.
+- A search input. Filter is the only narrowing mechanism in 10c.
+- URL persistence of view preference, filters, or sort. localStorage only for view; filters and sort stay in component memory.
+- Any backend changes. 10c is purely UI on top of 10a's data shape and 10b's components.
+- Bulk actions (select multiple rows, bulk-resend, bulk-archive). Future slice.
+- Pagination. Today's `/api/estimates` returns all estimates from the last 90 days; if the list grows past a few hundred and rendering becomes slow, virtualization can be added in a future polish slice.
+- Any change to the irrigation-manager-specific page (`estimates-manager.tsx`).
+
+---
+
+## UI Specification
+
+### Page header strip (updated from 10b)
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ Estimates                          [Board│List] [Filter] [+ New]    │
+│ 28 active · last 90 days                                             │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+The toggle is the new addition. Filter button and `+ New` retain their 10b behavior.
+
+### Toggle (segmented control)
+
+- Container: `inline-flex border border-gray-200 rounded-md p-0.5 bg-white`.
+- Buttons: `text-xs px-2.5 py-1 rounded-sm transition-colors`.
+- Selected: `bg-gray-100 text-gray-900 font-medium`.
+- Unselected: `text-gray-600 hover:text-gray-900`.
+- Two buttons total: "Board", "List".
+
+### List view table
+
+- Container: `bg-white border border-gray-200 rounded-md overflow-hidden`.
+- Header row: `grid grid-cols-[1fr_100px_140px_60px_40px] gap-3 px-4 py-2 bg-gray-50 border-b border-gray-200`.
+- Header cells: `text-xs font-medium text-gray-500` with optional sort indicator.
+- Data rows: same `grid` layout, `px-4 py-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer`.
+- Customer cell: customer name in `text-sm font-medium`, project name in `text-xs text-gray-500` below.
+- Amount cell: `text-sm font-medium tabular-nums`.
+- Status cell: status badge (see below), `justify-self: start`.
+- Age cell: `text-xs text-gray-500 text-right tabular-nums`.
+- Actions cell: three-dot icon button.
+
+### Status badge (`estimate-list-status-badge.tsx`)
+
+```ts
+const STATUS_TINTS: Record<LifecycleStatus, { bg: string; text: string; label: string }> = {
+  draft:          { bg: 'bg-gray-100',  text: 'text-gray-700',  label: 'Draft' },
+  pending_review: { bg: 'bg-amber-50',  text: 'text-amber-700', label: 'Pending review' },
+  sent:           { bg: 'bg-blue-50',   text: 'text-blue-700',  label: 'Sent' },
+  approved:       { bg: 'bg-green-50',  text: 'text-green-700', label: 'Approved' },
+  rejected:       { bg: 'bg-red-50',    text: 'text-red-700',   label: 'Rejected' },
+  expired:        { bg: 'bg-gray-100',  text: 'text-gray-500',  label: 'Expired' },  // line-through in render
+};
+```
+
+Render: `<span class="text-xs font-medium px-2 py-0.5 rounded-full {bg} {text} {expired ? 'line-through' : ''}">{label}</span>`.
+
+### Wizard Step 3 footer (updated)
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ ← Back to Line Items     [Save as draft]    [Submit for Approval]   │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+- "Save as draft" is `variant="outline"` (secondary).
+- "Submit for Approval" remains primary (blue-600).
+- On mobile, both right buttons stack vertically and become full-width.
+
+### Wizard edit-mode footer (updated for drafts only)
+
+When `lifecycleStatus === 'draft'`:
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ Cancel                   [Save changes]     [Submit for Approval]   │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+Save changes is `variant="outline"`; Submit for Approval is primary.
+
+When `lifecycleStatus !== 'draft'` (existing Slice 8 behavior):
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ Cancel                                          [Save changes]      │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## API & Data
+
+**No new endpoints.** 10c uses:
+
+- `POST /api/estimates` — existing endpoint. The wizard now passes `internalStatus: 'draft'` for the Save-as-draft path. (Slice 10a confirmed this is accepted.)
+- `PUT /api/estimates/:id` — existing endpoint, used for both Save changes paths (draft and non-draft).
+- `POST /api/estimates/:id/transition` — added in 10a. Used by the dual-CTA "Submit for Approval" path with `{ action: 'submit_for_review' }`.
+
+The `safeGet`/`safeSet` helpers in `client/src/utils/safeStorage` are used for the toggle preference. Add the key `estimates_view_preference` to whatever constants module already lists known localStorage keys (if such a module exists).
+
+---
+
+## Visual Language
+
+Visual language continues to match the wet-check redesign and Slices 8 and 10b:
+
+- **Tint mapping** is defined once and shared between board column headers and list status badges. Slice 10c centralizes this in `shared/lifecycle.ts` (alongside `LIFECYCLE_STATUSES`) so both files import from one source.
+- **Typography:** list rows use `text-sm` for primary content, `text-xs` for muted secondary content, `tabular-nums` on numeric columns to keep alignment.
+- **Hover/focus:** rows lift via `hover:bg-gray-50`; rows are `tabindex={0}` and respond to Enter as clicks.
+- **Status badge** uses the same tint constants as board column headers; only the visual treatment (pill in list, header bar in board) differs.
+- **Spacing:** `gap-3` between table columns, `py-3` row padding, `px-4` row padding.
+
+---
+
+## Risks and Rollback
+
+- **Sort state lost on view switch.** Switching from Board to List loses any in-progress List sort if the list state is unmounted. Mitigation: keep the list's sort state at the page level (or in `EstimateList`) so view switching doesn't discard it. Alternative: don't unmount, just `display: none` — but that hurts initial render.
+- **Wizard's dual-CTA footer ambiguous on edit-mode-of-draft.** A user may not realize "Submit for Approval" is the action that progresses the estimate. Mitigation: add helper text below the buttons in edit-mode-of-draft: "Save changes keeps this as a draft. Submit for Approval sends it to the billing manager." Small `text-xs text-gray-500`.
+- **localStorage key collision.** If `estimates_view_preference` clashes with another key, the existing `safeGet`/`safeSet` defensive parsing should still keep things from blowing up. Verify by listing existing keys (or just choose a clearly namespaced key).
+- **Status sort by lifecycle order is unintuitive.** Users may expect alphabetical. Mitigation: keep lifecycle order as the default since it tells a flow story (drafts → ... → rejected); a future polish slice can add an alpha-vs-lifecycle toggle in the column header if anyone asks.
+- **Edit-from-draft regression risk.** The dual-CTA path performs PUT + transition in sequence. If the transition fails after the PUT succeeds, the user sees a "Saved" toast and then a "Submit failed" toast — confusing. Mitigation: do the transition first if the user clicked Submit for Approval; only do the PUT after the transition validates the row. Or do them as a single composite request — but the simplest is: do PUT first, wait, then call transition; on transition failure, show a toast that says "Saved as draft, but couldn't submit for review. Try again." The state is recoverable.
+- **Mobile list view at <380px viewport.** Stacked cards work, but if the customer name is long, the row gets tall. Mitigation: truncate customer name to 30 chars on mobile cards.
+
+**Rollback:** `git revert` the slice commit. Existing 10b board view still works; the toggle and list view simply disappear; the wizard's Save-as-draft button disappears with the wizard reverting to single-CTA. Drafts created before the revert remain in the database with `internal_status = 'draft'` — they'll show in the board's Drafts column from 10b but can no longer be created from the UI until 10c lands again. Acceptable rollback state.
+
+---
+
+## Migration / Rollout
+
+Single deploy. The page swaps to the dual-view layout and the wizard gets the new footer. No database migration. No flag.
+
+There is one minor data-side consideration: any drafts that exist when 10c is deployed are immediately accessible — but if no drafts exist (because the wizard was the only entry point and pre-10c the wizard didn't allow drafts), the Drafts column will be empty until users start saving drafts. This is fine.
+
+---
+
+## Success Criteria
+
+Slice 10c ships when, in order:
+
+1. The page header strip on `/estimates` shows a Board/List segmented control between the subtitle and the Filter button.
+2. Selecting "List" renders the new sortable table; selecting "Board" renders the 10b board.
+3. The selected view persists across page reloads via `localStorage`.
+4. Both views show the same filtered estimate set; toggling Filter applies to whichever view is active and to the inactive view when re-rendered.
+5. The list view's column headers click-sort correctly: Customer (alpha asc/desc), Amount (numeric asc/desc), Status (lifecycle order forward/reverse), Date (chronological asc/desc).
+6. Sort indicator (chevron) renders next to the active column header.
+7. Status badges in list view use the exact same tints as the board columns, including line-through styling for `expired`.
+8. The list view's row click opens the existing `EstimateDetailModal`; the three-dot menu offers Open, Edit, and (for expired) Resend (placeholder).
+9. The wizard's Step 3 has a "Save as draft" secondary button that creates an estimate with `internalStatus: 'draft'`.
+10. On Save-as-draft success, a toast says "Saved to drafts" and the wizard closes; the Drafts column on the board (or list view) shows the new estimate after refetch.
+11. Editing a draft via the wizard surfaces the dual-CTA footer ("Save changes" + "Submit for Approval"). The latter performs PUT + transition correctly; the toast on success says "Submitted for review"; the estimate moves from Drafts to Pending review.
+12. Editing a non-draft estimate retains the Slice 8 single-CTA footer.
+13. Mobile (<768px) list view shows stacked cards with a "Sort by" dropdown above the list.
+14. The Slice 7 pending-approval queue still works.
+15. The customer-facing approval-by-link flow still works against an estimate created and submitted via the new draft → review path.
+
+---
+
+## What This Unblocks
+
+- **Slice 10d** consumes the now-built Resend menu items in the list view's three-dot menu and the placeholder buttons in the board's expired strip. 10d wires both to `POST /api/estimates/:id/transition { action: 'resend' }` plus a confirm dialog. The endpoint exists from 10a.
+- A future **search slice** can add a search input next to the Filter button and pipe the term into both views' filter pipelines simultaneously.
+- A future **bulk actions slice** can add row-checkboxes to the list view and a bulk-resend or bulk-archive bar that appears when one or more rows are selected.
+- A future **per-column sort options slice** can extend the list view's sort UI to the board (e.g. show approved by amount-desc within the column).

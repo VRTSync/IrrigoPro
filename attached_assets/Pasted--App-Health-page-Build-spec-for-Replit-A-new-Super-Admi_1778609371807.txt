@@ -1,0 +1,323 @@
+# App Health page — Build spec for Replit
+
+A new Super Admin page at `/super-admin/app-health` that gives a single live view of every company, user, sync queue, integration, and crash across IrrigoPro. Designed to surface problems before customers call.
+
+Reference design: `design-app-health-mockup.html` (open in browser).
+
+---
+
+## 1. Route & file layout
+
+Create:
+
+```
+artifacts/irrigopro/src/pages/super-admin-app-health.tsx
+artifacts/irrigopro/src/components/app-health/
+  ├─ status-hero.tsx           // top KPI strip + system status pulse
+  ├─ active-incidents.tsx      // banner(s) for open incidents
+  ├─ overview-tab.tsx          // default tab
+  ├─ crashes-tab.tsx
+  ├─ companies-tab.tsx
+  ├─ users-tab.tsx
+  ├─ sync-tab.tsx
+  ├─ integrations-tab.tsx
+  ├─ audit-tab.tsx
+  ├─ crash-detail-drawer.tsx
+  ├─ company-detail-drawer.tsx
+  ├─ health-badge.tsx          // shared (ok/warn/bad/crit)
+  └─ health-score-bar.tsx      // shared (0–100 colored bar)
+```
+
+Wire route in the same router used by `super-admin-dashboard.tsx`. Guard with `role === 'super_admin'`.
+
+Add nav entry under "Operations → App Health" in the super-admin sidebar (whatever component renders the existing super-admin nav).
+
+---
+
+## 2. Page structure (top → bottom)
+
+1. **Page header** — title "App Health", subtitle, timeframe selector (24h / 7d / 30d / 90d), `Export` button, `Acknowledge all` primary button.
+2. **Status hero** — 6 tiles in one row:
+   - System status (pulse + label + active incident count)
+   - Uptime % (vs. SLO 99.9)
+   - Active users now
+   - Errors / period
+   - API p95
+   - Sync queue depth (+ "N stuck > 1h")
+3. **Active incident banner** — only renders if any incident has `status='open'`. Red card with severity, summary, owner, started-at, "Open runbook" link.
+4. **Tab nav** — Overview · Crashes & Errors · Companies · Users · Sync & Uploads · Integrations · Audit Log. Each tab shows a count pill (e.g., "23 new") pulled from the corresponding endpoint.
+5. **Tab panel** — switches content below.
+
+Use existing `Card`, `Badge`, `Button`, `Tabs`, `Input`, `Select`, `Table` from `@/components/ui/*`. Keep visual style consistent with `admin-dashboard.tsx`.
+
+---
+
+## 3. Tab content
+
+### 3.1 Overview
+- **Errors & performance chart** (8-col): stacked bars for requests vs. errors vs. warnings, hourly buckets. Use `recharts` `<ComposedChart>`.
+- **Companies needing attention** (4-col): top 4 by lowest health score with badges.
+- **Top errors today** (7-col): table linking to crash detail drawer.
+- **Recent critical events feed** (5-col): chronological list of incidents, deploys, lockouts, regressions.
+- **IrrigoPro operational health** (12-col): 6 domain tiles — photo upload success %, wet-checks synced %, PDF render p95, invoice gen failures, offline sessions, map tile errors.
+
+### 3.2 Crashes & Errors
+Filterable table grouped by error fingerprint (Sentry-style):
+- Columns: severity bar · error message + file:line · component / version · # companies · events · users · first seen · last seen · status.
+- Filters: severity, company, version, status (open / muted / resolved / snoozed).
+- Bulk actions: mute / assign / resolve.
+- Row click → **Crash detail drawer** (right slide-in):
+  - Header: error message, badges (NEW / REGRESSION / version / file)
+  - Stats row: events, users, first seen, last seen
+  - Stack trace (monospace, dark bg)
+  - Breadcrumbs from one example session
+  - Suggested fix block (LLM-generated, optional v2)
+  - Actions: Mute, Assign, Create ticket, Resolve
+
+### 3.3 Companies
+Table of every tenant with health score + operational metrics:
+- Columns: company name + locale/size · plan · health score (0–100 with colored bar) · active now · total users · errors 24h · sync queue · photo upload % · storage · app version · last activity.
+- Sort default: health ascending (worst first).
+- Row click → **Company detail drawer**:
+  - Top: company badges, plan, joined date, health
+  - Stat row: active now, errors 24h, sync queue, photo OK%
+  - "Top issues for this company" feed (linked to crash records)
+  - Users table for this company (status, version, errors, last seen)
+  - Resource usage tiles (storage, API calls 24h, last invoice)
+  - Actions: Email admin, Open as company admin (impersonate), Throttle API, Force version upgrade
+
+### 3.4 Users
+Filterable user table:
+- Columns: user · company · role · status (active / offline / stuck / locked / syncing) · device / OS · app version (flag if behind) · errors 24h · sync conflicts · failed uploads · last seen.
+- Filters: company, role, status.
+- Row click → user detail drawer (sessions, devices, recent errors, recent actions).
+
+### 3.5 Sync & Uploads (IrrigoPro-specific)
+Two columns:
+- **Offline sync queue card** — counters (queued / stuck > 1h / conflicts / avg age) + table of stuck items (type, user, age, status).
+- **Photo upload pipeline card** — per-step success rates (Captured → Device DB, Device DB → S3, S3 → CDN, EXIF parse) + an inline incident card when S3 is degraded.
+
+This is the tab that should feel uniquely "IrrigoPro" — not a generic dashboard. The field-first, offline-capable nature of the app means sync and photo upload health are the two metrics that matter most.
+
+### 3.6 Integrations
+Table of every external dependency:
+- Stripe (subscriptions), Mapbox (GIS), AWS S3 (photos), SendGrid (email), Twilio (SMS), Postgres, Redis, Puppeteer (PDF worker).
+- Columns: service, purpose, status badge, success 24h, p95, last failure.
+
+### 3.7 Audit Log
+Stream of high-trust events across all tenants:
+- Columns: when · actor · action · target · company · IP · result.
+- Filter by actor, action type, severity, time range.
+- Always-included events: auth.login.failed, deploy, company.subscription.update, integration.error, role.change, data.export, impersonation.start.
+
+---
+
+## 4. Data model (new tables)
+
+### `app_events` (the firehose — all telemetry)
+```sql
+CREATE TABLE app_events (
+  id              BIGSERIAL PRIMARY KEY,
+  occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  company_id      INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+  user_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  session_id      TEXT,
+  type            TEXT NOT NULL,            -- 'error' | 'crash' | 'warning' | 'metric' | 'audit'
+  severity        TEXT NOT NULL,            -- 'crit' | 'error' | 'warn' | 'info'
+  source          TEXT NOT NULL,            -- 'web' | 'sw' | 'api' | 'worker' | 'integration'
+  component       TEXT,                     -- e.g. 'wet-checks.tsx'
+  app_version     TEXT,
+  message         TEXT NOT NULL,
+  fingerprint     TEXT,                     -- group key for crashes
+  stack           TEXT,
+  breadcrumbs     JSONB,
+  context         JSONB,                    -- device, OS, URL, route, request_id, etc.
+  resolved_at     TIMESTAMPTZ,
+  resolved_by     INTEGER REFERENCES users(id)
+);
+CREATE INDEX ON app_events (occurred_at DESC);
+CREATE INDEX ON app_events (fingerprint, occurred_at DESC);
+CREATE INDEX ON app_events (company_id, occurred_at DESC);
+CREATE INDEX ON app_events (severity, occurred_at DESC) WHERE resolved_at IS NULL;
+```
+
+### `app_event_groups` (materialized rollup per fingerprint — fast list view)
+```sql
+CREATE TABLE app_event_groups (
+  fingerprint     TEXT PRIMARY KEY,
+  title           TEXT NOT NULL,
+  severity        TEXT NOT NULL,
+  component       TEXT,
+  app_version     TEXT,
+  first_seen_at   TIMESTAMPTZ NOT NULL,
+  last_seen_at    TIMESTAMPTZ NOT NULL,
+  event_count     BIGINT NOT NULL DEFAULT 0,
+  user_count      INTEGER NOT NULL DEFAULT 0,
+  company_count   INTEGER NOT NULL DEFAULT 0,
+  status          TEXT NOT NULL DEFAULT 'open',  -- 'open' | 'muted' | 'snoozed' | 'resolved'
+  assignee_id     INTEGER REFERENCES users(id),
+  is_regression   BOOLEAN DEFAULT FALSE,
+  resolved_at     TIMESTAMPTZ
+);
+```
+A background job rolls `app_events` into this every 1–5 minutes.
+
+### `incidents` (P1–P4 banner objects)
+```sql
+CREATE TABLE incidents (
+  id              SERIAL PRIMARY KEY,
+  severity        TEXT NOT NULL,            -- 'P1' | 'P2' | 'P3' | 'P4'
+  title           TEXT NOT NULL,
+  summary         TEXT,
+  status          TEXT NOT NULL DEFAULT 'open',  -- 'open' | 'mitigated' | 'resolved'
+  trigger         TEXT,                     -- 'auto' | 'manual'
+  rule_id         TEXT,                     -- which detection rule fired it
+  owner_id        INTEGER REFERENCES users(id),
+  started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  mitigated_at    TIMESTAMPTZ,
+  resolved_at     TIMESTAMPTZ,
+  affected_companies INTEGER[] DEFAULT '{}',
+  affected_users  INTEGER DEFAULT 0,
+  runbook_url     TEXT
+);
+```
+
+### `audit_log`
+```sql
+CREATE TABLE audit_log (
+  id              BIGSERIAL PRIMARY KEY,
+  occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  actor_id        INTEGER,                  -- nullable for 'system'
+  actor_type      TEXT NOT NULL,            -- 'user' | 'system' | 'integration'
+  company_id      INTEGER REFERENCES companies(id),
+  action          TEXT NOT NULL,            -- 'auth.login.failed', 'deploy.production', ...
+  target          TEXT,
+  ip              INET,
+  user_agent      TEXT,
+  result          TEXT NOT NULL,            -- 'ok' | 'warn' | 'error' | 'locked'
+  metadata        JSONB
+);
+CREATE INDEX ON audit_log (occurred_at DESC);
+CREATE INDEX ON audit_log (company_id, occurred_at DESC);
+```
+
+### Derived health score
+Computed per company on-the-fly (cache 60s):
+```
+health = 100
+  - min(40, errors_24h_per_active_user * 4)
+  - min(25, sync_queue_age_minutes / 6)
+  - min(20, (100 - photo_upload_success_pct))
+  - min(15, (api_p95_ms - 500) / 50)   # only penalize over 500ms
+```
+Cap [0, 100]. Bucket: `>= 85 ok`, `70–84 warn`, `50–69 bad`, `< 50 crit`.
+
+---
+
+## 5. API endpoints (Express, under `/api/admin/app-health/`)
+
+All endpoints require `requireSuperAdmin` middleware.
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/summary?window=24h` | `{ status, uptime_pct, active_users, errors, api_p95_ms, sync_queue, incidents_open, kpis_delta }` |
+| GET | `/incidents?status=open` | `Incident[]` |
+| POST | `/incidents/:id/ack` | mark owner, status='mitigated' |
+| GET | `/timeseries?metric=errors&window=24h&bucket=1h` | `{ buckets: [{ ts, requests, errors, warnings }] }` |
+| GET | `/crashes?status=open&severity=&company_id=&version=&q=&limit=50` | `AppEventGroup[]` |
+| GET | `/crashes/:fingerprint` | group + recent 50 `app_events` + breadcrumbs |
+| POST | `/crashes/:fingerprint/status` | `{ status: 'muted' \| 'resolved' \| 'snoozed', assignee_id? }` |
+| GET | `/companies` | `CompanyHealth[]` — joins companies + computed metrics |
+| GET | `/companies/:id` | company detail + top issues + users + resource usage |
+| GET | `/users?company_id=&role=&status=&q=` | `UserHealth[]` |
+| GET | `/users/:id` | user detail + sessions + devices + recent errors |
+| GET | `/sync/queue?company_id=` | `{ counters, items }` |
+| GET | `/uploads/photos` | per-step success rates last hour |
+| GET | `/integrations` | per-service status |
+| GET | `/audit?q=&actor=&action=&from=&to=` | paginated audit rows |
+| POST | `/export?tab=crashes&format=csv` | streamed CSV |
+
+Add a **websocket / SSE channel** at `/api/admin/app-health/stream` for the live KPI refresh (active users, queue depth, open incidents). If SSE is overkill for v1, just poll `/summary` every 15s with TanStack Query.
+
+---
+
+## 6. Ingestion (where events come from)
+
+Wire these to write into `app_events`:
+
+- **Client unhandled errors** — install a `window.onerror` + `window.onunhandledrejection` handler in `src/sw.ts` or a top-level provider. POST to `/api/telemetry/event`. Include `app_version` (from build), `route`, `session_id`, device info, breadcrumbs from a ring buffer.
+- **API errors** — Express error middleware logs every 5xx + slow request (> 2s).
+- **Service worker / sync queue** — on retry > 3 or age > 1h, emit `sync.stuck` event.
+- **Photo uploader** — emit `photo.upload.failed` with S3 status code and retry count.
+- **Integration calls** — wrap Stripe / Mapbox / SendGrid / Twilio / S3 / Puppeteer calls in a `withTelemetry(name, fn)` helper that records success/failure + latency.
+- **Auth** — already partly there; ensure `auth.login.failed`, `auth.locked`, `auth.impersonation.start` write to `audit_log`.
+- **Deploys** — CI step posts to `/api/admin/deploys` which writes a `deploy.production` audit entry and primes regression detection.
+
+PII rule: scrub anything resembling email, phone, address, SSN, customer name from `message`, `stack`, `breadcrumbs`, and `context` before insert. Add allowlist of fields permitted in `context`.
+
+---
+
+## 7. Detection rules (turn raw events into incidents)
+
+Background job, runs every 60s. Each rule that fires inserts/updates an `incidents` row:
+
+| Rule id | Condition | Severity |
+|---|---|---|
+| `photo_upload_failure_rate` | photo failure % > 5 over last 30m and > 50 attempts | P2 |
+| `error_rate_spike` | total errors last 15m > 3× rolling 24h baseline | P2 |
+| `sync_queue_stuck` | any company has ≥ 10 records stuck > 1h | P3 |
+| `api_p95_breach` | p95 > 1500ms over 10m | P3 |
+| `regression_after_deploy` | new fingerprint with > 5 users within 30m of deploy | P2 |
+| `integration_down` | any service success% < 95 over 10m | P2/P3 by service |
+| `auth_brute_force` | > 10 failed logins for one user in 10m | P3 + auto-lock |
+| `tenant_isolated_failure` | one company has > 100× error rate vs. mean | P2 |
+
+Auto-resolve: when condition has been false for 10 consecutive minutes, set `mitigated_at`; after 30m set `resolved_at`.
+
+---
+
+## 8. Real-time / freshness
+
+- `summary`, `incidents`, `companies` list — poll every 15s via TanStack Query.
+- Charts — refresh every 60s.
+- Drawer detail — refresh on open only; manual reload button.
+- Use `staleTime: 10_000` to keep tab-switches snappy.
+
+---
+
+## 9. Permissions
+
+- Page route guarded by `role === 'super_admin'`.
+- All `/api/admin/app-health/*` endpoints check the same on the server.
+- Impersonation (Company detail drawer "Open as company admin") logs an `audit_log` entry with `actor_id`, `target=company_admin_id`, `result='ok'`. Show a persistent banner while impersonating.
+- "Throttle API" and "Force version upgrade" actions are gated behind a confirmation modal and a second audit entry.
+
+---
+
+## 10. Definition of done
+
+- All seven tabs render with real data from new endpoints.
+- One synthetic crash from the frontend (`throw new Error('test')`) shows up in Crashes within 60s with a stack trace, gets grouped on subsequent throws, and can be resolved from the UI.
+- One synthetic incident rule (e.g., set `photo_upload_failure_rate` threshold to 1% on a feature flag, then upload junk to S3) opens an incident banner that auto-resolves when the noise stops.
+- Per-company drill-down shows accurate user list, error count, sync queue, and storage for at least three seeded companies.
+- Audit log captures: login failure (×N), deploy, impersonation start, subscription change, integration failure.
+- Page TTI < 1.5s on a fresh load.
+
+---
+
+## 11. Phased rollout (so you don't have to build all of it before shipping)
+
+**Phase 1 — Crash storage (this week)**
+Tables: `app_events`, `app_event_groups`. Frontend error handler → endpoint. Crashes tab + drawer. Just storage + display, no rules.
+
+**Phase 2 — System status (next week)**
+Status hero, Companies tab with health score, Audit log tab (re-use existing audit data). Polling, no live stream.
+
+**Phase 3 — Sync & uploads tab + Users tab**
+Wire service worker telemetry and photo uploader telemetry. This is where you start saving support time.
+
+**Phase 4 — Incidents engine**
+Detection rules, banners, auto-resolve. Pager / email hookup is optional v2.
+
+**Phase 5 — Integrations + actions**
+Per-service status, impersonation, throttle, force-upgrade controls. Runbook URLs.

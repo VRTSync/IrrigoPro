@@ -1,0 +1,246 @@
+# Command Center Inline Edit — Slice 2: WCB Activity Log
+
+**Source:** follow-up from Slice 1 (Task #1093). The Slice 1 WCB rate-mode recompute method (`recomputeWcbTotalsForRateMode`) and the pre-existing WCB labor-rate override (Task #977) both currently short-circuit their audit-log writes because no per-WCB activity surface existed. This slice closes that gap.  
+**Severity:** P2 (audit/compliance gap — not a workflow blocker, but means high-value WCB rate changes have no who/when/before/after record today).  
+**Prerequisite slices:** Slice 1 (Task #1093) must be merged. The write call sites this slice wires up live inside the Slice 1 storage methods.
+
+This is a single self-contained slice. Do not deviate from the scope below.
+
+---
+
+## Design Context (locked decisions)
+
+1. **No new table.** The existing `audit_log` table is the storage layer for every per-resource activity feed in the app. The read side (`fetchActivityForTarget` in `routes.ts:1131`) and the write side (`recordLifecycleAudit` in `routes.ts:1065`) are both already parameterized by a `target_type` string. Adding a new resource = extending two type unions, not building new infrastructure.
+2. **Single new resource type:** `"wet_check_billing"`. Used for `target_type` in `audit_log` rows and for the `resource` discriminator in `recordLifecycleAudit`.
+3. **One new read endpoint:** `GET /api/wet-check-billings/:id/activity`. Mirrors the work-order activity route at `routes.ts:1210` line for line — same tenant guard pattern, same `{ events: rows }` envelope.
+4. **Three new write call sites** (all inside `artifacts/api-server/src/storage.ts`, all from Slice 1 + earlier WCB-edit tasks):
+   - `recomputeWcbTotalsForRateMode` (Slice 1) — `action: "wet_check_billing.rate_mode_changed"`, before/after = `{ rateMode, laborRate, totalAmount }`.
+   - `recomputeWcbTotalsForLaborRate` (Task #977, `storage.ts:4044`) — `action: "wet_check_billing.labor_rate_overridden"`, before/after = `{ laborRate, totalAmount }`.
+   - Zone-labor inline edit handler (Task #1027 — locate via `grep "repairLaborHours" routes.ts` or look in `zone-labor-edit-inline.tsx`'s API call site) — `action: "wet_check_billing.zone_labor_edited"`, extra payload `{ wetCheckId, controllerLetter, zoneNumber, before: laborHours, after: laborHours }`.
+5. **Frontend wiring is one ternary edit.** `DetailPaneInline` (from Slice 1) already computes `activityUrl` by item type. Add the `wet_check_billing` arm. Also wire the same URL into the `WetCheckBillingViewModal` so the WCB modal — when opened from the standalone `/wet-check-billings` page or from the new Wet Checks tab — shows the same activity feed at the bottom.
+6. **Backfill is out of scope.** Existing labor-rate overrides written before this slice will not appear in the activity feed. They were never recorded; we cannot fabricate timestamps and actors. Acceptable — the feed is forward-looking from merge time.
+7. **No fallback BS-also-missing-an-endpoint cleanup in this slice.** A grep of `routes.ts` shows there is no `GET /api/billing-sheets/:id/activity` either — the URL is referenced in the frontend `DetailPane` but the route doesn't exist server-side, so the feed silently shows "No activity yet." for billing sheets too. That's a pre-existing dead branch and probably worth its own slice (it requires a sweep of every BS mutation site to add write calls). This slice is WCB-only. Note in a comment that the BS gap is tracked separately.
+
+---
+
+## Slice 2.1 — Server: extend type unions and add the GET route
+
+### Files modified
+- `artifacts/api-server/src/routes/routes.ts`
+
+### Concrete changes
+
+In `recordLifecycleAudit`'s `LifecycleAuditOpts` type definition (~line 1050), extend the `resource` union:
+
+```ts
+type LifecycleAuditOpts = {
+  resource: "estimate" | "wet_check" | "work_order" | "wet_check_billing";
+  // ... rest unchanged
+};
+```
+
+In `fetchActivityForTarget` (~line 1131), extend the `targetType` parameter union the same way:
+
+```ts
+async function fetchActivityForTarget(
+  targetType: "estimate" | "wet_check" | "work_order" | "wet_check_billing",
+  // ... rest unchanged
+)
+```
+
+No body change needed in either function — both are already polymorphic over `target_type` strings; the type unions are the only thing pinning them to three resources.
+
+Add the new GET route directly after the work-order activity route at `routes.ts:1243`:
+
+```ts
+app.get("/api/wet-check-billings/:id/activity", requireAuthentication, async (req: any, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      res.status(400).json({ message: "Invalid wet check billing ID" });
+      return;
+    }
+    const callerCompanyId = (req as any).authenticatedUserRole === 'super_admin'
+      ? null
+      : ((req as any).authenticatedUserCompanyId ?? null);
+    // Tenant guard via the WCB's wet check (WCBs do not store companyId directly).
+    // `getWetCheckBillingById(id, companyId)` is the canonical lookup; pass
+    // companyId=null for super_admin so the lookup itself does the tenant gate.
+    const wcb = await storage.getWetCheckBillingById(id, callerCompanyId);
+    if (!wcb) { res.status(404).json({ message: "Not found" }); return; }
+    const wc = await storage.getWetCheck(wcb.wetCheckId, callerCompanyId);
+    if (!wc) { res.status(404).json({ message: "Not found" }); return; }
+    const isSuper = req.authenticatedUserRole === "super_admin";
+    const rows = await fetchActivityForTarget(
+      "wet_check_billing",
+      id,
+      wc.companyId ?? null,
+      isSuper,
+    );
+    res.json({ events: rows });
+  } catch (error) {
+    console.error("[activity] wet_check_billing", error);
+    res.status(500).json({ message: "Failed to load activity" });
+  }
+});
+```
+
+Confirmed in repo: the canonical lookup is `storage.getWetCheckBillingById(id, companyId)` (`storage.ts:3974`). It already applies a tenant filter when `companyId != null`, so the lookup itself plus the follow-on `getWetCheck` call cover the cross-company guard without an extra check.
+
+### Acceptance
+- TypeScript build passes with the extended unions.
+- `GET /api/wet-check-billings/:id/activity` returns `{ events: [] }` on a WCB with no audit rows.
+- `GET /api/wet-check-billings/:id/activity` returns 404 for cross-company WCBs and for nonexistent IDs.
+- super_admin bypass works (sees all rows regardless of company).
+
+---
+
+## Slice 2.2 — Server: wire the three write call sites
+
+### Files modified
+- `artifacts/api-server/src/storage.ts` — wire the three recompute / edit methods to call `recordLifecycleAudit`.
+
+### Wiring pattern
+
+`recordLifecycleAudit` is defined as a closure inside `registerRoutes` (see `routes.ts:1065`) and is passed into route-module factories as a dependency (see `routes.ts:7749`, `routes.ts:9537` for examples). Storage methods do not currently receive it. There are two valid wiring approaches:
+
+**Option A (preferred): pass `recordLifecycleAudit` as an optional argument to the three storage methods.**
+
+```ts
+async recomputeWcbTotalsForRateMode(
+  id: number,
+  mode: "normal" | "emergency",
+  companyId: number | null,
+  recordAudit?: (opts: LifecycleAuditOpts, req?: any) => Promise<void>,
+  req?: any,
+): Promise<WetCheckBilling> {
+  // ... existing transaction body that produces `before`, `updated` ...
+  if (recordAudit) {
+    await recordAudit({
+      resource: "wet_check_billing",
+      action: "wet_check_billing.rate_mode_changed",
+      targetId: id,
+      before: { rateMode: before.rateMode, laborRate: before.laborRate, totalAmount: before.totalAmount },
+      after:  { rateMode: updated.rateMode, laborRate: updated.laborRate, totalAmount: updated.totalAmount },
+      summary: `WCB ${updated.billingNumber} rate mode → ${mode}`,
+      companyId,
+    }, req);
+  }
+  return updated;
+}
+```
+
+Each route handler then passes `recordLifecycleAudit` and `req` through when it calls the storage method.
+
+**Option B (alternative): keep storage signatures clean; have the route handler write the audit after the storage call returns.**
+
+```ts
+const updated = await storage.recomputeWcbTotalsForRateMode(id, mode, companyId);
+await recordLifecycleAudit(req, { resource: "wet_check_billing", action: "wet_check_billing.rate_mode_changed", targetId: id, before, after: ..., summary: ..., companyId });
+```
+
+The drawback is that `before` is no longer available outside the transaction unless storage returns it. Easiest fix: have storage return `{ before, updated }` instead of just `updated`. Tests that asserted on a bare `WetCheckBilling` return will need to be updated to `result.updated`.
+
+**Pick Option B.** Reasons: (1) keeps the storage layer single-purpose and free of HTTP concerns, (2) every other audit-log write in the codebase is in the route layer next to `recordLifecycleAudit`, (3) the test changes are mechanical and small.
+
+### Write call sites (final actions and payloads)
+
+For each call site, the route handler does the audit write immediately after the storage method returns. Storage method change in all three: return `{ before, updated }` instead of `updated`.
+
+| Source method                         | Route                                                   | `action`                                       | `summary`                                            | `before` / `after`                                                                 |
+|---------------------------------------|---------------------------------------------------------|------------------------------------------------|------------------------------------------------------|------------------------------------------------------------------------------------|
+| `recomputeWcbTotalsForRateMode`       | `PATCH /api/wet-check-billings/:id/rate-mode`           | `wet_check_billing.rate_mode_changed`          | `WCB ${billingNumber} rate mode → ${mode}`           | `{ rateMode, laborRate, totalAmount }` for both                                    |
+| `recomputeWcbTotalsForLaborRate`      | `PATCH /api/wet-check-billings/:id/labor-rate`          | `wet_check_billing.labor_rate_overridden`      | `WCB ${billingNumber} labor rate → $${newRate}/hr`   | `{ laborRate, totalAmount }` for both                                              |
+| Zone labor inline edit (Task #1027)   | `PATCH /api/wet-check-billings/:wcbId/zone-labor` (or whatever the current route is — confirm) | `wet_check_billing.zone_labor_edited`          | `Zone ${controllerLetter}${zoneNumber} labor → ${hours}h` | `{ controllerLetter, zoneNumber, repairLaborHours }` for both, plus `extra: { wetCheckId, zoneRecordId }` |
+
+For the zone-labor case, the audit row's `targetType` stays `wet_check_billing` (so the events surface on the WCB activity feed), but `extra.wetCheckId` and `extra.zoneRecordId` are preserved so a future zone-level feed can be built without re-emitting.
+
+### Tests
+
+- `artifacts/api-server/src/routes/wcb-activity-routes.test.ts` (new):
+  - Empty list: GET activity on a WCB with no rows → 200, `{ events: [] }`.
+  - Cross-company: GET activity on a WCB whose wet check belongs to a different company → 404 (not 403, to match the existing work-order activity behavior).
+  - super_admin sees all rows.
+  - After a successful rate-mode flip, GET activity returns exactly one new row with `action === "wet_check_billing.rate_mode_changed"` and the correct `before`/`after`.
+  - After a successful labor-rate override (Task #977 path), one row with `action === "wet_check_billing.labor_rate_overridden"`.
+  - After a successful zone-labor edit, one row with `action === "wet_check_billing.zone_labor_edited"` and `extra.controllerLetter`/`extra.zoneNumber` populated.
+  - Audit-write failure is non-fatal: monkey-patch `recordLifecycleAudit` to throw, confirm the underlying PATCH still returns 200 and the WCB is updated. (This matches the "best-effort" contract in the `recordLifecycleAudit` comment at `routes.ts:1042`.)
+
+### Acceptance
+- All three write call sites emit exactly one audit row per successful mutation.
+- Storage methods return `{ before, updated }` (or equivalent); all Slice 1 tests are updated to the new return shape.
+- A failed audit write never fails the underlying PATCH.
+
+---
+
+## Slice 2.3 — Frontend: wire the activity URL into DetailPaneInline and WetCheckBillingViewModal
+
+### Files modified
+- `artifacts/irrigopro/src/components/billing-workspace/detail-pane-inline.tsx` (from Slice 1) — extend the `activityUrl` ternary.
+- `artifacts/irrigopro/src/components/wet-check-billings/wet-check-billing-view-modal.tsx` — add an activity feed section at the bottom of the modal body.
+
+### Concrete changes
+
+**`detail-pane-inline.tsx`:** Locate the `activityUrl` ternary that Slice 1 brought over from `billing-workspace.tsx`. Add the `wet_check_billing` arm:
+
+```ts
+const activityUrl =
+  item.type === "billing_sheet" ? `/api/billing-sheets/${item.refId}/activity` :
+  item.type === "work_order"    ? `/api/work-orders/${item.refId}/activity` :
+  item.type === "wet_check_billing" ? `/api/wet-check-billings/${item.refId}/activity` :
+  null;
+```
+
+The activity-log render code that already exists below this ternary needs no change — it iterates `events` and renders one row per item.
+
+**`wet-check-billing-view-modal.tsx`:** Add an `ActivityFeed` section after the `WetCheckBillingViewComponent` render (~line 222 in the Slice 1-modified file). Reuse the same render shape used in `DetailPaneInline`:
+
+```tsx
+<ActivityFeed url={`/api/wet-check-billings/${wcb.id}/activity`} />
+```
+
+Where `ActivityFeed` is a tiny new component (`artifacts/irrigopro/src/components/billing-workspace/activity-feed.tsx`) extracted from the inline activity-log JSX block currently in `DetailPaneInline`. After extraction, `DetailPaneInline` also uses `<ActivityFeed url={activityUrl} />` instead of inlining the render. The extracted component takes `{ url: string | null }` and renders nothing when `url === null`.
+
+### Tests
+
+- `activity-feed.test.tsx` (new):
+  - Renders "No activity yet." when the API returns `{ events: [] }`.
+  - Renders one row per event with timestamp + actor + message in the order the API returned.
+  - Does not render when `url === null`.
+- Extend `detail-pane-inline.test.tsx` (from Slice 1): WCB row drawer shows an `ActivityFeed` rendering the rate-mode-changed row after a toggle.
+- Extend `wet-check-billing-view-modal.test.tsx`: modal renders `ActivityFeed` with the correct URL.
+
+### Acceptance
+- Opening any WCB row in the Command Center drawer shows an activity section that lists the rate-mode flip you just performed.
+- Opening the same WCB from the standalone `/wet-check-billings` page shows the same activity section in the modal.
+- Empty WCBs render "No activity yet." — same wording as BS and WO.
+
+---
+
+## Cross-cutting acceptance checklist
+
+- [ ] `LifecycleAuditOpts.resource` union and `fetchActivityForTarget`'s `targetType` union both include `"wet_check_billing"`.
+- [ ] `GET /api/wet-check-billings/:id/activity` exists, returns `{ events }`, tenant-guarded.
+- [ ] `recomputeWcbTotalsForRateMode`, `recomputeWcbTotalsForLaborRate`, and the zone-labor edit handler each emit one `audit_log` row per successful mutation.
+- [ ] Storage methods that previously returned a bare `WetCheckBilling` now return `{ before, updated }`; all Slice 1 tests updated to match.
+- [ ] Audit-write failure never fails the underlying mutation (negative test in place).
+- [ ] `DetailPaneInline` and `WetCheckBillingViewModal` both render the activity feed for WCB records.
+- [ ] No new database tables; no Drizzle schema changes; no migration file required.
+
+---
+
+## Out of scope (do NOT do in this slice)
+
+- Building a `billing_sheet` activity endpoint or wiring write calls on the BS PATCH path (separate slice — broader sweep needed).
+- Backfilling historical audit rows for labor-rate overrides written before this slice merged.
+- Adding an activity tab to the WCB modal as a separate tab (the spec calls for an inline section at the bottom of the existing body).
+- Zone-level activity feed (a `wet_check_zone_record`-scoped GET) — the `extra` payload preserves enough context to build one later but no UI for it now.
+- Changes to the existing estimate / wet_check / work_order activity routes or write call sites.
+
+---
+
+## Follow-ups to file as separate slices
+
+1. **Billing sheet activity endpoint + write sweep.** `GET /api/billing-sheets/:id/activity` is referenced by the frontend but doesn't exist server-side. Building it requires both the route and write calls on every BS lifecycle mutation (create, PATCH, approve, kickback, items-replace, rate-mode flip from Slice 1, photo backfill).
+2. **Zone-level activity feed.** A `GET /api/wet-checks/:wcId/zones/:zoneId/activity` endpoint plus a zone-scoped feed in the wet check zone editor, filtering audit rows by `extra.zoneRecordId`.
+3. **Activity event icons + grouping.** Render different icons per `action` (rate change = $, kickback = ↩, approve = ✓) and group consecutive same-action events from the same actor.

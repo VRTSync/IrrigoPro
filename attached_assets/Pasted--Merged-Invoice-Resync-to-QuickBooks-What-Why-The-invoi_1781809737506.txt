@@ -1,0 +1,46 @@
+# Merged Invoice — Resync to QuickBooks
+
+**What & Why**
+The invoice **merge** is deliberately QuickBooks-free (`invoice-merge-routes.ts` makes no QB calls). So after merging duplicate monthly invoices into one surviving invoice, the original separate invoices still exist in QuickBooks, and the merged invoice either isn't in QB or carries a now-stale `quickbooksInvoiceId` (pointing at a pre-merge amount). The billing manager needs to delete the separate QB invoices (done manually — kept that way on purpose) and then **push the merged invoice into QuickBooks fresh**.
+
+This adds that push-to-QB action, plus a small change on merge so the resync is a clean *create*.
+
+**Manual deletion stays manual.** We do NOT auto-void/delete QuickBooks invoices via the API (risky, irreversible, and it would break the merge's no-QB-call contract). The billing manager deletes the separates in QB; this feature only handles pushing the merged invoice back.
+
+Single slice. No schema change.
+
+---
+
+## Done looks like
+- After a merge, the surviving invoice's `quickbooksInvoiceId` is **cleared** (null), so it shows "Not synced" and won't try to update a QB invoice that's been deleted. (This is a DB field change only — no QB API call — so the merge route's "no QB call" contract is preserved; do the clear in `storage.mergeInvoices`.)
+- A per-invoice QuickBooks action (in the invoices `⋯` menu), gated to billing/QuickBooks-capable roles, with two modes:
+  - **"Sync to QuickBooks"** when `quickbooksInvoiceId` is null (new merges, where the id was cleared) → **creates** the invoice in QB.
+  - **"Re-sync to QuickBooks"** when an id already exists (already-merged invoices carrying a stale id) → behind a **confirmation** ("This creates a new QuickBooks invoice. Delete the old one in QuickBooks first.") → creates a fresh QB invoice and **overwrites** the stored id.
+- Either mode creates the invoice in QuickBooks with the current (merged) totals/line items, stores the new `quickbooksInvoiceId`, and flips the row to "Synced" — no reload.
+- Reuses the existing QB-invoice-create logic (don't reimplement the QB mapping); the customer-must-be-synced precondition is enforced with the same clear error the monthly path uses.
+- **Covers the already-merged production invoices:** because `mergeInvoices` never cleared the survivor's QB id, those invoices already carry a stale id — the "Re-sync" mode makes them re-syncable with no migration or manual id-clearing.
+- (Optional nicety) The merged invoice surfaces the **source invoices' old `quickbooksInvoiceId`s** so the billing manager knows exactly which QB invoices to delete.
+
+## Steps
+1. **Clear QB id on merge.** In `storage.mergeInvoices`, set the surviving invoice's `quickbooksInvoiceId = null` as part of the atomic merge mutation. No QB call. (Optionally stash the source invoices' QB ids on the surviving invoice — e.g. a `mergedFromQuickbooksIds` note/field or just return them — for the UI nicety.)
+2. **Extract the QB-invoice-create logic.** Pull the "create invoice in QuickBooks from an app invoice" logic out of the monthly-invoice route (`POST /api/invoices/monthly`, ~6986–7184) into a reusable function so it can be called for a single existing invoice. Keep the monthly path calling it.
+3. **Add the endpoint.** `POST /api/invoices/:id/sync-quickbooks` (mirror `POST /api/quickbooks/sync-estimate/:id`): `requireQuickBooksAccess` / billing-capable guard, company-scoped. Accept a `{ force?: boolean }` body — when the invoice has **no** `quickbooksInvoiceId`, create normally; when it **already has** one, only proceed if `force === true` (the re-sync path), creating a **new** QB invoice and overwriting the stored id (don't attempt to update the old, possibly-deleted one). Enforce the customer-synced precondition with the existing error. On success: save the new `quickbooksInvoiceId`, return the updated invoice.
+4. **Add the button.** In `invoices.tsx` row `⋯` menu, gated to billing/QB-capable roles: show **"Sync to QuickBooks"** when `quickbooksInvoiceId` is null (no confirm), and **"Re-sync to QuickBooks"** when an id exists (opens a confirm dialog with the delete-old-first warning, then calls the endpoint with `force: true`). On success, invalidate the invoices query so the sync badge/icon updates.
+
+## Tests
+- Merging clears the surviving invoice's `quickbooksInvoiceId` (and makes no QB API call).
+- "Sync to QuickBooks" on a null-id invoice creates a QB invoice with the merged totals and stores the new id; row flips to Synced.
+- "Re-sync to QuickBooks" on an invoice with an existing (stale) id requires the confirm + `force: true`, then creates a **new** QB invoice and overwrites the id (does not try to update the old one). This is the path that unblocks the already-merged production invoices.
+- The endpoint rejects a non-forced call on an invoice that already has an id (prevents accidental double-create).
+- The action is 403 for non-billing roles.
+- Customer-not-synced-to-QB returns the same clear error as the monthly path.
+
+## Out of scope
+- Auto-deleting/voiding the source QuickBooks invoices (manual by design).
+- The merge validation/logic itself (unchanged except the QB-id clear).
+- Payment/sent status, table layout (separate tickets).
+
+## Relevant files
+- `artifacts/api-server/src/storage.ts` (`mergeInvoices` — clear QB id) / `artifacts/api-server/src/routes/invoice-merge-routes.ts`
+- `artifacts/api-server/src/routes/routes.ts` (monthly QB-create ~6986–7184 → extract; new `/api/invoices/:id/sync-quickbooks`; pattern: `sync-estimate/:id` ~9002)
+- `artifacts/irrigopro/src/pages/invoices.tsx` (`⋯` menu action; sync badge already renders)

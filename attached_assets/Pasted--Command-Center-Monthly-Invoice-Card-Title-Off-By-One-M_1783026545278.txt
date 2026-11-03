@@ -1,0 +1,54 @@
+# Command Center — Monthly Invoice Card Title Off-By-One Month
+
+**Bug, frontend-only.** In Command Center (`customer-billing.tsx`) → a customer's **Monthly Invoices** tab, each invoice card's title shows the **wrong month — one month earlier** than the invoice's actual billing month. Example (Wellman Creek): invoice #53707, period 5/31/2026–6/30/2026, is titled **"May 2026"** on the card. The dedicated **Invoices** page (`invoices.tsx`) shows the same invoice correctly grouped under **"June 2026."** Invoice #76796 (period 4/30–5/31) is similarly mislabeled "April 2026" on the card but correctly grouped "May 2026" on the Invoices page. Only the card title is wrong — invoice #, total, and the Period line on the card are all correct.
+
+**Root cause — card title is derived from `periodStart` instead of the invoice's stamped billing month.** `invoice-list.tsx` (the component that renders Command Center's Monthly Invoices cards) computes the title with:
+
+```ts
+const formatMonthYear = (date: string) => {
+  return new Date(date).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+};
+...
+<h3>{formatMonthYear(invoice.periodStart)}</h3>
+```
+
+`periodStart` is the *end of the prior* month (e.g. `2026-05-31` for the June cycle), so reading the month off of it gives "May." The Invoices page does **not** do this — it groups and labels using the invoice's own stamped `invoiceMonth` / `invoiceYear` fields:
+
+```ts
+// invoices.tsx
+`${MONTH_NAMES[inv.invoiceMonth - 1]} ${inv.invoiceYear}`
+```
+
+`invoiceMonth`/`invoiceYear` are set once at invoice creation (`routes.ts` ~6864-6865, `invoiceMonth: periodStart.getMonth() + 1`) and are already present in the row objects `storage.getInvoices()` returns — `GET /api/invoices` (the same endpoint `invoice-list.tsx` already calls) returns them unfiltered via `applyPricingVisibility`. They're just not in `invoice-list.tsx`'s `Invoice` interface or its fetch, so the card falls back to deriving the label from `periodStart` instead.
+
+**Fix:** make the Command Center card title use `invoiceMonth`/`invoiceYear` (the same source of truth `invoices.tsx` and `financial-pulse.tsx` already use), not `periodStart`.
+
+## Done looks like
+- A Command Center Monthly Invoices card's title always matches the month/year that the same invoice shows under on the Invoices page (`/invoices`) — no divergence for any invoice, past or newly generated.
+- The card's Period line (`periodStart`–`periodEnd`) is unchanged — that's already correct.
+- No backend changes required; this is a display-only frontend fix.
+
+## Steps
+1. In `artifacts/irrigopro/src/components/billing/invoice-list.tsx`:
+   - Add `invoiceMonth: number;` and `invoiceYear: number;` to the `Invoice` interface (line ~11-22).
+   - Replace the card title's `formatMonthYear(invoice.periodStart)` (line 138) with a label built from `invoice.invoiceMonth` / `invoice.invoiceYear` — same pattern as `invoices.tsx`'s `` `${MONTH_NAMES[inv.invoiceMonth - 1]} ${inv.invoiceYear}` `` (a shared `MONTH_NAMES` array or equivalent `long`-format lookup).
+   - The Audit modal's `label` (line ~214, also calls `formatMonthYear(invoice.periodStart)`) has the same bug — fix it the same way so the audit modal header matches too.
+   - Leave `formatDate(invoice.periodStart)` / `formatDate(invoice.periodEnd)` (the Period row, line 168) untouched — those are correctly showing the raw period dates, not a derived month label.
+2. Confirm no other consumer of `InvoiceList`/`Invoice` assumes the interface shape without these fields (check `customer-billing.tsx` usages at lines ~1834 and ~3087, which just pass `customerId`/`onOpenPdf` — no changes expected there).
+
+## Tests
+- Wellman Creek invoice #53707 (period 5/31/2026–6/30/2026, `invoiceMonth=6`, `invoiceYear=2026`) → Command Center card title reads **"June 2026"**, matching the Invoices page.
+- Wellman Creek invoice #76796 (period 4/30–5/31) → card title reads **"May 2026"**.
+- Wellman Creek HOA invoice #43843 (period 3/31–4/30) → card title reads **"April 2026"**.
+- Spot-check a January-cycle invoice (year boundary: `periodStart` in December, `invoiceMonth=1` of the following year) to confirm the year doesn't also shift incorrectly.
+- Audit modal header (opened via the "Audit" button on a card) shows the same corrected month/year as the card title.
+
+## Out of scope
+- Any backend route or `invoiceMonth`/`invoiceYear` computation logic — already correct (proven by `invoices.tsx` displaying the right month).
+- The Invoices page (`invoices.tsx`) — not touched, it's the reference-correct behavior.
+- Period date formatting on the card — unchanged.
+
+## Relevant files
+- `artifacts/irrigopro/src/components/billing/invoice-list.tsx` (`Invoice` interface ~11-22; `formatMonthYear` ~69-71; card title ~137-139; Audit modal label ~211-217 — all need `invoiceMonth`/`invoiceYear` instead of `periodStart`)
+- `artifacts/irrigopro/src/pages/invoices.tsx` (reference implementation: `groupByBillingPeriod` ~204-220, `MONTH_NAMES` usage ~645 — copy this pattern)
+- Do NOT modify: `artifacts/api-server/src/routes/routes.ts` invoice-creation logic, `storage.ts` — backend fields are already correct.

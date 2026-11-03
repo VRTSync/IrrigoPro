@@ -1,0 +1,242 @@
+# FIX — Invoices Page: Search Keeps Focus, and No Auto-Applied Filters
+
+This is a single self-contained task. Two defects on `/invoices`, one commit. Do not deviate from the decisions below; where this spec gives exact code, use it.
+
+## What & Why
+
+**Part A — the search box loses focus after every letter.** The box is already debounced (250 ms) and server-applied (Task #1942). The defect is what happens when the debounced value lands: the search writes `?search=` to the URL, the list query key changes, `useInfiniteQuery` has no data for the new key, `isLoading` goes true, and the page hits the early return at `artifacts/irrigopro/src/pages/invoices.tsx:2152`:
+
+```tsx
+if (isLoading) {
+  return ( <div ...><Loader2 .../> Loading invoices...</div> );
+}
+```
+
+That return replaces the whole page — header, aging strip, and the filter bar holding the `<Input>` — with a spinner. The input unmounts, focus is gone, and when the results arrive a fresh input mounts with the text but no cursor. The `if (error)` return at `:2161` has the same shape. Every pause in typing longer than 250 ms costs the user their place.
+
+**Part B — filters apply themselves on arrival.** `invoices.tsx:809-821` applies `COLLECTIONS_DEFAULT_QUERY` (`lib/invoice-ar-query.ts:144`: `aging: "overdue"`, `paymentStatus: "unpaid"`, `sort: "balanceDue"`, `dir: "desc"`) on mount whenever the URL is empty, for every invoice-reading role (`COLLECTIONS_LANDING_DEFAULT`, `lib/shared/src/roles.ts:267`). "Clear all" (`invoices.tsx:2233`) also resets to that default rather than to nothing, so the user cannot actually clear the filters.
+
+## Done looks like
+
+- Typing "woodglenn" at normal speed, with pauses, never moves the cursor out of the box. The header, aging strip and filter bar never disappear while results load.
+- While a search is in flight, a small spinner shows inside the search box and the rows already on screen dim; they are replaced when the new rows arrive.
+- Enter applies the search immediately. Escape or the X button clears it immediately.
+- Typing a search does not add one browser-history entry per pause.
+- Opening `/invoices` with no query string shows every invoice, unfiltered, newest-first grouped by billing month. URL stays `/invoices`. No chips.
+- "Clear all" returns to that same unfiltered view, for every role.
+- Deep links (`?aging=days90Plus`, `?month=…`, `?customerId=…` from Financial Pulse) still open exactly as before.
+
+## Locked decisions
+
+1. **The toolbar never unmounts.** Loading and error states render in the list area below the filter bar. No early return in `InvoicesPage` may sit above the header/strip/filter bar.
+2. **Previous results stay on screen during a refetch** via TanStack v5 `placeholderData: keepPreviousData` (repo is on `@tanstack/react-query ^5.90.21`) on both the list query and the aging-summary query, so the header total and strip don't blank either.
+3. **Debounce stays at 250 ms.** The bug was the unmount, not the delay.
+4. **No landing default of any kind** — no filters and no sort. The page opens on `EMPTY_AR_QUERY`. A sort is still one click away in the Filters popover or a column header.
+5. **Retire the landing-default machinery entirely** (project rule: no dead weight left behind). `COLLECTIONS_DEFAULT_QUERY`, `COLLECTIONS_LANDING_DEFAULT`, `UiDefaultRoles`, `usesUiDefault` and the type-safety test guarding them have no other consumer (verified by `git grep`); all are deleted.
+6. Server, URL parameter names, chips, and the `?aging=overdue` filter value are untouched. "Any overdue" stays selectable; it just isn't applied for you.
+
+## Out of scope
+
+- Server search behaviour (`invoice-list-routes.ts`), what fields search matches.
+- The Filters popover contents, the aging strip, row expansion.
+- `components/billing/invoice-list.tsx` (separate component; not this page).
+
+## Steps
+
+### Part A — search
+
+**A1. Remove the two page-replacing early returns.** Delete `invoices.tsx:2152-2171` (the `if (isLoading)` and `if (error)` blocks). Then, in the main return, wrap the list region — from the `{/* Empty state */}` block (currently `:2242`) through the end of the `{/* Task #532 — Load more pagination control */}` block (currently `:2661`) — so it reads:
+
+```tsx
+{isLoading ? (
+  <div className="flex items-center justify-center min-h-64 p-8" data-testid="invoice-list-loading">
+    <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+    <span className="ml-2 text-gray-600">Loading invoices...</span>
+  </div>
+) : error ? (
+  <Card data-testid="invoice-list-error">
+    <CardContent className="p-8 text-center">
+      <AlertCircle className="w-8 h-8 mx-auto mb-2 text-red-600" />
+      <p className="text-gray-600">Failed to load invoices. Please try again.</p>
+    </CardContent>
+  </Card>
+) : (
+  <>
+    {/* existing Empty state block, unchanged */}
+    {/* existing invoice list <div className="space-y-8"> — see A3 */}
+    {/* existing Load more block, unchanged */}
+  </>
+)}
+```
+
+The cancelled-invoices drawer and everything after it stay outside the wrapper, unchanged. Confirm no hook is declared below the old early returns; if one is, it already ran conditionally and nothing changes.
+
+**A2. Keep previous data on key change.** Add `keepPreviousData` to the `@tanstack/react-query` import on `:2`. On the list `useInfiniteQuery` (`:990-1011`) add `placeholderData: keepPreviousData` and destructure `isFetching` and `isPlaceholderData` alongside the existing fields. On the aging-summary `useQuery` (`:1040-1058`) add `placeholderData: keepPreviousData`. With this, `isLoading` is true only on the very first load of the page.
+
+**A3. Dim stale rows.** On the list container (`<div className="space-y-8">`, currently `:2259`):
+
+```tsx
+<div
+  className={`space-y-8 transition-opacity ${isPlaceholderData ? "opacity-60" : ""}`}
+  aria-busy={isPlaceholderData}
+  data-testid="invoice-list-rows"
+>
+```
+
+**A4. One commit path for search.** Replace `setArQuery` and `patchArQuery` (`:689-702`) so a write can replace the history entry instead of pushing:
+
+```tsx
+const setArQuery = (next: ArQuery, opts?: { replace?: boolean }) => {
+  const qs = arQueryToParams(next).toString();
+  setLocation(qs ? `/invoices?${qs}` : "/invoices", opts?.replace ? { replace: true } : undefined);
+};
+// (keep the existing arQueryRef comment and lines)
+const patchArQuery = (patch: Partial<ArQuery>, opts?: { replace?: boolean }) =>
+  setArQuery({ ...arQueryRef.current, ...patch }, opts);
+```
+
+Then replace the debounce effect (`:719-727`) with a named commit function and an effect that uses it:
+
+```tsx
+// Applies the box's text to the URL now. Search writes REPLACE the history
+// entry: one back-press should leave the search, not undo it a word at a time.
+const commitSearch = (raw: string) => {
+  const next = raw.trim();
+  if (next === arQueryRef.current.search) return;
+  pushedSearchRef.current = next;
+  patchArQuery({ search: next }, { replace: true });
+};
+useEffect(() => {
+  if (searchInput.trim() === arQuery.search) return;
+  const t = setTimeout(() => commitSearch(searchInput), 250);
+  return () => clearTimeout(t);
+}, [searchInput, arQuery.search]);
+```
+
+Leave the external-change resync effect (`:713-718`) as is. Every other caller of `patchArQuery`/`setArQuery` keeps pushing (no `opts`) — filter and bucket changes are deliberate navigation.
+
+**A5. Filter bar: Enter, Escape, clear button, pending spinner.** In `components/billing/invoice-filter-bar.tsx`, add two props:
+
+```ts
+onSearchCommit: (value: string) => void;
+isSearching: boolean;
+```
+
+Add `Loader2` to the `lucide-react` import on `:15`. Replace the input block (`:72-82`) with:
+
+```tsx
+<div className="relative flex-1">
+  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+  <Input
+    placeholder="Search invoice # or customer…"
+    value={searchTerm}
+    onChange={(e) => onSearchChange(e.target.value)}
+    onKeyDown={(e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        onSearchCommit(searchTerm);
+      } else if (e.key === "Escape" && searchTerm) {
+        e.preventDefault();
+        onSearchChange("");
+        onSearchCommit("");
+      }
+    }}
+    className="pl-9 pr-16"
+    aria-label="Search by invoice number or customer name"
+    data-testid="invoice-search-input"
+  />
+  <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
+    {isSearching && (
+      <Loader2 className="h-4 w-4 animate-spin text-gray-400" aria-hidden data-testid="invoice-search-pending" />
+    )}
+    {searchTerm && (
+      <button
+        type="button"
+        onClick={() => { onSearchChange(""); onSearchCommit(""); }}
+        className="rounded p-1 text-gray-400 hover:text-gray-700"
+        aria-label="Clear search"
+        data-testid="invoice-search-clear"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    )}
+  </div>
+</div>
+```
+
+The clear button must not steal a re-render that unmounts the input — it won't after A1; do not add any `key` prop to the input.
+
+**A6. Wire it.** At the `<InvoiceFilterBar` call (`invoices.tsx:2226`) add:
+
+```tsx
+onSearchCommit={commitSearch}
+isSearching={isFetching && !isFetchingNextPage}
+```
+
+### Part B — no auto-applied filters
+
+**B1. `invoices.tsx`.** Delete `:798-821` (the landing-default comment block, `usesCollectionsDefault`, `defaultArQuery`, `appliedLandingDefault` and its effect). Change the Clear-all handler (`:2231-2234`) to:
+
+```tsx
+onClearAll={() => {
+  setSearchInput("");
+  setArQuery(EMPTY_AR_QUERY);
+}}
+```
+
+Remove `usesUiDefault` (`:6`) and `COLLECTIONS_LANDING_DEFAULT` (`:13`) from the `@workspace/shared` import, and `COLLECTIONS_DEFAULT_QUERY` (`:120`) from the `@/lib/invoice-ar-query` import.
+
+**B2. `lib/invoice-ar-query.ts`.** Delete `COLLECTIONS_DEFAULT_QUERY` and its doc comment (`:140-155`). On `:17-18`, change the comment to: `// Task #1890 — \`overdue\` is an addition to this same parameter, NOT a second one.` Leave `"overdue"` in `AgingFilter` and `AGING_OPTIONS`.
+
+**B3. `lib/shared/src/roles.ts`.** Delete the whole `// ─── UI landing defaults ───` section: the comment block from `:236`, `UiDefaultRoles`, `COLLECTIONS_LANDING_DEFAULT`, and `usesUiDefault` (through `:282`). Nothing else in `lib/shared` re-exports them (checked).
+
+**B4. `artifacts/api-server/src/routes/invoice-list-routes.test.ts`.** Delete section `(j)` (`:710-753`: the comment, `__collectionsDefaultIsNotACapability`, and the `describe("collections landing default is not usable as an authorization guard")` block). Remove `hasCapability`, `usesUiDefault`, `CAN_READ_INVOICES`, `CAN_EDIT_INVOICES`, `COLLECTIONS_LANDING_DEFAULT` from the import on `:39-44` — none is used elsewhere in the file (verify with grep before removing each).
+
+**B5. `artifacts/api-server/src/routes/invoice-list-routes.ts:61`** — the comment says the sort "is what the collections landing default needs". Change "the collections landing default" to "a balance-first collections sort". Comment only.
+
+## Tests
+
+No new test files and no new workflows (repo is past its workflow cap). All changes go in the two existing vitest files, which already run under the existing `invoices-ar-*` workflows. The Radix `Select` jsdom shim already exists in both files; reuse it if a new test opens a select.
+
+**`pages/invoices-ar-collections.test.tsx`**
+
+- Header comment item 1 (`:10-11`): replace with `every invoice-reading role lands on the unfiltered list with a clean URL;`.
+- Replace the `describe("collections landing default")` block (`:234-283`) with `describe("no landing default")`:
+  - for `bookkeeper` and for `billing_manager`: render `/invoices`, wait for the list fetch, assert `nav.history` equals `["/invoices"]`, and the list request carries none of `aging`, `paymentStatus`, `sort`, `dir`; assert `screen.queryByTestId("ar-filter-chips")` is null.
+  - keep "does not override a view the bookkeeper arrived with" as is.
+- "clearing everything returns the role's default list" (`:325`): rename to "clearing everything returns the unfiltered list"; assert the last history entry is exactly `/invoices`.
+- Delete the stale comments at `:343-345` and `:411-413` that explain working around the landing-default effect. Leave the URLs those tests use unchanged.
+- Bookkeeper fixtures comment at `:631-632`: change to "Overdue fixture so the flag and reminder controls have something to act on." Fixtures unchanged.
+
+**`pages/invoices-ar-first-layout.test.tsx`**
+
+- Replace `describe("landing default per role")` (`:722-753`) with one test: a bookkeeper on `/invoices` lands with history `["/invoices"]` and month group headers present (`invoice-group-header`).
+- Add `describe("search box")`:
+  1. **Keeps focus through a refetch.** Render, wait for list, focus `invoice-search-input`, change value to `wood`, advance past the debounce, wait for a list request with `search=wood`, then assert `document.activeElement` is the same element returned by `getByTestId("invoice-search-input")` before the change (compare node identity, not just testid).
+  2. **Toolbar stays mounted while loading.** Make the fetch mock for `search=slow` hang on a deferred promise; type `slow`; while pending assert `invoice-search-pending` is present, `invoice-search-input` is present, and `invoice-list-loading` is absent (previous rows kept, `invoice-list-rows` has `aria-busy="true"`). Resolve, assert `aria-busy="false"`.
+  3. **Enter commits without waiting.** Type `ranch`, fire `keyDown` Enter, assert a list request with `search=ranch` is made before 250 ms elapse (use fake timers, advance 0).
+  4. **Escape and X clear immediately.** From `/invoices?search=ranch`, fire Escape: input empty, last history entry `/invoices`. Repeat with `invoice-search-clear`.
+  5. **Search replaces history.** From `/invoices`, type `a`, commit, type `ab`, commit: `nav.history.length` does not grow by more than one across both commits.
+- The existing "keeps a filter chosen while the search debounce is pending" (`:821`) must still pass unchanged — it proves `commitSearch` merges against the live URL via `arQueryRef`.
+
+## Acceptance checklist
+
+- [ ] No `return` above the header in `InvoicesPage` other than the final JSX.
+- [ ] `keepPreviousData` on the list and aging-summary queries.
+- [ ] Search spinner, X button, Enter and Escape behave as specified; debounce still 250 ms.
+- [ ] Search URL writes use `{ replace: true }`; no other write does.
+- [ ] `git grep -n "COLLECTIONS_DEFAULT_QUERY\|COLLECTIONS_LANDING_DEFAULT\|usesUiDefault\|UiDefaultRoles"` returns nothing.
+- [ ] `/invoices` opens unfiltered with a clean URL for every role; Clear all returns there.
+- [ ] Financial Pulse deep links unchanged.
+- [ ] Typecheck clean for `@workspace/irrigopro`, `@workspace/api-server`, `@workspace/shared`.
+- [ ] Both vitest files and `invoice-list-routes.test.ts` pass.
+
+## Relevant files
+
+- `artifacts/irrigopro/src/pages/invoices.tsx` — `:2`, `:6`, `:13`, `:120`, `:689-727`, `:798-821`, `:990-1012`, `:1040-1058`, `:2152-2171`, `:2226-2238`, `:2242-2661`
+- `artifacts/irrigopro/src/components/billing/invoice-filter-bar.tsx` — `:15`, `:41-63`, `:72-82`
+- `artifacts/irrigopro/src/lib/invoice-ar-query.ts` — `:17-18`, `:140-155`
+- `lib/shared/src/roles.ts` — `:236-282`
+- `artifacts/api-server/src/routes/invoice-list-routes.test.ts` — `:39-44`, `:710-753`
+- `artifacts/api-server/src/routes/invoice-list-routes.ts` — `:61`
+- `artifacts/irrigopro/src/pages/invoices-ar-collections.test.tsx`, `artifacts/irrigopro/src/pages/invoices-ar-first-layout.test.tsx`

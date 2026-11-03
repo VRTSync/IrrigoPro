@@ -1,0 +1,146 @@
+# BUILD — One budget meter, Slice 2: consolidate the six renderers
+
+## What & Why
+
+The app draws "how much of this customer's budget is used" in **six places, six ways**. Same four states, same numbers underneath, three colour sets, two vocabularies:
+
+| # | Where | Component | Notes |
+|---|---|---|---|
+| 1 | Budget Status page, Manager Workspace card, crew view | `components/budget/BudgetBar.tsx:99` | **Canonical.** Two segments, cap marker, clamping, `forcedStatus`, tested, three callers |
+| 2 | Customer profile, Budget & Alerts card | `pages/customer-profile.tsx:968` `BudgetBucketRow` | month + year rows, used by `BudgetCard` :993 |
+| 3 | Financial Pulse widget, customer-detail | `financial-pulse-widget.tsx:479` `BudgetMeter` + `statusColor` :466 | raw div track, emerald / amber / rose, used :565 |
+| 4 | Financial Pulse widget, top-customers | `financial-pulse-widget.tsx:649` `statusPill` | badge only, Over / Approaching / Healthy, used :741 |
+| 5 | Financial Pulse page, customer table | `pages/financial-pulse.tsx:1054` `BudgetMeter` + `statusTone` :1025 | shadcn `Progress`, red-500 / amber-500 / emerald-500, used :1369 / :1372 |
+| 6 | Customer form, live preview | `components/customer-form.tsx:1357` `PreviewRow` + `statusTone` :878 | its own row, classifies unsaved values live |
+
+The customer profile is the worst symptom: its own Budget & Alerts card and the embedded Financial Pulse widget both draw a meter for the same customer, same month, in different colours.
+
+**`BudgetBar` becomes the one. Do not build a new component and do not rename it.** It already has the hardest parts and three working callers; renaming churns them for nothing.
+
+## Prerequisite
+
+**Slice 1** — one classifier, one `BudgetStatus`, and the registered `success` / `warning` / ink colour tokens. This slice consumes all three.
+
+## The shortcut already in the code — fix it, do not copy it
+
+The crew view calls `BudgetBar` like this (`field-tech-dashboard.tsx:73-79`):
+
+```
+invoicedAmount={row.fillPercent !== null ? row.fillPercent : 0}
+pendingAmount={0}
+allocation={row.fillPercent !== null ? 100 : null}
+hideDollars
+```
+
+It fakes an allocation of 100 so a percentage renders as a proportion, then hides the dollars because "$47 of $100" is meaningless. It works, and it is a lie inside the props — the crew endpoint deliberately sends no money, so there are no amounts to pass. The moment anyone adds a tooltip, a percentage, or an export to that surface, it produces nonsense.
+
+**So the component gets two explicit input modes**, and the crew view moves onto the honest one:
+
+- **Amounts** — `allocation`, `invoicedAmount`, `pendingAmount`. What five of the six callers have.
+- **Proportion** — `fillPercent` plus `forcedStatus`, for a caller that has a ratio and no money, which is exactly what the crew endpoint returns by design.
+
+In proportion mode there are no dollars to hide, so `hideDollars` stops being load-bearing.
+
+## The other additions
+
+- `pillOnly?: boolean` — badge, no track. Call site 4.
+- `size?: "default" | "thin" | "compact"` — replacing the boolean `thin`. `compact` is the inline fixed-width form the Financial Pulse table cell needs. **Migrate all three existing callers in the same commit; no deprecated alias.**
+- `hidePercent?: boolean` — it has `hideDollars` and `hideLabel` already. The crew view must show neither a dollar figure nor a percentage: a percentage of a hidden number is still a leak by inference.
+- `label?: string` — "This month" / "This year". Call sites 2 and 6.
+- `tone?: "instruction" | "analytic"` — see below.
+
+## The two vocabularies (decided)
+
+`BudgetBar` hardcodes Go / Slow down / Stop / Unset. The Financial Pulse surfaces say Healthy / Approaching / Over / —.
+
+**Both are kept, as a `tone` prop, with both label sets in one map in one file.** They are not drift; they are different jobs. Go / Slow down / Stop is an instruction to someone deciding whether to send a crew somewhere today. Healthy / Approaching / Over is a description in a revenue table a bookkeeper reads. A finance table telling a bookkeeper to "Go" is worse copy, not better consistency.
+
+Default is `instruction`, so the three existing callers are unchanged. Financial Pulse passes `analytic`.
+
+This is still one implementation: one component, one map, one place to change a word.
+
+## Colour, exactly
+
+Using the tokens Slice 1 registered. Same visual result as today, from named colours instead of raw palette steps:
+
+| State | Solid segment | Pending segment | Pill background | Pill text | Pill border |
+|---|---|---|---|---|---|
+| healthy | `bg-success` | `bg-success/30` | `bg-success/10` | `text-success-ink` | `border-success/30` |
+| approaching | `bg-warning` | `bg-warning/30` | `bg-warning/10` | `text-warning-ink` | `border-warning/30` |
+| over | `bg-destructive` | `bg-destructive/30` | `bg-destructive/10` | `text-destructive-ink` | `border-destructive/30` |
+| unset | `bg-muted-foreground/30` | — | `bg-muted` | `text-muted-foreground` | `border-border` |
+
+Replaces `STATUS_PILL_CLASSES` (:63), `INVOICED_TRACK_CLASSES` (:77) and `PENDING_TRACK_CLASSES` (:84).
+
+## Done looks like
+
+- One budget renderer in the client. All six surfaces go through it, and the same customer in the same month looks identical on every one.
+- The customer profile no longer shows two differently-coloured meters for one budget.
+- The crew view passes a real proportion instead of a fake allocation of 100, and still shows no dollars and no percentage.
+- `BudgetBucketRow`, both `BudgetMeter` definitions, `statusColor`, `statusPill`, both `statusTone` functions, `previewStatus` and `PreviewRow` are **deleted**, not left unused.
+- The three surfaces already on `BudgetBar` are visually unchanged.
+- No behaviour change: thresholds, statuses, percentages and displayed figures are identical before and after.
+
+## Out of scope
+
+- Threshold semantics, the 75 / 100 defaults, per-customer overrides.
+- Any endpoint, response shape or query.
+- Which surfaces show dollars. The crew endpoint's server-side restriction shipped with #1995 and is untouched — `hidePercent` is a client convenience, never the guard.
+- Renaming `BudgetBar`.
+- The Action Board.
+- The wet-check status pills.
+
+## Steps
+
+1. **Add the two input modes.** Accept either the three amount props or `fillPercent`. Passing both is a developer error — fail loudly in development rather than silently preferring one.
+
+2. **Add `pillOnly`, `size`, `hidePercent`, `label` and `tone`**, with both label vocabularies in one map beside the existing `STATUS_LABEL`. Defaults leave the three current callers byte-identical.
+
+3. **Switch the colour maps onto the tokens**, per the table above.
+
+4. **Move the crew view onto proportion mode** (`field-tech-dashboard.tsx:73`) and add `hidePercent`. Confirm against the crew endpoint's response that no monetary field is being passed at all.
+
+5. **Migrate the other two existing callers** to the new `size` prop — `budget-status.tsx` and `manager-workspace.tsx` — in this same commit. Remove the boolean `thin`.
+
+6. **Migrate the customer profile** (`BudgetBucketRow` :968) — two rows with `label`. Delete `BudgetBucketRow`.
+
+7. **Migrate the Financial Pulse widget** — the customer-detail meter (:479, used :565) and the top-customers badge (:649, used :741, `pillOnly` + `tone="analytic"`). Delete `BudgetMeter`, `statusColor` and `statusPill`.
+
+8. **Migrate the Financial Pulse page** table (:1054, used :1369 / :1372) with `size="compact"` and `tone="analytic"`. **The row already carries `monthlyCap` and `monthlySpend`** (`financial-pulse.tsx:134-135`) — pass those in amounts mode with `pendingAmount={0}` rather than the pre-divided `monthlyUsedPct`. Do the same for the annual column. Delete the local `BudgetMeter` and `statusTone` (:1025).
+
+9. **Migrate the customer form's live preview** (`PreviewRow` :1357, inside `LiveBudgetPreview` :1289). This surface classifies **unsaved** form values, so it passes the typed cap and the typed soft/hard thresholds and lets the component classify — it must not receive a `forcedStatus`. Delete `PreviewRow`, `previewStatus` (:1313) and `statusTone` (:878).
+
+10. **Verify by loading every surface**, not by compiling. A customer in each of the four states, on all six surfaces, with displayed numbers unchanged.
+
+11. **Tests, registered as validation commands.** Extend `BudgetBar.test.tsx` rather than starting a new suite: both input modes, and passing both at once failing loudly; threshold boundaries at 74.9 / 75 / 100 and non-default per-customer thresholds; `forcedStatus` overriding local classification; over-100% clamping with the true figure in the pill; `allocation: null` and `fillPercent: null` both rendering Unset rather than zero or full; one segment when pending is 0, two when it is not; `pillOnly` rendering no track; both tones rendering their own words from the one map; `hideDollars` + `hidePercent` producing no monetary text and no percentage, asserted on rendered output. Add a snapshot per migrated call site. The existing `budget-status.test.tsx`, `budget-route-nav-parity.test.ts` and `customer-form-budget-preview.test.tsx` suites must pass unchanged.
+
+## Notes for the executor
+
+- **This is a pure refactor.** If any surface's displayed numbers change, something was translated wrong. The colour change is the only intended visual difference, and it should be imperceptible if the ink tokens were set to the right lightness in Slice 1.
+- `financial-pulse.tsx` uses shadcn `Progress` with a `[&>div]:bg-*` override. `BudgetBar` owns its own track markup — that is what makes two segments and a cap marker possible at all. Do not try to keep `Progress`.
+- Deleting `statusPill` touches the `top-customers-compact` variant, which has its own tests. Expect to update badge assertions, not to change what the badge says.
+- The form preview is the only surface that classifies client-side from unsaved input. Do not "simplify" it onto a server status; it would stop previewing.
+- After this, the Action Board specs' instruction to "reuse the shared bar, do not fork it" points at something real.
+
+## Definition of Done (attach proof — Rule 7)
+
+- [ ] `file:line` for the extended component, the single label map, the colour table, and each of the five migrated call sites plus the three re-pointed ones.
+- [ ] **Grep proof** that exactly one budget renderer exists, and that `BudgetBucketRow`, both `BudgetMeter` definitions, `statusColor`, `statusPill`, both `statusTone` functions, `previewStatus` and `PreviewRow` are gone.
+- [ ] **Grep proof** that no call site passes a synthetic allocation — search for `allocation={100}` and equivalents.
+- [ ] Before-and-after screenshots of all six surfaces for the same customer, showing identical numbers.
+- [ ] Screenshot of one customer in each of the four states through the canonical component.
+- [ ] Captured crew-endpoint response plus a rendered-output assertion proving no dollar figure and no percentage reaches the crew view.
+- [ ] Confirmation that the Budget Status page, Manager Workspace card and crew view are visually unchanged.
+- [ ] Test output for both input modes, threshold boundaries, clamping, unset, `forcedStatus`, `pillOnly` and both tones.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+
+- `artifacts/irrigopro/src/components/budget/BudgetBar.tsx` (component :99, `STATUS_PILL_CLASSES` :63, `STATUS_LABEL` :70, `INVOICED_TRACK_CLASSES` :77, `PENDING_TRACK_CLASSES` :84) and `BudgetBar.test.tsx`
+- `artifacts/irrigopro/src/pages/field-tech-dashboard.tsx` (:73-79 — the synthetic allocation)
+- `artifacts/irrigopro/src/pages/budget-status.tsx`, `src/pages/manager-workspace.tsx` (existing callers, `size` migration)
+- `artifacts/irrigopro/src/pages/customer-profile.tsx` (`BudgetBucketRow` :968, `BudgetCard` :993)
+- `artifacts/irrigopro/src/components/financial-pulse/financial-pulse-widget.tsx` (`statusColor` :466, `BudgetMeter` :479, use :565, `statusPill` :649, use :741)
+- `artifacts/irrigopro/src/pages/financial-pulse.tsx` (`statusTone` :1025, `BudgetMeter` :1054, row type :134-136, uses :1369 / :1372)
+- `artifacts/irrigopro/src/components/customer-form.tsx` (`statusTone` :878, `LiveBudgetPreview` :1289, `previewStatus` :1313, `PreviewRow` :1357)
+- `lib/shared/src/budget-status.ts` (from Slice 1)

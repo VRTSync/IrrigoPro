@@ -1,0 +1,71 @@
+# BUILD — Wire the Irrigation Profile Into the Wet-Check Controller/Zone Grid
+
+**What & Why**
+Adding controllers in a customer's Irrigation System profile no longer changes the controller/zone grid a wet check builds. The new profile writes to the canonical `irrigation_controllers` table, but wet-check creation still sizes its grid from the stale `customers.totalControllers` integer (and legacy `property_controllers` for zone counts). The purpose-built resolver that fixes this — `resolveWetCheckControllers` (reads `irrigation_controllers` first, falls back to `property_controllers`) — already exists and is unit-tested, but **it is not called anywhere in production.** This ticket wires it in so the Irrigation profile becomes the single driver of the wet-check grid, consistent with the canonical-store / VRTSync direction. Server-side only; do not touch `customer-billing.tsx`. Multi-tenancy intact.
+
+## Confirmed findings (in code)
+- `resolveWetCheckControllers` (`irrigation-controller-resolver.ts`) is referenced only by its test file — **zero production call sites.**
+- Wet-check creation reads `Number(customer.totalControllers ?? 1)` as `numControllers` in **two** paths — `routes.ts:15677` and `routes.ts:16550` (the `blankStart` variant) — then builds `seedConfigs` from that count + `property_controllers` zone counts, and seeds `irrigation_controllers` via `ensureIrrigationControllers`. The profile's actual controller count never drives the count.
+- `customers.totalControllers` is written only by the legacy `setCustomerControllerCount` (`storage.ts:7868`). The irrigation-profile CRUD (`irrigation-profile-routes.ts`) never updates it — confirmed.
+- The no-branch (customer-level) controller **read** path returns `listPropertyControllers` directly (`routes.ts:15716`), bypassing `irrigation_controllers`.
+
+## Done looks like
+- Adding/removing a controller (or changing a zone count) in the Irrigation profile changes the grid the next wet check builds — controller **count and per-controller zone counts** both come from `irrigation_controllers`.
+- Wet-check creation only falls back to `customers.totalControllers` / `property_controllers` when the customer+branch has **no** irrigation profile yet (true pre-seed state).
+- The customer-level (no-branch) controller read reflects `irrigation_controllers`.
+- `customers.totalControllers` stays in sync for any UI that still displays it.
+- No regression to `blankStart` wet checks (still start empty) or to first-visit seeding for customers with no profile.
+
+---
+
+## Slice 1 — Drive wet-check grid size from the profile (both creation paths)
+**File:** `routes.ts` — creation path A (~15677–15695) and creation path B (~16548–16567).
+
+In each path, **before** computing `numControllers`/`seedConfigs`, resolve the profile first:
+```ts
+const resolved = await resolveWetCheckControllers(cid, customerId, branchParam); // companyId from auth, not body
+```
+- **If `resolved.length > 0` (profile exists):** use it as the grid shape.
+  - `numControllers = resolved.length`.
+  - Build `seedConfigs` from `resolved`: `{ name: \`Controller ${letter}\`, zoneCount: r.zoneCount }` — pass `zoneCount` **through as-is, including `null`**. Do **not** default a null zone count to 12 (that was the prior wrong-count bug); a null means "unknown/unset," and the grid must render it as such.
+  - `ensureIrrigationControllers(...)` stays (idempotent) so the canonical table and the seeded grid remain consistent.
+- **If `resolved.length === 0` (no profile yet):** keep the **current** fallback exactly as-is — `numControllers = clamp(customer.totalControllers)`, `seedConfigs` from `property_controllers`. This is the legitimate first-visit/pre-seed path.
+- **`blankStart` path (B):** unchanged — still `numControllers = 0`; the resolver is not consulted (tech adds manually).
+- Persist `numControllers` on the wet check from whichever source won (as today).
+
+Apply identically to **both** paths so they can't diverge.
+
+## Slice 2 — Customer-level (no-branch) read path uses the resolver
+**File:** `routes.ts:15716` (the `listPropertyControllers`-direct return).
+- Route the no-branch controller read through the same resolution as the branch path (`resolveWetCheckControllers` / `ensureIrrigationControllers` → `irrigation_controllers`), so customer-level customers see canonical data, not stale `property_controllers`. Map to the existing wire shape the UI already consumes (as the branch path does at ~15694+), so no frontend change is needed.
+
+## Slice 3 — Keep `customers.totalControllers` in sync from the profile (display + fallback safety)
+**File:** `irrigation-profile-routes.ts` (controller create/delete handlers), `storage.ts`.
+- When a controller is added/removed in the **customer-level** profile bucket (`branchName == "" `/ null), update `customers.totalControllers` to the new `irrigation_controllers` count for that customer-level bucket (reuse the mirror logic `setCustomerControllerCount` already uses at `storage.ts:7862–7868`, which only writes when branch is null).
+- This keeps any surface still reading `totalControllers` (customer overview, reports, the pre-seed fallback) correct. Branch-scoped controllers do not write the customer-level integer (matches existing semantics).
+
+## Cross-cutting
+- **Multi-tenancy (Rule 1):** `companyId` for the resolver comes from `req.authenticatedUserCompanyId`, never the body. The resolver already scopes by `(companyId, customerId, branchName)`.
+- **branchName semantics — verify before shipping:** the resolver keys on `(companyId, customerId, branchName)`. Confirm the `branchName` used at wet-check creation is the **same key** the Irrigation profile writes controllers under (customer-level `""`/null vs a named branch). If a customer's profile is stored customer-level but wet checks are created per-branch, the resolver returns empty for the branch and silently falls back to legacy — so the two must agree, or the fix works for customer-level customers only. Add a test for the branched case.
+- **Canonical store:** after this, `irrigation_controllers` is the single driver; `property_controllers` is legacy fallback only. Do not reintroduce writes to `property_controllers` from these paths.
+
+## Tests
+- Profile has 3 controllers, `customers.totalControllers = 1` → new wet check builds a **3**-controller grid with each controller's profile zone count (not 1, not defaulted to 12).
+- Controller with `totalZones = null` in the profile → grid renders that controller with an unset/empty zone count, never 12.
+- Customer with **no** profile → falls back to `totalControllers` + `property_controllers` as today (no regression).
+- `blankStart` wet check → still starts with 0 controllers.
+- No-branch customer → read endpoint returns `irrigation_controllers` data, not `property_controllers`.
+- Add/remove controller in customer-level profile → `customers.totalControllers` updates to match.
+- Branch-scoped: a wet check for branch X reads branch X's profile controllers; company isolation holds (can't read another company's controllers).
+
+## Out of scope
+- `customer-billing.tsx` / Command Center.
+- Retiring `property_controllers` (stays as the pre-seed fallback).
+- Backfilling `irrigation_controllers` for customers who never opened the profile (the fallback covers them until seeded).
+
+## Relevant files
+- `artifacts/api-server/src/irrigation-controller-resolver.ts` (`resolveWetCheckControllers` — wire it in)
+- `artifacts/api-server/src/routes/routes.ts` (creation path A ~15677–15695; creation path B ~16548–16567; no-branch read ~15716)
+- `artifacts/api-server/src/routes/irrigation-profile-routes.ts` (controller CRUD — add `totalControllers` sync)
+- `artifacts/api-server/src/storage.ts` (`ensureIrrigationControllers` ~10538; `listIrrigationControllers` ~10523; `setCustomerControllerCount` mirror ~7862–7868)
+- `artifacts/api-server/src/irrigation-controller-resolver.test.ts` (extend with the branched + null-zone cases)

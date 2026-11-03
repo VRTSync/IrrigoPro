@@ -1,0 +1,118 @@
+# FIX — Repair Stale Work-Order Parts Columns (2 of 2)
+
+## What & Why
+
+Slice 1 stopped the invoice PDF printing a Parts Subtotal that contradicts the line-item table beneath it, by making the items authoritative at render time. That fixes the page. It does not fix the data: on an unknown number of work orders, `work_orders.total_parts_cost` (and possibly `parts_subtotal`) is stored as `0.00` while the ticket's line items sum to a real figure. Invoice #30210's two large July tickets are confirmed cases — $3,131.70 and $972.50 of parts each recorded as zero on the header.
+
+Every other reader of that figure is therefore also suspect. Three exist, and no two agree on precedence:
+
+| Location | Expression | Behaviour on a stored `"0.00"` |
+|---|---|---|
+| `storage.ts:6536`, `storage.ts:7002` | `wo.partsSubtotal ?? wo.totalPartsCost ?? 0` | returns 0 — correct only if `parts_subtotal` is right |
+| `routes.ts:6934` (QuickBooks line description) | `wo.partsSubtotal \|\| wo.totalPartsCost \|\| '0'` | `"0.00"` is truthy, so it returns `"0.00"` and never falls through |
+| `routes.ts:7182` (Bill Separately) | `parseFloat(wo.totalPartsCost \|\| '0')` | reads the legacy column alone — same defect Slice 1 just removed from the PDF |
+
+`routes.ts:7182` is the serious one: it sets the `partsSubtotal` written onto a standalone invoice for a single ticket. A work order with a stale `total_parts_cost` billed through Bill Separately produces an invoice whose stored parts figure is zero — not a display bug, a persisted one.
+
+**How the data got this way.** Three writer paths, and they do not agree either:
+
+- `routes.ts:9827` (field completion) writes both columns from `money(totalPartsCost)` — the value the technician's completion form submits. The comment above it at `routes.ts:9780` already concedes the client can supply 0, and guards that case only when `usedParts` is empty and prior items exist (`skipReplace`). When parts arrive as line items **and** the form's total field is 0, neither column is written from the items and both persist as zero while `total_amount` is later corrected elsewhere. That is the shape of the Woodglenn records.
+- `routes.ts:13590` (bulk item replace) writes `total_parts_cost` only. The recompute that follows at `routes.ts:13597-13612` writes `parts_subtotal` — but only when `freshWo.appliedLaborRate` is present. On a legacy record without it, `parts_subtotal` is never written and the two columns drift apart.
+- `routes.ts:13825` (single item add) writes both, consistently. This is the path that behaves correctly and the one the others should match.
+
+**Decision (already made, do not relitigate):** `work_orders.parts_subtotal` is the authoritative billed-price column. `total_parts_cost` is legacy, kept for backward compatibility, and must never again be written without `parts_subtotal` being written in the same statement. No column is dropped in this ticket — retiring `total_parts_cost` is a separate decision with a migration of its own, and bundling it here would put a schema change behind a data repair.
+
+## Done looks like
+
+- A dry-run report naming every work order whose stored parts columns disagree with the sum of its line items by more than $0.01, with company, work-order number, both stored values, the item sum and the delta.
+- After the repair run, that report is empty, and re-running the Slice 1 PDF path over the affected invoices logs zero heals.
+- `routes.ts:7182` and `routes.ts:6934` resolve parts the same way as `storage.ts:6536` — preferred column first, nullish coalescing, never truthy coalescing.
+- `routes.ts:13590`'s recompute writes `parts_subtotal` on every path, including records with no `appliedLaborRate`.
+- No invoice total, work-order `total_amount` or billing-sheet figure changes as a result of the repair. Only the two parts columns move.
+- The repair is scoped by `company_id` and cannot touch another tenant's rows.
+
+## Out of scope
+
+- Dropping or renaming `total_parts_cost`, and any change to `lib/db/src/pricing-fields.ts` (which lists both columns at 41-49 so the field_tech sanitizer strips them — that inventory stays exactly as it is).
+- The work-order completion form UI and `work-order-completion.tsx:574`. The client may keep submitting `totalPartsCost`; the server stops trusting it as the sole source.
+- Billing sheets and wet-check billings. `billing_sheets.parts_subtotal` is `.notNull()` and no drift is known; Slice 1's instrumentation will say so.
+- The PDF read path. Slice 1 owns it and must ship first.
+- QuickBooks re-push of already-synced invoices. The line description changes for future pushes only; do not resync historical invoices in this ticket.
+
+## Steps
+
+1. **Ship Slice 1 first and read its counter.** The `pdf_parts_subtotal_healed` log line tells you how many tickets are affected before you write a single row. If that count is zero across a regeneration of recent invoices, stop and report — the repair would be a no-op and the reader fixes below are the whole ticket.
+
+2. **Write the audit as a dry-run-first script**, following the existing family in `artifacts/api-server/src/scripts/` — `reconcile-billing-sheet-invoice-totals.ts` and its `-core.ts` / `-db.ts` split are the template. Same shape: pure core, thin DB wrapper, `--dry-run` default, `--company-id` required unless `--all-companies` is passed explicitly.
+
+   The core takes work orders with their items and returns the rows needing repair:
+
+```ts
+export interface PartsDriftRow {
+  workOrderId: number;
+  workOrderNumber: string;
+  companyId: number;
+  storedPartsSubtotal: string | null;
+  storedTotalPartsCost: string | null;
+  itemsTotal: string;
+  delta: string;
+}
+```
+
+   Flag a row when it has at least one item and `Math.abs(itemsTotal - resolved) > 0.01`, resolving exactly as Slice 1's `resolveTicketPartsSubtotal` does. Import that precedence or mirror it with a comment naming the file — do not invent a third rule.
+
+3. **Repair only the two parts columns.** For each flagged row, in one transaction per work order:
+
+```ts
+await tx.update(workOrders).set({
+  partsSubtotal: itemsTotal.toFixed(2),
+  totalPartsCost: itemsTotal.toFixed(2),
+}).where(and(eq(workOrders.id, id), eq(workOrders.companyId, companyId)));
+```
+
+   Do **not** recompute `labor_subtotal` or `total_amount`. On the confirmed records `total_amount` is already correct ($8,401.70 = $5,270.00 + $3,131.70) and rewriting it risks moving a figure that has already been invoiced, sent and in some cases pushed to QuickBooks. If the script finds a row where `total_amount` does **not** equal `labor_subtotal + itemsTotal`, do not silently correct it — list it in a separate "needs manual review" section of the report and leave it alone. A ticket that has already been billed at a different number is a business decision, not a migration.
+
+4. **Emit a structured audit event per repaired row**, matching the `pricingAuditEvents` pattern at `storage.ts:6592-6600`: `source: 'work_order'`, `kind: 'parts_subtotal_repair'`, `delta`, `itemCount`, `parentNumber`. Per Task #210, do not write the audit note into `work_orders.notes`. The History panel should show this repair the same way it shows a catalog reprice.
+
+5. **Close the two stale readers.**
+   - `routes.ts:7182` — replace `parseFloat(wo.totalPartsCost || '0')` with the same nullish-precedence resolution, preferring `wo.partsSubtotal`. Add a one-line comment naming Slice 1 so the next person finds the invariant.
+   - `routes.ts:6934` — change `||` to `??` so a stored `"0.00"` on `partsSubtotal` is treated as a real value rather than falling through to the legacy column. Behaviour is unchanged once the data is repaired; the point is that the three readers stop disagreeing.
+
+6. **Close the writer gap at `routes.ts:13590`.** After `replaceWorkOrderItemsInTransaction`, write both columns from `computedPartsCost` rather than `total_parts_cost` alone, so `parts_subtotal` is never left behind when `appliedLaborRate` is absent. Keep the existing labour recompute gated on `appliedLaborRate` as it is — that gate is correct for labour and only wrong for parts.
+
+7. **Harden the completion path at `routes.ts:9780-9792`.** Extend the existing `skipReplace` guard: when the client submits `totalPartsCost` of 0 **and** the resolved items for the work order sum to more than 0, derive `partsCost` from the items rather than from the form, and log `[AUDIT] work_order_completion_parts_derived workOrderId=<id> formValue=0 itemsTotal=<n>`. This is the defect that created the Woodglenn records; fixing the data without fixing this writer means repairing it again next season.
+
+8. **Tests.**
+   - A core test for the drift detector: items-vs-header agreement, a stale `"0.00"` header, a genuinely parts-free ticket, and a row where `total_amount` disagrees (must land in manual-review, not be repaired).
+   - A tenancy test asserting the repair's `where` clause carries `company_id` and that a row belonging to another company is not returned or updated. Per the standing multi-tenancy rule this is not optional.
+   - A route test for `routes.ts:7182` proving a work order with `partsSubtotal: "500.00"` and `totalPartsCost: "0.00"` bills at $500.00.
+   - A route test for step 7 proving a completion posting `totalPartsCost: 0` with non-empty `usedParts` persists the item-derived figure.
+
+   Check whether `.replit` has a validation command covering `scripts/reconcile-billing-sheet-invoice-totals.test.ts`; if the new script's test is not picked up by an existing command, add it to that command rather than creating a new one.
+
+## Notes for the executor
+
+- **Tenancy:** every `select` and every `update` in the script carries `company_id`. `--all-companies` must be an explicit flag, must be refused in combination with `--dry-run=false` unless also passed `--confirm`, and must log the per-company breakdown. There is a second company being onboarded; a repair script that ignores tenancy is the exact failure mode that assessment was written to prevent.
+- **Additive, not duplicative:** no parallel "v2" resolver, no second script alongside the reconcile family. Extend the existing shape.
+- Run dry-run, attach the report, get it reviewed, and only then run for real. The confirmed blast radius is two tickets on one HOA; if the dry run returns hundreds of rows across many customers, stop and report before writing anything.
+- Do not re-send or regenerate any invoice as part of this ticket. Regeneration is Randy's call, per customer, after the repair is verified.
+
+## Proof to attach when done
+
+- The dry-run report, before and after.
+- `file:line` for the script, the two reader fixes, the two writer fixes and the audit event.
+- Test output including the tenancy test.
+- The `pdf_parts_subtotal_healed` counter from a regeneration of invoice #30210 after the repair, reading zero.
+- Confirmation that no `total_amount` value changed, with the manual-review list if any rows landed there.
+
+## Relevant files
+
+- `artifacts/api-server/src/routes/routes.ts` — QuickBooks line parts (6934), Bill Separately parts (7182), completion parts resolution (9780-9792) and write (9827), bulk item replace write (13590) and recompute (13597-13612), single item add write (13825)
+- `artifacts/api-server/src/storage.ts` — correct precedence to copy (6536, 7002), `pricingAuditEvents` insert pattern (6592-6600)
+- `artifacts/api-server/src/scripts/reconcile-billing-sheet-invoice-totals{,-core,-db}.ts` — the script template to follow
+- `artifacts/api-server/src/pdf-view-model.ts` — `resolveTicketPartsSubtotal` from Slice 1; the precedence to mirror
+- `lib/db/src/schema/schema.ts` — `work_orders.total_parts_cost` (777), `work_orders.parts_subtotal` (781)
+- `lib/db/src/pricing-fields.ts:41-49` — both columns listed for the field_tech strip set; unchanged
+- `.replit` — add the new script test to an existing validation command if not already covered
+
+**Build order:** Slice 1 (`FIX - Invoice PDF Parts Subtotal Reads the Wrong Column (1 of 2).md`) ships first and independently. This slice depends on it for the resolver and for the counter that sizes the repair. Do not merge them into one task.

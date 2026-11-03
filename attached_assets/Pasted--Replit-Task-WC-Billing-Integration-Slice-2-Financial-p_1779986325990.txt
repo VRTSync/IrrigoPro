@@ -1,0 +1,268 @@
+# Replit Task — WC Billing Integration, Slice 2 (Financial-pulse audit WCB branch)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader integration audit — it is reference material so
+you understand the intent. The actual work for this task is in the **Slice 2**
+section at the bottom. Do not deviate from any file paths, function names,
+schema field names, or payload shapes specified. If you believe a deviation
+is necessary, surface it and stop rather than proceeding.
+
+> **Backend-only, additive.** This slice adds a third `else if` branch to
+> an existing enrichment loop in `routes.ts`, plus two new keys on the
+> returned shape (`wetCheckBillingId`, `wetCheckBilling.billingNumber`).
+> No frontend changes. No schema changes. No new endpoints.
+
+> **Pattern: mirror the billing-sheet branch.** The new branch does for
+> `wet_check_billing` items what the existing `billing_sheet` branch at
+> `routes.ts:11157+` does for billing sheets — re-sources status,
+> description, work date, totals, and approval/billed timestamps from the
+> source row, then injects the matching ID on the returned object. Match
+> the BS branch's shape exactly; do not invent new fields.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in the audit
+(`WC Billing Integration - Slice 0 End-of-Month Audit.md`) and apply to
+every slice in this family.
+
+**Polymorphic invoice items.** `invoice_items.sourceType` is one of
+`'work_order' | 'billing_sheet' | 'wet_check_billing'`. WCB invoice
+items have `sourceType === 'wet_check_billing'`, `sourceId === wcb.id`,
+and `wetCheckBillingId === wcb.id` (the dedicated FK column added when
+the WCB sourceType was introduced).
+
+**Source-of-truth precedence.** When the source row carries an
+authoritative total (`wcb.totalAmount > 0`), use it. The
+`invoice_item.totalPrice` is computed at invoice-creation time and is
+the fallback for invoices created before snapshotting was reliable.
+The BS branch demonstrates the pattern at `routes.ts:11181–11189`.
+
+**Approval snapshots.** Wet check billings do NOT currently carry
+`approvedLaborSnapshot` / `approvedPartsSnapshot` columns. That is a
+separate slice (Slice 7). For now, return `null` for both. When Slice 7
+ships, the same code path will populate them automatically because the
+read uses the columns directly.
+
+**No status remap.** The BS branch returns `bs.status` verbatim. The
+WCB branch returns `wcb.status` verbatim. Downstream UIs handle the
+status enum.
+
+---
+
+## Slice 2 — Add wet_check_billing branch to the invoice audit enrichment
+
+### Scope
+
+The invoice audit endpoint (the one consumed by the financial-pulse
+drilldown) enriches invoice items at `routes.ts:11103+`. The current
+implementation has a `work_order` branch (`:11124+`) and a
+`billing_sheet` branch (`:11157+`), then falls through to the
+invoice-item-level data for any other `sourceType`. WCB items
+therefore appear with raw fields only — no status from the source row,
+no authoritative totals, no `billedAt`. This slice adds the missing
+`wet_check_billing` branch.
+
+### Files modified
+
+- `artifacts/api-server/src/routes/routes.ts` — add the new `else if`
+  branch at `~line 11191` (immediately before the `return { ... }`
+  block at `:11193`), plus add `wetCheckBillingId` to the returned
+  shape.
+- `artifacts/api-server/src/routes/financial-pulse-wcb.test.ts`
+  (existing) — extend with cases asserting the new enrichment branch.
+  If the test file doesn't already cover the audit endpoint, add a new
+  `describe("invoice audit — WCB items")` block.
+
+### Concrete changes
+
+**(1) Add `wetCheckBillingId` to the returned shape.**
+
+In `routes.ts:11193+`, the current `return { ... }` block exposes
+`id`, `sourceType`, `sourceId`, `workOrderId`, `billingSheetId`,
+`description`, `status`, `laborTotal`, `partsTotal`, `ticketTotal`,
+`workDate`, `createdAt`, `approvedAt`, `billedAt`,
+`approvedLaborSnapshot`, `approvedPartsSnapshot`. Add one more key —
+`wetCheckBillingId` — adjacent to the existing `billingSheetId` field:
+
+```typescript
+return {
+  id: item.id,
+  sourceType: item.sourceType,
+  sourceId: item.sourceId,
+  workOrderId: item.workOrderId,
+  billingSheetId: item.billingSheetId,
+  wetCheckBillingId: item.wetCheckBillingId,   // NEW
+  description,
+  status,
+  // … unchanged
+};
+```
+
+`item.wetCheckBillingId` is already populated on
+`invoice_items` rows whose `sourceType === 'wet_check_billing'` (see
+the writer at `routes.ts:6929`).
+
+**(2) Add the `wet_check_billing` enrichment branch.**
+
+After the `billing_sheet` branch (at `routes.ts:~11190`, immediately
+before the closing `}` of the `else if (item.sourceType ===
+"billing_sheet" …)` block), add:
+
+```typescript
+} else if (item.sourceType === "wet_check_billing" && item.wetCheckBillingId) {
+  const wcb = await storage.getWetCheckBillingById(item.wetCheckBillingId, userCompanyId ?? null);
+  if (wcb) {
+    status = wcb.status || "billed";
+    description = `WC Billing ${wcb.billingNumber}`;
+    workDate = wcb.workDate || item.workDate;
+    createdAt = wcb.createdAt ? wcb.createdAt.toISOString() : null;
+    // WCBs do not yet carry approval timestamps as dedicated columns
+    // (Slice 7 will add them); approvedAt is left null and billedAt
+    // comes from the WCB row's billedAt column.
+    approvedAt = wcb.approvedAt ? wcb.approvedAt.toISOString() : null;
+    billedAt = wcb.billedAt ? wcb.billedAt.toISOString() : null;
+    // Approval snapshots — Slice 7 will populate these columns. For
+    // now they read as undefined and the parse fallback returns null.
+    if ((wcb as any).approvedLaborSnapshot) {
+      try {
+        const snap = JSON.parse((wcb as any).approvedLaborSnapshot);
+        const parsed = typeof snap === "number" ? snap : parseFloat(snap?.laborSubtotal ?? snap?.total ?? "");
+        approvedLaborSnapshot = isNaN(parsed) ? null : parsed;
+      } catch { approvedLaborSnapshot = null; }
+    }
+    if ((wcb as any).approvedPartsSnapshot) {
+      try {
+        const snap = JSON.parse((wcb as any).approvedPartsSnapshot);
+        const parsed = typeof snap === "number" ? snap : parseFloat(snap?.partsSubtotal ?? snap?.total ?? "");
+        approvedPartsSnapshot = isNaN(parsed) ? null : parsed;
+      } catch { approvedPartsSnapshot = null; }
+    }
+    // Use authoritative source totals when available
+    const wcbLabor = parseFloat(wcb.laborSubtotal || "0");
+    const wcbParts = parseFloat(wcb.partsSubtotal || "0");
+    const wcbTotal = parseFloat(wcb.totalAmount || "0");
+    if (wcbTotal > 0) {
+      ticketTotal = wcbTotal;
+      laborTotal = wcbLabor;
+      partsTotal = wcbParts;
+    }
+  }
+}
+```
+
+The `(wcb as any).approvedLaborSnapshot` casts are TEMPORARY — they
+allow this slice to ship before Slice 7 adds the columns. When Slice 7
+lands, the cast comes off naturally.
+
+**(3) Verify `storage.getWetCheckBillingById` signature.**
+
+Existing signature (per audit, used by route handler at
+`routes.ts:9629`): `getWetCheckBillingById(id: number)`. If the method
+does NOT take a `companyId` parameter, the company-scope check is
+handled inside the storage method via `assertWetCheckBelongsToCompany`
+or equivalent. In that case, call it as `storage.getWetCheckBillingById(item.wetCheckBillingId)`
+— drop the second arg. Confirm by reading the method body at
+`storage.ts:~3969+` before writing the call.
+
+If the method takes a companyId, pass `userCompanyId ?? null` to
+match the BS branch at `:11158`.
+
+### Tests
+
+#### Extend `financial-pulse-wcb.test.ts`
+
+Add or extend with three cases:
+
+```typescript
+describe("invoice audit — WCB enrichment branch (Slice 2)", () => {
+  it("returns wetCheckBillingId for WCB invoice items", async () => {
+    const { invoice, wcb } = await setupInvoiceWithWcb();
+    const res = await request(app).get(`/api/invoices/${invoice.id}/audit`);
+    expect(res.status).toBe(200);
+    const wcbItem = res.body.items.find((i: any) => i.sourceType === "wet_check_billing");
+    expect(wcbItem).toBeDefined();
+    expect(wcbItem.wetCheckBillingId).toBe(wcb.id);
+  });
+
+  it("uses WCB row totals as authoritative when wcb.totalAmount > 0", async () => {
+    const { invoice, wcb } = await setupInvoiceWithWcb({
+      wcbTotalAmount: "350.00",
+      wcbLaborSubtotal: "250.00",
+      wcbPartsSubtotal: "100.00",
+      // The invoice_item.totalPrice is "999.00" — a deliberately wrong fallback
+      // to prove the enrichment overrode it.
+      itemTotalPrice: "999.00",
+    });
+    const res = await request(app).get(`/api/invoices/${invoice.id}/audit`);
+    const wcbItem = res.body.items.find((i: any) => i.sourceType === "wet_check_billing");
+    expect(wcbItem.ticketTotal).toBe(350);
+    expect(wcbItem.laborTotal).toBe(250);
+    expect(wcbItem.partsTotal).toBe(100);
+  });
+
+  it("sources status / description / billedAt / workDate from the WCB row", async () => {
+    const billedAt = new Date("2026-05-15T12:00:00Z");
+    const workDate = new Date("2026-05-10T09:00:00Z");
+    const { invoice, wcb } = await setupInvoiceWithWcb({
+      wcbStatus: "billed",
+      wcbBillingNumber: "WC-2026-1042",
+      wcbBilledAt: billedAt,
+      wcbWorkDate: workDate,
+    });
+    const res = await request(app).get(`/api/invoices/${invoice.id}/audit`);
+    const wcbItem = res.body.items.find((i: any) => i.sourceType === "wet_check_billing");
+    expect(wcbItem.status).toBe("billed");
+    expect(wcbItem.description).toBe("WC Billing WC-2026-1042");
+    expect(wcbItem.billedAt).toBe(billedAt.toISOString());
+    expect(new Date(wcbItem.workDate).getTime()).toBe(workDate.getTime());
+  });
+});
+```
+
+If `setupInvoiceWithWcb` does not already exist as a test helper in
+the file, write it as a small inline helper that:
+1. Inserts a customer + WCB row via `db.insert(wetCheckBillings)`
+2. Creates an `invoices` row
+3. Creates an `invoice_items` row with `sourceType: 'wet_check_billing'`
+   and the WCB id on both `sourceId` and `wetCheckBillingId`
+
+Do NOT mock `storage.getWetCheckBillingById` — use the real
+implementation against the test database. The whole value of the
+enrichment is integration correctness, and mocking removes the test's
+value.
+
+### Acceptance criteria
+
+- The invoice audit endpoint returns `wetCheckBillingId` on every
+  enriched item (null for non-WCB items, populated for WCB items).
+- WCB items have their `status`, `description`, `workDate`,
+  `createdAt`, `billedAt`, `ticketTotal`, `laborTotal`, `partsTotal`
+  sourced from the underlying `wet_check_billings` row when the row
+  exists.
+- WCB items return `approvedLaborSnapshot: null` and
+  `approvedPartsSnapshot: null` until Slice 7 ships. (After Slice 7
+  ships, this same code path will populate them — no further change
+  needed here.)
+- The three new tests pass against the real database.
+- Existing WO and BS enrichment behavior is unchanged. No fields
+  removed, no fields renamed.
+- `pnpm typecheck` and `pnpm test` pass.
+
+### Out of scope
+
+- Adding the snapshot columns to `wet_check_billings` (Slice 7).
+- Frontend changes to surface `wetCheckBillingId` on the financial-pulse
+  drilldown UI (separate slice if needed; the field is harmless if
+  unconsumed).
+- Changing the BS or WO enrichment branches.
+- Adding a separate audit endpoint specifically for WCBs.
+- Changing `storage.getWetCheckBillingById` itself.
+
+### Dependencies
+
+None — this slice is independent. Order with Slice 7 is non-binding:
+if Slice 7 lands first, the snapshot fields will populate
+automatically; if this slice lands first, they read null until Slice 7
+fills the columns.

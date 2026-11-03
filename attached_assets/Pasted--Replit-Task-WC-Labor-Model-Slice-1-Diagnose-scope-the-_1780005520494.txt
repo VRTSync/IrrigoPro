@@ -1,0 +1,312 @@
+# Replit Task — WC Labor Model, Slice 1 (Diagnose & scope the zero-labor bug)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from `WC Labor Model - Slice 0 Per-Finding Labor Audit and Plan.md`
+— it is reference material so you understand the intent. The actual work for
+this task is in the **Slice 1** section at the bottom. Do not deviate from any
+file paths, function names, schema field names, or payload shapes specified.
+If you believe a deviation is necessary, surface it and stop rather than
+proceeding.
+
+> **Pure investigation slice. No production code changes.** The deliverable
+> is `docs/wc-labor-auto-compute-audit.md` plus the SQL reports it
+> references. The fix lands in Slice 2; the backfill lands in Slice 3.
+> Splitting these keeps each step reversible and lets the user authorize
+> the fix scope after seeing the blast radius.
+
+> **The reproducer is known: `WC-2026-1027` (Villas at the Boulders).** 50
+> repairs across 31 zones, all reading "auto 0.00." Originating wet
+> check's WC Sheet Totals card shows Repair Labor Subtotal $0.00 on a
+> $428.06 parts bill. Start there.
+
+> **Strong working hypothesis: the company is missing `issue_type_configs`
+> rows, OR finding `issueType` strings don't match catalog keys.** The
+> auto-compute at `storage.ts:7673` (`_recomputeZoneRepairLaborIfAuto`)
+> reads `issueTypeConfigs WHERE companyId = :cid` and builds a Map; an
+> empty Map or non-matching keys both produce 0.00. The diagnostic must
+> confirm which.
+
+---
+
+## Design Context (locked decisions)
+
+Inherited from WC Labor Model Slice 0.
+
+**No code changes in Slice 1.** Schema, storage, routes, and frontend are
+all read-only. The work is data inspection + writing.
+
+**The auto-compute lives at
+`artifacts/api-server/src/storage.ts:7673`**
+(`_recomputeZoneRepairLaborIfAuto`). It is called from:
+- `createWetCheckFinding` at `:7924`
+- `updateWetCheckFinding` at `:7973`
+- `resetZoneRepairLabor` at `:7748`
+- (verify) `deleteWetCheckFinding` — grep to confirm
+- (verify) wet check submit / approval path — grep to confirm
+
+**The catalog seed is at `schema.ts:1494+`** with the comment "applied per
+company on startup." The seed values:
+- `nozzle_replacement` → 0.25
+- `head_replacement` → 0.25
+- `head_adjustment` → 0.25
+- `leak_repair` → 1.00
+- `pressure_issue` → 0.50
+- `coverage_issue` → 0.50
+
+**The startup seed application code** is in
+`artifacts/api-server/src/` somewhere — grep for `issueTypeConfigs` AND
+`insertMany` or `insert(...).values(` to find it. The diagnostic must
+check whether the seed runs on company-create or only on app startup.
+
+---
+
+## Slice 1 — Diagnose & scope
+
+### Scope
+
+Four steps. All read-only. Deliverables: audit doc + SQL outputs.
+
+### Files modified
+
+- New: `docs/wc-labor-auto-compute-audit.md` — the audit deliverable.
+- New: `docs/wc-labor-auto-compute-queries/` — the SQL files used to
+  produce the report (committed for reproducibility).
+
+No production code touched.
+
+### Concrete changes
+
+#### Step A — Reproduce on `WC-2026-1027`
+
+On a dev environment or a production database snapshot:
+
+1. Locate the wet check. `SELECT * FROM wet_checks WHERE id = (SELECT
+   wet_check_id FROM wet_check_billings WHERE billing_number =
+   'WC-2026-1027');`. Record the `customer_id` and (via
+   `customers.company_id`) the company id.
+2. Inspect catalog rows for that company:
+   ```sql
+   SELECT * FROM issue_type_configs WHERE company_id = :cid;
+   ```
+   If zero rows → Hypothesis 1 confirmed. If rows exist but their
+   `issue_type` values look unusual (capitalized, spaced, etc.) →
+   continue to step 3.
+3. Inspect findings for that wet check:
+   ```sql
+   SELECT DISTINCT f.issue_type, COUNT(*) AS n
+   FROM wet_check_findings f
+   JOIN wet_check_zone_records zr ON zr.id = f.zone_record_id
+   WHERE zr.wet_check_id = :wcId
+   GROUP BY f.issue_type;
+   ```
+   Compare each value to the catalog keys from step 2. If they
+   differ — Hypothesis 2 confirmed.
+4. Manually walk the auto-compute logic at
+   `_recomputeZoneRepairLaborIfAuto` (storage.ts:7673) against one zone
+   from the wet check, by hand:
+   - Pull `repairLaborManuallySet` for the zone.
+   - Build the configMap from step 2's rows.
+   - For each finding, would `configMap.get(f.issueType)` return
+     anything? If no — that finding contributes 0. If yes — sum it.
+5. **Note the missing quantity multiplication.** Line 7700 in the auto-
+   compute reads `if (raw) totalHours += parseFloat(String(raw)) || 0;`
+   — no multiplication by `f.quantity`. Record this in the audit as a
+   secondary bug. It is real but smaller than the missing-catalog
+   case: a 2× quantity nozzle replacement contributes 0.25 (the
+   catalog default) instead of 0.50 (correct).
+
+#### Step B — Map every labor read path
+
+The user reports a divergence between "the wet checks say they have the
+labor calculated" and "the billings page says 0." The
+`WC-2026-1027` evidence shows the WC Sheet Totals card also says 0
+— so the divergence isn't universal across the wet check side. Catalog
+every read path to find which surface(s) read live vs persisted.
+
+For each of the following surfaces, document what query / aggregation
+produces the labor number displayed:
+
+- `WetCheckDetail.tsx` (`artifacts/irrigopro/src/pages/wet-checks/WetCheckDetail.tsx`)
+  — the wet check detail page.
+- `WetCheckReviewPage` (`pages/wet-check-review.tsx`) — the manager
+  review page.
+- `WetCheckBillingViewComponent`
+  (`components/billing/wet-check-billing-view.tsx`) — the WCB modal /
+  view body.
+- The WC Sheet Totals card (find the component rendering "Repair
+  Labor Subtotal" in screenshot 1 — likely in the wet-check detail
+  page or a summary card).
+- The PDF view-model (`pdf-view-model.ts`).
+- The wet check summary export (if one exists for the WC review).
+
+For each, record:
+- Source field (e.g., `zone.repairLaborHours` vs a derived sum vs an
+  on-the-fly compute against `issueTypeConfigs`).
+- Whether it would show $0 or "expected" labor for `WC-2026-1027`.
+
+Capture in a table:
+
+```
+| Surface                  | File:line                       | Read path                                  | Shows for WC-2026-1027 |
+|--------------------------|---------------------------------|--------------------------------------------|------------------------|
+| WC Sheet Totals card     | <find>                          | Σ zone.repairLaborHours × rate             | $0.00                  |
+| WCB view modal           | wet-check-billing-view.tsx:375  | zone.repairLaborHours direct               | "auto 0.00" per zone   |
+| WetCheckDetail labor pill | <find>                          | <fill in>                                  | <?>                    |
+| Review page summary      | wet-check-review.tsx            | <fill in>                                  | <?>                    |
+| PDF                      | pdf-view-model.ts               | <fill in>                                  | <?>                    |
+```
+
+#### Step C — Scope the blast radius (run against production or recent snapshot)
+
+Write each query as a file under
+`docs/wc-labor-auto-compute-queries/` and run it. Capture results in
+the audit doc.
+
+**Q1 — Unbilled WCBs with zero labor (the safely-fixable bucket):**
+
+```sql
+SELECT
+  COUNT(*) AS wcb_count,
+  COALESCE(SUM(CAST(parts_subtotal AS NUMERIC)), 0) AS parts_total,
+  COALESCE(SUM(CAST(total_amount AS NUMERIC)), 0) AS amount_total
+FROM wet_check_billings
+WHERE CAST(labor_subtotal AS NUMERIC) = 0
+  AND invoice_id IS NULL;
+```
+
+**Q2 — Already-invoiced WCBs with zero labor (the accounting-impact
+bucket):**
+
+```sql
+SELECT
+  wcb.id,
+  wcb.billing_number,
+  wcb.customer_name,
+  wcb.invoice_id,
+  CAST(wcb.parts_subtotal AS NUMERIC) AS parts_subtotal,
+  CAST(wcb.total_amount  AS NUMERIC) AS total_amount,
+  i.invoice_number,
+  CAST(i.total_amount AS NUMERIC) AS invoice_total,
+  i.created_at AS invoice_created
+FROM wet_check_billings wcb
+JOIN invoices i ON i.id = wcb.invoice_id
+WHERE CAST(wcb.labor_subtotal AS NUMERIC) = 0
+ORDER BY i.created_at DESC;
+```
+
+**Q3 — Zones whose finding `issueType` strings don't match the catalog
+for the parent company (Hypothesis 2 evidence):**
+
+```sql
+SELECT
+  c.id AS company_id,
+  c.name AS company_name,
+  f.issue_type,
+  COUNT(*) AS finding_count
+FROM wet_check_findings f
+JOIN wet_checks wc ON wc.id = f.wet_check_id
+JOIN customers cu ON cu.id = wc.customer_id
+JOIN companies c ON c.id = cu.company_id
+LEFT JOIN issue_type_configs itc
+  ON itc.company_id = c.id
+ AND itc.issue_type = f.issue_type
+WHERE itc.id IS NULL
+GROUP BY c.id, c.name, f.issue_type
+ORDER BY finding_count DESC;
+```
+
+**Q4 — Companies missing the catalog entirely (Hypothesis 1 evidence):**
+
+```sql
+SELECT
+  c.id, c.name, COUNT(itc.id) AS catalog_rows
+FROM companies c
+LEFT JOIN issue_type_configs itc ON itc.company_id = c.id
+GROUP BY c.id, c.name
+HAVING COUNT(itc.id) = 0;
+```
+
+**Q5 — Per-company WCB labor health (sanity):**
+
+```sql
+SELECT
+  c.name,
+  COUNT(*) FILTER (WHERE CAST(wcb.labor_subtotal AS NUMERIC) = 0) AS zero_labor_count,
+  COUNT(*) AS total_wcb_count,
+  ROUND(100.0 * COUNT(*) FILTER (WHERE CAST(wcb.labor_subtotal AS NUMERIC) = 0)
+        / NULLIF(COUNT(*), 0), 1) AS pct_zero_labor
+FROM wet_check_billings wcb
+JOIN customers cu ON cu.id = wcb.customer_id
+JOIN companies c ON c.id = cu.company_id
+GROUP BY c.name
+ORDER BY zero_labor_count DESC;
+```
+
+The `pct_zero_labor` column is the most telling number — if it's near
+100% for a given company, the catalog is missing or mismatched
+company-wide. If it's spread across companies at moderate rates, the
+problem is more nuanced.
+
+#### Step D — Write the audit
+
+Produce `docs/wc-labor-auto-compute-audit.md` with these sections (in
+order):
+
+1. **Reproducer summary** — `WC-2026-1027`, what it shows, the
+   company id, the wet check id.
+2. **Step A findings** — which hypothesis the evidence supports.
+3. **Step B read-path table** — every labor surface and its source.
+4. **Step C blast radius** — the five SQL results, with the absolute
+   numbers and percentages.
+5. **Accounting impact** — total $ of labor that "should have been"
+   on already-shipped invoices (compute from Q2 results × what the
+   labor would have been if the catalog had worked — use a derived
+   estimate from Q1's per-WCB average labor as the proxy).
+6. **Recommendation for Slice 2 scope** — one of:
+   - "Seed `issue_type_configs` for all companies missing it." (if
+     Q4 returns rows)
+   - "Normalize `issueType` strings in the auto-compute." (if Q3
+     returns rows)
+   - "Fix the auto-compute regression: add quantity multiplication
+     and any other arithmetic bug found in Step A." (if Steps A/C
+     reveal arithmetic issues)
+   - Often more than one.
+7. **Recommendation for Slice 3 scope** — typically "recompute Q1
+   WCBs, surface Q2 WCBs for accounting review," with the WCB
+   counts.
+
+### Tests
+
+No automated tests in this slice. The audit doc IS the deliverable.
+
+For traceability, copy each query's output into the doc as
+fenced text blocks AND save each as a `.csv` under
+`docs/wc-labor-auto-compute-queries/results-2026-MM-DD/`.
+
+### Acceptance criteria
+
+- `docs/wc-labor-auto-compute-audit.md` exists with all six sections.
+- Five SQL files exist under
+  `docs/wc-labor-auto-compute-queries/`.
+- The audit names ONE recommended Slice 2 shape (or an ordered list
+  if multiple fixes are needed).
+- The audit names a backfill scope for Slice 3, including counts.
+- The audit explicitly addresses the secondary quantity-multiplier
+  bug (storage.ts:7700) and recommends whether to fix in Slice 2 or
+  defer.
+- No production code is modified.
+
+### Out of scope
+
+- Fixing anything. Slice 2 fixes; Slice 3 backfills.
+- Modifying the audit doc to look better — keep it factual and dense.
+- Running the SQL against a non-production source if production is
+  available. The blast-radius numbers must reflect reality, not a
+  stale snapshot if avoidable.
+- Auto-deciding what to do about accounting impact on shipped
+  invoices. The audit surfaces; the user decides.
+
+### Dependencies
+
+- WC Labor Model Slice 0 (the planning doc) — landed.
+- Independent of Slices 2, 3, 4. Must land before any of them start.

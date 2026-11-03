@@ -1,0 +1,253 @@
+# Slice 8 — Estimate Creation Wizard Redesign
+
+**Date:** 2026-05-05
+**Status:** Ready for Replit implementation
+**Author:** Engineering planning
+**Decisions locked:**
+- Q1 = **Multi-step wizard.** Three steps: 1) Customer & Project → 2) Line Items → 3) Review & Send. Sticky progress strip, large primary CTAs, keyboard navigation. Matches the wet-check review wizard's structural feel.
+- Q2 = **Compact table for line items**, redesigned. Not a grid-of-fields and not a card-per-item — a polished, readable table with proper column headers, generous row spacing, inline editable cells, a real Part picker button per row, a live Line Total per row, and a sticky running subtotal. On mobile (<768px) rows collapse into stacked cards.
+- Q3 = **Inline pop-out parts picker with category groups.** Click "Add Part" → a focused panel slides in with category chips at the top (driven by the existing `parts.category` field) and a search box. Click a part → row added → picker stays open for fast multi-add. Closes on Done or Esc.
+- Q4 (locked by default) = **Edit mode reuses the same wizard** but skips Step 1 if the customer is already locked, opening directly on Step 2 with a "Change customer" link in the header.
+- Q5 (locked by default) = **Photos and attachments move to Step 3 (Review)** as an optional collapsed section. They aren't part of the core estimate-building flow and shouldn't take screen real estate during line-item entry.
+- Q6 (locked by default) = **Visual language matches the wet-check redesign exactly:** `HeaderStrip`-style header, color tokens (blue for primary, green for completed/totals, amber for pending action, gray for muted), Lucide icons in colored rounded backgrounds, `KpiTile`-style sticky running total.
+
+**Related:** Builds on Slice 1 (estimate stripdown — flat line items only), Slice 5 (manager UX redesign — visual language and component vocabulary this slice borrows from), and Slice 7 (estimate pending-approval workflow — sets the `internal_status = 'pending_approval'` default this wizard's submit will trigger). No schema or API changes in this slice; this is pure UI.
+
+---
+
+## Executive Summary
+
+The current estimate creation modal (`client/src/components/estimates/estimate-modal.tsx`) is a 95vh × 95vw dialog containing one giant scrolling form: customer card, project info card, line items grid, two upload zones, summary. The line-items editor is a 12-column grid that crams part name, price, quantity, labor hours, and per-line total into row segments that collapse into unreadable rubble below ~768px. Part name renders as plain text — to swap a part the user has to delete the row and re-add it. There is no running subtotal until the user scrolls to the bottom. The parts picker is a separate full-screen dialog with no category grouping. The whole thing predates the visual language the wet-check redesign established and feels like it.
+
+Slice 8 replaces the modal with a **three-step wizard** that mirrors the wet-check review wizard's structural feel: sticky progress strip, focused single-purpose steps, large primary CTAs, keyboard navigation, mobile-first layouts. The line-items step is a polished compact table — generous spacing, real Part-picker buttons per row, live per-line totals, a sticky running subtotal at the top, and an inline pop-out parts picker with category chips that stays open across multiple adds. Photos and attachments demote to an optional collapsible section in Step 3 so they stop competing for attention during the actual estimate-building work.
+
+**Slice 8 ships when:** the existing entry points to "create estimate" and "edit estimate" open the new wizard, the wizard renders cleanly on phone and desktop, the parts picker has category chips that work end-to-end, the running total is always visible while editing, submit produces an estimate identical in shape to what the current modal produces (no API or storage changes), and the customer-facing approval flow plus the Slice 7 pending-approval queue both still work.
+
+---
+
+## Why Now
+
+The estimate system is now structurally clean (Slices 1, 7) but the field-facing UX hasn't caught up. Three concrete problems are driving rework:
+
+First, **field use on a phone is currently bad.** The 12-column line-items grid (`estimate-modal.tsx:402-465`) collapses unpredictably below 768px. Managers building estimates on a job site routinely lose track of which input is which. The wet-check redesign solved the same class of problem by going mobile-first; the estimate flow hasn't.
+
+Second, **the parts picker assumes catalog browsing, not estimate building.** `parts-search-modal.tsx` shows a "Frequently Used" grid plus a long alphabetical list with substring search. There's no category grouping, so a manager looking for "the small drip emitter" has to scroll. There's no way to change a part on an existing line item without deleting and re-adding. The wet-check redesign's inline part-picker pattern — category chips, search, focused panel that stays open — is the right model.
+
+Third, **there's no running total feedback while editing.** The summary lives at the very bottom of the form, below all line items, photos, and attachments. The manager has to scroll down, see the total, scroll back up to adjust pricing, scroll down again to verify. A sticky running subtotal at the top of Step 2 fixes this with one component.
+
+Slice 7 made this slice unblockable: with `internal_status = 'pending_approval'` defaulting on the server, the wizard's Submit can be a single button that lands the estimate in the queue cleanly. No new server logic is required to support the new UI.
+
+---
+
+## What an Estimate Creation Flow Becomes
+
+After Slice 8, creating or editing an estimate is a three-step wizard inside a focused dialog (or full-screen take-over on mobile):
+
+**Step 1 — Customer & Project.** Customer picker (existing `CustomerSelector`) at the top, prominent. Once a customer is locked, the form shows their billing email, phone, and a "Change customer" link as a small secondary affordance. Below that: Project Name (required, the only required write here), Project Address (optional, defaults to the customer's primary address with a Change link), Location Notes, Access Instructions. CTA: "Continue to Line Items →". Esc closes the wizard with an unsaved-changes confirmation if anything is dirty.
+
+**Step 2 — Line Items.** This is the workhorse step. A sticky strip at the top shows: estimate number (or "New Estimate" if creating), customer name, and a live KpiTile-style **Running Total** (parts subtotal + labor subtotal + total, all computed locally). Below that, a polished compact table:
+
+| Column | Behaviour |
+|---|---|
+| Part | Renders the part name as a button. Click → opens the Change-Part variant of the inline picker. Below the name, a smaller-type text input for the per-line description (optional). |
+| Qty | Number stepper with `−` / `+` buttons and a typeable input. Default 1. Min 1. |
+| Unit Price | Read-only, sourced from `part.price`. Right-aligned. |
+| Labor Hrs | Number input, step 0.25, default 0. Helper text below: "× $X/hr = $Y" using the customer's labor rate so the labor cost component is visible. |
+| Line Total | Live-computed `qty × unitPrice + laborHrs × laborRate`. Bolder type, right-aligned. |
+| Actions | Drag handle (reorder), Delete button. |
+
+Below the table: a primary **"+ Add Part"** button that opens the inline picker. The picker is a focused panel sliding in from the right (desktop) or full-screen sheet (mobile) with: category chips at the top driven by `parts.category` distinct values (All, Sprinklers, Valves, Drip, Controllers, Backflow, Pipe & Fittings, etc. — exact set comes from the data), a search input, and a scrollable list. Clicking a part adds it as a new row with qty 1 and labor 0; the picker stays open for the next add. "Done" or Esc closes it.
+
+CTA strip: "← Back" and "Continue to Review →". The Continue CTA is disabled if the line-items list is empty, with a tooltip explaining why.
+
+**Step 3 — Review & Send.** Read-only summary of everything entered. Customer block, project block, line items table (same column layout but non-editable), totals block (parts subtotal, labor subtotal, **total**). Below the summary, an **optional collapsible** "Photos & Attachments" section with the existing FileUpload components — collapsed by default, expand-on-click. Two CTAs at the bottom: secondary "← Back to Line Items" and primary **"Submit for Approval"**. On submit, the existing `POST /api/estimates` endpoint is called; the server defaults `internal_status = 'pending_approval'` per Slice 7. Toast: "Estimate sent to approval queue." Wizard closes; the user lands back on the estimates list, which now shows the new estimate with the Slice 7 "Awaiting Review" badge.
+
+In **edit mode** (`estimateId` provided), the wizard opens directly on Step 2 with the customer already locked, the line items pre-loaded, and a "Change customer" link in the header that jumps back to Step 1. Otherwise identical.
+
+---
+
+## Scope of Slice 8
+
+### In Scope
+
+1. New top-level component `client/src/components/estimates/estimate-wizard.tsx` that owns wizard state (current step, dirty tracking, draft estimate) and renders the three steps via a `<Switch>`-style local stepper.
+2. Three step components: `estimate-wizard-customer-step.tsx`, `estimate-wizard-line-items-step.tsx`, `estimate-wizard-review-step.tsx`. Co-located in `client/src/components/estimates/wizard/`.
+3. New inline parts picker `estimate-wizard-part-picker.tsx` (also under `wizard/`) — a focused panel with category chips and search. Stays open across multiple adds. Used in both "Add Part" and "Change Part" variants of the same component (different mode prop).
+4. New sticky **Running Total** strip component (could be a small wrapper around the existing `KpiTile` if its API allows, or a thin custom component matching its visual language).
+5. Replace every existing call site of `<EstimateModal>` with `<EstimateWizard>`. Affected:
+   - `client/src/pages/estimates.tsx` (the New Estimate button + the Edit row action)
+   - `client/src/components/manager/estimates-manager.tsx`
+   - Any other call site found via grep (search for `EstimateModal` and `estimate-modal`)
+6. Delete `client/src/components/estimates/estimate-modal.tsx` once all call sites are migrated. The new wizard absorbs its responsibilities.
+7. Keep `parts-search-modal.tsx` for now — it may still be used elsewhere (parts catalog admin, etc.) — but it is **not** used inside the wizard. The wizard uses its own inline picker. If after migration grep shows zero remaining references to `parts-search-modal`, delete it too.
+8. Visual language: borrow `HeaderStrip`-style framing, `KpiTile` accent colors, `Card`/`CardContent`, `Badge`, and the wet-check decision-card hover/focus treatments. Use Lucide icons in colored rounded backgrounds (`rounded-md p-2`) consistently.
+9. Mobile layout: at `<768px`, the wizard takes over the full viewport (not a centered dialog). The line-items table collapses to stacked cards (one card per line item with the same fields stacked vertically). The parts picker becomes a full-screen sheet.
+10. Keyboard support: Esc closes wizard (with confirm if dirty); Enter advances to next step from the focused step's primary CTA; in the parts picker, ↑/↓ moves selection, Enter adds the focused part, Esc closes the picker.
+11. Dirty-tracking + unsaved-changes confirm: closing the wizard with any unsaved changes prompts "Discard changes?" (existing AlertDialog component pattern).
+12. **Edit mode** behavior: passing `estimateId` opens directly on Step 2 with everything pre-loaded.
+
+### Out of Scope
+
+- Any server, schema, or storage changes. The submit payload shape MUST be identical to what `EstimateModal` currently sends so `POST /api/estimates` and `processEstimatePayload` continue to work without modification.
+- Quick-entry / templates (separate future slice).
+- Edit-before-send + comment thread on the reviewer side (separate future slice).
+- PDF generation / email attachment (separate future slice).
+- Customer-facing approval page redesign.
+- Replacing the wet-check-side reused `KpiTile` / `HeaderStrip` components themselves.
+- Any change to how parts are categorized in the database. The picker uses whatever `parts.category` already contains; categorization improvements are a separate slice.
+
+---
+
+## UI Specification
+
+### Wizard Container
+
+- Dialog at ≥768px: `max-w-4xl`, height clamps to content with internal scroll on overflow.
+- Sheet/full-screen take-over at <768px: covers the viewport, fixed header with Back arrow and step title, fixed footer with primary CTA.
+- Header on every step: small breadcrumb-style "Step X of 3 · {step name}" with a horizontal progress bar below (filled to X/3). Sticky.
+- Footer on every step: secondary action on the left (Back / Cancel), primary CTA on the right.
+
+### Step 1 — Customer & Project
+
+- **Customer card** (top, prominent):
+  - Pre-selection state: shows the existing `CustomerSelector` widget with placeholder "Search customers…".
+  - Post-selection state: shows the customer name in larger type, billing email below in muted type, phone below that, and a small text-button "Change customer" on the right.
+  - Visual: blue accent (`border-l-4 border-l-blue-500`) once a customer is locked, neutral before.
+- **Project card** (below customer):
+  - Project Name (required, autofocus when this step opens).
+  - Project Address — defaults to customer's address with a small "Use a different address" toggle that swaps in the existing `LocationFields` component editable.
+  - Location Notes (optional textarea, 3 rows).
+  - Access Instructions (optional textarea, 3 rows).
+- Footer: "Cancel" (secondary), "Continue to Line Items →" (primary, disabled until customer + project name both present).
+
+### Step 2 — Line Items
+
+- **Sticky top strip**:
+  - Left: customer name + project name in muted type.
+  - Right: Running Total tile — shows three lines: "Parts $X.XX", "Labor $Y.YY", "**Total $Z.ZZ**". Updates live as the user edits any field. Uses green accent (`border-l-4 border-l-green-500`) consistent with the wet-check completed-state colour.
+- **Compact line-items table** (≥768px):
+  - Headers: Part / Description, Qty, Unit Price, Labor Hrs, Line Total, [icon-only Actions].
+  - Generous row padding (`py-3`), hover state (`hover:bg-gray-50`), zebra-stripe-free.
+  - Part column is a button styled to look like a label-with-pencil: shows the part name in `font-medium`, with a small Pencil icon on the right of the name. Below the name, a single-line description input. Click anywhere on the part name → opens the picker in Change mode (replaces the part on this row, keeps qty / labor / description).
+  - Qty: `<input type="number">` with `−` and `+` stepper buttons flanking it. Width ~140px.
+  - Unit Price: read-only, right-aligned, `text-gray-600`.
+  - Labor Hrs: `<input type="number" step="0.25">`. Below the input, helper text in `text-xs text-gray-500`: "× $45/hr = $Y" (use the customer's labor rate for X, computed labor cost for Y).
+  - Line Total: right-aligned, `font-semibold text-gray-900`, larger than other columns.
+  - Actions: Drag handle on the left (vertical dots icon, `cursor-grab`), Delete button on the right (`Trash2` icon, ghost button, red-500 on hover). Reordering uses the existing dnd library if one is already in use elsewhere; otherwise simple up/down arrows are an acceptable fallback for v1.
+- **Mobile (<768px)**: each line item renders as a stacked card instead of a table row. Card header: part name (large) + delete button. Body: Qty stepper, Labor Hrs input, Unit Price (muted), Line Total (large, right-aligned). Description input below as a single-line input. Drag handle becomes up/down arrow buttons (drag UX is poor on mobile).
+- **"+ Add Part" button** below the table/cards: full-width on mobile, right-aligned on desktop. Primary blue, with a Plus icon.
+- **Empty state** (no line items yet): centered placeholder with a Package icon and "No line items yet. Click '+ Add Part' to start building this estimate." with the Add Part button right below.
+- Footer: "← Back" (secondary), "Continue to Review →" (primary, disabled with tooltip if line items array is empty).
+
+### Inline Parts Picker
+
+- Slide-in panel from the right at ≥768px (width `w-96` or similar), full-screen sheet at <768px.
+- Header: "Add part" or "Change part" depending on mode, with a Close button.
+- **Category chips row** at the top: rendered horizontally, scrollable on overflow. First chip is "All" (default selected). Subsequent chips are distinct values from `parts.category` for the current company. Selected chip uses blue-filled style, unselected uses outline. Selecting a chip filters the list.
+- **Search input** below the chips: debounced 200ms, filters the list by name substring (case-insensitive).
+- **Parts list** below: each row shows part name (font-medium), category in a small badge, price right-aligned. Click row → adds to estimate (Add mode) or replaces the active line item's part (Change mode). In Add mode, the picker stays open and shows a brief inline confirmation ("Added: {name}") that fades. In Change mode, the picker closes immediately on selection.
+- Footer (Add mode only): "Done" button on the right, closes the picker.
+- Keyboard: ↑/↓ moves selection within the visible list, Enter triggers add/change, Esc closes the picker.
+
+### Step 3 — Review & Send
+
+- Read-only summary of Steps 1 and 2:
+  - Customer card (no Change link).
+  - Project card.
+  - Line items table (same column layout, non-editable, no Actions column, no add button).
+  - **Totals block** at the bottom of the items table — three large rows: Parts, Labor, **Total**. Total uses larger type and the green accent.
+- **Photos & Attachments** collapsible section below the summary. Collapsed by default with a header "Photos & Attachments (0)" — count updates as files are added. Expanding reveals the existing `FileUpload` components for `photos` and `attachments`. No required uploads.
+- Footer: "← Back to Line Items" (secondary), **"Submit for Approval"** (primary, full-width on mobile). On click: submits via the existing `POST /api/estimates` endpoint with the existing payload shape (no schema changes).
+- On success: toast "Estimate sent to approval queue", wizard closes, the `/estimates` list re-fetches and the new estimate appears with the Slice 7 "Awaiting Review" internal-status badge.
+- On failure: toast with error message, stay on Step 3 so the user can retry without losing data.
+
+---
+
+## Visual Language
+
+Match the wet-check redesign exactly so the two wizards feel like they came from the same designer:
+
+- **Primary action color:** blue-600 (`bg-blue-600 hover:bg-blue-700 text-white`).
+- **Completed / total accent:** green-500 (left border on the Running Total tile, total row in Step 3).
+- **Pending action accent:** amber-500 (used sparingly — empty-state callouts, validation hints).
+- **Neutral / muted:** gray-500 / gray-600 for helper text, gray-50 / gray-100 for backgrounds.
+- **Icons:** Lucide. Rendered inside `rounded-md p-2 bg-{color}-50` containers when used as section indicators. Used inline at `w-4 h-4` for buttons.
+- **Cards:** existing `Card` + `CardContent` from shadcn/ui. Use `border-l-4 border-l-{color}-500` left-accent pattern from the wet-check FindingCard for the Customer card (blue) and Running Total tile (green).
+- **Typography:** section headers in `text-base font-semibold`, body text in `text-sm`, helper text in `text-xs text-gray-500`. Numeric totals in `font-semibold` or `font-bold` and one size up from body.
+- **Spacing:** `space-y-4` between cards, `py-3` for table row padding, `gap-2` for inline button clusters.
+- **Focus states:** every interactive element gets a visible focus ring (`focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`).
+
+---
+
+## API & Data
+
+**No changes.** The wizard's Step 3 submit calls the existing `POST /api/estimates` endpoint with the exact payload shape `EstimateModal` produces today:
+
+```ts
+{
+  estimate: {
+    customerId, customerName, customerEmail, customerPhone,
+    projectName, projectAddress, locationNotes, accessInstructions,
+    estimateDate, laborRate, createdBy, createdByUserId,
+    photos, attachments,
+    // partsSubtotal/laborSubtotal/totalAmount are recomputed server-side by processEstimatePayload
+  },
+  items: [
+    { partId, partName, partPrice, quantity, laborHours, description, sortOrder }, ...
+  ]
+}
+```
+
+Edit mode uses the existing `PUT /api/estimates/:id` with the same payload shape.
+
+`internalStatus` is force-set to `'pending_approval'` server-side per Slice 7 — the wizard does not need to send it.
+
+---
+
+## Migration / Rollout
+
+This is a UI-only slice. No database migration. Rollout is the wizard absorbing the modal's responsibilities and the modal being deleted in the same commit. Because the API contract is unchanged, server endpoints continue to serve both old and new clients during the deploy window.
+
+If the team wants a feature-flag gate (e.g., `useEstimateWizard` env var that falls back to the old modal), it can be added — but for a UI redesign of this size with no data implications, the simpler "ship the new component, delete the old one" approach is recommended.
+
+---
+
+## Risks and Rollback
+
+- **Behavioural drift in submit payload.** The wizard must produce a payload identical in shape to what `EstimateModal` produces today, or the existing route handler will reject it. Mitigation: write a small adapter that builds the payload from wizard state and unit-test it against a fixture matching the current modal's output. Don't introduce new fields.
+- **Mobile viewport bugs in the take-over sheet.** Field use on a phone is a primary motivator; if the take-over sheet has scroll-lock issues or the keyboard pushes the footer offscreen, the whole point of the redesign is lost. Mitigation: test on a real phone (iOS Safari + Android Chrome) before shipping. The existing wet-check wizard has working patterns for this — borrow them rather than invent.
+- **Inline parts picker performance with large catalogs.** If a company has thousands of parts, rendering all of them in a virtualized-list-less scroller will be slow. Mitigation: cap the rendered list at ~200 items, show "Refine your search to see more" if the filtered set exceeds the cap. Use the existing parts-search debounced query if there is one.
+- **Reordering UX on mobile.** Drag-to-reorder is poor on touch. Mitigation: ship up/down arrows on mobile cards from day one; consider drag for desktop only.
+- **Edit mode dirty-tracking edge case.** If the user opens the wizard on an existing estimate, edits nothing, and clicks Cancel, no confirm should fire. Mitigation: track dirty state by deep-equaling current wizard state vs. the loaded estimate — not by "user touched any input."
+
+Rollback: `git revert` the slice commit. Because no schema changes, no API changes, and the deleted `EstimateModal` is recoverable from git history, rollback is a one-step operation.
+
+---
+
+## Success Criteria
+
+Slice 8 ships when, in order:
+
+1. The wizard renders cleanly on a desktop browser at 1280px+, on a tablet at 768px, and on a phone at 375px (iPhone SE).
+2. Creating a new estimate via the wizard produces an estimate with `internal_status = 'pending_approval'` (Slice 7 server default), correct line items in `sortOrder` order, and totals matching the live-computed Running Total to the cent.
+3. Editing an existing estimate opens directly on Step 2, pre-populates customer + line items + project info, and on Submit `PUT`s an estimate with the updated values.
+4. The inline parts picker shows category chips for every distinct `parts.category` value present in the company's catalog, and selecting a chip filters the list correctly.
+5. Adding 3 parts in a row via the picker is fewer clicks than the current modal (current: 3 × open dialog → search → click → close = ~12 clicks; target: open picker once → 3 × search/click → done = ~5 clicks).
+6. Closing the wizard with any unsaved changes triggers the discard-changes confirm; closing with no changes closes silently.
+7. Submitting an estimate from the wizard surfaces it correctly in the Slice 7 `/estimates/pending-approval` queue with all the right fields populated.
+8. The customer-facing approval-by-link flow (Slice 1) still works end-to-end against an estimate created via the new wizard.
+9. `EstimateModal` is deleted, no remaining imports anywhere; if `parts-search-modal` is no longer referenced anywhere, it is also deleted.
+10. A round of manual testing on a real phone (iOS Safari + Android Chrome) confirms the take-over sheet behaves correctly: keyboard doesn't hide the footer, no horizontal scroll, the parts-picker sheet is dismissible.
+
+---
+
+## What This Unblocks
+
+After Slice 8 ships, the estimate-creation experience matches the wet-check experience in polish, mobile-friendliness, and aesthetic — closing a major gap in field-facing UX consistency. Future slices can layer on top without re-doing the structural work:
+
+- A **templates / quick-entry** slice can add a "Start from template" affordance to Step 1 and pre-populate Step 2 with template line items.
+- An **edit-before-send + comment thread** slice (reviewer-side) can mirror the wizard's compact-table line-items view inside the pending-approval queue page.
+- A **PDF email** slice can use Step 3's read-only review layout as the visual basis for the customer-facing PDF.
+- A **per-line photo attachment** slice can extend the wizard's line-item row to include a small photo thumbnail without reshaping the table.
+
+The estimate creation flow gets a real UX foundation, and any future slice slots into it without re-shaping it.

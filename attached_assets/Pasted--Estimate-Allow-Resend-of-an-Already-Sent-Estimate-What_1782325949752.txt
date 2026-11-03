@@ -1,0 +1,47 @@
+# Estimate — Allow Resend of an Already-Sent Estimate
+
+**What & Why**
+After "Email Customer," there's no way to **re-send** the estimate if the customer didn't receive it (bounce, spam, wrong address, etc.). Resend actually exists end-to-end — but it's **locked to expired estimates only**, which is the wrong trigger for the common "didn't get it" case.
+
+**Current behavior:**
+- **UI:** the **Resend** button renders only when the estimate is **expired** — `estimate-detail-modal.tsx:1264` (`{isExpired(estimate) && !isEstimateDeleted && …}`). For a **sent but not-yet-responded** estimate, the only action offered is **"Copy approval link"** (`:1314`); Email Customer / Mark as Sent disappear after send (gated to `isPendingReview`, `:1336`/`:1347`).
+- **Backend:** `POST /api/estimates/:id/resend` rejects anything not expired — `estimate-routes.ts:1657` (`if (estimate.lifecycleStatus !== "expired") → 400 "Only expired estimates can be resent"`).
+
+**Result:** to re-send to a customer who didn't receive it, you'd have to wait ~30 days for the token to expire. That's the gap.
+
+**Fix:** allow resend for an **already-sent, not-yet-responded** estimate (status `sent` / internal `sent_to_customer`), in addition to expired — both the button and the endpoint. Keep the existing expired behavior. Exclude states where resend makes no sense (draft, approved, rejected, converted-to-WO).
+
+Small slice. No schema change. The resend hook (`useEstimateResend`), confirm dialog (`ResendConfirmDialog`), and audit are already built — this just widens the gate.
+
+---
+
+## Slice 1 — Backend: permit resend for sent estimates
+### File: `artifacts/api-server/src/routes/estimate-routes.ts` (`/resend` ~1632–1682; `_sendEstimateApprovalEmailFlow` ~1414+)
+- Replace the expired-only guard (`:1657`) with: allow resend when the estimate is **`expired`** OR **awaiting customer reply** (sent/`sent_to_customer`, customer hasn't approved/rejected). Reject `draft`, `approved`, `rejected`, and converted estimates with a clear message.
+- **Token/date handling:**
+  - **Expired** → keep current behavior: reset `estimateDate` and mint/extend the token (`resetEstimateDate: true`) so the link is live again.
+  - **Sent (not expired)** → re-send the **same** approval email; keep the existing token if still valid (just re-deliver), or refresh its 30-day expiry. Do **not** reset `estimateDate` for a simple re-deliver (keep `resetEstimateDate: false`), so it reads as a re-send, not a new estimate.
+- Keep the role gate (`irrigation_manager` / `company_admin` / `super_admin`) and the `estimate.resent` lifecycle audit (`:1664`) so the Activity tab logs every resend.
+- Preserve the `EstimateSendConflictError` → 409 handling.
+
+## Slice 2 — Frontend: show Resend after sending
+### File: `artifacts/irrigopro/src/components/estimates/estimate-detail-modal.tsx` (Resend button ~1264; sent actions ~1308–1329)
+- Widen the Resend button's render condition from `isExpired(estimate)` to **`isExpired(estimate) || (isSent(estimate) && isAwaitingCustomerReply(estimate))`** (still `&& !isEstimateDeleted`, still role-gated via `canSendEstimate`). So a sent, not-yet-responded estimate shows **Resend** alongside **Copy approval link**.
+- Keep "Copy approval link" as-is. Keep Email Customer / Mark as Sent gated to pre-send (`isPendingReview`) — Resend is the post-send re-deliver path.
+- Reuse the existing `ResendConfirmDialog` + `useEstimateResend` (`resendEstimate(estimateId, customerEmail)`); the confirm copy should make sense for a non-expired resend (e.g. "Re-send this estimate to {email}?"). Allow editing/confirming the recipient if the original address was wrong (optional but useful for the "wrong address" case).
+
+## Tests
+- A **sent** (awaiting reply) estimate shows a **Resend** button; clicking it re-sends the email and records an `estimate.resent` audit entry; the estimate stays `sent` (not bumped to a new estimate).
+- An **expired** estimate still resends with the date/token refreshed (unchanged).
+- **Draft / approved / rejected / converted** estimates do **not** offer resend, and the endpoint rejects them with a clear message.
+- Resend respects the role gate (manager/admin only).
+- Re-sending uses the verified sender and the (now) named "High Plains Irrigation Team" from-line; the approval link in the resent email still works.
+
+## Out of scope
+- The email body/from/subject redesign and signature capture (separate tickets) — resend just re-delivers whatever the current email build produces.
+- Delivery tracking / bounce detection (would be a separate enhancement).
+
+## Relevant files
+- `artifacts/api-server/src/routes/estimate-routes.ts` (`/resend` ~1632; guard ~1657; `_sendEstimateApprovalEmailFlow` ~1414)
+- `artifacts/irrigopro/src/components/estimates/estimate-detail-modal.tsx` (Resend gate ~1264; sent-state actions ~1308)
+- `artifacts/irrigopro/src/hooks/use-estimate-resend.ts`, `components/estimates/resend-confirm-dialog.tsx` (existing — reuse)

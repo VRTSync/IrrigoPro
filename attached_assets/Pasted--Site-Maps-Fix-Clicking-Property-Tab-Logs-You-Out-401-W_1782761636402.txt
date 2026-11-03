@@ -1,0 +1,38 @@
+# Site Maps — Fix "Clicking Property Tab Logs You Out" (401)
+
+**What & Why**
+Opening the customer **Property tab** (and the whole **Site Maps** section generally) **breaks and signs the user out**. It's been happening for a while across the site-map area.
+
+**Root cause (backend auth chaining).** The site-map routes in `artifacts/api-server/src/routes/site-map-routes.ts` are registered with **only** `requireSiteMapViewAccess` (or `requireCompanyAdminAccess`) as middleware — `requireAuthentication` is **never chained in front of them**. But those role middlewares read `req.authenticatedUserRole`, and that field is **only populated inside `requireAuthentication`** (`routes.ts:768`). The two global `app.use` blocks (`routes.ts:974`, `:1035`) are just request logging — they don't set it.
+
+So on every site-map request `req.authenticatedUserRole` is `undefined`, the middleware takes its `if (!userRole) → res.status(401).json({message:"Authentication required"})` branch (`routes.ts:907`), and the frontend's global 401 handler (`lib/queryClient.ts:128` → `markUnauthenticatedRead` → redirect to `/login`) interprets that as a **lost session and logs the user out**. It fails for **every** role (the role is never read), which is why the entire site-map section has been broken. The new Property tab triggers the `/api/customers/:customerId/site-maps` fetch, so it surfaces there too.
+
+**Fix:** chain `requireAuthentication` before the role middleware on every site-map route, so the role is populated (mirroring how `/api/customers/:id/property-boundary` does `requireAuthentication` first). Then genuine role denials return **403** (already the case once the role is set) and never trip the logout. Small backend fix.
+
+## Done looks like
+- A logged-in company_admin / irrigation_manager / field_tech can open the Property tab and the Site Maps section without being logged out; site maps load.
+- A role that genuinely lacks access gets **403** (not 401) and stays logged in.
+- No site-map route returns 401 for an authenticated user.
+
+## Steps
+1. In `site-map-routes.ts`, ensure **`requireAuthentication` runs first** on **every** route (all the GET/POST/PUT/DELETE for `/api/site-maps`, `/api/customers/:customerId/site-maps`, `/api/site-maps/:siteMapId/...`). Two options:
+   - Pass `requireAuthentication` into `registerSiteMapRoutes(app, { requireAuthentication, requireSiteMapViewAccess, requireCompanyAdminAccess })` and chain it: `app.get(path, requireAuthentication, requireSiteMapViewAccess, handler)`, etc.; **or**
+   - Compose it inside the role middlewares so they can't run without authentication.
+2. Update the call site `registerSiteMapRoutes(app, { … })` (`routes.ts:6420`) to supply `requireAuthentication`.
+3. Confirm the role middlewares now reach their role check with a populated `authenticatedUserRole` (403 path for wrong role, `next()` for allowed).
+4. **While here, verify company scoping** on the site-map reads (Rule 1): `/api/customers/:customerId/site-maps` and the site-map sub-resources should be scoped to the caller's company (404/empty for another company's customer), not global.
+
+## Secondary hardening (recommended, separate from the blocker)
+- The frontend logs the user out on **any** 401 for a logged-in user (`queryClient.ts`). That's brittle — a stray resource-level 401 anywhere nukes the session. Consider only treating a 401 from the **session/auth probe** (e.g. `/api/auth/*` or an explicit session-check) as "session lost," and surfacing other 401s as a normal error. (Not required to fix this bug — the route fix removes the spurious 401 — but it would prevent a whole class of "one bad endpoint logs everyone out" incidents.)
+
+## Tests
+- As each allowed role: GET `/api/customers/:customerId/site-maps` returns 200 with data (no 401); opening the Property tab does not redirect to `/login`.
+- A disallowed role (e.g. billing_manager for view access) gets **403**, stays logged in.
+- An unauthenticated request still gets 401 (correct) — but an authenticated one never does.
+- Cross-company: a user can't read another company's site maps.
+- Regression: the property-boundary and other Property-tab reads still work.
+
+## Relevant files
+- `artifacts/api-server/src/routes/site-map-routes.ts` (all routes — chain `requireAuthentication` first)
+- `artifacts/api-server/src/routes/routes.ts` (`registerSiteMapRoutes` call ~6420; `requireAuthentication` ~737/768; role middlewares `requireSiteMapViewAccess` ~902 / `requireCompanyAdminAccess` ~418)
+- `artifacts/irrigopro/src/lib/queryClient.ts` (global 401 → logout ~128; secondary hardening)

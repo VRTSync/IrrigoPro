@@ -1,0 +1,161 @@
+# REVISED — QuickBooks Stabilization + Audit Cleanup
+
+**Supersedes the original task set #1124–#1128.** Every claim below was checked against the freshly-pulled code on `main` (2026-06-08). Where the originals were wrong, the correction is called out inline as **[CORRECTED]**. Paste these into Replit in order.
+
+## Sequencing (do not reorder)
+
+1. **Task 1 — QB Production Scoping + Cross-Tenant Lockdown** (P0; restores function, closes all three leaks). Deploy + verify before anything else.
+2. **Task 2 — QB Surface Cleanup / De-Bloat** (the QuickBooks cleanup that was missing from the originals).
+3. **Task 3 — Orphan & Duplicate Cleanup** (corrected #1125).
+4. **Task 4 — Route & Navigation Consolidation** (corrected #1126).
+5. **Task 5 — Web AuthProvider** and **Task 6 — Shared Workspace Lib**: deferred. Not part of QuickBooks stabilization; ship 1–4 first, then decide. Task 5 in particular is risky (rewires auth app-wide) and should not ride along with the QB work.
+
+Tasks 1–2 together deliver "QuickBooks working, per-company, no bloat." Tasks 3–4 are general cleanup with verified, corrected scope.
+
+---
+
+## Task 1 — QB Production Scoping + Cross-Tenant Lockdown (P0)
+
+### What & Why
+
+Every legacy QuickBooks route resolves the caller's company from the dev-only `x-user-company-id` header (`headerUserCompanyId`, routes.ts:85), which returns `undefined` in production because `isHeaderAuthAllowed()` is hard-off in prod (routes.ts:72). So in production these routes run with `companyId = null`, causing three P0 symptoms at once:
+
+1. **Re-authorize always 400s** — OAuth state is stored with `companyId: null`; the callback guard (routes.ts:8688) aborts when it reads it back.
+2. **Status falsely "green"** — `getQuickBooksCustomerStatus(null)` falls through to an unscoped `SELECT … LIMIT 1` returning an arbitrary tenant's row.
+3. **Cross-tenant leak** — Company B sees Company A's connection via `/connection`, `/status`, **and `/health`**.
+
+The correct identity is already on `req.authenticatedUserCompanyId` (set by the global auth middleware, routes.ts:857; used 93+ times elsewhere and by the Slice 1116 stale endpoint).
+
+### Done looks like
+
+- A `company_admin` in production: Re-authorize → consent → back on Settings with a fresh `realm_id`, no 400; callback log shows a real numeric company id, not null.
+- `GET /api/quickbooks/connection` for a company with no integration returns `isConnected: false`.
+- **Cross-tenant isolation across all reads:** Company A connected, Company B not → each of `connection`, `health`, `connection/stale` returns only the caller's own data; B never sees A.
+- `sync-customers` and a single estimate sync succeed end-to-end post-reconnect; both 400 cleanly when the company has no connection.
+
+### Out of scope
+
+- `USE_DB_OAUTH_STATE` / the durable Postgres OAuth state store — leave as-is.
+- `isHeaderAuthAllowed()` — production-off is correct.
+- Non-QuickBooks `headerUserCompanyId` sites (routes.ts ~4713, 7584, 11069, 11508, 12446, 12745, 12961, 13192, 13705) — several already correct; do not touch.
+
+### Steps
+
+1. **Add `resolveCompanyId` helper** near `headerUserCompanyId` (routes.ts ~85):
+   ```ts
+   function resolveCompanyId(req: Request): string | null {
+     const authed = (req as any).authenticatedUserCompanyId;
+     if (authed != null) return String(authed); // text column → string
+     const hdr = headerUserCompanyId(req);       // undefined in prod by design
+     return hdr ? String(hdr) : null;
+   }
+   ```
+2. **Swap company resolution** — replace `(headerUserCompanyId(req) as string) || null` with `resolveCompanyId(req)` at the routes that survive cleanup: `/api/quickbooks/auth` (~8589), `/api/quickbooks/disconnect` (~8829), `/api/quickbooks/connection` (~8951), `/api/quickbooks/sync-customers` (~9061), `/api/quickbooks/sync-estimate/:id` (~9323). *(Skip `/status`, `/customers`, `/sync-parts` — Task 2 deletes them; don't waste effort converting them.)*
+3. **Remove the unscoped fallback** in `getQuickBooksCustomerStatus` (storage.ts:3156): the `else` (no companyId) branch must return `integration = []`, never a bare `SELECT … LIMIT 1`.
+4. **Propagate company id through `syncQuickBooksCustomers`** (storage.ts:3196) — it currently calls `getQuickBooksCustomerStatus()` with no argument. Give it a `companyId` parameter and pass `resolveCompanyId(req)` from `/api/quickbooks/sync-customers`; 400 if null.
+5. **[CORRECTED — was missing] Scope `/api/quickbooks/health` (routes.ts:9022).** It currently returns `getQuickBooksAllIntegrations()` — **every company's** integration to any authenticated user. Replace with a single company-scoped lookup keyed on `resolveCompanyId(req)`, returning only the caller's connection health (or `{ connection: null }`). The background token-refresh job may keep `getQuickBooksAllIntegrations()` internally — that's server-side iteration, not an API surface.
+
+### Relevant files
+- `artifacts/api-server/src/routes/routes.ts:85,8589,8829,8951,9061,9322,9022`
+- `artifacts/api-server/src/storage.ts:3156,3196`
+
+---
+
+## Task 2 — QB Surface Cleanup / De-Bloat
+
+### What & Why
+
+The QuickBooks surface has accumulated parallel, demo, and debug endpoints that duplicate the canonical flow and add cross-tenant/security risk. This was the "clean it up, no bloat" intent that the original #1124–1128 dropped. After Task 1 makes the canonical path correct and per-company, remove everything else.
+
+### Done looks like
+
+- Only the canonical company-scoped QB endpoints remain (table below).
+- No demo endpoints, no debug pages, no `demo_access_token` reachable anywhere.
+- Typecheck/build clean after route, storage, and frontend deletions.
+
+### Steps
+
+1. **Delete the demo `integrations` family (routes.ts ~9492–9545):** `GET /api/integrations/quickbooks/customers/status`, `GET …/auth-url`, `POST …/connect`, `POST …/sync`, `POST …/disconnect`. Most are **unauthenticated**, and `…/connect` writes `connectQuickBooks("demo_access_token","demo_refresh_token","demo_realm_id","Demo Company")` — a fake-row generator.
+2. **Delete the debug routes (routes.ts ~8144–8175):** `/quickbooks-temp-fix.js`, `/quickbooks-debug`, `/quickbooks-test`, `/quickbooks-debug-test`, `/check-domain`, plus the root-level `quickbooks-debug.html`, `simple-quickbooks-test.html`, `quickbooks-debug-test.html`, `check-domain.html`.
+3. **Delete redundant/unused routes:** `GET /api/quickbooks/status` (~8852, byte-duplicate of `/connection`), `GET /api/quickbooks/customers` (~8874, unused), `POST /api/quickbooks/sync-parts` (~9201, unused). `GET /api/quickbooks/launch` (~14664): **confirm you are not pursuing an Intuit App-Store listing** — if not, delete it; if yes, keep.
+4. **Remove super_admin global QB tooling** (connection management is company-level, not super_admin): delete `POST /api/admin/repair/qb-company-id` (~7440); simplify `GET /api/quickbooks/connection/stale` (~8977) to the company-scoped check only (drop the super_admin global-count branch and the "exactly one stale row globally" heuristic — evaluate purely against the caller's company). In `quickbooks-integration.tsx`, drop `super_admin` from `repairAllowedRoles` and remove its branch.
+5. **Delete orphaned storage methods (storage.ts)** once their routes are gone — confirm zero callers first: `connectQuickBooks` (3285), `getQuickBooksAuthUrl` (3328), `disconnectQuickBooksCustomers` (3337), and `syncCustomersFromQuickBooks` (2910, appears dead).
+6. **Frontend:** delete `components/integrations/customer-integration.tsx` (drives the demo family) and its route/nav entry. Remove the `/api/quickbooks/connection-status` ghost references in `pages/financial-pulse.tsx` (~240–241; that endpoint doesn't exist) and point the type/comment at `/api/quickbooks/connection`.
+
+### Canonical surface after cleanup (the only QB endpoints that should exist)
+
+| Endpoint | Method | Scope |
+|---|---|---|
+| `/api/quickbooks/auth` | GET | company |
+| `/api/quickbooks/callback` | GET | (Intuit) |
+| `/api/quickbooks/connection` | GET | company |
+| `/api/quickbooks/connection/stale` | GET | company |
+| `/api/quickbooks/disconnect` | POST | company |
+| `/api/quickbooks/sync-customers` | POST | company |
+| `/api/quickbooks/sync-estimate/:id` | POST | company |
+| `/api/quickbooks/overdue-summary` | GET | company *(confirm it filters by company in billing-workspace-routes.ts)* |
+| `/api/quickbooks/health` | GET | company |
+| `/api/work-orders/:id/sync-quickbooks` | POST | work-order's company |
+| `/api/invoices/:id/sync-quickbooks` | POST | invoice's company |
+
+### Verification
+- `grep -rn "demo_access_token\|Demo Company\|getQuickBooksAuthUrl\|connectQuickBooks(\|integrations/quickbooks/customers\|quickbooks-debug" api-server/src` → nothing.
+- Route audit returns only the canonical table above.
+- Regression test: seed an integration for Company A, authenticate as Company B → `connection`/`health`/`connection/stale` all return empty/false.
+
+### Relevant files
+- `artifacts/api-server/src/routes/routes.ts`, `artifacts/api-server/src/storage.ts`, `artifacts/api-server/src/routes/billing-workspace-routes.ts`
+- `artifacts/irrigopro/src/components/integrations/customer-integration.tsx`, `artifacts/irrigopro/src/components/quickbooks/quickbooks-integration.tsx`, `artifacts/irrigopro/src/pages/financial-pulse.tsx`
+- repo root: four QuickBooks debug `.html` files
+
+---
+
+## Task 3 — Orphan & Duplicate Cleanup (corrected #1125)
+
+### What & Why
+
+Remove confirmed-orphaned files and collapse duplicate Express route definitions (Express runs the **last** registered handler when two identical paths exist, so duplicates cause silent wrong-handler behavior).
+
+### Steps
+
+1. **Delete truly-orphaned files (verified zero references):** `pages/customer-billing-backup.tsx`, `components/site-maps/zones-data-view-broken.tsx`, `components/site-maps/compact-map-viewer.tsx`. `pages/field-tech.tsx` appears unreferenced as a page import — confirm with a grep for `import … pages/field-tech` (not "field-tech" substrings) before deleting.
+2. **[CORRECTED] Do NOT delete `pages/estimates-pending-approval.tsx`.** The original called it a "legacy redirect / orphan" — it is **live**: `App.tsx:61` lazy-imports it and `components/estimates/estimate-submit-retry.e2e.test.tsx:46` references it. Remove it from the delete list entirely.
+3. **Unify `useIsMobile`:** delete `hooks/use-mobile.ts` (the `window.innerWidth` version); repoint every importer to `use-mobile.tsx`.
+4. **[CORRECTED] Duplicate `DELETE /api/users/:id`:** there are **two** definitions, at **4989 and 5079** — *not three; the original's "~4467" does not exist.* Keep the more complete one, delete the other.
+5. **Duplicate `PUT /api/users/:id`:** two definitions at **4871 and 5035** (confirmed). Keep the more complete, delete the other.
+6. **Shadowed `GET /api/admin/app-health/integrations`:** two GET definitions at **2750 and 3768** (confirmed). Remove the earlier (2750) after confirming functional equivalence. *(Leave the POST at 2765, POST `/test` at 2876, and GET `/:service/recent-failures` at 3937 — different routes.)*
+7. **Typecheck:** `pnpm run typecheck`.
+
+### Relevant files
+- `artifacts/irrigopro/src/pages/customer-billing-backup.tsx`, `components/site-maps/zones-data-view-broken.tsx`, `components/site-maps/compact-map-viewer.tsx`, `pages/field-tech.tsx`, `hooks/use-mobile.ts`, `hooks/use-mobile.tsx`
+- `artifacts/api-server/src/routes/routes.ts:2750,4871,4989,5035,5079`
+
+---
+
+## Task 4 — Route & Navigation Consolidation (corrected #1126)
+
+### What & Why
+
+Collapse genuinely-duplicate routes. **Two of the original's premises were wrong — corrected below.**
+
+### Steps
+
+1. **Manager routes:** `App.tsx:338` `/manager-dashboard` and `App.tsx:339` `/manager` both load `ManagerDashboard` (eager import line 15). Replace both with `<Redirect to="/manager-workspace" />` (confirm `/manager-workspace` is the live successor), then drop the now-unused eager `ManagerDashboard` import.
+2. **parts-list:** remove the `/parts-list` route (`App.tsx:342`) and delete `pages/parts-list.tsx` — **but also remove the nav entry at `components/layout/navigation.tsx:211`** (the original missed this) and first **confirm `parts-catalog` is the routed successor**. Do **not** touch `components/manager/parts-list-manager` / its `index.ts` export — that's a different module.
+3. **UserManager:** it is routed **twice** — `App.tsx:488` and `App.tsx:544` (two role-tree shells), both `/user-manager` → `UserManager`. Confirm `system-user-management.tsx` is the live successor and is routed; repoint or redirect both entries, then delete `pages/UserManager.tsx`.
+4. **[CORRECTED] Wet-check review/summary — do NOT blind-consolidate.** The original claimed `/wet-checks/:id/review` and `/summary` "both load the same field-tech component." That is true only in **one** of five role-tree blocks (`App.tsx:301/302`). In the others they intentionally diverge: `:374` review → `ManagerWetCheckDetailPage` while `:375` summary → `WetCheckInspectionSummaryPage`; blocks at `:422/426`, `:472/476`, `:539/542` route `review → WetCheckReviewPage`, `summary → WetCheckInspectionSummaryPage`. **Leave these as-is.** At most, add a clarifying comment at the 301/302 block noting the two paths are identical there; collapsing review↔summary globally would break manager/reviewer flows. Recommended: drop this item from the cleanup.
+5. **Typecheck:** `pnpm run typecheck`.
+
+### Relevant files
+- `artifacts/irrigopro/src/App.tsx`, `components/layout/navigation.tsx`
+- `artifacts/irrigopro/src/pages/parts-list.tsx`, `pages/UserManager.tsx`, `pages/manager-dashboard.tsx`
+
+---
+
+## Task 5 — Web AuthProvider (DEFERRED)
+
+Carry over the original #1127 as-is, but **do not run it as part of QuickBooks stabilization.** It migrates ~50+ `safeGet("user")` call sites and the `App.tsx` role switch onto a new React `AuthProvider`/`useAuth` — a broad rewrite of auth/session state. Risk: destabilizing login/role routing exactly while production is being stabilized. Schedule it on its own, after Tasks 1–4 are deployed and verified, and land it incrementally (provider + `App.tsx` switch first, then pages). Reference implementation: `artifacts/irrigopro-mobile/lib/auth-context.tsx`.
+
+## Task 6 — Shared Workspace Lib (DEFERRED)
+
+Carry over the original #1128 (move `lifecycle.ts` + `estimate-number.ts` into `@workspace/shared`). Reasonable de-duplication, low urgency, unrelated to QuickBooks. Before moving `lifecycle.ts`, reconcile the two existing copies (api-server is authoritative for write logic, irrigopro for display) — verify they haven't already drifted. Do after Tasks 1–4.

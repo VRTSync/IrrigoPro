@@ -1,0 +1,526 @@
+# Replit Task — WC Separate System, Slice 6 (Switch conversion path)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader rebuild — it is reference material so you understand
+the intent. The actual work for this task is in the **Slice 6** section at the
+bottom. Do not deviate from any file paths, function names, schema field names,
+or payload shapes specified. If you believe a deviation is necessary, surface it
+and stop rather than proceeding.
+
+> **This slice flips user-visible behavior.** After this deploys, every new
+> wet check submission that auto-bills will create a `wet_check_billings` row
+> (not a `billing_sheets` row). The new `/wet-check-billings` page (Slice 4)
+> starts populating with real data. Old BS-WC rows in `billing_sheets`
+> remain unchanged — Slice 5's migration script moves them.
+
+> **Deploy ordering.** Deploy this BEFORE running Slice 5's migration script.
+> Otherwise wet check submissions during migration create new BS-WC rows in
+> `billing_sheets` that the migration's snapshot misses, leaving orphans.
+
+> **Rule of thumb for this slice:** the refactor touches a critical
+> transactional helper (`_writeRepairedInFieldBilling`) that's called from
+> two places. The behavior change is meaningful — be conservative. Do not
+> rename public methods, do not modify non-wet-check code paths, do not
+> remove the legacy `billingSheetId` field on findings (it stays for legacy
+> un-migrated rows until Slice 7 cleanup).
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in conversation and are referenced by every slice in this
+rebuild. Do not deviate from any of them.
+
+**Scope.** Only the wet check conversion path is affected. Work-order
+conversion to `billing_sheets` is untouched.
+
+**Numbering.** New wet check billings use `WC-YYYY-NNNN` format, with the
+sequence starting at 1000 per Slice 1. The conversion path consumes
+`getNextWetCheckBillingNumber()` for each new row.
+
+**Wet check billing status enum.** `'submitted'`, `'pending_manager_review'`,
+`'approved_passed_to_billing'`, `'billed'`. Wet check billings auto-submit on
+creation (no `'draft'` state); the conversion path always creates with
+`status: "submitted"`.
+
+**Layout for detail view.** Zone-grouped. Each finding is a line item;
+per-zone repair labor comes from `wet_check_zone_records.repairLaborHours`
+(authoritative); per-finding labor hours are vestigial for estimation
+purposes.
+
+**Source of truth for line items.** Wet check billings derive line items
+from `wetCheckFindings` directly — there is NO `wet_check_billing_items`
+table parallel to `billing_sheet_items`. The conversion path therefore does
+NOT insert any items table rows; it only stamps `wetCheckBillingId` on the
+findings.
+
+**Findings dual-FK.** `wet_check_findings` has both `billingSheetId`
+(legacy) and `wetCheckBillingId` (new, added in Slice 1). New conversions
+set the new column and clear the legacy column. Legacy un-migrated rows
+keep their `billingSheetId` set until Slice 5 migration moves them.
+
+**Safety patch on `deleteWetCheck`.** The patch must block deletion when
+any finding references EITHER a billing sheet OR a wet check billing,
+regardless of invoice status. Three priority tiers: invoiced records >
+uninvoiced BS > uninvoiced WCB.
+
+---
+
+## Slice 6 — Switch conversion path + extend safety patch
+
+**Scope.** Refactor `_writeRepairedInFieldBilling` (the shared helper called
+by both auto-bill paths on wet check submission) to write to
+`wet_check_billings` instead of `billing_sheets`. Update the two callers'
+local variable names to match. Update `wet_check_findings` writes to set
+`wetCheckBillingId` instead of `billingSheetId`. Extend the Slice 1 safety
+patch in `deleteWetCheck` to also block deletion when findings reference a
+wet check billing. Add a new typed error `WetCheckHasWetCheckBillingError`
+paralleling `WetCheckHasBillingSheetError`.
+
+**Files modified.**
+- `artifacts/api-server/src/storage.ts` — refactor
+  `_writeRepairedInFieldBilling` (~line 6964); update its two callers
+  (lines ~6833 and ~7607–7618); update `deleteWetCheck` safety patch
+  (~line 6423–6446); add new `WetCheckHasWetCheckBillingError` class
+  (place adjacent to `WetCheckHasBillingSheetError` at ~line 206–219)
+- `artifacts/api-server/src/routes/routes.ts` — add HTTP 409 classification
+  for the new error (mirror the existing handling of
+  `WetCheckHasBillingSheetError` at ~line 14866 and ~line 14936)
+- `artifacts/api-server/src/wet-check-submit-autobill.test.ts` (existing) —
+  update assertions to expect wet check billing creation instead of BS-WC
+- `artifacts/api-server/src/wet-check-submit-autobill-error.test.ts`
+  (existing) — update assertions
+- `artifacts/api-server/src/routes/wet-check-delete-billing-block.test.ts`
+  (existing) — extend with cases for the new error class
+- `artifacts/api-server/src/wet-check-billing-view.integration.test.ts`
+  (existing) — update test setup to use the new conversion path
+- New: `artifacts/api-server/src/wet-check-convert-creates-wcb.test.ts` —
+  explicit verification of new behavior
+
+**Concrete changes.**
+
+**(1) Refactor `_writeRepairedInFieldBilling`** (storage.ts ~line 6964).
+
+Replace the function entirely. Old signature returns the BS id; new
+signature returns the WCB id. Keep the function name (it's a private
+helper). Keep the same call shape from callers.
+
+New signature:
+
+```typescript
+private async _writeRepairedInFieldBilling(
+  tx: DbExecutor,
+  wc: WetCheck,
+  customerLaborRate: number,
+  repaired: WetCheckFinding[],
+  priorWcbId: number | null,
+  now: Date,
+): Promise<number>
+```
+
+Parameter renamed `priorBsId` → `priorWcbId`. Return type unchanged —
+still returns a `number`, but the number is now a `wet_check_billings.id`,
+not a `billing_sheets.id`.
+
+**Validation block at top (storage.ts:6978–7001)** — keep verbatim. The
+validation rules (no partId without `noPartNeeded`, qty>0 for parts,
+laborHours>=0) apply to wet check billings identically.
+
+**Lines computation (storage.ts:7002–7015)** — keep verbatim.
+
+**Zone repair labor hours computation (storage.ts:7017–7039)** — keep
+verbatim. The `wetCheckZoneRecords.repairLaborHours` source of truth is
+unchanged.
+
+**New-sheet branch** (replaces storage.ts:7087–7109): when `priorWcbId ==
+null`:
+
+```typescript
+const laborSubtotal = newLaborHours * customerLaborRate;
+const total = newPartsSubtotal + laborSubtotal;
+const billingNumber = await this.getNextWetCheckBillingNumber();
+const [wcb] = await tx.insert(wetCheckBillings).values({
+  billingNumber,
+  wetCheckId: wc.id,
+  customerId: wc.customerId,
+  customerName: wc.customerName,
+  propertyAddress: wc.propertyAddress ?? "",
+  workDate: wc.submittedAt ?? now,
+  technicianName: wc.technicianName,
+  technicianId: wc.technicianId,
+  status: "submitted",
+  totalHours: newLaborHours.toFixed(2),
+  laborRate: customerLaborRate.toFixed(2),
+  laborSubtotal: laborSubtotal.toFixed(2),
+  partsSubtotal: newPartsSubtotal.toFixed(2),
+  totalAmount: total.toFixed(2),
+  appliedLaborRate: customerLaborRate.toFixed(2),
+} as typeof wetCheckBillings.$inferInsert).returning();
+wcbId = wcb.id;
+```
+
+Notes on field omissions:
+- No `workDescription` field — wet_check_billings has no such column per
+  Slice 1. The description is derived from findings on read.
+- No `billing_sheet_items` insert. Wet check billings derive line items
+  from findings; there is no parallel `wet_check_billing_items` table.
+
+**Append-to-existing branch** (replaces storage.ts:7042–7086): when
+`priorWcbId != null`:
+
+```typescript
+const [priorWcb] = await tx.select().from(wetCheckBillings)
+  .where(eq(wetCheckBillings.id, priorWcbId));
+const snapshotRate = parseFloat(String(
+  priorWcb?.appliedLaborRate ?? priorWcb?.laborRate ?? customerLaborRate
+));
+// Existing parts subtotal comes from findings already linked to this WCB,
+// NOT from a separate items table. Wet check billings have no items table.
+const existingFindings = await tx
+  .select({
+    partPrice: wetCheckFindings.partPrice,
+    quantity: wetCheckFindings.quantity,
+  })
+  .from(wetCheckFindings)
+  .where(eq(wetCheckFindings.wetCheckBillingId, priorWcbId));
+const existingPartsSubtotal = existingFindings.reduce(
+  (s, f) => s + (parseFloat(String(f.partPrice ?? "0")) * parseFloat(String(f.quantity ?? "0"))),
+  0,
+);
+// Collect zone IDs already linked to this WCB (via findings stamped in a prior run).
+const existingFindingZones = await tx
+  .select({ zoneRecordId: wetCheckFindings.zoneRecordId })
+  .from(wetCheckFindings)
+  .where(eq(wetCheckFindings.wetCheckBillingId, priorWcbId));
+const allZoneIds = Array.from(new Set([
+  ...existingFindingZones.map(f => f.zoneRecordId),
+  ...newZoneIds,
+]));
+const allZoneRows = allZoneIds.length > 0
+  ? await tx.select({ repairLaborHours: wetCheckZoneRecords.repairLaborHours })
+      .from(wetCheckZoneRecords)
+      .where(inArray(wetCheckZoneRecords.id, allZoneIds))
+  : [];
+const allZoneRepairHours = allZoneRows.reduce(
+  (s, zr) => s + parseFloat(String(zr.repairLaborHours ?? "0")), 0,
+);
+const totalLaborHours = wcBaseLaborHours + allZoneRepairHours;
+const partsSubtotal = existingPartsSubtotal + newPartsSubtotal;
+const laborSubtotal = totalLaborHours * snapshotRate;
+const total = partsSubtotal + laborSubtotal;
+await tx.update(wetCheckBillings).set({
+  totalHours: totalLaborHours.toFixed(2),
+  laborSubtotal: laborSubtotal.toFixed(2),
+  partsSubtotal: partsSubtotal.toFixed(2),
+  totalAmount: total.toFixed(2),
+  updatedAt: now,
+}).where(eq(wetCheckBillings.id, priorWcbId));
+wcbId = priorWcbId;
+```
+
+**Findings update block** (replaces storage.ts:7111–7130): NO
+`billing_sheet_items` insert. Update findings to set `wetCheckBillingId`
+instead of `billingSheetId`:
+
+```typescript
+for (const f of repaired) {
+  await tx.update(wetCheckFindings).set({
+    wetCheckBillingId: wcbId,
+    billingSheetId: null,  // defensive — clear legacy column if set
+    convertedAt: now,
+    updatedAt: now,
+  }).where(eq(wetCheckFindings.id, f.id));
+}
+return wcbId;
+```
+
+The `for` loop over `repaired.length` paired with `lines[i]` is no longer
+needed because we're not writing items. The lines computation above is
+still used for the parts subtotal aggregation in both branches.
+
+**(2) Update the two callers.**
+
+**Call site at storage.ts:6826–6837** (single-submission auto-bill):
+
+```typescript
+let wetCheckBillingId: number | null = null;  // renamed from billingSheetId
+let autoBilledCount = 0;
+
+if (autoBillEnabled && repaired.length > 0) {
+  const [cust] = await tx.select().from(customers).where(eq(customers.id, wc.customerId));
+  if (!cust) throw new Error(`Customer ${wc.customerId} not found`);
+  const laborRate = parseFloat(String(cust.laborRate ?? "45.00"));
+  wetCheckBillingId = await this._writeRepairedInFieldBilling(
+    tx, wc, laborRate, repaired, /* priorWcbId */ null, now,
+  );
+  autoBilledCount = repaired.length;
+}
+```
+
+Any downstream usage of the local `billingSheetId` variable in this
+function (e.g., returning it, attaching to a response) — rename to
+`wetCheckBillingId` throughout. Inspect the surrounding function for any
+such usages and update consistently.
+
+**Call site at storage.ts:7600–7621** (bulk/manager conversion with
+prior-conversion lookup):
+
+Replace:
+
+```typescript
+const priorBsId = allFindings.find(f => f.billingSheetId != null)?.billingSheetId ?? null;
+// ...
+let billingSheetId: number | null = priorBsId;
+// ...
+if (repaired.length > 0) {
+  billingSheetId = await this._writeRepairedInFieldBilling(
+    tx, wc, laborRate, repaired, priorBsId, now,
+  );
+}
+```
+
+With:
+
+```typescript
+const priorWcbId = allFindings.find(f => f.wetCheckBillingId != null)?.wetCheckBillingId ?? null;
+// ...
+let wetCheckBillingId: number | null = priorWcbId;
+// ...
+if (repaired.length > 0) {
+  wetCheckBillingId = await this._writeRepairedInFieldBilling(
+    tx, wc, laborRate, repaired, priorWcbId, now,
+  );
+}
+```
+
+(The `priorEstId` and `priorWoId` lookups on adjacent lines stay
+unchanged — those are unrelated to this slice.)
+
+Any downstream usage of the local `billingSheetId` variable in this
+function — rename to `wetCheckBillingId` consistently.
+
+**(3) Add new typed error class** in storage.ts. Place adjacent to
+`WetCheckHasBillingSheetError` (~line 206–219):
+
+```typescript
+// Thrown by deleteWetCheck when one or more of the wet check's findings has
+// wetCheckBillingId IS NOT NULL but the wet check billing is not yet on an
+// invoice. The invoiced-records error takes priority; this fires only when
+// there are no invoiced blockers AND no legacy BS-WC blockers. Surface
+// mapped to HTTP 409 by the route layer.
+export class WetCheckHasWetCheckBillingError extends Error {
+  readonly code = "WET_CHECK_HAS_WET_CHECK_BILLING";
+  billingNumbers: (string | null)[];
+  constructor(wetCheckId: number, blockers: Array<{ id: number; billingNumber: string | null }>) {
+    const parts = blockers.map(b => `wet check billing ${b.billingNumber ?? `#${b.id}`}`);
+    super(`Cannot delete wet check #${wetCheckId}: linked to ${parts.join("; ")}. Remove it from the wet check billing first.`);
+    this.name = "WetCheckHasWetCheckBillingError";
+    this.billingNumbers = blockers.map(b => b.billingNumber);
+  }
+}
+```
+
+**(4) Extend `deleteWetCheck` safety patch** (storage.ts:6423–6446).
+
+After the existing two-pass collection logic (invoiced BS + uninvoiced
+BS), add a THIRD pass for wet check billings:
+
+```typescript
+// Third pass: any wet check billing linked by a finding but NOT yet on an
+// invoice is also a blocker. After Phase 2 migration, all wet check
+// findings reference wet_check_billings via wetCheckBillingId — this pass
+// catches the new world.
+const findingWcbIds = await db
+  .select({ wetCheckBillingId: wetCheckFindings.wetCheckBillingId })
+  .from(wetCheckFindings)
+  .where(and(
+    eq(wetCheckFindings.wetCheckId, id),
+    isNotNull(wetCheckFindings.wetCheckBillingId),
+  ));
+const wcbIds = Array.from(new Set(
+  findingWcbIds.map(r => r.wetCheckBillingId).filter((x): x is number => x != null)
+));
+const wcbRows = wcbIds.length > 0
+  ? await db.select({
+      id: wetCheckBillings.id,
+      billingNumber: wetCheckBillings.billingNumber,
+      invoiceId: wetCheckBillings.invoiceId,
+    }).from(wetCheckBillings).where(inArray(wetCheckBillings.id, wcbIds))
+  : [];
+const invoicedWcbBlockers = wcbRows.filter(w => w.invoiceId != null);
+const uninvoicedWcbBlockers = wcbRows.filter(w => w.invoiceId == null);
+
+// Invoiced WCBs roll into the existing WetCheckHasInvoicedRecordsError —
+// add them to the `blockers` array before the existing throw with
+// kind="wet_check_billing".
+for (const w of invoicedWcbBlockers) {
+  let invoiceNumber: string | null = null;
+  if (w.invoiceId != null) {
+    const [inv] = await db.select({ invoiceNumber: invoices.invoiceNumber })
+      .from(invoices).where(eq(invoices.id, w.invoiceId));
+    invoiceNumber = inv?.invoiceNumber ?? null;
+  }
+  blockers.push({
+    kind: "wet_check_billing",
+    id: w.id,
+    displayNumber: w.billingNumber ?? null,
+    invoiceId: w.invoiceId,
+    invoiceNumber,
+  });
+}
+```
+
+**Update the existing `BlockerKind` type / blocker discriminated union**
+to add `"wet_check_billing"` as a valid `kind` value. Find the type
+definition (likely inside the `WetCheckHasInvoicedRecordsError` class or
+a nearby type alias) and extend it.
+
+Then update the priority order at the existing throw site (~line
+6437–6446):
+
+```typescript
+if (blockers.length > 0) {
+  blockers.sort((a, b) => a.kind.localeCompare(b.kind) || a.id - b.id);
+  throw new WetCheckHasInvoicedRecordsError(id, blockers);
+}
+
+if (uninvoicedBsBlockers.length > 0) {
+  uninvoicedBsBlockers.sort((a, b) => a.id - b.id);
+  throw new WetCheckHasBillingSheetError(id, uninvoicedBsBlockers);
+}
+
+// NEW: third priority — uninvoiced wet check billings
+if (uninvoicedWcbBlockers.length > 0) {
+  const sorted = uninvoicedWcbBlockers
+    .map(w => ({ id: w.id, billingNumber: w.billingNumber ?? null }))
+    .sort((a, b) => a.id - b.id);
+  throw new WetCheckHasWetCheckBillingError(id, sorted);
+}
+```
+
+**(5) Add HTTP 409 classification** in
+`artifacts/api-server/src/routes/routes.ts`.
+
+The two existing classification sites (~line 14866 and ~line 14936)
+already handle `WetCheckHasBillingSheetError`. Mirror the same pattern
+for `WetCheckHasWetCheckBillingError`:
+
+```typescript
+} else if (e instanceof WetCheckHasWetCheckBillingError) {
+  res.status(409).json({
+    message: e.message,
+    code: e.code,
+    billingNumbers: e.billingNumbers,
+  });
+  return;
+}
+```
+
+Add the import for the new class at the top of routes.ts alongside the
+existing `WetCheckHasBillingSheetError` import (~line 7).
+
+**(6) Update existing tests** to reflect the new behavior.
+
+`wet-check-submit-autobill.test.ts` — wherever the test asserts
+`billing_sheets` row creation with `BS-WC-` prefix:
+- Change assertion target to `wet_check_billings`.
+- Change billingNumber pattern from `/^BS-WC-/` to `/^WC-/`.
+- Verify findings get `wetCheckBillingId` set, not `billingSheetId`.
+- Remove any assertion that `billing_sheet_items` rows are created (they're
+  not anymore).
+
+`wet-check-submit-autobill-error.test.ts` — same shape updates.
+
+`wet-check-billing-view.integration.test.ts` — the test setup at line 100
+(referenced as "simulating _writeRepairedInFieldBilling outcome") needs to
+create a `wet_check_billings` row instead of a `billing_sheets` row, and
+stamp findings with `wetCheckBillingId`.
+
+`wet-check-delete-billing-block.test.ts` — add new test cases:
+- A wet check with a finding that has `wetCheckBillingId IS NOT NULL` and
+  the WCB has `invoiceId IS NULL` → assert
+  `WetCheckHasWetCheckBillingError` is thrown.
+- A wet check with a finding that has `wetCheckBillingId IS NOT NULL` and
+  the WCB has `invoiceId IS NOT NULL` → assert
+  `WetCheckHasInvoicedRecordsError` is thrown (with `kind:
+  "wet_check_billing"` in the blocker).
+- Verify priority order: a wet check with BOTH a BS-WC blocker AND a WCB
+  blocker throws the BS error (BS takes priority by spec).
+- Verify HTTP 409 classification in the route handler test.
+
+**(7) New test** `wet-check-convert-creates-wcb.test.ts`:
+
+End-to-end happy path:
+- Seed a wet check with 2 findings across 2 zones, each with parts and
+  labor.
+- Call the submit-autobill endpoint or storage method.
+- Assert: a new row exists in `wet_check_billings` with the expected
+  totals.
+- Assert: the new row's `billingNumber` matches `/^WC-\d{4}-\d{4,}$/`.
+- Assert: both findings have `wetCheckBillingId` set to the new WCB's id.
+- Assert: NO row was created in `billing_sheets`.
+- Assert: NO row was created in `billing_sheet_items`.
+- Assert: the WCB's `wetCheckId` matches the wet check's id.
+
+Partial-conversion appends:
+- Same setup, but mark only 1 finding as repaired.
+- Submit, verify WCB created with 1 finding.
+- Mark second finding as repaired later (simulating manager review).
+- Re-call the convert path.
+- Assert: NO new WCB row is created (same WCB id is reused).
+- Assert: the existing WCB's totals are recomputed (parts subtotal
+  includes both findings).
+- Assert: both findings now have `wetCheckBillingId` set to the same WCB.
+
+**Acceptance criteria.**
+- `_writeRepairedInFieldBilling` writes to `wet_check_billings`, not
+  `billing_sheets`.
+- Findings created/updated by the conversion path have
+  `wetCheckBillingId` set and `billingSheetId IS NULL`.
+- No `billing_sheet_items` rows are created during wet check conversion.
+- New wet check submissions produce billing numbers matching
+  `WC-YYYY-NNNN` format.
+- The append-to-existing branch (partial conversions) reuses the existing
+  WCB and recomputes totals.
+- `WetCheckHasWetCheckBillingError` exists with code
+  `WET_CHECK_HAS_WET_CHECK_BILLING`.
+- `deleteWetCheck` blocks deletion when findings reference an uninvoiced
+  WCB; throws the new typed error.
+- `deleteWetCheck` rolls invoiced WCBs into the existing
+  `WetCheckHasInvoicedRecordsError` with `kind: "wet_check_billing"`.
+- HTTP 409 classification works for the new error in both the
+  single-delete and bulk-delete route handlers.
+- All updated tests pass with their new assertions.
+- New `wet-check-convert-creates-wcb.test.ts` passes.
+- All existing tests that asserted BS-WC behavior have been migrated to
+  assert WCB behavior (no orphan tests asserting deprecated behavior).
+- All existing non-wet-check tests pass unchanged (work-order BS
+  conversion is untouched).
+
+**Out of scope.**
+- Running the migration of existing BS-WC rows (Slice 5 — separate script
+  that does not auto-run).
+- Removing the `wet_check_findings.billingSheetId` column (Slice 7
+  cleanup; the column stays for now because the safety patch still
+  inspects it for legacy un-migrated rows).
+- Renaming the public `convertWetCheckToBillingSheet` method to
+  `convertWetCheckToWetCheckBilling` (defer to Slice 7 cleanup — public
+  method renames are a larger blast radius).
+- Removing the existing `WetCheckHasBillingSheetError` class (it still
+  fires for legacy un-migrated BS-WC rows during the transition; Slice 7
+  may remove it after migration is verified).
+- Modifying any work-order conversion code paths (those still create
+  regular billing_sheets rows).
+- Frontend changes.
+- Adding any new endpoints.
+- Modifying invoice generation or PDF rendering (handled by Slice 2's
+  polymorphic invoice items).
+- Modifying dashboard or reporting aggregations (handled by Slice 3).
+- Changing the public `WetCheckBillingView` payload shape (Slice 2's
+  wetCheckBillingId field is already in place).
+
+**Dependencies.** Slice 1 merged (table + storage methods +
+`getNextWetCheckBillingNumber`). Slices 2 and 3 SHOULD be merged before
+this deploys (consumers must already handle either source); the slice
+will compile without them but production behavior breaks for invoice path
+and dashboards if they're not yet in place.

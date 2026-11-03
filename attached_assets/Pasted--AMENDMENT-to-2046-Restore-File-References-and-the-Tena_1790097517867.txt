@@ -1,0 +1,86 @@
+# AMENDMENT to #2046 — Restore File References and the Tenancy Guard
+
+Task #2046 preserved the architecture and every safety decision from the source spec: the registry migration, the reconciliation invariant, the fail-closed acknowledgement gate, skipped-not-failed handling, the preview warning, the drift-candidate invariant test, and tenant isolation. Nothing in this amendment changes any of those. Do not relitigate them.
+
+What the ticket lost is the **evidence and the coordinates**. Four omissions change what gets built, and this amendment restores them. Apply it alongside #2046; where the two differ in specificity, the more specific text here governs.
+
+## 1. Restore the file:line map
+
+#2046's Relevant files list is nine bare paths. `routes.ts` is **18,480 lines** and `storage.ts` is **12,704**. Step 1 ("make Bill Separately and QuickBooks parts resolution follow #2045's rule") and Step 2 ("make bulk item replacement persist both parts columns") name no call sites, so the executor has to rediscover them — and the earlier audit already found that the three existing readers disagree, which is exactly the situation where searching finds the wrong one.
+
+The verified coordinates:
+
+**Readers (Step 1)**
+- `routes.ts:7182` — Bill Separately. `parseFloat(wo.totalPartsCost || '0')`. Legacy column alone. This is the one that **persists** a parts figure onto a standalone invoice.
+- `routes.ts:6934` — QuickBooks line description. `workOrder.partsSubtotal || workOrder.totalPartsCost || '0'`.
+- `storage.ts:6536`, `storage.ts:7002` — already correct (`wo.partsSubtotal ?? wo.totalPartsCost ?? 0`). Reference only; do not edit.
+
+**Writers (Step 2)**
+- `routes.ts:13590` — bulk item replace; writes `total_parts_cost` only.
+- `routes.ts:13597-13612` — the recompute that writes `parts_subtotal`, gated behind `freshWo.appliedLaborRate`. That gate is correct for labour and wrong for parts.
+- `routes.ts:9780-9792` — the completion `skipReplace` guard to extend.
+- `routes.ts:9827` — the completion write.
+- `routes.ts:13825` — single item add. **Already correct; this is the path to match.** Reference only; do not edit.
+
+**Migration (Steps 3-5)**
+- `repair-woodglenn-wo-hours.ts:34` (`DONE_KEY`), `:362` (`check()`), `:222-228` (acknowledgement gate), `:9` (check-then-write-nothing), `:195` + `:217` (`RepairWoodglennDeps` and the exported pure runner), `:442-444` (preview warning style).
+- `repair-ticket-total-drift.ts:46` (`RepairDeps`), `:114-118` (its update path — see §3), `:146-157` (`recomputeInvoice`), `:223-224` (add-parts-only semantics).
+- `registry.test.ts:255-262` — shape assertions and the superseded-id assertion.
+- `schema.ts:777` (`total_parts_cost`), `:781` (`parts_subtotal`).
+- `pdf-view-model.ts` — `resolveTicketPartsSubtotal`, added by #2045.
+
+## 2. Restore the evidence behind Step 1
+
+#2046 says "prefer the billed-price header with nullish precedence." That is the right instruction but it reads as a style preference. It is not. Three readers exist and no two agree:
+
+| Location | Expression | On a stored `"0.00"` |
+|---|---|---|
+| `storage.ts:6536`, `:7002` | `wo.partsSubtotal ?? wo.totalPartsCost ?? 0` | returns 0 |
+| `routes.ts:6934` | `wo.partsSubtotal \|\| wo.totalPartsCost \|\| '0'` | `"0.00"` is **truthy** — returns it, never falls through |
+| `routes.ts:7182` | `parseFloat(wo.totalPartsCost \|\| '0')` | legacy column alone |
+
+The `||` → `??` change at 6934 is the entire reason that line is in scope. Without this table it looks cosmetic and is likely to be skipped.
+
+**Additional constraint, omitted from #2046:** where the resolver cannot be imported without coupling route code to the PDF subsystem, mirror it with a comment naming `pdf-view-model.ts` as the source of the rule. **Do not invent a third precedence.** There are already three; the ticket exists partly because of that.
+
+## 3. Restore the exact write, including tenancy in the `where`
+
+#2046 Step 4 says "within tenant scope." That is ambiguous in a way that matters, because the file the executor is told to model on does it the weaker way: `repair-ticket-total-drift.ts:114-118` carries `companyId` on the candidate row but **omits it from the update's `where` clause**, scoping only at query time. Modelling on that file without this note reproduces the gap.
+
+The write is:
+
+```ts
+await tx.update(workOrders).set({
+  partsSubtotal: itemsTotal.toFixed(2),
+  totalPartsCost: itemsTotal.toFixed(2),
+}).where(and(eq(workOrders.id, id), eq(workOrders.companyId, companyId)));
+```
+
+`companyId` appears in the `where` on every select **and** every update. Never write `labor_subtotal`, `total_amount`, or any invoice column. The tenancy test asserts the update clause specifically, not just the select.
+
+## 4. Restore the two operational gates
+
+**Stop-if-zero (missing from #2046 Step 7).** Before writing anything, ship #2045 and read its `pdf_parts_subtotal_healed` counter across a regeneration of recent invoices. If it reports zero heals, **stop and report** — the migration is a no-op and Steps 1-2 are the whole ticket. #2046 has "stop if the population is unexpectedly broad" but not this case, and the zero case is the more likely of the two.
+
+**Why the confirmed rows are safe (missing from #2046's What & Why).** The arithmetic is the justification for the invariant and should be in the ticket, because anyone tempted to relax the equality check needs to see it:
+
+- WO-1783955816671-314 today: parts `0`, labor `5,270.00`, stored total `8,401.70`. Canonical (`parts + labor`) = `5,270.00`, which is **below** stored, so `repair-ticket-total-drift-v1`'s add-parts-only rule (`:223-224`) skips it.
+- After repair: parts `3,131.70`, canonical `8,401.70`, stored `8,401.70` — **exactly zero drift**, permanently outside the candidate set.
+
+That equality is why the repair is safe on these rows and why rows failing it must be skipped: on those, correcting parts upward can push canonical above stored, and `recomputeInvoice` (`:146-157`) then rewrites the parent **invoice's** `parts_subtotal`, `labor_subtotal` and `total_amount` — on an invoice already sent to the HOA and in some cases already pushed to QuickBooks.
+
+## 5. Restore concrete test values
+
+#2046 Step 6 lists the right cases but without values. Use these, so the assertions pin numbers rather than shapes:
+
+- Bill Separately (`routes.ts:7182`): a work order with `partsSubtotal: "500.00"`, `totalPartsCost: "0.00"` and items summing to `$500.00` bills at **$500.00**, not $0.00.
+- Completion (`routes.ts:9780-9792`): a posting with `totalPartsCost: 0` and non-empty `usedParts` persists the item-derived figure and emits `[AUDIT] work_order_completion_parts_derived workOrderId=<id> formValue=0 itemsTotal=<n>`.
+- Repairable row: stored `"0.00"`, items `$3,131.70`, `total_amount` `$8,401.70`, labor `$5,270.00` — repaired to `3131.70`, and the invariant test confirms it is not a drift candidate afterward.
+- Skipped row: same but `total_amount` `$9,000.00` — reported `skipped`, not `failed`, both parts columns untouched.
+
+## Acceptance additions
+
+- Every `file:line` in §1 is either edited or cited in the delivered diff; none was located by guesswork.
+- The tenancy test asserts `companyId` in the **update** `where` clause, not only the select.
+- The `pdf_parts_subtotal_healed` counter was read before the migration ran, and its value is reported.
+- Before/after candidate counts for `repair-ticket-total-drift-v1` are attached and unchanged.

@@ -1,0 +1,96 @@
+# FIX — Financial Pulse: Real Costs in Profit Margin
+
+**What & Why**
+The Profit Margin tile subtracts billed prices as if they were costs, on two of the three record types that feed it. Work orders contribute a real parts cost; billing sheets and wet-check billings contribute the marked-up price the customer was charged. Wet checks also contribute their entire billed labor line as labor cost. The more of a company's volume runs through billing sheets and wet checks, the harder the tile is pushed toward zero.
+
+On 2026-09-11 the tile read **23.4%** with its warning triangle lit. The By Technician table on the same page showed **"—" in both the Labor cost and Margin % columns for all four technicians**, because no user has an `hourlyWage` set. So the 23.4% is computed with the $25/hr fallback standing in for 100% of labor, and with marked-up parts prices standing in for parts cost on most of the volume. Neither the number nor its direction can be trusted.
+
+## Current state (confirmed in code)
+
+`computeGrossMargin` (`financial-pulse-math.ts:400`) builds cost on three inconsistent bases:
+
+| Leg | Parts cost | Labor cost |
+|---|---|---|
+| Work orders (`:463`) | `wo.totalPartsCost` — a real cost column ("Cost of parts used", `schema.ts:777`) | `totalHours × users.hourlyWage` — real cost |
+| Billing sheets (`:471`) | `bs.partsSubtotal` — **billed price** | `totalHours × users.hourlyWage` — real cost |
+| Wet-check billings (`:478`) | `wcb.partsSubtotal` — **billed price** | `wcb.laborSubtotal` — **billed price** |
+
+`partsSubtotal` is revenue. It is the figure summed into `invoices.partsSubtotal` at generation (`routes.ts:6826`), and parts carry a markup through `part_categories.markupPercent` (`parts-routes.ts:682`). `laborSubtotal` is `totalHours × appliedLaborRate`, the customer's rate (`schema.ts:780`) — not a technician's wage.
+
+**The cost data already exists.** `parts.cost` is a real column (`schema.ts:272`). Every invoiced part line lands in `invoice_items` carrying `partId`, `quantity` and `sourceType` — "work_order", "billing_sheet" or "wet_check_billing" (`schema.ts:999–1018`). No new column is needed.
+
+## Slice 1 — One parts-cost rule for all three source types
+
+Compute parts cost from the invoice's own line items rather than from three different upstream columns:
+
+```
+partsCost = Σ over invoice_items of an in-window invoice:
+              quantity × parts.cost   (joined on invoice_items.partId)
+```
+
+- One rule, applied identically whether the line came from a work order, a billing sheet or a wet check. The `sourceType` split stops mattering for cost.
+- **This changes work-order margin too.** `totalPartsCost` is a real cost, but it is a sheet-level snapshot rather than a line-level one, so the number will move. That is expected and is the point: one basis everywhere.
+- Drop `totalPartsCost`, `bs.partsSubtotal` and `wcb.partsSubtotal` from the margin path entirely. Do not leave a fallback chain that silently reintroduces a price as a cost.
+
+**Estimation fallback.** `parts.cost` is nullable, and a manually-entered part has no `partId` at all. When cost is unavailable for a line, fall back to a configurable percentage of that line's `totalPrice` (env `DEFAULT_PARTS_COST_PCT`, default 65) and **accumulate the estimated dollars**, exactly as the wage path already does with `estimatedLaborCostShortfall` (`financial-pulse-math.ts:397`). Return it as `estimatedPartsCostShortfall` alongside a `missingCostPartCount`.
+
+## Slice 2 — Wet-check labor cost stops being wet-check labor revenue
+
+- `financial-pulse-math.ts:478` — remove `laborCost += toNum(wcb.laborSubtotal)`.
+- Tally wet-check labor through the same `tally(techId, hours)` path the other two legs use (`:437`), passing `wcb.technicianId` and `wcb.totalHours`. Both fields are already loaded by `loadWetCheckBillingsForInvoices` (`financial-pulse.ts:389`).
+- Wet-check labor then falls under the same missing-wage warning as everything else, instead of looking like a precise cost.
+
+## Slice 3 — Say what is estimated
+
+The tile's warning (`financial-pulse.tsx:1955–1967`) currently names only the technician count and the estimated labor dollars. Extend it to cover parts, and make the estimated share legible:
+
+- When any labor used the fallback wage **or** any parts line used the fallback cost percentage, the tile shows the warning triangle with a line naming both: how many technicians lack a wage, how many part lines lack a cost, and the total dollar amount of cost that is estimated rather than known.
+- When **every** technician lacks a wage — the current state for this company — the warning says so plainly, because the margin is then an estimate end to end rather than a number with a caveat.
+- Update the tile tooltip (`financial-pulse.tsx:319`) to state that parts cost comes from the parts catalog cost, labor cost from technician wages, and that missing values are estimated and flagged.
+
+## Out of scope
+
+- The By Technician table's `marginPct`, which ignores parts cost entirely. It is meaningless until that table's revenue attribution is fixed, and both are handled in the attribution ticket (6 of 8).
+- Backfilling `parts.cost` for the catalog, or building a UI to set technician wages. Both are prerequisites for a trustworthy number and should be raised with Randy separately — this ticket makes the gap visible and quantified rather than silent.
+- Changing what counts as revenue in the margin. Revenue stays `invoices.totalAmount` for in-window invoices.
+
+## Decisions
+
+- Parts cost is derived from `invoice_items × parts.cost`, one rule for all three source types. (decided)
+- A price is never used as a cost. When cost is unknown it is estimated from a documented percentage and reported as estimated. (decided)
+- `DEFAULT_PARTS_COST_PCT` defaults to 65 and is env-overridable, mirroring `DEFAULT_HOURLY_WAGE`.
+
+## Done looks like
+
+- No cost figure anywhere in the margin path originates from a `partsSubtotal`, `laborSubtotal`, or any other billed-price column.
+- Wet-check labor cost is hours × wage, like every other leg.
+- The tile reports how much of its cost base is estimated, in dollars, for both parts and labor.
+- With a fully-costed catalog and wages set, the tile's warning triangle disappears.
+
+## Tests
+
+- An invoice whose only line is a billing-sheet part with catalog `price` 100 and `cost` 60, quantity 2: parts cost is 120, not 200. Before this fix it was 200.
+- A wet-check billing with `laborSubtotal` $400 and `totalHours` 4 attributed to a tech on $30/hr: labor cost is 120, not 400.
+- A part line with `parts.cost` null: cost is 65% of `totalPrice`, and both `estimatedPartsCostShortfall` and `missingCostPartCount` reflect it.
+- A manually-entered line with no `partId`: same fallback, same reporting, no crash.
+- Revenue of zero returns `pct: null`, not a division by zero.
+- A company with no wages set anywhere: margin still computes, the warning states that all labor is estimated, and `estimatedLaborCostShortfall` equals total labor cost.
+- Tenancy (Rule 1): the parts join is scoped so an invoice can never pick up a `parts.cost` row from another company.
+
+## Definition of Done (attach proof — Rule 7)
+
+- [ ] `file:line` for the new parts-cost derivation and the removed price-as-cost lines on all three legs.
+- [ ] Grep proof that `partsSubtotal` and `laborSubtotal` no longer appear anywhere in `computeGrossMargin`.
+- [ ] Before/after margin percentage for the same company and window, with the difference explained by leg.
+- [ ] Screenshot of the tile's warning showing both the estimated-labor and estimated-parts figures.
+- [ ] Test output for the billing-sheet parts case and the wet-check labor case.
+- [ ] Tenancy test passing.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+
+- `artifacts/api-server/src/financial-pulse-math.ts` (`computeGrossMargin` :400, WO leg :463, BS leg :471, WCB leg :478, `tally` :437, shortfall :397)
+- `artifacts/api-server/src/routes/financial-pulse.ts` (margin loaders :698–703, WCB loader :389, `fallbackHourlyWage` :82)
+- `lib/db/src/schema/schema.ts` (`parts.cost` :272, `invoice_items` :999, `work_orders.totalPartsCost` :777)
+- `artifacts/irrigopro/src/pages/financial-pulse.tsx` (tile warning :1955, tooltip :319)
+- Tests: `financial-pulse-math.test.ts`, `financial-pulse.test.ts`

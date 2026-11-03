@@ -1,0 +1,209 @@
+# Location Selector Map Improvements — Slice 1108b
+
+**Source:** Conversation 2026-06-08 — map labels/street names insufficient; zoom-out range too limited; no address/boundary case should warn but still show the map centered on the company address.  
+**Severity:** P2 (usability — techs can't orient themselves when zoomed out; map blocks on missing customer address).  
+**Prerequisite slices:** Can ship independently of Slice 1108 (the refactor), but touches the same `location-picker.tsx`. If 1108 ships first, apply these changes to the post-refactor file.
+
+---
+
+## Changes
+
+### 1 — Richer map labels (leaflet-base-layers.ts + location-picker.tsx)
+
+The current label overlay is `voyager_only_labels` from CARTO, which renders well at high zoom but is sparse at mid-range zoom (zoom 12–16 where a tech is orienting to a neighborhood). Replace it with the ESRI World Reference Overlay, which is designed specifically to sit on top of satellite imagery and includes full street names, neighborhood labels, and road hierarchy at all zoom levels.
+
+**In `leaflet-base-layers.ts`:**
+
+Replace the `CARTO_VOYAGER_LABELS` constant and the `createReferenceLabelsLayer` function:
+
+```ts
+// BEFORE:
+const CARTO_VOYAGER_LABELS =
+  "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png";
+
+export function createReferenceLabelsLayer(maxZoom = 22): L.TileLayer {
+  return L.tileLayer(CARTO_VOYAGER_LABELS, {
+    attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a>',
+    maxNativeZoom: 22,
+    maxZoom,
+    opacity: 0.95,
+    subdomains: "abcd",
+  });
+}
+
+// AFTER:
+const ESRI_WORLD_REFERENCE_OVERLAY =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Reference_Overlay/MapServer/tile/{z}/{y}/{x}";
+
+export function createReferenceLabelsLayer(maxZoom = 22): L.TileLayer {
+  return L.tileLayer(ESRI_WORLD_REFERENCE_OVERLAY, {
+    attribution:
+      'Tiles &copy; Esri &mdash; Esri, HERE, Garmin, © OpenStreetMap contributors, and the GIS user community',
+    maxNativeZoom: 19,
+    maxZoom,
+    opacity: 1,
+  });
+}
+```
+
+No changes needed in `location-picker.tsx` — it already calls `addSatelliteHybrid(map, { withLabels: true, ... })` which uses `createReferenceLabelsLayer` internally.
+
+---
+
+### 2 — Zoom range (location-picker.tsx)
+
+The map currently sets `minZoom: 3`. This is correct but `wheelPxPerZoomLevel: 20` makes each scroll tick change zoom very aggressively, which can overshoot and feel like the zoom range is restricted. Raise it to the Leaflet default (`60`) so each wheel tick produces a measured zoom step:
+
+```ts
+// BEFORE:
+const map = L.map(mapRef.current!, {
+  center: initialCenter,
+  zoom: initialZoom,
+  zoomControl: true,
+  maxZoom: 22,
+  minZoom: 3,
+  zoomSnap: 0.1,
+  wheelPxPerZoomLevel: 20,
+});
+
+// AFTER:
+const map = L.map(mapRef.current!, {
+  center: initialCenter,
+  zoom: initialZoom,
+  zoomControl: true,
+  maxZoom: 22,
+  minZoom: 2,           // one step further out — can see full continent
+  zoomSnap: 0.5,        // snappier step feel without 0.1 micro-steps
+  wheelPxPerZoomLevel: 60,  // Leaflet default — smooth, not overshooting
+});
+```
+
+`minZoom: 2` vs `3` — at zoom 2 you can see the full continental US. At zoom 3 you're already at a regional view. Dropping to 2 gives one more step of context when a tech needs to pan to a different area.
+
+`zoomSnap: 0.5` — `0.1` means every wheel tick can land at a fractional zoom (e.g. 14.1, 14.2...), causing excessive tile fetches and a jittery feel. `0.5` snaps to half-step increments, which still feels smooth but loads fewer tile sets.
+
+---
+
+### 3 — Company address fallback + soft warning (location-picker.tsx + CustomerLocationPicker)
+
+When a customer has no address and no property boundary, the map currently blocks (after Slice 1108 removes `showEmptyState`/`showMapless`, it will open at FALLBACK_CENTER — Kansas). The correct fallback center is the company's own address, which is a much better geographic anchor for the tech.
+
+Additionally, a soft inline warning should tell the user why the map isn't centered on the customer property — without blocking them.
+
+#### Changes to `LocationPicker` props
+
+Add a `companyFallbackAddress` prop:
+
+```ts
+interface LocationPickerProps {
+  defaultAddress?: string;              // customer address — for centering + reverse-geocode fill
+  companyFallbackAddress?: string;      // company address — used only for centering when customer has no address/boundary
+  onLocationSelect: (location: { lat: number; lng: number; address?: string }) => void;
+  selectedLocation?: { lat: number; lng: number; address?: string } | null;
+  customerBoundary?: PropertyBoundary | null;
+  className?: string;
+}
+```
+
+#### Centering priority in the init effect
+
+Update the centering sequence to include `companyFallbackAddress` before FALLBACK_CENTER:
+
+```
+1. Existing pin (selectedLocation)           → zoom 20, center on pin
+2. Customer boundary (customerBoundary)      → fitBounds
+3. Customer address (defaultAddress)         → geocode → zoom 18
+4. Company address (companyFallbackAddress)  → geocode → zoom 12  ← NEW
+5. FALLBACK_CENTER (US center)               → zoom 12
+```
+
+In the init effect, after the `hasAddress` geocode branch fails or is absent, add:
+
+```ts
+} else if (companyFallbackAddress?.trim()) {
+  const coords = await geocodeAddress(companyFallbackAddress.trim());
+  if (coords) {
+    initialCenter = [coords.lat, coords.lng];
+    initialZoom = 12;
+    usedCompanyFallback = true;
+  }
+  // If company geocode also fails, initialCenter stays at FALLBACK_CENTER — map still mounts.
+}
+```
+
+Add a local boolean `usedCompanyFallback` (initialized `false`) to track whether the company fallback was used. Pass it to the render so the warning banner can display.
+
+#### Soft warning banner
+
+After the map mounts, show an inline warning when `usedCompanyFallback` is true. This replaces the old gray `showEmptyState` placeholder — the map is still fully functional, but the user knows why it's not centered on the customer:
+
+```tsx
+{usedCompanyFallback && !selectedLocation && (
+  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 flex items-start gap-2 mt-2">
+    <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 flex-shrink-0" />
+    <p className="text-sm text-yellow-800">
+      No address or property boundary on file for this customer — map is centered on your
+      company address. Add an address or boundary to the customer profile for accurate centering.
+    </p>
+  </div>
+)}
+```
+
+The warning disappears as soon as the tech drops a pin (`selectedLocation` becomes non-null) since they've now established a location.
+
+#### Changes to `CustomerLocationPicker`
+
+`CustomerLocationPicker` (new in Slice 1108) should fetch the company profile and pass its address down:
+
+```tsx
+import { useQuery } from "@tanstack/react-query";
+
+export function CustomerLocationPicker({ customerId, companyId, ... }) {
+  const { data: customerBoundary } = useCustomerBoundary(customerId);
+  const { data: companyProfile } = useQuery({
+    queryKey: [`/api/company/${companyId}/profile`],
+    enabled: !!companyId,
+  });
+
+  return (
+    <LocationPicker
+      ...
+      customerBoundary={customerBoundary}
+      companyFallbackAddress={companyProfile?.address ?? undefined}
+    />
+  );
+}
+```
+
+`companyId` should come from the session. In the wizard context it's available on the `user` object. Add `companyId` as a prop to `CustomerLocationPicker` (callers already have the user's `companyId` from session context).
+
+Note: the company profile query is already in the React Query cache in most contexts (navigation.tsx fetches it on every page load) — this `useQuery` call will be a cache hit with no extra network request in normal usage.
+
+---
+
+## Acceptance criteria
+
+- Street names, road labels, and neighborhood names are visible and readable at zoom levels 12–18 on the satellite view.
+- The layer control switcher still shows Satellite / Streets / Light options with the Labels overlay toggle.
+- Zooming out via scroll reaches zoom level 2 (continental US view) without hitting a hard stop.
+- Scroll-to-zoom feels smooth and does not overshoot zoom levels.
+- When a customer has no address and no boundary, the map opens centered on the company address at zoom 12, and a yellow inline warning explains that the customer profile needs an address or boundary.
+- The warning disappears once the tech drops a pin.
+- When a customer has an address or boundary, the company address is never used for centering — no behavioral change.
+- When neither customer address, boundary, nor company address is available, the map opens at FALLBACK_CENTER — no blocking state.
+
+---
+
+## Out of scope
+
+- Changing how the Streets or Light base layers render — only the satellite hybrid labels overlay changes.
+- Adding lat/lng columns to the `companies` table — the company address is geocoded at runtime like customer addresses.
+- Any changes to the property boundary editor or how boundaries are stored.
+
+---
+
+## Relevant files
+
+- `artifacts/irrigopro/src/lib/leaflet-base-layers.ts` — swap label tile source
+- `artifacts/irrigopro/src/components/ui/location-picker.tsx` — zoom config, `companyFallbackAddress` prop, centering fallback, soft warning
+- `artifacts/irrigopro/src/components/location/customer-location-picker.tsx` — add `companyId` prop, fetch company profile, pass `companyFallbackAddress` (new file from Slice 1108; apply here or fold into that slice)

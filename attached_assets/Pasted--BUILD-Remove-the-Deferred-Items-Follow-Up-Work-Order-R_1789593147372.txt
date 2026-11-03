@@ -1,0 +1,97 @@
+# BUILD — Remove the Deferred-Items Follow-Up Work Order (Retire #1935)
+
+**Sequenced ticket. Slice 1 must be run in production and verified before Slices 2 and 3 merge.** Slice 3 drops a column that Slice 1 needs the records to still be identifiable by. Slice 1 identifies its targets by `work_order_number` literal, not by the column, so a mis-order is recoverable — but do not rely on that. Run Slice 1 first.
+
+## What & Why
+
+Task #1935 diffs an approved estimate's line items against the items on the completed work order and auto-creates a "follow-up" work order carrying whatever did not match. The match key is `part_name + controller_letter + zone_number + issue_type`.
+
+**That diff cannot distinguish work that was not done from a part that was substituted**, and substitution is the normal case. An estimate is an estimate; the parts and hours differ on almost every job. The work order is created prefilled with the estimate's parts (`storage.ts:4018` `createWorkOrderFromEstimate` copies `estimate_items` onto the work order), the tech edits that list down to what he actually installed, and completion uses replace-not-append semantics. Every quoted part the tech did not use therefore reads as deferred work.
+
+Measured in production at Woodglenn Squares HOA on 2026-08-21. Three completed, manager-approved, billed work orders each grew a phantom follow-up at the moment of the completion submit (follow-up work order numbers embed `Date.now()`: `1787333695634` = 11:34:55, `1787333883734` = 11:38:03, `1787334011979` = 11:40:11, matching the parents' completion times to the second):
+
+| Parent (billed, Invoice #171) | Phantom follow-up carries | What the parent actually carries |
+|---|---|---|
+| WO-1785869292161-458 valve replacement | 1" Rain Bird Scrubber Valve (PESB), $350 | diaphragm kit + latching solenoid — rebuilt, not replaced |
+| WO-1785869264925-44 leak 11879 Harrison | 1" PVC slip-fix, coupler, glue, Class 200 pipe | .75" poly pinch clamp + insert coupler |
+| WO-1785869241143-67 lateral line break | 1" PVC coupler, slip-fix, glue | nine poly insert fittings |
+
+PVC quoted, poly in the ground, every time. The repair was complete in all three cases. The result is a non-continuous billing line: one repair split across two work orders, with the parent billed and locked so the phantom can never be reconciled back into it.
+
+**The decision (decided).** Nothing downstream second-guesses a technician's completion by comparing parts lists. Parts determine what is billed; they say nothing about whether the work happened. Marking the ticket complete means the referenced fix is done — the same trust model already applied to billing sheets. The diff and everything built on it is removed, for every work order, in every mode.
+
+**Explicitly out of scope.** The punch-list problem this mechanism was invented for — a 162-line inspection estimate where 18 repairs went untouched and nothing flagged it — is a separate ticket. It is not solved here and must not be patched here with a replacement audit. If a future design starts needing a mechanism to verify a work order was "fully" completed, that is the tell that an inspection punch list is riding work-order rails again; fix the shape, do not rebuild this.
+
+## Additive check — what already does part of this
+
+Nothing else in the repo creates a work order from a diff. `createWorkOrderFromEstimate` (`storage.ts:4018`) is the only other work-order-creating path and is untouched by this ticket. `work_orders_estimate_unique_idx` (#1740) and its 23505 idempotency catch stay exactly as they are. There is no second implementation to consolidate — this is a pure removal.
+
+## Multi-tenancy (Rule 1)
+
+Slice 1's migration is super-admin tooling operating on four named records in one company. It must resolve each record by `work_order_number` **and** assert the resolved row's `company_id` matches the expected Woodglenn company before writing, aborting the whole run if any does not. Slices 2 and 3 remove code and schema and introduce no new read or write path, so they add no tenancy surface. No tenant-isolation test is required for 2 and 3; state that in the completion report rather than skipping it silently.
+
+## Slice 1 — Clean up the four live records
+
+New registered migration `retire-followup-work-orders-v1`, file `artifacts/api-server/src/lib/migrations/retire-followup-work-orders.ts`, following the existing pattern in that directory (step emitter, `app_settings` completion key, idempotent re-run, per-step status). Register it in `artifacts/api-server/src/lib/migrations/registry.ts` in the same commit that removes `createWoodglennFollowupMigration` (Slice 2) — one import line out, one in.
+
+**Cancel the three phantoms.** For each of `WO-1787334011979-485`, `WO-1787333883734-723`, `WO-1787333695634-675`: set `status = 'cancelled'` (an existing value in `workOrderStatusValues`, `schema.ts:1248`). Do **not** hard-delete; do **not** delete their `work_order_items`. Write a `recordAuditEvent` entry per record against `target_type: 'work_order'` with `action: 'work_order.cancelled'`, severity `warning`, and a summary naming this ticket and the parent work order number, so the cancellation is visible on each ticket's Activity tab (Rule 6). If a record is already `cancelled`, skip it and report the step as `skipped` — the migration must be safe to re-run.
+
+**Leave WO-1786572356558-607 alone (decided).** That is the migration-built follow-up for WO-1783955816671-314, carrying 18 genuinely undone repairs and 22.50 approved, quoted hours. It is assigned and it represents real work somebody still owes the customer. Cancelling it would destroy the only record of that work. It stays a live work order; Slice 3's column drop is what severs its now-meaningless parent linkage, turning it into an ordinary standalone work order. The migration must assert it is present and **not** modify it — if a step touches it, that is a defect.
+
+**Verification inside the migration.** Before writing, log the four resolved ids, their statuses, and their `company_id`. After writing, re-read and log. Abort without writing if fewer than three phantoms resolve, if any resolves to a status other than `pending`/`assigned`, or if any `company_id` mismatches.
+
+## Slice 2 — Delete the code
+
+Every item below is a deletion. Nothing is renamed, commented out, feature-flagged, or labeled deprecated (Rule 7).
+
+**Backend**
+
+- `artifacts/api-server/src/routes/routes.ts:9989-10072` — the entire `// Task #1935` block in the work-order completion handler, including the `followUpWorkOrderId` declaration at `:9993` and both nested try/catch layers.
+- `artifacts/api-server/src/routes/routes.ts:10113` — drop `followUpWorkOrderId` from the completion response body. The response becomes `{ message, workOrder }`. Verified no consumer: `grep -rn "followUpWorkOrderId" artifacts/irrigopro/src artifacts/irrigopro-mobile` returns nothing.
+- `artifacts/api-server/src/routes/routes.ts:13040-13053` — the `// Task #1935` block in `GET /api/work-orders/:id` that builds `parentWorkOrderLink` and `followUpWorkOrderLink`, and both keys from the `res.json(...)` spread at `:13056`.
+- `artifacts/api-server/src/storage.ts:652-670` — the `createFollowUpWorkOrder` and `getFollowUpWorkOrder` declarations on the `IStorage` interface, with their comments. Line 671 (`// Task #611 — atomic "approve estimate" lifecycle action.`) is the first line that stays.
+- `artifacts/api-server/src/storage.ts:4220-4325` — both method implementations, with their comments. Line 4327 (`// Task #611 — atomic estimate-approval lifecycle.`) is the first line that stays.
+- `artifacts/api-server/src/lib/work-order-deferred-items.ts` — delete the file (119 lines).
+- `artifacts/api-server/src/lib/work-order-deferred-items.test.ts` — delete the file (323 lines).
+- `artifacts/api-server/src/lib/migrations/create-woodglenn-followup.ts` — delete the file (395 lines).
+- `artifacts/api-server/src/lib/migrations/registry.ts:9` and `:23` — remove the `createWoodglennFollowupMigration` import and registry entry.
+- `artifacts/api-server/src/lib/migrations/registry.test.ts:70-76` — delete the `contains woodglenn-followup-v1` case and replace it with a `contains retire-followup-work-orders-v1` case in the same shape.
+
+**Frontend**
+
+- `artifacts/irrigopro/src/components/work-orders/work-order-completion.tsx:333-345` — the `deferredItemCount` `useMemo`.
+- `artifacts/irrigopro/src/components/work-orders/work-order-completion.tsx:764-771` — the informational notice block and its `{/* Task #1935 */}` comment. Keep the `<Separator />` above it.
+- **Keep** the `workOrderItems` query at `:327-329` (resolved 2026-09-16, decided). It does not feed only `deferredItemCount` — it also drives the parts prefill at `:361-396`, the estimate-items preview at `:632-646`, and `computeCompletionPrefillHours` at `:382`. Deleting it breaks the prefill. Only the `useMemo` at `:333-343` goes.
+- `artifacts/irrigopro/src/components/work-orders/work-order-details.tsx:629-649` — both lineage link blocks (`data-testid="wo-parent-wo-banner"` and `data-testid="wo-follow-up-wo-banner"`) and the `{/* Task #1935 */}` comment. The `From Wet Check #` link immediately above at `:624-628` stays.
+
+## Slice 3 — Drop the schema
+
+In `lib/db/src/schema/schema.ts`:
+
+- `:842-848` — delete the `parentWorkOrderId` column and its `// Task #1935` comment block.
+- `:870-876` — delete the `followUpUniqueIdx` partial unique index (`work_orders_follow_up_unique_idx`) and its comment.
+
+`estimateUniqueIdx` (`work_orders_estimate_unique_idx`, `:866-868`) and `statusScheduledIdx` (`:869`) stay untouched. All line numbers in this ticket re-verified against the working tree on 2026-09-16.
+
+**Also delete the SQL migration and add its reversal (added 2026-09-16).** `lib/db/migrations/0019_work_order_parent_follow_up.sql` created this column and index by hand. Delete that file and add `lib/db/migrations/0022_drop_work_order_parent_follow_up.sql` (0021 is the current highest) containing exactly:
+
+```sql
+DROP INDEX IF EXISTS work_orders_follow_up_unique_idx;
+ALTER TABLE work_orders DROP COLUMN IF EXISTS parent_work_order_id;
+```
+
+Both statements are `IF EXISTS` so the migration is safe to re-run and safe on an environment where 0019 never ran.
+
+Schema auto-applies on deploy, so this drop lands the moment Slice 3 deploys. **Do not deploy Slice 3 until Slice 1 has been run against the deployed server and its completion report verified.** Dropping the column before the cleanup runs leaves three phantom `pending` work orders in the queue with no lineage to explain them.
+
+## Definition of Done (Rule 7 — proof, not claims)
+
+Completion report maps each requirement to a `file:line` and the proof for it. Required:
+
+1. **Diff** — exact files and lines, including the three deleted files.
+2. **Grep proof the mechanism is gone.** `grep -rn "1935\|createFollowUpWorkOrder\|getFollowUpWorkOrder\|computeDeferredItems\|deferredItemKey\|parentWorkOrderId\|parent_work_order_id\|followUpWorkOrderLink\|parentWorkOrderLink\|deferredItemCount\|woodglenn-followup" artifacts lib` returns **zero hits** across the whole repo. Paste the empty result.
+3. **Test output.** The deleted `work-order-deferred-items.test.ts` cases are gone, `registry.test.ts` passes with the new case, and the existing work-order completion route tests still pass. The repo is past the Replit workflow cap — register validation commands rather than adding workflow entries.
+4. **Behavioural proof, both modes (Rule 5).** Complete one estimate-based repair work order with a substituted parts list (swap a quoted part for a different one) and screenshot the result: no follow-up created, no notice on the completion screen, no lineage banner on the work-order detail page. Then complete one work order whose `origin_wet_check_id` is non-null with an item removed and screenshot the same three absences. Mode is resolved server-side from the persisted work order, not from the client.
+5. **Migration proof.** Screenshot of the Super Admin run of `retire-followup-work-orders-v1` showing four resolved records, three cancelled, WO-1786572356558-607 untouched, plus a screenshot of one cancelled work order's Activity tab showing its audit entry.
+6. **Production screenshot** of the Woodglenn Squares HOA Jobs tab showing the Work Orders column with the three phantoms gone from the active lane and WO-1786572356558-607 still present.
+7. **Deploy status** — confirm the deployed commit is the one claimed, and that Slice 1 was run against the deployed server before Slice 3 deployed.

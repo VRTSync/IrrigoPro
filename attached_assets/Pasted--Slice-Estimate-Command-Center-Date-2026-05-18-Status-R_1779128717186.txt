@@ -1,0 +1,442 @@
+# Slice — Estimate Command Center
+
+**Date:** 2026-05-18
+**Status:** Ready for Replit implementation
+**Author:** Engineering planning
+**Builds on:** Slice 7 (Pending-Approval Workflow), Slice 10a (canonical lifecycle).
+**Decisions locked:**
+
+- **Q1 = Company Admin only, for now.** The Command Center is *not* shipped to Billing Manager or Irrigation Manager in this slice. The existing `/estimates/pending-approval` page is left intact for Billing Manager (their nav entry doesn't change). Only the Company Admin's nav entry is swapped over.
+- **Q2 = Replace, don't add.** The Command Center *absorbs* the current "Estimates Pending Approval" nav item for Company Admins — same group, same icon, new label, new path. The Pending-Approval data becomes one column of the Command Center's kanban + one tile in the KPI strip. The old `/estimates/pending-approval` URL stays valid but server-side it 302-redirects to `/estimates/command-center` for Company Admins so old bookmarks and email links keep working.
+- **Q3 = Hybrid layout: tiles → attention → kanban → table.** No tabs. Everything is on one page and visible by default, because the brief is "very apparent / all the visibility I could want." The kanban is collapsible (default open); the table is the source of truth and is never collapsed.
+- **Q4 = Reuse existing endpoints, add one summary endpoint.** The kanban + table read from `GET /api/estimates` (already paginated to 500). The tiles read from a new `GET /api/estimates/summary` that returns counts + dollar sums bucketed by `lifecycleStatus`, plus three "window" aggregates (`approvedLast30Days`, `expiringNext7Days`, `stuckInReviewOver3Days`) and a 90-day win rate. Single source of aggregation lives server-side so the tiles never disagree with the kanban totals.
+- **Q5 = No drag-and-drop on the kanban (this slice).** Cards are read-only — click opens the existing `EstimateDetailModal`. Status transitions still happen through the existing route surfaces (`internal-approve`, `send-approval-email`, etc.) reachable from the modal and from per-row actions in the table. DnD is a deliberate follow-up — it implies authoring new state machines on the client and isn't needed to make the system "apparent."
+- **Q6 = "Attention" rules are server-stamped, not client-recomputed.** The summary endpoint also returns a small `attention[]` array (up to 8 estimate IDs flagged with one of `stuck_in_review`, `expiring_soon`, `high_value_silent`) so the AttentionPanel doesn't have to re-derive urgency from a paginated list. The list is built from authoritative server data; the UI just renders it.
+
+**Related (future, NOT in this slice):**
+- Drag-and-drop transitions on the kanban (would also require a new audit event).
+- CSV export of the filtered table.
+- Saved filter views (URL-shareable querystring).
+- Activity timeline column (lifecycle transitions + approvals) per estimate.
+- Same page rolled out to Billing Manager and Irrigation Manager with role-aware tiles and filters.
+
+---
+
+## Executive Summary
+
+Today, a Company Admin who wants to know "what's happening with estimates" has to juggle three places: the `/estimates/pending-approval` queue for what's awaiting internal review, the broader `/estimates` list to see what's been sent, and the `/` admin dashboard to glance at the few estimate-flavored numbers it surfaces in passing. None of these answer the three questions an owner actually asks every morning — *where is the money sitting, what's at risk of expiring, and what's stuck on my desk* — without the user doing the math themselves.
+
+The Estimate Command Center collapses that into one Company-Admin-only page. The top strip shows six KPI tiles built off a new `/api/estimates/summary` endpoint (pipeline $, awaiting review, awaiting customer, expiring this week, approved this month, 90-day win rate). Below that, an Attention panel surfaces the 3–8 estimates the system thinks need action now, server-flagged with a reason. Below that, a six-column lifecycle kanban (`Draft / Pending review / Sent / Approved / Rejected / Expired`) using the same `LIFECYCLE_TINTS` palette already shipped in Slice 10a, so the colors match the badges everywhere else. Below that, a single filterable, sortable table of every open estimate, with per-row actions.
+
+The nav swap is the part that makes this "feel like the Command Center" rather than "yet another page": the existing **Estimates Pending Approval** leaf in the Company Admin nav becomes **Estimate Command Center**, with the existing badge count (now meaning "awaiting review only") preserved. The old URL is a 302 to the new one.
+
+**Slice ships when:** a Company Admin lands on `/estimates/command-center`, sees six accurate tiles backed by a single server response, sees an Attention list of the right rows in the right order, sees a six-column lifecycle kanban whose column totals match the tiles, and can filter / sort / search every estimate in one table on the same page — and the old `/estimates/pending-approval` URL still works for Company Admins (via redirect) and is unchanged for Billing Manager.
+
+---
+
+## Why Now
+
+Three pressures converge on the same UI gap:
+
+1. **The lifecycle is finally canonical.** Slice 10a (`lib/lifecycle.ts`) made `lifecycleStatus` a single server-stamped value with a fixed palette (`LIFECYCLE_TINTS`) and a fixed sort order (`LIFECYCLE_ORDER`). Until that landed, any "see all estimates by status" UI had to recompute the bucket on the client and risk drifting from the badges shown elsewhere. With 10a in place, a kanban grouped by `lifecycleStatus` will agree with every other surface on the first render.
+
+2. **The Pending Approval page is doing two jobs.** It was Slice 7's queue for internal reviewers — a list of work the reviewer owns. Company Admins (per the original Slice 7 role table) also got that page, but they don't *primarily* use it as a queue; they use it as a shorthand for "show me what's happening." Promoting their entry point from a single-column queue to a full command center matches what they're already trying to do with it, without breaking what Billing Manager uses it for.
+
+3. **The numbers exist but aren't summed.** `GET /api/estimates` already returns the right shape; `lifecycle.ts` already returns the right buckets; the dashboard already has `KpiTile` and the rest of the tile primitives. The page is fundamentally an assembly problem, not a new-domain problem.
+
+Putting this off another sprint costs us "all the visibility I could want" not because the data is missing but because it's spread across three pages and aggregated by eye.
+
+---
+
+## Scope of This Slice
+
+### In Scope
+
+1. **New page** at `artifacts/irrigopro/src/pages/estimate-command-center.tsx`. Composes existing dashboard primitives (`HeaderStrip`, `KpiTile`, `AttentionPanel`) + new `LifecycleKanban` + new `EstimateTable` (see §UI Changes).
+2. **New endpoint** `GET /api/estimates/summary` in `artifacts/api-server/src/routes/estimate-routes.ts`, gated by `requireEstimateApprovalAccess`, scoped to the caller's `companyId` (`null` for `super_admin`, same convention as `/api/estimates/pending-approval`). Returns `byLifecycle`, `windows`, `attention[]`, `winRate90d`.
+3. **New storage method** `getEstimateSummary(companyId: number | null): Promise<EstimateSummary>` on `IStorage` and the database storage class. Computes the same aggregates Slice 10a's `computeLifecycleStatus` would compute on the row, but done in one pass over the company's estimates (active + non-deleted).
+4. **Nav swap (Company Admin only).** In `artifacts/irrigopro/src/components/layout/nav-config.ts` (line ~200 of the `companyAdminNav.items[].Operations` group), replace the existing `"Estimates Pending Approval"` leaf with:
+   ```ts
+   {
+     type: "leaf",
+     label: "Estimate Command Center",
+     path: "/estimates/command-center",
+     icon: LayoutDashboard, // from lucide-react
+     badgeKey: "estimatesPendingApproval", // unchanged; still tracks pending-review count
+   }
+   ```
+   The `superAdminNav` and `billingManagerNav` blocks are NOT changed in this slice.
+5. **Route registration** in three places, matching the existing `EstimatesPendingApproval` pattern (lazy import + `<Route>`):
+   - `artifacts/irrigopro/src/components/company-admin-app.tsx` (next to the existing `parts-pending-approval` and `estimates/pending-approval` lines around line 143). Add the new page; leave the old `/estimates/pending-approval` route in place but render a `<RedirectToCommandCenter />` shim component on the Company Admin path (see §Redirect Behavior).
+   - `artifacts/irrigopro/src/App.tsx` line ~361 (default-fallback admin block) — same dual-route shape.
+   - `artifacts/irrigopro/src/App.tsx` line ~471 (fall-through `Operations` aliasing block) — leave untouched; the Operations alias for `/estimates` is unrelated.
+6. **Redirect shim** `artifacts/irrigopro/src/components/estimates/redirect-to-command-center.tsx` — a `useEffect` + `useLocation` (Wouter) hook that does `setLocation("/estimates/command-center", { replace: true })` once on mount and renders nothing. Registered ONLY for Company Admin (per Q1). Billing Manager continues to see the existing page.
+7. **Component scaffolding:**
+   - `artifacts/irrigopro/src/components/estimates/command-center/lifecycle-kanban.tsx` — six columns from `LIFECYCLE_STATUSES`, each with a `LIFECYCLE_TINTS[bucket]` header strip and a stack of cards.
+   - `artifacts/irrigopro/src/components/estimates/command-center/lifecycle-card.tsx` — one estimate, one card (id, customer, $, age, `lifecycleOf()` badge). Click → existing `<EstimateDetailModal>`.
+   - `artifacts/irrigopro/src/components/estimates/command-center/estimate-table.tsx` — table of every estimate the caller can see, with column filters and row actions reusing the same handlers `estimates-pending-approval.tsx` already wires up (`internalApprove`, `sendToCustomer`).
+   - `artifacts/irrigopro/src/components/estimates/command-center/attention-strip.tsx` — uses the existing `AttentionPanel` primitive from `components/admin-dashboard/attention-panel.tsx`, fed by `summary.attention[]`.
+8. **Tile wiring.** Six `KpiTile`s in the header, in order, with these reads off the summary response:
+
+   | Tile                       | Color  | Value source                                                | Subtitle                                |
+   | -------------------------- | ------ | ----------------------------------------------------------- | --------------------------------------- |
+   | Open pipeline              | blue   | `byLifecycle.sent.totalAmount + byLifecycle.pending_review.totalAmount` | "Sent + awaiting review"        |
+   | Awaiting review            | amber  | `byLifecycle.pending_review.count`                          | `formatCurrency(...totalAmount)`        |
+   | Awaiting customer          | purple | `byLifecycle.sent.count`                                    | `formatCurrency(...totalAmount)`        |
+   | Expiring this week         | rose   | `windows.expiringNext7Days.count`                           | `formatCurrency(...totalAmount)`        |
+   | Approved last 30 days      | green  | `windows.approvedLast30Days.count`                          | `formatCurrency(...totalAmount)`        |
+   | 90-day win rate            | teal   | `Math.round(winRate90d * 100)%`                             | "approved / decided"                    |
+
+   Tiles link to the table below pre-filtered by the relevant lifecycle (see §URL-state).
+9. **URL state.** Querystring params on `/estimates/command-center` drive the table's initial filter / sort:
+   - `?lifecycle=sent` (multi-select via comma)
+   - `?attention=expiring_soon` (single)
+   - `?sort=total_desc | age_desc | lifecycle`
+   Tiles set these via `setLocation` so a Company Admin can right-click → "Open in new tab" on any tile and land in a deep-linked view.
+10. **Three tests** in `tests/`:
+    - **Summary scope test:** a `company_admin` for company A calling `/api/estimates/summary` sees only company A's aggregates; `super_admin` sees the full union.
+    - **Summary numeric test:** seed 6 estimates across 6 lifecycles, assert each `byLifecycle.<bucket>.count` and `.totalAmount` matches what `computeLifecycleStatus` would return per row.
+    - **Redirect test (RTL):** mounting the Company Admin router at `/estimates/pending-approval` lands you at `/estimates/command-center` after one effect tick.
+
+### Out of Scope (this slice)
+
+- Drag-and-drop transitions on the kanban (Q5).
+- CSV export of the filtered table.
+- Saved-filter views with shareable links beyond the basic querystring above.
+- A dedicated activity / audit timeline panel per estimate.
+- Same UI for Billing Manager / Irrigation Manager (Q1). Their navs and pages are unchanged.
+- Real-time updates beyond the existing 60-second `refetchInterval` (no websocket / SSE).
+- New permissions or new role.
+- Server-side filtering of `GET /api/estimates` by `lifecycleStatus`. The table fetches the full page (cap 500) and filters client-side; this is fine at current scale and is a deliberate non-goal so we don't bikeshed query-param design alongside the UI.
+
+---
+
+## Endpoint: `GET /api/estimates/summary`
+
+Register **before** `GET /api/estimates/:id` for the same Express ordering reason that bit Slice 7. Place it adjacent to `/api/estimates/pending-approval` in `estimate-routes.ts` (currently line ~333) — just below it.
+
+```ts
+app.get(
+  "/api/estimates/summary",
+  requireAuthentication,
+  requireEstimateApprovalAccess,
+  async (req: any, res) => {
+    try {
+      const userRole = req.authenticatedUserRole;
+      const userCompanyId = req.authenticatedUserCompanyId;
+      let scopeCompanyId: number | null;
+      if (userRole === "super_admin") {
+        scopeCompanyId = null;
+      } else {
+        if (!userCompanyId) {
+          res.status(400).json({ message: "Missing company context" });
+          return;
+        }
+        scopeCompanyId = Number(userCompanyId);
+      }
+      const summary = await storage.getEstimateSummary!(scopeCompanyId);
+      res.json(summary);
+    } catch (error) {
+      console.error("Error fetching estimate summary:", error);
+      res.status(500).json({ message: "Failed to fetch estimate summary" });
+    }
+  },
+);
+```
+
+**Response shape** (add to `lib/api-spec` and the corresponding Zod in `lib/api-zod`):
+
+```ts
+type LifecycleBucket = "draft" | "pending_review" | "sent" | "approved" | "rejected" | "expired";
+
+type AttentionReason = "stuck_in_review" | "expiring_soon" | "high_value_silent";
+
+interface EstimateSummary {
+  byLifecycle: Record<LifecycleBucket, { count: number; totalAmount: number }>;
+  windows: {
+    approvedLast30Days: { count: number; totalAmount: number };
+    expiringNext7Days: { count: number; totalAmount: number }; // sent and (estimateDate + 30d) ∈ [now, now+7d]
+    stuckInReviewOver3Days: { count: number; totalAmount: number };
+  };
+  attention: Array<{
+    estimateId: number;
+    estimateNumber: string;
+    customerName: string;
+    totalAmount: number;
+    lifecycle: LifecycleBucket;
+    reason: AttentionReason;
+    sinceDays: number; // e.g. days since createdAt for stuck_in_review, days until expiry for expiring_soon (negative if already expired)
+  }>;
+  winRate90d: number; // approved / (approved + rejected + expired) over the last 90 calendar days. NaN-safe: 0 if denominator is 0.
+}
+```
+
+**Aggregation rules:**
+
+- Each estimate row contributes to exactly one `byLifecycle` bucket, using the server-side `lifecycleStatus` already stamped on the row (`deriveLifecycleForWrite` in the existing code path). The aggregator never re-derives.
+- `windows.expiringNext7Days` filters to `lifecycle === "sent"` and `now − estimateDate ∈ (23d, 30d]` (i.e., ≤ 7 days from the 30-day expiration boundary). Re-uses `ESTIMATE_EXPIRATION_DAYS` from `lib/lifecycle.ts` so we can't have two definitions drift.
+- `windows.stuckInReviewOver3Days` filters to `lifecycle === "pending_review"` and `now − createdAt > 3 days`. The threshold lives in a single named constant `ESTIMATE_STUCK_REVIEW_DAYS = 3` in the same `lib/lifecycle.ts` so the UI's "Stuck" badge can read it without a magic number.
+- `winRate90d` denominator includes `approved`, `rejected`, **and** `expired` over the last 90 calendar days (by `estimateDate`). `expired` counts as a loss. If denominator is 0, return `0` (the UI treats `0` and "no data" identically and shows "—").
+- `attention[]` is bounded at 8 items and sorted by `(reason priority, sinceDays desc)` where priority is `expiring_soon` > `stuck_in_review` > `high_value_silent`. `high_value_silent` is `lifecycle === "sent" && totalAmount >= 5000 && sinceDays >= 7`. The `$5000` threshold lives in the same lifecycle.ts constants block (`ESTIMATE_HIGH_VALUE_USD = 5000`).
+
+---
+
+## Storage Layer Changes
+
+In `lib/db/src/storage.ts` (`IStorage` + database implementation):
+
+- **Add:** `getEstimateSummary(companyId: number | null): Promise<EstimateSummary>`.
+- Implementation reads via the existing estimates query path (`includeDeleted: false`, `companyId` scoping mirroring `getEstimatesPendingApproval`), then walks the result set once to populate the buckets and windows. **No new SQL aggregations** in this slice — one pass in TS keeps the diff small and is well within budget at current row counts. If volume grows, a future slice can swap the body for an aggregate SQL query without changing the response shape.
+- **Do not touch** `getEstimates`, `getEstimatesPendingApproval`, or any write path.
+
+---
+
+## Middleware
+
+No new middleware. The endpoint reuses `requireEstimateApprovalAccess`, which is already imported in `estimate-routes.ts`. This is deliberate: the role wall is the same wall, the access surface is the same one Slice 7 sealed.
+
+---
+
+## UI Changes
+
+### `artifacts/irrigopro/src/pages/estimate-command-center.tsx` — NEW
+
+The page itself is thin — it's a composition of existing primitives + the four new components below. Order on the page, top to bottom:
+
+1. `<HeaderStrip>` with title "Estimate Command Center" and the company name. Re-use the same `HeaderStrip` `admin-dashboard.tsx` uses.
+2. KPI tile row (6 `<KpiTile>` instances per §In-Scope #8). The row uses the same `grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3` pattern from `admin-dashboard.tsx`.
+3. `<AttentionStrip rows={summary.attention} />` — a single `Card` containing up to 8 rows. Each row has a reason chip (red for `expiring_soon`, amber for `stuck_in_review`, indigo for `high_value_silent`), customer name, amount, days, and a "Open" button that opens the `EstimateDetailModal`.
+4. `<LifecycleKanban estimates={allEstimates} />` — collapsible card; default open.
+5. `<EstimateTable estimates={allEstimates} initial={fromQuerystring()} />` — full bleed.
+
+Data fetching:
+
+```ts
+const { data: summary } = useQuery<EstimateSummary>({
+  queryKey: ["/api/estimates/summary"],
+  refetchInterval: 60_000,
+});
+const { data: estimates = [] } = useArrayQuery<Estimate>({
+  queryKey: ["/api/estimates"],
+  refetchInterval: 60_000,
+});
+```
+
+Loading: render `<Skeleton>` rows for the tiles and a single-line placeholder for the table while the queries are pending; do NOT block the rest of the page on `summary` (it's a tiles-only dependency).
+
+### `lifecycle-kanban.tsx` — NEW
+
+Receives the full estimates array, groups by `lifecycleOf(estimate)`, sorts each column by `totalAmount desc`. Renders six fixed columns in `LIFECYCLE_ORDER`:
+
+```
+Draft   Pending review   Sent   Approved   Rejected   Expired
+```
+
+Each column header:
+- Uses `LIFECYCLE_TINTS[bucket].bg / .text / .border` for the chip.
+- Shows `count` and `formatCurrency(totalAmount)`.
+- Has a "View all →" link that calls `setLocation(\`/estimates/command-center?lifecycle=${bucket}\`)` to focus the table below.
+
+Each column body: up to 6 `<LifecycleCard>` instances; a "+N more" footer below if the bucket has more.
+
+Card width: fixed `w-72`; columns scroll horizontally on narrow screens (Company Admins are desktop-primary, so `xl:grid-cols-6` and `overflow-x-auto` below that).
+
+### `lifecycle-card.tsx` — NEW
+
+Compact card:
+
+```
+┌─────────────────────────────┐
+│ #00037   Smith Landscaping  │  ← estimateNumber + customer
+│ $4,250.00                   │  ← totalAmount (right-aligned)
+│ 12 days old · Created by RM │  ← age + createdBy initials
+│ [Pending review]            │  ← LIFECYCLE_TINTS badge
+└─────────────────────────────┘
+```
+
+`onClick` → opens existing `<EstimateDetailModal>` with the estimate ID. No DnD handles, no drag affordance (per Q5).
+
+### `estimate-table.tsx` — NEW
+
+A `shadcn/ui` `Table` with these columns:
+
+| Column      | Width | Sortable | Notes                                                          |
+| ----------- | ----- | -------- | -------------------------------------------------------------- |
+| Estimate #  | 88px  | yes      | `#${estimateNumber}` — links to detail modal                   |
+| Customer    | 220px | yes      | truncate; tooltip with full name + email                       |
+| Project     | 220px | no       | truncate                                                       |
+| Total       | 110px | yes (default sort desc) | `formatCurrency` right-aligned             |
+| Lifecycle   | 130px | yes      | `LIFECYCLE_TINTS` badge; sort key uses `LIFECYCLE_ORDER`       |
+| Age         | 90px  | yes      | days since `createdAt`                                         |
+| Owner       | 120px | no       | `createdBy` initials + name tooltip                            |
+| Last update | 110px | yes      | days since `updatedAt`                                         |
+| Actions     | 64px  | no       | three-dot menu (View, Edit, Approve & Send, Convert to WO)     |
+
+Action gating (mirrors the gating already done on `estimates-pending-approval.tsx`):
+
+- **View** is always present.
+- **Edit** is present when `isDraft(estimate) || isPendingReview(estimate)`. Reuses the existing `EstimateWizard` open flow.
+- **Approve & Send** is present when `isPendingReview(estimate) || isReadyToSend(estimate)`. Calls the same `internalApprove` + `sendToCustomer` mutations the queue page already wires up.
+- **Convert to WO** is present when `isApproved(estimate) && !isConvertedToWorkOrder(estimate)`. Same handler the detail modal uses.
+
+Filters live in a slim toolbar above the table:
+- Lifecycle multi-select (chips backed by `LIFECYCLE_STATUSES`).
+- Customer search (client-side substring on `customerName`).
+- $ range (min / max).
+- Owner filter (multi-select from the unique `createdBy` values in the result).
+- Reset button.
+
+All filter state is reflected in the URL querystring (per §In-Scope #9) so the page is shareable and browser-back-friendly.
+
+### `attention-strip.tsx` — NEW
+
+Wraps `<AttentionPanel>` from `components/admin-dashboard/attention-panel.tsx`. Maps each `summary.attention[i]` row to an `AttentionRow` with the right icon + tint:
+
+```ts
+const ATTENTION_ICONS: Record<AttentionReason, AttentionIconKey> = {
+  expiring_soon: "AlertTriangle",
+  stuck_in_review: "Clock",
+  high_value_silent: "DollarSign",
+};
+const ATTENTION_TINTS: Record<AttentionReason, "red" | "amber" | "indigo"> = {
+  expiring_soon: "red",
+  stuck_in_review: "amber",
+  high_value_silent: "indigo",
+};
+```
+
+Empty state: "All clear — nothing needs your attention right now." (Don't hide the panel; the empty state is itself information.)
+
+---
+
+## Nav Changes
+
+`artifacts/irrigopro/src/components/layout/nav-config.ts`, in `companyAdminNav.items` Operations group, **replace** the existing leaf at lines ~200–206:
+
+```ts
+// BEFORE
+{
+  type: "leaf",
+  label: "Estimates Pending Approval",
+  path: "/estimates/pending-approval",
+  icon: ShieldCheck,
+  badgeKey: "estimatesPendingApproval",
+},
+
+// AFTER
+{
+  type: "leaf",
+  label: "Estimate Command Center",
+  path: "/estimates/command-center",
+  icon: LayoutDashboard, // add to the lucide-react import block at top of file
+  badgeKey: "estimatesPendingApproval",
+},
+```
+
+`badgeKey` is preserved — the badge still reflects the count of pending-review estimates because that's the most actionable single number. `superAdminNav` and `billingManagerNav` blocks are unchanged.
+
+`desktop-shell.tsx` does NOT need to change. Its `useNavBadges()` (line ~134) already populates `estimatesPendingApproval` from the same `/api/estimates/pending-approval` query, and the new nav leaf reads the same key.
+
+---
+
+## Redirect Behavior
+
+`artifacts/irrigopro/src/components/estimates/redirect-to-command-center.tsx` — NEW:
+
+```tsx
+import { useEffect } from "react";
+import { useLocation } from "wouter";
+
+export function RedirectToCommandCenter() {
+  const [, setLocation] = useLocation();
+  useEffect(() => {
+    setLocation("/estimates/command-center", { replace: true });
+  }, [setLocation]);
+  return null;
+}
+```
+
+Wire-up:
+
+- `company-admin-app.tsx` line 143: change
+  ```tsx
+  <Route path="/estimates/pending-approval" component={EstimatesPendingApproval} />
+  ```
+  to
+  ```tsx
+  <Route path="/estimates/pending-approval" component={RedirectToCommandCenter} />
+  <Route path="/estimates/command-center"   component={EstimateCommandCenter} />
+  ```
+- `App.tsx` line 361 (default-fallback admin block): same dual-route shape.
+- `App.tsx` line 471 (Operations alias block): **leave the existing `EstimatesPendingApproval` mount in place**. That block is consulted for roles other than Company Admin who fall through to the operations alias map — keeping it intact preserves Billing Manager's current page (per Q1).
+
+The dual-route approach (rather than a server-side redirect) is intentional: Wouter doesn't support 302s, and the rest of the app does its routing client-side. For Company Admin the shim runs once and replaces the URL; for Billing Manager the shim is never registered and they still see the page they had.
+
+---
+
+## Tests
+
+Add to `tests/`:
+
+1. **`tests/api/estimate-summary.test.ts`**
+   - Seed: 2 companies, 6 estimates for company A (one per lifecycle bucket), 1 estimate for company B.
+   - Assert: a company_admin for A gets `byLifecycle.<bucket>.count === 1` for each of the six buckets and `byLifecycle.<bucket>.count === 0` for company B's row.
+   - Assert: a super_admin gets the union (7 total).
+   - Assert: an irrigation_manager gets `403`.
+
+2. **`tests/api/estimate-summary-windows.test.ts`**
+   - Seed: 3 sent estimates with `estimateDate` of `now - 31d`, `now - 25d`, `now - 24d`.
+   - Assert: `byLifecycle.expired.count === 1`, `byLifecycle.sent.count === 2`, `windows.expiringNext7Days.count === 1` (the 25d-old one).
+   - Seed: 2 pending_review estimates with `createdAt` of `now - 4d` and `now - 1d`.
+   - Assert: `windows.stuckInReviewOver3Days.count === 1`.
+
+3. **`tests/web/redirect-pending-approval.test.tsx`**
+   - Mount the Company Admin router at `/estimates/pending-approval`.
+   - Wait one tick.
+   - Assert: `location` is `/estimates/command-center` and the Command Center page is rendered.
+
+---
+
+## Migration
+
+None. No schema changes. No new columns, no enum changes, no backfill. The slice is purely additive at the API/UI level.
+
+---
+
+## Risks and Rollback
+
+- **Summary / list disagreement.** Tiles read the summary endpoint; the kanban reads the full list. If a row's `lifecycleStatus` were computed differently in the two paths, totals would disagree visibly. Mitigation: both reads source `lifecycleStatus` from the same `deriveLifecycleForWrite` stamp the server already writes. The summary endpoint does NOT re-derive on the fly; the test suite asserts equality on a seeded set.
+- **Page weight.** Six tiles + a kanban + a table on one screen is a real amount of DOM. Mitigation: tiles use the existing `KpiTile` (already optimized for the admin dashboard); the kanban caps each column at six visible cards; the table virtualizes only if it grows beyond ~200 rows (use `@tanstack/react-virtual`, which the workspace already depends on — out of scope to wire up unless we see perf regressions).
+- **Nav swap surprise.** Existing Company Admin muscle memory points "Estimates Pending Approval" at a queue. New label points at a dashboard. Mitigation: the `badgeKey` is preserved so the visual cue (a numeric badge in the same nav slot) is identical, and the old URL still works via redirect.
+- **Wouter `setLocation` race.** If the user starts an action on the shim before `useEffect` fires, the action lands on the page that's about to unmount. Mitigation: the shim renders `null` — there's no interactive surface to start an action from.
+
+Rollback: revert the nav swap (single line change), revert the three route registrations, drop the summary endpoint route, leave the storage method and page files in place. Old behavior is restored on next page load.
+
+---
+
+## Success Criteria
+
+This slice ships when, in order:
+
+1. A Company Admin visiting `/estimates/command-center` sees the page render: six tiles, an Attention strip, a six-column kanban, and a filterable table.
+2. The tiles' aggregate values match the kanban column totals for the same buckets on the same data (no drift).
+3. The summary endpoint returns `403` for `irrigation_manager` and `field_tech` and is scoped to the caller's company for `company_admin` / `billing_manager`.
+4. The `/estimates/pending-approval` URL still resolves for a Company Admin — they land at `/estimates/command-center` after one tick, with `location.replace` semantics so the browser back button doesn't bounce them back.
+5. The same URL resolves to the unchanged queue page for Billing Manager.
+6. The nav badge on "Estimate Command Center" shows the same count Billing Manager's "Estimates Pending Approval" badge shows.
+7. Clicking a tile sets the table's querystring filter and the table re-renders to that subset; pasting the URL in a new tab arrives in the same filtered state.
+8. The three tests pass.
+9. Existing Slice 7 / Slice 10a routes and pages still work end-to-end (no regressions in `/estimates`, `/estimates/pending-approval` for Billing Manager, or the detail modal).
+
+---
+
+## What This Unblocks
+
+Once the Command Center is the Company Admin's estimate home, several follow-ups slot in cleanly:
+
+- **Drag-and-drop kanban.** A future slice can add DnD by wiring each card's drop target to the existing transition mutations (`internal-approve`, `send-approval-email`, `reject`). No new state machine needed.
+- **CSV export.** The table already filters client-side; an "Export" button at the top of the toolbar produces a CSV of the current filtered view.
+- **Activity timeline.** Hang a vertical timeline component off the detail modal that reads from a future audit-log endpoint; the Command Center's Attention strip can then link directly into the timeline view.
+- **Role-aware rollout.** The summary endpoint already shapes data the way Billing Manager and Irrigation Manager would consume it; a follow-up slice can register the same page in those navs with different tile sets and different default filters, without changing the server.
+
+The Command Center is the place every future estimate-system surface plugs into.

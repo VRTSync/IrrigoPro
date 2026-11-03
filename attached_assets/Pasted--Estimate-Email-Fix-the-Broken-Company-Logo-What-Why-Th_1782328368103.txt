@@ -1,0 +1,47 @@
+# Estimate Email — Fix the Broken Company Logo
+
+**What & Why**
+The company logo renders as a **broken image** in the estimate email, even though it shows correctly on the **estimate/wet-check/invoice PDFs**. Root cause is a logo-URL **path-normalization mismatch** between the email builder and the PDF builders — not (primarily) the base-URL issue flagged earlier.
+
+**The chain:**
+- The stored value is `company.logo = "company-logos/<uuid>"` (`normalizeLogoPath`, `objectStorage.ts:534`).
+- The serving route is `GET /api/company-logo/:logoId` and it **re-adds** the prefix internally — it searches `company-logos/${logoId}` (`routes.ts:4477`). So it expects the **bare `<uuid>`**, and `:logoId` matches only a **single path segment** (no slashes).
+- **PDFs** run the stored value through `resolveLogoToFetchableUrl`, which **strips** `company-logos/` → `/api/company-logo/<uuid>` → matches → renders. (`estimate-pdf.ts`, `wet-check-pdf.ts`, `invoice-pdf-service.ts`.)
+- **Email** uses its own `getCompanyLogoUrl` (`email-service.ts:184–198`) that does **not** strip the prefix → it builds `${baseUrl}/api/company-logo/company-logos/<uuid>`. The extra slash means the route doesn't match → **404 → broken image**.
+
+So PDFs work and email doesn't, from the same stored value.
+
+Small backend fix. No schema change.
+
+---
+
+## Fix
+### File: `artifacts/api-server/src/email-service.ts` (`getCompanyLogoUrl` ~184–198; used at ~104)
+- Replace the email's bespoke `getCompanyLogoUrl` with the **same normalization the PDFs use**. Best: extract the PDF resolver into a **shared helper** (e.g. `resolveCompanyLogoUrl(storedLogo, baseUrl)`) and call it from email **and** the three PDF services so they can never drift again. The helper must handle every stored shape:
+  - `http(s)://…` → if it's a `/api/(public-objects/)?company-logos/<id>` URL, reduce to `/api/company-logo/<id>` on the target base; otherwise pass through.
+  - `/api/…` → prefix with base as-is.
+  - `company-logos/<uuid>` → **strip** to `${base}/api/company-logo/<uuid>`  ← the missing case causing the break.
+  - bare `<uuid>` → `${base}/api/company-logo/<uuid>`.
+- **Use the public base URL for email** (the PDFs use `http://localhost:PORT` for server-side fetch, but a recipient's mail client must reach a public host). So email = the normalized **path** + the **public** `baseUrl` (`APP_BASE_URL`, else the prod domain). Keep `EmailService.baseUrl`, but ensure `APP_BASE_URL` is set to the public domain so the absolute `<img src>` resolves for recipients.
+- Keep the existing "no logo configured → omit the block" behavior.
+
+### Config (Replit)
+- Confirm **`APP_BASE_URL`** = the public app domain (e.g. `https://irrigopro.com`) in the deployment env, so the logo `<img>` (and the approval/links) point at a reachable host. (Also fixes the same risk for the approval-page links.)
+
+## Tests
+- An estimate email for a company whose `company.logo = company-logos/<uuid>` shows the logo in Gmail/Apple Mail (no broken image).
+- The resolved logo URL is `${publicBase}/api/company-logo/<uuid>` (single segment after `company-logo/`), returns 200, and the bytes load.
+- Companies with logos stored as a full `https://…company-logos/<id>` URL, as `/api/company-logo/<id>`, or as a bare `<uuid>` all resolve correctly (shared helper covers all shapes).
+- PDFs still render the logo (no regression from the shared-helper extraction).
+- A company with no logo set: email omits the logo block (no broken image).
+
+## Out of scope
+- The email body redesign / from-name / subject (separate tickets) — this is just the logo URL.
+- In-app logo display (uses its own path; out of scope unless it shows the same break — worth a quick check, since `getCompanyLogoPublicURL` in `objectStorage.ts:521` also doesn't strip the prefix).
+
+## Relevant files
+- `artifacts/api-server/src/email-service.ts` (`getCompanyLogoUrl` ~184–198; `baseUrl` ~64–83)
+- `artifacts/api-server/src/objectStorage.ts` (`normalizeLogoPath` ~527; `getCompanyLogoPublicURL` ~521)
+- `artifacts/api-server/src/routes/routes.ts` (`/api/company-logo/:logoId` ~4469, searches `company-logos/${logoId}` ~4477)
+- Reference resolvers (the working ones to share): `estimate-pdf.ts` ~16–45, `wet-check-pdf.ts` ~13–42, `invoice-pdf-service.ts` ~75–121
+- Config: `APP_BASE_URL`

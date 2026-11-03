@@ -1,0 +1,313 @@
+# Replit Task — WC Separate System, Slice 3 (Dashboard + reporting consumers)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader rebuild — it is reference material so you understand
+the intent. The actual work for this task is in the **Slice 3** section at the
+bottom. Do not deviate from any file paths, function names, schema field names,
+or payload shapes specified. If you believe a deviation is necessary, surface it
+and stop rather than proceeding.
+
+> **Rule of thumb for this slice (learned from Slice 1):** when the spec lists
+> what to add to an existing return type or response payload, treat that as the
+> complete delta. **Do not add additional fields, helpers, or response keys
+> beyond what is explicitly listed.** Do not "improve" existing field shapes
+> while you're in the file. Surface a question and stop if you think an
+> addition outside the spec is necessary.
+
+> **Architectural note for this slice.** Wet check billings are being moved out
+> of the shared `billing_sheets` table into their own parallel
+> `wet_check_billings` table (Slice 1 added the table; nothing reads from it
+> yet). This slice teaches the read-side aggregate endpoints — customer
+> billing preview, customer billing detail, dashboard stats — to include wet
+> check billings in monetary rollups and pending-review counts. Other list-only
+> endpoints stay billing-sheets-only because wet check billings will get their
+> own dedicated page in a later slice.
+>
+> **Critical safety property:** This slice adds new code paths but produces
+> **zero user-visible behavior change on day 1**. The `wet_check_billings`
+> table is empty until Slice 5 (migration) populates it. New response arrays
+> will be empty, new counts will be 0. If you find yourself making changes
+> that affect what users see today (with the table still empty), you've
+> drifted from the slice scope.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in conversation and are referenced by every slice in this
+rebuild. Do not deviate from any of them.
+
+**Scope.** Only billing sheets whose `billingNumber` starts with `BS-WC-` are
+affected by the broader rebuild today. After Phase 2 completes, those rows
+will live in `wet_check_billings` with `WC-YYYY-NNNN` numbering.
+
+**Source of truth for the new layout.** `wetCheckFindings` joined to
+`wetCheckZoneRecords`. Findings have `billingSheetId` (legacy) and
+`wetCheckBillingId` (new, added in Slice 1). Both columns coexist during
+migration; consumers must handle either source.
+
+**Wet check billing status enum.** Wet check billings auto-submit on creation
+(no `'draft'` state). Possible statuses: `'submitted'`,
+`'pending_manager_review'`, `'approved_passed_to_billing'`, `'billed'`. This
+is narrower than the billing_sheets enum which also has `'draft'` and
+`'completed'`.
+
+**Invoice items are already polymorphic.** `invoice_items.sourceType` accepts
+`"work_order"`, `"billing_sheet"`, or `"wet_check_billing"` (the last added by
+Slice 1). The `invoices.totalAmount` is the sum of all invoice items, so any
+endpoint that queries invoices is automatically wet-check-aware.
+
+**No PDF backward compatibility.** All wet check billings live in the current
+billing cycle.
+
+---
+
+## Slice 3 — Dashboard + reporting consumers: dual-source aggregation
+
+**Scope.** Update the three aggregate consumers (two route handlers + one
+storage method) that compute monetary totals or pending-review counts across
+billing sheets, so they also include `wet_check_billings`. Other read-side
+endpoints stay billing-sheets-only — wet check billings will surface to users
+via the dedicated `/wet-check-billings` page in Slice 4, not by being mixed
+into existing billing-sheets lists. No user-visible change on day 1: the
+`wet_check_billings` table is empty after Slice 1, so the new code paths are
+dormant until Slice 5 (migration) populates the table.
+
+**Files modified.**
+- `artifacts/api-server/src/routes/routes.ts` — update
+  `/api/customers/billing-preview` (~line 6033) and `/api/customers/:id/billing`
+  (~line 6303)
+- `artifacts/api-server/src/storage.ts` — extend `getDashboardStats()`
+  (~line 2544) and its interface signature (~line 481)
+- New: `artifacts/api-server/src/routes/customer-billing-preview-wet-check.test.ts`
+- New: `artifacts/api-server/src/routes/customer-billing-detail-wet-check.test.ts`
+- New: `artifacts/api-server/src/storage/dashboard-stats-wet-check.test.ts`
+
+**Endpoints/methods deliberately NOT changed in this slice. Do not touch these:**
+- `storage.getThisMonthBilledForCompany()` — queries `invoices.totalAmount`
+  directly, not `billing_sheets`. After Slice 2 lands, invoices already
+  include wet check billings via the polymorphic `invoice_items` shape, so the
+  monthly billed rollup is automatically correct. **No change needed.**
+- `GET /api/billing-sheets` and its filters (`?technician=`, `?missing-photos`,
+  etc.) — list-only endpoints that power the existing billing-sheets page.
+  They must stay billing-sheets-only because the page they power will stop
+  showing wet check billings post-migration (those go to the new page).
+- `GET /api/customers/:id/billing-sheets` — direct customer billing-sheets
+  list; same reasoning.
+- `/api/billing-workspace/queue` and `/api/billing-workspace/status-strip` —
+  manager workflow queue stays billing-sheets-only.
+- `storage.getDashboardStats.totalRevenue` — already sums `estimates`, not
+  billing sheets. Unrelated.
+
+**Concrete changes.**
+
+**(1) Update `GET /api/customers/billing-preview`** (~line 6033–6278 in
+routes.ts).
+
+Inside the `customers.map(async (customer) => {...})` block (~line 6082):
+- Add: `const wetCheckBillings = await storage.getWetCheckBillingsByCustomer(customer.id);`
+  (storage method exists from Slice 1).
+- Add a parallel `wcbInRange(wcb)` helper matching the existing `bsInRange(bs)`
+  helper (~line 6100). Use `wcb.workDate ?? wcb.createdAt` for the date.
+- Add `unbilledWetCheckBillings`: filter wcb where
+  `status === 'approved_passed_to_billing'` AND `!invoiceId` AND `wcbInRange(wcb)`.
+- Add `unapprovedWetCheckBillings`: filter wcb where
+  `status === 'pending_manager_review' || status === 'submitted'` AND
+  `!invoiceId`. (Wet check billings do not have a `'completed'` or `'draft'`
+  status per the Slice 1 schema — they default to `'submitted'`.)
+- Add to `unbilledAmount` sum:
+  `+ unbilledWetCheckBillings.reduce((sum, wcb) => sum + safeAmount(wcb.totalAmount, \`wcb:${wcb.id}\`), 0)`.
+  Use the existing `safeAmount` defensive coercion helper with a `wcb:<id>`
+  source key.
+- Add to `unapprovedTotal` sum: same pattern.
+- Add wet check billing iterations to the `combinedTotal` independent sum loop
+  (~line 6155–6159). This keeps the drift-guard invariant intact: any future
+  change to one subtotal must also be made in the combined-loop, or the warn
+  fires.
+- For the all-time-approved sums (~line 6175–6182): mirror the existing
+  pattern, adding `allTimeApprovedWCBs` and including in
+  `allTimeApprovedTotal`.
+- For the current-month sums: same mirror pattern wherever billing_sheets are
+  summed.
+
+Response payload addition (per-customer row): add a new field
+`wetCheckBillings: WetCheckBilling[]` (full list for the customer, not
+filtered). **Do NOT modify any existing field names or shapes — additive
+only.**
+
+**(2) Update `GET /api/customers/:id/billing`** (~line 6303–6414 in
+routes.ts).
+
+After loading billing sheets (~line 6325):
+- Add: `const allWetCheckBillings = await storage.getWetCheckBillingsByCustomer(customerId);`
+
+Add a transform block paralleling the existing `billingSheets.map`
+(~line 6358):
+
+```typescript
+const wetCheckBillings = allWetCheckBillings.map(wcb => {
+  const laborAmount = parseFloat(wcb.laborSubtotal || '0') || 0;
+  const partsAmount = parseFloat(wcb.partsSubtotal || '0') || 0;
+  const storedTotal = parseFloat(wcb.totalAmount || String(laborAmount + partsAmount));
+  return {
+    ...wcb,
+    laborCost: laborAmount,
+    partsCost: partsAmount,
+    totalAmount: storedTotal.toString(),
+    description: `Wet check repairs (#${wcb.wetCheckId})`, // derived; wet_check_billings has no workDescription column
+    billedDate: null,
+    completedDate: wcb.workDate,
+  };
+});
+```
+
+Add filter (paralleling unbilledBillingSheets ~line 6390):
+
+```typescript
+const unbilledWetCheckBillings = wetCheckBillings.filter(wcb =>
+  (wcb.status === 'approved_passed_to_billing') && !wcb.invoiceId
+);
+```
+
+Update `totalUnbilledAmount` to include wet check billings:
+
+```typescript
+const totalUnbilledAmount =
+  unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
+  unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0) +
+  unbilledWetCheckBillings.reduce((sum, wcb) => sum + parseFloat(wcb.totalAmount || '0'), 0);
+```
+
+Update the `billingData` response object — add two new fields, leave existing
+fields untouched:
+
+```typescript
+const billingData = {
+  customer: applyBillingNotesVisibility(req, customer),
+  workOrders,
+  billingSheets,
+  wetCheckBillings,            // NEW — additive only
+  estimates,
+  unbilledWorkOrders,
+  unbilledBillingSheets,
+  unbilledWetCheckBillings,    // NEW — additive only
+  totalUnbilledAmount,         // now includes WCBs
+};
+```
+
+**(3) Extend `storage.getDashboardStats`** (storage.ts ~line 2544
+implementation, ~line 481 interface).
+
+Update the interface return type to add a parallel stats object:
+
+```typescript
+billingSheetStats: {
+  pendingManagerReview: number;
+};
+wetCheckBillingStats: {           // NEW
+  pendingManagerReview: number;
+};
+```
+
+In the implementation:
+- Add: `const allWetCheckBillings = await db.select().from(wetCheckBillings);`
+  after the existing `allBillingSheets` query (~line 2572).
+- Compute the parallel stat:
+
+```typescript
+const wetCheckBillingStats = {
+  pendingManagerReview: allWetCheckBillings.filter(wcb =>
+    wcb.status === "pending_manager_review" || wcb.status === "submitted"
+  ).length,
+};
+```
+
+(Note: wet check billings default to `"submitted"` on creation per Slice 1
+schema. They never have `"draft"` or `"completed"` statuses, so the filter has
+two values, not three.)
+
+- Add `wetCheckBillingStats` to the return object alongside
+  `billingSheetStats`.
+
+**Do NOT modify the existing `billingSheetStats.pendingManagerReview` field
+shape or its filter logic.** Do not add any other fields to either stats
+object.
+
+**(4) Tests.**
+
+`customer-billing-preview-wet-check.test.ts`:
+- Fixture: one customer with one billing sheet (status=`'approved_passed_to_billing'`,
+  totalAmount=`'100.00'`) AND one wet check billing
+  (status=`'approved_passed_to_billing'`, totalAmount=`'50.00'`).
+- Call `GET /api/customers/billing-preview`.
+- Assert: the customer's preview row has `unbilledAmount` reflecting both
+  sources (`150.00`).
+- Assert: the customer's preview row includes a `wetCheckBillings` array
+  containing the wcb.
+- Assert: a wet check billing with `status='submitted'` is NOT included in
+  `unbilledAmount` but IS in `unapprovedTotal`.
+
+`customer-billing-detail-wet-check.test.ts`:
+- Fixture: one customer with two wet check billings (one
+  `'approved_passed_to_billing'`, one `'billed'` with invoiceId set).
+- Call `GET /api/customers/:id/billing`.
+- Assert: `billingData.wetCheckBillings` array has both rows.
+- Assert: `billingData.unbilledWetCheckBillings` has only the unbilled one.
+- Assert: `billingData.totalUnbilledAmount` matches the unbilled wcb's
+  totalAmount (plus any other unbilled work added by the fixture).
+- Assert: existing fields (`billingSheets`, `unbilledBillingSheets`) still
+  appear with their existing shape (additive-only verification).
+
+`dashboard-stats-wet-check.test.ts`:
+- Fixture: one wet check billing with `status='submitted'`, one with
+  `status='pending_manager_review'`, one with `status='billed'`.
+- Call `storage.getDashboardStats()`.
+- Assert: `stats.wetCheckBillingStats.pendingManagerReview === 2`.
+- Assert: `stats.billingSheetStats.pendingManagerReview` is computed only
+  from billing_sheets table (unchanged).
+
+**Acceptance criteria.**
+- `/api/customers/billing-preview` per-customer rows include `wetCheckBillings`
+  array, and all monetary rollups (`unbilledAmount`, `approvedTotal`,
+  `unapprovedTotal`, `combinedTotal`, `allTimeApprovedTotal`, current-month
+  sums) include wet check billings.
+- `/api/customers/:id/billing` response includes `wetCheckBillings` and
+  `unbilledWetCheckBillings` arrays; `totalUnbilledAmount` includes them.
+- `storage.getDashboardStats()` return type has a new `wetCheckBillingStats:
+  { pendingManagerReview: number }` field; the implementation computes it
+  correctly.
+- All three new test files pass.
+- All existing tests pass without modification.
+- The existing `billingSheetStats.pendingManagerReview` value is unchanged in
+  shape and computation.
+- The existing response shape of both endpoints is unchanged for all
+  pre-existing fields — additions only.
+- **No user-visible behavior change at landing time.** The
+  `wet_check_billings` table is empty, so the new arrays are empty and the
+  new counts are 0. The safety property holds.
+
+**Out of scope.**
+- Migrating existing BS-WC rows (Slice 5).
+- Switching the wet check conversion path (Slice 6).
+- Updating any list-only endpoint (`/api/billing-sheets`,
+  `/api/customers/:id/billing-sheets`, `/api/billing-sheets/missing-photos`,
+  `/api/billing-workspace/queue`, etc.) — these stay billing-sheets-only.
+- Updating `storage.getThisMonthBilledForCompany` (already correct via
+  invoices).
+- Adding a wet-check-billings stats object to `/api/admin/stats` (separate
+  concern; not needed for correctness).
+- The dedicated `/wet-check-billings` page or `GET /api/wet-check-billings`
+  endpoint (Slice 4).
+- Frontend changes. New response fields are additive; existing frontends that
+  don't read them are unaffected.
+- Designing or building any UI to display wet check billings stats (Slice 4
+  surfaces the data).
+- Changing the existing `billingSheetStats` filter logic or response shape in
+  `getDashboardStats`.
+- Modifying anything in `applyPricingVisibility` or
+  `applyBillingNotesVisibility` — wet check billings inherit the same
+  visibility rules as billing sheets automatically.
+
+**Dependencies.** Slice 1 merged. (Slice 2 does not need to be merged for
+Slice 3 to work, but they're typically deployed together — see the
+bundled-publish strategy.)

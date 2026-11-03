@@ -1,0 +1,104 @@
+# FIX — Retire the Overdue Endpoint, Reconcile the Metrics Doc
+
+**What & Why**
+`docs/financial-metrics.md` is the reconciliation contract for every shared financial number in the app. It currently documents an "Overdue in QuickBooks" tile on a Billing Workspace page that no longer exists, served by an endpoint no screen calls, computed by a function with four independent defects. After tickets 1 through 7 land, the doc will be wrong about nearly every metric it describes. A contract nobody maintains is worse than no contract, because the next change is written against it.
+
+This ticket removes the dead path and brings the doc back to describing what actually ships.
+
+## Current state (confirmed in code)
+
+**The overdue calculation is wrong four ways.** `overdueSummary` (`billing-workspace-routes.ts:939`):
+
+1. **Ignores the effective-due-date rule.** `const due = inv.dueDate ? ... : NaN; if (!Number.isFinite(due) ...) continue` (`:975`). Every invoice with no explicit `dueDate` is silently dropped. Everywhere else derives one from `createdAt` plus the customer's payment terms (`computeEffectiveDueDate`, `lib/shared/src/invoice-aging.ts:49`).
+2. **Ignores payment state.** No `paidAt` check, no `paymentStatus` check (`:974–978`) — the exact stale-status case `computeOutstandingAr` defends against explicitly.
+3. **Uses `totalAmount`, never `balance`** (`:978`), so a partially-paid overdue invoice counts at face value.
+4. **Drifts on statuses**: excludes `draft, cancelled, paid, superseded` — missing `merged` and `failed`.
+
+**It is also a Rule 1 smell.** It calls `getAllInvoices()` with no company argument (`:952`), pulling every tenant's invoices into memory, then issues one `getCustomer` per distinct customer id to establish tenancy in JavaScript (`:952–970`). The filter itself is correct, so nothing leaks — but cross-tenant rows are loaded and held before it runs.
+
+**Nothing on screen consumes it.** Confirmed by grep across the client:
+
+- No client code calls `/api/quickbooks/overdue-summary` (`:918`).
+- `overdueSummary`'s only other caller is `/api/billing-workspace/status-strip` (`:719`), which supplies `quickbooks.overdueCount`. **No client code calls any `/api/billing-workspace/*` endpoint at all.** Manager Workspace reads `/api/manager-workspace/status-strip` (`manager-workspace.tsx:251`), and `manager-workspace-routes.ts` never calls `overdueSummary`. `manager-workspace.tsx` never references `overdueCount`.
+- `billing-workspace.tsx` no longer exists; `/billing-workspace` and `/billing-dashboard` are redirects (`App.tsx:334`, `:415`, `:481`).
+- The response's `agingReportUrl: "/financial-pulse/ar-aging"` (`:987`) points at a route registered nowhere — only `/financial-pulse` exists.
+
+**The module itself is still live** and must not be deleted wholesale: `routes.ts:384`, `manager-workspace-routes.ts:31` and `billing-workspace-bulk-approve.ts:16` import `ACTIVE_WCB`, `PENDING_REVIEW_WCB`, `ACTIVE_BS`, `ACTIVE_WO` and `loadQbSyncStatus` from it.
+
+## Decision (decided)
+
+**Delete the overdue path rather than repair it.** The invoices page A/R view already answers "what is overdue," using the frozen shared aging rules, with filters and a working list behind it. A second overdue number computed a fifth way is a liability, not a feature. No number a user can currently see is lost.
+
+## Slice 1 — Remove the dead overdue path
+
+- Delete `overdueSummary` (`:939–992`), `OVERDUE_CACHE` (`:179`), `OVERDUE_TTL_MS` (`:180`), its clear call (`:195`), the `OverdueCacheEntry` type (`:177`) and the `/api/quickbooks/overdue-summary` route (`:912–935`).
+- Remove the `overdueCount` field from the `/api/billing-workspace/status-strip` response (`:783–789` and its use at `:798`).
+- **Keep** `ACTIVE_WCB`, `PENDING_REVIEW_WCB`, `ACTIVE_BS`, `ACTIVE_WO` and `loadQbSyncStatus` exactly as they are. They have live importers listed above.
+
+## Slice 2 — Decide the fate of `/api/billing-workspace/status-strip`
+
+The endpoint is unreachable from the client. Under Rule 3 it is dead code and should go, but it is a whole endpoint rather than one function, so confirm before removing:
+
+- Grep for any non-client caller — scripts, tests that assert real behaviour rather than shape, scheduled jobs, external integrations.
+- If nothing legitimate calls it, delete the route and its handler, keeping the shared status-set exports.
+- If something does, record what in the module header so the next audit does not re-open this question.
+- Check `billing-workspace-bulk-approve.ts` in the same pass: it registers its own routes and may be reachable or may be dead alongside this one. Report which; do not remove it blind.
+
+## Slice 3 — Reconcile `docs/financial-metrics.md`
+
+Rewrite the doc so every statement matches shipped code. It must be updated **in the same change** as tickets 1–7, not afterwards.
+
+- **Status filter.** Every tile section says "excludes draft and cancelled". It has been five statuses since Task #1756 — draft, cancelled, superseded, merged, failed. State the constant by name and stop restating the list per tile.
+- **Balance rule.** Tiles 3 and 8 describe no `balance` / `paymentStatus` handling. Document `resolveBalanceDue` as the single rule for money owed, per ticket 3 of 8.
+- **Delete the Billing Workspace section entirely** — the page, its three status-strip tiles and the Overdue in QuickBooks tile. Replace it with a short note that the strip now lives at `/api/manager-workspace/status-strip` with its own status sets, and that overdue is answered by the invoices page A/R view.
+- **Tile 4** becomes the billed run-rate projection (1 of 8).
+- **Tile 5** becomes two entries, Invoiced YTD and Work Booked YTD, with the no-double-count rule stated explicitly (5 of 8).
+- **Tile 6** gains the wet-check leg it currently omits.
+- **Tile 8** documents the parts-cost and labor-cost derivation and the estimation fallbacks (2 of 8).
+- Add a **Reconciliation invariants** section listing the properties that are now enforced by test, so the next change knows what it may not break: aging buckets sum to Money Owed; the technician revenue column sums to the billed total; Work Booked YTD matches across both tabs; all five budget-spend surfaces agree; the two projections are one number.
+
+## Out of scope
+
+- Building any replacement overdue tile.
+- Changing `/api/manager-workspace/status-strip` or its status sets.
+- The frozen aging boundaries.
+
+## Decisions
+
+- The overdue endpoint is deleted, not repaired. (decided)
+- `billing-workspace-routes.ts` survives as the home of shared status sets and `loadQbSyncStatus`. (decided)
+- The metrics doc ships with the code that changes it, in the same commit.
+
+## Done looks like
+
+- No function in the codebase computes an overdue total on its own rules.
+- No endpoint returns `agingReportUrl`, and no route string points at `/financial-pulse/ar-aging`.
+- `docs/financial-metrics.md` describes only surfaces that exist and formulas the code runs.
+- The doc names the invariants that tests now enforce.
+
+## Tests
+
+- Grep assertion in CI or the review: `overdueSummary`, `OVERDUE_CACHE` and `agingReportUrl` appear nowhere.
+- The `/api/billing-workspace/status-strip` response no longer carries `overdueCount`, and its remaining consumers — if any survive Slice 2 — still pass.
+- `loadQbSyncStatus` and the four status-set exports still resolve from all three importing modules; the API server boots and `manager-workspace-routes.ts` serves its strip unchanged.
+- Manager Workspace renders its QuickBooks status bar exactly as before.
+- Doc review: each metric section names a helper that exists, and each named `file:line` resolves.
+
+## Definition of Done (attach proof — Rule 7)
+
+- [ ] `file:line` for every deletion, and grep proof that the removed symbols have no remaining references.
+- [ ] A stated answer for Slice 2: whether `/api/billing-workspace/status-strip` and `billing-workspace-bulk-approve.ts` are reachable, with the evidence.
+- [ ] Screenshot of Manager Workspace with its QuickBooks status bar working after the change.
+- [ ] The rewritten `docs/financial-metrics.md` in the same commit as the code it describes.
+- [ ] API server boots; full typecheck passes (Rule 8 — nothing ships untypechecked).
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+
+- `artifacts/api-server/src/routes/billing-workspace-routes.ts` (`overdueSummary` :939, cache :177–180 and :195, route :912–935, status-strip :719 with overdue use :783–789, shared exports kept)
+- `artifacts/api-server/src/routes/manager-workspace-routes.ts` (imports :31, live strip :941)
+- `artifacts/api-server/src/routes/billing-workspace-bulk-approve.ts` (imports :16 — reachability to confirm)
+- `artifacts/irrigopro/src/pages/manager-workspace.tsx` (strip query :251, QB bar :339)
+- `artifacts/irrigopro/src/App.tsx` (redirects :334, :415, :481)
+- `docs/financial-metrics.md` (the contract to rewrite)
+- Tests: `billing-workspace-routes.test.ts`, `manager-workspace-routes.test.ts`

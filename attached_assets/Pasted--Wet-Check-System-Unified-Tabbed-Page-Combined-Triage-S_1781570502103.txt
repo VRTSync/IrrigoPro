@@ -1,0 +1,149 @@
+# Wet Check System — Unified Tabbed Page + Combined Triage→Snapshot Review
+
+**Source:** Randy, 2026-06-15 — "the wet check system as a whole is all over the place… there isn't a one-stop page." Locked over a design conversation: one wet-check page; the WCB is renamed and **undivorced** from its wet check; the manager review combines triage and snapshot approval in one surface; nothing is billable until full approval.
+**Severity:** P1 — wet checks surface across ≥5 disconnected places (Wet Checks list, Wet Check Reviews, Wet Check Billings, the triage detail page, and Manager Workspace lanes); the WCB/wet-check split is a core source of confusion.
+**Prerequisite / sibling specs:** *Findings-to-Route Removal* (removes standalone findings from Manager Workspace; this spec is where findings actually get routed — via triage). *Manager Workspace Simplification* (Spec B; its wet-check tile links into this page). Built in **parallel** with Spec B — see Coordination.
+**Hard boundary:** **Command Center (`pages/customer-billing.tsx`) is not modified** beyond, optionally, one small "snapshot pending approval" affordance (Slice 4). Field-technician wet-check *creation/inspection* screens are not touched — this spec is the **manager/admin** wet-check home.
+
+This file contains **four slices** (1–4) plus shared context. Build them in order; each is a clean standalone task. Do not deviate from the locked decisions. If a question arises that isn't answered here, stop and flag it rather than guessing.
+
+---
+
+## The core reframing (read first — it drives every decision)
+
+A **wet check** is the field inspection (controller + zones + findings). A **finding** is one problem; each gets a disposition: repaired-in-field, deferred→work order, sent→estimate, or documented-only. The thing currently stored as **`wet_check_billings` (WCB)** is *only the bill for the repaired-in-field work* — labor + parts for what was fixed on the visit. It is **part of the same record as its wet check**, not a separate object.
+
+Two consequences:
+
+1. **Rename + undivorce.** In the UI the WCB becomes the **"WC Snapshot"** — the on-site-repair portion of the wet check. It is always reached *through* its wet check; it is never browsed as a free-floating object. The current "View originating wet check" link (in the Command Center snapshot editor) is a *symptom* of the divorce and is removed inside this page's context.
+2. **Pending, not billed.** The snapshot row is created at submit as a draft (`WET_CHECK_AUTO_BILL` default-on — unchanged) but is **not billable** until the wet check goes through full approval. The existing invoice gate already enforces this (`wcb.status === 'approved_passed_to_billing' && wetCheckStatus === 'converted'`, routes.ts:6409/6703) — we preserve it. The draft wears a **"Pending approval"** badge and still counts toward the Unbilled Pipeline KPI (Randy's explicit choice).
+
+No `wet_check_billings` schema change. "WC Snapshot" / "Pending approval" are presentation; lifecycle still rides the existing status ladder (`submitted → pending_manager_review → approved_passed_to_billing → billed`).
+
+---
+
+## Design Context (locked decisions — apply to all four slices)
+
+1. **One manager/admin page, only wet checks.** A single tabbed page is the system-of-record. **Every tab lists wet-check records**, badged/filtered differently. The snapshot is only ever reached through its wet check. Proposed route: serve the tabbed page at the manager/admin `/wet-checks` home (field-tech creation routes stay as-is — Replit reconciles the existing role-split route blocks in `App.tsx`; preserve `/wet-checks/c/...` creation/inspection paths untouched). If a clean separate route is easier, `/wet-check-system` is acceptable — flag the choice.
+2. **Three tabs, split at the approval line:**
+   - **All Wet Checks** — full record set, status badges, search/filter. The "what's happening in the field" browse.
+   - **Needs Review** — everything *before* approval: wet checks awaiting triage and/or snapshot approval.
+   - **Approved** — everything *after* approval: snapshot approved, ready-to-bill / billed.
+   These are filtered views of one list; a wet check moves from Needs Review to Approved when fully approved. (Naming locked: "Approved" — not "Wet Check Billings," not "Snapshots.")
+3. **Scattered pages retire into the tabs.** `pages/wet-checks` (list → **All**), `pages/wet-check-review` (→ **Needs Review** flow), `pages/wet-check-billings` (→ **Approved**). Old routes (`/wet-check-billings`, the manager `/wet-check-review` surfaces) **redirect** into the new page/tab. No dead links.
+4. **Combined review surface = triage (conditional) → snapshot editor → approve.** Opened from a Needs Review row. It is a **focused review surface** (overlay/page with room — *not* the compact quick-view modal), reusing two existing components stitched into one flow: the triage engine (`components/manager/wet-check-wizard.tsx`) and the snapshot editor (`components/wet-check-billings/wet-check-billing-view-modal.tsx`). Detail in Slice 3.
+5. **Triage and snapshot approval are independently completable.** The manager isn't forced to finish triage before the snapshot or vice-versa; a wet check can sit `partially_converted` until both are resolved. It leaves **Needs Review** only when fully done (every finding routed/documented **and** snapshot approved). Maps onto existing `partially_converted → converted` logic — do not invent new state.
+6. **State-driven action button.** A wet-check row / snapshot exposes one primary action keyed to lifecycle:
+   - **Pending approval →** "**Review**" → opens the combined review surface (Slice 3).
+   - **Approved (not yet invoiced) →** "**View / Edit**" → opens the snapshot editor allowing further edits by the next handler.
+   - **Invoiced / billed →** read-only (existing `billed` / `invoiceId` locks — frozen).
+7. **Approval is role-open.** `company_admin`, `billing_manager`, `irrigation_manager`, and `super_admin` can all run the review and approve. Editability within a step still respects existing server locks (billed/invoiced).
+8. **Absorbs the held findings gate-widening** from *Findings-to-Route Removal* (its Slice 1.3): the **Needs Review** membership rule is the realization of "surface partially_converted wet checks with unrouted findings." Defined in Slice 2.
+9. **Command Center untouched** (`customer-billing.tsx`). We reuse its snapshot-editor component; we do not modify Command Center, except the optional single affordance in Slice 4.
+
+---
+
+## Slice 1 — Page shell, All & Approved tabs, redirects, rename/badge
+
+The page scaffold, the two lighter list tabs, and the cosmetic WC-Snapshot pass. (Needs Review tab lands in Slice 2; the review surface in Slice 3.)
+
+### Files
+- `artifacts/irrigopro/src/pages/wet-checks/` — new container page (e.g. `WetCheckSystemPage.tsx`) hosting the three tabs (Needs Review tab can ship as a stub here, filled in Slice 2).
+- `artifacts/irrigopro/src/App.tsx` — wire the manager/admin route to the new page; add redirects; preserve field-tech creation routes.
+- Reuse `pages/wet-checks` list logic (All) and `pages/wet-check-billings` listing logic (Approved) as data sources.
+
+### Concrete changes
+- **Shell:** tabbed container `All Wet Checks | Needs Review | Approved`; tab state in the URL (`?tab=` or path segment) so deep links/refresh persist. Role gating: `company_admin`, `billing_manager`, `irrigation_manager`, `super_admin`.
+- **Redirects:** `/wet-check-billings` → new page `?tab=approved`; manager `/wet-check-review` surfaces → new page; keep existing `RedirectToWetChecks` chains pointing at the new home. Field-tech `/wet-checks/c/...` creation/inspection routes untouched.
+- **All Wet Checks tab:** full wet-check list (super_admin: all companies), **status badges** for every lifecycle state, plus a **snapshot status chip** ("Pending approval" / "Approved" / "Billed") so on-site-repair state shows without leaving the row. Search + filters (customer, technician, date/age, status). Row click → wet-check record + the state-driven action button (decision 6).
+- **Approved tab:** wet checks whose snapshot is `approved_passed_to_billing` or `billed`, rendered as **wet-check rows** (not loose WCBs), with snapshot total + state chip. Primary action **View / Edit** → snapshot editor; edits allowed until invoiced/billed, then read-only (existing locks); edits re-run existing total resync.
+- **Rename/badge pass:** replace user-facing "Wet Check Billing"/"WCB" with **"WC Snapshot"** across this page (internal table/type names stay `wet_check_billings` — UI strings only). **"Pending approval"** badge pre-approval; "Approved"/"Billed" chips otherwise. Confirm pending snapshots stay in `computeUnbilledExposure` (financial-pulse.ts) — **no predicate change**.
+
+### Tests / Acceptance
+- One page, three tabs (Needs Review may be a stub), tab persists across refresh/deep-link; retired routes redirect; field-tech flow intact.
+- All tab: every wet check appears with accurate status + snapshot chip; search/filter work.
+- Approved tab: approved/ready-to-bill/billed wet checks appear as records; View/Edit works pre-invoice, locks post-invoice.
+- No user-facing "WCB"/"Wet Check Billing" strings remain on the page; pipeline KPI unchanged.
+
+---
+
+## Slice 2 — Needs Review tab + queue membership + count endpoint
+
+The queue that also feeds the Manager Workspace hub's "Wet checks needing review" tile (the cross-spec interface).
+
+### Files
+- Needs Review tab component (fills the Slice 1 stub).
+- New/extended server endpoint for the needs-review queue (wet-check scoped) + a count.
+
+### Concrete changes
+- **Membership rule:** a wet check is in Needs Review when it is `submitted` / `pending_manager_review`, **or** it is `partially_converted` and still has ≥1 finding with all routing FKs null and `resolution != 'documented_only'`, **or** its snapshot is unapproved (status ∈ pre-approval). Fully-triaged + snapshot-approved wet checks do **not** appear. `converted`/closed wet checks with a stray orphan finding do **not** reopen here (handled by the Findings-Removal diagnostic).
+- Each row shows what's outstanding ("Triage: 2 findings" / "Snapshot: pending") and a **Review** button → the combined review surface (Slice 3).
+- Expose a **count** for this queue as a small endpoint/field (consumed by Spec B's "Wet checks needing review — N" tile — see Coordination).
+
+### Tests / Acceptance
+- Active and partially-converted-with-work wet checks appear; fully-done ones don't; closed records don't reopen.
+- Row shows outstanding work and opens the review surface.
+- Queue count exposed for the hub tile.
+
+---
+
+## Slice 3 — Combined review surface (triage → snapshot → approve)
+
+The keystone. Composes two existing components into one stepped flow.
+
+### Files
+- New review surface component composing the existing **triage engine** (`components/manager/wet-check-wizard.tsx`) and the existing **snapshot editor** (`components/wet-check-billings/wet-check-billing-view-modal.tsx`).
+- Reuse existing triage/convert routes and snapshot approve routes — **do not** rebuild billing logic. Keep/repoint the existing manager review route (e.g. `/manager/wet-checks/:id`).
+
+### Concrete changes
+- Opened from a Needs Review row.
+- **Step 1 — Triage (conditional):** render the triage engine only if review-flagged findings exist; route each to work order / estimate / documented-only via existing flows. If none, skip straight to Step 2.
+- **Step 2 — Snapshot:** render the existing snapshot editor (Repairs Summary by zone, rate-mode toggle, labor rate, parts/hours/zone totals) for review/adjust. The editor is embedded *inside the wet check* — **remove the "View originating wet check" link** in this context.
+- **Step 3 — Approve:** existing snapshot approve route flips status to `approved_passed_to_billing`; wet-check status recomputes to `converted` (all done) or `partially_converted` (work remains), reusing current logic.
+- Triage and snapshot are **independently completable** — approving the snapshot does not require triage finished, and finishing triage does not auto-approve the snapshot. The wet check leaves Needs Review only when both are resolved.
+- Reuse existing pre-flight guardrails (Task #1246: block snapshot approval while a repaired-in-field finding lacks a part and isn't marked no-part-needed).
+
+### Tests / Acceptance
+- Wet check with review-flagged findings → triage step shows; with none → skipped.
+- Approving snapshot while triage incomplete → allowed; wet check stays `partially_converted`, remains in Needs Review.
+- Finishing triage + approving snapshot → wet check `converted`, moves to Approved.
+- Approval allowed for company_admin / billing_manager / irrigation_manager / super_admin; billed/invoiced snapshot → editor read-only.
+- One surface, both existing components reused; status transitions match existing convert logic; "not billable until full approval" preserved (invoice gate unchanged).
+
+---
+
+## Slice 4 — Quick-view snapshot modal + (optional) Command Center affordance
+
+Small, depends on Slice 3's editor reuse.
+
+### Files
+- Reuse the same snapshot-editor component as a compact modal.
+- `pages/customer-billing.tsx` — **only** the optional, isolated button below (skip entirely if not needed).
+
+### Concrete changes
+- **Quick-view modal:** from All / Approved rows, open the compact snapshot modal (the Command Center form) for a fast look. Same component as the Slice 3 step; edit gated by state/role (read-mostly once approved, frozen once invoiced). This is the "similar to but not the same as" quick view; Slice 3's surface is its richer sibling.
+- **Optional Command Center button:** if a pending-approval snapshot needs to be launchable from Command Center, add a single small "Snapshot pending approval" button/badge linking into this page's review surface. **No other Command Center change.** If not needed, skip.
+
+### Tests / Acceptance
+- Quick-view opens the snapshot read-only/limited-edit per state; no duplicate editor implementation.
+- Command Center either unchanged, or exactly one isolated button added.
+
+---
+
+## Coordination (parallel build with Spec B + Findings-Removal)
+
+- **Wet-check needs-review count** (Slice 2) is the data source for Spec B's Manager Workspace "Wet checks needing review — N" tile. Expose it as a small endpoint/field; Spec B consumes it. This is the only cross-spec interface.
+- **Findings routing** lives here (triage), not in Manager Workspace. The *Findings-Removal* spec deletes the Manager Workspace findings lane; its held gate-widening is realized in Slice 2.
+- **Route ownership:** this spec owns the wet-check pages/routes; Spec B owns Manager Workspace. If both edit `App.tsx` routing, land redirects additively.
+
+## Out of scope
+- Any `wet_check_billings` schema change; any change to `WET_CHECK_AUTO_BILL` timing; any change to the invoice gate or the Unbilled Pipeline predicate.
+- Field-technician creation/inspection screens.
+- Command Center beyond optional Slice 4 button.
+
+## Verification (whole family)
+- One page, three tabs; every tab shows wet-check records; snapshot only reachable via its wet check.
+- Review surface runs triage (conditional) → snapshot → approve, reusing both existing components; status transitions unchanged.
+- "WC Snapshot" + "Pending approval" everywhere; no "WCB" strings; pipeline KPI unchanged.
+- Not billable until full approval (invoice gate intact); post-approval edits until invoiced, then frozen.
+- Scattered pages redirect in; field-tech flow intact; Command Center unchanged (or one isolated button).

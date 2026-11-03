@@ -1,0 +1,55 @@
+#2011 - Financial Pulse: One Projection
+What & Why
+The Accounting tab shows the month-end projection twice, from two endpoints, on two different bases. On 2026-09-11 the KPI tile "Projected by Month-End" read $64,428 while the "Month-End Projection" card lower on the same screen read $130,315 — both labelled as the projection, 2.0x apart.
+
+The tile is wrong in kind, not only in value. Its base is the uninvoiced pipeline (unbilledExposure), a point-in-time balance across all time. Dividing a standing balance by the day of the month produces a figure that collapses as the month runs: a pipeline held constant at $50,000 projects $1,500,000 on the 1st, $150,000 on the 10th and $50,000 on the 30th, with nothing about the business having changed. By month end it simply restates the "Work Not Yet Billed" tile two positions away.
+
+Both endpoints already report method: "runRate" though only the card's is a run rate, and the tile contradicts itself on screen: its helper line says "Run-rate projection" while its own tooltip describes the pipeline formula.
+
+Decision (already made, do not relitigate): the billed run-rate survives. It answers "what will we invoice this month" and the card already explains it correctly. The pipeline-based projection is deleted, not relabelled. unbilledExposure itself is untouched and still feeds the "Work Not Yet Billed" tile.
+
+Note on history: the pipeline base was introduced deliberately by an earlier merged task, and that task left behind a regression test asserting the two bases differ. That test now encodes the defect and must be inverted, not worked around — see step 4.
+
+Done looks like
+The KPI tile and the Month-End Projection card show the same number, always, on the same screen at the same moment.
+That number is billed month-to-date extrapolated at the current daily pace.
+No surface projects from the uninvoiced pipeline.
+The tile's tooltip, helper line and window badge all describe the same formula the code actually runs.
+The Admin Dashboard widget tile shows the corrected value without any new fetch.
+"Work Not Yet Billed" is unchanged in value and presentation.
+Out of scope
+Any change to unbilledExposure or the "Work Not Yet Billed" tile.
+Weighting the projection by working days, seasonality, or the Apr–Oct seasonal budget spread. If a flat daily pace proves too crude, that is a later ticket with its own before/after comparison.
+The projections card's layout, its prior-month bar, or its prevMonthSameDay figure.
+Removing projectedMonthEnd from the /kpis response. Both the page and the Admin Dashboard widget read /kpis; dropping the field would blank the widget tile. method: "runRate" stays on both responses and becomes truthful.
+Steps
+Point the KPI endpoint at the billed run rate. Change the /kpis projection to call the shared projection helper with billed month-to-date — the same call the /projections endpoint already makes — so both endpoints return an identical number by construction rather than by coincidence. Delete the now-false ordering comment above it that explains why the unbilled pipeline had to be computed first; that dependency is gone. Leave the unbilledExposure computation itself in place, since the "Work Not Yet Billed" tile still needs it.
+
+Clean up the projection helper. Rename its first parameter from pipelineBase to billedToDate so the signature stops implying a pipeline input, and delete the unreachable day <= 0 guard — Date.getDate() is always 1–31, so that branch can never run and its early return would silently skip the extrapolation.
+
+Make the tile's labels true. Rewrite the projectedMonthEnd tooltip to describe the run rate: billed month-to-date divided by days elapsed, multiplied by days in the month, and state plainly that it assumes the rest of the month bills at the same daily pace as the days so far. Add an "MTD" window badge to the tile — it is the only unbadged month figure in a band where every other month figure is badged, and it is the one that moves with the month. The existing "Run-rate projection" helper line is now accurate; leave it alone.
+
+Invert the stale regression test. The api-server test suite contains a test whose stated purpose is that the projection uses the unbilled pipeline and that a pipeline-based and a billed-based projection differ. Replace it with a test asserting the opposite contract — the projection base is billed-to-date — so the suite stops defending the defect. Also confirm the widget tile inherits the corrected value from the existing /kpis query and do not add a second fetch for it.
+
+Add the drift and edge-case tests. Cover: /kpis and /projections hit against the same fixture at the same now return an identical projectedMonthEnd (this is the test that keeps them from separating again); a mid-month fixture with 10 of 30 days elapsed, $30,000 billed MTD and $50,000 uninvoiced pipeline projects $90,000, not the $150,000 the tile returns today; zero billed to date projects $0 rather than NaN or Infinity; day 1 of the month projects billed-so-far × days-in-month without dividing by zero; and tenancy — a company_admin's projection is computed only from their own company's invoices, a super_admin with ?companyId gets that company's, and without it, global.
+
+Register and run the tests. Make sure the new and changed tests actually execute in the project's existing financial-pulse validation command rather than only locally, then run it and confirm both the equal-values regression and the mid-month fixture pass.
+
+Verification to attach
+The changed /kpis projection call and the removed dead guard, cited by file and line.
+Grep proof that the projection helper has exactly two production call sites and both pass a billed-to-date figure, not a pipeline figure.
+A screenshot of the Accounting tab with the KPI tile and the Month-End Projection card showing the same number in one frame.
+Test output for the equal-values regression, the mid-month fixture, and the tenancy case.
+Relevant files
+artifacts/api-server/src/routes/financial-pulse.ts:670-690
+artifacts/api-server/src/routes/financial-pulse.ts:754-758
+artifacts/api-server/src/routes/financial-pulse.ts:1295-1322
+artifacts/api-server/src/financial-pulse-math.ts:272-284
+artifacts/irrigopro/src/pages/financial-pulse.tsx:315-316
+artifacts/irrigopro/src/pages/financial-pulse.tsx:1897-1908
+artifacts/irrigopro/src/components/financial-pulse/financial-pulse-widget.tsx:264-270
+artifacts/irrigopro/src/components/financial-pulse/metric-tile.tsx:59-146
+artifacts/api-server/src/routes/financial-pulse.test.ts:238-242
+artifacts/api-server/src/routes/financial-pulse.test.ts:600-614
+artifacts/api-server/src/routes/financial-pulse-http.test.ts:138-160
+artifacts/api-server/src/financial-pulse-math.test.ts

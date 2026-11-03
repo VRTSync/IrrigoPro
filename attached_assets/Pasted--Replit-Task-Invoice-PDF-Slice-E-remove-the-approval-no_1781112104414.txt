@@ -1,0 +1,78 @@
+# Replit Task — Invoice PDF, Slice E (remove the approval note from ticket headers)
+
+Each ticket header currently prints an "Approved By: <name> / Approved
+At: <date>" block. That's **internal record-tracking**, not something the
+customer needs on their billing packet. Remove it from all three ticket
+types. Data stays in the model and in the app — this only stops rendering
+it on the customer-facing PDF.
+
+> Confined to `artifacts/api-server/src/pdf-helpers.ts`. Line numbers
+> below are approximate (other slices shift them) — grep the identifiers.
+
+## The change
+
+Three ticket builders each construct an `approvalHtml` block and inject it
+into the header. Remove both the construction and the injection in each:
+
+- `ticketPageWO` — delete the `const approvalHtml = (wo.approvedBy …)`
+  block (~`:204–212`) and the `${approvalHtml}` reference in the header
+  (~`:229`).
+- `ticketPageBS` — delete the `const approvalHtml = (bs.approvedBy …)`
+  block (~`:281–`) and its `${approvalHtml}` reference (~`:306`).
+- `ticketPageWCB` — delete the `const approvalHtml = (wcb.approvedBy …)`
+  block (~`:373–`) and its `${approvalHtml}` reference (~`:409`).
+
+Then remove the now-unused CSS in `buildFullCSS` (~`:1317–1341`):
+`.ticket-approval`, `.ticket-approval-icon`, `.ticket-approval-details`,
+`.ticket-approval-by`, `.ticket-approval-at`.
+
+Leave everything else in the header (reference #, date, technician, hours,
+location, branch) unchanged.
+
+## Do NOT touch
+
+- The `approvedBy` / `approvedAt` fields on the view-model types or the
+  underlying data — they remain for internal use (audit, app UI, QB). This
+  slice is render-only.
+- The approval display anywhere in the **web/mobile app** — that's the
+  internal surface and should keep showing approvals.
+- The green check icon used elsewhere — only the `.ticket-approval-icon`
+  instance inside the removed block goes.
+
+## Done looks like
+
+- No "Approved By" / "Approved At" text appears on any ticket page (WO,
+  BS, WCB) in the generated PDF.
+- Ticket headers otherwise render exactly as before.
+- No dead `.ticket-approval*` CSS remains (grep returns nothing).
+- `approvedBy`/`approvedAt` still exist in the model and still show in the
+  app.
+- `pnpm typecheck` and `pnpm test` pass.
+
+## Tests
+
+- Update any PDF test asserting approval text to assert its **absence**:
+
+```typescript
+it("does not render approval info on ticket pages", () => {
+  const wo  = ticketPageWO(woRow,  '94354', [], null, 'Co');
+  const bs  = ticketPageBS(bsRow,  '94354', [], null, 'Co');
+  const wcb = ticketPageWCB(wcbRow,'94354', [], null, 'Co');
+  for (const html of [wo, bs, wcb]) {
+    expect(html).not.toContain('Approved By');
+    expect(html).not.toContain('Approved At');
+    expect(html).not.toContain('ticket-approval');
+  }
+});
+```
+
+- Remove/adjust any existing test that asserted approval text was present.
+
+## Out of scope
+
+- Any non-PDF surface, the data model, and other ticket-header content.
+
+## Dependencies
+
+- None. Independent of the color/cover slices, though it edits the same
+  `pdf-helpers.ts` (trivial merge if landing alongside them).

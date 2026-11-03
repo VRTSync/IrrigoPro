@@ -1,0 +1,83 @@
+# FIX — Financial Pulse: One Projection, One Base
+
+**What & Why**
+The Accounting tab shows the month-end projection twice, from two endpoints, on two different bases. On 2026-09-11 the KPI tile "Projected by Month-End" read **$64,428** while the "Month-End Projection" card four cards below it read **$130,315** — on the same screen, at the same moment, both labelled as the projection. They are 2.0x apart.
+
+The tile is also wrong in kind, not just in value. Its base is `unbilledExposure`, a point-in-time balance of every uninvoiced work order, billing sheet and wet-check billing across all time. Dividing a standing balance by the day of the month produces a figure that collapses as the month runs: a pipeline held constant at $50,000 projects $1,500,000 on the 1st, $150,000 on the 10th and $50,000 on the 30th, with nothing about the business having changed. By month end it simply restates the "Work Not Yet Billed" tile two positions away.
+
+## Current state (confirmed in code)
+
+| Surface | Endpoint | Formula | 2026-09-11 value |
+|---|---|---|---|
+| KPI tile "Projected by Month-End" (`financial-pulse.tsx:1898`) | `/api/financial-pulse/kpis` | `unbilledExposure ÷ day × daysInMonth` (`financial-pulse.ts:686`) | $64,428 |
+| Card "Month-End Projection" (`financial-pulse.tsx:1745`) | `/api/financial-pulse/projections` | `billedMtd ÷ day × daysInMonth` (`financial-pulse.ts:1307`) | $130,315 |
+| Admin Dashboard widget tile (`financial-pulse-widget.tsx:265`) | `/api/financial-pulse/kpis` | inherits the tile's formula | $64,428 |
+
+Both endpoints report `method: "runRate"` (`financial-pulse.ts:757`, `:1321`) though only the second is a run rate.
+
+The tile contradicts itself in the UI as well: its helper line reads "Run-rate projection" (`financial-pulse.tsx:1902`) while its own info tooltip reads "Work Not Yet Billed ÷ days elapsed × days in month" (`financial-pulse.tsx:315`).
+
+## Decision (decided)
+
+**The billed run-rate survives.** It is a genuine run rate, it answers "what will we invoice this month," and the Month-End Projection card already explains it correctly on screen. The pipeline-based projection is deleted, not relabelled.
+
+`unbilledExposure` itself is unaffected — it still feeds the "Work Not Yet Billed" tile, which is correct and stays exactly as it is.
+
+## Slice 1 — One value, computed once
+
+- `financial-pulse.ts:686` — change the `/kpis` projection to `computeProjectedMonthEnd(billedMtd, now)`, the same call `/projections` already makes at `:1307`. Both endpoints then return the identical number by construction, because they run the same helper over the same input.
+- Remove the ordering comment immediately above `financial-pulse.ts:686` that explains why `unbilledExposure` had to be computed before the projection. That dependency is gone.
+- `financial-pulse-math.ts:282` — delete the dead guard `if (day <= 0) return pipelineBase`. `Date.getDate()` is always 1–31, so the branch is unreachable.
+- Rename the helper's first parameter from `pipelineBase` to `billedToDate` so the signature stops implying a pipeline input.
+
+## Slice 2 — Make the labels true
+
+- `financial-pulse.tsx:315` — rewrite the `projectedMonthEnd` tooltip to describe the run rate: billed month-to-date divided by days elapsed, multiplied by days in the month; note that it assumes the rest of the month bills at the same daily pace as the days so far.
+- `financial-pulse.tsx:1902` — the helper line "Run-rate projection" is now accurate; leave it.
+- Add `windowBadge="MTD"` to the tile (`financial-pulse.tsx:1897–1903`). The projection is a month figure sitting in a band where every other month figure is badged, and it is the only unbadged one that moves with the month.
+- `financial-pulse-widget.tsx:265` — the Admin Dashboard tile inherits the corrected value with no change. Confirm it does; do not add a second fetch.
+
+## Out of scope
+
+- Any change to `unbilledExposure` or the "Work Not Yet Billed" tile.
+- Weighting the projection by working days, seasonality, or the Apr–Oct seasonal budget spread. If the flat daily pace proves too crude, that is a later ticket with its own before/after comparison.
+- The `/projections` card's layout, its prior-month bar, or its `prevMonthSameDay` figure. Slice 7 covers the prior-month window defect that feeds it.
+
+## Decisions
+
+- Billed run-rate is the one projection. (decided)
+- Both endpoints keep returning `projectedMonthEnd` — `/kpis` is not stripped of the field. The widget and the page both read `/kpis`, and removing the field would blank the Admin Dashboard tile.
+- `method: "runRate"` stays on both responses and is now truthful.
+
+## Done looks like
+
+- The KPI tile and the Month-End Projection card show the same number, always.
+- That number is billed month-to-date extrapolated at the current daily pace.
+- No surface projects from the uninvoiced pipeline.
+- The tile's tooltip, helper line and badge all describe the same formula the code runs.
+
+## Tests
+
+- `/kpis` and `/projections` called against the same fixture at the same `now` return an identical `projectedMonthEnd`. This is the regression test that keeps the two from drifting apart again.
+- Mid-month fixture: 10 days elapsed in a 30-day month, $30,000 billed MTD, $50,000 uninvoiced pipeline → projection is $90,000, not $150,000. Before this fix the tile returned $150,000.
+- A month with zero billed to date projects $0, not `NaN` or `Infinity`.
+- Day 1 of the month: the projection equals billed-so-far × daysInMonth and does not divide by zero.
+- The Admin Dashboard widget tile renders the same value as the Financial Pulse tile for the same company.
+- Tenancy (Rule 1): a company_admin's projection is computed only from their own company's invoices; a super_admin with `?companyId` gets that company's; without it, global.
+
+## Definition of Done (attach proof — Rule 7)
+
+- [ ] `file:line` for the changed `/kpis` projection call and the deleted dead guard.
+- [ ] Grep proof that `computeProjectedMonthEnd` has exactly two call sites and both pass a billed-to-date figure, not a pipeline figure.
+- [ ] Screenshot of the Accounting tab showing the KPI tile and the Month-End Projection card with the same number visible in one frame.
+- [ ] Test output for the equal-values regression test and the mid-month fixture.
+- [ ] Tenancy test passing.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+
+- `artifacts/api-server/src/routes/financial-pulse.ts` (`/kpis` projection :686, `/projections` :1307, `method` :757 and :1321)
+- `artifacts/api-server/src/financial-pulse-math.ts` (`computeProjectedMonthEnd` :272, dead guard :282)
+- `artifacts/irrigopro/src/pages/financial-pulse.tsx` (tile :1893–1903, tooltip :315, card :1745)
+- `artifacts/irrigopro/src/components/financial-pulse/financial-pulse-widget.tsx` (Admin Dashboard tile :263)
+- Tests: `financial-pulse.test.ts`, `financial-pulse-math.test.ts`, `financial-pulse-http.test.ts`

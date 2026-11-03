@@ -1,0 +1,177 @@
+# Replit Task — Wet Check Billing Rebuild, Slice 9
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader rebuild — it is reference material so you understand
+the intent. The actual work for this task is in the **Slice 9** section at the
+bottom. Do not deviate from any file paths, function names, schema field names,
+or payload shapes specified. If you believe a deviation is necessary, surface it
+and stop rather than proceeding.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in conversation and are referenced by every slice in this
+rebuild. Do not deviate from any of them.
+
+**Scope.** Only billing sheets whose `billingNumber` starts with `BS-WC-` are
+affected. Work-order and other billings keep the existing flat-parts layout.
+
+**Source of truth for the new layout.** `wetCheckFindings` joined to
+`wetCheckZoneRecords`. Each finding already has `billingSheetId`,
+`zoneRecordId`, `issueType`, `partId`, `partName`, `partPrice`, `quantity`,
+`laborHours`. No data migration is needed — historical BS-WC sheets render
+correctly from existing data.
+
+**Layout.** Zone-grouped. Each zone displays as: zone header
+(`<controllerLetter> <zoneNumber>` + issue display label), part lines, per-zone
+repair labor row showing `hours × rate = total`, per-zone subtotal. A single
+wet-check-level "Inspection Labor" line appears once per sheet.
+
+**Repair labor entry.** Per-zone, stepper UI, 0.25-hour increments, 0.25-hour
+minimum. Free-form decimal inputs are not permitted in the new flow.
+
+**Labor rate.** Always the per-customer global rate (`customers.laborRate`),
+snapshotted onto the billing sheet at creation (`billing_sheets.appliedLaborRate`).
+Never reprice based on later customer-rate changes. Existing snapshot logic is
+preserved.
+
+**Issue type display.** Always use `issueTypeConfigs.displayLabel` for the
+customer's company. Never display the raw `issueType` field. If no config row
+exists for a `(companyId, issueType)` pair, fall back to title-cased
+`issueType.replace(/_/g, " ")`.
+
+**$0.00 line item suppression on PDF.** Suppress when `lineTotal === 0 AND
+laborHours === 0 AND NOT isLaborOnly`. Labor-only findings (qty=0, partPrice=0,
+noPartNeeded=true) are kept because they represent real work performed.
+
+**PDF treatment.** Repairs Summary table at the top (zone label → subtotal).
+Each zone wrapped in a div with `page-break-inside: avoid`. Labor math shown on
+PDF (`hours × rate = total`). Labor subtotal split into "Inspection Labor" +
+"Repair Labor". Issue type display labels everywhere.
+
+> **Note for Slice 9 specifically:** The "Inspection Labor + Repair Labor" split
+> language above describes the *original* design. A later in-cycle change
+> (Task #766) deliberately collapsed that split into a single "Irrigation Labor"
+> line. Slice 9 must respect Task #766 — do **not** re-introduce the split.
+
+**Issue type config normalization.** `issueTypeConfigs.defaultLaborHours` must
+be a multiple of 0.25 with a 0.25 minimum. The seed and admin validation must
+enforce this.
+
+**Safety patch.** `deleteWetCheck` must refuse when any of the wet check's
+findings has `billingSheetId IS NOT NULL`, even if the BS is not yet on an
+invoice. Today's blocker only checks invoice linkage, which leaves a back door
+that the new renderer would silently break against.
+
+**No PDF backward compatibility.** All wet check billings live in the current
+billing cycle (the wet check feature didn't exist before this cycle). There is
+no "old vs new" PDF reconciliation to handle. Regenerating an existing BS-WC PDF
+in the new format is the correct behavior.
+
+---
+
+## Slice 9 — Post-landing cleanup: stale tests, dead CSS, missing coverage
+
+**Scope.** Mechanical cleanup of three things that landed wrong or didn't land:
+(a) test assertions in `pdf-helpers-wet-check.test.ts` that became stale when
+Task #766 collapsed the per-zone labor row and the Inspection/Repair Labor split
+into a single "Irrigation Labor" line;
+(b) an orphan CSS rule in `pdf-helpers.ts` that no element references anymore;
+(c) the two missing test files from Slice 6 — `finding-save-payload.test.ts`
+was never extended with quantization assertions, and no component test exists
+for `LaborHoursStepper`. Test/CSS/cleanup only. No production source behavior
+changes.
+
+**Files modified.**
+- `artifacts/api-server/src/pdf-helpers-wet-check.test.ts`
+- `artifacts/api-server/src/pdf-helpers.ts` (CSS rule removal only)
+- `artifacts/irrigopro/src/lib/finding-save-payload.test.ts`
+- New: `artifacts/irrigopro/src/components/ui/labor-hours-stepper.test.tsx`
+
+**Concrete changes.**
+
+`pdf-helpers-wet-check.test.ts` — three assertion clusters depend on strings the
+PDF no longer emits:
+- Remove the assertion `assert.ok(html.includes('Zone Labor'))` (approximately
+  line 135). The "Zone Labor" row was removed from `partsBlockForWetCheckBS`
+  when Task #766 collapsed per-zone labor.
+- For the assertion `assert.ok(html.includes('1.50'))` (approximately line 136):
+  inspect the test's fixture to determine whether `1.50` still appears in the
+  rendered output organically (as a part price, quantity, or zone subtotal). If
+  it appears elsewhere, leave the assertion. If not, remove it.
+- Delete the entire `test(...)` block titled `'shows Inspection Labor and
+  Repair Labor rows when wetCheckView is present'` (approximately lines 182–207).
+  The split labor breakdown was deliberately reverted; the test asserts on
+  behavior that no longer exists by design.
+- The test `'shows single Labor row when wetCheckView is absent'` (approximately
+  lines 240–247) should continue to pass — the new financial-breakdown row
+  `Irrigation Labor (...)` contains the substring `Labor (` that the existing
+  assertion checks. Verify by running the test; do not modify unless it fails.
+
+`pdf-helpers.ts` — remove the orphan `.zone-labor-row` CSS rule (approximately
+lines 1426–1429). Before removing, run `grep -rn "zone-labor-row\|zoneLaborRow" .`
+across the repo to verify no element references the class. If any reference
+exists, do **not** remove the rule — surface the unexpected reference and stop.
+(Out of scope to refactor any consumers in this slice.)
+
+`finding-save-payload.test.ts` — add a new
+`describe('quantizeLaborHours integration', ...)` block at the end of the file.
+Match the existing file's import style, helper builders, and assertion style —
+do not refactor the existing four tests. Test cases:
+- `buildFindingSavePayload({ ..., laborHours: "0.33" })` produces a payload with
+  `laborHours === "0.25"` (rounds down to nearest 0.25 multiple).
+- `buildFindingSavePayload({ ..., laborHours: "0.40" })` produces a payload with
+  `laborHours === "0.50"` (rounds up to nearest 0.25 multiple).
+- `buildFindingSavePayload({ ..., laborHours: "1.00" })` produces a payload with
+  `laborHours === "1.00"` (already a 0.25 multiple, unchanged).
+- `buildFindingSavePayload({ ..., laborHours: "0.10" })` produces a payload with
+  `laborHours === "0.25"` (clamped to 0.25 minimum).
+- `buildFindingSavePayload({ ..., laborHours: "" })` produces a payload with
+  `laborHours === "0.25"` (empty-string fallback to default).
+
+Create `artifacts/irrigopro/src/components/ui/labor-hours-stepper.test.tsx`. Use
+vitest + React Testing Library, matching the test pattern in
+`artifacts/irrigopro/src/components/billing/wet-check-billing-view.test.tsx`
+(imports, render setup, query style). Test cases:
+- Renders the formatted value `"0.25 hrs"` when `value="0.25"`.
+- Renders the formatted value `"1.50 hrs"` when `value="1.50"`.
+- Clicking the `+` button calls `onChange` with `"0.50"` when starting at
+  `value="0.25"`.
+- Clicking the `−` button at `value="0.25"` (the default min) does not call
+  `onChange`. Assert either via the button's `disabled` attribute or by
+  verifying the `onChange` spy was not called.
+- Clicking the `−` button calls `onChange` with `"0.25"` when starting at
+  `value="0.50"`.
+- When `disabled={true}`, both `+` and `−` buttons are disabled (`disabled`
+  attribute present) and clicking neither fires `onChange`.
+
+**Acceptance criteria.**
+- All tests in `pdf-helpers-wet-check.test.ts` pass after edits.
+- `grep -rn "zone-labor-row\|zoneLaborRow"` returns zero matches across the repo
+  (verifies CSS removal is safe and complete).
+- `finding-save-payload.test.ts` contains at least five new test cases inside
+  the new `describe` block, all passing.
+- `labor-hours-stepper.test.tsx` exists with the six test cases above, all
+  passing.
+- No production source files modified beyond the CSS rule removal in
+  `pdf-helpers.ts`.
+- Full test suite passes locally with no new failures.
+
+**Out of scope.**
+- Re-introducing the Inspection Labor / Repair Labor split anywhere
+  (deliberately reverted by Task #766 — do not restore).
+- Re-introducing the per-zone labor row in PDF zone blocks (same reason).
+- The `repair_labor_hours` migration file decision (separate decision).
+- Removing the `cleanup-invoice-71256` admin endpoint (pending confirmation it
+  served its purpose).
+- Running backfills against production (ops task, not code).
+- Renaming `noPartNeeded` → `isLaborOnly` on `WcvLineItem` (payload contract
+  change, separate discussion).
+- Moving wet check billings into their own section (planned as separate slices
+  — do not attempt in this slice).
+- Adding `isWetCheck: true` discriminator to the payload (payload contract
+  change, separate discussion).
+- Refactoring the `LaborHoursStepper` component itself.
+
+**Dependencies.** Slices 1–8 merged. Task #766 (labor collapse) already in place.

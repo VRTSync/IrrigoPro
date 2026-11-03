@@ -1,0 +1,125 @@
+# Work Order Total Shows "$NaN" + Parts Zeroed — Guard NaN Poisoning Across Estimate → Work Order → Billing
+
+**What & Why**
+A work order that came through the pipeline **wet-check inspection → estimate → field completion** shows a headline total of **"$NaN"** with **Parts: $0.00** in the Command Center unbilled list (e.g. WO #26, Wellman-area, labor $1,520.00), even though its description lists dozens of parts. "$NaN" is JavaScript's "Not a Number" — a numeric field got corrupted into a non-number and every downstream total inherited it. This blocks the work order from being billed correctly (its total is unusable) and hides the real parts revenue.
+
+## Root cause (confirmed in code)
+One bad line item poisons the whole total, because number parsing is **unguarded** in the estimate total recompute — and the resulting `NaN` gets **persisted** and then **snapshotted** onto the work order.
+
+1. **Origin — a line item with no/blank price becomes `NaN`.** The estimate carries adjustment / labor-only findings (the description is full of them: "Adjust MP Nozzle", "Bad Solenoid Fitting", "Pinch Clamp", "Decoder", etc.) that have no material price. When such an item's `totalPrice` is computed as `quantity × partPrice` with a null/blank `partPrice`, the result is `NaN`. Postgres `decimal`/`numeric` columns **accept the special value `NaN`**, so `estimate_items.totalPrice` (a `NOT NULL` decimal) can and does store the literal string `"NaN"`.
+
+2. **Estimate total recompute doesn't guard it.** `getEstimate` / `getEstimates` (`storage.ts:2448` and the singular variant) sum parts with:
+   ```js
+   const itemTotal = parseFloat(String(item.totalPrice)); // NO "|| 0"
+   partsSubtotal += itemTotal;                             // += NaN  → partsSubtotal = NaN
+   ...
+   const totalAmount = partsSubtotal + laborSubtotal;      // NaN + 1520 = NaN
+   ```
+   `parseFloat(String("NaN"))` is `NaN`, so `partsSubtotal` and `totalAmount` both become `NaN`. **Note the inconsistency:** other recompute paths in the same file already guard this — `storage.ts:2566` uses `parseFloat(String(item.totalPrice)) || 0`, `:4731` and `:4784` use `parseFloat(String(row.totalPrice || 0))`, and the field-completion path (`routes.ts:9414`) uses `(parseFloat(String(it.laborHours ?? '0')) || 0)`. The estimate read path is the unguarded outlier.
+
+3. **The NaN is snapshotted onto the work order.** `createWorkOrderFromEstimate` (`storage.ts:3699–3704`) copies the estimate's totals verbatim: `partsSubtotal: estimate.partsSubtotal`, `totalAmount: estimate.totalAmount`. So the work order inherits `totalAmount = "NaN"` (and a broken parts figure). Labor is fine because it's computed from `hours × rate`, not from the poisoned item sum — which is exactly why the card shows **clean labor $1,520.00 but total $NaN**.
+
+4. **The card renders it faithfully.** Command Center builds the row with `parseFloat(wo.totalAmount || '0')` (`routes.ts:6323/6331`). The `|| '0'` guard only catches null/empty — it does **not** catch the string `"NaN"` (which is truthy), so `parseFloat("NaN") = NaN` prints as **"$NaN"** via `Intl.NumberFormat` (`customer-billing.tsx:805`). The huge parts text is the estimate's `workDescription` carried into the WO `description` (`storage.ts:3686`), unrelated to the numeric bug.
+
+**Net:** a single unpriced line item → `NaN` persisted in a decimal column → unguarded estimate recompute → snapshotted onto the WO → "$NaN" total and zeroed parts. Same *class* as the billing-total drift bug (unguarded numeric handling), different spot.
+
+---
+
+## Slice 1 — Stop NaN at the source (never persist a non-number)
+Any code that writes a money/number column must coerce to a finite number first. Add a tiny shared helper and use it everywhere totals/prices are written:
+```js
+const money = (v) => { const n = parseFloat(String(v)); return Number.isFinite(n) ? n : 0; };
+```
+- At estimate/work-order/billing **item creation** (where `totalPrice = quantity × partPrice` is computed), coerce `quantity`, `partPrice`, and the product with `money()` — an unpriced adjustment line stores `0.00`, never `NaN`.
+- Guard against writing `NaN`/`Infinity` into any `decimal` column app-wide (a write-time assertion or the `money()` wrapper on every `.toFixed(2)` total).
+
+## Slice 2 — Guard every total recompute (make the reads NaN-proof)
+- In `getEstimate` and `getEstimates` (`storage.ts:2448` + singular), change `parseFloat(String(item.totalPrice))` → `money(item.totalPrice)` and `parseFloat(String(item.laborHours))` → `money(item.laborHours)`. Same for the labor rate / hours reads so a bad rate can't yield `NaN` either.
+- Sweep for the unguarded pattern and standardize on `money()`: `grep` for `parseFloat(String(` **without** an adjacent `|| 0` / `?? '0'`. Bring the outliers in line with the already-guarded paths (`:2566`, `:4731`, `:4784`, `routes.ts:9414`).
+- **Guarantee:** no single line item can ever turn a subtotal or total into `NaN`.
+
+## Slice 3 — Harden the snapshot + the display guard (defense in depth)
+- `createWorkOrderFromEstimate` (`storage.ts:3699–3704`): run the snapshotted `partsSubtotal` / `laborSubtotal` / `totalAmount` through `money()` before insert, and recompute `total = money(parts) + money(labor)` rather than trusting the estimate's stored `totalAmount`. A poisoned estimate can't propagate into a work order.
+- Command Center shaping (`routes.ts:6323`, `:6342–6344`, `:6371`) and `customer-billing.tsx:805` `formatCurrency`: treat non-finite as `0` (`Number.isFinite(n) ? n : 0`) so a legacy bad row degrades to `$0.00` (visibly wrong, fixable) instead of the alarming `$NaN`. Do **not** modify `customer-billing.tsx` beyond this display guard if it can be avoided — prefer fixing the data server-side; flag if the guard must live in the page.
+
+## Slice 4 — Repair the corrupted data (sweep, not one-off)
+Other estimates / work orders that went through the same path are silently corrupted too (you just haven't opened them). Add an admin migration (Super Admin → Migrations, re-runnable/idempotent, preview before→after):
+- Scan `estimate_items`, `work_order_items`, `billing_sheet_items` for `totalPrice IS NULL OR totalPrice = 'NaN'` (Postgres: `totalPrice = 'NaN'::numeric` or `isnan(totalPrice)`); recompute each from `quantity × partPrice` with `money()`, writing `0.00` where price is genuinely absent.
+- Recompute `partsSubtotal` / `laborSubtotal` / `totalAmount` on the parent `estimates` and `work_orders` from the repaired items (parts from item sum, labor from hours × rate), using **add-parts semantics** (bill the correct amount; never silently lower a real total) per the billing-total memory rule.
+- Confirm **WO #26** → total becomes `parts + labor` (real number), parts reflects the actually-priced valves/nozzles, and it becomes billable. Log before/after; report any rows that had `NaN`.
+
+## Slice 5 — Guard test (lock the class)
+- Behavioral test: create an estimate with one normally-priced part **and** one adjustment line with `partPrice = null` → assert `partsSubtotal`, `laborSubtotal`, `totalAmount` are all finite numbers (the priced part's value, not `NaN`).
+- Convert that estimate to a work order → assert the WO's snapshotted totals are finite and equal `parts + labor`.
+- Property assertion: after any estimate/WO/billing mutation, `Number.isFinite(totalAmount) === true` and `total === parts + labor`.
+
+## Migration preview error — root cause + correction (repair-nan-totals-v1)
+The shipped migration's preview 500s ("Failed to load preview", status Error) because it assumes all three item tables share a `part_price` column. They don't:
+- `estimate_items` → `part_price` (decimal), `quantity` (**integer**)
+- `work_order_items` → `part_price` (decimal), `quantity` (**integer**)
+- `billing_sheet_items` → **`unit_price`** (decimal), `quantity` (**decimal**) — **no `part_price`**
+
+A single query using `part_price` across all three throws `column "part_price" does not exist` on `billing_sheet_items`. Corrections:
+1. Scan each table with its own price column — `part_price` for estimate/work-order items, `unit_price` for billing-sheet items. Don't share one SQL across all three.
+2. Detect NaN with `WHERE total_price = 'NaN'::numeric`. In Postgres `numeric`, `NaN = NaN` is **true**, so `total_price <> total_price` will NOT find it; and `IS NULL` is a no-op on these `NOT NULL` columns. Recompute each item as `money(quantity) × money(price_col)`, `0.00` where price absent.
+3. Make `preview()` fail soft — wrap per table and surface the real Postgres error, not a generic message.
+4. Recompute parent `estimates` / `work_orders` subtotals+total from repaired items (add-parts semantics).
+
+### The full migration currently fails on EVERY path (check/preview/run)
+The red **Error** chip = the migration's own `check()` threw (framework `state: 'error'`), and preview/run throw for the same reason — all three reference `part_price` on `billing_sheet_items`. So there is no way to repair data from Super Admin until this is fixed. **Fastest unblock:** scope pass 1 to `estimate_items` + `work_order_items` only (both have `part_price`) — that runs clean and fixes WO #26. Add `billing_sheet_items` (`unit_price`) as a separate pass 2.
+
+### Corrected repair SQL (reference — adapt to Drizzle `sql`)
+Detect + repair items (guard both price and quantity; Postgres numeric NaN equals NaN, so use `= 'NaN'::numeric`):
+```sql
+-- estimate_items (part_price, quantity=int)
+UPDATE estimate_items
+SET total_price = ROUND(
+  (CASE WHEN part_price = 'NaN'::numeric OR part_price IS NULL THEN 0 ELSE part_price END)
+  * COALESCE(quantity, 0), 2)
+WHERE total_price = 'NaN'::numeric OR total_price IS NULL;
+
+-- work_order_items (identical shape)
+UPDATE work_order_items
+SET total_price = ROUND(
+  (CASE WHEN part_price = 'NaN'::numeric OR part_price IS NULL THEN 0 ELSE part_price END)
+  * COALESCE(quantity, 0), 2)
+WHERE total_price = 'NaN'::numeric OR total_price IS NULL;
+
+-- billing_sheet_items (unit_price, quantity=decimal → guard both)
+UPDATE billing_sheet_items
+SET total_price = ROUND(
+  (CASE WHEN unit_price = 'NaN'::numeric OR unit_price IS NULL THEN 0 ELSE unit_price END)
+  * (CASE WHEN quantity  = 'NaN'::numeric OR quantity  IS NULL THEN 0 ELSE quantity  END), 2)
+WHERE total_price = 'NaN'::numeric OR total_price IS NULL;
+```
+Recompute parent totals from the repaired items (parts = SUM(items); guard a NaN labor too):
+```sql
+-- estimates
+UPDATE estimates e SET
+  parts_subtotal = COALESCE((SELECT SUM(total_price) FROM estimate_items i WHERE i.estimate_id = e.id), 0),
+  labor_subtotal = CASE WHEN e.labor_subtotal = 'NaN'::numeric OR e.labor_subtotal IS NULL THEN 0 ELSE e.labor_subtotal END,
+  total_amount   = COALESCE((SELECT SUM(total_price) FROM estimate_items i WHERE i.estimate_id = e.id), 0)
+                 + (CASE WHEN e.labor_subtotal = 'NaN'::numeric OR e.labor_subtotal IS NULL THEN 0 ELSE e.labor_subtotal END)
+WHERE e.total_amount = 'NaN'::numeric OR e.parts_subtotal = 'NaN'::numeric OR e.total_amount IS NULL;
+-- work_orders: same shape against work_order_items
+```
+Use the framework's `check()` = "count of rows matching `total_price = 'NaN'::numeric` across the tables" (0 → completed; >0 → not_started/partial). `preview()` should return those counts per table and **fail soft** (try/catch per table, surface the real Postgres error, never a bare "Failed to load preview"). Idempotent by construction — a clean re-run matches 0 rows.
+
+## Done looks like
+- WO #26's card shows a real total (`labor + parts`) and a real parts figure; it can be billed.
+- No unpriced/adjustment line item can ever produce `NaN` in a stored total — coerced to `0` at write, guarded at every recompute.
+- A poisoned estimate can't propagate into a work order (snapshot recomputes + guards).
+- The migration repairs WO #26 and every other silently-corrupted estimate/WO, with add-parts semantics.
+- `$NaN` can never reach a screen again — worst case a legacy row shows `$0.00`, not `$NaN`.
+
+## Out of scope
+- Redesigning how adjustment/labor-only findings are priced (they legitimately carry `$0` parts) — this is purely about not corrupting totals.
+- The Command Center UI (`customer-billing.tsx`) beyond the display-guard for `formatCurrency` — do not restructure it.
+- QuickBooks push mechanics (unchanged) — the corrected total is what's pushed.
+
+## Relevant files
+- `artifacts/api-server/src/storage.ts` — estimate total recompute `getEstimates`/`getEstimate` (~2448 unguarded; the singular variant); guarded references to copy (`:2566`, `:4731`, `:4784`); `createWorkOrderFromEstimate` snapshot (~3699–3704); item builders (~2278/2320)
+- `artifacts/api-server/src/routes/routes.ts` — Command Center unbilled shaping (~6317–6376); field completion recompute (guarded ref ~9414); `/api/work-orders/complete` (~9340)
+- `artifacts/irrigopro/src/pages/customer-billing.tsx:805` — `formatCurrency` display guard only (do not restructure)
+- New: shared `money()` coercion helper + admin repair migration (Super Admin → Migrations)
+- Related: `Billing Total Integrity - Fix PATCH Zeroing + Edits Carry Forward to Invoice (Full).md` (same class — unguarded numeric handling)

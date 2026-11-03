@@ -1,0 +1,967 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Action Board Mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<style>img{max-width:100%}[hidden]{display:none!important}</style>
+<style>
+  @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+  /* App design tokens, lifted from artifacts/irrigopro/src/index.css */
+  :root {
+    --app-primary: #1e5c99;        /* --primary: 210 67% 36% */
+    --app-primary-dark: #0e3a6c;   /* --primary-dark: 212 77% 24% */
+    --app-primary-light: #7dc3e8;  /* --primary-light: 201 70% 70% */
+    --app-accent: #82bf40;         /* --accent: 89 50% 50% — fresh green */
+    --app-bg: #f8fafc;             /* --background: 210 40% 98% */
+    --app-card: #ffffff;
+    --app-ink: #0f172a;            /* --foreground: 222 47% 11% */
+    --app-muted: #f1f5f9;          /* --muted: 210 40% 96% */
+    --app-muted-ink: #64748b;      /* --muted-foreground: 215 16% 47% */
+    --app-border: #e2e8f0;         /* --border: 214 32% 91% */
+    --r: 0.875rem;                 /* --radius */
+    --r-md: calc(var(--r) - 2px);
+    --r-sm: calc(var(--r) - 4px);
+    --sh-sm: 0 1px 2px rgba(0,0,0,.04);
+    --sh-md: 0 4px 6px -1px rgba(0,0,0,.05), 0 2px 4px -2px rgba(0,0,0,.05);
+    --sh-lg: 0 10px 15px -3px rgba(0,0,0,.08), 0 4px 6px -4px rgba(0,0,0,.05);
+  }
+
+  :root {
+    --ground: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #f1f4f8;
+    --line: #dfe4ec;
+    --line-soft: #eaeef4;
+    --ink: #101728;
+    --ink-2: #475069;
+    --ink-3: #8a93a8;
+    --accent: #1e5c99;
+    --accent-soft: #e6eff8;
+
+    --go: #22c55e;      --go-soft: #bbf7d0;  --go-chip-bg: #dcfce7;  --go-chip-ink: #14532d;  --go-chip-line: #86efac;
+    --slow: #f59e0b;    --slow-soft: #fde68a; --slow-chip-bg: #fef3c7; --slow-chip-ink: #78350f; --slow-chip-line: #fcd34d;
+    --stop: #ef4444;    --stop-soft: #fecaca; --stop-chip-bg: #fee2e2; --stop-chip-ink: #7f1d1d; --stop-chip-line: #fca5a5;
+    --unset: #cbd5e1;   --unset-soft: #e2e8f0; --unset-chip-bg: #f1f5f9; --unset-chip-ink: #64748b; --unset-chip-line: #e2e8f0;
+
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0d1017; --surface: #151a24; --surface-2: #1c2230;
+      --line: #2a3242; --line-soft: #222a38;
+      --ink: #e9edf5; --ink-2: #a5aec2; --ink-3: #767f94;
+      --accent: #7ba0f8; --accent-soft: #1b2947;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0d1017; --surface: #151a24; --surface-2: #1c2230;
+    --line: #2a3242; --line-soft: #222a38;
+    --ink: #e9edf5; --ink-2: #a5aec2; --ink-3: #767f94;
+    --accent: #7ba0f8; --accent-soft: #1b2947;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 44px 24px 90px; }
+
+  .eyebrow { font-size: 11px; font-weight: 650; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 10px; }
+  h1 { font-size: 40px; line-height: 1.1; letter-spacing: -.022em; margin: 0 0 14px; text-wrap: balance; font-weight: 680; }
+  .standfirst { font-size: 17px; color: var(--ink-2); margin: 0; max-width: 64ch; }
+  .facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+  .fact { font-size: 12.5px; color: var(--ink-2); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; }
+  .fact b { color: var(--ink); font-weight: 620; }
+
+  h2 { font-size: 13px; font-weight: 680; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 4px; padding-top: 4px; }
+  .sec { margin-top: 56px; }
+  .sec > .lede { margin: 0 0 20px; color: var(--ink-2); max-width: 68ch; font-size: 14.5px; }
+  hr.rule { border: 0; border-top: 1px solid var(--line); margin: 56px 0 0; }
+
+  .board { background: #f8fafc; color: #0f172a; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; box-shadow: 0 1px 2px rgba(16,23,40,.06), 0 12px 32px -18px rgba(16,23,40,.35); }
+  .board-scroll { overflow-x: auto; }
+  .app { display: grid; grid-template-columns: 190px 1fr; min-width: 960px; }
+
+  /* .sidebar-brand-blue — the irrigation manager, company admin, billing
+     manager and bookkeeper all get this treatment (desktop-shell.tsx:470). */
+  .side {
+    background:
+      radial-gradient(120% 60% at 0% 0%, rgba(56,189,248,.18) 0%, transparent 55%),
+      radial-gradient(80% 50% at 100% 100%, rgba(20,184,166,.14) 0%, transparent 60%),
+      linear-gradient(168deg, hsl(222 47% 11%) 0%, hsl(220 50% 14%) 35%, hsl(215 60% 18%) 70%, hsl(210 70% 22%) 100%);
+    border-right: 1px solid rgba(255,255,255,.06);
+    box-shadow: inset -1px 0 0 rgba(255,255,255,.04);
+    padding: 14px 10px;
+  }
+  .brand { display: flex; align-items: center; gap: 7px; padding: 2px 6px 14px; margin-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .brand-dot { width: 15px; height: 15px; border-radius: 4px; background: linear-gradient(135deg, hsl(199 95% 52%), hsl(174 80% 45%)); }
+  .brand span { font-weight: 650; font-size: 13.5px; color: #fff; letter-spacing: -.01em; }
+  .navgrp { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: rgba(186,213,240,.55); padding: 13px 8px 5px; }
+  .navitem { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: var(--r-sm); font-size: 12.5px; font-weight: 500; color: rgba(226,240,253,.78); }
+  .navitem i { width: 13px; height: 13px; border-radius: 3px; background: rgba(186,213,240,.7); flex: none; display: block; }
+  .navitem.on {
+    background: linear-gradient(135deg, hsl(199 95% 52%) 0%, hsl(188 90% 48%) 50%, hsl(174 80% 45%) 100%);
+    color: #fff; font-weight: 600;
+    box-shadow: 0 6px 18px -4px rgba(14,165,233,.55), 0 2px 6px -2px rgba(20,184,166,.4), inset 0 1px 0 rgba(255,255,255,.22);
+  }
+  .navitem.on i { background: #fff; }
+  .sidefoot { margin-top: 14px; padding-top: 11px; border-top: 1px solid rgba(255,255,255,.06); display: flex; align-items: center; gap: 8px; padding-left: 8px; }
+  .sidefoot .av { width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, hsl(199 95% 55%), hsl(174 80% 48%)); flex: none; }
+  .sidefoot .who { font-size: 11.5px; color: #fff; font-weight: 550; line-height: 1.25; }
+  .sidefoot .who span { display: block; font-size: 10px; color: rgba(186,213,240,.55); font-weight: 400; }
+
+  .main { padding: 18px 22px 26px; min-width: 0; }
+  /* Page hero — .bg-gradient-brand, as on Manager Workspace (rounded-xl, shadow-lg) */
+  .hero {
+    position: relative; overflow: hidden; border-radius: 0.75rem;
+    background: linear-gradient(to right, var(--app-primary-dark), var(--app-primary));
+    padding: 20px 24px; box-shadow: var(--sh-lg); margin-bottom: 16px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  .hero h3 { margin: 0 0 3px; font-size: 22px; letter-spacing: -.018em; font-weight: 650; color: #fff; }
+  .hero p { margin: 0; font-size: 12.5px; color: rgba(219,234,254,.85); }
+  .pickers { display: flex; gap: 8px; flex: none; }
+  .picker { font-size: 12px; color: #fff; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.3); border-radius: var(--r-sm); padding: 6px 11px; display: flex; align-items: center; gap: 7px; }
+  .picker::after { content: ""; width: 0; height: 0; border-left: 3.5px solid transparent; border-right: 3.5px solid transparent; border-top: 4px solid rgba(255,255,255,.7); }
+  .btn-primary { font-size: 12px; font-weight: 600; color: var(--app-primary-dark); background: #fff; border: 1px solid #fff; border-radius: var(--r-sm); padding: 6px 13px; }
+  .plan .btn-primary { color: #fff; background: var(--app-primary); border-color: var(--app-primary); }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 6px; }
+  .tile { background: #fff; border: 1px solid #e2e8f0; border-radius: 0.75rem; padding: 12px 14px; box-shadow: var(--sh-sm); }
+  .tile .k { font-size: 9.5px; font-weight: 690; letter-spacing: .09em; text-transform: uppercase; color: #94a3b8; }
+  .tile .v { font-size: 23px; font-weight: 660; letter-spacing: -.02em; margin-top: 3px; color: #0f172a; font-variant-numeric: tabular-nums; }
+  .tile .s { font-size: 11.5px; color: #64748b; margin-top: 1px; }
+  .tile .v.warn { color: #b45309; }
+  .tile .v.bad { color: #b91c1c; }
+  .tilenote { margin: 8px 0 20px; font-size: 11.5px; color: #94a3b8; }
+
+  .lane { margin-top: 16px; }
+  .lane-head { display: flex; align-items: baseline; gap: 9px; padding: 0 2px 7px; }
+  .lane-head h4 { margin: 0; font-size: 12px; font-weight: 690; letter-spacing: .09em; text-transform: uppercase; }
+  .lane-head .n { font-size: 11px; font-weight: 660; color: #475569; background: #e2e8f0; border-radius: 20px; padding: 1px 7px; }
+  .lane-head .rule { font-size: 11.5px; color: #94a3b8; margin-left: auto; }
+  .lane.go   .lane-head h4 { color: #15803d; }
+  .lane.hold .lane-head h4 { color: #b91c1c; }
+  .lane.idle .lane-head h4 { color: #475569; }
+
+  .rows { background: #fff; border: 1px solid #e2e8f0; border-radius: 0.75rem; overflow: hidden; box-shadow: var(--sh-sm); }
+  .lane.go   .rows { border-left: 4px solid var(--go); }
+  .lane.hold .rows { border-left: 4px solid var(--stop); }
+  .lane.idle .rows { border-left: 4px solid var(--unset); }
+
+  .hrow, .row { display: grid; grid-template-columns: 1.5fr 1.35fr 1.25fr 1fr .8fr; gap: 14px; align-items: center; padding: 10px 14px; }
+  .hrow { font-size: 9.5px; font-weight: 690; letter-spacing: .085em; text-transform: uppercase; color: #94a3b8; background: #f8fafc; border-bottom: 1px solid #e2e8f0; padding-top: 7px; padding-bottom: 7px; }
+  .row + .row { border-top: 1px solid #f1f5f9; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  .cust { font-size: 13.5px; font-weight: 620; color: #0f172a; letter-spacing: -.008em; }
+  .cust .sub { display: block; font-weight: 400; font-size: 11.5px; color: #94a3b8; letter-spacing: 0; margin-top: 1px; }
+
+  .track { height: 8px; border-radius: 4px; background: #f1f5f9; display: flex; overflow: hidden; position: relative; }
+  .track .seg { height: 100%; }
+  .track .seg + .seg { margin-left: 2px; }
+  .track .cap { position: absolute; right: 0; top: -2px; bottom: -2px; width: 1.5px; background: #94a3b8; }
+  .barmeta { display: flex; justify-content: space-between; gap: 8px; margin-top: 5px; font-size: 11px; color: #64748b; font-variant-numeric: tabular-nums; }
+  .chip { display: inline-block; font-size: 10px; font-weight: 660; letter-spacing: .02em; border-radius: 20px; padding: 1px 8px; border: 1px solid; }
+  .chip.go   { background: var(--go-chip-bg);   color: var(--go-chip-ink);   border-color: var(--go-chip-line); }
+  .chip.slow { background: var(--slow-chip-bg); color: var(--slow-chip-ink); border-color: var(--slow-chip-line); }
+  .chip.stop { background: var(--stop-chip-bg); color: var(--stop-chip-ink); border-color: var(--stop-chip-line); }
+  .chip.unset{ background: var(--unset-chip-bg);color: var(--unset-chip-ink);border-color: var(--unset-chip-line); }
+
+  .wo { font-size: 12.5px; color: #1e293b; }
+  .wo b { font-weight: 640; }
+  .wo span { display: block; color: #94a3b8; font-size: 11px; font-family: var(--mono); }
+  .wo .none { color: #94a3b8; }
+  .wo .warnmeta { color: #b45309; font-family: var(--sans); }
+  .wo .okmeta { color: #15803d; font-family: var(--sans); }
+
+  .money { font-size: 13.5px; font-weight: 640; color: #0f172a; font-variant-numeric: tabular-nums; }
+  .money.dim { color: #94a3b8; font-weight: 500; }
+  .money.neg { color: #b91c1c; }
+  .subnum { font-size: 11px; color: #94a3b8; font-weight: 400; }
+  .wc { font-size: 12.5px; color: #1e293b; }
+  .wc span { display: block; font-size: 11px; color: #94a3b8; }
+  .wc.due b { color: #b45309; font-weight: 640; }
+  .wc.ok { color: #94a3b8; }
+
+  .plan { margin-top: 24px; background: #fff; border: 1px solid #e2e8f0; border-radius: 0.75rem; overflow: hidden; box-shadow: var(--sh-sm); }
+  .plan-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+  .plan-head h4 { margin: 0; font-size: 12.5px; font-weight: 660; color: #0f172a; }
+  .plan-head .hint { font-size: 11.5px; color: #94a3b8; }
+  .plan-head .btn-primary { margin-left: auto; }
+  .plan pre { margin: 0; padding: 14px 16px; font-family: var(--mono); font-size: 11.5px; line-height: 1.72; color: #1e293b; white-space: pre; overflow-x: auto; }
+
+  .phones { display: flex; gap: 22px; overflow-x: auto; padding: 4px 2px 14px; }
+  .phone { flex: none; width: 300px; }
+  .phone-cap { font-size: 12.5px; color: var(--ink-2); margin: 10px 2px 0; }
+  .phone-cap b { color: var(--ink); font-weight: 620; display: block; font-size: 13px; }
+  .screen { width: 300px; height: 620px; background: var(--app-bg); color: var(--app-ink); border: 8px solid #0b1220; border-radius: 32px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 14px 34px -20px rgba(16,23,40,.6); }
+  .status-bar { height: 22px; background: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; font-size: 9.5px; color: #64748b; font-variant-numeric: tabular-nums; flex: none; }
+  .ph-head { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 10px 13px 11px; flex: none; }
+  .ph-head h5 { margin: 0; font-size: 15.5px; font-weight: 670; letter-spacing: -.012em; }
+  .ph-head p { margin: 2px 0 0; font-size: 11px; color: #64748b; }
+  .ph-hero { margin-top: 9px; background: linear-gradient(to right, var(--app-primary-dark), var(--app-primary)); border-radius: 0.75rem; padding: 10px 12px; box-shadow: var(--sh-md); }
+  .ph-hero .k { font-size: 9px; font-weight: 690; letter-spacing: .09em; text-transform: uppercase; color: #93b0f5; }
+  .ph-hero .v { font-size: 21px; font-weight: 660; color: #fff; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .ph-hero .s { font-size: 10.5px; color: #b9c9f2; }
+  .ph-body { flex: 1; overflow: hidden; padding: 11px 11px 0; }
+  .lanechips { display: flex; gap: 5px; margin-bottom: 10px; }
+  .lanechip { font-size: 10px; font-weight: 620; padding: 3px 8px; border-radius: 20px; border: 1px solid; }
+  .lanechip.on { background: #0f172a; color: #fff; border-color: #0f172a; }
+  .lanechip.off { background: #fff; color: #64748b; border-color: #e2e8f0; }
+
+  .plabel { font-size: 9.5px; font-weight: 690; letter-spacing: .09em; text-transform: uppercase; margin: 12px 2px 6px; }
+  .plabel:first-child { margin-top: 0; }
+  .plabel.go { color: #15803d; } .plabel.hold { color: #b91c1c; } .plabel.idle { color: #64748b; }
+
+  .pcard { background: #fff; border: 1px solid #e2e8f0; border-radius: 0.75rem; padding: 10px 12px; margin-bottom: 8px; box-shadow: var(--sh-sm); }
+  .pcard.go   { border-left: 4px solid var(--go); }
+  .pcard.hold { border-left: 4px solid var(--stop); }
+  .pcard.idle { border-left: 4px solid var(--unset); }
+  .pcard .top { display: flex; align-items: center; gap: 7px; }
+  .pcard .nm { font-size: 12.5px; font-weight: 640; letter-spacing: -.008em; }
+  .pcard .amt { margin-left: auto; font-size: 12.5px; font-weight: 660; font-variant-numeric: tabular-nums; }
+  .pcard .amt.neg { color: #b91c1c; }
+  .pcard .ln { font-size: 10.5px; color: #64748b; margin-top: 3px; }
+  .pcard .ln.due { color: #b45309; }
+  .pcard .track { margin-top: 7px; height: 6px; }
+
+  .ph-foot { flex: none; background: #fff; border-top: 1px solid #e2e8f0; padding: 10px 12px 14px; }
+  .bigbtn {
+    display: block; text-align: center; color: #fff; font-size: 13.5px; font-weight: 600;
+    border-radius: var(--r); padding: 12px;
+    background: linear-gradient(135deg, var(--app-primary) 0%, var(--app-primary-dark) 100%);
+    box-shadow: 0 4px 14px rgba(14,165,233,.35);
+  }
+  .bigbtn.ghost { background: #fff; color: var(--app-primary); border: 1px solid #c3d7e9; box-shadow: none; margin-top: 8px; }
+
+  .planbox { background: #fff; border: 1px solid #e2e8f0; border-radius: 0.75rem; padding: 11px; box-shadow: var(--sh-sm); }
+  .planbox pre { margin: 0; font-family: var(--mono); font-size: 9.6px; line-height: 1.68; color: #1e293b; white-space: pre-wrap; }
+
+  .dsec { margin-bottom: 11px; }
+  .dsec .dh { font-size: 9.5px; font-weight: 690; letter-spacing: .09em; text-transform: uppercase; color: #94a3b8; margin-bottom: 5px; }
+  .worow { background: #fff; border: 1px solid #e2e8f0; border-radius: 0.75rem; padding: 9px 11px; margin-bottom: 7px; display: flex; gap: 9px; align-items: baseline; box-shadow: var(--sh-sm); }
+  .worow .z { font-size: 9.5px; font-weight: 680; color: #64748b; background: #f1f5f9; border-radius: 4px; padding: 1px 6px; flex: none; font-family: var(--mono); }
+  .worow .t { font-size: 11.5px; color: #1e293b; flex: 1; }
+  .worow .t span { display: block; color: #94a3b8; font-size: 10.5px; }
+  .worow .p { font-size: 11.5px; font-weight: 640; font-variant-numeric: tabular-nums; flex: none; }
+
+  .lin { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--ink); }
+  .lin thead tr { text-align: left; color: var(--ink-3); font-size: 9.5px; letter-spacing: .085em; text-transform: uppercase; }
+  .lin th { padding: 0 12px 8px 0; font-weight: 690; }
+  .lin td { padding: 10px 12px 10px 0; vertical-align: top; }
+  .lin tbody tr { border-top: 1px solid var(--line-soft); }
+  .lin td:last-child, .lin th:last-child { padding-right: 0; color: var(--ink-2); }
+  code { font-family: var(--mono); font-size: .88em; background: var(--surface-2); padding: 1px 4px; border-radius: 3px; }
+
+  .decisions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .dcard { background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 16px 17px; border-top: 3px solid var(--accent); }
+  .dcard .q { font-size: 10px; font-weight: 690; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); margin-bottom: 7px; }
+  .dcard h4 { margin: 0 0 7px; font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
+  .dcard p { margin: 0 0 8px; font-size: 13.5px; color: var(--ink-2); }
+  .dcard p:last-child { margin-bottom: 0; }
+
+  .callouts { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .co { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 13px 15px; font-size: 13.5px; color: var(--ink-2); }
+  .co b { color: var(--ink); font-weight: 620; }
+
+  @media (max-width: 900px) {
+    .decisions, .callouts { grid-template-columns: 1fr; }
+    h1 { font-size: 31px; }
+    .wrap { padding: 30px 16px 60px; }
+  }
+</style>
+</head>
+<body style="margin:0">
+
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">IrrigoPro &middot; mockup for spec &middot; revision 2</p>
+    <h1>Action Board</h1>
+    <p class="standfirst">
+      One row per customer, answering three questions: <b>is there a work order</b>, <b>is a wet check due</b>, and <b>is there budget left</b>.
+      Nothing else. It ends in a list the manager pastes into a text before 6am.
+    </p>
+    <div class="facts">
+      <span class="fact">Its own page at <b>/action-board</b>, its own nav entry</span>
+      <span class="fact">Read-only &mdash; it ranks, it decides nothing</span>
+      <span class="fact">Standard: <b>one wet check per customer per month</b></span>
+      <span class="fact">Over budget &rarr; the check runs as an <b>inspection</b></span>
+      <span class="fact">Approved estimates sit <b>outside</b> the budget</span>
+      <span class="fact">Example data, <b>Wed 3 Sep 2026</b></span>
+    </div>
+  </header>
+
+  <section class="sec">
+    <h2>What changed in this revision</h2>
+    <p class="lede">
+      Findings are out. Valuing them meant reaching into mid-flight objects &mdash; half of them already routed to an estimate or work order,
+      some sitting on wet checks a tech has not submitted, and on flat-mode checks their labour hours are zero by design, so the money would have been wrong.
+    </p>
+    <p class="lede">
+      A work order is the dispatchable unit. It has a customer, a status, a scheduled date and a real dollar total written at creation.
+      A wet check is the other thing you send a crew to do. Those two, plus the budget, are the whole board &mdash; and it deletes the two hardest
+      questions from the last revision: no cut algorithm, no severity tiebreaker.
+    </p>
+  </section>
+
+  <section class="sec">
+    <h2>Desktop</h2>
+    <p class="lede">
+      Chrome drawn from the app&rsquo;s own tokens rather than from memory: <code>--primary</code> <b>#1e5c99</b>, <code>--radius</code> <b>14px</b>,
+      Inter, and the <code>.bg-gradient-brand</code> hero the Manager Workspace already uses. The sidebar is the real one &mdash;
+      <code>.sidebar-brand-blue</code>, a navy gradient with a cyan-to-teal active pill, which <code>desktop-shell.tsx:470</code> applies to the
+      irrigation manager, company admin, billing manager and bookkeeper. The recovered August screenshots show a white sidebar because they were
+      captured as super admin, the one role that does <em>not</em> get it.
+    </p>
+
+    <div class="board board-scroll">
+      <div class="app">
+
+        <nav class="side">
+          <div class="brand"><span class="brand-dot"></span><span>IrrigoPro</span></div>
+          <div class="navgrp">Manager</div>
+          <div class="navitem"><i></i>Manager Workspace</div>
+          <div class="navitem on"><i></i>Action Board</div>
+          <div class="navitem"><i></i>Budget Status</div>
+          <div class="navgrp">Wet Check</div>
+          <div class="navitem"><i></i>Wet Checks</div>
+          <div class="navitem"><i></i>Wet Check Reviews</div>
+          <div class="navgrp">Operations</div>
+          <div class="navitem"><i></i>Work Orders</div>
+          <div class="navitem"><i></i>Billing Sheets</div>
+          <div class="navitem"><i></i>Estimates</div>
+          <div class="navitem"><i></i>Customers</div>
+          <div class="sidefoot">
+            <span class="av"></span>
+            <span class="who">Dave Whitfield<span>Irrigation Manager</span></span>
+          </div>
+        </nav>
+
+        <div class="main">
+          <div class="hero">
+            <div>
+              <h3>Action Board</h3>
+              <p>Wednesday, 3 September 2026 &middot; September allocation &middot; 8 weeks left in the season</p>
+            </div>
+            <div class="pickers">
+              <span class="picker">September 2026</span>
+              <span class="btn-primary">Copy today&rsquo;s plan</span>
+            </div>
+          </div>
+
+          <div class="tiles">
+            <div class="tile">
+              <div class="k">Billed in September</div>
+              <div class="v">$14,300</div>
+              <div class="s">of $60,000 allocated &middot; 24%</div>
+            </div>
+            <div class="tile">
+              <div class="k">Season pace</div>
+              <div class="v warn">$23,600 behind</div>
+              <div class="s">$186,400 of $210,000 to date</div>
+            </div>
+            <div class="tile">
+              <div class="k">Left to bill this season</div>
+              <div class="v">$90,000</div>
+              <div class="s">Sep 20% &middot; Oct 10% &middot; 8 weeks</div>
+            </div>
+            <div class="tile">
+              <div class="k">Over budget</div>
+              <div class="v bad">3</div>
+              <div class="s">properties &middot; 2 work orders held</div>
+            </div>
+          </div>
+          <p class="tilenote">These four replace the Financial Pulse link in the manager&rsquo;s nav &mdash; the money he needs to plan with, no margin, no wage figures.</p>
+
+          <!-- CLEAR TO SEND -->
+          <div class="lane go">
+            <div class="lane-head">
+              <h4>Clear to send</h4><span class="n">6</span>
+              <span class="rule">something to do, and either budget or an approval to do it with</span>
+            </div>
+            <div class="rows">
+              <div class="hrow">
+                <div>Property</div><div>September budget</div>
+                <div>Open work orders</div><div>Wet check</div><div class="num">Do not exceed</div>
+              </div>
+
+              <div class="row">
+                <div class="cust">Huntington Trails<span class="sub">$30,000/yr &middot; $6,000 September</span></div>
+                <div>
+                  <div class="track"><span class="cap"></span></div>
+                  <div class="barmeta"><span>$0 billed &middot; $0 pending</span><span class="chip go">Go</span></div>
+                </div>
+                <div class="wo"><b>2 &middot; $2,230</b><span>WO-1042, WO-1051</span></div>
+                <div class="wc ok">Done 1 Sep<span>2 days ago</span></div>
+                <div class="num money">$6,000</div>
+              </div>
+
+              <div class="row">
+                <div class="cust">Ashford Park<span class="sub">$12,000/yr &middot; $2,400 September</span></div>
+                <div>
+                  <div class="track"><span class="seg" style="width:17%;background:var(--go)"></span><span class="cap"></span></div>
+                  <div class="barmeta"><span>$400 billed &middot; $0 pending</span><span class="chip go">Go</span></div>
+                </div>
+                <div class="wo"><b>1 &middot; no estimate</b><span class="warnmeta">WO-1048 &middot; direct work order</span></div>
+                <div class="wc due"><b>Due</b><span>last 28 Aug &middot; 6 days</span></div>
+                <div class="num money">$2,000</div>
+              </div>
+
+              <div class="row">
+                <div class="cust">Copper Ridge HOA<span class="sub">$18,000/yr &middot; $3,600 September</span></div>
+                <div>
+                  <div class="track"><span class="seg" style="width:25%;background:var(--go)"></span><span class="seg" style="width:8%;background:var(--go-soft)"></span><span class="cap"></span></div>
+                  <div class="barmeta"><span>$900 billed &middot; $300 pending</span><span class="chip go">Go</span></div>
+                </div>
+                <div class="wo"><span class="none">None open</span></div>
+                <div class="wc due"><b>Due</b><span>last 24 Jul &middot; 41 days</span></div>
+                <div class="num money">$2,400</div>
+              </div>
+
+              <div class="row">
+                <div class="cust">Woodglenn<span class="sub">$12,000/yr &middot; $2,400 September</span></div>
+                <div>
+                  <div class="track"><span class="cap"></span></div>
+                  <div class="barmeta"><span>$0 billed &middot; $0 pending</span><span class="chip go">Go</span></div>
+                </div>
+                <div class="wo"><span class="none">None open</span></div>
+                <div class="wc due"><b>Due</b><span>last 31 Jul &middot; 34 days</span></div>
+                <div class="num money">$2,400</div>
+              </div>
+
+              <div class="row">
+                <div class="cust">College Hills<span class="sub">$7,500/yr &middot; $1,500 September</span></div>
+                <div>
+                  <div class="track"><span class="seg" style="width:40%;background:var(--go)"></span><span class="seg" style="width:10%;background:var(--go-soft)"></span><span class="cap"></span></div>
+                  <div class="barmeta"><span>$600 billed &middot; $150 pending</span><span class="chip go">Go</span></div>
+                </div>
+                <div class="wo"><span class="none">None open</span></div>
+                <div class="wc due"><b>Due</b><span>last 1 Aug &middot; 33 days</span></div>
+                <div class="num money">$750</div>
+              </div>
+
+              <div class="row">
+                <div class="cust">Sunrise Estates HOA<span class="sub">$9,000/yr &middot; $1,800 September</span></div>
+                <div>
+                  <div class="track"><span class="seg" style="width:74%;background:var(--stop)"></span><span class="seg" style="width:24%;background:var(--stop-soft)"></span><span class="cap"></span></div>
+                  <div class="barmeta"><span>$2,400 billed &middot; $640 pending &middot; 169%</span><span class="chip stop">Stop</span></div>
+                </div>
+                <div class="wo"><b>2 &middot; $1,780</b><span class="okmeta">pre-approved &mdash; outside budget</span></div>
+                <div class="wc due"><b>Due &mdash; inspection only</b><span>last 28 Jul &middot; 37 days</span></div>
+                <div class="num money">$0<span class="subnum"> + pre-approved</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- BUDGET BLOCKED -->
+          <div class="lane hold">
+            <div class="lane-head">
+              <h4>Over budget, nothing approved</h4><span class="n">2</span>
+              <span class="rule">work orders with no estimate behind them, and no check due &mdash; nothing the crew can do today</span>
+            </div>
+            <div class="rows">
+              <div class="hrow">
+                <div>Property</div><div>September budget</div>
+                <div>Open work orders</div><div>Wet check</div><div class="num">Headroom</div>
+              </div>
+
+              <div class="row">
+                <div class="cust">Desert Springs CC<span class="sub">$15,000/yr &middot; $3,000 September</span></div>
+                <div>
+                  <div class="track"><span class="seg" style="width:89%;background:var(--stop)"></span><span class="seg" style="width:9%;background:var(--stop-soft)"></span><span class="cap"></span></div>
+                  <div class="barmeta"><span>$3,000 billed &middot; $300 pending &middot; 110%</span><span class="chip stop">Stop</span></div>
+                </div>
+                <div class="wo"><b>1 &middot; $760</b><span class="warnmeta">direct WO &middot; held, no budget</span></div>
+                <div class="wc ok">Done 29 Aug<span>nothing due</span></div>
+                <div class="num money neg">&minus;$300</div>
+              </div>
+
+              <div class="row">
+                <div class="cust">Stonebridge Villas<span class="sub">$6,000/yr &middot; $1,200 September</span></div>
+                <div>
+                  <div class="track"><span class="seg" style="width:66.6%;background:var(--slow)"></span><span class="seg" style="width:8.3%;background:var(--slow-soft)"></span><span class="cap"></span></div>
+                  <div class="barmeta"><span>$800 billed &middot; $100 pending</span><span class="chip slow">Slow down</span></div>
+                </div>
+                <div class="wo"><b>1 &middot; $920</b><span class="warnmeta">direct WO &middot; exceeds $300 headroom</span></div>
+                <div class="wc ok">Done 2 Sep<span>nothing due</span></div>
+                <div class="num money">$300</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- NOTHING PENDING -->
+          <div class="lane idle">
+            <div class="lane-head">
+              <h4>Nothing pending</h4><span class="n">1</span>
+              <span class="rule">no open work order, September&rsquo;s check already done</span>
+            </div>
+            <div class="rows">
+              <div class="hrow">
+                <div>Property</div><div>September budget</div>
+                <div>Open work orders</div><div>Wet check</div><div class="num">Unused</div>
+              </div>
+              <div class="row">
+                <div class="cust">Green Valley Golf Club<span class="sub">$24,000/yr &middot; $4,800 September</span></div>
+                <div>
+                  <div class="track"><span class="seg" style="width:39.6%;background:var(--go)"></span><span class="cap"></span></div>
+                  <div class="barmeta"><span>$1,900 billed &middot; $0 pending</span><span class="chip go">Go</span></div>
+                </div>
+                <div class="wo"><span class="none">None open</span></div>
+                <div class="wc ok">Done 2 Sep<span>1 day ago</span></div>
+                <div class="num money">$2,900</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="plan">
+            <div class="plan-head">
+              <h4>Today&rsquo;s plan</h4>
+              <span class="hint">plain text, ready to paste into a message</span>
+              <span class="btn-primary">Copy</span>
+            </div>
+<pre>Wed Sep 3
+
+Huntington Trails
+  DNE $6,000
+  2 work orders - WO-1042, WO-1051
+
+Ashford Park
+  DNE $2,000
+  1 work order - WO-1048
+  Wet check due
+
+Copper Ridge HOA
+  DNE $2,400
+  Wet check due - last was 24 Jul
+
+Woodglenn
+  DNE $2,400
+  Wet check due - last was 31 Jul
+
+College Hills
+  DNE $750
+  Wet check due - last was 1 Aug
+
+Sunrise Estates HOA
+  2 work orders - pre-approved,
+  outside the budget. Go ahead.
+  Wet check also due - INSPECTION
+  ONLY. Document, do not repair.
+  It comes back as an estimate.
+
+Not clear to work
+  Desert Springs CC
+  Stonebridge Villas
+
+Work orders are in the app
+under each property.</pre>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Every column, and where it comes from</h2>
+    <p class="lede">
+      Five reads, no derived money except the subtraction. Four of the five already exist in main today &mdash; only the allocation is missing,
+      and that is exactly what #1993 restores.
+    </p>
+    <div class="board" style="padding:0">
+      <div style="padding:16px 18px;background:#fff;overflow-x:auto">
+        <table class="lin" style="color:#0f172a;min-width:640px">
+          <thead>
+            <tr style="color:#94a3b8">
+              <th>Column</th><th>Source</th><th>In main today?</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-top:1px solid #f1f5f9">
+              <td><b>September budget</b> (the bar)</td>
+              <td><code>customer_budget_months.amount</code> for the month, against <code>computeCustomerSpend()</code> &mdash; invoiced plus worked-not-billed</td>
+              <td style="color:#b45309">Allocation: <b>no</b>, #1993 restores it. Spend: <b>yes</b>.</td>
+            </tr>
+            <tr style="border-top:1px solid #f1f5f9">
+              <td><b>Open work orders</b></td>
+              <td><code>work_orders</code> where <code>status</code> is <code>pending</code>, <code>assigned</code> or <code>in_progress</code>, valued by <code>estimatedTotal</code></td>
+              <td style="color:#15803d">Yes</td>
+            </tr>
+            <tr style="border-top:1px solid #f1f5f9">
+              <td><b>Work order numbers</b></td>
+              <td><code>work_orders.workOrderNumber</code></td>
+              <td style="color:#15803d">Yes</td>
+            </tr>
+            <tr style="border-top:1px solid #f1f5f9">
+              <td><b>Wet check</b></td>
+              <td>newest <code>wet_checks</code> row for the customer; &ldquo;Due&rdquo; when none falls in the current month</td>
+              <td style="color:#15803d">Yes</td>
+            </tr>
+            <tr style="border-top:1px solid #f1f5f9">
+              <td><b>Inspection only</b></td>
+              <td>headroom at or below zero, resolved into <code>wet_checks.mode</code> at creation &mdash; not a board-only label</td>
+              <td style="color:#15803d">Mode exists; the budget gate is new</td>
+            </tr>
+            <tr style="border-top:1px solid #f1f5f9">
+              <td><b>Pre-approved</b> (outside budget)</td>
+              <td><code>workOrders.estimateId</code> is set &mdash; the work order came from an estimate the customer approved</td>
+              <td style="color:#15803d">Yes, on the board. The matching spend exemption is new.</td>
+            </tr>
+            <tr style="border-top:1px solid #f1f5f9">
+              <td><b>Do not exceed</b></td>
+              <td>allocation minus spend. The same number the bar draws &mdash; stated as the instruction rather than the balance.</td>
+              <td style="color:#b45309">With the allocation</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="callouts">
+      <div class="co">
+        <b>Work order values are written at creation, not at completion.</b>
+        Both estimate&rarr;work-order conversion paths compute <code>estimatedTotal</code> from the estimate&rsquo;s items and its snapshotted <code>appliedLaborRate</code>, handling flat and per-part labour correctly. So an open work order carries a real number before anyone touches a valve &mdash; which is what makes this board possible and findings not.
+      </div>
+      <div class="co">
+        <b>Direct work orders carry no estimate.</b>
+        <code>workType</code> can be <code>direct_billing</code> or <code>maintenance</code> &mdash; created without an estimate, so <code>estimatedTotal</code> is null. Ashford Park shows the handling: <em>&ldquo;1 &middot; no estimate&rdquo;</em>, never <em>$0</em>. A blank that reads as zero would tell the manager a job is free.
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Phone</h2>
+    <p class="lede">
+      The manager&rsquo;s screen is the 5:45am one: he is standing in a kitchen, and the job ends when the text is sent.
+      The crew screen already exists &mdash; it shipped in #1866 and is shown for contrast, because it is the one view that must never carry a dollar figure.
+    </p>
+
+    <div class="phones">
+
+      <div class="phone">
+        <div class="screen">
+          <div class="status-bar"><span>5:47</span><span>IrrigoPro</span></div>
+          <div class="ph-head">
+            <h5>Action Board</h5>
+            <p>Wed 3 Sep &middot; 8 weeks left in season</p>
+            <div class="ph-hero">
+              <div class="k">Clear to send today</div>
+              <div class="v">6 properties</div>
+              <div class="s">1 inspection only &middot; 5 checks due &middot; $23,600 behind pace</div>
+            </div>
+          </div>
+          <div class="ph-body">
+            <div class="lanechips">
+              <span class="lanechip on">All 9</span>
+              <span class="lanechip off">Clear 6</span>
+              <span class="lanechip off">Blocked 2</span>
+            </div>
+
+            <div class="plabel go">Clear to send</div>
+            <div class="pcard go">
+              <div class="top"><span class="nm">Huntington Trails</span><span class="amt">DNE $6,000</span></div>
+              <div class="ln">2 work orders &middot; WO-1042, WO-1051</div>
+              <div class="track"><span class="cap"></span></div>
+            </div>
+            <div class="pcard go">
+              <div class="top"><span class="nm">Ashford Park</span><span class="amt">DNE $2,000</span></div>
+              <div class="ln">1 work order &middot; WO-1048</div>
+              <div class="ln due">Wet check due &middot; 6 days</div>
+              <div class="track"><span class="seg" style="width:17%;background:var(--go)"></span><span class="cap"></span></div>
+            </div>
+            <div class="pcard go">
+              <div class="top"><span class="nm">Copper Ridge HOA</span><span class="amt">DNE $2,400</span></div>
+              <div class="ln due">Wet check due &middot; 41 days</div>
+              <div class="track"><span class="seg" style="width:25%;background:var(--go)"></span><span class="seg" style="width:8%;background:var(--go-soft)"></span><span class="cap"></span></div>
+            </div>
+            <div class="pcard go">
+              <div class="top"><span class="nm">Woodglenn</span><span class="amt">DNE $2,400</span></div>
+              <div class="ln due">Wet check due &middot; 34 days</div>
+              <div class="track"><span class="cap"></span></div>
+            </div>
+          </div>
+          <div class="ph-foot">
+            <span class="bigbtn">Copy today&rsquo;s plan</span>
+          </div>
+        </div>
+        <p class="phone-cap"><b>1 &middot; Action Board</b>Three facts per row and nothing else: the work order, the wet check, and the amount not to exceed.</p>
+      </div>
+
+      <div class="phone">
+        <div class="screen">
+          <div class="status-bar"><span>5:49</span><span>IrrigoPro</span></div>
+          <div class="ph-head">
+            <h5>Today&rsquo;s plan</h5>
+            <p>Wed 3 Sep &middot; 5 clear &middot; 3 blocked</p>
+          </div>
+          <div class="ph-body">
+            <div class="planbox">
+<pre>Wed Sep 3
+
+Huntington Trails
+  DNE $6,000
+  2 work orders
+  WO-1042, WO-1051
+
+Ashford Park
+  DNE $2,000
+  1 work order - WO-1048
+  Wet check due
+
+Copper Ridge HOA
+  DNE $2,400
+  Wet check due - last 24 Jul
+
+Woodglenn
+  DNE $2,400
+  Wet check due - last 31 Jul
+
+College Hills
+  DNE $750
+  Wet check due - last 1 Aug
+
+Sunrise Estates HOA
+  2 work orders - pre-approved,
+  outside the budget.
+  Check also due - INSPECTION
+  ONLY. Document, do not repair.
+
+Not clear to work
+  Desert Springs CC
+  Stonebridge Villas</pre>
+            </div>
+          </div>
+          <div class="ph-foot">
+            <span class="bigbtn">Copy</span>
+            <span class="bigbtn ghost">Share&hellip;</span>
+          </div>
+        </div>
+        <p class="phone-cap"><b>2 &middot; Today&rsquo;s plan</b>Do-not-exceed amounts and work order numbers. Blocked properties are named and nothing more. Editable before copying.</p>
+      </div>
+
+      <div class="phone">
+        <div class="screen">
+          <div class="status-bar"><span>5:51</span><span>IrrigoPro</span></div>
+          <div class="ph-head">
+            <h5>Huntington Trails</h5>
+            <p>$30,000/yr &middot; $6,000 September &middot; <span style="color:#15803d;font-weight:620">Go</span></p>
+            <div class="ph-hero" style="background:#f1f5f9">
+              <div class="k" style="color:#94a3b8">Do not exceed</div>
+              <div class="v" style="color:#0f172a">$6,000</div>
+              <div class="s" style="color:#64748b">$0 billed &middot; $0 pending &middot; of $6,000</div>
+            </div>
+          </div>
+          <div class="ph-body">
+            <div class="dsec">
+              <div class="dh">Open work orders &mdash; $2,230</div>
+              <div class="worow">
+                <span class="z">WO-1042</span>
+                <span class="t">Valve replacement<span>Assigned &middot; Admiel</span></span>
+                <span class="p">$1,340</span>
+              </div>
+              <div class="worow">
+                <span class="z">WO-1051</span>
+                <span class="t">Head replacement<span>Pending &middot; unassigned</span></span>
+                <span class="p">$890</span>
+              </div>
+            </div>
+            <div class="dsec">
+              <div class="dh">Wet check</div>
+              <div class="worow">
+                <span class="z">1 Sep</span>
+                <span class="t">September check complete<span>Brady &middot; 2 days ago</span></span>
+              </div>
+            </div>
+          </div>
+          <div class="ph-foot">
+            <span class="bigbtn ghost" style="margin-top:0">Open customer profile</span>
+          </div>
+        </div>
+        <p class="phone-cap"><b>3 &middot; Property detail</b>The work orders themselves, with status and who has them. No findings, no cut line &mdash; the work order is the unit.</p>
+      </div>
+
+      <div class="phone">
+        <div class="screen">
+          <div class="status-bar"><span>6:04</span><span>IrrigoPro</span></div>
+          <div class="ph-head">
+            <h5>Budget Status</h5>
+            <p>Your customer budgets this month</p>
+          </div>
+          <div class="ph-body">
+            <div class="pcard" style="border-left:3px solid var(--stop)">
+              <div class="top"><span class="nm">Sunrise Estates HOA</span><span class="chip stop" style="margin-left:auto">Stop</span></div>
+              <div class="track" style="margin-top:8px"><span class="seg" style="width:74%;background:var(--stop)"></span><span class="seg" style="width:24%;background:var(--stop-soft)"></span><span class="cap"></span></div>
+              <div class="ln">Over monthly budget</div>
+            </div>
+            <div class="pcard" style="border-left:3px solid var(--slow)">
+              <div class="top"><span class="nm">Stonebridge Villas</span><span class="chip slow" style="margin-left:auto">Slow down</span></div>
+              <div class="track" style="margin-top:8px"><span class="seg" style="width:66.6%;background:var(--slow)"></span><span class="seg" style="width:8.3%;background:var(--slow-soft)"></span><span class="cap"></span></div>
+              <div class="ln">Approaching monthly budget</div>
+            </div>
+            <div class="pcard" style="border-left:3px solid var(--go)">
+              <div class="top"><span class="nm">Huntington Trails</span><span class="chip go" style="margin-left:auto">Go</span></div>
+              <div class="track" style="margin-top:8px"><span class="cap"></span></div>
+              <div class="ln">&nbsp;</div>
+            </div>
+            <div class="pcard" style="border-left:3px solid var(--unset)">
+              <div class="top"><span class="nm">Desert Springs CC</span><span class="chip unset" style="margin-left:auto">Unset</span></div>
+              <div class="track" style="margin-top:8px"></div>
+              <div class="ln">&nbsp;</div>
+            </div>
+          </div>
+          <div class="ph-foot" style="border-top:1px solid #e2e8f0">
+            <p style="margin:0;font-size:10.5px;color:#94a3b8;text-align:center">No dollar figures &mdash; enforced server-side</p>
+          </div>
+        </div>
+        <p class="phone-cap"><b>4 &middot; Crew view (already built)</b>Shipped in #1866, deleted by the rollback, restored by #1995. Unchanged by the Action Board.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section class="sec">
+    <h2>The manager&rsquo;s phone app, as it stands</h2>
+    <p class="lede">
+      The mobile app already has a manager mode. <code>app/(tabs)/index.tsx</code> splits on role and renders <code>ManagerTodayScreen</code>
+      instead of the tech screen. Three tabs &mdash; Today, Wet Checks, Profile &mdash; and four action buttons.
+      <b>Two of those four go to &ldquo;Coming soon&rdquo; stubs.</b>
+    </p>
+
+    <div class="callouts" style="margin-top:0">
+      <div class="co">
+        <b>What works.</b>
+        <em style="font-style:normal;color:var(--ink-3)">Start wet check</em> and <em style="font-style:normal;color:var(--ink-3)">Create work order</em> route to real screens.
+        Below them, three live count tiles &mdash; pending estimates, wet checks pending review, work orders awaiting approval &mdash; fed by
+        <code>/api/manager-workspace/status-strip</code>, a mobile-shaped endpoint that already exists.
+      </div>
+      <div class="co">
+        <b>What doesn&rsquo;t.</b>
+        <em style="font-style:normal;color:var(--ink-3)">Today&rsquo;s schedule</em> (<code>app/schedule.tsx</code>) and
+        <em style="font-style:normal;color:var(--ink-3)">Assign tech</em> (<code>app/work-order/assign.tsx</code>) are each a &ldquo;Coming soon&rdquo; card and a Go Back button.
+        The comment on the first reads <code>routes-todo: wire up in a future slice</code>.
+      </div>
+    </div>
+
+    <p class="lede" style="margin-top:22px">
+      So the answer to &ldquo;make it more robust&rdquo; is <b>not a fifth button</b>. <em>Today&rsquo;s schedule</em> was always meant to be this,
+      and it has been an empty screen waiting for the data the budget model provides. Fill the two stubs rather than adding beside them.
+    </p>
+
+    <div class="decisions">
+      <div class="dcard">
+        <div class="q">Fills a dead stub</div>
+        <h4>Today&rsquo;s schedule becomes the Action Board</h4>
+        <p>The button, the route and the nav position already exist. Point it at the three lanes and the plan text, and a manager who taps what he already taps gets his morning brief.</p>
+      </div>
+      <div class="dcard">
+        <div class="q">Fills a dead stub</div>
+        <h4>Assign tech becomes the second step</h4>
+        <p>Once the board says which properties, assigning them is the natural next tap. Work orders already carry <code>assignedTechnicianId</code> and <code>scheduledDate</code>; nothing has ever written to them from a manager&rsquo;s phone.</p>
+      </div>
+      <div class="dcard">
+        <div class="q">Open question</div>
+        <h4>Does he get a fourth tab?</h4>
+        <p>Today: Today, Wet Checks, Profile. A manager arguably needs <em>Properties</em> &mdash; budget, work orders and check history per customer &mdash; which is phone screen 3 with nowhere to live yet.</p>
+        <p><b>My read:</b> not yet. Fill the two stubs and see whether he still reaches for something the tabs do not give him.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section class="sec">
+    <h2>Over budget does not mean stay home</h2>
+    <p class="lede">
+      <b>Decided 2 September:</b> a customer over their monthly budget still gets their wet check &mdash; but it runs in <b>inspection</b> mode.
+      The tech documents and does not repair, and the visit comes back as an estimate for the HOA to approve rather than a bill they never agreed to.
+      The monthly standard is kept, nothing is billed against a spent budget, and the work that needs doing is captured and priced instead of forgotten.
+    </p>
+
+    <div class="callouts" style="margin-top:0">
+      <div class="co">
+        <b>This is the mode split the wet-check redesign already built.</b>
+        Service produces repairs and a snapshot to bill; inspection produces an estimate. Both are live in the code today &mdash; the create gate takes
+        <code>mode: "service" | "inspection"</code>, the finding sheet branches on <code>wetCheckMode</code>, the review surface has an inspection path,
+        and <code>inspection-estimate-items.ts</code> builds the estimate. Nothing new has to be invented to honour this rule.
+      </div>
+      <div class="co">
+        <b>Enforce it at capture, not on the board.</b>
+        Under Rule 4 a guard belongs where the data is created. <code>wet-check-create-gate.ts</code> already holds one pure gate of this shape
+        (branch required for multi-location customers); this becomes a second: resolve the customer&rsquo;s headroom server-side and force
+        <code>mode = "inspection"</code> when it is at or below zero. The Action Board then only <em>reports</em> the rule &mdash; it never has to enforce it,
+        and a tech who starts a check from the field gets the same answer.
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Approved estimates sit outside the budget</h2>
+    <p class="lede">
+      <b>Decided 2 September.</b> The monthly allocation governs discretionary work &mdash; what the crew decides to do on a visit.
+      Work the HOA has seen and approved is not discretionary, so it does not consume the allocation. That closes the loop the inspection rule opened:
+      an over-budget property gets an inspection, the inspection becomes an estimate, the HOA approves it, and the resulting work order can be done
+      without waiting for October.
+    </p>
+    <p class="lede">
+      On the board this is why Sunrise Estates sits in <em>Clear to send</em> at 169% of budget. Its two work orders came from approved estimates, so
+      they are marked <em>pre-approved &mdash; outside budget</em> and the do-not-exceed reads <b>$0 + pre-approved</b>: no discretionary money, but
+      approved work to get on with.
+    </p>
+
+    <div class="callouts" style="margin-top:0">
+      <div class="co">
+        <b>The board half is easy.</b>
+        A work order is exempt when <code>workOrders.estimateId</code> is set &mdash; both conversion paths only create one from an already-approved estimate.
+        Everything else, <code>direct_billing</code> and <code>maintenance</code> work orders, is discretionary and counts. That is a single nullable FK, already there.
+      </div>
+      <div class="co">
+        <b>Account for it; do not exempt it.</b>
+        The customer really has been billed $3,040 against an $1,800 allocation &mdash; that is true and worth knowing. What is different is whether it is a problem,
+        and it is not, because they approved it. So <code>computeCustomerSpend</code> gains a fourth number rather than changing the three it already returns.
+      </div>
+    </div>
+
+    <p class="lede" style="margin-top:22px">
+      <b>The agreed shape.</b> <code>computeCustomerSpend</code> returns <code>{ invoiced, pendingNotBilled, total }</code> today. Add <code>preApproved</code> &mdash;
+      the estimate-derived portion. Every existing caller keeps reading <code>total</code> and nothing changes. Surfaces that care about discretionary headroom
+      subtract it: the Action Board computes do-not-exceed as <code>allocation &minus; (total &minus; preApproved)</code>, and Budget Status can later show
+      <em>&ldquo;Over &mdash; approved&rdquo;</em> instead of <em>Stop</em> when the whole overage is pre-approved. Additive, not a redefinition: no retroactive
+      movement in past months, no three-surface blast radius, and each screen opts in when it is ready.
+    </p>
+    <p class="lede">
+      The data supports it. <code>invoice_items</code> carries <code>sourceType</code> with typed foreign keys, so an invoice&rsquo;s items trace back through
+      <code>workOrders.estimateId</code> to the estimate; and invoices carry no discount, tax or adjustment column, so a total decomposes into its items cleanly.
+    </p>
+    <p class="lede">
+      <b>Not now, though (decided 2 September).</b> Nothing in the system has a budget yet, so nobody can hit this case. It goes third &mdash; after the restores
+      and after the goals are entered. The reason it is written down here is so whoever builds the board knows the do-not-exceed number is provisional and
+      where the seam is, rather than hard-coding the assumption that spend is spend.
+    </p>
+  </section>
+
+  <section class="sec">
+    <h2>Still open</h2>
+    <div class="callouts" style="margin-top:0">
+      <div class="co">
+        <b>What counts as September&rsquo;s wet check?</b>
+        Any <code>wet_checks</code> row in the month, or only one that reached <code>submitted</code>? A check started on the 30th and abandoned would satisfy the standard on a loose rule and hide a missed month. My read: <code>submitted</code> at minimum.
+      </div>
+      <div class="co">
+        <b>Does the exemption apply to past months too?</b>
+        Changing what spend means changes it retroactively &mdash; August&rsquo;s numbers will move the moment this ships, and a customer who read as over in August may not any more. Fine if expected; alarming if it turns up unannounced next to a bill someone already sent.
+      </div>
+    </div>
+  </section>
+
+</div>
+
+</body>
+</html>

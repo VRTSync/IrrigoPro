@@ -1,0 +1,329 @@
+# Replit Task — WC Billing Integration, Slice 1 (QB line description + legacy monthly-invoice cleanup)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader integration audit — it is reference material so
+you understand the intent. The actual work for this task is in the **Slice 1**
+section at the bottom. Do not deviate from any file paths, function names,
+schema field names, or payload shapes specified. If you believe a deviation
+is necessary, surface it and stop rather than proceeding.
+
+> **Two-part, low-risk slice.** Part A is cosmetic — strip a redundant
+> prefix from QuickBooks line descriptions on three line types. Part B
+> deletes (or fences) two unused storage methods so they cannot silently
+> drop wet check billings if anyone wires them back up. Neither part
+> changes business logic for the in-use invoice-creation path.
+
+> **Pattern: match what the line type's billing number already encodes.**
+> Billing numbers are already prefixed (`BS-YYYY-NNNN`,
+> `WC-YYYY-NNNN`, `WO-YYYY-NNNN`-style). The current code prepends a
+> second prefix (`BS-`, `WCB-`, `WO-`) on top, producing strings like
+> `BS-BS-2026-0020 - 3h labor @ …` in QuickBooks. The fix is to drop the
+> outer prefix and let the billing number's natural prefix carry the
+> identifier.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in the WC Billing Integration audit
+(`WC Billing Integration - Slice 0 End-of-Month Audit.md`) and apply to
+every slice in this family.
+
+**Billing-number formats are stable.**
+- Billing sheets: `BS-YYYY-NNNN` (generated at `storage.ts:3848` —
+  `const prefix = \`BS-${year}-\``).
+- Wet check billings: `WC-YYYY-NNNN` (generated at `storage.ts:3886` —
+  `const prefix = \`WC-${year}-\``).
+- Work orders: `WO-YYYY-NNNN` (generated via the work-order number helper).
+
+No new numbering format is introduced. No migration of existing numbers.
+
+**Invoice-creation path is the route handler.** The live monthly-invoice
+flow is the `/api/invoices/monthly` route at `routes.ts:6924+` (the WCB
+loop) and `:6905+` (the BS loop) and `:6889+` (the WO loop). The
+storage-layer methods `generateMonthlyInvoices` (`storage.ts:5476`) and
+`createMonthlyInvoice` (`storage.ts:5536`) are NOT in this path — they
+have no remaining callers in the repo (grep confirms only the
+self-call at `storage.ts:5527`).
+
+**No QuickBooks behavior change beyond the line description.** Item
+mapping, customer ref resolution, tax/discount handling, and DocNumber
+all stay as-is. The only outgoing-payload change is the `Description`
+string on each line.
+
+---
+
+## Slice 1 — QB line description + legacy monthly-invoice cleanup
+
+### Scope
+
+Two coherent, small changes shipped together. **Part A** rewrites three
+lines in `routes.ts` to drop the redundant outer prefix in QuickBooks
+line descriptions for WO, BS, and WCB lines. **Part B** removes (or
+fences with an explicit `throw`) the unused
+`generateMonthlyInvoices` and `createMonthlyInvoice` storage methods
+that pre-date the WCB sourceType and would silently drop wet check
+billings if a caller appeared.
+
+Both parts are bundled because they are the same shape of low-risk
+cleanup and a single PR is cheaper to review than two.
+
+### Files modified
+
+- `artifacts/api-server/src/routes/routes.ts` — three description-line
+  edits (Part A)
+- `artifacts/api-server/src/storage.ts` — delete or fence two methods
+  (Part B)
+- New: `artifacts/api-server/src/routes/qb-line-description.test.ts` —
+  asserts the rendered description format for each line type
+- Existing test files to UPDATE if any currently pin the
+  double-prefix string in a fixture or snapshot:
+  - `artifacts/api-server/src/routes/invoice-monthly-wcb.test.ts`
+  - `artifacts/api-server/src/routes/invoice-preview-wcb.test.ts`
+  - `artifacts/api-server/src/routes/billing-workspace-routes.test.ts`
+  - Any other test that grep'ing the repo for `'WCB-WC-'`,
+    `'BS-BS-'`, or `'WO-WO-'` surfaces.
+
+If no existing test asserts the double-prefix string, do not add such
+an assertion as a "pinning" step — the new
+`qb-line-description.test.ts` is the canonical lock.
+
+### Concrete changes
+
+#### Part A — QuickBooks line description fix
+
+**(A1) Work-order line description** at `routes.ts:6984`:
+
+Old:
+
+```typescript
+Description: `WO-${workOrder.workOrderNumber} - ${workOrder.projectName} (${workOrder.totalHours}h labor @ $${appliedLaborRate.toFixed(2)}/h, $${partsAmount.toFixed(2)} parts)`
+```
+
+New:
+
+```typescript
+Description: `${workOrder.workOrderNumber} - ${workOrder.projectName} (${workOrder.totalHours}h labor @ $${appliedLaborRate.toFixed(2)}/h, $${partsAmount.toFixed(2)} parts)`
+```
+
+Note: this change relies on `workOrderNumber` already being
+`WO-YYYY-NNNN`-shaped. If a small number of legacy work orders in
+production carry a bare numeric `workOrderNumber` (no `WO-` prefix),
+the description for those rows will lose the type indicator. If grep
+shows such legacy rows exist, leave the WO description AS-IS and ship
+only the BS and WCB description fixes. Document the decision in the PR
+description.
+
+**(A2) Billing-sheet line description** at `routes.ts:7003`:
+
+Old:
+
+```typescript
+Description: `BS-${billingSheet.billingNumber} - ${parseFloat(billingSheet.totalHours || '0')}h labor @ $${parseFloat(billingSheet.laborRate || '0').toFixed(2)}/h, $${parseFloat(billingSheet.partsSubtotal || '0').toFixed(2)} parts`
+```
+
+New:
+
+```typescript
+Description: `${billingSheet.billingNumber} - ${parseFloat(billingSheet.totalHours || '0')}h labor @ $${parseFloat(billingSheet.laborRate || '0').toFixed(2)}/h, $${parseFloat(billingSheet.partsSubtotal || '0').toFixed(2)} parts`
+```
+
+**(A3) Wet-check-billing line description** at `routes.ts:7022`:
+
+Old:
+
+```typescript
+Description: `WCB-${wcb.billingNumber} - ${parseFloat(wcb.totalHours || '0')}h labor @ $${parseFloat(wcb.appliedLaborRate || wcb.laborRate || '0').toFixed(2)}/h, $${parseFloat(wcb.partsSubtotal || '0').toFixed(2)} parts`,
+```
+
+New:
+
+```typescript
+Description: `${wcb.billingNumber} - ${parseFloat(wcb.totalHours || '0')}h labor @ $${parseFloat(wcb.appliedLaborRate || wcb.laborRate || '0').toFixed(2)}/h, $${parseFloat(wcb.partsSubtotal || '0').toFixed(2)} parts`,
+```
+
+**Do not** also remove the `WCB-` from the internal
+`createInvoiceItem` description at `routes.ts:6930` (`"WC Billing
+${wcb.billingNumber}"` — that string is for our own UIs, not for
+QuickBooks; leaving it as `"WC Billing WC-2026-1042"` is correct
+because the prefix word reads naturally in our UI columns). Same for
+the BS internal description at `routes.ts:6912`.
+
+#### Part B — Fence the unused monthly-invoice methods
+
+The storage-layer pair `generateMonthlyInvoices` (`storage.ts:5476`) and
+`createMonthlyInvoice` (`storage.ts:5536`) are unused (grep:
+`storage.ts:5527` is the only caller, which is `generateMonthlyInvoices`
+calling its own `this.createMonthlyInvoice` — i.e., the only caller of
+the pair is itself). They predate the WCB sourceType and silently drop
+wet check billings.
+
+Choose **option B-Delete** (preferred) or **option B-Fence**, not both:
+
+**Option B-Delete** (preferred). Remove both method bodies and their
+declarations on the `IStorage` interface (search for
+`generateMonthlyInvoices` and `createMonthlyInvoice` in
+`storage.ts` — both are declared in the interface above the class
+implementation; remove both pairs). Run `pnpm typecheck` to confirm no
+external consumers. If typecheck passes, the methods were genuinely
+dead and removal is safe.
+
+**Option B-Fence** (fallback if external consumers exist outside the
+api-server workspace). Replace the bodies with:
+
+```typescript
+async generateMonthlyInvoices(_month: number, _year: number): Promise<Invoice[]> {
+  throw new Error(
+    "storage.generateMonthlyInvoices is deprecated. Monthly invoices " +
+    "are created via POST /api/invoices/monthly (routes.ts:6754+), " +
+    "which is wet-check-billing aware. This method dropped WCBs and " +
+    "was retained only to preserve the interface signature."
+  );
+}
+
+async createMonthlyInvoice(
+  _customerId: number,
+  _work: { workOrders: WorkOrder[], billingSheets: BillingSheet[] },
+  _month: number,
+  _year: number,
+  _periodStart: Date,
+  _periodEnd: Date,
+): Promise<Invoice | null> {
+  throw new Error(
+    "storage.createMonthlyInvoice is deprecated. Use the route handler " +
+    "at POST /api/invoices/monthly (routes.ts:6754+) which writes WCB " +
+    "invoice items via sourceType: 'wet_check_billing'."
+  );
+}
+```
+
+Same `IStorage` interface declarations stay; the bodies throw.
+
+### Tests
+
+#### New: `qb-line-description.test.ts`
+
+```typescript
+// Pins the QuickBooks line description format. The description is what
+// the customer sees in their QuickBooks invoice, so format drift is a
+// customer-visible regression. One assertion per line type.
+
+describe("QuickBooks line description format (Slice 1, Part A)", () => {
+  it("WO line description starts with the work-order number, no double prefix", () => {
+    const description = buildWoLineDescription({
+      workOrderNumber: "WO-2026-0042",
+      projectName: "Backyard rebuild",
+      totalHours: 3,
+      appliedLaborRate: 85.00,
+      partsAmount: 120.50,
+    });
+    expect(description).toBe("WO-2026-0042 - Backyard rebuild (3h labor @ $85.00/h, $120.50 parts)");
+    expect(description).not.toMatch(/^WO-WO-/);
+  });
+
+  it("BS line description starts with the billing-sheet number, no double prefix", () => {
+    const description = buildBsLineDescription({
+      billingNumber: "BS-2026-0020",
+      totalHours: "5",
+      laborRate: "85",
+      partsSubtotal: "0",
+    });
+    expect(description).toBe("BS-2026-0020 - 5h labor @ $85.00/h, $0.00 parts");
+    expect(description).not.toMatch(/^BS-BS-/);
+  });
+
+  it("WCB line description starts with the wet-check-billing number, no double prefix", () => {
+    const description = buildWcbLineDescription({
+      billingNumber: "WC-2026-1042",
+      totalHours: "3",
+      appliedLaborRate: "85",
+      laborRate: "85",
+      partsSubtotal: "55.25",
+    });
+    expect(description).toBe("WC-2026-1042 - 3h labor @ $85.00/h, $55.25 parts");
+    expect(description).not.toMatch(/^WCB-WC-/);
+  });
+});
+```
+
+You will need to either:
+- Extract the three description builders into a small helper module
+  (`artifacts/api-server/src/lib/qb-line-description.ts`) so the test
+  can import them directly. This is the cleaner option — recommended.
+- Or invoke the route handler with a mocked QuickBooks fetch and
+  assert on the captured POST body's `Line[].Description` strings.
+  Higher fidelity but heavier; use only if extraction would require
+  pulling other dependencies into the helper module.
+
+If you extract: the helper module exports three pure functions
+(`buildWoLineDescription`, `buildBsLineDescription`,
+`buildWcbLineDescription`) and `routes.ts:6984`, `:7003`, `:7022`
+become single-line calls.
+
+#### Existing tests to update
+
+After Part A lands, grep the repo for the literal strings
+`'WCB-WC-'`, `'BS-BS-'`, and `'WO-WO-'`. Each match in a test fixture
+or expected-value assertion must be updated to drop the outer prefix.
+If grep finds none, no update is needed — the previous behavior was
+not pinned anywhere.
+
+#### Part B test (Option B-Fence only)
+
+If you took Option B-Fence rather than Option B-Delete, add to
+the existing `storage` tests (or a new
+`storage-monthly-invoice-fenced.test.ts`):
+
+```typescript
+it("generateMonthlyInvoices throws — it is deprecated and would drop WCBs", async () => {
+  await expect(storage.generateMonthlyInvoices(11, 2026)).rejects.toThrow(/deprecated/);
+});
+
+it("createMonthlyInvoice throws — it is deprecated and would drop WCBs", async () => {
+  await expect(
+    storage.createMonthlyInvoice(1, { workOrders: [], billingSheets: [] }, 11, 2026, new Date(), new Date())
+  ).rejects.toThrow(/deprecated/);
+});
+```
+
+If you took Option B-Delete, no test is needed — typecheck is the
+sufficient lock.
+
+### Acceptance criteria
+
+- `routes.ts:6984`, `:7003`, and `:7022` no longer prepend an outer
+  prefix to the `Description` string. The billing number already
+  carries its own prefix.
+- `routes.ts:6930` (`"WC Billing ${wcb.billingNumber}"`) and
+  `routes.ts:6912` (`"Billing Sheet ${billingSheet.billingNumber} -
+  ${billingSheet.workDescription}"`) are NOT modified. They are
+  internal-UI descriptions, not QuickBooks descriptions.
+- `qb-line-description.test.ts` exists and passes, with three
+  assertions (WO, BS, WCB).
+- Either both legacy methods are deleted, OR both throw an explicit
+  deprecation error. Not a mix.
+- `pnpm typecheck` and `pnpm test` pass across all workspaces.
+- No change to the QuickBooks request structure beyond the
+  `Line[].Description` strings — no change to `Amount`, `Qty`,
+  `UnitPrice`, `ItemRef`, `CustomerRef`, `DocNumber`, `TxnDate`, or
+  `DueDate`.
+
+### Out of scope
+
+- Adding a separate QuickBooks `ItemRef` for WCB lines (separate
+  product decision; not in this slice).
+- Changing the internal `invoice_items.description` strings for WCBs
+  or BSs (those are read by our own UIs and the format is fine as-is).
+- Modifying the billing-number generation formats themselves
+  (`storage.ts:3848`, `:3886`).
+- Any change to the WO line description if a non-trivial number of
+  legacy WOs carry a bare numeric `workOrderNumber`. In that case ship
+  only A2 and A3 and document the deferral.
+- The route handler reorganization in `routes.ts:6754+` — keep the
+  handler shape, only edit the three description lines (and possibly
+  swap them for helper calls if you took the extract option).
+
+### Dependencies
+
+None. This slice is independent of the other WC Billing Integration
+slices. It can land any time.

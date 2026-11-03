@@ -1,0 +1,26 @@
+Two internal contradictions and a line range that excludes the code the ticket exists to change.
+
+Step 6 contradicts Test placement. Step 6 says "Extend the existing Financial Pulse math and route test files rather than adding a new suite." The Test placement block says put them in a file of their own. Same document, opposite instructions. Test placement is the right one — it's what #2011 and #2013 both did, and both registered their new file in the validation command successfully. Delete that clause from step 6 and let it just say what to cover.
+
+Step 7 contradicts Coordination. Step 7 says "Update the metric documentation. Revise the Profit Margin section of the financial metrics doc." Coordination says "Do not edit docs/financial-metrics.md. Task #2018 owns that file exclusively." Step 7 should go entirely — #2018 documents what actually shipped, and a Profit Margin section rewritten here would collide with it.
+
+The math range excludes the wet-check leg. financial-pulse-math.ts:388-492 stops at 492, but the lines this ticket must delete are at 495-496:
+
+495:    partsCost += toNum(wcb.partsSubtotal);
+496:    laborCost += toNum(wcb.laborSubtotal);
+
+Those two lines are the whole reason for steps 2 and 4. Use 405-510 — that covers GrossMarginResult (405), computeGrossMargin (417), tally (454) and all three legs (480, 488, 495-496).
+
+Three other cites drifted when #2013 landed:
+
+Cited	Should be
+financial-pulse-math.ts:388-492	405-510
+financial-pulse.tsx:86-93	105-110 — grossMarginPct: MarginTile is at 108
+financial-pulse.tsx:319-321	318-320 — the grossMargin tip starts at 318
+financial-pulse.tsx:1945-1968	1941-1970 — the tile starts at 1943, the warning at 1952
+
+The three financial-pulse.ts ranges are all still accurate — 83, 321, 414, 692, 711, 767 all fall inside them.
+
+One thing still missing from the executor notes. The #828 note says don't implement that assertion, but doesn't say there's nothing to remove. I checked: financial-pulse-wcb.test.ts:543-544 asserts wcbItem.laborTotal and wcbItem.partsTotal — invoice line item revenue, which this ticket doesn't touch and which stays valid. Worth one sentence, because an executor coming off #2011 (which did have a stale test to delete) will go looking for one here.
+
+Everything else reads ready. The coordination section's shift to naming functions instead of lines is exactly right — and this paste is a good illustration of why, since four of the line cites went stale in a single wave.

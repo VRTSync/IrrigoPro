@@ -1,0 +1,55 @@
+# Customer Profile — Consolidate Into One Canonical Routed Page
+
+**What & Why**
+There are **two** customer-profile components that have **diverged**, each carrying features the other lacks. Which one a user sees depends on role and navigation path — so features land on one and are invisible from the other (that's why the Irrigation System Profile is unreachable for you). This is a maintenance/visibility vulnerability: building on a page you're not actually viewing. **Collapse to one canonical profile and delete the other.** No unreachable pages left in the system.
+
+**The two today:**
+- **A — `pages/customer-profile.tsx`** (routed `/customers/:id/profile`, 601 lines). Has: Contact details, Labor Rate + Discount, **Irrigation System card + "Controllers & Zones" button**, **Financial Pulse**, **Budget + alerts**, **Invoice list**, Property Notes, View Site Map. Already reached by: field-tech customer click (`customers.tsx:244`), Financial Pulse widget (`financial-pulse-widget.tsx:709`), the Irrigation Profile back link (`IrrigationProfile.tsx:1880`), and the table "profile" button (`customers.tsx:358`).
+- **B — `components/customers/customer-profile.tsx`** (rendered **inline** when a non-field-tech clicks a customer, 678 lines). Has: KPI count tiles, **Estimates / Work Orders / Billing Sheets tabs** (full lists + `EstimateDetailModal` / `CompletedWorkDetailModal`), **Property Boundary section**, **Emergency Labor Rate**, View Site Maps (modal). **No** irrigation/financial/budget/invoices.
+
+**Decision: keep A (the routed page) as canonical**, merge B's unique sections into it, repoint every entry point to the route, and **delete B** plus the inline-render path. End state: one deep-linkable customer profile, reached the same way for every role, with all features in one place.
+
+Multi-tenancy unaffected (reads already company-scoped). This is a behavior-preserving refactor — the risk is **feature loss**, so parity is the core acceptance criterion.
+
+---
+
+## Slice 1 — Merge B's unique sections into A (`pages/customer-profile.tsx`)
+Port the following from B into A (or confirm A already covers them), preserving behavior:
+- **Estimates / Work Orders / Billing Sheets tabs** — the full lists with empty states and the row→detail modals (`EstimateDetailModal`, `CompletedWorkDetailModal`). (A currently only links to invoices/financial — these tabbed lists are B-only and must come over.)
+- **Property Boundary section** (`PropertyBoundarySection` / `property-boundary`).
+- **Emergency Labor Rate** (A shows Labor Rate + Discount; add Emergency rate).
+- **KPI count tiles** (Estimates/Work Orders/Billing Sheets counts) if not already equivalent in A.
+- Keep all of A's existing sections: Irrigation System card + Controllers & Zones button, Financial Pulse, Budget + alerts, Invoice list, Property Notes, Contact details, View Site Map(s).
+- Reconcile "View Site Maps": A navigates to `/customers/:id/site-maps`, B opens a modal — pick one consistent behavior (recommend the modal if that's what users know, else the route; just don't ship both).
+
+## Slice 2 — Repoint every entry point to the route; remove the inline render
+In `artifacts/irrigopro/src/pages/customers.tsx`:
+- Replace **all** `setSelectedCustomer(customer)` triggers with `setLocation(\`/customers/${customer.id}/profile\`)` — the card click for non-field-techs (~245), the table row click (~324), and the secondary button (~363). (Field techs already navigate to the route at ~244 — now everyone does.)
+- Remove the inline render block (`if (selectedCustomer) return <CustomerProfile .../>`, ~149–157), the `selectedCustomer` state (~34), and the deep-link `setSelectedCustomer` restore (~105–113) — convert that deep-link to a `setLocation` to the route instead.
+- Remove the `import { CustomerProfile } from "@/components/customers/customer-profile"` (line 15).
+- Confirm `onBack` behavior is covered by A's "Back to Customers" (it is — A has `setLocation("/customers")`).
+
+## Slice 3 — Delete the orphan + verify nothing references it
+- **Delete `artifacts/irrigopro/src/components/customers/customer-profile.tsx`** once nothing imports it (only `customers.tsx` does today — confirm with a repo grep before deleting).
+- Grep the repo for any other importer/route of the deleted component; there should be none.
+- Confirm `/customers/:id/profile` is registered in **every** role's router (App.tsx + `company-admin-app.tsx`) so all roles reach the canonical page.
+
+## Tests / Acceptance (parity is the bar)
+- **Feature parity:** every section that existed on *either* old profile is present on the consolidated page — Contact, Labor + Emergency rate + Discount, Estimates/WO/Billing tabs (with working detail modals), Property Boundary, Property Notes, Irrigation card + Controllers & Zones button, Financial Pulse, Budget + alerts, Invoices, Site Maps. (Use a side-by-side checklist of both old files; nothing dropped.)
+- **All roles, one page:** company_admin, irrigation_manager, billing_manager, field_tech all land on `/customers/:id/profile` when opening a customer; each sees the role-appropriate sections (pricing/financial gated as before).
+- **The Irrigation Profile is now reachable** for admins/managers from the customer they clicked (the original complaint).
+- **No orphan:** `components/customers/customer-profile.tsx` is deleted and unreferenced; no route renders it; deep links and the Financial Pulse / Irrigation back links still resolve.
+- Estimate/WO/Billing detail modals open from the consolidated tabs exactly as they did inline.
+- **Verification step:** diff the rendered sections of the old inline view vs the new page for a real customer (e.g. Woodglenn Squares HOA) and confirm nothing is missing; run the estimate-role-matrix / any customer-profile tests.
+
+## Out of scope
+- Redesigning the profile (this is consolidation, not a visual redesign — keep the better layout of the two).
+- The Irrigation Profile page itself.
+
+## Relevant files
+- Keep/extend: `artifacts/irrigopro/src/pages/customer-profile.tsx` (canonical)
+- Delete: `artifacts/irrigopro/src/components/customers/customer-profile.tsx`
+- Edit: `artifacts/irrigopro/src/pages/customers.tsx` (repoint clicks, remove inline render + import)
+- Verify routes: `artifacts/irrigopro/src/App.tsx` (268/309/377), `artifacts/irrigopro/src/components/company-admin-app.tsx` (184)
+- Callers to keep working: `components/financial-pulse/financial-pulse-widget.tsx:709`, `pages/customers/IrrigationProfile.tsx:1880`
+- Port from B: `components/customers/property-boundary.tsx`, `EstimateDetailModal`, `CompletedWorkDetailModal`

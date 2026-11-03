@@ -1,0 +1,333 @@
+# Replit Task — Auth & Tenancy Hardening, Slice 6
+
+This is a single self-contained task. The **Design Context** is in
+`Auth-Tenancy - Slice 0 Hotfix.md` — re-read it before starting. The
+actual work for this task is in the **Slice 6** section below. Do not
+deviate from any file paths, function names, schema field names, or
+payload shapes specified.
+
+> **Architectural note.** Slices 1–5 made the application layer
+> tenant-correct. Slice 6 adds Postgres Row-Level Security on the
+> three highest-risk tables (`work_orders`, `billing_sheets`,
+> `invoices`) as a final structural backstop. After this slice, even
+> a hypothetical app-layer bug that issues a SELECT or UPDATE without
+> a `company_id` predicate will return zero rows for a non-super-admin
+> caller. The per-request transaction wrapper sets a session-local
+> GUC `app.current_company_id` that the RLS policy reads. Super-admin
+> callers run inside a different role / GUC value that bypasses the
+> policy. We scope RLS to the three high-risk tables only — extending
+> to additional tables is deliberate later work, not silent scope
+> creep.
+
+---
+
+## Slice 6 — Postgres Row-Level Security on `work_orders`, `billing_sheets`, `invoices`
+
+**Scope.**
+
+1. Enable RLS on the three tables.
+2. Define a tenant-scoping policy on each: visible rows are those
+   whose `company_id` matches the session GUC
+   `app.current_company_id`, OR whose session GUC indicates
+   super-admin (`app.is_super_admin = 'true'`).
+3. Add a per-request middleware in the API server that opens a
+   transaction (or sets local GUCs on the pooled connection), sets
+   the two GUCs from `req.authenticatedUserCompanyId` and
+   `req.authenticatedUserRole === 'super_admin'`, runs the handler,
+   then either commits or releases the GUCs.
+4. Add a smoke test that:
+   - Inserts cross-tenant rows via a super-admin connection.
+   - Queries via a tenant-scoped connection and verifies the foreign
+     rows are not visible.
+   - Updates the GUC to a different tenant and verifies the visibility
+     switches.
+
+**Files modified.**
+- `artifacts/api-server/src/app.ts` — mount the new middleware after
+  `requireAuthentication` (but it's set globally — see below).
+- `artifacts/api-server/src/routes/routes.ts` — the new middleware is
+  registered globally; no per-route changes here.
+- `lib/db/src/db.ts` (or wherever the Drizzle client is constructed)
+  — expose a helper to set the GUCs on the active connection.
+
+**Files created.**
+- `lib/db/migrations/0005_rls_policies.sql` — RLS enablement +
+  policies.
+- `artifacts/api-server/src/middlewares/tenant-rls.ts` — the
+  per-request GUC-setting middleware.
+- `artifacts/api-server/src/middlewares/tenant-rls.test.ts` — smoke
+  test against a real Postgres.
+
+**Concrete changes.**
+
+### 1. Migration — `lib/db/migrations/0005_rls_policies.sql`
+
+```sql
+-- Slice 6 — Postgres RLS as defense-in-depth tenant isolation.
+--
+-- Enables RLS and adds policies on work_orders, billing_sheets, and
+-- invoices. Visible rows are those whose company_id matches the
+-- session GUC app.current_company_id, OR whose session indicates
+-- super-admin (app.is_super_admin = 'true').
+--
+-- The application server sets both GUCs at the start of every request
+-- via tenant-rls.ts. Direct psql sessions (operators, migrations)
+-- run as a database superuser, which bypasses RLS entirely; no
+-- explicit BYPASSRLS role is required.
+
+ALTER TABLE "work_orders"    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "billing_sheets" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "invoices"       ENABLE ROW LEVEL SECURITY;
+
+-- Default-deny baseline. Without an explicit policy, RLS denies all
+-- access for non-superuser roles. The policies below grant access
+-- back under the session GUC contract.
+
+CREATE POLICY "work_orders_tenant_isolation" ON "work_orders"
+  USING (
+    current_setting('app.is_super_admin', true) = 'true'
+    OR "company_id" = current_setting('app.current_company_id', true)::int
+  )
+  WITH CHECK (
+    current_setting('app.is_super_admin', true) = 'true'
+    OR "company_id" = current_setting('app.current_company_id', true)::int
+  );
+
+CREATE POLICY "billing_sheets_tenant_isolation" ON "billing_sheets"
+  USING (
+    current_setting('app.is_super_admin', true) = 'true'
+    OR "company_id" = current_setting('app.current_company_id', true)::int
+  )
+  WITH CHECK (
+    current_setting('app.is_super_admin', true) = 'true'
+    OR "company_id" = current_setting('app.current_company_id', true)::int
+  );
+
+CREATE POLICY "invoices_tenant_isolation" ON "invoices"
+  USING (
+    current_setting('app.is_super_admin', true) = 'true'
+    OR "company_id" = current_setting('app.current_company_id', true)::int
+  )
+  WITH CHECK (
+    current_setting('app.is_super_admin', true) = 'true'
+    OR "company_id" = current_setting('app.current_company_id', true)::int
+  );
+
+-- The TRUE branch of current_setting(..., true) is the missing-key
+-- behavior: returns NULL if the GUC has never been set in this
+-- session. The policies treat NULL as "deny" — a request that
+-- somehow reaches Postgres without the GUCs set sees zero rows.
+```
+
+### 2. Middleware — `middlewares/tenant-rls.ts`
+
+```ts
+// Auth & Tenancy hardening, Slice 6.
+//
+// Per-request RLS GUC setter. After requireAuthentication has
+// populated req.authenticatedUserCompanyId and
+// req.authenticatedUserRole, this middleware issues two SET LOCAL
+// statements at the start of the request's transaction. The policy
+// definitions in 0005_rls_policies.sql read these GUCs and gate row
+// visibility on tenant tables.
+//
+// Implementation note: the app uses a single Drizzle client over a
+// connection pool. We open a single transaction per request and run
+// the handler inside it. On request end (res 'finish'), the
+// transaction commits (or rolls back on handler throw). All storage
+// calls inside the handler must use the per-request client returned
+// from this middleware rather than the global one.
+
+import type { Request, Response, NextFunction } from "express";
+import { db, withTenantTx } from "../db";
+
+declare module "express-serve-static-core" {
+  interface Request {
+    // Per-request Drizzle client running inside a transaction with
+    // the tenant GUCs set. Storage calls take this client as their
+    // executor. The global `db` export remains as a fallback for
+    // boot-time / IIFE callers (none of which are tenant-scoped).
+    tenantDb?: typeof db;
+  }
+}
+
+export async function tenantRlsMiddleware(req: Request, res: Response, next: NextFunction) {
+  // Public / unauthenticated endpoints (e.g. /api/marketing-leads,
+  // /api/health) skip this middleware entirely — they are mounted
+  // before requireAuthentication and have no companyId.
+  const companyId = (req as any).authenticatedUserCompanyId as number | null | undefined;
+  const role = (req as any).authenticatedUserRole as string | undefined;
+  const isSuperAdmin = role === "super_admin";
+  if (!isSuperAdmin && (companyId == null || !Number.isFinite(companyId))) {
+    // Anything past requireAuthentication should have one or the
+    // other. If we somehow land here without a tenant, fail closed.
+    res.status(403).json({ message: "Company scope required" });
+    return;
+  }
+  try {
+    await withTenantTx(
+      { companyId: companyId ?? 0, isSuperAdmin },
+      async (tx) => {
+        (req as any).tenantDb = tx;
+        // Wrap next() in a promise so the transaction does not
+        // commit until the response is fully sent.
+        await new Promise<void>((resolve, reject) => {
+          res.on("finish", () => resolve());
+          res.on("close", () => resolve());
+          try {
+            next();
+          } catch (err) {
+            reject(err);
+          }
+        });
+      },
+    );
+  } catch (err) {
+    // The transaction has been rolled back; if the response hasn't
+    // been sent yet, surface a 500.
+    if (!res.headersSent) {
+      console.error("tenant-rls middleware failed:", err);
+      res.status(500).json({ message: "Tenant scope setup failed — please retry." });
+    }
+  }
+}
+```
+
+The `withTenantTx` helper lives in `lib/db/src/db.ts` (next to the
+Drizzle client export):
+
+```ts
+export async function withTenantTx<T>(
+  scope: { companyId: number; isSuperAdmin: boolean },
+  fn: (tx: typeof db) => Promise<T>,
+): Promise<T> {
+  return await db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL app.current_company_id = ${scope.companyId}`);
+    await tx.execute(sql`SET LOCAL app.is_super_admin = ${scope.isSuperAdmin ? "true" : "false"}`);
+    return await fn(tx);
+  });
+}
+```
+
+### 3. Mounting
+
+In `app.ts`, register the middleware **after** session middleware and
+**before** any route registration:
+
+```ts
+app.use(async (req, res, next) => {
+  // Run requireAuthentication-equivalent identity lookup if a route
+  // mounts requireAuthentication; otherwise skip. Easier path: mount
+  // requireAuthentication in app.ts for /api/* and have tenant-rls
+  // sit immediately after.
+});
+```
+
+The cleaner approach is to leave per-route `requireAuthentication` as
+the gating layer (it already handles 3 auth surfaces correctly) and
+make `tenantRlsMiddleware` conditional: if
+`req.authenticatedUserCompanyId` is unset, skip (the unauthenticated
+endpoints — health, marketing-leads, login — never touch tenant
+tables). Implementation choice; document either way.
+
+Implementation choice for this slice: **register `tenantRlsMiddleware`
+inside `registerRoutes` in `routes.ts`, immediately after the
+`requireAuthentication` mount on every `/api/*` route**. Mechanically
+this means wrapping `requireAuthentication` so the two run as a unit:
+
+```ts
+const requireAuthenticatedTenant = [requireAuthentication, tenantRlsMiddleware];
+
+// Replace every requireAuthentication mount with the array spread:
+app.get("/api/work-orders", ...requireAuthenticatedTenant, async (req, res) => { ... });
+```
+
+Express accepts an array of middlewares in a `use`-style call. Wrap
+Slice 1/2's `[requireAuthentication, requireSameCompanyAsWorkOrder]`
+chain as
+`[...requireAuthenticatedTenant, requireSameCompanyAsWorkOrder]` to
+keep the order correct.
+
+### 4. Storage callsites
+
+Storage methods inside a request handler now must accept the
+per-request `tx` (a `req.tenantDb`) as their executor. Slice 4 already
+set the application-layer filter; with RLS engaged, that filter is
+now mathematically redundant — but leave it in place as belt-and-braces.
+RLS catches drift; the app filter catches everything else.
+
+This is the largest mechanical change in the slice. **Bound the scope
+to the three RLS tables and their direct callers**:
+
+- `storage.getWorkOrder*`, `storage.createWorkOrder`,
+  `storage.updateWorkOrder`, `storage.deleteWorkOrder`
+- `storage.getBillingSheet*`, `storage.createBillingSheet`,
+  `storage.updateBillingSheet`, `storage.deleteBillingSheet`
+- `storage.getInvoice*`, `storage.createInvoice`,
+  `storage.updateInvoice`, `storage.deleteInvoice`
+
+Each takes an optional `executor?: typeof db` parameter at the *end*
+of its signature (after `companyId`); when omitted, defaults to the
+global `db` client (for boot-time / IIFE callers that legitimately
+need to bypass RLS). Inside route handlers, always pass
+`req.tenantDb`:
+
+```ts
+const workOrder = await storage.getWorkOrder(id, callerCompanyId, req.tenantDb);
+```
+
+A static-source test in `routes/policy-coverage.test.ts` (extended in
+this slice) asserts every callsite in the routes/ directory passes
+`req.tenantDb` (or an explicit `db` for the bypass case, named in an
+allowlist) to those methods.
+
+**Test file.**
+
+`middlewares/tenant-rls.test.ts`:
+
+- Boot a test Postgres, run migrations through 0005.
+- As a super-admin, insert two work orders (one in Company A, one in
+  B) and the matching customers/companies.
+- Open a tenant-scoped session via `withTenantTx({ companyId: A,
+  isSuperAdmin: false })` and query `SELECT * FROM work_orders`. Assert
+  only Company A's row is visible.
+- Switch tenant to B in a new transaction. Assert only Company B's
+  row is visible.
+- Switch to super-admin. Assert both rows are visible.
+- Attempt to insert a row with `company_id = B` while
+  `app.current_company_id` is `A` and `is_super_admin = false`. Assert
+  Postgres rejects with the `WITH CHECK` violation.
+- Attempt to update a foreign-tenant row's `company_id` to the
+  current tenant. Assert Postgres rejects.
+
+**Acceptance criteria.**
+- Migration `0005_rls_policies.sql` runs end-to-end on staging
+  against a recent prod snapshot. RLS is enabled on the three tables;
+  policies are present.
+- `tenantRlsMiddleware` is wired into every authenticated `/api/*`
+  route via `requireAuthenticatedTenant`.
+- All storage callsites for the three table groups inside the routes
+  directory pass `req.tenantDb`.
+- The smoke test passes.
+- All existing tests (including Slices 0–5) continue to pass.
+- Manual probe in staging: as a `company_admin` of B, attempt
+  `GET /api/work-orders/<A's WO id>` → 404 (Slice 1's guard fires),
+  AND a `SELECT id FROM work_orders WHERE id = <A's WO id>` issued
+  via the tenant transaction returns zero rows (RLS fires).
+- `npm run typecheck` passes.
+
+**Out of scope.**
+- Extending RLS to other tables (`customers`, `estimates`, `parts`,
+  `users`, `notifications`, etc.). Worth doing as the next company
+  approaches go-live, but a separate slice — operationally each new
+  table requires its own callsite audit.
+- Replacing the application-layer companyId filter from Slice 4. The
+  belt-and-braces double-check stays.
+- Observability + cleanup (Slice 7).
+- Any client change.
+
+**Dependencies.** Slices 0, 1, 2, 3, 4, and 5 merged. **Before
+applying the migration to production**, exercise the full smoke test
+on staging and run a representative sample of read/write traffic
+against a staging copy of prod data to confirm no legitimate workflow
+silently returns zero rows from a missing GUC.

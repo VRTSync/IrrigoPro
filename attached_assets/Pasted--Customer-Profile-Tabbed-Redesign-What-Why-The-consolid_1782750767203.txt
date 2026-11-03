@@ -1,0 +1,61 @@
+# Customer Profile — Tabbed Redesign
+
+**What & Why**
+The consolidated customer profile (`pages/customer-profile.tsx`) now holds everything — Customer Info, KPI tiles, Billing Rates, Billing Notes, Financial Pulse, Budget, Invoices, Estimates/Work Orders/Billing Sheets lists, Property Notes, Property Boundary, and the Irrigation System card — as **one long scroll**. Reorganize it into a **persistent header + sensible tabs** so each area is easy to find and the page isn't an endless feed of mixed data.
+
+**Confirmed direction (mockup-approved layout):** `customer-profile-tabs-redesign-mockup.html`.
+
+Frontend layout refactor only — same data, same components, just reorganized into tabs **and widened to use the full working area**. No schema/API change. Reads already company-scoped (Rule 1 unaffected). One canonical page (Rule 3 — this is the consolidated one; don't reintroduce a parallel view).
+
+## Use the full width (responsive)
+The page currently renders as a narrow centered column (~`max-w-2xl/3xl`) with large empty margins on desktop. Widen it and use the space with responsive column grids, while staying mobile-friendly:
+- **Container:** drop the narrow centered column; let content fill the working area up to a sensible cap (~`max-w-[1600px]` / `2xl:max-w-screen-2xl`) with comfortable side padding — wide enough to use the space, capped so text lines don't get unreadably long.
+- **Within each tab, lay sections out in responsive grids** instead of a single stacked column: e.g. Overview = a main column + a side rail (`lg:grid-cols-3` with the rail spanning 1); Jobs = Estimates / Work Orders / Billing Sheets across 2–3 columns; Billing = rates/notes/budget/invoices in a 2–3 column grid with Financial Pulse spanning full width.
+- **Breakpoints:** multi-column at `lg`+ , collapse to 2 columns around `md`, and **single column on mobile** (`grid-cols-1`). Tab bar scrolls horizontally on small screens; header actions wrap.
+- Use Tailwind responsive grid utilities (`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3`, `col-span-*`) — no fixed pixel widths.
+
+## Layout
+**Persistent header (always visible, above the tabs):**
+- Customer name + status badges (Active / QuickBooks Synced)
+- Back to Customers
+- Primary actions: **View Site Map**, **Controllers & Zones**, **Edit Customer**
+- A compact contact line (email / phone / address)
+
+**Tabs (body) — five tabs, each with a lucide icon and an accent color:**
+1. **Overview** (blue, `layout-dashboard`) — at-a-glance KPI tiles (Estimates / Work Orders / Billing Sheets with their $ + counts), a Financial snapshot (Invoiced MTD/YTD, Money Owed, Avg time to pay — links to the full Billing tab), and Customer Information.
+2. **Jobs** (indigo, `wrench`) — Estimates, Work Orders, and Billing Sheets lists (the full lists + their detail modals: `EstimateDetailModal`, `CompletedWorkDetailModal`). Optional count badge on the tab.
+3. **Billing Details** (emerald, `receipt`) — Billing Rates (Labor + Emergency), Financial Pulse (full), Billing Notes, Budget + alerts (`BudgetCard`, `RecentBudgetAlertsCard`), Invoices (`InvoiceList`). *(renamed from "Billing & Financials")*
+4. **Property** (amber, `trees`) — Property Notes, Property Boundary (`PropertyBoundarySection`), Site Maps.
+5. **Irrigation System** (sky, `droplets`) — the Irrigation System card (`IrrigationSystemCard`): controller/zone summary, Open System Profile / Controllers & Zones link, and the Generate Report action. *(split out from Property so the system has its own home)*
+
+## Color & icons (no emojis)
+- Use **lucide-react** icons throughout (the app already uses lucide) — never emojis. Tab icons: Overview `layout-dashboard`, Jobs `wrench`, Billing Details `receipt`, Property `trees`, Irrigation System `droplets`. Section headers and KPI tiles get matching icons (e.g. Estimates `file-text`, Work Orders `wrench`, Billing Sheets `clipboard-list`, rates `badge-dollar-sign`/`clock`/`zap`, invoices `file-check-2`).
+- **Tasteful color accents** using the app's existing Tailwind palette: each tab carries an accent color (blue / indigo / emerald / amber / sky) applied to its active underline + icon; KPI tiles use colored icon chips (blue/green/amber); the financial tiles highlight (emerald for invoiced, amber for money owed); key cards get a subtle colored left border. Keep it light — accents, not loud fills — and consistent with existing job-type / status colors. Respect any dark-mode variables already in use.
+
+## Steps
+1. **Add a tab container** (use the existing `@/components/ui/tabs` primitives already imported in the inline component) inside `pages/customer-profile.tsx`. Keep the current header block above it; move each existing section into the matching tab pane — **no section is removed**, only relocated.
+2. **Map sections to tabs** per the layout above. The Overview financial snapshot can reuse a compact view of `FinancialPulseWidget` (or a few summary tiles) with a "View in Billing" link; the full widget lives in Billing.
+3. **Persist the active tab in the URL** (e.g. `?tab=jobs`) so refreshes and deep links land on the right tab; default to `overview`. (Keeps it Rule-3-friendly: deep-linkable.)
+4. **Preserve role/visibility gating** exactly as today — "billing team only" sections (rates, notes), pricing visibility, and the `canEditIrrigation` gate stay; a role that can't see a section sees it hidden within its tab (and hide a tab entirely if it would be empty for that role).
+5. **Mobile:** tab bar scrolls horizontally; panes stack; the header actions wrap (as in the mockup).
+6. Keep all existing data fetching/queries; this is presentation only — don't change what's loaded (lazy-load per-tab later is a nice-to-have, not required).
+
+## Tests
+- Every section that was on the long-scroll page is present under exactly one tab; nothing dropped.
+- Tabs switch without refetching the whole page; the detail modals (estimate/WO) still open from the Jobs tab.
+- `?tab=…` deep links open the correct tab; default is Overview.
+- Role gating holds: billing-only sections hidden for non-billing roles; `field_tech` sees the appropriate subset; irrigation card/Controllers & Zones still reachable.
+- Mobile: header actions wrap, tab bar scrolls, panes readable at phone width.
+- **Width:** on a wide desktop the content fills the working area (no narrow center strip / large dead margins) using multi-column grids; at tablet width it drops to ~2 columns; on phone it's a single column. No horizontal scroll or fixed-pixel widths.
+- No second/parallel customer-profile component is reintroduced (Rule 3).
+
+## Out of scope
+- Changing any data, totals, or queries.
+- The Irrigation System Profile page itself (separate).
+- Reintroducing the deleted inline profile component.
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/customer-profile.tsx` (the consolidated page — add tabs, relocate sections)
+- Existing pieces to place into tabs: `FinancialPulseWidget`, `BudgetCard`, `RecentBudgetAlertsCard`, `InvoiceList`, `IrrigationSystemCard`, `PropertyBoundarySection`, `EstimateDetailModal`, `CompletedWorkDetailModal`, the KPI tiles, Billing Rates/Notes, Customer Information
+- `@/components/ui/tabs` (Tabs primitives)
+- Visual reference: `customer-profile-tabs-redesign-mockup.html`

@@ -1,0 +1,60 @@
+# BUILD — QuickBooks SyncToken Capture + In-Place Invoice Update (Never Two Invoices)
+
+**What & Why**
+When an invoice is corrected/reissued, QuickBooks must show **one** invoice — corrected in place — not a second one alongside the original. Today the integration is create-only: `buildAndPostQbInvoice` POSTs a new invoice and reads back `Invoice.Id`, but **discards `Invoice.SyncToken`**, and there's no column to store it. QuickBooks requires the `SyncToken` (plus the invoice `Id`) to modify or void an existing invoice, so without it the only option is creating a duplicate. This ticket captures and persists the `SyncToken` and adds an **in-place sparse-update** path, so a correction updates the existing QB invoice instead of creating a second. Prerequisite for `BUILD - Invoice Correction and Reissue` Slice 4. Server-side only; multi-tenancy intact; still no auto-void (update ≠ void — this corrects the live invoice, it doesn't delete anything).
+
+## Done looks like
+- Every QB invoice create stores the returned `SyncToken` (and `Id`) on the invoice.
+- Correcting/reissuing an invoice that's already in QuickBooks **updates that same QB invoice in place** (corrected lines, total, DocNumber) — no second invoice is ever created.
+- The stored `SyncToken` is refreshed from every successful update (QB increments it each time).
+- A stale-token conflict self-heals (re-fetch current token, retry once).
+- Invoices pushed before this change (no stored token) still update correctly by fetching the current token from QB first.
+
+---
+
+## Slice 1 — Persist the SyncToken
+### Files: `lib/db/src/schema/schema.ts` (+ migration), `storage.ts`
+- Add `quickbooksSyncToken: text("quickbooks_sync_token")` (nullable) to `invoices`, next to `quickbooksInvoiceId`.
+- Capture it on create: in `buildAndPostQbInvoice` (`routes.ts:8285+`), read `Invoice.SyncToken` from the create response (currently only `Invoice.Id` is read) and return it alongside `quickbooksId`. Extend `QbInvoice` type to include `SyncToken?: string`.
+- Everywhere the create result is persisted (`routes.ts:7000`, `:8441`, and `createQuickBooksInvoiceForInvoice`), also write `quickbooksSyncToken`.
+
+## Slice 2 — In-place update path (`updateQbInvoiceInPlace`)
+### Files: `routes.ts` / QB integration service
+Add a function that updates an existing QB invoice via **sparse update** rather than creating a new one:
+- Build the corrected `Line` array with the same mapping `buildAndPostQbInvoice` uses (service item, amount, description), then POST to `/v3/company/{realmId}/invoice` with body:
+  ```json
+  { "Id": "<quickbooksInvoiceId>", "SyncToken": "<current>", "sparse": true, "DocNumber": "<reissued number>", "Line": [ ...corrected lines... ] }
+  ```
+  (Sending `Line` on a sparse update **replaces** the invoice's line set — exactly the corrected total we want; QB keeps the same invoice `Id`.)
+- Read the **new** `SyncToken` from the response and persist it (QB increments it on every update — a stale stored token breaks the next edit).
+- Reuse `makeQuickBooksRequest` (auth, retry, audit) and the existing precondition guards (QB connected, customer synced, ≥1 billable line).
+
+### Stale-token + missing-token handling (required)
+- **Missing stored token (legacy invoice):** if `quickbooksSyncToken` is null but `quickbooksInvoiceId` is set, first `GET /v3/company/{realmId}/invoice/{id}`, read `Invoice.SyncToken`, then do the update. Store it.
+- **Stale token (QB fault code `5010`, "Stale Object"):** on that error, re-`GET` the invoice for the current `SyncToken` and **retry the update once**. If it still fails, surface the error and leave state unchanged (retryable) — never fall back to creating a duplicate.
+
+## Slice 3 — Wire it into reissue + the existing resync (choose update over create)
+### Files: `routes.ts` (`createQuickBooksInvoiceForInvoice`, the correction qb-sync step, `invoice-sync-quickbooks-route`)
+- **Decision rule:** if the target invoice (or, on reissue, the superseded original whose QB linkage carries forward) already has a `quickbooksInvoiceId` → call `updateQbInvoiceInPlace`. Only when there is **no** `quickbooksInvoiceId` → create fresh (existing path).
+- **Reissue linkage:** when a correction reissues `04723 → 04723-R1`, carry the original's `quickbooksInvoiceId` + `quickbooksSyncToken` onto the reissued invoice (the QB object is one living invoice tracking the currently-active DB invoice). The QB update sets the corrected lines/total and `DocNumber = 04723-R1`, so QuickBooks shows a single invoice at the corrected amount. This **replaces** the correction ticket's Slice 4 "create + guided-manual void" — no second invoice, no manual void needed.
+- **Existing resync route:** the current "force re-create" path (which creates a new QB invoice) should also prefer in-place update when a `quickbooksInvoiceId` exists, eliminating the accidental-duplicate risk it was guarding against. Keep an explicit "create new in QB" escape hatch only for the genuinely-unlinked case.
+
+## Guardrails
+- Multi-tenancy: resolve the QB integration by the invoice's `companyId`; scope all reads/writes (Rule 1).
+- Idempotent: re-running a sync with an unchanged invoice is a no-op update (same lines) — never creates a duplicate.
+- Never delete/void in QB automatically; this path only *updates* the live invoice. (A true void remains a separate, explicitly-confirmed future action — now possible since the token is stored.)
+- Failure is retryable, never a fallback-to-create.
+
+## Tests
+- Create a QB invoice → `quickbooksSyncToken` stored.
+- Correct/reissue an invoice already in QB → the **same** QB `Id` is updated to the corrected total/lines/DocNumber; no new QB invoice; stored token refreshed to QB's incremented value.
+- Legacy invoice with `quickbooksInvoiceId` but null token → update fetches the current token from QB first, then succeeds.
+- Simulated `5010` stale-token → re-fetch + single retry succeeds; a persistent failure is surfaced and retryable, with **no** duplicate created.
+- Company isolation: can't update another company's QB invoice.
+
+## Relevant files
+- `lib/db/src/schema/schema.ts` (add `quickbooks_sync_token` to `invoices`)
+- `artifacts/api-server/src/types/quickbooks.ts` (`QbInvoice.SyncToken`)
+- `artifacts/api-server/src/routes/routes.ts` (`buildAndPostQbInvoice` ~8285; `createQuickBooksInvoiceForInvoice` ~8378; persistence sites ~7000/8441; new `updateQbInvoiceInPlace`)
+- `artifacts/api-server/src/routes/invoice-sync-quickbooks-route.ts` (prefer update over re-create)
+- Related: `BUILD - Invoice Correction and Reissue (Guided Dispute Flow).md` (Slice 4 becomes in-place update via this ticket)

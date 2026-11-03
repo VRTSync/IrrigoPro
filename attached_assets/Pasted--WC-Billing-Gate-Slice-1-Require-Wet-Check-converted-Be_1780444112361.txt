@@ -1,0 +1,136 @@
+# WC Billing Gate — Slice 1: Require Wet Check `converted` Before WCB Invoicing
+
+**Source:** Conversation 2026-06-02 — billing-page review-vs-billings discrepancy investigation.
+**Severity:** P1 (data-integrity risk: invoiced WCBs can silently diverge from billed totals).
+**Prerequisite slices:** None.
+
+---
+
+## Why
+
+Today a Wet Check Billing (WCB) becomes invoiceable the moment the tech submits the wet check, because the auto-bill path inserts the WCB at `status='approved_passed_to_billing'` immediately (storage.ts:7600-7627, comment at 7594 — "auto-bill WCBs are immediately approved"). The invoicing eligibility filters across the codebase only check WCB status + `invoiceId`; they never look at the underlying wet check's routing state.
+
+That means a wet check with pending findings sitting on the reviews page can have its WCB invoiced to the customer for the auto-billed slice alone. If the manager later routes a leftover finding to "Repaired in field" and runs Convert, `_writeRepairedInFieldBilling` takes the append branch (storage.ts:7523-7585), updates the invoiced WCB's `totalAmount`/`partsSubtotal`/`laborSubtotal` in place, and stamps the new finding with that WCB's id — without checking `invoiceId` or `status`. Result: the WCB row no longer matches what was actually billed to the customer, and the new finding is attached to an invoice that doesn't include it.
+
+This slice closes the gap by gating WCB invoicing on the wet check having reached a terminal `converted` state — the only status that guarantees no further convert call can append more lines.
+
+Tied to this, the explicit "Approve" CTA on the manager wet check detail page (`approveWetCheck`, storage.ts:8316-8341, route `/api/wet-checks/:id/approve`) is removed. It currently flips status to `approved` without checking that all findings are resolved, so a manager can prematurely approve a wet check that still has pending findings — which would defeat the new gate if `approved` were allowed through it. Letting `converted` be the only meaningful terminal status (automatically reached when Convert resolves the last pending finding) eliminates this ambiguity.
+
+---
+
+## Scope
+
+1. Tighten the four WCB invoicing-eligibility filters to require `wc.status === 'converted'`.
+2. Remove the `/api/wet-checks/:id/approve` route, the `approveWetCheck` storage method, and the Approve CTA on the manager detail page.
+3. Stop including `'approved'` in the manager reviews page query (storage.ts:7022-7025), since no new wet checks will land in that status.
+4. One-shot migration to reconcile any existing wet checks currently in `status='approved'`: if they have no pending findings and every finding has a `convertedAt` stamp, flip to `converted`; otherwise flip to `partially_converted` (or `submitted` if no findings converted).
+5. Drop the `approved` branch from the status badge map on the manager detail page (`ManagerWetCheckDetailPage.tsx:617-643`) — collapse into the `converted` rendering with the existing "Fully converted" label.
+
+---
+
+## Files to modify
+
+| File | Change |
+|------|--------|
+| `artifacts/api-server/src/routes/routes.ts` | At lines 6122-6123, 6429-6430, 6485, 6774-6775: add `&& wc.status === 'converted'` to each WCB eligibility filter. Requires joining/looking up the wet check status alongside the WCB; if `getWetCheckBillingsByCustomer` returns the WCB without the WC status, extend that storage method to include it. |
+| `artifacts/api-server/src/routes/routes.ts` | Remove the `/api/wet-checks/:id/approve` POST handler entirely (find by route literal). Also remove its `audit-coverage.test.ts` expectation row (the row `{ name: "wet-check /approve", marker: '"/api/wet-checks/:id/approve"', action: "wet_check.approved" }` at `audit-coverage.test.ts:54`). |
+| `artifacts/api-server/src/storage.ts` | Remove `approveWetCheck` interface entry (~line 1000) and implementation (line 8316-8341). |
+| `artifacts/api-server/src/storage.ts` | Line 7022-7025: change `inArray(wetChecks.status, ["submitted", "approved", "partially_converted"])` to `inArray(wetChecks.status, ["submitted", "partially_converted"])`. |
+| `artifacts/api-server/src/storage.ts` | Remove the `wc.status !== "approved"` clause from `routeWetCheckFinding` (line 8356) and `convertWetCheckToWetCheckBilling` (line 8392) status guards — both should now accept only `"submitted"` and `"partially_converted"`. |
+| `artifacts/api-server/src/storage.ts` | In `convertWetCheckToWetCheckBilling`, line 8735-8737: drop the `approvedBy`/`approvedByName`/`approvedAt` writes (they were tied to the `approveWetCheck` flow). Convert no longer needs to stamp these — Convert itself is now the terminal action. Keep the columns in the schema for audit history of pre-migration approvals. |
+| `artifacts/irrigopro/src/pages/wet-checks/ManagerWetCheckDetailPage.tsx` | Lines 617-643: remove the `wc.status === "approved"` branch from the outcome panel; collapse to a single `converted` branch with label "Fully converted". |
+| `artifacts/irrigopro/src/pages/wet-checks/ManagerWetCheckDetailPage.tsx` | Remove any "Approve" button rendering and its mutation hook (search for `approveWetCheck` / `/approve` POST in this file and `wet-check-review.tsx`). |
+| `artifacts/irrigopro/src/pages/wet-check-review.tsx` | Lines 50-51: remove the `case "approved"` arm of the status badge switch. |
+| `artifacts/api-server/src/migrations/` | New migration file: `NNNN_wet_check_status_drop_approved.sql` (or equivalent TS migration). For every `wet_checks` row where `status='approved'`: set `status='converted'` and `fullyConvertedAt=COALESCE(fullyConvertedAt, NOW())` if no `wet_check_findings` row for that wet check has `resolution='pending'` AND all findings have `convertedAt IS NOT NULL`; otherwise set `status='partially_converted'` if any finding has `convertedAt IS NOT NULL`, else `status='submitted'`. |
+
+---
+
+## Invoicing-filter change — exact diff intent
+
+All four call sites currently read:
+
+```ts
+wcb.status === 'approved_passed_to_billing' && wcb.invoiceId == null
+```
+
+After this slice they must read:
+
+```ts
+wcb.status === 'approved_passed_to_billing'
+  && wcb.invoiceId == null
+  && wcb.wetCheckStatus === 'converted'
+```
+
+where `wetCheckStatus` is the joined `wet_checks.status` for the WCB's `wet_check_id`. The shape of how that join is plumbed depends on the call site:
+
+- `/api/customers/:id/billing-data` (routes.ts:6429) — already loads `wetCheckBillingsForCustomer`; extend that loader (most likely `getWetCheckBillingsByCustomer` in storage.ts:~3946) to LEFT JOIN `wet_checks` and project `wet_check_status` into the returned shape.
+- `/api/invoices/preview` (routes.ts:6485) — uses the same `getWetCheckBillingsByCustomer`; benefits from the same join.
+- `/api/customers/:id/monthly-invoice` (routes.ts:6774-6775) — same loader, same join.
+- Customer-billing dashboard aggregator (routes.ts:6122-6123, 6187-6188) — same loader, same join.
+
+If extending `getWetCheckBillingsByCustomer` is the cleanest path, also extend `getAllWetCheckBillingsWithCounts` (storage.ts:3950) so the billings list UI can surface a "waiting on review" indicator on WCBs whose underlying wet check is not yet `converted` (see UI surfacing note below).
+
+---
+
+## UI surfacing of the new gate
+
+On the billings page, WCBs whose wet check is still `submitted`/`partially_converted` will move out of any "ready to invoice" section and into "waiting on review." Add a small badge on the row: **Review in progress** (gray badge, using existing badge tokens from Slice 9c). Clicking the badge or the row should link to `/manager/wet-checks/:wetCheckId` so the billing manager can see what's holding the WCB up.
+
+On the invoice-creation modal (wherever WCBs are selected for invoicing), filter out any WCB whose wet check is not `converted` and show a one-line empty-state explainer beneath the WCB list if any were filtered: *"N wet check billing(s) are waiting on manager review and aren't available to invoice yet."*
+
+---
+
+## Tests
+
+### Backend
+
+New file: `artifacts/api-server/src/routes/wcb-invoice-gate.test.ts`
+- Seed a wet check with mixed findings → submit (auto-bill) → assert WCB exists at `approved_passed_to_billing`, wet check at `partially_converted`.
+- POST `/api/invoices/preview` selecting that WCB → assert WCB is filtered out, response shows zero selected WCBs.
+- POST `/api/customers/:id/monthly-invoice` selecting that WCB → assert 400 "No valid items selected for invoicing" (existing error path).
+- Manager routes remaining pending finding to `repaired_in_field`, runs convert → wet check transitions to `converted`.
+- Retry preview → WCB now eligible, appears in selected list.
+
+New file: `artifacts/api-server/src/routes/wet-check-approve-removed.test.ts`
+- POST `/api/wet-checks/:id/approve` → assert 404 (route gone).
+- Verify `audit-coverage.test.ts` no longer expects the `wet_check.approved` action.
+
+Update existing tests that POST `/api/wet-checks/:id/approve` (search `/api/wet-checks/.+/approve` across `artifacts/`) — at minimum:
+- `wet-check-review.test.tsx:272, 296` — remove approve-related assertions or convert to expect-no-approve-call.
+- `wcb-approval-snapshot.test.ts` — verify no test depends on the `approveWetCheck` storage method.
+
+### Frontend
+
+- `ManagerWetCheckDetailPage` — no Approve button in the DOM when wet check is `submitted`/`partially_converted`. Outcome panel shows only the existing CTAs (Begin Review / Continue Review / Continue Triage) for non-terminal states, and "Fully converted" for `converted`.
+- Billings page — WCB row with `wetCheckStatus !== 'converted'` shows the "Review in progress" badge and is excluded from the "ready to invoice" subset.
+
+### Migration
+
+- Seed three pre-migration fixtures in a migration test:
+  1. `status='approved'`, all findings have `convertedAt` and no `pending` → expect post-migration `status='converted'`, `fullyConvertedAt` set.
+  2. `status='approved'`, one finding `convertedAt` set + one finding still `pending` → expect post-migration `status='partially_converted'`.
+  3. `status='approved'`, zero `convertedAt` stamps → expect post-migration `status='submitted'`.
+
+---
+
+## Acceptance criteria
+
+- A WCB created via auto-bill on submit is **not** present in any invoicing-eligibility result until its wet check reaches `converted`.
+- Convert is the only path that transitions a wet check to `converted` (along with auto-bill on submit when nothing was pending).
+- `/api/wet-checks/:id/approve` returns 404 across all roles.
+- The Approve button does not render on the manager wet check detail page for any wet check status.
+- No new `wet_checks` row is written with `status='approved'`. Existing rows are reconciled by migration.
+- The reviews page query returns the same set of wet checks for triage as before (zero behavior change for the manager's day-to-day queue — the filter still hinges on having at least one finding needing attention).
+- The billings page surfaces a "Review in progress" badge on WCB rows whose source wet check is not yet `converted`, with a link to the wet check detail page.
+- The invoice-creation flow filters out non-`converted` WCBs and shows an explainer when any were filtered.
+- Existing approved+invoiced historical WCBs are untouched (this slice does not retroactively un-invoice anything).
+
+---
+
+## Out of scope
+
+- Changing how WCB approval snapshots (`approvedLaborSnapshot`, `approvedPartsSnapshot`, `approvedAt`, `approvedTotal`) are written by `_writeRepairedInFieldBilling`. The auto-bill path continues to insert WCBs at `approved_passed_to_billing` with snapshot stamps — that's still the right WCB-level state; the new gate is purely on the wet check side.
+- The `/api/wet-check-billings/:id/approve` route (approve-routes.ts:283). That handler operates on WCBs that already exist in `submitted`/`pending_manager_review` — created via the legacy migration path or future flows. The new wet-check-status gate applies to invoicing eligibility regardless of how the WCB got to `approved_passed_to_billing`.
+- Any change to how findings get routed (`routeWetCheckFinding`) or how Convert distributes lines across WCB / estimate / work order. The internal routing/convert flow is unchanged; only the downstream invoicing eligibility moves.
+- Removing the `wet_checks.approvedBy`/`approvedByName`/`approvedAt` columns. They stay in the schema as historical audit fields (and as targets for any future "manager acknowledgement" feature distinct from the converted terminal state).
+- The badge meanings on the billings page that originally prompted this investigation. If those need clarifying after this slice ships, that's a separate UI slice.

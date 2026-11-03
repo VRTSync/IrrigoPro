@@ -1,0 +1,52 @@
+# Irrigation Profile — Header Redesign
+
+This is a single self-contained visual fix. Do not deviate or expand scope beyond what's specified here.
+
+**What & Why**
+The property header on the Irrigation Profile page (`Villas at the Boulders — Controllers & Zones`, screenshot from Randy 2026-07-02) wraps the title across up to four lines and pushes its five action buttons onto a second row, because the title and the full button row are forced into one `flex justify-between` line inside a page capped at `max-w-4xl` (`IrrigationProfile.tsx:356`). Randy flagged this as needing "aesthetic work, especially in the header." Approved direction (mockup shown and confirmed 2026-07-02): shorten the title hierarchy so it never wraps, turn the stat line into pills, and collapse the four look-alike outline buttons into two grouped menus so only one primary + two secondary controls remain in the row.
+
+**Root cause:** `IrrigationProfile.tsx:373-375` concatenates the dynamic customer name with a static suffix into a single `<h1>` (`{customer?.name} — Controllers & Zones`), and the same flex row (`IrrigationProfile.tsx:397-462`) lays out five full-width-labeled buttons (Add Controller, Export CSV, Import CSV, Generate Report, Send Report) with no grouping — for any property name longer than a few words this wraps badly, as seen with "Villas at the Boulders."
+
+**Design decision:** fix this through typographic restructuring and button grouping, not by widening the page container. No change to `max-w-4xl` — the current header data (property name, 2 stats, 5 actions) fits comfortably in that width once the title stops carrying the redundant "— Controllers & Zones" suffix and the buttons are grouped from 5 down to 3.
+
+## Slice 1 — Header layout
+
+### Files: `artifacts/irrigopro/src/pages/customers/IrrigationProfile.tsx`
+
+Replace the property header `<Card>` block (currently `IrrigationProfile.tsx:369-465`) with the structure below. Import additions at the top of the file (`IrrigationProfile.tsx:1-29`): add `DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger` from `"@/components/ui/dropdown-menu"` (same import already used in `irrigation-controller-grid.tsx:20-24` — reuse that pattern) and add `MoreHorizontal, ChevronDown` to the existing `lucide-react` import (`IrrigationProfile.tsx:13-22`).
+
+**1a. Title + stat pills** (replaces `IrrigationProfile.tsx:372-396`):
+- Small muted eyebrow label "Irrigation profile" above the name (`text-xs font-medium text-gray-500`).
+- `<h1>` is the property name alone — `{customer?.name ?? "Customer"}`, no suffix — `text-xl font-bold` (was already this size; the suffix removal is what stops the wrap).
+- Stats (`controllers.length`, `totalZoneCount`) render as pill badges instead of plain inline text: `bg-blue-50 text-blue-700 text-xs font-medium px-2.5 py-1 rounded-full`. Keep the existing singular/plural logic (`controller`/`controllers`, `zone`/`zones`) and the existing `totalZoneCount > 0` guard.
+- Move the "Updated {date} by {name}" line (`IrrigationProfile.tsx:387-394`) out of the stat row entirely — it becomes its own line below a hairline divider at the bottom of the card, `text-xs text-gray-400`, keeping the existing `lastUpdated &&` guard so it's omitted when there's no history yet.
+
+**1b. Button row** (replaces `IrrigationProfile.tsx:397-462`), from 5 buttons down to up to 3:
+- **Add Controller** — unchanged: same `canWrite` gate, same `onClick`/`disabled={showAddController}`, same `<Plus>` icon and label (`IrrigationProfile.tsx:398-406`). Stays the one filled/primary button.
+- **Report** — a `DropdownMenu` (outline trigger button, `<FileText>` icon + label "Report" + trailing `<ChevronDown>`), containing two `DropdownMenuItem`s: "Generate report" (today's `handleGenerateReport`, `disabled={reportLoading || controllers.length === 0}`, swap to `<Loader2 className="animate-spin">` while `reportLoading`) and "Send report" (today's `handleSendReport`, `disabled={sendLoading || controllers.length === 0}`, same loading-icon swap). No permission gate — matches today (Generate/Send Report currently have none).
+- **More** — a second `DropdownMenu`, icon-only outline trigger (`<MoreHorizontal>`, `aria-label="More actions"`), rendered only when `canImport` is true (same gate that wraps Export+Import today, `IrrigationProfile.tsx:408-433`), containing "Export CSV" (today's `handleExportCsv`, `disabled={exportLoading || controllers.length === 0}`, loading-icon swap) and "Import CSV" (today's `setShowImportModal(true)`, unchanged).
+- All four underlying handlers/mutations (`handleExportCsv`, `handleGenerateReport`, `handleSendReport`, `setShowImportModal`) are unchanged — this slice only moves *where* they're triggered from, not what they do.
+
+## Tests
+
+- Property with a long name (e.g. "Villas at the Boulders") renders the `<h1>` on a single line at desktop width — no wrap.
+- Stat pills render correctly for 0/1/many controllers and zones (singular/plural unchanged).
+- "Updated by" line appears below the divider only when `lastUpdated` is present; absent for a brand-new property with no history.
+- Report dropdown: "Generate report" and "Send report" both fire their existing handlers; each independently shows its own loading spinner and is disabled while `controllers.length === 0`.
+- More dropdown: only rendered when `canImport` is true (field_tech/billing_manager see no More button, matching today's Export/Import gating); "Export CSV" and "Import CSV" fire their existing handlers unchanged.
+- Add Controller button behavior (gate, disabled state, click) is a pure regression check — unchanged from today.
+- No visual regression on the rest of the page (controller grid, add-controller form, CSV import modal) — this slice only touches the header `<Card>`.
+
+## Acceptance checklist
+
+- [ ] Title never wraps for realistic property name lengths at desktop width.
+- [ ] Button row shows at most 3 controls (Add Controller, Report, More) instead of 5.
+- [ ] Report and More dropdowns preserve every existing handler, loading state, and permission gate — nothing regresses, only the trigger surface changes.
+- [ ] Stats render as pills; "Updated by" moves to its own divided line at the bottom of the card.
+- [ ] No change to `max-w-4xl` or any other page-level layout outside the header card.
+
+## Out of scope
+
+- Widening the page container or redesigning the controller grid below the header — not needed for this fix, and a separate visual decision if Randy wants it later.
+- Changing what any action actually does (report generation, CSV export/import logic) — trigger relocation only.
+- Sidebar/nav styling, or any other page in the app — this is scoped to the Irrigation Profile header only.

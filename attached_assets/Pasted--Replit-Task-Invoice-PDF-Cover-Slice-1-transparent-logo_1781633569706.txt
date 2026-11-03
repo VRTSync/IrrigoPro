@@ -1,0 +1,171 @@
+# Replit Task — Invoice PDF Cover, Slice 1 (transparent logo tile + fit page-1 content)
+
+Two cosmetic bugs on **page 1** of the Irrigation Billing Detail packet,
+both confined to `coverPage()` + `buildFullCSS` in
+`artifacts/api-server/src/pdf-helpers.ts`. No schema, route, or data
+changes. Verified against the High Plains export "Legends at Hunter's
+Glen – Irrigation Billing Detail (5-1-26_5-31-26)", Invoice #50027.
+
+> **Heads-up on line numbers.** The iCloud checkout may be a few commits
+> behind the deployed PDF. **Grep by class name** (`.cover-logo-tile`,
+> `.cover-howto`, `.cover-page`); do not trust absolute line numbers in
+> this doc.
+
+---
+
+## Bug 1 — White box behind the (already-white) logo
+
+The company logo High Plains uploaded is **already a white, transparent
+PNG**. On the navy brand band it currently sits inside a **white tile**
+(`.cover-logo-tile { background: white }`), so a white logo on a white
+square is effectively invisible — only a faint outline shows. Randy wants
+**just the logo on the navy band, transparent background, no box at all.**
+
+### Fix
+
+In `buildFullCSS`, the populated logo tile must be transparent — drop the
+white fill, the rounded box, and the clip:
+
+```css
+.cover-logo-tile {
+  width: 96px;
+  height: 96px;
+  background: transparent;   /* was: white */
+  border-radius: 0;          /* was: 8px — no box */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  /* drop `overflow: hidden;` — no box to clip to anymore */
+}
+```
+
+`.cover-logo` itself is unchanged (`max-width/height:100%; object-fit:
+contain`) — the white PNG now renders directly on the navy band.
+
+**Keep the empty-state fallback visible.** `.cover-logo-tile-empty` (the
+"H" initial shown when *no* logo is uploaded) must NOT inherit the
+transparent change, or a navy initial would vanish on the navy band.
+Either scope the transparent rule to the populated tile only, or give the
+empty tile its own contrasting treatment, e.g.:
+
+```css
+.cover-logo-tile-empty {
+  background: rgba(255,255,255,0.15);  /* faint plate so the initial reads on navy */
+  border-radius: 8px;
+  font-size: 42px;
+  font-weight: 800;
+  color: white;                         /* was: ${navy} — must contrast the band */
+}
+```
+
+The cleanest implementation is to move the white-box properties OUT of the
+shared `.cover-logo-tile` and onto `.cover-logo-tile-empty` only, leaving
+`.cover-logo-tile` as a bare transparent flex box. The markup in
+`coverPage()` (`cover-logo-tile` vs `cover-logo-tile cover-logo-tile-empty`)
+does not need to change.
+
+---
+
+## Bug 2 — Page-1 content overflows and the bottom gets clipped
+
+On the High Plains export the **"How to Review"** paragraph is cut off
+mid-sentence ("…turn to the **Billing Sheet Detail** pages for full
+technician notes and parts" — then nothing). The cover is meant to be a
+single self-contained page, but the stacked blocks now exceed the printable
+A4 height and `.cover-page { overflow: hidden }` hard-clips the remainder.
+
+The cover stack is: brand band → title block → invoice-total card →
+stat grid → "What's Included" → "How to Review", separated by a **28px
+gap** with generous block paddings. That total exceeds one A4 page, so the
+last block clips.
+
+### Fix — tighten the cover to fit one page (do NOT let it spill to page 2)
+
+This is a one-page executive cover by design; the answer is to make the
+content fit, not to allow a page break. Reduce vertical spend until the
+"How to Review" block renders complete with comfortable bottom margin.
+Recommended trims (tune to fit — these are the levers, exact px can flex):
+
+```css
+.cover-page {
+  gap: 18px;            /* was 28px — biggest single win across ~5 gaps */
+  padding: 24px 0 28px; /* was 32px 0 40px */
+}
+
+.cover-total-card {
+  padding: 20px 28px;   /* was 28px 32px */
+}
+.cover-total-card-amount {
+  font-size: 40px;      /* was 48px */
+  margin-bottom: 12px;  /* was 16px */
+}
+
+.cover-stat        { padding: 14px 16px; }   /* was 18px 16px */
+.cover-stat-count  { font-size: 30px; }      /* was 36px */
+
+.cover-included    { padding: 14px 22px; }   /* was 18px 22px */
+.cover-howto       { padding: 14px 22px; }   /* was 18px 22px */
+.cover-included-list { gap: 5px; }           /* was 6px */
+```
+
+Guidance for whoever implements: trim from `gap` and the block paddings
+first (they're the cheapest, least visible changes), then font sizes only
+if still short. The brand band, title block, and the dollar figures should
+stay legible and prominent — don't shrink the `$3,145.28` total or the
+section headings into illegibility to save a few pixels.
+
+**Do not** simply delete a block to make it fit, and **do not** remove
+`page-break-after: always` / introduce a second cover page — the cover must
+remain exactly one page that ends cleanly after "How to Review."
+
+Keep `overflow: hidden` (it crops the corner watermark). It's the symptom,
+not the cause — once the content fits, nothing gets clipped.
+
+---
+
+## Done looks like
+
+- Page 1 brand band shows the white High Plains logo directly on the navy
+  band with **no white box** behind it; the logo is clearly visible.
+- With **no** logo uploaded, the "H" initial fallback still reads clearly
+  on the navy band (light plate + white initial), unchanged behavior
+  otherwise.
+- The "How to Review" paragraph renders **complete** ("…notes and parts
+  used on each visit… before your payment due date.") with a sensible
+  bottom margin — nothing clipped.
+- The cover is still exactly **one page**; page 2+ unchanged.
+- All figures and copy unchanged; this is layout/CSS only.
+- `pnpm typecheck` and `pnpm test` pass.
+
+## Tests (extend the cover test suite — `pdf-cover-header.test.ts`)
+
+```typescript
+it("renders the logo tile without a white background", () => {
+  const html = coverPage(vmWith({
+    company: { logoDataUri: 'data:image/png;base64,AAA', name: 'High Plains' },
+  }));
+  // populated tile present, empty fallback absent
+  expect(html).toContain('data:image/png;base64,AAA');
+  expect(html).not.toContain('cover-logo-tile-empty');
+});
+
+it("keeps the initial-fallback tile when no logo is set", () => {
+  const html = coverPage(vmWith({ company: { name: 'High Plains' } })); // no logoDataUri
+  expect(html).toContain('cover-logo-tile-empty');
+});
+```
+
+CSS values aren't easily asserted in unit tests; verify the transparent
+box and the one-page fit by **re-exporting the Legends at Hunter's Glen
+invoice and eyeballing page 1** (logo visible, no box, "How to Review"
+complete). Note that in the CSS string you can still assert the tile rule
+no longer contains `background: white` for the populated class if the
+white-box props are moved onto `.cover-logo-tile-empty`.
+
+## Out of scope
+
+- Any data, totals, schema, route, or logo-upload/storage changes.
+- The droplet watermark, footer ("Powered by"), or page 2+ layout.
+- Adding a separate inverse/dark-mode logo field — not needed; the
+  uploaded logo is already white.

@@ -1,0 +1,41 @@
+# DB Migrations Page — Fix Frontend `apiRequest` Misuse (the real "Failed to load" cause)
+
+**What & Why**
+The super-admin **DB Migrations** page still shows **"Failed to load migrations"** even though the backend fix (Task #1448, per-migration `check()` try/catch) is committed *and* published. That's because #1448 fixed the wrong layer — the actual failure is in the **frontend** API calls.
+
+This page (and `MigrationRunner`) use the **wrong `apiRequest` convention** — the exact bug already fixed on the reconciliation page:
+- Real signature: `apiRequest(url, method = "GET", data?)`, and it **returns parsed JSON** (calls `.json()` internally) and **throws on a non-OK status**. It does **not** return a `fetch` Response.
+- The migrations code calls it as `apiRequest("GET", url)` (arguments swapped) and then calls `.json()` on the result.
+
+So every call fetches a URL of literally `"GET"`/`"POST"` with the real URL as the HTTP method, and even if that worked, `.json()` on an already-parsed value throws. The list query rejects → "Failed to load migrations," and the run/preview/status calls would fail too. The fix never reaches the (now-correct) backend.
+
+Single small frontend slice. No backend change (the #1448 try/catch is correct — keep it).
+
+**Affected call sites:**
+- `pages/admin/migrations.tsx:34` (preview), `:35` `.json()`
+- `pages/admin/migrations.tsx:157` (list), `:158` `.json()`
+- `components/admin/MigrationRunner.tsx:39` (run), `:40` `.json()`, `:45` (status poll)
+
+## Done looks like
+- The DB Migrations page loads for the super admin and lists the registered migrations.
+- Preview, Run, and the status poll all work.
+- No code treats an `apiRequest` return as a `fetch` Response.
+
+## Steps
+1. **Fix the list** (`migrations.tsx` ~155–158): `return await apiRequest("/api/admin/migrations", "GET");` — drop the `.json()` (the result is already the parsed array).
+2. **Fix the preview** (~32–35): `return await apiRequest(\`/api/admin/migrations/${migrationId}/preview\`, "GET");` — drop `.json()`.
+3. **Fix the run + status poll** (`MigrationRunner.tsx` ~39, ~45): `const data = await apiRequest(\`/api/admin/migrations/${migrationId}/run\`, "POST")` (and `apiRequest(\`…/status?jobId=…\`, "GET")`) — use the returned parsed JSON directly; remove `.json()`. Pass any body as the 3rd arg.
+4. Sweep the two files for any remaining `apiRequest(method, url)` ordering or `.json()`/`.ok` on an `apiRequest` return.
+
+## Tests
+- The page loads and renders the migration list (including the "Reconcile billing-sheet / invoice totals" row).
+- Preview returns data; Run starts a job and the status poll updates; no `.json()`-on-parsed errors.
+- A migration whose `check()` errors shows its error row (the #1448 backend isolation) instead of blanking the page.
+
+## Note (separate, lower priority)
+Once the page loads, the **work-order-zones** migration row may show an *error* status if its `work_order_items` zone columns (#1437) aren't applied in this environment — that's the #1448 isolation working as intended, and it does **not** block the reconcile migration. Apply the #1437 schema push when convenient; it's not required to load the page or run the reconcile.
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/admin/migrations.tsx`
+- `artifacts/irrigopro/src/components/admin/MigrationRunner.tsx`
+- `artifacts/irrigopro/src/lib/queryClient.ts` (reference: `apiRequest(url, method, data)` → parsed JSON, throws on error)

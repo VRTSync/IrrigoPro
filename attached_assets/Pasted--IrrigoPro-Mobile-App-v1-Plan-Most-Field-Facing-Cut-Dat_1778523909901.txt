@@ -1,0 +1,503 @@
+# IrrigoPro Mobile App — v1 Plan (Most Field-Facing Cut)
+
+**Date:** 2026-05-11
+**Owner:** Randy
+**Target package:** `artifacts/irrigopro-mobile/` (existing Expo scaffold)
+**Build environment:** Replit (this repl)
+**Status:** Planning — not yet started
+
+---
+
+## 1. What this is
+
+A native mobile app for IrrigoPro field technicians. v1 is the "most field-facing" cut — the absolute minimum to let a tech show up at a property, do the job on their phone, and have it land cleanly in the office workflow on the web app.
+
+v1 is **not** for managers, admins, or billing staff. They keep using the web app. The web app continues to be the source of truth and the only place wet checks/work orders/billing sheets get reviewed, approved, and pushed to QuickBooks.
+
+## 2. v1 scope
+
+Three workflows, in this order of priority:
+
+1. **Work orders** — tech sees their assigned work orders for today, opens one, sees customer/address/access notes, starts/completes the job, adds a work summary.
+2. **Wet checks** — tech runs through controllers and zones, marks zone status, captures findings, attaches photos. Submits when done. (This is the densest UI surface.)
+3. **Onsite billing sheets** — tech creates or edits a billing sheet attached to a completed work order: hours, work description, parts used, photos. Submits for manager review.
+
+Out of scope for v1: estimates, customer signup, schedule editing, admin tools, parts catalog management, manager review/approval, invoicing, QuickBooks sync.
+
+## 3. Decisions made
+
+| Decision | Choice | Reason |
+| --- | --- | --- |
+| Platform | Expo / React Native (continue existing scaffold) | Real camera, GPS, offline storage, push later. Scaffold already in `artifacts/irrigopro-mobile/` with expo-router 6, SDK 54, expo-image-picker, expo-location, expo-haptics. |
+| Offline | Offline-tolerant (not full offline-first) | Tech can load assignments online, complete a wet check fully offline, sync when signal returns. Conflict policy: last-writer-wins on simple fields; mutations are idempotent via `clientId`. |
+| Auth | Token-based mobile auth, stored in SecureStore | Existing session-cookie auth is brittle for mobile (cookie lifetime, no refresh). Long-lived bearer token lets techs stay signed in for weeks. |
+| Role | Field tech only | Single role keeps UI tight and authz logic simple. |
+
+## 4. What already exists in the codebase that helps
+
+- **`artifacts/irrigopro-mobile/`** — Expo SDK 54, expo-router 6, expo-image-picker, expo-location, expo-haptics, React Query, Zod, @tanstack/react-query already wired in. Currently just boilerplate (one tab screen, error boundaries).
+- **`@workspace/api-client-react`** — already a workspace dep of the mobile package; the API client layer is reusable.
+- **`clientId` columns** in `wet_checks`, `wet_check_zone_records`, `wet_check_findings`, `wet_check_photos` — with unique partial indexes. **This means the schema is already designed for client-generated IDs / idempotent retries**, which is exactly what we need for offline sync. Big head start.
+- **Existing wet check API surface** at `routes.ts:11607–12400` covers everything the mobile flow needs (list, detail, zone records, findings, photos, submit).
+- **Slice 7 work** already hardened the *web* wet check UI for phones — that page is a strong reference for what the native screen needs to do.
+
+## 5. Architecture
+
+### 5.1 API + auth changes
+
+Two new endpoints. Both can ship as a small slice before the mobile app proper.
+
+```
+POST /api/auth/mobile-login
+  body: { username, password, deviceName? }
+  resp: { token, user, expiresAt }
+
+POST /api/auth/mobile-logout
+  header: Authorization: Bearer <token>
+  resp: { ok: true }
+```
+
+Token format: opaque random 32-byte hex stored in a new `mobile_tokens` table:
+
+```
+mobile_tokens (
+  id, user_id, token_hash, device_name,
+  last_used_at, created_at, expires_at, revoked_at
+)
+```
+
+Tokens are hashed at rest (sha256). Default expiry 90 days, sliding window — every authenticated request bumps `last_used_at`.
+
+Update `requireAuthentication` (currently `routes.ts:560`) to recognise a third auth path **before** the existing session check: if `Authorization: Bearer <token>` is present, look up the hashed token, load the user, set `userId/userRole/userCompanyId` on the request.
+
+> Security note worth flagging while we're in there: `requireAuthentication` currently accepts `x-user-id`/`x-user-role` headers with no signature verification — those should be removed or restricted to non-production environments as part of this slice. Adding bearer-token verification is the natural moment to lock that down.
+
+### 5.2 Mobile API client
+
+The web app uses a direct `apiRequest`/`queryClient` fetch layer (per `replit.md`). Mobile should mirror that pattern, but with three additions:
+
+1. **Auth header injection** — attach `Authorization: Bearer <token>` from SecureStore on every request.
+2. **401 handler** — clear token, route to sign-in.
+3. **Mutation queue interceptor** — if a mutation fails with a network error (not 4xx/5xx), enqueue it to the offline queue and resolve optimistically.
+
+### 5.3 Offline-tolerant data layer
+
+**What gets cached locally (read-side):**
+
+- Current user + token (SecureStore)
+- Today's assigned work orders (last-fetched JSON in AsyncStorage)
+- Open wet checks for those work orders
+- Parts catalog (small, low-churn, fetched on first login then refreshed daily)
+- Photos taken locally (filesystem, not AsyncStorage)
+
+**What gets queued (write-side):**
+
+Every mutation the tech can make goes through a queue table in AsyncStorage with this shape:
+
+```
+{
+  id: uuid,                    // local id, also clientId on the wire
+  endpoint: "POST /api/wet-checks/:id/zone-records",
+  body: { ... },
+  attachedPhotoUris: [...],    // local file:// uris, uploaded as multipart
+  status: "pending" | "syncing" | "synced" | "failed",
+  attempts: number,
+  lastError?: string,
+  createdAt: timestamp,
+}
+```
+
+**Sync engine** runs on three triggers:
+1. App returns to foreground (`AppState.addEventListener('change')`)
+2. Network restores (`NetInfo`)
+3. Manual pull-to-refresh on Today screen
+
+The engine drains the queue serially per-resource (so zone-record creates happen before findings that depend on them). All mutations carry `clientId` — server is already idempotent on these.
+
+**Conflict policy for v1:** last-writer-wins on plain fields. If the server returns 409 (someone else edited it on the web), surface a banner ("This wet check was edited in the office — refresh to see latest") and let the tech overwrite or back out. We can refine later; for v1 this is rare in practice because field and office work on disjoint records.
+
+**Photos** are special: capture writes a JPEG to the app's documents directory and inserts a queue entry with `attachedPhotoUris`. The uploader does a multipart POST per photo, then deletes the local file on success. Photos are also rendered locally (from the file:// uri) until upload succeeds, so the tech sees instant feedback.
+
+### 5.4 State management
+
+- **React Query** for server state (already in the scaffold). Cache time long, refetch on focus.
+- **AsyncStorage** for the offline queue and cached lists.
+- **Expo SecureStore** for the auth token only.
+- **expo-image-picker + expo-camera** for photos.
+- **expo-location** for capturing lat/lng on billing sheets (`work_location_lat`/`work_location_lng` columns already exist).
+
+## 6. Screens (expo-router structure)
+
+```
+app/
+  _layout.tsx                     # Root: auth gate, query provider, sync engine boot
+  sign-in.tsx                     # Username + password → POST /api/auth/mobile-login
+  (tabs)/
+    _layout.tsx                   # Bottom tabs: Today / Wet Checks / Profile
+    index.tsx                     # Today — assigned work orders for today
+    wet-checks.tsx                # All my open wet checks (across work orders)
+    profile.tsx                   # User info, sign out, app version, sync status
+  work-order/
+    [id].tsx                      # Work order detail: customer, address, status, start/complete
+    [id]/billing-sheet.tsx        # Create/edit the billing sheet for this work order
+  wet-check/
+    [id].tsx                      # Wet check detail: zone grid, findings, photos
+    [id]/zone/[zoneRecordId].tsx  # Single zone: status + findings + photo capture
+```
+
+### Screen detail (just the must-haves)
+
+**Today** — top of screen shows sync status pill (green "synced", yellow "N pending", red "no signal"). Body is a list of cards per work order: customer name, project name, address, scheduled time, status. Tap to open.
+
+**Work Order detail** — header with customer/address/phone (tap-to-call), access instructions, special instructions. Big primary button changes by status: "Start Work" → "Add Wet Check" / "Add Billing Sheet" → "Mark Complete". Footer shows attached wet checks and billing sheets as sub-rows.
+
+**Wet Check detail** — mirrors the responsive web layout from Slice 7: status chip row, zone grid (5 cols on phone), per-zone status. Tap a zone to drill into zone detail.
+
+**Zone detail** — radio buttons for zone status (working / not working / partial / etc.), findings list (each finding = issue type + parts + labor), photo strip with "Add photo" button. Photos open the native camera via expo-image-picker.
+
+**Billing Sheet edit** — totalHours field, work description (multi-line), parts list (add from a searchable parts picker pulled from the cached parts catalog), photo strip, "Submit for review" button.
+
+**Sign-in** — username + password, optional "Remember this device" checkbox (controls token expiry).
+
+## 7. Milestone plan (Replit-friendly slice sequence)
+
+Each slice is independently shippable and PR-sized. Roughly the cadence the team is already using (cf. "Slice 7").
+
+- **Slice M1 — Mobile auth backend.** New `mobile_tokens` table, `/api/auth/mobile-login`, `/api/auth/mobile-logout`, bearer-token path in `requireAuthentication`. Remove or env-gate the header-based auth bypass. Web app untouched.
+- **Slice M2 — Sign-in + Today screen, online-only.** Replace the boilerplate screen with sign-in, token storage, root layout auth gate, Today screen reading from `/api/work-orders?assignedTechnicianId=me&date=today`.
+- **Slice M3 — Work Order detail + start/complete.** Read-only first, then add the start/complete mutations. Online-only still.
+- **Slice M4 — Wet Check read.** List + detail screens with zone grid, photo viewing. No editing yet.
+- **Slice M5 — Wet Check write (zones + findings, online-only).** Mutations go straight to the API. Validates the screens before we add the offline layer underneath.
+- **Slice M6 — Photo capture.** expo-image-picker, multipart upload, local rendering.
+- **Slice M7 — Billing Sheet edit.** Create + edit + submit. Parts picker against cached catalog.
+- **Slice M8 — Offline queue + sync engine.** This is the big one: wrap M5/M6/M7 mutations in the queue, build the foreground/network/manual sync drains, wire the sync-status pill.
+- **Slice M9 — Polish + TestFlight build.** Loading states, empty states, error toasts, haptics on submit, EAS Build config, internal TestFlight + Play Console internal track.
+
+A first usable build for one friendly tech could land after M5 or M6 if we accept online-only initially; full v1 lands at M9.
+
+## 8. Open questions to settle before M1
+
+1. **Existing scaffold's `server/` folder.** The mobile package has a `server/serve.js` and `scripts/build.js` — looks like it's set up to serve a static web build. Is that intentional (web preview of the RN app in Replit)? If so, M9 needs to keep that working alongside the native build.
+2. **Who is the pilot tech?** v1 only earns its keep once one real tech is using it on real jobs. Picking the pilot now lets us tune to their phone, signal patterns, and the specific work types they run.
+3. **Photo storage.** Where do photos land server-side today? The wet-check photos table stores `url: text`. If that's S3/R2/etc., the mobile multipart endpoint needs to mirror whatever the web upload uses. Worth a quick trace before M6.
+4. **Push notifications.** Not in v1 scope, but useful soon ("you've been assigned a new work order"). Expo push tokens should probably be captured on sign-in starting at M1 so we have the data when we want it, even if we don't send anything yet.
+5. **App icon + branding.** Need final assets before any TestFlight build. Marketing-site standalone may have what we need.
+6. **iOS vs Android first.** TestFlight is faster than Play internal for the pilot. Default plan: iOS first via Expo EAS, Android close behind.
+
+## 9. Risks and how we'd handle them
+
+- **`routes.ts` is a 12.5k-line monolith.** Adding the bearer-token path and one new table is low risk, but anything more invasive should be a separate slice. Don't touch existing routes from mobile work.
+- **Offline queue correctness.** This is the part most likely to bite us. Mitigation: lean hard on the existing `clientId` idempotency, keep the queue serial per-resource, and put a "force resync" button in Profile from day one so a tech can recover without us.
+- **Photo upload over slow LTE.** Compress photos client-side before upload (expo-image already supports this), and never block the UI on upload — the queue handles it.
+- **Schema drift from web app.** `@shared/schema` in the web app is already a hand-copied mirror per `replit.md`. Mobile should depend on the same source-of-truth (`lib/db/src/schema/`) via the workspace, not re-copy types.
+
+## 10. Suggested next step
+
+Start with **Slice M1 (mobile auth backend)** as a standalone PR. It unblocks everything else, is self-contained on the API side, and lets us also tidy the header-auth bypass at the same time. Once M1 is merged, M2 (sign-in + Today screen) can land within a day or two of focused work in Replit.
+
+---
+
+# Slice M1 — Mobile Auth Backend
+
+**Date:** 2026-05-11
+**Status:** Ready for implementation
+**Files touched:**
+- `lib/db/src/schema/schema.ts` — new `mobile_tokens` table
+- `artifacts/api-server/src/routes/routes.ts` — two new endpoints + one middleware change
+- `artifacts/api-server/src/storage.ts` — new storage helpers for tokens
+**Risk:** Medium — modifies `requireAuthentication`, which fronts every authenticated route. Mitigations: the bearer-token path is purely additive (existing session and header paths are preserved); the header-bypass tightening is env-gated and reversible.
+
+## Problem statement
+
+The mobile app needs a way to authenticate that doesn't rely on session cookies (which are awkward to manage on a phone, expire frequently, and don't survive app restarts cleanly). Today the API offers two auth paths:
+
+1. **Session cookies** (`req.session.userId`) — production-correct but mobile-unfriendly.
+2. **`x-user-id` / `x-user-role` headers** — unsigned, unverified, anyone-can-impersonate-anyone. Originally there for dev/PDF use; in production it's a hole.
+
+This slice adds a third path — long-lived bearer tokens stored hashed in the DB — and closes the header hole in production. Web app behavior is unchanged.
+
+## M1.1 — New `mobile_tokens` table
+
+**File:** `lib/db/src/schema/schema.ts`
+
+Append this block immediately before the `appSettings` table at the bottom of the file (so it lives near the other infrastructure tables):
+
+```ts
+// Long-lived auth tokens for the mobile app. Tokens are stored hashed
+// (sha256) — the raw token is only ever returned to the client once at
+// login time. expiresAt is a sliding window: lastUsedAt is bumped on
+// every authenticated request, and the server may extend expiresAt
+// when it sees recent activity.
+export const mobileTokens = pgTable("mobile_tokens", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  deviceName: text("device_name"),
+  lastUsedAt: timestamp("last_used_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  revokedAt: timestamp("revoked_at"),
+}, (table) => ({
+  userIdx: index("idx_mobile_tokens_user").on(table.userId),
+  // Quickly find active tokens for a user (logout-all, revocation)
+  activeIdx: index("idx_mobile_tokens_active").on(table.userId, table.revokedAt),
+}));
+
+export const insertMobileTokenSchema = createInsertSchema(mobileTokens).omit({
+  id: true, createdAt: true, lastUsedAt: true,
+});
+export type InsertMobileToken = z.infer<typeof insertMobileTokenSchema>;
+export type MobileToken = typeof mobileTokens.$inferSelect;
+```
+
+## M1.2 — Storage helpers
+
+**File:** `artifacts/api-server/src/storage.ts`
+
+Add four helpers (signatures shown — implementation is a straight drizzle pass-through, matching the patterns already in this file):
+
+```ts
+createMobileToken(input: { userId: number; tokenHash: string; deviceName?: string; expiresAt: Date }): Promise<MobileToken>;
+
+// Returns the row only if not revoked AND not expired. Also bumps lastUsedAt as a side effect.
+getActiveMobileTokenByHash(tokenHash: string): Promise<MobileToken | null>;
+
+revokeMobileToken(tokenHash: string): Promise<void>;
+
+// Used by future "sign out all devices" feature; not wired to a route in M1.
+revokeAllMobileTokensForUser(userId: number): Promise<void>;
+```
+
+Implementation note for `getActiveMobileTokenByHash`: do the lookup and the `lastUsedAt` bump in a single transaction so a revoked token can't slip through under contention.
+
+## M1.3 — `/api/auth/mobile-login`
+
+**File:** `artifacts/api-server/src/routes/routes.ts`
+**Where:** Insert immediately after the `/api/auth/login` handler closes (~line 1695, right before the `/api/auth/forgot-password` block).
+
+```ts
+// Mobile-friendly login: returns a long-lived bearer token instead of
+// setting a session cookie. Same credential checks as /api/auth/login.
+app.post("/api/auth/mobile-login", async (req, res) => {
+  try {
+    const { username, password, deviceName } = req.body ?? {};
+    if (typeof username !== "string" || typeof password !== "string") {
+      return res.status(400).json({ message: "username and password are required" });
+    }
+
+    const user = await storage.getUserByUsername(username);
+    if (!user || !user.isActive) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    const passwordValid = await bcrypt.compare(password, user.password);
+    if (!passwordValid) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    if (user.email && !user.emailVerified) {
+      return res.status(403).json({
+        message: "Email verification required",
+        requiresVerification: true,
+        email: user.email,
+      });
+    }
+
+    // v1: mobile is field-tech only. Block other roles at the door so
+    // a leaked token can't be used to hit admin endpoints from a phone.
+    // (Server-side authz on each endpoint is still the real gate; this
+    // is a belt-and-suspenders check.)
+    const ALLOWED_MOBILE_ROLES = new Set(["field_tech", "irrigation_manager"]);
+    if (!ALLOWED_MOBILE_ROLES.has(user.role)) {
+      return res.status(403).json({ message: "Mobile access not enabled for this role" });
+    }
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+    const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000); // 90 days
+
+    await storage.createMobileToken({
+      userId: user.id,
+      tokenHash,
+      deviceName: typeof deviceName === "string" ? deviceName.slice(0, 100) : undefined,
+      expiresAt,
+    });
+
+    const { password: _, mfaSecret: _m, mfaBackupCodes: _b, passwordResetToken: _r, emailVerificationToken: _v, ...safeUser } = user;
+
+    res.json({
+      token: rawToken,
+      expiresAt: expiresAt.toISOString(),
+      user: safeUser,
+    });
+  } catch (error) {
+    console.error("Mobile login error:", error);
+    res.status(500).json({ message: "Login failed" });
+  }
+});
+```
+
+## M1.4 — `/api/auth/mobile-logout`
+
+Insert directly below the login handler:
+
+```ts
+// Revokes the bearer token used to make this call. Idempotent: returns
+// 200 even if the token was already revoked or never existed, so the
+// client can fire-and-forget at sign-out time.
+app.post("/api/auth/mobile-logout", async (req, res) => {
+  try {
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith("Bearer ")) {
+      return res.json({ ok: true });
+    }
+    const rawToken = auth.slice("Bearer ".length).trim();
+    if (rawToken) {
+      const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+      await storage.revokeMobileToken(tokenHash);
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Mobile logout error:", error);
+    res.status(500).json({ message: "Logout failed" });
+  }
+});
+```
+
+## M1.5 — `requireAuthentication`: add bearer-token path
+
+**File:** `artifacts/api-server/src/routes/routes.ts` (~line 560)
+
+The bearer-token check goes **first**, before the existing header path, so an attacker can't strip the bearer header and fall through to the unsigned `x-user-id` path. The session and header paths are unchanged after this edit.
+
+```
+FIND:
+const requireAuthentication = async (req: any, res: any, next: any) => {
+  try {
+    // Get authenticated user ID and role from headers
+    let userId = req.headers['x-user-id'];
+    let userRole = req.headers['x-user-role'];
+    let userCompanyId = req.headers['x-user-company-id'];
+
+REPLACE:
+const requireAuthentication = async (req: any, res: any, next: any) => {
+  try {
+    let userId: any;
+    let userRole: any;
+    let userCompanyId: any;
+
+    // 1. Bearer token (mobile app) — checked first so it can't be bypassed
+    //    by stripping the Authorization header and falling through to the
+    //    unsigned x-user-id path.
+    const auth = req.headers.authorization;
+    if (typeof auth === "string" && auth.startsWith("Bearer ")) {
+      const rawToken = auth.slice("Bearer ".length).trim();
+      if (rawToken) {
+        const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+        const token = await storage.getActiveMobileTokenByHash(tokenHash);
+        if (token) {
+          const user = await storage.getUser(token.userId);
+          if (user && user.isActive) {
+            userId = user.id;
+            userRole = user.role;
+            userCompanyId = user.companyId;
+          }
+        }
+        if (!userId) {
+          return res.status(401).json({ message: "Invalid or expired token" });
+        }
+      }
+    }
+
+    // 2. Header-based identity (legacy / dev only — see M1.6 for env gating)
+    if (!userId) {
+      userId = req.headers['x-user-id'];
+      userRole = req.headers['x-user-role'];
+      userCompanyId = req.headers['x-user-company-id'];
+    }
+```
+
+The rest of the middleware (session path, query-param fallback, the `parsedUserId` check, the `req.authenticatedUserId` assignment, the catch block) stays exactly as-is.
+
+## M1.6 — Env-gate the header bypass
+
+Still inside `requireAuthentication`, immediately after the block added in M1.5, gate the legacy header path so it can't be used in production:
+
+```
+FIND (the new block added in M1.5):
+    // 2. Header-based identity (legacy / dev only — see M1.6 for env gating)
+    if (!userId) {
+      userId = req.headers['x-user-id'];
+      userRole = req.headers['x-user-role'];
+      userCompanyId = req.headers['x-user-company-id'];
+    }
+
+REPLACE:
+    // 2. Header-based identity (legacy / dev only). Disabled in production
+    //    unless explicitly re-enabled via ALLOW_HEADER_AUTH=1, which exists
+    //    as an escape hatch for the PDF-in-new-tab flow until that's ported
+    //    to signed URLs.
+    const headerAuthAllowed =
+      process.env.NODE_ENV !== "production" ||
+      process.env.ALLOW_HEADER_AUTH === "1";
+    if (!userId && headerAuthAllowed) {
+      userId = req.headers['x-user-id'];
+      userRole = req.headers['x-user-role'];
+      userCompanyId = req.headers['x-user-company-id'];
+    }
+```
+
+Before merge, confirm via search that no production-critical path is silently relying on the header bypass:
+
+```
+grep -rn "x-user-id" artifacts/ --include="*.ts" --include="*.tsx"
+```
+
+If anything in the web frontend or external integrations sends `x-user-id` to a production deploy, that call site needs to be migrated to session auth (or a signed URL for the PDF case) before this slice can ship to prod. In staging, leave `ALLOW_HEADER_AUTH=1` set initially so the change is observable without breaking dev tools.
+
+## M1.7 — Push the schema
+
+```bash
+pnpm --filter @workspace/db run push
+```
+
+Verify the new table exists:
+
+```bash
+psql "$DATABASE_URL" -c "\d mobile_tokens"
+```
+
+Expected: 8 columns, two indexes (`idx_mobile_tokens_user`, `idx_mobile_tokens_active`), unique constraint on `token_hash`.
+
+## M1.8 — Test checklist
+
+Manual, via curl against the dev server (port 8080):
+
+1. **Happy path login** — `curl -X POST http://localhost:8080/api/auth/mobile-login -H 'Content-Type: application/json' -d '{"username":"<tech>","password":"<pw>","deviceName":"Randy iPhone"}'` → 200 with `{ token, expiresAt, user }`. Token is a 64-char hex string.
+2. **Authed request with bearer** — `curl http://localhost:8080/api/work-orders -H "Authorization: Bearer <token>"` → 200, returns work orders for that user. Confirms M1.5.
+3. **Bad password** — wrong password → 401, no token row written. Check DB.
+4. **Wrong role** — log in as `company_admin` → 403 "Mobile access not enabled for this role".
+5. **Logout** — `curl -X POST http://localhost:8080/api/auth/mobile-logout -H "Authorization: Bearer <token>"` → 200. Repeating the authed request from step 2 → 401 "Invalid or expired token".
+6. **Expired token** — manually update `expires_at` in the row to a past timestamp, retry step 2 → 401.
+7. **Header bypass still works in dev** — `curl http://localhost:8080/api/work-orders -H "x-user-id: 1" -H "x-user-role: super_admin" -H "x-user-company-id: 1"` → 200 (when `NODE_ENV !== production`).
+8. **Header bypass blocked in prod-mode** — set `NODE_ENV=production` and `ALLOW_HEADER_AUTH` unset, retry step 7 → 401.
+9. **Session auth still works** — log into the web app, hit an authed endpoint from the browser → 200. No regression for web users.
+10. **`lastUsedAt` bumps** — make an authed bearer request, check `select last_used_at from mobile_tokens where token_hash = '...'` updated within the last few seconds.
+
+## M1.9 — What this slice does *not* do
+
+Out of scope (intentional, deferred to later slices):
+
+- Token refresh / sliding expiry extension (90 days is plenty for the pilot).
+- "Sign out all devices" UI (storage helper exists; no route yet).
+- Rate limiting on `/api/auth/mobile-login` (worth adding before public TestFlight, but not blocking).
+- Push-notification token capture (will be folded into M2 sign-in flow).
+- Removing the `x-user-id` path entirely (env-gated for now; full removal happens once the PDF-in-new-tab flow is migrated to signed URLs).
+
+## M1.10 — Definition of done
+
+- `mobile_tokens` table exists in the dev DB.
+- All 10 test-checklist items pass.
+- `pnpm run typecheck` is clean.
+- `grep -rn "x-user-id" artifacts/` reviewed and any prod callers documented in the PR description.
+- PR description includes a note that `ALLOW_HEADER_AUTH=1` should be set in staging for the first deploy, then removed once we've confirmed nothing prod-critical depends on it.

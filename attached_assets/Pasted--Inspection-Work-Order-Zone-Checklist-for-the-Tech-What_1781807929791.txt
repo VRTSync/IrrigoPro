@@ -1,0 +1,82 @@
+# Inspection Work Order — Zone Checklist for the Tech
+
+**What & Why**
+An Inspection wet check → estimate → work order, but the zone-by-zone detail is **lost at the WO step**: `work_order_items` carry no controller/zone, and the estimate→WO conversion only copies the estimate *header's* single zone. So when the tech goes to do the approved work, he gets a flat parts list with no map back to the inspection he walked.
+
+This carries the zone detail all the way through and gives the tech a **simple, zone-grouped checklist**: the approved work, grouped by Controller → Zone, where he just **checks each item off as done**. Everything (parts, quantities, pricing, labor) was settled at the estimate — the tech adds nothing, he confirms.
+
+**Visual source of truth:** `work-order-tech-zone-checklist.html` (approved mockup).
+
+**Locked: pure check-off + per-zone photos.** No actuals/pricing/labor entry on the tech side — `actualQuantityUsed`/`actualLaborHours` stay equal to approved. The **one** thing the tech captures beyond checking off is **photos of the completed work, per zone**.
+
+Three slices: data carry-through, the tech checklist view, and a one-time backfill (run from `/admin/migrations`).
+
+---
+
+## Slice 1 — Carry zone detail + done state onto work order items
+
+### Files
+- `lib/db/src/schema/schema.ts` + migration — `work_order_items`.
+- `artifacts/api-server/src/storage.ts` — `createWorkOrderFromEstimate` / `approveEstimateAndCreateWorkOrder` (~3330–3475).
+
+### Concrete changes
+- **Schema** (all nullable, no backfill): add to `work_order_items`:
+  - `controllerLetter text`, `zoneNumber integer`, `issueType text` (zone context)
+  - `completedAt timestamp` (per-item done state; null = not done)
+- **Conversion carry-through:** when an estimate converts to a work order, copy each **estimate item's** `controllerLetter` / `zoneNumber` / `issueType` onto the corresponding new `work_order_item` (the estimate items carry this since #1385). Stop relying on the estimate header's single zone for inspection-origin items.
+- `originWetCheckId` already lands on the WO (inspection lineage) — no change.
+
+### Acceptance
+- A work order created from an inspection estimate has per-item controller/zone/issue and a null `completedAt`; totals/quantities unchanged.
+
+---
+
+## Slice 2 — Tech zone-checklist completion view
+
+### Files
+- `artifacts/irrigopro/src/components/work-orders/work-order-details.tsx` / `work-order-completion.tsx` (the tech view).
+- New endpoint to toggle item done state, e.g. `PATCH /api/work-orders/:id/items/:itemId/complete`.
+
+### Concrete changes
+- **Detect inspection-origin WOs** (items carry `controllerLetter`/`zoneNumber`, or `originWetCheckId` set) and render the **zone checklist** instead of the flat completion form. Other work orders keep their current flow.
+- **Layout** per the mockup: a "From inspection #N" chip + a progress bar ("X of Y done"); items grouped by Controller → Zone; each item a large tap target with a checkbox, the work in plain terms (verb + part + qty), and a struck-through done state. Per-zone done count + an optional "Mark whole zone done" shortcut.
+- **Check-off interaction:** tapping an item toggles `completedAt` (set now / clear) via the new endpoint; optimistic UI; the progress bar + zone counts update live. No prices, no part editing, no labor entry.
+- **Per-zone photos.** Each zone block has an "Add photo" affordance so the tech can attach photos of the completed work to that zone. Reuse the existing photo-upload infra (`ObjectUploader` / the object-storage path used by wet-check and WO photos). Store the photos associated with their **controller/zone** (the cleanest mirror is the wet-check pattern — `wet_check_photos` carries zone linkage; do the equivalent for WO zone photos, e.g. a tagged/structured store rather than the flat `work_orders.photos` array, so a photo knows its zone). Show a small per-zone photo count/thumbnails.
+- **Complete:** the "Complete work order" button enables when all items are done (or allow complete-with-remaining behind a confirm — pick the simplest; default: enabled only when 0 left). Completing routes through the existing WO completion flow (`/api/work-orders/complete`), unchanged downstream.
+- Respect existing locks (billed/invoiced → read-only).
+
+### Acceptance
+- An inspection-origin WO shows the zone checklist; checking items updates progress and persists; completing the WO works through the existing pipeline; non-inspection WOs are unaffected.
+
+---
+
+## Slice 3 — Backfill existing inspection-origin work orders (admin migration)
+
+Mirror the estimate backfill (#1409) and the reconcile migration — runnable by super admin from `/admin/migrations`.
+
+### Files
+- A reusable core (e.g. `backfill-work-order-zones-core.ts`) + a `MigrationDefinition` registered in `lib/migrations/registry.ts` (same pattern as the billing-sheet reconcile migration).
+
+### Concrete changes
+- **Select** work orders with `originWetCheckId IS NOT NULL` whose items lack `controllerLetter`/`zoneNumber`.
+- For each, re-derive per-item zone/issue from the source — preferably the **estimate items** (matched by part/qty), falling back to the wet-check findings via `originWetCheckId`. Stamp `controllerLetter`/`zoneNumber`/`issueType` onto the WO items. **Do not** change quantities, labor, totals, `completedAt`, or any recorded actuals.
+- **Preview** (read-only) lists which work orders + how many items would be stamped; **run** applies. Idempotent + resumable (`app_settings` done/failed keys). Surface via the admin migrations UI so Randy runs it himself.
+- Skip + report any WO whose items can't be confidently mapped to a source.
+
+### Acceptance
+- Existing inspection-origin work orders gain per-item zone data and render the checklist; nothing financial or in-progress is altered; re-running is a no-op.
+
+---
+
+## Out of scope
+- Actuals entry on the tech side (pure check-off; deferred).
+- Non-inspection work orders (flat flow retained).
+- Pricing/labor/total math (unchanged).
+- The estimate and snapshot zone work (already shipped).
+
+## Relevant files
+- `lib/db/src/schema/schema.ts` (`work_order_items` + migration)
+- `artifacts/api-server/src/storage.ts` (`createWorkOrderFromEstimate` ~3330–3475)
+- `artifacts/irrigopro/src/components/work-orders/work-order-details.tsx`, `work-order-completion.tsx`
+- `artifacts/api-server/src/lib/migrations/registry.ts` (+ new backfill core/definition)
+- Mockup: `work-order-tech-zone-checklist.html`; pattern reference: inspection estimate zone work (#1385/#1386), estimate backfill (#1409)

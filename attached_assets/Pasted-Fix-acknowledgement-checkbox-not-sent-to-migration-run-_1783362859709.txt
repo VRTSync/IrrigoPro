@@ -1,0 +1,20 @@
+Fix: acknowledgement checkbox not sent to migration run endpoint
+Bug: The "I understand the risks and wish to proceed" checkbox is checked in the UI, but the Run request never carries it, so every acknowledged-gated migration (repair-wo-items-from-source-v1, etc.) fail-fasts with "Migration not acknowledged" before any DB work. No data is written — it's purely a wiring bug.
+Root cause: artifacts/irrigopro/src/components/admin/MigrationRunner.tsx:39 calls the run endpoint with no request body:
+tsconst data = await apiRequest(`/api/admin/migrations/${migrationId}/run`, "POST") as { jobId: string };
+The backend reads const opts = { acknowledged: req.body?.acknowledged === true }; (admin-migrations-routes.ts:103) and the migration refuses to write unless acknowledged === true (repair-wo-items-from-source.ts:879). Body is undefined → acknowledged is false → immediate failed step.
+Fix:
+
+Send the acknowledgement in the run POST body, gated on the checkbox's checked state:
+
+tsconst data = await apiRequest(
+  `/api/admin/migrations/${migrationId}/run`,
+  "POST",
+  { acknowledged: true },
+) as { jobId: string };
+
+Plumb the actual checkbox state through. The "I understand the risks" checkbox lives in the preview panel, not in MigrationRunner — pass its checked value into startRun (e.g. startRun(acknowledged: boolean)), send { acknowledged }, and keep the Run Migration button disabled until the box is checked so the flag and the UI can never disagree.
+Surface failure reasons: when a run ends in failed, show the job's errorMessage (already stored on the job in admin-migrations-routes.ts) in the status panel — "Migration not acknowledged" would have made this obvious instead of a bare "failed."
+
+Verify: check the box → Preview still shows candidateWorkOrders: 8 → Run → the 3 clean WOs auto-repair to their estimate totals, the 5 divergent WOs stay flagged, and a genuine failure now shows its message.
+Separate (do not conflate): the API server EADDRINUSE port-conflict crash is a real deployment issue to fix, but it is not what failed this migration.

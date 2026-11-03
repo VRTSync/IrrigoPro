@@ -1,0 +1,59 @@
+# Irrigation Profile — Backflow Tracking
+
+**What & Why**
+Track each customer's **backflow preventers** — how many they have and each device's attributes — as a section in their Irrigation System profile, alongside Controllers. Because backflows require **annual certification testing** in most jurisdictions, include test/compliance tracking (last tested, next due, result) so due dates are visible and reportable.
+
+**Confirmed decisions:** a **Backflows section inside the Irrigation System profile**; **attributes + test/compliance tracking**; capture **brand, model, size, type, serial #, location, install date, photo, notes**. Company-scoped (Rule 1). VRTSync-ready (external id) per the VRTSync design note. Single canonical store (no legacy duplication).
+
+**Visual reference:** `backflow-tracking-mockup.html`.
+
+## Slice 1 — Schema
+### File: `lib/db/src/schema/schema.ts` + migration
+New **`irrigation_backflows`** table:
+- `id, companyId (FK, NOT NULL), customerId (FK), branchName (text NOT NULL default '')` — same tenancy/branch model as `irrigation_controllers`.
+- Attributes: `name (label), brand, model, size, deviceType (enum: rpz | double_check | pvb | spill_resistant_pvb | other), serialNumber, location, installDate (date), photoUrl (nullable), notes`.
+- Test/compliance: `lastTestedDate (date), nextTestDueDate (date), lastTestResult (enum: pass | fail | null), lastTestedBy (text)`.
+- `isActive (default true), vrtSyncId (external id, nullable — for VRTSync match-and-update), lastUpdatedByUserId, lastUpdatedByName, lastUpdatedAt, createdAt, updatedAt`.
+- Index by `(companyId, customerId, branchName)`; optional uniqueness on `(companyId, serialNumber)` where serial present.
+- (Optional, if per-test history is wanted later) a `backflow_tests` child table — **out of scope for now**; the current model keeps the latest test on the device row plus a "Log test" action that updates it.
+
+## Slice 2 — API (canonical, company-scoped)
+### Files: extend `routes/irrigation-profile-routes.ts`, `storage.ts`
+- CRUD under the customer profile, mirroring the controller endpoints' auth/scoping:
+  - `GET /api/customers/:customerId/backflows` (list), `POST` (create)
+  - `PUT /api/backflows/:id`, `DELETE /api/backflows/:id`
+  - `POST /api/backflows/:id/log-test` — quick action: set `lastTestedDate` (today or provided), `lastTestResult`, `lastTestedBy`, and roll `nextTestDueDate` forward (default +1 year; configurable).
+- **Multi-tenancy (Rule 1):** `companyId` from `req.authenticatedUserCompanyId` (never body); super_admin cross-tenant; company mismatch → 404; the customer must belong to the caller's company; nested id routes verify the row's company before mutating.
+- Roles: manager/admin write; field_tech may read (and optionally log tests / add photos — match the controller/zone permissions).
+- Stamp `lastUpdatedBy*`; append to the profile history snapshot if practical.
+- **Photo authorization:** the backflow `photoUrl` must be added to **`assertCanViewPhoto`** (`routes.ts`) as another company-scoped photo store — do NOT add a photo store the authz layer doesn't know about (this is the `work_order_zone_photos` 403 lesson).
+
+## Slice 3 — UI: Backflows section in the profile
+### Files: `pages/customers/IrrigationProfile.tsx` (+ a backflow card + add/edit modal)
+- A **Backflows** section/tab in the Irrigation System profile next to Controllers, with a count badge and header summary ("3 devices · 1 overdue · 1 due soon"), and an **Add Backflow** button.
+- Each backflow renders as a card (see mockup): name, brand/model, size/type chips, serial, location, install date, optional photo, and a **status chip** computed from `nextTestDueDate`: **Overdue** (past), **Due soon** (≤30 days), **Current** (future), **Not scheduled** (no date). Card actions: **Log test** and **Edit**.
+- **Add/Edit modal** with grouped fields: Device (name, location, brand, model, type, size, serial, install date), Test/Compliance (last tested, next due, result, tested by), Photo & notes (reuse the camera/library picker).
+- Match the profile's look (lucide icons, indigo/sky accents), full-width responsive, dark-mode safe.
+- Optionally surface a backflow count on the customer Overview tab.
+
+## Slice 4 — (Follow-on hooks, note only)
+- **Reports:** include a Backflows section on the customer Irrigation report, and a future company-wide **"Backflow tests due"** report/roll-up (overdue + due-soon across customers) — powered by `nextTestDueDate`. Not built now, but the schema supports it.
+
+## Tests
+- Add/edit a backflow with all attributes + test fields; it persists and renders with the correct status chip (overdue/due-soon/current) from the due date.
+- "Log test" stamps the test and rolls the next-due date forward (+1 yr); status flips to Current.
+- Company isolation: a user can't read/edit another company's backflows (404); customer must be in caller's company.
+- Backflow photo displays (signed) and is authorized via `assertCanViewPhoto`; not viewable cross-company.
+- Count badge/summary reflects the devices and their statuses.
+
+## Out of scope
+- Per-test history table (latest-test-on-device for now).
+- The company-wide backflow-tests-due report (follow-on).
+- VRTSync live integration (schema is ready via `vrtSyncId`).
+
+## Relevant files
+- `lib/db/src/schema/schema.ts` (new `irrigation_backflows`; model tenancy on `irrigation_controllers`)
+- `artifacts/api-server/src/routes/irrigation-profile-routes.ts`, `storage.ts` (CRUD + log-test)
+- `artifacts/api-server/src/routes/routes.ts` (`assertCanViewPhoto` — add backflow photo store)
+- `artifacts/irrigopro/src/pages/customers/IrrigationProfile.tsx` (+ backflow card + modal); reuse camera/library picker
+- Visual reference: `backflow-tracking-mockup.html`

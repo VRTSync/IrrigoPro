@@ -1,0 +1,14 @@
+Paste this into Replit:
+
+Create a new task for the migration setup. Don't run it yet — show me the task definition first for review.
+The task should accomplish these five things and nothing else:
+
+Snapshot the current repo to .migration-backup/. A complete mirror of the live root — not just client/ and server/, but shared/, docs/, attached_assets/, the service worker file(s), manifest.json, Puppeteer PDF templates, Drizzle migration files, .env.example, custom middleware files, Postmark email templates, and VAPID config. Verify parity by directory diff after the snapshot. If anything in the live repo is missing from .migration-backup/, the task fails.
+Apply the pnpm_workspace scaffold. Create artifacts/api-server/ (kind=api), artifacts/mockup-sandbox/ if not present, and the lib/api-spec/, lib/api-client-react/, lib/db/ packages. Run pnpm install and confirm it completes cleanly.
+Leave my live root code untouched. After setup, my existing app must still run exactly as it does today. The setup adds new directories alongside the existing code — it does not move, rename, or modify anything in client/, server/, or shared/.
+Create a git tag named pre-multi-artifact-migration before any file operations begin, so I have one-command rollback.
+Report back with: directory-diff confirmation that .migration-backup/ matches the live repo, confirmation that all scaffold packages exist with their expected files, confirmation that pnpm install succeeded, confirmation that the live app still runs, the git tag name, and any issues encountered.
+
+Out of scope: any porting work. No file moves out of client//server//shared/, no import path changes, no DB pushes, no OpenAPI work, no workflow modifications to the existing app. Setup creates the workspace; the port fills it later in a separate task (#306).
+If Replit has a standard migration-setup task or template that already does most of this, use that — I don't need a custom task if a known-good one exists. Tell me which path you're taking.
+Show me the task definition (goal, in-scope, out-of-scope, steps, verification) before running anything.

@@ -1,0 +1,219 @@
+# BUILD — Estimate Builder: Branch Selection for Multi-Branch Customers
+
+**What & Why**
+
+Pick a multi-branch customer in the **Billing Sheet Creator** and a required "Branch Location" card appears before you can continue. Pick the *same* customer in the **Estimate Builder** and nothing appears — the wizard goes straight from Customer to Scope of Work and the estimate saves against the parent with no branch. The estimate builder is the **only** ticket-creation flow in the app that does not capture a branch; billing sheets, work orders and wet checks all gate on it.
+
+**The column already exists and the downstream already reads it.** `estimates.branch_name` shipped under Task #315. The PDF renders a `Branch:` line from it, the estimate → work-order conversion carries it, and the API already accepts it (`insertEstimateSchema` is generated from the table; `processEstimatePayload` spreads it through). **No schema change, no migration, no `pnpm db push`.** Nothing ever *writes* the value — that is the whole bug.
+
+**Consequence.** A repair estimate for a customer's north branch approves into a work order with no branch and bills to the parent. The tech is then asked to pick a branch at *completion* time as a rescue (`work-order-completion.tsx:308`) — the exact "ask the tech to remember it later" failure Rule 4 exists to prevent. The branch is known at estimate time and must be captured there.
+
+**Copy the existing pattern; do not invent one.** `billing-sheet-wizard.tsx` is the reference implementation for every UI decision in this ticket. Same card, same copy, same gate.
+
+**Rules in scope:** Rule 4 (capture at the source, guard at capture time), Rule 8 (one implementation, no options left open), Rule 1 (tenancy — the branch list is read off the already company-scoped customer record; no new query), Rule 7 (screenshot proof for a real multi-branch customer).
+
+---
+
+## Current state (confirmed in the code)
+
+**The wizard has no branch field at all.** Zero occurrences of "branch" in `artifacts/irrigopro/src/components/estimates/`.
+- `CustomerStepValue` — `components/estimates/wizard/estimate-wizard-customer-step.tsx:28–44`. No `branchName`.
+- Step-1 gate — `:99`, `const canContinue = !!value.customer && value.projectName.trim().length > 0;`
+- Customer card closes `:181`; Scope of Work card opens `:184`. That gap is where the branch card goes.
+- Wizard payload type `estimate-wizard.tsx:41–73`; payload build `:784–825`. Neither mentions `branchName`.
+
+**The reference implementation** — `components/billing/billing-sheet-wizard.tsx`: field on the step value `:109`, blank `:143`, branch list + `branchRequired` `:206–209`, reset on customer change `:221`, gate `:226–229`, the card itself `:292–318`, review display `:984–986`, edit hydration `:1302`, payload `:1491`, header context line `:1578–1586`.
+
+**The API already accepts it — verified, do not "add support" for it.**
+- `estimates.branchName` — `lib/db/src/schema/schema.ts:606–609`.
+- `insertEstimateSchema = createInsertSchema(estimates)` — `schema.ts:1242`, feeding `createEstimateWithItemsSchema` at `routes/estimate-routes.ts:154`.
+- `processEstimatePayload` spreads the whole estimate object (`estimate-payload.ts:94–106`), so the field reaches the insert untouched.
+- Single insert path: `createEstimateFromPayload` (`storage.ts:3225`) → `_writeEstimateWithItems` → `storage.ts:3198`. There is no second write path to keep in sync.
+
+**The downstream already reads it — verify, do not re-implement.**
+- PDF: `estimate-pdf-html.ts:379` feeds `estimate.branchName` into `buildPdfSiteMetadata`, rendered `:620`.
+- Estimate → work order: `storage.ts:4140–4142` (approval conversion) and `:4448` (Seam 3 locked conversion).
+- Follow-up work order: `storage.ts:4267`.
+
+**Two holes on the write side.**
+1. The wizard never sends it (above), so every manually built estimate lands `branch_name = NULL`.
+2. The wet-check → estimate conversion never stamps it — `storage.ts:10888–10904` — despite the schema comment at `:607–608` claiming "Carried from the originating wet check." **That comment is currently false.**
+
+**No server gate on estimates.** Every other flow has one:
+- `POST /api/billing-sheets` — `routes/routes.ts:11535–11544`
+- `POST /api/work-orders` — `routes.ts:13237–13246`
+- `POST /api/work-orders/complete` — `routes.ts:9669–9679`
+- `POST /api/work-orders/:id/billing-sheet` — `routes.ts:14410–14419`
+- `POST /api/wet-checks` — `routes/wet-check-create-gate.ts`, locked in by `routes/wet-check-post-branch-gate.test.ts`
+
+The three estimate write routes have none: `POST /api/estimates` (`routes/estimate-routes.ts:457`), `PUT /api/estimates/:id` (`:733`) and `POST /api/estimates/:id/submit-for-review` (`:747`) — the last two both routed through `handleEstimateUpdate` (`:550`).
+
+---
+
+## The change
+
+### 1. Wizard captures the branch — `estimate-wizard-customer-step.tsx`
+
+- **`CustomerStepValue` (`:28–44`)** gains `branchName: string;`, placed directly after `customerPhone` (matches `billing-sheet-wizard.tsx:109`). Empty string means "none selected"; it is also the single-location value.
+- **Derive the list** immediately after the `useState` declarations (`:61–63`), verbatim from `billing-sheet-wizard.tsx:206–209`:
+  ```
+  const branches: string[] = Array.isArray(value.customer?.branches)
+    ? (value.customer!.branches as string[])
+    : [];
+  const branchRequired = branches.length > 0;
+  ```
+- **Reset on customer change.** `handleSelectCustomer` (`:80–97`) adds `branchName: ""` to the object it passes to `onChange` — same as `billing-sheet-wizard.tsx:221`. Without this, switching customers leaves a stale branch on the payload.
+- **Gate the step.** `:99` becomes:
+  ```
+  const canContinue =
+    !!value.customer &&
+    (!branchRequired || !!value.branchName) &&
+    value.projectName.trim().length > 0;
+  ```
+- **Render the card** between the Customer card (closes `:181`) and the Scope of Work card (opens `:184`), copied from `billing-sheet-wizard.tsx:292–318`: same `Building2` icon in the `bg-blue-50 p-2 rounded-md` tile, same "Branch Location" heading with the red `*`, same `Select` with `placeholder="Select branch location..."` mapping `branches`. Wrapped in `{value.customer && branchRequired && (…)}` so a single-location customer sees no card at all. **Add `data-testid="wizard-branch-select"` on the `SelectTrigger`** (the billing wizard has none; the tests below need it).
+- **Imports.** Add `Building2` to the `lucide-react` import (`:8–16`) and `Select, SelectContent, SelectItem, SelectTrigger, SelectValue` from `@/components/ui/select` — that module is not currently imported in this file.
+
+### 2. Wire it through the wizard — `estimate-wizard.tsx`
+
+- Initial state (`:314–330`) → `branchName: ""`.
+- `blank` reset for a new estimate (`:373–390`) → `branchName: ""`.
+- Edit hydration `cs` (`:487–505`) → `branchName: existing.branchName ?? ""` (matches `billing-sheet-wizard.tsx:1302`).
+- `EstimateApiPayloadEstimate` (`:41–73`) gains `branchName: string | null;`.
+- Payload build (`:784–825`) sends `branchName: customerStep.branchName || null,` beside `controllerLetter` (`:818`). **Null, not empty string** — single-location estimates store `NULL`, matching the wet-check/WO convention and `billing-sheet-wizard.tsx:1491`.
+- `snapshot()` (`:264–300`) gains `branchName: cs.branchName,`, and the field is added to the `DraftSnapshot` interface (`:217–250`). Without this, changing only the branch leaves the wizard thinking it is clean and the close-without-saving guard never fires.
+- **Draft restore — do NOT bump `DRAFT_STORAGE_VERSION` (decided).** It stays `2` (`:123`); bumping it silently discards every in-flight draft on deploy. Instead normalize in **both** return paths of `loadDraft` (`:144–192`) — the v1 migration object (`:170–180`) and the v2 return (`:184–188`) — so `customerStep.branchName` comes back as `?? ""`. A restored pre-change draft then hits the step-1 gate and the user picks a branch. That is intended, not a regression.
+- `headerContextLine` (`:870–885`) renders `Name · Branch` when set, matching `billing-sheet-wizard.tsx:1578–1586`:
+  ```
+  if (customerStep.customer?.name) {
+    parts.push(
+      customerStep.branchName
+        ? `${customerStep.customer.name} · ${customerStep.branchName}`
+        : customerStep.customer.name,
+    );
+  }
+  ```
+  Add `customerStep.branchName` to the `useMemo` dependency array (`:885`).
+
+### 3. Server gate — one helper, two call sites
+
+**New export in `artifacts/api-server/src/estimate-payload.ts`** (the module both write paths already share for labor-rate resolution — do not create a new file, and do not inline the check twice):
+
+```
+// Branch enforcement: if the customer has branches configured, branchName is
+// required. Mirrors POST /api/billing-sheets (routes.ts:11535-11544) and
+// POST /api/work-orders (routes.ts:13237-13246).
+export function resolveBranchGateError(
+  customerBranches: unknown,
+  branchName: string | null | undefined,
+): string | null {
+  if (!Array.isArray(customerBranches) || customerBranches.length === 0) return null;
+  if (!branchName || String(branchName).trim() === "") {
+    return "Branch is required for this customer. Please select a branch before submitting.";
+  }
+  return null;
+}
+```
+The message is copied verbatim from `routes.ts:11540` so all three flows read identically to the user.
+
+**`POST /api/estimates` (`routes/estimate-routes.ts:457`).** Inside the existing `if (customerId != null)` block (`:512–526`) — the customer is already loaded there as `customer`, so no second query — after the `!customer` 400 and before the labor-rate stamp:
+```
+const branchError = resolveBranchGateError(
+  customer.branches,
+  (parsed.estimate as { branchName?: string | null }).branchName,
+);
+if (branchError) { res.status(400).json({ message: branchError }); return; }
+```
+
+**`handleEstimateUpdate` (`:550`).** After `existing` is loaded and `newCustomerId` / `customerChanged` are resolved (`:598–599`), gate on the **effective** customer and the **effective** branch, reusing the `customer` already fetched in the `customerChanged` branch (`:602`) rather than fetching twice:
+```
+const gateCustomerId = newCustomerId ?? existing.customerId;
+const gateCustomer = customerChanged ? customer : await storage.getCustomer(gateCustomerId);
+const incomingBranch = (parsed.estimate as { branchName?: string | null }).branchName;
+const effectiveBranch = incomingBranch !== undefined ? incomingBranch : existing.branchName;
+const branchError = resolveBranchGateError(gateCustomer?.branches, effectiveBranch);
+if (branchError) { res.status(400).json({ message: branchError }); return null; }
+```
+
+**The gate is unconditional, drafts included (decided).** "Save as draft" is only reachable from step 4 of the wizard (`estimate-wizard.tsx:947–958`), which sits behind the step-1 branch gate, so no legitimate draft save can be blocked. Exempting drafts would leave a writable path that still produces branch-less estimates.
+
+**Legacy rows behave as intended (decided).** An existing branch-less estimate for a multi-branch customer 400s on its next save until a branch is chosen. The wizard shows the required card the moment it opens, so the fix is one click. **Do not add a grandfather clause.**
+
+### 4. Stamp wet-check-origin estimates — `storage.ts:10888–10904`
+
+Add `branchName: wc.branchName ?? null,` to the estimate object passed to `createEstimateFromPayload`, beside `projectAddress: wc.propertyAddress ?? null` (`:10896`). `wc` is the wet check already in scope and `wet_checks.branch_name` already exists (`schema.ts:1557–1560`). This makes the comment at `schema.ts:607–608` true; leave the comment as written.
+
+This path bypasses the route gate (it calls storage directly), but `POST /api/wet-checks` already refuses a branch-less multi-branch wet check, so the wet check always carries a branch for those customers and no hole is left.
+
+### 5. Display parity — four surfaces
+
+The PDF already shows it. These do not.
+
+- **Wizard review step** — `components/estimates/wizard/estimate-wizard-review-step.tsx`. Add a `branchName: string` prop to the props interface beside `customerPhone` (`:22–24`) and render it in the Customer card (`:171–175`) under the name: `{branchName && <div className="text-gray-600">Branch: {branchName}</div>}`, matching `billing-sheet-wizard.tsx:984–986`. Pass `branchName={customerStep.branchName}` from `estimate-wizard.tsx` where the review step is rendered.
+- **Estimate detail modal** — `components/estimates/estimate-detail-modal.tsx`. In the Customer Information card (`:743–760`), add a row between "Customer Name" (`:744–747`) and "Email" (`:748–751`):
+  ```
+  {estimate.branchName && (
+    <div>
+      <span className="font-medium text-gray-700">Branch:</span>
+      <p className="text-gray-900">{estimate.branchName}</p>
+    </div>
+  )}
+  ```
+- **Public approval page.** The customer-facing payload omits the field: add `branchName: full.branchName ?? null,` to the `estimate` object at `routes/estimate-routes.ts:2145–2160`, next to `projectName` (`:2148`). In `pages/estimate-approval.tsx`, add `branchName: string | null;` to the estimate type (`:63–72`) and render it in the project block (`:757–762`) as a `text-gray-600 text-sm` line above `projectAddress`, prefixed `Branch: `.
+- **Approval email.** `EstimateEmailData` (`email-service.ts:28–66`) gains `branchName?: string | null;` beside `projectAddress` (`:34`). Pass `branchName: estimateWithItems.branchName ?? null,` at the call site (`routes/estimate-routes.ts:1632`, beside `projectAddress`). Render `Branch: <value>` in the email's site/location block, omitted entirely when null, so the email keeps matching the PDF.
+
+---
+
+## Done looks like
+
+- Selecting a multi-branch customer in the estimate builder shows a required Branch Location card, and **Continue** is disabled until a branch is chosen — identical to the billing sheet creator for the same customer.
+- A single-location customer shows no branch card and behaves exactly as before.
+- Changing the customer clears any previously chosen branch.
+- The saved estimate row has `branch_name` set; a single-location estimate has `NULL`.
+- Editing an estimate that already has a branch pre-selects it.
+- The wizard header reads `Customer · Branch`.
+- `POST /api/estimates`, `PUT /api/estimates/:id` and `POST /api/estimates/:id/submit-for-review` all 400 for a multi-branch customer with no branch, and succeed with one. A single-location customer is unaffected on all three.
+- Converting a branch wet check to an estimate produces an estimate carrying that branch; approving it produces a work order carrying the same branch.
+- The review step, detail modal, public approval page and approval email each show `Branch: <name>` when set and nothing extra when not. The PDF is unchanged.
+- **No second copy of the branch-gate logic** — both estimate write paths call `resolveBranchGateError`.
+
+## Tests
+
+- `estimate-wizard-customer-step.test.tsx` (extend): a multi-branch customer renders `wizard-branch-select` and Continue is disabled until a branch is picked; a single-location customer renders no branch control and Continue enables on project name alone; changing customer clears the selection.
+- `estimate-wizard-submit.test.ts` (extend): the built payload carries `branchName` for a branch customer and `null` for a single-location one.
+- **New** `artifacts/api-server/src/routes/estimate-branch-gate.test.ts`, modeled on `wet-check-post-branch-gate.test.ts` and importing the same `resolveBranchGateError` the routes use (so drift is a compile error): POST without branch → 400; POST with branch → 201; PUT omitting `branchName` on a row that already has one → 200; PUT on a legacy branch-less row → 400; single-location customer → 201/200 throughout; **tenancy** — a company-A user cannot read company B's customer branch list through these routes (404).
+- `wet-check-inspection-estimate.test.ts` (extend): a branch wet check produces an estimate with that `branchName`, and approving it produces a work order with the same value.
+
+## Definition of Done (attach proof — Rule 7)
+
+- [ ] `file:line` for every bullet in **The change**, mapped one-to-one.
+- [ ] **Side-by-side screenshot:** the estimate builder and the billing sheet creator, same multi-branch customer, both showing the Branch Location card — they must look and behave the same.
+- [ ] Screenshot of the saved estimate's detail modal showing the Branch row, plus that row's `branch_name` value from the database.
+- [ ] Screenshot of the work order created from approving that estimate, showing the same branch.
+- [ ] Test output for all four test files above, passing.
+- [ ] Tenancy test passing (company A → 404 on company B's estimate routes; super_admin across).
+- [ ] Grep proving exactly one branch-gate helper exists on the estimate write paths and that both `POST /api/estimates` and `handleEstimateUpdate` call it.
+- [ ] Deployed; commit message matches the diff. **No schema push is part of this ticket** — if the diff contains a migration, something was misread.
+
+## Explicitly out of scope
+
+- Branch selection in the billing sheet creator, work-order wizard and wet-check flow — all working; referenced only as the pattern to copy.
+- Creating or editing a customer's branch list (existing, on the customer profile).
+- Back-filling `branch_name` on estimates already created without one. Those stay visibly empty until someone edits them, at which point the gate forces a choice. A bulk backfill would have to guess at billing attribution, and guessing there is worse than an empty field (decided).
+- Branch-scoped controller/zone loading in the estimate wizard's Location step. That picker is customer-scoped today; changing it is a separate ticket with its own data questions and is not what is broken here.
+
+## Relevant files
+
+- `artifacts/irrigopro/src/components/estimates/wizard/estimate-wizard-customer-step.tsx` — `CustomerStepValue:28–44`, `handleSelectCustomer:80–97`, `canContinue:99`, card insertion `:181–184`
+- `artifacts/irrigopro/src/components/estimates/estimate-wizard.tsx` — payload type `:41–73`, draft version `:123`, `loadDraft:144–192`, `DraftSnapshot:217–250`, `snapshot():264–300`, initial state `:314–330`, blank reset `:373–390`, edit hydration `:487–505`, payload build `:784–825`, `headerContextLine:870–885`, draft button `:947–958`
+- `artifacts/irrigopro/src/components/estimates/wizard/estimate-wizard-review-step.tsx` — props `:22–24`, Customer card `:162–177`
+- `artifacts/irrigopro/src/components/estimates/estimate-detail-modal.tsx` — Customer Information card `:743–760`
+- `artifacts/irrigopro/src/pages/estimate-approval.tsx` — estimate type `:63–72`, project block `:755–762`
+- `artifacts/irrigopro/src/components/billing/billing-sheet-wizard.tsx` — **reference only, do not change**: `:109, 143, 206–209, 221, 226–229, 292–318, 984–986, 1302, 1491, 1578–1586`
+- `artifacts/api-server/src/estimate-payload.ts` — new `resolveBranchGateError`; existing `processEstimatePayload:94–106`
+- `artifacts/api-server/src/routes/estimate-routes.ts` — `createEstimateWithItemsSchema:154`, `POST:457`, `handleEstimateUpdate:550`, `PUT:733`, `submit-for-review:747`, email call site `:1627–1640`, public approval payload `:2145–2166`
+- `artifacts/api-server/src/email-service.ts` — `EstimateEmailData:28–66`
+- `artifacts/api-server/src/storage.ts` — wet-check → estimate `:10888–10904`; estimate → WO `:4140–4142`, `:4448`; follow-up WO `:4267`; insert path `:3198`, `:3225`
+- `lib/db/src/schema/schema.ts` — `customers.branches:123`, `estimates.branchName:606–609`, `wetChecks.branchName:1557–1560`, `insertEstimateSchema:1242` — **read only, no changes**
+- `artifacts/api-server/src/estimate-pdf-html.ts` — `:377–383`, `:620` — **verify unchanged**
+- `artifacts/api-server/src/routes/routes.ts` — gates to mirror: `:9669–9679`, `:11535–11544`, `:13237–13246`, `:14410–14419` — **reference only**
+- `artifacts/api-server/src/routes/wet-check-post-branch-gate.test.ts` — test pattern to copy

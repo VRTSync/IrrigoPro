@@ -1,0 +1,284 @@
+# Slice 10b — Estimates Dashboard: Board View
+
+**Date:** 2026-05-06
+**Status:** Ready for Replit implementation
+**Author:** Engineering planning
+**Decisions locked:**
+- Q1 = **Board view replaces the default `/estimates` page layout.** The current active/completed sections are removed. The List view (proper one, with color-coded badges) ships in Slice 10c with a Board/List toggle in the header. Until 10c ships, board is the only view on this page.
+- Q2 = **Five columns plus an Expired callout strip.** Drafts (gray), Pending review (amber), Sent (blue), Approved (green), Rejected (red). Expired is a horizontal collapsed strip below the columns showing count + "ready to resend" affordance — clicking it expands an inline list of expired cards. (The Resend action itself ships in 10d.)
+- Q3 = **Cards open the existing `EstimateDetailModal` on click.** No drag-and-drop. State transitions go through the modal's existing actions plus the new transition endpoint from 10a where applicable.
+- Q4 = **`+ N more` overflow expands the column to full width.** When a column has more cards than fit (cap at 6 visible), a `+ N more` row appears at the bottom. Clicking it puts that single column in expanded mode — the other four columns hide, the active column takes the full width and shows all cards. A back arrow ("← Back to board") returns to the 5-column view.
+- Q5 = **Filter button shipped in 10b.** Two filters: Customer (multi-select dropdown driven by `/api/customers`) and Status (multi-select of the six `LifecycleStatus` values including `expired`). Filters apply to all columns simultaneously. State stays in component memory; no URL persistence in this slice.
+- Q6 = **No search bar yet** (deferred to a later polish slice). Filter covers the immediate need.
+- Q7 = **Sort within columns: newest first** by `estimateDate` descending. Not configurable in 10b.
+
+**Related:** Depends on Slice 10a (`lifecycleStatus` field on every estimate). Hands off to Slice 10c (List view + Board/List toggle + Save-as-draft) and Slice 10d (Resend flow). Does not touch `client/src/components/manager/estimates-manager.tsx` — that page is the irrigation-manager-specific Slice 7 surface and stays as-is.
+
+---
+
+## Executive Summary
+
+The current `/estimates` page (`client/src/pages/estimates.tsx`) renders estimates in two collapsible sections — Active and Completed — with no clear at-a-glance read on where each estimate sits in the lifecycle. Slice 10b replaces this with a five-column kanban-style board: Drafts, Pending review, Sent, Approved, Rejected, with an Expired strip below for the resend queue. Cards on the board are compact (customer name, dollar amount, age) and click through to the existing `EstimateDetailModal`. A Filter button surfaces customer and status filters in a dropdown. Columns cap at 6 visible cards and expose a `+ N more` row that, when clicked, expands that column to take over the board with the full list — a single dismiss button returns to the 5-column view.
+
+The slice is **frontend-only**. All five lifecycle buckets are read directly from the `lifecycleStatus` field that Slice 10a now returns on every estimate. No new endpoints, no new database fields, no schema changes. The expired strip is rendered when any estimates have `lifecycleStatus === 'expired'`; clicking the strip expands it inline showing the expired cards (Resend button is a no-op visual placeholder until 10d wires it up).
+
+**Slice 10b ships when:** the new board renders the five columns plus expired strip on `/estimates`, every estimate is correctly placed by `lifecycleStatus`, clicking a card opens the existing detail modal, the filter dropdown narrows all columns simultaneously, the column-expand interaction works on desktop and mobile, the existing wizard's "Submit for Approval" still produces an estimate that lands in Pending review, and the Slice 7 manager queue plus the customer approval link both still work end-to-end.
+
+---
+
+## Why Now
+
+Two motivations.
+
+First, **the current page hides lifecycle.** The Active/Completed split (`estimates.tsx:26-27` — `activeExpanded`, `completedExpanded`) is too coarse: an irrigation manager looking at the page can't tell at a glance how many estimates are sitting unread by the billing manager, how many are sent and waiting on a customer reply, or how many are about to expire. The kanban makes this state visible in one glance and is the right shape for a workflow with five distinct stages.
+
+Second, **Slice 10a's `lifecycleStatus` field is a wasted investment until something consumes it.** The unified read field exists; this slice is the smallest change that puts it on screen.
+
+Slice 10c (List view) is deliberately split out so 10b can be a focused UI delivery and shipped without waiting on the wizard's Save-as-draft work or the polish on the list-view table. 10c will land within the same week.
+
+---
+
+## What `/estimates` Becomes
+
+After Slice 10b, opening `/estimates` shows:
+
+**Header strip** at the top of the page:
+- Title "Estimates" with a subtitle "{N} active · last 90 days" where N is the count of non-rejected, non-expired estimates.
+- Right side: Filter button (opens dropdown), `+ New Estimate` button (existing wizard entry).
+
+**Five-column board** below the header:
+- Column header for each: name + count badge, tinted background per status (gray/amber/blue/green/red).
+- Each column shows up to 6 cards, sorted by `estimateDate` desc.
+- Each card: customer name (truncated with ellipsis), dollar amount, age (`Nd` / `Nw`).
+- Card click → existing `EstimateDetailModal` opens for that estimate.
+- If a column has >6 estimates: bottom row "+ N more" → click to expand column.
+
+**Expired strip** below the board:
+- Renders only when ≥1 estimate has `lifecycleStatus === 'expired'`.
+- Collapsed default: `Expired · {N} estimates older than 30 days · ready to resend  Show ›`
+- Click anywhere on the strip → expands inline below it into a horizontal scrollable row of expired cards (same compact card shape as columns).
+- Each expired card has a placeholder "Resend" button (visible but disabled, with tooltip "Available in next update" — wired up in 10d). The card body still opens the detail modal on click.
+
+**Filter dropdown** (when Filter button is clicked):
+- Two sections inside a popover:
+  - **Customer**: multi-select with search. Lists customers from `/api/customers` (or the existing customer query already in use on this page). Default: empty (no customer filter).
+  - **Status**: multi-select with all six `LifecycleStatus` chips. Each chip uses its column's tint when selected. Default: all selected.
+- Filters apply combinatorially: an estimate is shown if (no customer filter OR customer matches) AND (no status filter OR status matches).
+- A "Clear all" link in the popover resets both. The popover closes on outside click.
+- A small dot or count badge appears on the Filter button when any filter is active.
+
+**Column-expanded mode** (when a `+ N more` row is clicked):
+- The other four columns and the expired strip animate-fade out, leaving the active column expanded to the full board width.
+- The expanded column shows all matching cards (no 6-card cap) in a single-column scrollable list.
+- A "← Back to board" button appears in the page header next to the title.
+- Esc also returns to the 5-column view.
+- Filter dropdown still works in expanded mode and continues to apply.
+
+**Mobile (<768px)**:
+- Columns stack vertically into accordion sections, each collapsed by default except the first non-empty one.
+- Section header tap toggles open/close. Counts and tints stay.
+- Cards inside an open section are full-width.
+- The expired strip stays as a single full-width strip with the same expand-inline behavior.
+- Column-expanded mode is the same as desktop (the active column takes the screen, others hide).
+
+---
+
+## Scope of Slice 10b
+
+### In Scope
+
+1. New top-level component `client/src/components/estimates/board/estimate-board.tsx` that owns the board state — selected filters, expanded-column state — and renders the five columns plus the expired strip.
+
+2. Co-located component files under `client/src/components/estimates/board/`:
+   - `estimate-board-column.tsx` — single column with header, card stack, `+ N more` overflow.
+   - `estimate-board-card.tsx` — compact card (customer name, amount, age, click-through).
+   - `estimate-board-filter.tsx` — Filter button + popover with Customer and Status sections.
+   - `estimate-board-expired-strip.tsx` — collapsed callout strip + inline-expanded card row.
+
+3. Replace the existing render body of `client/src/pages/estimates.tsx` (the active/completed sections, the inline cards) with `<EstimateBoard estimates={estimates} onCardClick={openDetailModal} />`. Keep the existing data-loading hooks (`useQuery`, `handleRefresh`, etc.), modal state, deep-link hooks, and create-estimate hooks — only the rendered tree changes.
+
+4. **Delete** the active/completed accordion code from `estimates.tsx` (lines around 26-27 plus all the rendering downstream of those toggles). Keep the wizard, detail modal, and QuickBooksIntegration entry points untouched.
+
+5. **Mobile adaptive layout**: the board component uses Tailwind responsive utilities to stack columns vertically below 768px. Each section is an accordion built from the existing shadcn `Accordion` (or the wet-check redesign's collapse pattern, whichever is already in use).
+
+6. **Card visual language matching Slice 8**:
+   - White card background (`var(--color-background-primary)` / `bg-white`), 0.5px border, `rounded-md`.
+   - Customer name in `font-medium text-sm text-gray-900`.
+   - Amount and age on the same row, `text-xs`, with age `text-gray-500`.
+   - Tinted column headers using existing semantic backgrounds: `bg-gray-100`, `bg-amber-50`, `bg-blue-50`, `bg-green-50`, `bg-red-50` with matching darker text shades for labels.
+   - Count badges in column headers: pill-shaped, white background, status-tinted text.
+
+7. **Filter popover**:
+   - Built from the existing shadcn `Popover` + `Command` components.
+   - Customer search input filters the customer list as the user types.
+   - Status chips use the same color tokens as the columns. Toggling a chip immediately re-filters the visible cards.
+   - Active-filter dot on the Filter button is `var(--color-text-info)` colored.
+
+8. **Column expansion**:
+   - State variable `expandedColumn: LifecycleStatus | null` in `EstimateBoard`.
+   - When non-null, only the active column renders, in `grid-template-columns: 1fr` style.
+   - "← Back to board" button injects into the page header (or floats above the column) and toggles state back to null.
+   - Esc handler at component scope.
+
+9. **Empty states**:
+   - A column with zero estimates after filtering shows a small centered "No estimates" placeholder (`text-xs text-gray-400`) instead of being completely empty.
+   - The whole board with zero estimates shows a centered placeholder: "No estimates yet. Click + New Estimate to get started."
+
+10. **Loading and error states**:
+    - While `isLoading`, render a skeleton grid using the existing `EstimateListSkeleton` pattern adapted to the column shape (5 column skeletons each with 3 card skeletons).
+    - On query error, render an error placeholder with a Retry button that calls `handleRefresh`.
+
+11. **Data**:
+    - The board reads the existing `useQuery<Estimate[]>(["/api/estimates"])` from `estimates.tsx`. After Slice 10a, every estimate already has `lifecycleStatus` populated.
+    - Grouping: a single `useMemo` keyed on `(estimates, filters)` that returns `Record<LifecycleStatus, Estimate[]>` plus the filtered expired list.
+
+12. **Click-through to detail modal**:
+    - Card click sets `selectedEstimateId` and `showDetailModal` exactly like the existing `estimates.tsx` does for its inline rows. The detail modal is rendered from the page-level component as it is today; `EstimateBoard` only fires the callback.
+
+### Out of Scope
+
+- Any backend / API changes (10a covered the data shape).
+- Drag-and-drop between columns.
+- Search bar (covered later if needed; filter is enough for now).
+- Sort options (newest-first is hardcoded).
+- The List view, the Board/List toggle, and the wizard's Save-as-draft button — all in 10c.
+- The Resend action's actual call — in 10d. The button visually exists but is disabled in 10b.
+- URL persistence of filters or expanded-column state.
+- Saving the user's last filter selection across reloads (10c will add localStorage persistence for the view toggle; filters can come later if there's demand).
+- The irrigation-manager-specific page (`estimates-manager.tsx`). Untouched.
+
+---
+
+## UI Specification
+
+### Board container
+
+- `<div class="space-y-4">` with the header strip on top.
+- Header strip: `flex items-center justify-between` with title block on the left and Filter + New buttons on the right.
+- Below the header: the column grid.
+- Below the grid: the expired strip (only rendered if any expired exist).
+
+### Column grid
+
+- Desktop (≥768px): `grid grid-cols-5 gap-2 items-start`.
+- Mobile (<768px): `flex flex-col gap-3` with each column rendered as an accordion section.
+
+### Column
+
+- Header: `flex items-center justify-between px-3 py-2 rounded-md` with status-tinted background.
+- Cards stack vertically with `gap-2`.
+- `+ N more` row at the bottom: `text-center text-xs text-gray-400 py-1 cursor-pointer hover:text-gray-600`.
+
+### Card
+
+```
+┌─────────────────────────┐
+│ Vista Verde Golf       │  ← font-medium text-sm
+│ $12,400          1d    │  ← amount + age
+└─────────────────────────┘
+```
+
+- `bg-white border border-gray-200 rounded-md p-2.5 cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all`.
+- Customer name: `truncate font-medium text-sm text-gray-900` (single line, ellipsis on overflow).
+- Bottom row: `flex items-center justify-between text-xs mt-1`.
+
+### Expired strip (collapsed)
+
+- `flex items-center justify-between p-3 bg-gray-50 rounded-md cursor-pointer hover:bg-gray-100`.
+- Left: bold "Expired" + muted "{N} estimates older than 30 days · ready to resend".
+- Right: chevron icon (`ChevronRight` from lucide).
+
+### Expired strip (expanded inline)
+
+- Below the collapsed header: a horizontal scroll row of cards (`flex gap-2 overflow-x-auto`), one card per expired estimate.
+- Each card has the same shape as a column card plus a small **Resend** ghost button below the amount row, disabled in 10b.
+
+### Filter popover
+
+- Trigger: `<Button variant="outline" size="sm">Filter{activeCount > 0 && <span class="ml-2 size-1.5 rounded-full bg-blue-500" />}</Button>`.
+- Popover content: `w-72 p-3` with two sections separated by a `Separator`:
+  - **Customer**: search input on top, scrollable list of customer names with a checkbox each.
+  - **Status**: row of six chips. Selected chips get the column's tinted background.
+- Footer: small "Clear all" text-button on the right.
+
+### Column-expanded mode
+
+- The grid wrapper's class flips to `grid grid-cols-1` (or just the active column).
+- A floating "← Back to board" button appears on the left of the page header (replaces the title, or sits above it).
+- The other columns and the expired strip unmount.
+- Esc handler: `useEffect` listening for keydown on document, calls `setExpandedColumn(null)`.
+
+---
+
+## API & Data
+
+**No changes.** Slice 10b reads:
+
+- `GET /api/estimates` — already returns `lifecycleStatus` after 10a. Used to populate all five columns and the expired strip.
+- `GET /api/customers` (or whatever the existing customer query is) — used to populate the customer-filter list. Cached.
+
+The detail modal (`EstimateDetailModal`) makes its own fetches when opened; the board component does not touch them.
+
+---
+
+## Visual Language
+
+Match the wet-check redesign and Slice 8 visual language exactly so the dashboard feels like the same designer:
+
+- **Column tints (header backgrounds + count-badge text):**
+  - Drafts: `bg-gray-100` / text `text-gray-700`, badge `bg-white text-gray-600`.
+  - Pending review: `bg-amber-50` / text `text-amber-700`, badge `bg-white text-amber-700`.
+  - Sent: `bg-blue-50` / text `text-blue-700`, badge `bg-white text-blue-700`.
+  - Approved: `bg-green-50` / text `text-green-700`, badge `bg-white text-green-700`.
+  - Rejected: `bg-red-50` / text `text-red-700`, badge `bg-white text-red-700`.
+- **Cards:** white background, `border-gray-200` 0.5px, `rounded-md`, hover lift via `hover:border-gray-300 hover:shadow-sm`.
+- **Typography:** card title `font-medium text-sm`, secondary text `text-xs text-gray-500`. Numeric amounts in `font-medium`. No bolder weight than 500.
+- **Icons:** Lucide. `ChevronRight`/`ChevronLeft` for the expired strip and back button. `Filter` icon on the Filter button.
+- **Spacing:** `gap-2` between columns, `space-y-2` between cards within a column, `space-y-4` between major page sections.
+- **Focus states:** every interactive element gets `focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`.
+
+---
+
+## Risks and Rollback
+
+- **Cards too narrow at 5 columns on mid-sized viewports (≥768px but <1100px).** Five columns at ~140-160px each means card content can feel cramped. Mitigation: at viewport widths ≥768px and <1024px, render the board in two rows (3 columns above, 2 below) using `grid-cols-3 lg:grid-cols-5`. Verify on a typical iPad-portrait viewport.
+- **Filter popover doesn't include enough customers.** A long customer list (>50) renders a long popover. Mitigation: virtualize the customer list inside the popover if performance is bad, or cap the visible list and require the user to search to filter. Acceptable for v1: render the full list with overflow-y-auto and a max height.
+- **Column-expanded mode disorienting on mobile.** Going from a vertical accordion to a focused single-column view may feel discontinuous. Mitigation: on mobile, the `+ N more` row inside an open accordion section just expands the section to show all cards instead of switching modes — column-expand is a desktop-only interaction.
+- **Detail modal click-through swallows the column header click in mobile accordions.** Mitigation: stop propagation on card click handlers; only the section header toggles the accordion.
+
+**Rollback:** `git revert` the slice commit. The previous `estimates.tsx` rendering is recoverable from git. Because no schema or API changes happen in 10b, rollback is a one-step UI revert.
+
+---
+
+## Migration / Rollout
+
+Single deploy. The `/estimates` page swaps from the old active/completed sections to the new board on the next deploy. There is no flag.
+
+If desired, an env-var-gated fallback to the old render can be added — but for a UI redesign of this size with no data implications, ship-the-new-component-and-delete-the-old is the recommendation.
+
+---
+
+## Success Criteria
+
+Slice 10b ships when, in order:
+
+1. `/estimates` renders the new five-column board on desktop at 1280px+, the two-row split at 1024px and below, and the vertical accordion at <768px.
+2. Every estimate appears in exactly one column, matching its `lifecycleStatus` value (verify by spot-checking three estimates of different statuses).
+3. Counts in column headers match the actual number of cards in each column for any filter state.
+4. Clicking a card opens the existing `EstimateDetailModal` for the right estimate.
+5. The Filter button opens a popover with Customer and Status sections; toggling either narrows all columns simultaneously; "Clear all" resets.
+6. The active-filter dot on the Filter button appears when any non-default filter is active.
+7. A column with >6 estimates shows the `+ N more` row; clicking it expands the column to full width with all cards visible; "← Back to board" returns to the 5-column view; Esc also returns.
+8. The Expired strip appears only when there is ≥1 estimate with `lifecycleStatus === 'expired'`; clicking it expands inline; the cards inside have a disabled Resend placeholder (10d wires it up).
+9. The new wizard's "Submit for Approval" still produces an estimate that lands in Pending review.
+10. The Slice 7 pending-approval queue still works end-to-end.
+11. The customer-facing approval-by-link page still works end-to-end against an estimate created via the new wizard.
+12. Manual mobile testing on iOS Safari + Android Chrome confirms the accordion section toggles work, cards are tappable, and the column-expand interaction is reachable.
+
+---
+
+## What This Unblocks
+
+- **Slice 10c** consumes the same component file structure: it adds `EstimateList` next to `EstimateBoard`, a `view: 'board' | 'list'` toggle in `estimates.tsx`, persists the selection in localStorage, and adds Save-as-draft to the wizard. The List view reads `lifecycleStatus` directly for its color-coded badges, so 10c needs zero data work.
+- **Slice 10d** consumes the disabled Resend buttons that 10b ships. The transition endpoint already exists from 10a; 10d wires the button to it plus a confirmation dialog and a toast.
+- **A future search slice** can add a search input next to the Filter button. The board's `useMemo`-based filter pipeline already takes a transformer; adding a `searchTerm` parameter to it is one extra line.

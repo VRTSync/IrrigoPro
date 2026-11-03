@@ -1,0 +1,119 @@
+# BUILD — Fix Work-Order Item Duplication (#1698) + Close Remaining Money-Drift Vectors (Sequenced)
+
+**Goal.** Stop the duplication at its root, close the last two NaN/drift holes, then repair the corrupted production work orders — **in that order**, because repairing before the leak is plugged just re-corrupts. Companion to `Money Integrity - Full Flow Hardening`. Server-side only; do not touch `customer-billing.tsx`. Multi-tenancy scoping stays intact. Migrations run by Randy from Super Admin; add-parts semantics; never auto-void QuickBooks.
+
+**Do the slices in order.** Slices 1–3 are code (ship + deploy first). Slice 4 is the production data repair and **must not run until Slice 1 is live**. Slice 5 is the test net.
+
+---
+
+## Slice 1 — Stop new duplication: row-lock the wet-check conversion (the root cause)
+**File:** `artifacts/api-server/src/storage.ts` — `convertWetCheckToWetCheckBilling` (fn ~9780; `db.transaction` ~9791; `allFindings` loaded ~9802; deferred branch ~9817–10130).
+
+**Problem.** This transaction reads `allFindings`, filters `eligible` (excludes `convertedAt != null` / `workOrderId != null`), then inserts a `work_order_items` batch — with **no row lock** on the wet check. Two concurrent calls for the same wet check (double-click "Submit Review," slow request + client retry, two tabs) both pass the eligibility check before either commits and both insert a full batch → duplicate items. Contrast `approveEstimateAndCreateWorkOrder` (~3845), which takes `SELECT … FOR UPDATE` on the estimate row precisely to serialize this.
+
+**Fix.** At the very top of the transaction — **before** `allFindings` is read — take a row lock on the parent wet check so concurrent conversions serialize:
+```ts
+return await db.transaction(async (tx) => {
+  // Serialize concurrent conversions of THIS wet check (mirrors
+  // approveEstimateAndCreateWorkOrder's estimate row lock ~3845). The second
+  // waiter blocks here, then reads findings AFTER the first commits — by which
+  // point the just-converted findings are stamped (workOrderId/convertedAt) and
+  // excluded by `eligible`, so it inserts nothing. Closes the duplication race
+  // without touching the intentional incremental-append design.
+  await tx.select({ id: wetChecks.id }).from(wetChecks)
+    .where(eq(wetChecks.id, wetCheckId))
+    .for("update");
+
+  const allFindings = await tx.select().from(wetCheckFindings) ... // existing
+```
+- Use the same `wetCheckId` the function already scopes to; keep all existing company-scoping asserts.
+- Apply the identical lock to any sibling convert transaction that appends children off the same wet check (the sent-to-estimate / repaired-in-field branches, if they run in their own tx) so the whole conversion surface is serialized.
+- **Do NOT** add a zone-scoped delete-before-insert — it would drop legitimately incremental (multi-session) items and silently under-bill. The lock is the correct and sufficient fix.
+
+**Done:** two concurrent conversions of one wet check produce exactly one item batch; incremental multi-session triage still appends correctly.
+
+---
+
+## Slice 2 — Close the completion NaN vector
+**File:** `artifacts/api-server/src/routes/routes.ts` — `/api/work-orders/complete` (~9429–9435).
+
+**Problem.** Still unguarded:
+```ts
+laborHours   = parseFloat(totalHours || '0');       // "NaN" is truthy → NaN
+const partsCost   = parseFloat(totalPartsCost || '0');
+const laborSubtotal = laborHours * appliedLaborRate; // NaN rate → NaN
+const totalAmount   = laborSubtotal + partsCost;
+```
+`parseFloat("NaN" || '0')` is `NaN` (the `|| '0'` only catches null/empty), and a NaN `appliedLaborRate` propagates — writing `NaN` totals on completion.
+
+**Fix.** Route every operand through the existing `money()` helper (`lib/money.ts`) and store `.toFixed(2)`:
+```ts
+laborHours = money(totalHours);
+const partsCost    = money(totalPartsCost);
+const rate         = money(appliedLaborRate);
+const laborSubtotal = laborHours * rate;
+const partsSubtotal = partsCost;
+const totalAmount   = laborSubtotal + partsSubtotal;   // finite, = parts + labor
+```
+Also apply `money()` to the per-part `laborHours × quantity` sums just above (~9414–9423) for consistency. **Done:** no completion submission can persist a `NaN` total.
+
+---
+
+## Slice 3 — Add lineage columns to `work_order_items` (detect + reverse this class forever)
+**Files:** `lib/db/src/schema/schema.ts` (`workOrderItems`), + Drizzle migration.
+
+**Add** two nullable columns:
+- `findingId: integer("finding_id").references(() => wetCheckFindings.id)` — the finding that produced this row (null for non-inspection items).
+- `createdAt: timestamp("created_at").defaultNow()` — insert time.
+
+**Why.** Today there's no way to key an item row back to its finding or its insert batch, which is exactly why duplication needed a forensic rebuild. With `findingId`, a duplicate is trivially detectable (`COUNT(*) > 1 per (workOrderId, findingId)`) and future repairs are a one-liner. **Populate `findingId` going forward** in the Slice-1 conversion insert (the deferred loop already iterates findings — stamp each item with its `f.id`). Backfill is not required for the repair (Slice 4 rebuilds from findings directly), but stamping new inserts closes the gap. Consider the same two columns on `estimate_items` / `billing_sheet_items` for parity (optional, same rationale).
+
+---
+
+## Slice 4 — Repair the corrupted production work orders (rebuild from findings) — **runs only after Slice 1 is live**
+**File:** new `artifacts/api-server/src/lib/migrations/repair-duplicated-work-order-items.ts`, registered in `registry.ts`; follow the `MigrationDefinition` contract (`check`/`preview`/`run` + `appSettingsKey`), mirroring `repair-nan-totals.ts` (per-row audit log, per-step try/catch, idempotent done-marker, acknowledgement gate since this changes money).
+
+**Do NOT guess a "correct batch."** Findings were never duplicated — only their item rows were — so rebuild each affected WO's items deterministically from its findings:
+
+**Detection (`check`/`preview`).** For each work order that has linked deferred findings (`wet_check_findings.work_order_id = wo.id AND resolution = 'deferred_to_work_order'`), compute the finding-derived set (one line per finding) and compare to the stored `work_order_items`. Flag as duplicated when the stored item count/sum exceeds the finding-derived count/sum. Report per-WO: current parts/labor/total → rebuilt parts/labor/total, and the delta (will be negative — a **reduction**; call this out clearly in the acknowledgement gate, opposite of the add-parts NaN/reconcile repairs).
+
+**Repair (`run`, per affected WO, transactional + wet-check row lock):**
+1. Snapshot current `work_order_items` + the WO header totals to a scratch table (or emit to the audit log) — reversible.
+2. Rebuild one item per finding using the existing `calc()`/`money()` logic (parts = `money(partPrice) × money(quantity)`; labor hours = `money(laborHours)`), stamping `findingId` (Slice 3).
+3. Replace the WO's entire item set via the existing safe helper `replaceWorkOrderItemsWithResync(woId, rebuiltItems, companyId)` (~storage.ts:4905) — delete + insert + recompute in one tx.
+4. Recompute and write header `partsSubtotal / laborSubtotal / totalAmount / totalItems` from the rebuilt set (`total = parts + labor`, all `money()`).
+5. Log before→after per WO.
+
+**Safety.**
+- Company-scoped throughout (Rule 1).
+- **Idempotent:** a clean re-run finds 0 duplicated WOs.
+- **Run order in production:** (a) confirm Slice 1 is deployed; (b) run `reconcile-billing-sheet-invoice-totals` (BS-2026-0235); (c) confirm `repair-nan-totals` has run (NaN cleared); (d) run **this** repair last — it supersedes the NaN migration's item-summed totals for the duplicated WOs and produces the truly-correct figures.
+- **Verify WO-1781807328597-643 ("WO #26" Tanglewood)** lands at ~$2,125.20 parts + $1,520 labor. If it doesn't match the independently-derived figure, stop and reconcile before releasing billing.
+- Hold billing on all flagged WOs until each rebuilt total is verified.
+
+---
+
+## Slice 5 — Guardrail tests (prove it, keep it)
+- **Concurrency regression (the key one):** fire two concurrent `convertWetCheckToWetCheckBilling` calls for the same wet check → assert exactly one `work_order_items` batch is written and totals equal a single rebuild-from-findings. (Proves Slice 1.)
+- **Incremental append still works:** defer finding A (convert), then defer findings B+C (convert) → WO has A+B+C exactly once (no drop, no dup).
+- **Completion NaN:** POST `/complete` with `totalPartsCost = "NaN"` (or a NaN rate) → stored total is finite and `= parts + labor`. (Proves Slice 2.)
+- **Repair idempotency + correctness:** seed a duplicated WO → run repair → items = finding count, `total = parts + labor`, matches rebuild; re-run → 0 changes. (Proves Slice 4.)
+- **Property assertion** after every WO/estimate/BS money mutation: `Number.isFinite(totalAmount) && totalAmount === partsSubtotal + laborSubtotal`.
+- **End-to-end:** one wet check with mixed findings → estimate + deferred WO + repaired-in-field → approve → complete → bill → invoice → PDF; assert finite & `total = parts + labor` at every stage, and a pre-invoice billing edit carries through unchanged to the PDF.
+
+---
+
+## Sequenced checklist (for the production run)
+1. ☐ Slice 1 (lock) + Slice 2 (completion guard) + Slice 3 (columns) merged & deployed.
+2. ☐ Slice 5 concurrency test green (lock proven).
+3. ☐ Run `reconcile-billing-sheet-invoice-totals` → verify BS-2026-0235 = $821.72.
+4. ☐ Confirm `repair-nan-totals` shows 0 remaining (NaN cleared).
+5. ☐ Run `repair-duplicated-work-order-items` (dry-run → review deltas → run) → verify WO #26 ≈ $2,125.20 + $1,520.
+6. ☐ Spot-check the other flagged WOs against their findings, then release billing.
+
+## Relevant files
+- `artifacts/api-server/src/storage.ts` — `convertWetCheckToWetCheckBilling` (~9780, add lock); `approveEstimateAndCreateWorkOrder` (~3845, lock reference); `replaceWorkOrderItemsWithResync` (~4905, rebuild helper); `calc()` in the conversion fn
+- `artifacts/api-server/src/routes/routes.ts` — `/api/work-orders/complete` (~9414–9435, `money()` guard)
+- `lib/db/src/schema/schema.ts` — `workOrderItems` (~add `findingId` + `createdAt`)
+- `artifacts/api-server/src/lib/migrations/repair-duplicated-work-order-items.ts` (new) + `registry.ts`
+- `artifacts/api-server/src/lib/money.ts` (`money()`); `repair-nan-totals.ts` (contract to mirror)

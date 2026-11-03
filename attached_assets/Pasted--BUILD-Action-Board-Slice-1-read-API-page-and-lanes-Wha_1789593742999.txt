@@ -1,0 +1,143 @@
+# BUILD — Action Board, Slice 1: read API, page and lanes
+
+## What & Why
+
+The irrigation manager texts Admiel and Brady the day's plan before 6am and has no data to build it from. He said so directly. Budget Status answers "who is over budget"; nobody has a screen that answers "where do the crews go today, and why."
+
+The Action Board is that screen. One row per customer, three facts and nothing else: **is there an open work order**, **is a wet check due**, and **is there budget left**. Everything it needs already exists except the monthly allocation, which Task #1993 restores.
+
+Findings are deliberately **not** part of this. Valuing them means reaching into mid-flight objects — many already routed to an estimate or work order, some sitting on wet checks a tech has not submitted, and on flat-mode wet checks `wetCheckFindings.laborHours` defaults to 0 by design, so the money would be wrong. A work order is the dispatchable unit and carries a real total written at creation. That decision is settled; do not reintroduce findings.
+
+**A visual mockup accompanies this ticket** (`MOCKUP - Action Board (Desktop + Phone).html`, pasted into `attached_assets/`). It is the layout target, and its chrome is drawn from the app's real tokens.
+
+## Hard prerequisites
+
+1. **Task #1993** — Restore the Seasonal Budget Model. **Merged.** `customer_budget_months` exists.
+2. **Task #1995** — Restore the Budget Status page. **Merged.** It also shipped `/api/budget/status`, which this ticket's read composes on.
+3. **Tasks #2008 and #2009** — the budget classifier and the meter consolidation. **Merged.** `BudgetBar` is now the single budget renderer in the client; use it as-is.
+
+Task #1864's `computeCustomerSpend` is the single spend source, now consumed by five modules. It is the spend side of both bar segments. Do not re-create it.
+
+**Read `AUDIT - Action Board and Budget Restores - Additive, Not Duplicative` first.** It lists what already exists that this ticket must reuse rather than reimplement, and the changes #1995 must make so this ticket has something to call.
+
+## Where it goes
+
+**Its own route, `/action-board`, with its own nav entry.** Not a tab on Budget Status. The two pages share the bar and the underlying reads but answer different questions: Budget Status ranks worst-first and asks who is over; the Action Board asks where the crews go. They must never become two components rendering the same screen (Rule 3) — the bar is imported from one place by both.
+
+The read belongs in `artifacts/api-server/src/routes/manager-workspace-routes.ts`, alongside the existing status-strip endpoint. That file already has the role gate (`isManagerAllowed`, `MW_ROLES`) and the tenant-scoping helpers (`scopedWorkOrdersForManager`, `scopedWcb`) this endpoint needs. Do not start a new routes file.
+
+## The model
+
+**The budget half of every row is not computed here — but the shared function it should call does not exist yet, so this ticket creates it.**
+
+`GET /api/budget/status` shipped with Task #1995 and lives at `budget-routes.ts:859`. It already returns every customer in the caller's company with the month's allocation, the spend split, season-to-date figures and the status, gated on `hasCapability(role, CAN_VIEW_BUDGETS)`. It is the right source.
+
+**Verified 2026-09-16:** that handler is ~245 lines of logic inline in the route (`:859-1104`). The only exports from `budget-routes.ts` are `applyBulkBudgetGoalRow` and `registerBudgetRoutes` — the per-customer row builder was never extracted. The original audit asked Task #1995 to do it; that did not happen before it merged.
+
+So **the first step of this ticket is that extraction**, and only then does the Action Board endpoint call it. Recomputing allocations and spend a second time would be a second implementation of the same query with its own chance to disagree — the exact disease Task #1864 was created to cure. See `AUDIT - Action Board and Budget Restores - Additive, Not Duplicative`, finding 2.
+
+For each customer in the caller's company that has a budget goal set:
+
+- **Allocation and spend** — from the shared budget-status row builder. Not queried here.
+- **Do not exceed** — allocation minus spend. Presented as an instruction, not a balance.
+- **Open work orders** — `work_orders` with `status` in `pending`, `assigned`, `in_progress`, valued by `estimatedTotal`, carrying their `workOrderNumber`. Define this as a named set, **`DISPATCHABLE_WO`**, immediately beside the two that already exist in this file — `ACTIVE_WO_FOR_MANAGER` (:60, awaiting the manager) and `ALL_WO_STAGES` (:62, the merged queue) — with a comment saying what each of the three answers. They are three legitimate questions; three anonymous status sets in one file is how they drift.
+- **Wet check** — the newest `wet_checks` row for the customer. "Due" when none falls in the current month. The standard is one wet check per customer per month.
+- **Pre-approved** — a work order whose `estimateId` is set came from an approved estimate. Mark it; see "the provisional number" below.
+
+### Lanes
+
+- **Clear to send** — has an open work order that fits the headroom, or a pre-approved work order, or a due wet check with headroom above zero.
+- **Over budget, nothing approved** — work exists but headroom is at or below zero (or the work order exceeds it), no pre-approved work, and no due wet check. Nothing the crew can do today.
+- **Nothing pending** — no open work order and this month's check already done.
+
+Sort within each lane worst-first by percentage of allocation used, so the tightest properties surface first.
+
+## The provisional number (read this before writing the DNE calculation)
+
+**Decided, and deliberately not built here:** approved estimates sit outside the budget. The monthly allocation governs discretionary work; work the customer has already seen and approved is not discretionary. A work order with `estimateId` set is therefore pre-approved and can be worked regardless of headroom.
+
+The matching change on the spend side is **out of scope** and deferred. When it lands, `computeCustomerSpend` gains a fourth returned number, `preApproved`, and do-not-exceed becomes `allocation − (total − preApproved)`. Nothing about the existing three returned values changes.
+
+**What this ticket must do about it:** compute do-not-exceed as `allocation − total` today, but put that arithmetic in **one named function** with a comment recording that `preApproved` will be subtracted from `total` when it exists. Do not scatter the subtraction across the row builder and the lane classifier. The seam has to be in one place or the later change becomes a hunt.
+
+## Done looks like
+
+- An irrigation manager opens Action Board from the sidebar and sees every budgeted customer in one of three lanes, sorted worst-first.
+- Each row shows the month's budget bar, the open work orders with their numbers and value, the wet check state, and a do-not-exceed amount.
+- A customer with a pre-approved work order appears in Clear to send even when the bar reads over 100%, and the work order is marked as pre-approved.
+- A work order with no estimate behind it (`workType` `direct_billing` or `maintenance`, so `estimatedTotal` is null) reads as **"no estimate"**, never as `$0`.
+- A customer with no budget goal does not appear at all, and the page says how many were excluded for that reason.
+- Nothing on the page edits anything; every row links to the customer profile budget anchor.
+- Every read is scoped to the caller's own company.
+
+## Out of scope
+
+- **Today's plan text and the copy button** — Slice 2.
+- **Forcing inspection mode on over-budget wet checks** — its own ticket; that guard belongs in the wet-check create gate, not here.
+- **The `preApproved` spend change** — deferred, as above.
+- **The manager's mobile app** — its own ticket.
+- **Any change to Budget Status, the Manager Workspace card, or the crew view.**
+- **Findings.** Not as a column, not as a count, not as a tooltip.
+- **A second budget bar, a second budget-status query, or a second KPI tile row.** All three already exist or are restored by #1995; see the audit.
+- **Crew assignment or a day/calendar view.** Work orders carry `assignedTechnicianId` and `scheduledDate`, and nothing writes to them here.
+- **Retiring the Financial Pulse nav link for the manager.** The header tiles below make it arguable, but that decision waits until Task #1992 has landed and been used.
+
+## Steps
+
+1. **Extract the budget-status row builder.** Lift the per-customer row logic out of the `/api/budget/status` handler (`budget-routes.ts:859-1104`) into an exported function, and have that route call it. Its existing tests must pass unchanged — that is the proof the extraction changed no behaviour. This is a prerequisite refactor inside this ticket, not a separate concern: without it the next step has nothing to call.
+
+2. **Add the read endpoint.** `GET /api/action-board` in `manager-workspace-routes.ts`, behind `requireAuthentication` and gated on `hasCapability(role, CAN_VIEW_BUDGETS)` — the same capability `/api/budget/status` already uses (`budget-routes.ts:864`). Do not introduce a new role string list; that file has `isManagerAllowed` (:47) for its own queue endpoints, and mixing the two gates is how a manager ends up reaching one page and not the other. Accept a month parameter defaulting to the current month.
+
+3. **Build the row in a pure, testable function.** Given a customer, their allocation, their spend, their open work orders and their newest wet check, return the row and its lane. No HTTP, no database — so the lane rules can be unit-tested at the boundaries without standing up a server.
+
+4. **Scope every read by company.** Resolve `companyId` from `req.authenticatedUserCompanyId`, never from the query string, and route the work-order and wet-check reads through the file's existing scoped helpers rather than writing new queries with their own rules. A super admin passes an explicit company.
+
+5. **Value the work orders.** Sum `estimatedTotal` across open work orders. A null `estimatedTotal` must propagate as "unknown", not as zero — a customer with one direct work order reads "1 · no estimate", and its value is excluded from any fit comparison rather than treated as free.
+
+6. **Add the tiles as a new variant of the existing widget, not a new tile row.** `FinancialPulseWidget` already owns KPI tile rows across five variants and five pages, including the one Manager Workspace embeds at `manager-workspace.tsx:333`. Add an `action-board` variant to it — billed this month against total allocated, season pace, left to bill this season, over-budget count. `useFinancialPulseData` is exported and generic, so feed the variant from this ticket's endpoint rather than `/api/financial-pulse/*`. (Task #1992 has since merged, so the manager is no longer refused by those routes — but this page's tiles are budget figures, not Financial Pulse figures, and must come from the budget reads.) The roll-up numbers come from `/api/budget/company-summary` (`budget-routes.ts:769`, shipped with #1995); do not recompute them.
+
+7. **Build the page.** `artifacts/irrigopro/src/pages/action-board.tsx`, following the mockup: brand-gradient hero, the four tiles, then the three lanes as bordered tables. **Use the shared `BudgetBar`.** Since Task #2009 it is the single budget renderer in the client, on the semantic colour tokens, and it already carries every prop this page needs — amounts mode (`allocation`, `invoicedAmount`, `pendingAmount`), plus `size`, `tone`, `label` and `forcedStatus`. Pass the default `tone="instruction"`: this page instructs a manager deciding where to send a crew. Do not add a prop to that component for this page without checking its existing surface first.
+
+8. **Register route and nav together.** Add `/action-board` to every role block in `App.tsx` whose nav can reach it, plus the separate company-admin app shell. Add the nav leaf directly above Budget Status in the irrigation manager's nav and in the billing and admin groups. The bookkeeper gets neither the route nor the leaf. A leaf without a route, or a route no nav reaches, is a Rule 3 defect.
+
+9. **Handle the empty and excluded cases.** Before goals are entered this page has nothing to show. An empty board must say so plainly and say how to fix it ("No customers have a budget goal for September — set one on the customer profile"), not render an empty table. Customers without a goal are excluded from the lanes and counted in a line the manager can see.
+
+10. **Tests, registered as validation commands.** Lane classification at every boundary: work fits, work exceeds, headroom exactly zero, pre-approved work order on an over-budget customer, due wet check with and without headroom, nothing pending. Null `estimatedTotal` never becomes `$0` and never counts as fitting. Customers with no allocation are excluded and counted. Tenant isolation on every read including the tiles: a manager in company A sees nothing from company B, and a super admin passing company A gets the same rows. Route-and-nav parity per role, bookkeeper and field tech refused. Register the suites as validation commands, not workflows — this repo is past its workflow cap.
+
+11. **Verify in the running app as the role.** Sign in fresh as an irrigation manager, reach the page by clicking the sidebar leaf, with real budget goals entered. Nav reads role at login, so a stale session proves nothing.
+
+## Notes for the executor
+
+- The mockup's chrome is taken from `src/index.css`: `--primary` is `210 67% 36%` (#1e5c99), `--radius` is `0.875rem`, the font is Inter, and the page hero uses `.bg-gradient-brand`. The manager's sidebar is `.sidebar-brand-blue` — a navy gradient — applied at `desktop-shell.tsx:470`. Screenshots taken as super admin show a white sidebar because that is the one role without it; do not use them as the visual reference.
+- The status chip (Go / Slow down / Stop) and the lane are two different axes and will disagree on purpose. A customer can carry a green Go chip and sit in a non-Go lane. Do not "fix" that by deriving one from the other.
+- `work_orders.status` has eight values; only the three open ones belong here. `work_completed`, `pending_manager_review`, `approved_passed_to_billing`, `cancelled` and `billed` are all finished work as far as this board is concerned.
+- If the month or company selector is a Radix Select, a sentinel value with no rendered option shows neither the value nor the placeholder and reads as broken — seed the option list first.
+- Server integration tests share a development database; prefer membership assertions over exact row counts.
+
+## Definition of Done (attach proof — Rule 7)
+
+- [ ] `file:line` for the endpoint, the pure row/lane function, the page, each route registration, and each nav leaf.
+- [ ] Screenshot of the board with real budget goals entered, showing at least one customer in each of the three lanes, including one pre-approved work order on an over-budget customer.
+- [ ] Screenshot of the empty state before goals are entered.
+- [ ] Captured response proving a manager in one company sees no rows from another.
+- [ ] Grep proof that the page contains no edit control and no reference to `wet_check_findings`.
+- [ ] Grep proof that the do-not-exceed arithmetic exists in exactly one function.
+- [ ] Grep proof that this ticket added no second budget-status query: the endpoint calls the shared row builder and does not query `customer_budget_months` itself.
+- [ ] Grep proof that exactly one budget bar component and one KPI tile component exist in the client.
+- [ ] Test output for lane boundaries, null `estimatedTotal`, exclusion counting, and route/nav parity.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+
+- `artifacts/api-server/src/routes/manager-workspace-routes.ts` (`isManagerAllowed` :45, `scopedWorkOrdersForManager` :164, `scopedWcb` :192, status-strip :941 — the pattern to follow)
+- `artifacts/api-server/src/budget-spend.ts` (`computeCustomerSpend` — already in main)
+- `artifacts/api-server/src/routes/budget-routes.ts` (`/api/budget/status` :859-1104 — the handler to extract from; `/api/budget/company-summary` :769; capability gate :864)
+- `lib/shared/src/roles.ts` (`CAN_VIEW_BUDGETS` :189)
+- `lib/db/src/schema/schema.ts` (`work_orders` status/estimatedTotal/workOrderNumber, `wet_checks`, `customer_budget_months` after #1993)
+- `artifacts/irrigopro/src/components/budget/BudgetBar.tsx` (the single budget renderer since #2009 — import and use its existing props; do not fork or extend without checking)
+- `artifacts/irrigopro/src/pages/` (new `action-board.tsx`)
+- `artifacts/irrigopro/src/App.tsx`, `src/components/company-admin-app.tsx`, `src/components/layout/nav-config.ts` (`managerNav` :256)
+- `artifacts/irrigopro/src/components/customer-form.tsx` (anchor `id="budget-and-alerts"` — row link target)
+- `artifacts/irrigopro/src/components/financial-pulse/financial-pulse-widget.tsx` (variant home for KPI tiles; `useFinancialPulseData` :159)
+- `artifacts/api-server/src/routes/budget-routes.ts` (`/api/budget/status`, `/api/budget/company-summary` — restored by #1995)
+- `attached_assets/` — the pasted Action Board mockup HTML and the pasted audit

@@ -1,0 +1,26 @@
+Got it — apologies again for jumping past that. Here's my read on the Replit agent's plan, based on the audit I already did.
+What the plan gets right
+The diagnosis is correct on both halves. I verified each one:
+
+lib/quickbooks.ts:41 does call /api/quickbooks/auth-url and lib/quickbooks.ts:57 does call /api/quickbooks/connection-status. Neither route is registered on the backend.
+financial-pulse.tsx:344,347 does call /api/quickbooks/connection-status — also not registered.
+The rename targets (/api/quickbooks/auth and /api/quickbooks/connection) are the real registered routes (routes/routes.ts:8088 and routes/routes.ts:8400).
+Missing QUICKBOOKS_REDIRECT_URI does cause a 400 at routes/routes.ts:8098-8104 before any OAuth URL is built.
+
+Where I'd push back
+The plan conflates two separate bugs and gets the priority slightly wrong. Step 3 (the env var) is the only thing causing the user-visible "won't even attempt to connect" symptom. Steps 1 and 2 fix real 404s, but they're not what's blocking the Connect button. Here's why:
+
+The Connect button lives in quickbooks-integration.tsx, which the plan explicitly puts out of scope. That component already calls apiRequest('/api/quickbooks/auth') directly — the correct endpoint. It does not use lib/quickbooks.ts at all.
+So lib/quickbooks.ts is almost certainly dead code (or only reachable from somewhere I haven't checked). Fixing it is fine, but the plan should verify there's actually a caller. If there isn't, this is cleanup, not a bugfix.
+The Financial Pulse banner fix is real — financial-pulse.tsx is the one place where /api/quickbooks/connection-status is genuinely being requested in production and 404'ing. Worth doing.
+
+What's missing
+A few things I'd add to the ticket before approving it:
+
+Verify all three env vars, not just the redirect URI. The 400 at routes.ts:8091 trips first if QUICKBOOKS_CLIENT_ID or QUICKBOOKS_CLIENT_SECRET is missing. The agent has zero visibility into your Replit Secrets pane, so its claim that only QUICKBOOKS_REDIRECT_URI is missing is a guess. Check all three.
+The redirect URI must match the Intuit developer portal exactly. Setting the env var without registering the same URL in Intuit's "Redirect URIs" list will still fail — just later in the flow, after the user lands on Intuit's page. The plan doesn't mention this. The legacy value in .migration-backup/.replit:85 was https://irrigopro.com/api/quickbooks/callback; if that's still your prod domain, use it.
+The frontend swallows the real error. The reason this took an audit instead of "look at the toast" is that handleQuickBooksConnect catches the API error and shows a generic "Failed to connect to QuickBooks." A 5-line change to surface the server's actual message would have made this self-diagnosing. Worth a follow-up ticket — not blocking, but you'll thank yourself next time.
+Drive-by cleanup the agent didn't catch: app.post("/api/quickbooks/disconnect") is registered twice (routes.ts:8296 with auth, routes.ts:13563 without). Express keeps the first; the second is dead. Not urgent, but it's living code-rot in the same surface area.
+
+Bottom line
+The plan will work and the endpoint fixes are correct. I'd tighten it up by: (a) explicitly calling step 3 as the gating fix and steps 1-2 as cleanup, (b) verifying that lib/quickbooks.ts actually has a live caller before bothering, (c) checking all three env vars in Secrets, and (d) confirming the redirect URI is also registered with Intuit. If the agent does all that, you're good to merge.

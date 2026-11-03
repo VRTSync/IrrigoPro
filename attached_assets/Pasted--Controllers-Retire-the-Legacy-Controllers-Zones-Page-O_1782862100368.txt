@@ -1,0 +1,49 @@
+# Controllers — Retire the Legacy "Controllers & Zones" Page (One Source of Truth)
+
+**What & Why**
+There are still **two editors of controller/zone data on two different stores**, which means they sync only by one-time migration and **drift on the next edit**:
+- **Customer Irrigation pages** (the profile card + the Irrigation System profile) → `irrigation_controllers` via `/api/customers/:id/controllers-profile`. **This is canonical.**
+- **Legacy "Controllers & Zones" nav page** (`pages/admin-controllers.tsx` → `/api/admin/customer-controllers` → **`property_controllers`**). Still a live editor of the **old** store.
+
+The recent migration copied `property_controllers` → `irrigation_controllers`, so they match *today*. But editing the legacy page changes the old store only (not the customer pages), and editing the profile changes the new store only (not the legacy page) — guaranteed divergence, and exactly the duplicate-source problem (PROJECT RULES Rule 3). To make the customer pages *provably* the source of truth, finish the convergence: **there should be one store and one editor.**
+
+Goal: `irrigation_controllers` is the single source; nothing else edits `property_controllers`. (VRTSync will feed `irrigation_controllers`, per the VRTSync design note.)
+
+## Decision
+Keep the "Controllers & Zones" page and **convert it into a company-wide roll-up** of `irrigation_controllers` — same compiled table look it has today (all customers in one list) — sourced from the **canonical** store. It's read-mostly, but includes a **quick-edit modal** so an admin can adjust a customer's controllers/zones inline without opening each profile.
+
+**Critical:** the quick-edit modal writes to **`irrigation_controllers` via the same canonical endpoints the customer profile uses** — NOT `property_controllers`, NOT a new store. So there's still **one source of truth**; the roll-up modal is just a second *door* into it, not a second store (the divergence we're eliminating). The customer Irrigation System profile remains the full editor; the modal is the fast path for common edits. Stop all writes to `property_controllers`.
+
+## Steps
+1. **Convert the page to a read-only company-wide roll-up.** Keep `pages/admin-controllers.tsx` and the "Controllers & Zones" nav entry, but:
+   - **Source from the canonical store:** read from `irrigation_controllers` (a company-wide aggregate endpoint, e.g. `GET /api/irrigation-controllers` scoped to the caller's company; super_admin = all) instead of `/api/admin/customer-controllers` (`property_controllers`).
+   - **Keep the same list/table look:** the current Customer → Controllers layout (the screenshot) — each customer row, expandable to its controllers with zone counts; optionally show company totals (total controllers, total zones).
+   - **Quick-edit modal (writes the canonical store):** each customer/controller row has an **Edit** action that opens a modal to adjust controllers/zones (e.g. add/remove a controller, rename, change a controller's zone count, toggle active) — saving through the **same canonical endpoints the customer profile uses** (`/api/customers/:id/controllers-profile`, `PUT /api/irrigation-controllers/:id`, etc.), with the same `irrigation_profile_zones` sync (non-destructive trim). Keep an **"Open full profile"** link in the modal for programs/run-times/photos/report (the full editor). On save, invalidate so the roll-up, the customer card/profile, and the wet-check grid all reflect it (one store).
+   - **Delete the old `PATCH/POST /api/admin/customer-controllers` write endpoints** that targeted `property_controllers` (no second store — Rule 3). The roll-up's edits go to the canonical irrigation endpoints only.
+   - **Move it in the nav to the SETTINGS section**, and **gate it to `company_admin` only** (and `super_admin`). Remove the "Controllers & Zones" item from the CUSTOMERS section (`navigation.tsx:123/183`) and add it under SETTINGS, shown only for company_admin/super_admin. Add a matching route guard so non-admins hitting `/admin/controllers` directly don't see it (redirect/404), consistent with Rule 2/3 (no reachable page for roles that shouldn't have it).
+2. **Make `property_controllers` read-only / retire its writers.** Audit and remove remaining write paths to `property_controllers` (the admin endpoints above; confirm the wet-check lazy bootstrap now writes `irrigation_controllers` per #1608). Keep the table readable until verification is complete, then plan removal.
+3. **Verify all consumers read the canonical store.** Confirm the wet-check controller grid resolver (`resolveWetCheckControllers` / `irrigation-controller-resolver.ts`) reads `irrigation_controllers` first (falling back to `property_controllers` only pre-seed), so the wet-check flow, the profile, and the card all agree.
+4. **No data left behind.** Since the values are already copied into `irrigation_controllers` (migration), retiring the legacy editor loses nothing; `property_controllers` stays as the historical/source table for the one-time repair only.
+
+## How we'll "be sure" (acceptance)
+- The "Controllers & Zones" page is a **read-only company-wide roll-up** sourced from `irrigation_controllers` — same compiled list look — and the **customer Irrigation profile is the only editor**.
+- The roll-up shows the **same** controllers/zone counts as each customer's profile (same store), and edits there immediately reflect on the roll-up, the card, and the wet-check grid.
+- No surface writes `property_controllers` anymore.
+
+## Tests
+- The "Controllers & Zones" page lists all customers' controllers/zone counts (read-only) from `irrigation_controllers`, matching the current table layout; numbers equal each customer's profile.
+- The roll-up's **quick-edit modal** saves to `irrigation_controllers` (canonical) — editing a customer's zone count there updates the customer profile, the card, and the wet-check grid (one store, just a second door). It does **not** write `property_controllers`.
+- Editing in the customer profile likewise reflects on the roll-up — both directions agree because it's one store.
+- No `property_controllers` write endpoint remains; `/api/admin/customer-controllers` write paths are gone.
+- Company isolation intact (company sees only its customers; super_admin all); the wet-check resolver returns canonical data.
+- The "Controllers & Zones" nav item appears under **SETTINGS** and **only for company_admin** (and super_admin); other roles don't see it and can't reach `/admin/controllers` directly.
+
+## Out of scope
+- The one-time repair migration (already done — this prevents re-divergence).
+- VRTSync integration (this just ensures it feeds the single canonical store).
+
+## Relevant files
+- Delete/retire: `artifacts/irrigopro/src/pages/admin-controllers.tsx`; nav item `components/layout/navigation.tsx:123/183`; routes `App.tsx:455/509`; backend `/api/admin/customer-controllers` (read/write) in `routes.ts`
+- Canonical: `artifacts/irrigopro/src/components/customers/irrigation-system-card.tsx`, `pages/customers/IrrigationProfile.tsx` (`/controllers-profile`)
+- Verify: `artifacts/api-server/src/irrigation-controller-resolver.ts` (reads `irrigation_controllers` first); `ensurePropertyControllers` writers (should target canonical)
+- `lib/db/src/schema/schema.ts` (`property_controllers` — read-only/retire path)

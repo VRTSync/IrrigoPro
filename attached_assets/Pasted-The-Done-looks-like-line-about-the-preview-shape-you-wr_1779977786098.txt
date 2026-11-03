@@ -1,0 +1,16 @@
+The "Done looks like" line about the preview shape — you wrote "ADD COLUMN company_id (nullable) on three tables + DROP NOT NULL on estimates.company_id. No truncate cascade."
+The DROP NOT NULL on estimates.company_id line won't actually appear. Reason: production's estimates.company_id is already nullable in the database (per the diagnostic query you ran — only estimates came back, with is_nullable = YES). The current schema's .notNull() is what was making drizzle-kit push propose ALTER TABLE estimates ... SET NOT NULL. When the slice relaxes the schema to nullable, schema and DB then agree on estimates, so Drizzle Kit shows no diff for that table at all.
+The actual expected preview is:
+
+ADD COLUMN company_id (nullable, with FK to companies) on work_orders, billing_sheets, invoices.
+No changes to estimates.
+No DROP TABLE web_sessions (the new schema declaration handles it).
+No truncate cascade anywhere.
+
+I'd reword that line in the ticket to:
+
+The Replit deploy preview for this slice shows only safe operations: ADD COLUMN company_id (nullable, FK to companies) on work_orders, billing_sheets, and invoices. No changes to estimates. No DROP TABLE web_sessions. No truncate cascade anywhere.
+
+If Agent ships and a DROP NOT NULL on estimates.company_id line does show up in the preview, that's actually fine — it'd just mean prod somehow ended up with NOT NULL on estimates after all, and Drizzle is reconciling it. Won't cause data loss. The truncate line is the only one that's catastrophic and worth gating the deploy on.
+Everything else in the ticket reads cleanly. The numbered steps match the spec, the out-of-scope list is appropriately tight (good move adding the legacy status/internalStatus guardrail — that's exactly the kind of scope creep Replit Agent would otherwise drift into), and the references to the spec doc + relevant files give Agent the right grounding.
+One thing worth noting that's not in the ticket but is worth knowing as you watch the build: the applyCompanyIdColumns() startup migration in storage.ts from commit 00ce687 stays in place. The slice deliberately doesn't remove it. Both code paths (startup + admin page) share the app_settings marker ('company-id-columns-v1'), so whichever runs first wins and the other becomes a no-op. This is intentional belt-and-braces — if someone deploys but forgets to open the admin page, the startup migration still runs the same SQL on next boot.

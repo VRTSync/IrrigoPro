@@ -1,0 +1,500 @@
+# Wet Check Billing Rebuild — Implementation Plan
+
+**Purpose:** Replace the current flat parts-list billing for BS-WC sheets with a zone-grouped layout in both the in-app modal and the customer PDF. This document is the source of truth — every slice below is intended to be handed to Replit as a self-contained task with no room for reinterpretation.
+
+**Read order:**
+1. Section 1: Design Context (all locked decisions, one source of truth)
+2. Section 2: Open Decision Before Slicing (read and confirm before handing Slice 4 to Replit)
+3. Section 3: Slices 1–8 (handed to Replit one at a time, in order)
+
+---
+
+## 1. Design Context (locked decisions)
+
+These were agreed in conversation and are referenced by every slice. Replit should not deviate from any of them.
+
+**Scope.** Only billing sheets whose `billingNumber` starts with `BS-WC-` are affected. Work-order and other billings keep the existing flat-parts layout.
+
+**Source of truth for the new layout.** `wetCheckFindings` joined to `wetCheckZoneRecords`. Each finding already has `billingSheetId`, `zoneRecordId`, `issueType`, `partId`, `partName`, `partPrice`, `quantity`, `laborHours`. No data migration is needed — historical BS-WC sheets render correctly from existing data.
+
+**Layout.** Zone-grouped. Each zone displays as: zone header (`<controllerLetter> <zoneNumber>` + issue display label), part lines, per-zone repair labor row showing `hours × rate = total`, per-zone subtotal. A single wet-check-level "Inspection Labor" line appears once per sheet.
+
+**Repair labor entry.** Per-zone, stepper UI, 0.25-hour increments, 0.25-hour minimum. Free-form decimal inputs are not permitted in the new flow.
+
+**Labor rate.** Always the per-customer global rate (`customers.laborRate`), snapshotted onto the billing sheet at creation (`billing_sheets.appliedLaborRate`). Never reprice based on later customer-rate changes. Existing snapshot logic is preserved.
+
+**Issue type display.** Always use `issueTypeConfigs.displayLabel` for the customer's company. Never display the raw `issueType` field. If no config row exists for a `(companyId, issueType)` pair, fall back to title-cased `issueType.replace(/_/g, " ")`.
+
+**$0.00 line item suppression on PDF.** Suppress when `lineTotal === 0 AND laborHours === 0 AND NOT isLaborOnly`. Labor-only findings (qty=0, partPrice=0, noPartNeeded=true) are kept because they represent real work performed.
+
+**PDF treatment.** Repairs Summary table at the top (zone label → subtotal). Each zone wrapped in a div with `page-break-inside: avoid`. Labor math shown on PDF (`hours × rate = total`). Labor subtotal split into "Inspection Labor" + "Repair Labor". Issue type display labels everywhere.
+
+**Issue type config normalization.** `issueTypeConfigs.defaultLaborHours` must be a multiple of 0.25 with a 0.25 minimum. The seed and admin validation must enforce this.
+
+**Safety patch.** `deleteWetCheck` must refuse when any of the wet check's findings has `billingSheetId IS NOT NULL`, even if the BS is not yet on an invoice. Today's blocker only checks invoice linkage, which leaves a back door that the new renderer would silently break against.
+
+**No PDF backward compatibility.** All wet check billings live in the current billing cycle (the wet check feature didn't exist before this cycle). There is no "old vs new" PDF reconciliation to handle. Regenerating an existing BS-WC PDF in the new format is the correct behavior.
+
+---
+
+## 2. Open Decision Before Slicing — Per-Zone Repair Labor Storage
+
+The design language is "per-zone repair labor." The codebase today stores labor per-finding on `wetCheckFindings.laborHours`. Two viable implementations exist; pick one before handing Slice 4 to Replit, because the data model and the tech UI diverge between them.
+
+**Option A — Sum-of-findings (no schema change).** Per-zone repair labor is computed as `SUM(wetCheckFindings.laborHours)` for findings in that zone. The tech enters labor per finding using the stepper (FindingSheet today). Zero migration, fits the existing data model perfectly. Downside: there is no zone-level value to display in the tech UI as a single source of truth — the zone's labor is always derived.
+
+**Option B — New column on zone records.** Add `wetCheckZoneRecords.repairLaborHours decimal(5,2) default "0.00"`. The tech enters one labor value per zone via a stepper in ZoneScreen. Per-finding `laborHours` becomes an estimate field used only by the issue-type defaults and other (non-BS-WC) flows. Requires a column, a backfill, and a per-zone PATCH endpoint. Cleanest semantic model for the new UI.
+
+**Recommendation: Option B** — it matches "per-zone repair labor" literally, makes the tech UI unambiguous (one stepper per zone, not one per finding), and the migration is mechanical (sum existing per-finding hours into the new column).
+
+**This plan is written assuming Option B.** If you pick Option A, fold Slice 4 into Slice 6, skip the migration, and replace the PATCH endpoint in Slice 4 with continued use of the existing per-finding PATCH.
+
+**Confirm Option A or B before Slice 4 is handed off.**
+
+---
+
+## 3. Slice Plan
+
+Each slice is self-contained. Replit should be given exactly one slice at a time, in order, and should not be told about subsequent slices' contents. Every slice lists explicit out-of-scope items to prevent feature creep.
+
+### Slice 1 — Safety patch: close the wet-check delete back door
+
+**Scope.** Block `deleteWetCheck` whenever any of its findings is attached to a billing sheet, regardless of invoice linkage. This protects against silent loss of zone records that the new zone-grouped renderer will depend on.
+
+**Files modified.**
+- `artifacts/api-server/src/storage.ts`
+- `artifacts/api-server/src/routes/routes.ts`
+- New: `artifacts/api-server/src/storage/wet-check-delete-billing-block.test.ts`
+
+**Concrete changes.**
+- In `deleteWetCheck` (storage.ts ~line 6059), after the existing invoice-blocker collection (~lines 6110–6196) and **before** the `if (blockers.length > 0)` check, add a second pass: for every `bsId` in the collected `billingSheetIds`, push a blocker entry of `{ kind: "billing_sheet", invoiceId: null, invoiceNumber: null, billingNumber }` if it isn't already represented in the list.
+- Introduce a new typed error class in storage.ts: `WetCheckHasBillingSheetError` with `code: "WET_CHECK_HAS_BILLING_SHEET"`, mirroring the shape of `WetCheckHasInvoicedRecordsError`. Throw this when the new blocker fires (and the existing one does not).
+- In the route handler `DELETE /api/wet-checks/:id` at `routes.ts ~line 14698`, classify the new error to HTTP 409 with a message naming each blocked BS by `billingNumber`. Add to the existing `recognized` error list pattern.
+
+**Acceptance criteria.**
+- Deleting a wet check whose findings have `billingSheetId IS NOT NULL` returns HTTP 409, with a message naming each BS by `billingNumber`, even when the BS has no invoice.
+- New test file `wet-check-delete-billing-block.test.ts` asserts both the storage throw and the route's 409 response shape.
+- Existing test `wet-check-submit-autobill-error.test.ts` still passes.
+- Existing test `wet-check-finding-delete.test.ts` still passes.
+
+**Out of scope.**
+- Renaming `WetCheckHasInvoicedRecordsError`.
+- Touching the cascade order at storage.ts ~line 6240.
+- Modifying `deleteWetCheckFinding`.
+- Any UI changes.
+
+**Dependencies.** None.
+
+---
+
+### Slice 2 — Normalize `issueTypeConfigs.defaultLaborHours` to 0.25 increments
+
+**Scope.** Update the seed, server-side admin validation, the admin UI input attributes, and a one-shot backfill so every `default_labor_hours` value is a multiple of 0.25 with a 0.25 minimum.
+
+**Files modified.**
+- `lib/db/src/schema/schema.ts` (update `WET_CHECK_ISSUE_TYPE_SEED` ~lines 1400–1411)
+- `artifacts/api-server/src/routes/routes.ts` (update `issueTypeAdminBodySchema` ~line 14308)
+- `artifacts/irrigopro/src/pages/admin-issue-types.tsx` (update the `defaultLaborHours` input attributes)
+- New: `artifacts/api-server/src/scripts/backfill-issue-type-labor-quarter.ts`
+- New: `artifacts/api-server/src/scripts/backfill-issue-type-labor-quarter.test.ts`
+
+**Concrete changes.**
+- Seed updates: change `nozzle_replacement` from `"0.10"` → `"0.25"`, `head_adjustment` from `"0.05"` → `"0.25"`. All other seed values already align to 0.25 increments.
+- Add a Zod `.refine()` to `issueTypeAdminBodySchema.defaultLaborHours`: `.refine((v) => { const n = parseFloat(v); return n >= 0.25 && Math.abs(n * 4 - Math.round(n * 4)) < 1e-9; }, "defaultLaborHours must be ≥ 0.25 and a multiple of 0.25")`.
+- Admin UI input: add `step="0.25"` and `min="0.25"` attributes to the `defaultLaborHours` input.
+- Backfill script (model on `backfill-estimate-labor-mode.ts`):
+  - Iterate all `issue_type_configs` rows.
+  - Compute `quantized = Math.max(0.25, Math.round(parseFloat(defaultLaborHours) * 4) / 4)`.
+  - If different from stored, UPDATE the row.
+  - Resumable via `app_settings` key `issueTypeLaborQuarter.done`.
+  - Supports `--dry-run` and `--batch=N` flags.
+- Test file asserts the quantization function on representative inputs: `0` → `0.25`, `0.10` → `0.25`, `0.33` → `0.25`, `0.40` → `0.50`, `1.00` → `1.00`, `1.55` → `1.50`.
+
+**Acceptance criteria.**
+- `seedIssueTypeConfigsForActiveCompanies()` is idempotent and produces only 0.25-multiple values on a fresh company.
+- POST/PATCH `/api/admin/issue-types` rejects `0.10`, `0.33`, `0`, returning HTTP 400 with the refine message.
+- After running the backfill on a fixture with mixed inputs, zero rows have `default_labor_hours % 0.25 != 0`.
+- Backfill is dry-runnable, resumable from a checkpoint, and logs each updated row.
+- The Admin Issue Types page's `defaultLaborHours` input visibly steps in 0.25 increments and has a minimum of 0.25.
+
+**Out of scope.**
+- Backfilling `wetCheckFindings.laborHours` (separate slice if ever needed).
+- Touching the FindingSheet UI (handled in Slice 6).
+
+**Dependencies.** None.
+
+---
+
+### Slice 3 — Backend: zone-grouped billing view assembler + endpoint
+
+**Scope.** Build the server-side data shape that the new in-app modal (Slice 5) and the new PDF (Slice 7) both consume. One pure assembler function, one storage method, one new endpoint.
+
+**Files modified.**
+- New: `artifacts/api-server/src/wet-check-billing-view.ts`
+- New: `artifacts/api-server/src/wet-check-billing-view.test.ts`
+- `artifacts/api-server/src/storage.ts` (add `getBillingSheetWetCheckView(billingSheetId, companyId)`)
+- `artifacts/api-server/src/routes/routes.ts` (add `GET /api/billing-sheets/:id/wet-check-view`)
+
+**Concrete changes.**
+
+Define these TypeScript interfaces in `wet-check-billing-view.ts`:
+
+```ts
+export interface WcvLineItem {
+  findingId: number;
+  partName: string;           // f.partName || cfg.displayLabel fallback
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  isLaborOnly: boolean;       // qty===0 && partPrice===0 && noPartNeeded===true
+  laborHours: number;         // per-finding labor (preserved for display + reconciliation)
+  notes: string | null;
+}
+
+export interface WcvZone {
+  zoneRecordId: number;
+  controllerLetter: string;
+  zoneNumber: number;
+  issueTypeKey: string;
+  issueDisplayLabel: string;       // from issueTypeConfigs; never the raw key
+  items: WcvLineItem[];
+  repairLaborHours: number;        // see Slice 4: from zone column (Option B) or Σ findings (Option A)
+  repairLaborRate: number;         // = sheet.appliedLaborRate
+  repairLaborTotal: number;        // hours × rate
+  partsSubtotal: number;
+  zoneSubtotal: number;            // parts + labor for this zone
+}
+
+export interface WcvInspection {
+  inspectionLaborHours: number;    // = wetChecks.totalLaborHours
+  laborRate: number;
+  inspectionLaborTotal: number;
+}
+
+export interface WetCheckBillingView {
+  billingSheetId: number;
+  billingNumber: string;
+  isWetCheck: true;                // discriminator for the modal
+  wetCheckId: number;
+  customerId: number;
+  customerName: string;
+  laborRate: number;               // sheet snapshot (appliedLaborRate ?? laborRate ?? customer.laborRate)
+  inspection: WcvInspection;
+  zones: WcvZone[];                // ordered by controllerLetter, then zoneNumber ascending
+  repairsSummary: Array<{ zoneRecordId: number; label: string; subtotal: number }>;
+  partsSubtotal: number;
+  laborSubtotal: number;           // inspection + Σ zone labor
+  grandTotal: number;
+}
+```
+
+Implement `buildWetCheckBillingView(input): WetCheckBillingView` as a **pure function** (no I/O). Heavily unit-tested.
+
+Implement `storage.getBillingSheetWetCheckView(billingSheetId, companyId): Promise<WetCheckBillingView | null>`:
+- Loads the BS.
+- Resolves `wetCheckId` by reading any finding with `billingSheetId = X`.
+- Loads the wet check + all findings with `billingSheetId = X` joined to their zone records.
+- Loads `issueTypeConfigs` for the customer's company.
+- Calls `buildWetCheckBillingView`.
+- Returns `null` if the BS has no findings linked (i.e., it's a non-wet-check BS).
+
+Add route `GET /api/billing-sheets/:id/wet-check-view` alongside the existing `/items` route (~routes.ts:12021). Same auth pattern as `/api/billing-sheets/:id`. Returns:
+- HTTP 200 with the `WetCheckBillingView` payload, or
+- HTTP 404 if the BS doesn't exist, or
+- HTTP 422 with `{ message: "Not a wet-check billing sheet" }` if the storage method returns `null`.
+
+**Label fallback rule.** `issueDisplayLabel` resolution: prefer `issueTypeConfigs.displayLabel` for the BS's company; if no row exists, fall back to `issueType.replace(/_/g, " ")` with each word title-cased. Never copy the raw `issueType` verbatim into `issueDisplayLabel`.
+
+**Labor rate precedence.** `laborRate` in the response: `bs.appliedLaborRate ?? bs.laborRate ?? customer.laborRate`, parsed to number.
+
+**Acceptance criteria.**
+- `buildWetCheckBillingView` test covers: single zone single finding, single zone multiple findings, multi-zone (verifies ordering by controllerLetter then zoneNumber), labor-only finding, `$0.00` line item with `isLaborOnly: false` (suppression flag is on the consumer side; the view still returns the item).
+- Endpoint returns the contract above for a real BS-WC sheet seeded in test setup.
+- Endpoint returns HTTP 422 with the exact message for a non-wet-check BS.
+- `displayLabel` is read from `issueTypeConfigs` for the BS's company.
+- Labor rate in the response uses the precedence above.
+- Zones are ordered deterministically: `controllerLetter` ascending, `zoneNumber` ascending.
+- `partsSubtotal + laborSubtotal === grandTotal` in every test fixture.
+
+**Out of scope.**
+- Modifying the existing flat `/items` endpoint (keep for backwards compat).
+- Modifying the PDF (Slice 7).
+- Per-zone repair labor writes (Slice 4).
+- Frontend changes.
+
+**Dependencies.** Slice 1 merged.
+
+---
+
+### Slice 4 — Backend: per-zone repair labor data model (Option B)
+
+**Scope.** Add the `wetCheckZoneRecords.repairLaborHours` column, write paths, backfill, and switch the view assembler to read from the new column. **Skip this slice entirely if Option A was chosen in Section 2 above.**
+
+**Files modified.**
+- `lib/db/src/schema/schema.ts` (add column to `wetCheckZoneRecords` ~line 1261)
+- Drizzle migration: new file under the project's drizzle migrations directory
+- `artifacts/api-server/src/storage.ts` (extend `upsertWetCheckZoneRecord`; add `setZoneRepairLabor(zoneRecordId, hours, companyId)`; update `_writeRepairedInFieldBilling` totals math)
+- `artifacts/api-server/src/routes/routes.ts` (extend PATCH zone-record route at ~line 15022 to accept `repairLaborHours`; add new dedicated PATCH `/api/wet-checks/zone-records/:id/repair-labor` route for the stepper)
+- `artifacts/api-server/src/wet-check-billing-view.ts` (switch `repairLaborHours` source from Σ finding hours to the new column)
+- New: `artifacts/api-server/src/scripts/backfill-zone-repair-labor.ts`
+- New: `artifacts/api-server/src/scripts/backfill-zone-repair-labor.test.ts`
+
+**Concrete changes.**
+
+Schema column:
+```ts
+repairLaborHours: decimal("repair_labor_hours", { precision: 5, scale: 2 })
+  .notNull()
+  .default("0.00")
+```
+
+Drizzle migration: `ALTER TABLE wet_check_zone_records ADD COLUMN repair_labor_hours decimal(5,2) NOT NULL DEFAULT '0.00';` (use the project's standard `IF NOT EXISTS` patterns where the migration tooling supports it).
+
+Backfill script:
+- For each zone record whose wet check has at least one finding with `billingSheetId IS NOT NULL`, compute `SUM(wcf.labor_hours)` across that zone's billed findings and write to the new column.
+- Resumable via `app_settings` key `zoneRepairLabor.done`.
+- Supports `--dry-run` and `--batch=N`.
+- Logs every updated row.
+
+Reusable Zod refine: `repairLaborHoursSchema = z.string().refine(...)` enforcing `>= 0` and a multiple of 0.25. Apply to both write paths.
+
+Storage changes:
+- `setZoneRepairLabor(zoneRecordId, hours, companyId)` updates only the new column with a company-scoped existence check. Idempotent.
+- In `_writeRepairedInFieldBilling` (~storage.ts:6695), change the labor-total computation. For BS-WC sheets, total labor = `wetChecks.totalLaborHours + Σ(wetCheckZoneRecords.repairLaborHours WHERE zone has any finding in this BS)`. Document this math in a comment near the calculation.
+
+Route additions:
+- Extend the existing PATCH zone-record endpoint to accept the new field via the refined schema.
+- Add `PATCH /api/wet-checks/zone-records/:id/repair-labor` for the stepper. Body: `{ repairLaborHours: string }`. This dedicated endpoint keeps the offline queue's per-field idempotency clean.
+
+**Acceptance criteria.**
+- Migration is idempotent and runs cleanly via the project's existing migration runner.
+- New column defaults to `0.00` on every existing row.
+- Backfill leaves every zone with a billed finding satisfying `repair_labor_hours = SUM(findings.labor_hours WHERE billingSheetId IS NOT NULL)`. Verified by unit test against a known fixture.
+- Dedicated PATCH endpoint rejects `"0.1"`, `"-1"`, `"0.33"` with HTTP 400; accepts `"0"`, `"0.25"`, `"0.50"`, `"2.00"`.
+- The wet check billing view endpoint from Slice 3 now reads `repair_labor_hours` from the new column.
+- A fixture with 1 finding (laborHours = 0.5) in a zone with `repair_labor_hours = 0.5` produces sheet `totalHours = 0.5`, not `1.0` (no double-counting).
+- Backfill is dry-runnable, resumable, and produces zero changes on a second run.
+
+**Out of scope.**
+- Any UI changes (Slice 6).
+- PDF changes (Slice 7).
+- Removing or deprecating `wetCheckFindings.laborHours` (it stays — used by non-BS-WC flows and as an estimate source).
+
+**Dependencies.** Slices 1 and 3 merged.
+
+---
+
+### Slice 5 — Frontend: zone-grouped in-app billing detail view
+
+**Scope.** Render the new zone-grouped layout in the existing modal for any BS whose `wet-check-view` endpoint returns HTTP 200. Fall back to the legacy parts table on HTTP 422 (non-wet-check BS) or any error.
+
+**Files modified.**
+- `artifacts/irrigopro/src/components/billing/completed-work-detail-modal.tsx`
+- New: `artifacts/irrigopro/src/components/billing/wet-check-billing-view.tsx` (the zone-grouped subtree component)
+- New: `artifacts/irrigopro/src/components/billing/wet-check-billing-view.test.tsx`
+
+**Concrete changes.**
+
+In `CompletedWorkDetailModal`:
+- When `type === "billing_sheet"`, add a second `useQuery`:
+  ```ts
+  useQuery({
+    queryKey: ["/api/billing-sheets", id, "wet-check-view"],
+    queryFn: () =>
+      fetch(`/api/billing-sheets/${id}/wet-check-view`).then((r) =>
+        r.status === 422 ? null : r.ok ? r.json() : null
+      ),
+    enabled: type === "billing_sheet",
+  });
+  ```
+- If the response is non-null, render `<WetCheckBillingView view={...} />` **in place of** the existing `Parts & Materials` SectionCard (~lines 727–795). Keep location/job/photos/notes sections untouched.
+- For the existing "Time & Labor" SectionCard (~lines 700–724): when `view != null`, replace its single labor pill with a breakdown — Inspection Labor line + Repair Labor line — both showing `hours × rate = total`.
+
+`WetCheckBillingView` component layout (top to bottom):
+1. **Repairs Summary** table at top: zone label (`<controllerLetter> <zoneNumber> — <issueDisplayLabel>`) and subtotal, sticky header.
+2. **One section per zone** from `view.zones`:
+   - Header: zone identifier + issue display label.
+   - Line items table: part name, quantity, unit price, total.
+   - Labor row: `<hours> × <rate>/hr = <total>`.
+   - Zone subtotal pill.
+3. **Inspection** section: `Inspection Labor (<hours> × <rate>/hr = <total>)`.
+4. **Totals** footer matching the existing financial summary structure.
+
+**Line item suppression rule** (mirrors PDF): hide line items where `lineTotal === 0 && item.laborHours === 0 && !item.isLaborOnly`. Labor-only items remain visible.
+
+**Acceptance criteria.**
+- Component test renders a fixture with 2 zones, 3 findings including one labor-only finding. Verifies: zones ordered by `controllerLetter`/`zoneNumber`, display labels used (never raw issue type), inspection section appears exactly once, totals match.
+- Test asserts that a `$0` non-labor-only part line is filtered out.
+- Test asserts that a labor-only finding is preserved.
+- Test asserts that for `type === "work_order"`, `WetCheckBillingView` is **not** rendered (legacy parts table only).
+- Test asserts the fallback path: when the query returns null (422), the legacy parts table is rendered.
+- Manual QA: opening a real BS-WC modal shows the new layout; opening a regular BS shows the legacy parts table.
+
+**Out of scope.**
+- PDF changes.
+- Editing labor from the modal (view is read-only).
+- Tech-facing repair labor stepper (Slice 6).
+
+**Dependencies.** Slice 3 merged. (Slice 4 also merged if Option B was selected, since the view's `repairLaborHours` source depends on it.)
+
+---
+
+### Slice 6 — Frontend: 0.25-hr stepper for tech-facing repair labor entry
+
+**Scope.** Add a reusable 0.25-hour stepper component. Use it in `ZoneScreen` for the new per-zone repair labor input (Option B). Replace the existing free-form labor-hours input in `FindingSheet` with the same stepper.
+
+**Files modified.**
+- New: `artifacts/irrigopro/src/components/wet-checks/labor-hours-stepper.tsx`
+- `artifacts/irrigopro/src/pages/wet-checks/ZoneScreen.tsx`
+- `artifacts/irrigopro/src/pages/wet-checks/FindingSheet.tsx`
+- `artifacts/irrigopro/src/lib/finding-save-payload.ts` (client-side quantization)
+- `artifacts/irrigopro/src/lib/finding-save-payload.test.ts` (extend)
+
+**Concrete changes.**
+
+`LaborHoursStepper` component:
+- Props: `value: string`, `onChange(next: string)`, `min?: string` (default `"0.25"`), `max?: string`, `disabled?: boolean`, `label?: string`.
+- UI: `−` button on left, center display showing `X.XX hrs`, `+` button on right.
+- Step is fixed at `0.25`.
+- `−` disables at `min`.
+- All values stored as strings to match the existing decimal handling in the codebase.
+- Optional: long-press-to-repeat (nice-to-have, not required for acceptance).
+
+In `ZoneScreen.tsx`:
+- When a zone is in `checked_with_issues`, surface a `<LaborHoursStepper>` labeled "Repair labor for this zone" near the findings list (~lines 790–820).
+- Initial value comes from the zone record's `repairLaborHours` field.
+- Wire to a debounced mutation against `PATCH /api/wet-checks/zone-records/:id/repair-labor`.
+
+In `FindingSheet.tsx`:
+- Replace the existing `<Input type="number" step="0.05" ... />` at ~line 338 with `<LaborHoursStepper value={laborHours} onChange={setLaborHours} min="0.25" />`.
+- Default value seeding from `cfg?.defaultLaborHours` (~line 109) is preserved.
+
+In `finding-save-payload.ts`:
+- Add a clamp/quantize step that snaps any incoming `laborHours` value to the nearest 0.25 (with 0.25 minimum) before emitting the payload. This protects against any offline-replay path that could surface non-quantized values.
+
+**Acceptance criteria.**
+- Component test: clicking `−` from `0.25` does nothing; clicking `+` from `0.25` produces `0.50`; the displayed value always shows two decimals.
+- `FindingSheet` no longer presents a free-form decimal input — arbitrary values cannot be typed.
+- `ZoneScreen` shows the per-zone repair labor stepper only when zone status is `checked_with_issues`; otherwise the stepper is hidden.
+- Offline write path (existing `offlineUpdateFinding` and PATCH zone-records queue) still works.
+- `finding-save-payload.test.ts` updated to assert: a non-quantized input (e.g., `"0.33"`) is quantized to `"0.25"` in the payload.
+- Visual QA: stepper is touch-friendly on mobile (tap targets ≥ 44px square).
+
+**Out of scope.**
+- Inspection-labor UI for the wet check as a whole (separate follow-up).
+- Manager-side overrides.
+- Stepper for any non-labor numeric input.
+
+**Dependencies.** Slice 4 merged (column + PATCH endpoint exist). If Option A was selected, this slice handles only the FindingSheet replacement and skips ZoneScreen changes.
+
+---
+
+### Slice 7 — PDF: zone-grouped template
+
+**Scope.** Replace the flat parts table in `ticketPageBS` with a zone-grouped layout for BS-WC sheets. Add a Repairs Summary table at the top, show labor math, use `displayLabel`, suppress qualifying $0 lines, and use `page-break-inside: avoid` on each zone block.
+
+**Files modified.**
+- `artifacts/api-server/src/pdf-view-model.ts`
+- `artifacts/api-server/src/pdf-helpers.ts`
+- `artifacts/api-server/src/invoice-pdf-service.ts`
+- `artifacts/api-server/src/pdf-view-model.test.ts` (extend)
+- New: `artifacts/api-server/src/pdf-helpers-wet-check.test.ts`
+
+**Concrete changes.**
+
+Extend `PdfBillingSheetRow` (pdf-view-model.ts ~line 66) with an **optional** field: `wetCheckView?: WetCheckBillingView`. Optional so non-wet-check sheets are unaffected.
+
+Extend `InvoiceDetailData.billingSheets[]` (~pdf-view-model.ts:145) with the same optional `wetCheckView` field.
+
+In `InvoicePdfService.generatePdfBuffer` (invoice-pdf-service.ts ~line 316):
+- Pre-fetch the `WetCheckBillingView` per BS using `storage.getBillingSheetWetCheckView`.
+- Attach to each `data.billingSheets[i].wetCheckView`.
+- This keeps `buildPdfViewModel` synchronous and pure.
+
+In `buildPdfViewModel` (pdf-view-model.ts ~line 260, the `billingSheetRows.map`):
+- Pass the optional `wetCheckView` through to the row object verbatim.
+
+New helper in `pdf-helpers.ts`: `partsBlockForWetCheckBS(view: WetCheckBillingView, brandColors): string`.
+- Emits a "Repairs Summary" table (zone label → subtotal, total at bottom).
+- Per zone, emits `<div class="zone-block">` (with `page-break-inside: avoid` styling) containing:
+  - Zone header.
+  - Parts mini-table (apply the suppression rule).
+  - Labor row showing `<hours> × <rate>/hr = <total>` styled like the existing financial-row CSS.
+  - Zone subtotal.
+- Final row: Inspection — `Inspection (X.XX hrs × $rate/hr = $total)`.
+
+In `ticketPageBS` (pdf-helpers.ts ~line 240):
+- Replace the `partsTableFromBS(bs.items)` call (~line 310) with: `bs.wetCheckView ? partsBlockForWetCheckBS(bs.wetCheckView, brandColors) : partsTableFromBS(bs.items)`.
+- In the FINANCIAL BREAKDOWN block (~lines 292–308), when `wetCheckView` is present, split the labor row into "Inspection Labor" + "Repair Labor" using values from the view.
+
+Add CSS to `buildFullCSS`:
+```css
+.zone-block { page-break-inside: avoid; }
+```
+
+**Line item suppression rule** (inside `partsBlockForWetCheckBS`): hide items where `lineTotal === 0 && item.laborHours === 0 && !item.isLaborOnly`.
+
+**Acceptance criteria.**
+- New test `pdf-helpers-wet-check.test.ts` snapshots the HTML for a 2-zone fixture with one labor-only finding and asserts:
+  - The string `"Repairs Summary"` appears exactly once.
+  - Each zone block contains its display label and a labor row matching `<hours> × <rate>/hr = <total>`.
+  - A `$0`-total non-labor-only line item is absent from the HTML.
+  - A labor-only line item is present in the HTML.
+  - The `page-break-inside: avoid` rule is present in the generated CSS.
+- Existing `pdf-view-model.test.ts` continues to pass without modification beyond extending fixtures with the new optional `wetCheckView` field (non-wet-check BS rendering unchanged).
+- Manually generating a PDF for an existing BS-WC invoice in dev produces the new layout.
+- Manually generating a PDF for a non-wet-check BS produces the unchanged legacy layout.
+- The existing reconciliation invariant `partsSubtotal + laborSubtotal === totalAmount` continues to hold for the new layout.
+
+**Out of scope.**
+- The cover page, reconciliation page, or work-order tickets.
+- The validation routine itself.
+- The Puppeteer `footerTemplate` (kept as-is).
+
+**Dependencies.** Slices 3 and 4 merged.
+
+---
+
+### Slice 8 — Tests, cleanup, observability
+
+**Scope.** Close test coverage gaps at the seams between earlier slices, mark `laborMode` as obsolete for BS-WC v2 in code comments (do not drop), and add a runbook note for ops.
+
+**Files modified.**
+- `artifacts/api-server/src/pdf-view-model.test.ts` (extend fixtures with `wetCheckView` field)
+- `artifacts/api-server/src/routes/billing-workspace-routes.test.ts` (verify queue rows still build with the new column)
+- `artifacts/irrigopro/src/pages/billing-sheets.tsx` (verify no client-side calculations need updating; likely no edits)
+- New: `artifacts/api-server/src/routes/wet-check-billing-view.integration.test.ts`
+- `artifacts/api-server/src/storage.ts` (comment block near `_writeRepairedInFieldBilling`)
+- `lib/db/src/schema/schema.ts` (comment marking `laborMode` as ignored for BS-WC v2)
+
+**Concrete changes.**
+- New integration-style test: create a wet check → add findings with labor → submit → fetch `/api/billing-sheets/:id/wet-check-view` → assert payload shape, ordering, totals, and label resolution.
+- Add a comment block in storage.ts near `_writeRepairedInFieldBilling` describing the new totals math: `total_labor = wc.totalLaborHours + Σ zone.repairLaborHours`, `parts_total = Σ finding.partPrice × finding.quantity`.
+- Add console-log instrumentation in `getBillingSheetWetCheckView`: when `repair_labor_hours` is 0 but the sum-of-findings is non-zero, log a warning with the BS and wet check IDs (to catch any forgotten backfill rows in production).
+- Verify and (if necessary) update `applyPricingVisibility` so it does not redact fields on the new view that field techs are allowed to see.
+- Add a code comment near `billing_sheets.laborMode` and `wet_checks.laborMode` in `schema.ts` marking them as "ignored for BS-WC v2; preserved for non-wet-check billing paths."
+
+**Acceptance criteria.**
+- Integration test asserts the full happy path from finding creation to view-endpoint payload.
+- All previously listed tests pass (with fixture extensions only).
+- No console.warn fires during PDF generation for a fully-backfilled, fully-quantized invoice.
+- Pricing visibility behavior for field-tech role on the new view matches what they see today on the existing modal.
+
+**Out of scope.**
+- Removing the `laborMode` columns.
+- Repricing legacy invoices.
+- Adding inspection-labor UI for wet checks.
+
+**Dependencies.** Slices 1–7 merged.
+
+---
+
+## 4. Handoff to Replit
+
+When sending a slice to Replit:
+1. Paste the slice section verbatim (Slice header through "Dependencies").
+2. Prepend the **Design Context** section (Section 1) so Replit has the locked decisions in front of it.
+3. Do **not** include other slices' content — keep each task scoped.
+4. After Replit returns the diff, verify against the slice's Acceptance Criteria before merging.
+
+The plan is intentionally specific about file paths, function names, schema field names, and expected payload shapes. If Replit proposes deviations from any of these, treat it as a deviation from the plan that needs explicit re-approval rather than a Replit interpretation to accept.

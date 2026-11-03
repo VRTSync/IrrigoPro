@@ -1,0 +1,116 @@
+# CRM Parts Catalog API — Slices 1–3 (Sync-Ready Mutations, Shared API-Key Middleware, Delta Endpoint)
+
+**What & Why**
+Our own CRM needs an always-up-to-date copy of the parts catalog to build estimates from. The design is **delta polling**: the CRM calls `GET /api/external/parts?updatedSince=<cursor>` on its own schedule and receives every part created or changed since its last poll — including deactivations — so its local copy converges on IrrigoPro's catalog without webhooks, retries, or delivery tracking. IrrigoPro already has the building blocks: a company-scoped `parts` table, an `api_keys` table built "for CRM integrations," and a working external-route pattern (`/api/external/work-orders`). This family closes the three gaps between those blocks and a reliable sync API.
+
+**The three gaps (each is a slice):**
+1. `updatedAt` on parts is **never maintained** — `defaultNow()` only, no `$onUpdate`, and no write path stamps it. Delta sync keyed on a stale column returns nothing. (Slice 1)
+2. Parts can be **hard-deleted**, so a removed part simply vanishes — the CRM can never learn it's gone. (Slice 1)
+3. External API-key auth is **inlined** in the work-order route, not reusable. (Slice 2)
+
+Then Slice 3 ships the endpoint itself.
+
+## Current state (confirmed)
+
+- **Parts model** (`lib/db/src/schema/schema.ts:205`): `companyId` (NOT NULL), `name`, `description`, `price`, `cost`, `sku`, `category`, `material`, `size`, `brand`, `fittingType`, `detail`, `quickbooksId`, `isActive`, `approvalStatus`, `approvedAt`, `createdAt`, `updatedAt` (`:225` — `defaultNow().notNull()`, **no `$onUpdate`**).
+- **`updatePart`** (`artifacts/api-server/src/storage.ts:2303`): `db.update(parts).set(part)` — **does not stamp `updatedAt`**. No caller passes it either (`parts-routes.ts` has zero `updatedAt` references). PUT `:184` and PATCH `:234` (incl. the approve path `:317`) go through `updatePart`; bulk-import `:365` is **create-only** (skips existing names, `:582–605`), so its rows get `updatedAt` from the insert default.
+- **`deletePart`** (`storage.ts:2314`): **hard delete**, wired to `DELETE /api/parts/:id` (`parts-routes.ts:1095`).
+- **API keys** (`schema.ts:1022`): company-scoped, `keyPrefix`, `isActive`, `lastUsedAt`, optional `expiresAt`. Management routes exist (`routes.ts:14940`, company-admin gated, key value never re-shown after create). Lookup is plain-text equality with `isActive=true` filter (`storage.ts:7227`).
+- **External route pattern** (`routes.ts:15033` `POST /api/external/work-orders`, `:15209` GET): `Authorization: Bearer <key>` → `getApiKeyByKey` → inactive/expired checks → `updateApiKeyLastUsed` → company scoped from `apiKey.companyId`. All **inline**, duplicated across the two routes.
+
+## Slice 1 — Sync-ready catalog mutations (`updatedAt` + soft delete)
+
+Make the `parts` table tell the truth about change, so a delta query is trustworthy.
+
+- **Stamp `updatedAt` on every part write path.** Preferred: add `.$onUpdateFn(() => new Date())` (or `.$onUpdate`) to `parts.updatedAt` in `schema.ts:225` so Drizzle stamps it on any `db.update(parts)`. If the Drizzle version in use doesn't support it cleanly, stamp explicitly in `storage.updatePart` (`storage.ts:2303`) — one canonical place, not per-route. Either way, verify the update paths stamp: PUT `:184`, PATCH `:234`, and the approve transition `:317`. (Bulk-import `:365` is create-only, so inserts are covered by the column default.)
+- **Convert hard delete to soft delete.** `DELETE /api/parts/:id` (`parts-routes.ts:1095`) sets `isActive = false` (stamping `updatedAt`) instead of calling `storage.deletePart`. A deactivated part then flows through the delta feed as `isActive: false` and the CRM deactivates its copy — deletion becomes just another update. This also protects historical references (`estimate_items.partId`, `work_order` items, `assembly_parts` all reference `parts.id`).
+  - Keep `storage.deletePart` only if something else calls it; otherwise remove it (Rule 7 — no dead helpers). The Parts Catalog UI already treats `isActive=false` parts as inactive, so no frontend change should be needed — confirm the catalog list/filters behave sensibly after a "delete."
+- **Index for the delta query:** add `index("parts_company_updated_idx").on(table.companyId, table.updatedAt)` to the parts table (same pattern as `customers_company_idx`, `schema.ts:121`). The sync query is `WHERE company_id = ? AND updated_at > ? ORDER BY updated_at, id` — this index keeps it O(log n).
+- **Backfill note:** existing rows already have `updatedAt` populated from `defaultNow()` at insert; no backfill needed. First CRM sync just starts with no `updatedSince` (full catalog).
+
+## Slice 2 — Shared `requireApiKey` middleware
+
+Extract the inline key-auth from the work-order routes into one reusable Express middleware, e.g. `artifacts/api-server/src/routes/external-auth.ts`:
+
+- Behavior identical to today's inline block (`routes.ts:15036–15068`): missing/malformed header → 401 `UNAUTHORIZED`; unknown or inactive key → 401 `INVALID_API_KEY`; past `expiresAt` → 401 `API_KEY_EXPIRED`; on success fire `updateApiKeyLastUsed` and attach the key's tenancy to the request — `req.apiKeyCompanyId = apiKey.companyId` (and `req.apiKeyId`).
+- **Refactor both existing external routes** (`POST` `:15033`, `GET` `:15209`) to use it — one auth implementation, not three (Rule 3's one-canonical principle applied to code paths).
+- **Tenancy rule for external routes:** `companyId` comes from the key, never from body/query/path (Rule 1). API keys are company-scoped credentials with no `super_admin` variant — a key sees exactly one company, always.
+- Out of scope but worth a flag: keys are stored **plain-text** (`storage.ts:7227` compares equality; the schema comment `:1026` says "hashed or plain"). Hashing at rest (store SHA-256, compare hash) is a cheap hardening — fine as a follow-on, don't block this family on it.
+
+## Slice 3 — `GET /api/external/parts` (delta + pagination)
+
+The endpoint the CRM polls. Lives with the other external routes, behind `requireApiKey`.
+
+**Query params**
+- `updatedSince` (optional, ISO-8601): return parts with `updatedAt > updatedSince`. Omitted → full catalog (first sync / resync).
+- `cursor` (optional): opaque pagination cursor returned by the previous page.
+- `limit` (optional, default 200, max 1000).
+
+**Ordering & cursor** — order by `(updatedAt ASC, id ASC)`; the cursor encodes the last row's `(updatedAt, id)` (base64 of `<iso>|<id>` is fine — treat as opaque). The `id` tiebreak makes pagination stable when many rows share a timestamp (bulk import). Page condition: `(updatedAt, id) > (cursorUpdatedAt, cursorId)`.
+
+**Response**
+```json
+{
+  "parts": [
+    {
+      "id": 123,
+      "sku": "HTR-PGP-ADJ",
+      "name": "Hunter PGP Ultra Rotor",
+      "description": "Adjustable arc rotor",
+      "category": "Rotor",
+      "brand": "Hunter",
+      "material": null,
+      "size": "3/4\"",
+      "fittingType": null,
+      "detail": null,
+      "price": "24.50",
+      "cost": "14.10",
+      "isActive": true,
+      "approvalStatus": "approved",
+      "updatedAt": "2026-07-15T16:02:11.000Z"
+    }
+  ],
+  "nextCursor": "MjAyNi0wNy0xNVQxNjowMjoxMS4wMDBafDEyMw==",
+  "hasMore": false,
+  "serverTime": "2026-07-15T16:05:00.000Z"
+}
+```
+- **Includes `cost`** (decided: the CRM computes margins; the API key is an admin-grade credential — internal pricing visibility roles don't apply to it).
+- **Includes inactive parts** — that's how deactivation propagates. The CRM filters `isActive` for its estimate picker but keeps the rows.
+- **Includes all `approvalStatus` values** with the field exposed, so a pending→approved transition arrives as a normal delta (the approve path stamps `updatedAt` per Slice 1). The CRM should only offer `approvalStatus === "approved" && isActive` parts in estimate building.
+- `serverTime` lets the CRM use the server's clock for its next `updatedSince` (avoids client-clock skew). CRM protocol: page through with `cursor` until `hasMore: false`, then store `serverTime` as the next `updatedSince`. Overlap-safe: re-receiving a part is a harmless upsert.
+- Money fields serialize as **strings** (decimal columns) — the CRM parses them; don't float-ify server-side.
+- Company scope: `WHERE company_id = req.apiKeyCompanyId` — from the key only.
+
+**Non-goals (future slices, don't build now):** part assemblies endpoint, webhook push, write-back from the CRM, key hashing at rest.
+
+## Decision flags
+- **Soft delete replaces hard delete (Slice 1).** Recommended and assumed above. If some workflow truly needs permanent removal (e.g. a just-created typo part), the fallback is delete-only-when-unreferenced + the CRM doing an occasional full resync (`updatedSince` omitted) to catch vanished ids. Say the word if you want that instead; default is soft delete.
+- **Endpoint also useful internally?** If the CRM team wants to browse the payload during development, the same handler could back an authenticated internal route later — not wired now (Rule 3: no page/route without an entry point and a purpose).
+
+## Done looks like
+- Editing, approving, importing, or "deleting" a part stamps `updatedAt`; a delete shows as `isActive: false`, and the row survives for history.
+- A fresh API key (created on the existing company API-keys admin screen) can pull the full catalog, then poll with `updatedSince` and receive exactly the parts that changed — including deactivations — and nothing from any other company.
+- Both pre-existing external work-order routes still work, now via the shared middleware.
+
+## Tests
+- **`updatedAt` maintenance:** PUT, PATCH, and the approve transition each advance `updatedAt`; a bulk-imported part arrives with a fresh `updatedAt`; an untouched part's `updatedAt` does not move.
+- **Soft delete:** `DELETE /api/parts/:id` → row remains, `isActive=false`, `updatedAt` advanced; part appears in the next delta; referencing estimate/work-order items unaffected.
+- **Delta correctness:** create 3 parts, sync, edit 1, poll with `updatedSince` = prior `serverTime` → exactly the edited part returns.
+- **Pagination:** >limit parts sharing one bulk-import timestamp page cleanly via cursor with no skips or duplicates (the `id` tiebreak case).
+- **Auth:** missing header → 401 `UNAUTHORIZED`; unknown/inactive key → 401 `INVALID_API_KEY`; expired → 401 `API_KEY_EXPIRED`; `lastUsedAt` updates on success.
+- **Tenant isolation (Rule 1):** company A's key never returns a company B part — full pull or delta; there is no cross-tenant key behavior.
+- **Regression:** `POST`/`GET /api/external/work-orders` behave byte-for-byte as before the middleware extraction.
+
+## Definition of Done (attach proof — Rule 7)
+- [ ] `file:line` for: the `updatedAt` stamp mechanism, the soft-delete conversion, the new index, `requireApiKey`, and the `/api/external/parts` handler.
+- [ ] Test output for the delta, pagination, soft-delete, auth, and tenant-isolation cases.
+- [ ] A real `curl` transcript against the deployed server: full pull → edit a part in the UI → delta poll returns just that part; delete a part → delta poll shows `isActive: false`.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+- `lib/db/src/schema/schema.ts` — `parts` `:205` (`updatedAt` `:225`, add `$onUpdate` + `parts_company_updated_idx`); `apiKeys` `:1022`
+- `artifacts/api-server/src/storage.ts` — `updatePart` `:2303`, `deletePart` `:2314`, `getApiKeyByKey` `:7227`, `updateApiKeyLastUsed` `:7243`
+- `artifacts/api-server/src/routes/parts-routes.ts` — PUT `:184`, PATCH `:234`, approve path `:317`, bulk-import `:365`, DELETE `:1095`
+- `artifacts/api-server/src/routes/routes.ts` — inline key auth `:15036–15068`, external work-order routes `:15033` / `:15209`, key-management routes `:14940`
+- New: `artifacts/api-server/src/routes/external-auth.ts` (`requireApiKey`), external parts route alongside the existing external routes

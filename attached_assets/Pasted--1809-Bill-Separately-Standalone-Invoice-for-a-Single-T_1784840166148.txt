@@ -1,0 +1,37 @@
+#1809 - "Bill Separately" — Standalone Invoice for a Single Ticket
+What & Why
+Sometimes a customer has one large-ticket item that needs to be invoiced on its own immediately — without rolling the rest of their unbilled work into a monthly invoice. Add a per-ticket "Bill Separately" action in the Command Center (customer-billing.tsx) that generates a Standalone Invoice for exactly that ticket. Reuses the existing invoice engine (monthly generator already accepts explicit ticket selections and already guards against double-billing). The resulting invoice is tagged billingType = 'standalone', labeled in the invoice list, and renders a lean PDF (same branding/total card, no per-branch or executive-summary scaffolding).
+
+Done looks like
+Each unbilled ticket row in the Command Center has a "Bill Separately" button; clicking it (after a confirm dialog) creates a standalone invoice for just that ticket.
+That ticket immediately leaves the unbilled list and is excluded from all future monthly invoices — no double-billing.
+The invoice is tagged standalone and shows a "Standalone" badge in the invoice list (invoice-list.tsx).
+The standalone PDF matches monthly branding (logo, total card, ticket detail) but omits the Per-Branch Summary and Executive Summary blocks; wording is "Service Invoice" and shows the service date instead of a billing period range.
+The existing monthly batch-select flow and all other Command Center behavior are unchanged.
+QuickBooks sync works identically to any other generated invoice.
+Out of scope
+Peeling a ticket out of an existing draft monthly invoice (separate flow).
+Changing the correction/reissue engine (it already works on any invoice).
+Auto-syncing to QuickBooks silently — follows the same UX as a generated monthly invoice.
+Deleting or deprecating the laborMode column or any unrelated schema columns.
+Steps
+Schema — add billingType column. Add billingType: text("billing_type").notNull().default("monthly") to the invoices table in lib/db/src/schema/schema.ts (near line 857). Existing rows will default to "monthly"; the new endpoint will write "standalone". Apply via pnpm --filter @workspace/db run push. Update any Zod/drizzle-zod output types consumed downstream.
+
+Backend — POST /api/invoices/bill-separately endpoint. Add the endpoint in routes.ts (or a new routes/invoice-routes.ts module if preferred to keep the monolith smaller). Guard with requireAuthentication + requireBillingAccess. Accept body { ticketType: 'work_order' | 'billing_sheet' | 'wet_check_billing', ticketId: number }. Server-side steps: (a) verify the ticket belongs to the caller's company (404 otherwise; super_admin bypass); (b) re-check the ticket has no invoiceId — return 409 "This item is already on an invoice" if it does; (c) reuse the invoice-creation core already used by the monthly endpoint (no duplicate money math) to build an invoice from that one ticket, setting billingType: 'standalone', period start/end = the ticket's work date, status 'generated'; (d) stamp invoiceId on the ticket row; (e) record the activity/audit event on the ticket. Company ID comes from auth, never the body.
+
+Frontend — "Bill Separately" row action. In customer-billing.tsx, add a small "Bill Separately" button to each unbilled-work row (work order, billing sheet, wet-check billing), alongside the existing selection toggle. If it keeps the diff clean, extract the unbilled-row markup into a small local row component. On click: show a confirm dialog ("Bill #BS-1234 — $2,450.00 separately? It won't be included in the monthly invoice."), POST to /api/invoices/bill-separately, then on success: toast + invalidate the customer-billing and invoices queries (the ticket leaves the list; the new invoice appears). Button is disabled/hidden when the row already has an invoiceId. Role-gate: same as monthly generate (billing access). No changes to the batch-select logic.
+
+Frontend — "Standalone" badge in invoice list. In invoice-list.tsx (and the invoice detail/header where the invoice type is shown), render a small "Standalone" badge keyed off billingType === 'standalone'. No other list behavior changes.
+
+PDF — standalone layout branch. In pdf-generator.ts and pdf-helpers.ts, branch on billingType === 'standalone' in the cover-page render path. When standalone: keep the branded header (logo, company/customer info) and the Invoice Total card exactly as-is; drop the Per-Branch Summary table (lines ~131–154 of coverPage) and the Executive Summary job-count block (~159–185); retitle to "Service Invoice" (not "Monthly service documentation"); replace the Billing Period date range with the ticket's service date; flow straight into the single ticket's detail page without a separate consolidation page. Monthly PDFs are completely unchanged — the branch is driven by billingType, not ticket count. Keep footer/remittance/"thank you" chrome identical.
+
+Tests. Add tests covering: (a) bill a billing sheet separately → standalone invoice created at the correct total, sheet gets invoiceId, absent from unbilled list; (b) second attempt on the same ticket → 409; (c) monthly generation for that customer excludes the now-billed ticket; (d) work order and wet-check-billing ticket types each bill separately correctly; (e) period fields derive from the ticket's work date; invoice number uses the normal sequence; (f) ticket from another company → 404; (g) billingType defaults to "monthly" for all existing/monthly invoices. PDF tests: a standalone invoice renders with branded header + total card + single ticket detail and without per-branch/executive-summary blocks; a monthly invoice PDF is unchanged (snapshot/parity).
+
+Relevant files
+lib/db/src/schema/schema.ts
+artifacts/api-server/src/routes/routes.ts
+artifacts/irrigopro/src/pages/customer-billing.tsx
+artifacts/irrigopro/src/components/billing/invoice-list.tsx
+artifacts/api-server/src/pdf-generator.ts
+artifacts/api-server/src/pdf-helpers.ts
+artifacts/api-server/src/pdf-ticket-parity.test.ts

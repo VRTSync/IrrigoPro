@@ -1,0 +1,46 @@
+# Work Order — Let the Assigned Irrigation Manager Complete It Like a Field Tech
+
+**What & Why**
+When a work order is **assigned to the irrigation manager**, he should be able to **start and complete it** the same way a field tech does. Today he only ever sees the manager controls (View / Edit + reassign), with no path to the do-the-work flow — even when the WO is assigned to him.
+
+**Root cause (frontend only).** In the work-order list card actions (`artifacts/irrigopro/src/pages/work-orders.tsx`, ~1105–1157), the buttons branch on role:
+- **field_tech** assigned the WO (and not terminal) → button calls `setSelectedWorkOrderForStart(workOrder)`, which opens **`WorkOrderDetails`** — the component with the **Start Work Order / Complete Work Order** buttons (status-gated, ~1455–1492).
+- **every other role** (including `irrigation_manager`) → only a **"View / Edit"** button calling `setSelectedWorkOrder(workOrder)`, which opens **`CompletedWorkDetailModal`** (manager/review/read-only). There is **no** branch that gives a non-field-tech the Start/Complete flow, even when the WO is assigned to them.
+
+**The backend already allows it** — `POST /api/work-orders/:id/complete` is `requireAuthentication, requireSameCompanyAsWorkOrder` (no field-tech-only gate, `routes.ts:9512`), and the status→`in_progress` start path isn't restricted for managers. So this is purely the frontend not offering the action.
+
+Single frontend slice. No schema change, no backend change (verify only).
+
+---
+
+## Done looks like
+- When a work order's `assignedTechnicianId === currentUser.id` and it's in an **active** status (`pending` / `assigned` / `in_progress`, not `work_completed` / `approved_passed_to_billing` / `billed` / invoiced), the irrigation manager sees a **"Start / Complete"** (do-the-work) action that opens `WorkOrderDetails` (the same Start Work Order → Complete Work Order flow field techs use).
+- The manager **also** keeps the management actions (View / Edit, reassign) — being assignee doesn't take those away.
+- Terminal/billed WOs still open the View (read-only/manager) modal.
+- Field techs are unchanged; managers/admins **not** assigned the WO are unchanged.
+
+## Steps (in `work-orders.tsx` card actions, the manager/admin branch ~1144–1157)
+1. Compute, once, an `isMine = workOrder.assignedTechnicianId === currentUser?.id` and an `isActive = ['pending','assigned','in_progress'].includes(workOrder.status) && !isBilled(workOrder) && workOrder.invoiceId == null`.
+2. In the **non-field-tech** branch, when `isMine && isActive`, render a primary **"Start / Complete"** button that calls `setSelectedWorkOrderForStart(workOrder)` (the existing field flow → `WorkOrderDetails`), shown **alongside** the existing View / Edit + reassign controls. (Keep "Start" vs "Complete" label optional — `WorkOrderDetails` already shows the right button by status.)
+3. Generalize cleanly: gate the do-the-work action on **`isMine && isActive`**, not on a specific role — so any assignee (irrigation_manager today; company_admin/super_admin if ever self-assigned) gets it, while non-assignees keep only management controls.
+4. No change needed inside `WorkOrderDetails` — its Start/Complete buttons are already status-gated, not role-gated (~1455–1492). Opening it via `setSelectedWorkOrderForStart` gives the manager the full completion flow (`WorkOrderCompletion`).
+
+## Verify (backend — expected already-OK, just confirm)
+- `POST /api/work-orders/:id/complete` accepts an irrigation_manager who is the assignee (it's company-scoped, no field-tech gate — `routes.ts:9512`).
+- The status→`in_progress` "start" transition succeeds for a manager assignee (the field_tech-specific block at ~527–579 is an additional path for techs; managers update through the general path). If any start/complete transition rejects a manager, relax it to allow the **assignee or a manager/admin**.
+
+## Tests
+- Assign a WO to the irrigation manager → on his work-order list the card shows a **Start / Complete** action; opening it shows **Start Work Order**, then **Complete Work Order**, and completing transitions the WO (to `work_completed`) just like a field tech.
+- The same manager still sees View / Edit + reassign on that card.
+- A manager **not** assigned the WO sees only View / Edit + reassign (no do-the-work button).
+- Field tech assigned the WO: unchanged.
+- Terminal/billed WO assigned to the manager opens the read-only/manager view, not the start flow.
+
+## Out of scope
+- The list-level reassign widening (separate ticket already written).
+- Pricing visibility rules, approval flow, and the manager review/approve path (unchanged).
+
+## Relevant files
+- `artifacts/irrigopro/src/pages/work-orders.tsx` (card actions ~1105–1157; `selectedWorkOrderForStart` → `WorkOrderDetails` ~1378–1392)
+- `artifacts/irrigopro/src/components/work-orders/work-order-details.tsx` (Start/Complete buttons, status-gated ~1455–1492 — no change)
+- `artifacts/api-server/src/routes/routes.ts` (`/api/work-orders/:id/complete` ~9512; start path ~527–579 — verify only)

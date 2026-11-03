@@ -1,0 +1,47 @@
+# CC Kickback Fix — Slice 1: Wire Kickback to Return-for-Correction
+
+**Source:** verified bug found during the Manager Workspace Redesign audit (2026-06-12).
+**Severity:** P1 — the Command Center's Kickback button has never worked; every click 404s and shows "Kickback failed."
+**Prerequisite slices:** none. Independent of (and a prerequisite-of-convenience for) "Manager Workspace Redesign — Slice 1," which uses the correct endpoint from day one.
+
+This is a single tiny slice. Do not expand it.
+
+---
+
+## The bug (verified)
+
+`billing-workspace.tsx`, inside `kickbackActive` (~line 706), posts:
+
+```
+POST /api/billing-sheets/:id/kickback     { reason }
+POST /api/work-orders/:id/kickback        { reason }
+```
+
+Neither route exists. A repo-wide grep for "kickback" matches only three frontend files (`billing-workspace.tsx`, `detail-pane-inline.tsx`, `billing-workspace-keyboard.test.ts`) — zero server files. The real, working endpoints (`artifacts/api-server/src/routes/approve-routes.ts`) are:
+
+```
+POST /api/billing-sheets/:id/return-for-correction   { notes }   → status 'draft'
+POST /api/work-orders/:id/return-for-correction      { notes }   → status 'in_progress'
+```
+
+Both already allow `irrigation_manager` / `company_admin` / `super_admin`, validate the from-status (`pending_manager_review` | `submitted`/`work_completed`), append `[Returned for correction: …]` to notes, and (for work orders) write a lifecycle audit entry.
+
+## Fix (frontend only — no server changes)
+
+### Files modified
+- `artifacts/irrigopro/src/pages/billing-workspace.tsx` — in `kickbackActive`:
+  - `/api/billing-sheets/${active.refId}/kickback` → `/api/billing-sheets/${active.refId}/return-for-correction`
+  - `/api/work-orders/${active.refId}/kickback` → `/api/work-orders/${active.refId}/return-for-correction`
+  - body `{ reason: trimmed }` → `{ notes: trimmed }`
+- `artifacts/irrigopro/src/pages/billing-workspace-keyboard.test.ts` — update asserted path and body key.
+
+Do NOT add server-side `/kickback` alias routes. One canonical endpoint per action.
+
+### Tests
+- Existing keyboard test updated to assert the new path/body.
+- Add one assertion: kickback on a wet-check-billing / part / manual_review item still short-circuits with the "Not supported" toast (unchanged behavior).
+
+### Acceptance
+- Kickback from the Command Center returns 200; the billing sheet lands in `draft`, the work order in `in_progress`; the queue row disappears on refetch and auto-advance moves to the next item.
+- The kickback reason appears in the ticket notes as `[Returned for correction: …]`.
+- Repo-wide grep for `/kickback` in frontend code returns nothing.

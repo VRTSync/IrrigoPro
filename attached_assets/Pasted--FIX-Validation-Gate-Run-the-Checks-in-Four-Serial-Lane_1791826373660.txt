@@ -1,0 +1,109 @@
+# FIX — Validation Gate: Run the Checks in Four Serial Lanes
+
+This is a single self-contained task. It depends on no other task. Build on current `main` (`cddb6477`). It changes how the existing checks are *run*, never what they check: every test file, assertion, timeout and flag stays exactly as it is today.
+
+## What & Why
+
+Task completion runs every registered validation command at the same time. There are now **57** (`.replit`, every `[[workflows.workflow]]` with `isValidation = true`), each one a separate pnpm → Node → test-worker tree. Run together they exhaust the container's process budget. The symptoms are recorded in `.agents/memory/validation-run-resource-exhaustion.md`: `EAGAIN`, `pthread_create: Resource temporarily unavailable`, tinypool `Worker exited unexpectedly`, aborted typechecks.
+
+Recent cost:
+
+- #2073 (zone foundation) could not complete: the gate disconnected three times. It had to be merged by hand from a patch.
+- #2083 (fast zone entry) merged, but its completion run hit `EAGAIN` and timeouts in unrelated suites. Its own report says this was "not a claim that every project-wide check passed".
+- One check is registered twice: `invoice-aging-summary` and `invoice-ar-list` run the identical command.
+
+Fix: four validation commands ("lanes"). Each lane runs its share of today's commands **one after another**. At most four test processes are alive at once instead of 57. Same commands, same coverage, a gate that can finish.
+
+## Locked decisions (do not relitigate)
+
+1. **Commands are copied verbatim (decided).** Each existing validation command string moves into a manifest unchanged. No assertion, file list, timeout, `--maxWorkers` or other flag changes. That way a lane failure means exactly what the old per-suite failure meant.
+2. **Four lanes, assigned by name (decided).** The table in Step 1 is the assignment. Billing-side Node suites, field-side Node suites, web Vitest suites, and typecheck/mobile are split so the four finish in similar time.
+3. **A lane runs every command even after one fails (decided),** then exits non-zero if any failed. One broken suite must not hide the results of the rest.
+4. **The duplicate goes (decided).** `invoice-aging-summary` is the same command as `invoice-ar-list`. Keep `invoice-ar-list`, drop the other.
+5. **From now on a new test joins a lane's manifest; nobody registers a new validation command for it (decided).** This replaces the per-suite registration habit that created 57 commands.
+6. **The `Project` run button runs the four lanes,** not the 58 entries it lists today (`.replit:14-18` onward, `mode = "parallel"`).
+
+## Out of scope
+
+- Any test, assertion, timeout or worker flag.
+- Fixing any currently failing suite. If one fails in its lane, report it with its baseline result at `cddb6477`.
+- The non-validation workflow `wc-in-flight-photos` and the artifact service workflows. Leave them as they are.
+- Application code.
+
+## Steps
+
+### 1. Manifest — `scripts/validation-lanes.json`
+
+New file. Shape:
+
+```json
+{
+  "api-billing": [{ "name": "auth-middleware-coverage", "command": "<exact string from .replit>" }, ...],
+  "api-field":   [ ... ],
+  "web":         [ ... ],
+  "types":       [ ... ]
+}
+```
+
+`command` is the exact `args` string of that workflow's `shell.exec` task in `.replit`. Copy it programmatically from `.replit`, not by hand.
+
+| Lane | Commands, in this order |
+|---|---|
+| `api-billing` (16) | auth-middleware-coverage, company-id-backfill-migration, pdf-cover-header, qb-invoice-ops, invoice-reminders, invoice-ar-list, invoice-ar-notes, invoice-reminders-batch, storage-error-propagation, invoice-row-expansion-reads, pdf-site-metadata, seasonal-budget-api, seasonal-budget-financial-pulse, financial-pulse-manager-access, bulk-budget-goals-backend, budget-bookkeeper-exclusion |
+| `api-field` (16) | wet-check-zone-filter, wet-check-select-shape, work-order-labor-hours, migration-registry, username-normalization, estimate-expiry-anchor, migration-run-proof, work-type-seed-reconcile, estimate-branch-gate, retire-followup-migration, action-board-api, wet-check-labor-shared, wet-check-repair-totals, wet-check-submit-preview-parity, finding-catalog-labor, action-board-plan-text |
+| `web` (21) | wc-customer-picker-filter, invoice-ar-ui, invoice-ar-notes-panel, invoice-batch-reminders-ui, invoice-row-expansion-ui, nav-config-bookkeeper, invoice-draft-editor-line-items, invoice-ar-first-ui, estimate-lifecycle-ui, offline-connection-recovery, work-location-controls, migration-page-post-run-ui, retired-work-types, seasonal-budget-ui, bulk-budget-goals-frontend, budget-route-nav-parity, action-board-ui, zone-screen-derived-labor, action-board-plan-ui, estimate-command-center, command-center-row-delete |
+| `types` (3) | bulk-budget-goals-types, manager-mobile-action-board, irrigation-fast-entry |
+
+That is 56 commands, plus the dropped duplicate, for the 57 registered today. If the checkout at build time has any validation command not in this table (one added after `cddb6477`), put it in the lane whose kind it matches (Node API → `api-field`, Vitest → `web`, typecheck/mobile → `types`) and list it in the report.
+
+### 2. Runner — `scripts/run-validation-lane.mjs`
+
+New file, plain Node, no dependencies. Usage: `node scripts/run-validation-lane.mjs <lane>`.
+
+- Unknown or missing lane → print the valid lane names, exit 2.
+- For each entry, in order: print `=== [lane] (i/n) <name> ===`, run `command` with `child_process.spawnSync("bash", ["-c", command], { stdio: "inherit", cwd: <repo root> })`, and record the exit status and wall time.
+- After the last entry, print a summary table (`name | status | seconds`) and `LANE <lane>: X passed, Y failed`. Exit 1 if any failed, 0 otherwise.
+- A signal-terminated child counts as failed, with the signal name in the status column.
+
+### 3. Registration
+
+- Remove all 57 existing validation-command registrations. Use the same validation-command tooling that registered them; editing `.replit` directly is a fallback. Afterwards `.replit` must hold no `[[workflows.workflow]]` with `isValidation = true` except the four below.
+- Register four validation commands, named `validate-api-billing`, `validate-api-field`, `validate-web`, `validate-types`. Each command is `node scripts/run-validation-lane.mjs <lane>`.
+- Point the `Project` workflow (`runButton = "Project"`) at the four lanes in place of its current per-suite `workflow.run` tasks. Keep any task in it that is not a validation suite.
+
+### 4. Guard test — `scripts/validation-lanes.test.mjs`
+
+Run with `node --test scripts/validation-lanes.test.mjs`. Add it as the **first** entry of the `types` lane (name `validation-lanes-manifest`); do not register it separately. It asserts:
+
+1. Every lane name is one of the four.
+2. No two entries share a `name`, and no two share a `command`.
+3. Every test-file path that appears in a command (tokens ending in `.test.ts`, `.test.tsx` or `.test.cjs`, resolved against the `--filter` package directory) exists on disk. This catches a suite renamed out from under the manifest.
+4. Every `*.test.ts` / `*.test.tsx` file under `artifacts/api-server/src`, `artifacts/irrigopro/src` and `lib/shared/src` that a manifest command names is counted. Test files **not** named by any command are printed as a warning, not a failure. Today several exist on purpose; this keeps them visible.
+
+### 5. Agent memory and project notes
+
+- Rewrite `.agents/memory/workflow-limit-use-validation.md`: new suites go into a lane in `scripts/validation-lanes.json`, never a new validation command. Update its one-line entry in `.agents/memory/MEMORY.md` to match.
+- In `.agents/memory/validation-run-resource-exhaustion.md`, add one paragraph: the gate now runs four serial lanes, so a resource error in one lane is a real regression to investigate, not background noise.
+- Add a "Validation" section to `replit.md` with the four lane names, the runner command, and the rule from decision 5.
+
+## Tests and proof
+
+1. `node --test scripts/validation-lanes.test.mjs` passes.
+2. Run each lane once directly, one lane at a time. Report the summary table per lane.
+3. Run the completion gate once. Report whether it reached a terminal status, and the four lane results.
+4. For any suite that fails in a lane, run its exact command alone on a clean checkout of `cddb6477` and report both results side by side. Do not fix it in this task.
+5. Report the peak value of `/sys/fs/cgroup/pids.current` observed during the gate run, next to `pids.max`.
+
+## Acceptance checklist
+
+- [ ] `grep -c 'isValidation = true' .replit` prints `4`.
+- [ ] `scripts/validation-lanes.json` holds 57 entries: the 56 existing commands plus `validation-lanes-manifest`, each command byte-identical to its old `.replit` string.
+- [ ] The guard test passes; no duplicate names or commands.
+- [ ] The completion gate reaches a terminal status. Each lane's pass/fail is reported, and any failure is compared against `cddb6477`.
+- [ ] `git diff --stat` shows no change under `artifacts/`, `lib/` or any `*.test.*` file other than the new `scripts/validation-lanes.test.mjs`.
+
+## Relevant files
+
+- `.replit` — the `Project` workflow (`:13+`) and the 57 `isValidation = true` workflows
+- New: `scripts/validation-lanes.json`, `scripts/run-validation-lane.mjs`, `scripts/validation-lanes.test.mjs`
+- `.agents/memory/workflow-limit-use-validation.md`, `.agents/memory/validation-run-resource-exhaustion.md`, `.agents/memory/MEMORY.md`, `replit.md`

@@ -1,0 +1,43 @@
+# Inspection Review Surface — Zone-Grouped Detail Before Approval
+
+**What & Why**
+The **Inspection Report — Estimate Review** page (Needs Review → an inspection wet check, before it's approved/converted to an estimate) renders the consolidated estimate as a **flat list** of line items — "Adjust / Set Nozzle / Head / Nipple…" with no zone context, lots of repeated rows, and `$0.00` labor-only lines mixed in. The manager can't see the zone-by-zone structure of what they're about to approve.
+
+This page should read the **same zone-grouped way as the estimate detail and the estimate PDF** (Repairs-Summary-by-zone → per Controller·Zone sections), so the manager sees the real structure **before** approving and converting.
+
+**Root cause:** `CombinedReviewSurface.tsx` (~547–583) renders the items as a flat `items.map` table. The estimate items already carry zone data (`controllerLetter` / `zoneNumber` / `issueType`, #1385), and the shared grouping helper already exists — it's just not used here.
+
+**Reuse what's built:** `lib/estimate-zone-grouping.ts` → `groupEstimateItemsByZone(...)` and the zone-grouped rendering used in `estimate-detail-modal.tsx`. Do **not** reinvent the grouping.
+
+Single frontend slice. Display-only — no schema, no API, no new data. (Reads are already company-scoped; nothing changes re: multi-tenancy.)
+
+## Done looks like
+- On the inspection Estimate Review surface, an inspection-origin estimate renders **zone-grouped** — a Repairs-Summary-by-zone block, then per **Controller · Zone** sections listing the work (clean issue-type label · part · qty · unit · line total) with per-zone subtotals — matching the estimate detail/PDF the approval will produce.
+- The flat repeated rows and bare `$0.00` lines are organized under their zones instead of a wall of identical descriptions.
+- Existing behavior is intact: **Edit Estimate**, **Approve** (converts the WC), totals, and pricing visibility (`canSeePricing`) all unchanged.
+- Manager sees this **before** approving/converting (the whole point).
+
+## Steps
+1. In `CombinedReviewSurface.tsx`, replace the flat line-items table (~546–583) with the **zone-grouped view** for inspection-origin estimates: call `groupEstimateItemsByZone(items)` and render the same grouped layout the estimate detail modal uses. Extract that grouped renderer into a shared component (e.g. `EstimateZoneGroupedView`) if it isn't already, so the review surface, the estimate detail modal, and the PDF can't drift.
+2. Respect `canSeePricing()` exactly as today — hide Qty/Unit/Total columns for roles that shouldn't see pricing; the zone grouping still shows for them (labels + structure, no money).
+3. Keep the empty state ("No part findings — estimate captures labor only") and the totals block below.
+4. Non-inspection review surfaces are unaffected (this section is already gated by `isInspection`).
+5. Keep it visually consistent with the estimate detail/PDF (same section headers, per-zone subtotal styling).
+
+## Tests
+- An inspection wet check pending approval shows zone-grouped detail (Controller·Zone sections + per-zone subtotals) on the review surface, matching its eventual estimate/PDF; not a flat list.
+- Edit Estimate still opens the editor; Approve still converts; totals reconcile.
+- A role without pricing sees the zone structure but no dollar columns.
+- A non-inspection review surface is unchanged.
+- Labor-only / `$0.00` lines appear under their zone (or in the zone's labor line), not as orphan rows.
+
+## Out of scope
+- The approve/convert logic and the estimate editor (unchanged).
+- The estimate detail modal and PDF (already zone-grouped — they're the reference).
+- Any data/schema change.
+
+## Relevant files
+- `artifacts/irrigopro/src/components/wet-check-review/CombinedReviewSurface.tsx` (flat `items.map` ~547–583; `isInspection` gate ~895/985)
+- `artifacts/irrigopro/src/lib/estimate-zone-grouping.ts` (`groupEstimateItemsByZone` ~78 — reuse)
+- `artifacts/irrigopro/src/components/estimates/estimate-detail-modal.tsx` (existing zone-grouped rendering to share/extract)
+- Look reference: the estimate PDF / `inspection-estimate-zone-detail-redesign.html`

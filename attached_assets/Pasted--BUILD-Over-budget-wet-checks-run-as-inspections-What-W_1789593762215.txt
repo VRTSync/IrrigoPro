@@ -1,0 +1,95 @@
+# BUILD — Over-budget wet checks run as inspections
+
+## What & Why
+
+Every customer is meant to get a wet check every month. When a customer is over their monthly budget, that check still happens — but the tech documents instead of repairing, and the visit comes back as an **estimate** the HOA can approve rather than a bill they never agreed to.
+
+Over budget does not mean stay home. It means change what the visit produces.
+
+This keeps the monthly standard, bills nothing against a spent budget, and captures the work that needs doing instead of losing it for a month. It also creates the path back: the estimate gets approved, and approved work sits outside the budget, so the property can be worked again without waiting for the next allocation.
+
+**Wet-check mode scope (Rule 5):** this guard blocks **service** mode and passes **inspection** mode. Both must be tested.
+
+## The rule
+
+At wet-check creation, resolve the customer's headroom for the current month — allocation from `customer_budget_months` minus `computeCustomerSpend`. When headroom is **at or below zero**, the wet check is created in `mode: "inspection"` regardless of what the client asked for.
+
+A customer with **no budget goal** is unaffected: no allocation means no rule, and the check runs in whatever mode was requested. An unset budget must never be read as zero headroom — that would silently convert every unbudgeted customer's checks to inspections.
+
+## Why the create gate and not the Action Board
+
+Rule 4: guards fire where the data is created, not downstream. A label on a manager's screen is advisory, and a tech starting a check from the field would never see it. `wet-check-create-gate.ts` already holds exactly this shape of gate — `checkBranchGate`, which refuses a wet check when a multi-location customer has no branch selected. This becomes a second gate in the same file, resolved server-side.
+
+The Action Board only **reports** the rule. It never enforces it.
+
+## Prerequisite
+
+**Task #1993** — the seasonal budget model. There is no allocation to compare against before it. Ships after #1993; independent of the Action Board tickets and can run in parallel with them.
+
+## Nothing new has to be built for inspection mode
+
+It already works end to end. `wet-check-create-gate.ts:18` accepts `mode: z.enum(["service", "inspection"])`; `FindingSheet.tsx:64` branches on `wetCheckMode`; `CombinedReviewSurface.tsx:911` has the inspection review path; `inspection-estimate-items.ts` builds the estimate; the estimate payload, PDF and email all handle it, and a `reconcile-inspection-pass` migration exists. This ticket adds a gate in front of a working feature.
+
+## Done looks like
+
+- A tech or manager starting a wet check on an over-budget customer gets an inspection, whether they asked for service or did not specify.
+- The person starting it is told why, in the flow, before they begin — not after they have walked zones expecting to make repairs.
+- A customer with headroom is unaffected and still gets a service check by default.
+- A customer with no budget goal is unaffected.
+- The mode is resolved on the server. A client that posts `mode: "service"` for an over-budget customer still gets an inspection.
+- Inspection mode's own behaviour is byte-for-byte unchanged.
+- The Action Board shows the same answer the gate will give, and gets it from the same resolver.
+
+## Out of scope
+
+- Changing what an inspection does, what it produces, or how its estimate is reviewed.
+- Blocking the wet check entirely. It always happens; only its mode changes.
+- Work orders. This gate is about wet checks; an over-budget customer's work orders are held or released by the Action Board's own rules.
+- The `preApproved` spend change — deferred, its own ticket.
+- Any retroactive change to wet checks already created.
+- The one-per-customer-per-month cadence target itself, which is reported by the Action Board and not enforced anywhere.
+
+## Steps
+
+1. **Add a pure gate function** beside `checkBranchGate` in `wet-check-create-gate.ts`: given the resolved headroom (a number, or null when the customer has no allocation) and the requested mode, return the mode to use. Null headroom returns the requested mode unchanged. Pure, no database, no HTTP — so every boundary is unit-testable the way the branch gate already is.
+
+2. **Resolve headroom server-side at creation.** In the `POST /api/wet-checks` handler, look up the customer's current-month allocation and call `computeCustomerSpend` for the same window, scoped to the customer's own company (Rule 1), never from anything in the request body. Pass the result to the gate and persist the returned mode.
+
+3. **Tell the person before they start.** When the wet-check start flow is opened for an over-budget customer, show it plainly — that this visit will be an inspection, that they should document and not repair, and that it will come back as an estimate. A tech who learns this at submit time has already done the wrong work.
+
+4. **Declare and honour the mode scope (Rule 5).** The gate blocks service and passes inspection. An explicitly requested inspection on an over-budget customer is unchanged. An explicitly requested inspection on a customer with headroom is also unchanged — this rule only ever forces inspection on, never off.
+
+5. **Expose the same answer to the Action Board.** The board's "Due — inspection only" marker must come from the same resolver, not a second copy of the threshold. One function, two callers.
+
+6. **Log the forced mode.** When the gate changes a requested service check into an inspection, record it on the wet check's activity stream (Rule 6) with the headroom figure that caused it. Six weeks later someone will ask why a check came back as an estimate, and the answer needs to be in the record.
+
+7. **Tests, registered as validation commands.** Headroom above zero keeps service; exactly zero forces inspection; below zero forces inspection; null allocation leaves the requested mode alone and is never treated as zero. A client posting `mode: "service"` for an over-budget customer receives an inspection. An explicitly requested inspection is untouched in every case. Service-mode behaviour on a customer with headroom is unchanged, and inspection-mode behaviour is unchanged in both — the Rule 5 both-modes regression. Tenant isolation: headroom resolves from the customer's own company. The activity-stream entry is written when and only when the mode was forced. Register as validation commands, not workflows — this repo is past its workflow cap.
+
+## Notes for the executor
+
+- **The unset-budget case is the trap.** A customer with no `customer_budget_months` row has no allocation, not an allocation of zero. Read it as zero and every unbudgeted customer silently starts producing estimates instead of repairs — and nobody notices until an HOA asks why nothing was fixed.
+- `checkBranchGate` returns an error string or null. This gate returns a mode, not an error, because the wet check is never refused — only redirected. Do not model it as a refusal.
+- The pending-not-billed leg matters here. `computeCustomerSpend` counts uninvoiced wet-check billings, so a property can cross into inspection-only territory on the strength of work done earlier the same month that has not been billed yet. That is correct and intended; be sure the window is the current month.
+- The finding sheet already branches on mode, so nothing in capture needs a second gate. Resist adding one.
+
+## Definition of Done (attach proof — Rule 7)
+
+- [ ] `file:line` for the pure gate, the creation handler's headroom resolution, the pre-start notice, the shared resolver used by the Action Board, and the audit call.
+- [ ] Screenshot of the pre-start notice on an over-budget customer.
+- [ ] Screenshot of the resulting wet check showing inspection mode, and the estimate it produced.
+- [ ] Captured response proving a posted `mode: "service"` returns an inspection for an over-budget customer.
+- [ ] Captured response proving a customer with no budget goal is unaffected.
+- [ ] Test output for all four headroom boundaries plus the both-modes regression.
+- [ ] Activity-stream entry showing the forced mode and the headroom that caused it.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+
+- `artifacts/api-server/src/routes/wet-check-create-gate.ts` (`wetCheckCreateBody` :12, `mode` :18, `checkBranchGate` :43 — the pattern to follow)
+- `artifacts/api-server/src/routes/routes.ts` (the `POST /api/wet-checks` handler)
+- `artifacts/api-server/src/budget-spend.ts` (`computeCustomerSpend`)
+- `artifacts/api-server/src/routes/budget-routes.ts` (allocation reads, restored by #1993)
+- `artifacts/irrigopro/src/pages/wet-checks/FindingSheet.tsx` (`wetCheckMode` :64 — verify unchanged)
+- `artifacts/irrigopro/src/components/wet-check-review/CombinedReviewSurface.tsx` (`isInspection` :911 — verify unchanged)
+- `artifacts/api-server/src/inspection-estimate-items.ts`
+- `artifacts/api-server/src/routes/audit-log.ts` (Rule 6 activity stream)

@@ -1,0 +1,277 @@
+# Replit Task — WC Billing Integration, Slice 3 (Reconciliation safety-net parallel WCB branch)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from the broader integration audit — it is reference material so
+you understand the intent. The actual work for this task is in the **Slice 3**
+section at the bottom. Do not deviate from any file paths, function names,
+schema field names, or payload shapes specified. If you believe a deviation
+is necessary, surface it and stop rather than proceeding.
+
+> **Tiny defensive slice.** This adds a 10-line parallel branch inside an
+> existing reconciliation `try` block in `routes.ts`. The primary
+> WCB-billed-stamping loop above is the actual correctness mechanism;
+> this slice only closes the symmetry gap with billing sheets, so the
+> next person who edits the main loop doesn't accidentally rely on a
+> safety net that only catches half the line types.
+
+> **Pattern: mirror the BS reconciliation branch exactly.** Same try/catch
+> shell, same `getInvoiceItems` source, same "if not yet billed, update"
+> logic. The only differences are the storage methods called.
+
+---
+
+## Design Context (locked decisions)
+
+These were agreed in the audit
+(`WC Billing Integration - Slice 0 End-of-Month Audit.md`) and apply to
+every slice in this family.
+
+**Primary mechanism.** The main "mark WCBs as billed" loop runs at
+`routes.ts:7133+`. Every WCB whose ID was passed in
+`selectedWcbs` is stamped `invoiceId / billedAt / status='billed'` in
+that loop. Stragglers are theoretically impossible in the current
+code path.
+
+**Safety-net purpose.** The reconciliation block at `routes.ts:7141+`
+exists for the case where the main loop and the
+`invoice_items.sourceId` set diverge — either because a future edit
+to the main loop introduces a skip, or because a manual repair script
+inserts items but forgets to stamp the source row. The BS branch
+inside the block has caught a real issue once historically; the WCB
+absence is the kind of asymmetry that bites later.
+
+**Idempotency.** The reconciliation only updates rows where the
+`invoiceId` is still null. A WCB that was already stamped by the main
+loop above is left untouched.
+
+---
+
+## Slice 3 — Add a parallel WCB straggler branch to the reconciliation block
+
+### Scope
+
+A single new `if (item.sourceType === 'wet_check_billing' && item.sourceId)`
+block immediately after the existing BS straggler branch inside the
+reconciliation `try` at `routes.ts:7141+`. No behavior change in the
+happy path (the main loop above already stamps every selected WCB). No
+new tests-of-correctness required for the happy path. One test that
+asserts the safety net's behavior when an orphan WCB invoice item is
+manufactured.
+
+### Files modified
+
+- `artifacts/api-server/src/routes/routes.ts` — add 13 lines after the
+  existing BS straggler branch at `:7146+`. Update the surrounding
+  comment to mention both line types.
+- New: `artifacts/api-server/src/routes/invoice-monthly-wcb-straggler.test.ts`
+  — one test exercising the safety net for WCB.
+
+### Concrete changes
+
+**(1) Edit the reconciliation comment** at `routes.ts:7141`:
+
+Old:
+
+```typescript
+// Reconciliation: ensure any billing sheet that is an invoice line item
+// but was missed by the status update loop is also marked as billed.
+```
+
+New:
+
+```typescript
+// Reconciliation: ensure any billing sheet OR wet check billing that is
+// an invoice line item but was missed by the status update loop is also
+// marked as billed. The primary loops above are the correctness
+// mechanism; this is a defensive safety net for future divergence.
+```
+
+**(2) Add the WCB straggler branch** at `routes.ts:7156+`, immediately
+after the closing brace of the existing BS straggler `if`:
+
+```typescript
+} else if (item.sourceType === 'wet_check_billing' && item.sourceId) {
+  const wcb = await storage.getWetCheckBillingById(item.sourceId);
+  if (wcb && !wcb.invoiceId) {
+    await storage.updateWetCheckBilling(wcb.id, {
+      invoiceId: invoice.id,
+      billedAt: currentDate,
+      status: 'billed',
+    });
+    console.log(`Reconciliation: marked wet check billing ${wcb.id} as billed for invoice ${invoice.id}`);
+  }
+}
+```
+
+The combined block then reads:
+
+```typescript
+for (const item of invoiceItemsForReconciliation) {
+  if (item.sourceType === 'billing_sheet' && item.sourceId) {
+    const bs = await storage.getBillingSheetById(item.sourceId, callerCompanyId6746);
+    if (bs && !bs.invoiceId) {
+      await storage.updateBillingSheet(bs.id, {
+        invoiceId: invoice.id,
+        billedAt: currentDate,
+        status: 'billed'
+      });
+      console.log(`Reconciliation: marked billing sheet ${bs.id} as billed for invoice ${invoice.id}`);
+    }
+  } else if (item.sourceType === 'wet_check_billing' && item.sourceId) {
+    const wcb = await storage.getWetCheckBillingById(item.sourceId);
+    if (wcb && !wcb.invoiceId) {
+      await storage.updateWetCheckBilling(wcb.id, {
+        invoiceId: invoice.id,
+        billedAt: currentDate,
+        status: 'billed',
+      });
+      console.log(`Reconciliation: marked wet check billing ${wcb.id} as billed for invoice ${invoice.id}`);
+    }
+  }
+}
+```
+
+**(3) Verify the `getWetCheckBillingById` signature** before writing
+the call. The audit's earlier read of `storage.ts:~3969+` showed
+`getWetCheckBillingById(id)`. If it now takes a `companyId`, pass
+`callerCompanyId6746` to match the BS branch.
+
+**Do NOT change the outer `try { … } catch (reconcileError) { … }`
+boundaries.** The whole reconciliation is fire-and-forget; the
+catch-all at `routes.ts:7158+` is part of the safety contract (a
+storage error during reconciliation must not fail the invoice
+creation). The new branch lives inside the same `try`.
+
+### Tests
+
+#### New: `invoice-monthly-wcb-straggler.test.ts`
+
+```typescript
+describe("invoice creation reconciliation — WCB straggler safety net (Slice 3)", () => {
+  it("stamps a WCB as billed when its invoice item exists but the main loop skipped it", async () => {
+    // Setup: an invoice that has a WCB invoice item, but the WCB itself
+    // is in 'approved_passed_to_billing' status with no invoiceId set —
+    // simulating a future-broken main loop or a manual data-repair
+    // scenario the safety net is meant to catch.
+    const { customer, wcb } = await setupCustomerAndOrphanWcb({
+      wcbStatus: "approved_passed_to_billing",
+      wcbInvoiceId: null,
+    });
+
+    // Manufacture the orphan: an invoice with an invoice_item that
+    // references the WCB but where the WCB row was never stamped.
+    const [invoice] = await db.insert(invoices).values({
+      customerId: customer.id,
+      invoiceNumber: "INV-TEST-001",
+      invoiceMonth: 5,
+      invoiceYear: 2026,
+      periodStart: new Date("2026-05-01"),
+      periodEnd: new Date("2026-05-31"),
+      partsSubtotal: "0",
+      laborSubtotal: "200",
+      totalAmount: "200",
+    }).returning();
+
+    await db.insert(invoiceItems).values({
+      invoiceId: invoice.id,
+      sourceType: "wet_check_billing",
+      sourceId: wcb.id,
+      wetCheckBillingId: wcb.id,
+      description: "WC Billing WC-2026-1042",
+      workDate: wcb.workDate,
+      quantity: "1",
+      unitPrice: "200",
+      totalPrice: "200",
+      laborTotal: "200",
+    });
+
+    // Invoke the route — the body intentionally targets a DIFFERENT
+    // customer/period so the main WCB loop does not pick up the orphan,
+    // forcing the safety net to be the only mechanism that could fix it.
+    // (Test setup may vary — adapt to the existing harness in
+    // invoice-monthly-wcb.test.ts.)
+    await runReconciliationForInvoice(invoice.id);
+
+    const after = await storage.getWetCheckBillingById(wcb.id);
+    expect(after.invoiceId).toBe(invoice.id);
+    expect(after.status).toBe("billed");
+    expect(after.billedAt).toBeInstanceOf(Date);
+  });
+
+  it("does not touch a WCB that is already billed (idempotent)", async () => {
+    const billedAt = new Date("2026-05-01T00:00:00Z");
+    const { customer, wcb, invoice } = await setupAlreadyBilledWcb({
+      billedAt,
+    });
+
+    await runReconciliationForInvoice(invoice.id);
+
+    const after = await storage.getWetCheckBillingById(wcb.id);
+    expect(after.billedAt?.getTime()).toBe(billedAt.getTime());
+  });
+});
+```
+
+`runReconciliationForInvoice` can be either (a) a small test helper
+that invokes the route handler and waits for completion, or (b) an
+extraction of the reconciliation block into a small named helper that
+the route handler calls. **Option (b) is preferable** if the
+refactor is small — the block at `routes.ts:7141+` is ~20 lines and
+could be lifted into a single helper:
+
+```typescript
+// New: artifacts/api-server/src/lib/invoice-reconciliation.ts
+export async function reconcileInvoiceLineSources(
+  invoiceId: number,
+  currentDate: Date,
+  callerCompanyId: number | null,
+  storageArg: Storage,
+): Promise<void> {
+  const items = await storageArg.getInvoiceItems(invoiceId);
+  for (const item of items) {
+    // … BS + WCB branches identical to the route handler …
+  }
+}
+```
+
+If you take option (b), `routes.ts:7141+` becomes a single call:
+`await reconcileInvoiceLineSources(invoice.id, currentDate, callerCompanyId6746, storage);`
+inside the existing `try`. The test then unit-tests the helper
+directly with no route invocation.
+
+Pick (b) if the extraction is genuinely a 1-call cleanup. Pick (a) if
+extracting would pull other handler-local variables that complicate
+the helper signature.
+
+### Acceptance criteria
+
+- The reconciliation block at `routes.ts:7141+` includes an `else if
+  (item.sourceType === 'wet_check_billing' && item.sourceId)` branch.
+- The comment on the block mentions both line types.
+- An orphan WCB invoice item is correctly stamped by the safety net
+  during invoice creation (test passes).
+- An already-billed WCB is NOT re-stamped by the safety net
+  (idempotency test passes).
+- Existing BS straggler behavior is unchanged (run the existing
+  `billing-workspace-routes.test.ts` or any other BS-reconciliation
+  test if present and confirm green).
+- The reconciliation remains fire-and-forget — a storage error in
+  the new branch is caught by the existing outer `catch
+  (reconcileError)` at `routes.ts:7158+`.
+- `pnpm typecheck` and `pnpm test` pass.
+
+### Out of scope
+
+- Refactoring or renaming the main WCB-billed-stamping loop at
+  `routes.ts:7133+`. The main loop is the correctness mechanism; the
+  safety net is purely defensive.
+- Adding WO straggler reconciliation — WO is stamped by a different
+  upstream mechanism and is not on this slice's scope.
+- Changing `storage.updateWetCheckBilling` or
+  `storage.getWetCheckBillingById`.
+- Surfacing reconciliation hits in any UI or admin tool.
+
+### Dependencies
+
+None. This slice is independent and can land any time. It is the
+smallest slice in the family.

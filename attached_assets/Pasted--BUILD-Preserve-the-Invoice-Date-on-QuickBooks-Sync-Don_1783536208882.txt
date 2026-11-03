@@ -1,0 +1,59 @@
+# BUILD — Preserve the Invoice Date on QuickBooks Sync (Don't Restamp `TxnDate` to Today)
+
+**What & Why**
+When a corrected invoice is re-synced to QuickBooks, the QB invoice date should stay the **original invoice date**, not jump to today. In the live #04723 case the amount synced correctly ($2,286.09) but the QB `TxnDate` moved from 5/1/26 to today. The root cause is narrow and confirmed: the in-place **update** path never changes the date, but the **create** path stamps `TxnDate = new Date()`. Because QB invoice 48408 had been deleted, the sync took the *create* path (recreate) — and that path restamped the date. This ticket makes the sync **preserve the original invoice date on every path**, so corrections/resyncs (and recreates after a manual QB delete) keep the date QuickBooks already had.
+
+## Root cause (confirmed in code)
+- **Create path restamps to today** — `qb-invoice-ops.ts:209–215` (`buildAndPostQbInvoice`):
+  ```ts
+  const currentDate = new Date();
+  const invoiceData = { …, TxnDate: currentDate.toISOString().split("T")[0],
+                        DueDate: new Date(currentDate.getTime() + 30d)… };
+  ```
+  `TxnDate`/`DueDate` are computed from *now*, ignoring the invoice's real date.
+- **Update path is already date-neutral** — `updateQbInvoiceInPlace` sends a sparse update with only `Id`, `SyncToken`, `DocNumber`, and `Line` (no `TxnDate`), so an in-place update leaves the QB date untouched. Good — no change needed there.
+- **So the only path that moves the date is create**, which runs on first-ever sync *and* on recreate-after-delete (the #04723 case, since the DocNumber lookup found nothing and fell through to create).
+- **Why the reissue makes this tricky:** a correction reissue inserts a **new** invoice row (Rev 2) whose `createdAt` defaults to now. The original date (5/1/26) lives on the **Rev 1** row. So "the invoice's date" can't be read off the row being synced — it has to come from the earliest revision of that invoice number.
+
+## The fix
+**1. Thread the invoice date into the create path instead of using `new Date()`.**
+Add `txnDate` (and optionally `dueDate`) params to `buildAndPostQbInvoice` and use them:
+```ts
+TxnDate: params.txnDate,                    // original invoice date, "YYYY-MM-DD"
+DueDate: params.dueDate ?? <txnDate + terms> // preserve original due date if present
+```
+Keep the current `new Date()` only as a last-resort fallback if no date can be resolved (should not happen for a real invoice).
+
+**2. Resolve the *original* invoice date in the sync closure (`createQuickBooksInvoiceForInvoice`, `routes.ts:8465`).**
+Before calling `buildAndPostQbInvoice`, resolve the stable invoice date as the **earliest revision's `createdAt`** for this `(companyId, invoiceNumber)` — i.e. the Rev 1 row's `createdAt` — so a Rev 2 recreate reproduces the date QuickBooks originally had. Fall back to the invoice's own `createdAt` when it *is* the first revision. Format as `YYYY-MM-DD`.
+- For `DueDate`: pass the invoice's stored `dueDate` if set; otherwise derive from the resolved invoice date + the existing net-30 default (so behavior is unchanged when there's no stored due date).
+
+**3. Leave the in-place update path date-neutral (default).**
+Do **not** add `TxnDate` to `updateQbInvoiceInPlace` — an in-place update should never move the date. (QuickBooks preserves the existing `TxnDate` on a sparse update that omits it.) This means once this ships and #04723 has the right date, future in-place updates keep it.
+
+## Decision (one small call)
+"Original invoice date" is resolved as the **earliest-revision `createdAt`** — this exactly reproduces the pre-existing QB date (5/1/26 for #04723). The alternative would be `periodStart` (the billing period, ~April 1), but that would *change* #04723's date rather than preserve it, so earliest-revision `createdAt` is the right anchor. Flag if you'd rather bill-date off `periodStart` going forward.
+
+## Done looks like
+- Re-syncing / recreating #04723 keeps its QuickBooks date at **5/1/26**, not today; amount stays $2,286.09.
+- A corrected reissue (Rev N) + resync never moves the QB `TxnDate` — it stays the original invoice date across every correction.
+- A genuinely new invoice's first sync uses the invoice's own issue date (its `createdAt`), not a hardcoded "today."
+- In-place updates continue to leave the QB date untouched.
+
+## Tests
+- **Recreate path** (DocNumber not found → create) with a Rev 2 invoice whose Rev 1 `createdAt` = 5/1/26 → the created QB invoice has `TxnDate` = 2026-05-01, not today.
+- **First-ever sync** of a new invoice → `TxnDate` = the invoice's `createdAt` date.
+- **In-place update** of an existing QB invoice → response `TxnDate` unchanged (regression guard that the sparse update still omits `TxnDate`).
+- **DueDate**: invoice with a stored `dueDate` → that date is used; invoice without → resolved date + net-30.
+- Company isolation holds on the earliest-revision lookup (scoped by `companyId` + `invoiceNumber`).
+
+## Definition of Done (attach proof — Rule 7)
+- [ ] `file:line` for: the `txnDate`/`dueDate` params on `buildAndPostQbInvoice`; the earliest-revision date resolution in `createQuickBooksInvoiceForInvoice`; confirmation the update path still omits `TxnDate`.
+- [ ] Screenshot: #04723 in QuickBooks showing `TxnDate` = 5/1/26 after a resync (not today).
+- [ ] Test output for the recreate / first-sync / in-place / due-date cases.
+- [ ] Deployed; commit message matches the diff.
+
+## Relevant files
+- `artifacts/api-server/src/routes/qb-invoice-ops.ts` (`buildAndPostQbInvoice` ~177–216 — the `new Date()` restamp; `updateQbInvoiceInPlace` — leave date-neutral)
+- `artifacts/api-server/src/routes/routes.ts` (`createQuickBooksInvoiceForInvoice` ~8465–8578 — resolve original date, pass it in)
+- `lib/db/src/schema/schema.ts` (`invoices`: `revision`, `createdAt`, `dueDate`, composite unique on `(company_id, invoice_number, revision)` — used to find the earliest revision)

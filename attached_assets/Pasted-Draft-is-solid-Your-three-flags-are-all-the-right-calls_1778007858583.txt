@@ -1,0 +1,17 @@
+Draft is solid. Your three flags are all the right calls — keep the aggressive out-of-scope language, keep the title (longer-but-honest beats snappy here), and you're correct not to declare a dependsOn on #306. Two small edits before you create:
+Edit 1 — MFA tables in the DB baseline. Step 3's sensitive-tables list (session, billing_number_counters, wet_check_photos, invoice_pdfs, users, companies, quickbooks_integration) is missing MFA-related tables. The system has TOTP with backup codes per the project notes, so there's almost certainly a user_mfa_secrets (or similar) table and a mfa_backup_codes (or similar) table. Either name them explicitly if you can identify them from shared/schema.ts, or add a generic catch: "plus any table matching mfa, totp, or backup_code in its name." The point is that MFA reset-by-accident would be a security incident, so we want a row count baseline.
+Edit 2 — make the handshake procedural warning fully prescriptive. Step 6's section 7 currently says the executor should note that the confirm dialog doesn't render plan file content. Make the warning a step-by-step procedure rather than just a caveat, since whoever fires the handshake later may not have the full context we built up over this thread. Concretely, the section should read something like:
+
+When firing the migration handshake later, the port plan file must be drafted and reviewed in chat BEFORE proposeMigration is called. The handshake's confirm dialog (Gate B) does not render plan file contents — only actionLabel + message strings. The plan file content is locked in at the moment proposeMigration is invoked.
+Recommended procedure:
+
+Locate .local/tasks/port-irrigopro.md — this contains task #306's hardened plan with all safeguards (smoke-test checklist, OpenAPI skip, lib/db structural-fit guard, escalation policy, etc.).
+Copy that file's contents into the new port plan file at the path proposeMigration will reference.
+Review the new plan file in chat. Iterate if needed.
+Only then call proposeMigration with the new plan file's path.
+The handshake's confirm dialog will appear — accept it.
+
+
+That way the procedural knowledge lives in the completion report, not just in this conversation's history.
+One smaller note (your call, not a hard ask): consider including a line in the report capturing the current SKILL.md modification time or short hash for .local/secondary_skills/migrate-to-multi-artifact/SKILL.md and .local/skills/artifacts/SKILL.md. If those skills change between now and when the handshake fires, our analysis (Gate A vs. Gate B, single-artifact-only constraint) could be stale. A tiny "skills snapshot" line lets future-us detect that. Skip if you think it's overkill.
+Otherwise: yes, fold those two edits in, create the task, and propose it. I'll review it in the Drafts column before approving.

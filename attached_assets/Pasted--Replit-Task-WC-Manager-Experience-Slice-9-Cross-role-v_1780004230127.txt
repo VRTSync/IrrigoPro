@@ -1,0 +1,205 @@
+# Replit Task — WC Manager Experience, Slice 9 (Cross-role visual unification audit + token-level fixes)
+
+This is a single self-contained task. The **Design Context** below is locked
+decisions from `WC Manager Experience - Slice 0 Unification Audit and Plan.md`
+— it is reference material so you understand the intent. The actual work for
+this task is in the **Slice 9** section at the bottom. Do not deviate from any
+file paths, function names, schema field names, or payload shapes specified.
+If you believe a deviation is necessary, surface it and stop rather than
+proceeding.
+
+> **This slice is an AUDIT that spawns sub-slices.** It does not ship
+> individual fixes. The work is to impersonate each role, snapshot every
+> pre-handoff WC-related page, produce a deltas table, and write one
+> small slice spec per delta. The follow-up slices then ship in batches
+> after the audit lands.
+
+> **Out of scope: /billing-workspace and the billing manager command
+> center.** Those are the billing manager's surfaces; they have their
+> own visual vocabulary (post-handoff) and converging them with the
+> pre-handoff vocabulary is a SEPARATE consideration. This slice covers
+> only the pre-handoff surfaces.
+
+---
+
+## Design Context (locked decisions)
+
+Inherited from WC Manager Experience Slice 0 (Slice 9 section).
+
+**Surfaces in scope** (all pre-handoff):
+- `/wet-checks` — the unified list page (post-Slice-7).
+- `/wet-checks/:id` — the wet check detail page (`WetCheckDetail.tsx`).
+- `/wet-checks/pending-review` and `/wet-checks/:id/review` — the
+  review page (post-Slice-6).
+- `/manager-workspace` — the new dashboard (post-Slice-8).
+
+**Surfaces explicitly out of scope:**
+- `/billing-workspace` — billing manager's daily home, post-handoff.
+- `/customer-billing` / `/customers/:id` — billing manager command
+  center, post-handoff (the user is happy with the WCB tab addition
+  from Slice 1; further visual work is its own family).
+- `/wet-check-billings` list page — partially polished by Slice 3;
+  further visual work happens there or via a follow-up.
+- Field tech mobile screens.
+
+**Role lenses to impersonate:**
+- `irrigation_manager`
+- `company_admin`
+- `super_admin`
+- `billing_manager` (where they have read-only access — verify visual
+  consistency for read-only surfaces too)
+
+---
+
+## Slice 9 — Cross-role visual unification audit
+
+### Scope
+
+Three sequential steps:
+1. Impersonate each role; capture screenshots / DOM snapshots of every
+   pre-handoff page; store as fixtures.
+2. Diff the snapshots; produce a deltas table.
+3. Write one slice spec per delta — to be handed to Replit as a
+   follow-up batch.
+
+This slice does NOT implement any of the fixes. It produces the
+artifact (the deltas table + sub-slice specs) so the actual visual
+unification work can ship in small, focused PRs.
+
+### Files modified
+
+- New: `docs/wc-manager-experience-visual-audit.md` — the audit
+  artifact.
+- New: `docs/wc-manager-experience-visual-audit-fixtures/` directory
+  containing the captured snapshots per role per page.
+- New: `WC Manager Experience - Slice 9a <title>.md`,
+  `Slice 9b <title>.md`, ... — one spec per delta surfaced by the
+  audit. These are NOT implemented in this slice; they are written
+  as plain Markdown specs in the standard slice format.
+
+### Concrete changes
+
+#### Step 1 — Capture snapshots
+
+For each surface in scope, for each role lens, capture:
+- A DOM HTML snapshot (via a vitest snapshot test that renders the
+  page with an impersonated user — pattern from
+  `nav-config.test.ts` or similar).
+- A visual screenshot (via Playwright or similar — if Playwright
+  isn't already set up, use vitest + jsdom + an HTML-to-text
+  conversion as the fallback comparator).
+
+Store snapshots in
+`docs/wc-manager-experience-visual-audit-fixtures/` with a clear
+naming scheme:
+
+```
+wet-checks-list.irrigation_manager.html
+wet-checks-list.billing_manager.html
+wet-checks-list.company_admin.html
+wet-checks-list.super_admin.html
+wet-check-detail.irrigation_manager.html
+... etc
+```
+
+If the impersonation harness doesn't exist in the repo, write a small
+helper:
+
+```typescript
+// docs/wc-manager-experience-visual-audit-fixtures/_capture.ts
+async function captureSurface(route: string, role: UserRole): Promise<string> {
+  const { container } = render(
+    <App user={{ id: 1, role, name: "Test", companyId: 1 }} initialPath={route} />
+  );
+  // Wait for queries to settle.
+  await waitForElement(/* page-specific sentinel */);
+  return container.innerHTML;
+}
+```
+
+Commit the captured fixtures alongside the audit doc.
+
+#### Step 2 — Produce deltas table
+
+In `docs/wc-manager-experience-visual-audit.md`, write a table per
+surface. Columns:
+
+```
+| Element                | irrigation_manager | company_admin | super_admin | billing_manager (read-only) | Delta | Severity |
+|------------------------|--------------------|----|-------------|-----|------------------------|--------|
+| Status badge "Submitted" colors |          |    |             |     |                        |        |
+| Row hover state        |                    |    |             |     |                        |        |
+| Empty state icon       |                    |    |             |     |                        |        |
+| Page header padding    |                    |    |             |     |                        |        |
+| Filter chip active style |                  |    |             |     |                        |        |
+| Action button label vocabulary |            |    |             |     |                        |        |
+```
+
+For each row, record:
+- The actual value per role lens (e.g., HEX color, class name,
+  pixel-padding value).
+- The Delta column: terse description of the difference.
+- The Severity column: P0 (breaks parity in a user-visible way), P1
+  (noticeable on side-by-side), P2 (token-level only, low impact).
+
+Aim for completeness; the audit's value is in surfacing things that
+were previously invisible.
+
+#### Step 3 — Write sub-slice specs
+
+For each P0 or P1 delta, write a small slice spec file at the project
+root following the standard slice format:
+
+```
+WC Manager Experience - Slice 9a Status Badge Token Convergence.md
+WC Manager Experience - Slice 9b Row Hover State Token Convergence.md
+WC Manager Experience - Slice 9c Empty State Icon Standardization.md
+... etc
+```
+
+Each sub-slice is small (1–3 file changes, ≤200 LOC), focused on a
+single delta, and references the audit doc as the source of truth for
+"what to change to what."
+
+P2 deltas can either be bundled into a single
+"Slice 9z Token Cleanup" catch-all, or deferred entirely. Mark them
+explicitly in the audit doc.
+
+### Tests
+
+The captured snapshots ARE the tests for the sub-slices that will
+ship later — each fix slice asserts the post-fix snapshot matches
+expected.
+
+For THIS slice's verification: the audit doc and the captured
+fixtures are the deliverable. A simple "did the audit run?" check is
+fine — e.g., assert each surface×role combination has a corresponding
+fixture file.
+
+### Acceptance criteria
+
+- `docs/wc-manager-experience-visual-audit.md` exists with one deltas
+  table per surface in scope.
+- Snapshot fixtures exist for every (surface, role) combination listed
+  in Design Context.
+- At least one sub-slice spec exists for every P0 and P1 delta
+  surfaced by the audit.
+- No production code is modified in this slice.
+- The audit doc explicitly lists which deltas were P0/P1 (slice-specced)
+  vs P2 (deferred or batched).
+
+### Out of scope
+
+- Implementing any of the sub-slice fixes.
+- `/billing-workspace`, `/customers/:id`, and other billing manager
+  surfaces.
+- Mobile screens.
+- Field tech surfaces.
+- Component-library-level token redesign (these are SURFACE-level
+  deltas, not theme work).
+
+### Dependencies
+
+- Slices 6, 7, 8 must have landed — otherwise the audit captures
+  pre-unification snapshots that don't reflect the target state.
+- Independent of Slices 1–5, 10, 11.

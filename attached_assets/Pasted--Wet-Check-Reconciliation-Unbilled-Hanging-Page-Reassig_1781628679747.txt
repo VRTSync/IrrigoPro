@@ -1,0 +1,82 @@
+# Wet Check Reconciliation — Unbilled/Hanging Page + Reassign-with-Cascade (Company Admin Utility)
+
+**What & Why**
+Wet checks selected against the wrong/duplicate customer records (the field-tech picker was showing all customers, not just billing-visible ones) end up with their snapshots stranded under the wrong customer — and because every normal billing view is filtered to the current billing month, May-dated stragglers never surface. Company admin needs (1) a date-range reconciliation view to **see** every unbilled wet check + snapshot grouped by customer so mis-assignments are obvious, and (2) a **reassign action** that moves the wet check *and the billing(s) attached to it* to the correct customer + branch — the cascade is the part that actually fixes billing.
+
+This is a **company-admin utility** (and super_admin). Two slices. No new lifecycle states. Pairs with: the *Wet-Check Customer Picker* fix (stops new mis-assignments) and deactivating/merging the duplicate customer records (stops recurrence).
+
+---
+
+## Background — why a naive customer switch fails (confirmed in schema)
+
+The customer reference is copied down the chain, so updating one row isn't enough:
+- `wet_checks` → `customerId`, `customerName`, **`companyId`** (all not-null).
+- `wet_check_billings` (the snapshot billing sees) → its **own** `customerId`, `customerName`, `propertyAddress`, `branchName`, and **no `companyId`** column. One wet check can have **multiple** WCBs (`getWetCheckBillingsByWetCheckId` returns an array).
+- Derived `work_orders` / `estimates` (from triaged findings) → their own `customerId` + `companyId`.
+
+If the wrong customer record sits under a **different `companyId`** than the real customer, company-scoped views hide the items from the right billing manager entirely — so fixing `companyId` (via the wet check + correct customer) is often the actual unlock, not just the name.
+
+---
+
+## Slice 1 — Reconciliation page: unbilled/hanging wet checks by date range, grouped by customer
+
+### Done looks like
+- A company-admin (+ super_admin) page (e.g. `/admin/wet-check-reconciliation`, clearly labeled a utility) with a **custom date range** filter (from/to).
+- Lists every **unbilled** wet check in range — defined as a wet check whose snapshot(s) have **no `invoiceId`** (and/or the wet check has no fully-billed snapshot) — regardless of status, so stuck/mis-assigned items show.
+- **Grouped by customer** (and branch), each group showing count + total $; each row shows: wet check #, address, wet-check status, snapshot status ("Pending approval" / "Approved" / etc.), date, amount, assigned tech.
+- A mis-assignment is visually obvious (e.g. a cluster of PNC properties sitting under "First Bank of Colorado").
+- Date range defaults wide enough to catch stragglers (e.g. last 90 days), but is freely adjustable — **not** locked to the current billing month.
+
+### Steps
+1. New endpoint `GET /api/admin/wet-check-reconciliation?from=&to=` (company-admin/super_admin only). Returns wet checks in the date range joined to their WCB snapshot(s), filtered to those with no `invoiceId`, with the fields above. Scope by the caller's company (super_admin: all / by `companyId` param).
+2. New page component grouping results by `customerId` (then `branchName`), with per-group subtotal and a global total. Status chips reuse the wet-check + snapshot status presentation from the Wet Check System page.
+3. Each row exposes a **Reassign** action (Slice 2) and a link to the wet-check record / snapshot.
+
+### Acceptance
+- Admin can pick any date range and see all unbilled wet checks + snapshots grouped by customer; invoiced items are excluded; mis-assigned clusters are visible.
+
+---
+
+## Slice 2 — Reassign-with-cascade action
+
+### Done looks like
+- From a reconciliation row (or the wet-check record), the admin picks the **correct customer + branch** and confirms.
+- The action **cascades** in one transaction:
+  - `wet_checks`: set `customerId`, `customerName`, **`companyId`** (to the target customer's company), `propertyAddress` if appropriate.
+  - **All non-invoiced** `wet_check_billings` for that wet check: set `customerId`, `customerName`, `propertyAddress`, `branchName` (to the chosen branch).
+- **Guards:** reassign is **blocked** for any snapshot that is already `billed` or has an `invoiceId` (and surfaces a clear message). If the wet check spawned `work_orders` / `estimates` (from triaged findings), the UI **warns** and lists them (they carry their own `customerId`/`companyId`) so the admin knows to handle those separately — Slice 2 does not silently move them. (Optional follow-up: extend the cascade to non-invoiced derived WO/estimate.)
+- A confirmation step shows exactly what will move (the wet check + N snapshots, with old → new customer/branch) before committing.
+- The action is audited (reuse the existing activity/audit trail) on the wet check and each snapshot.
+
+### Steps
+1. New endpoint `POST /api/wet-checks/:id/reassign-customer` (company-admin/billing-manager/super_admin) body `{ customerId, branchName }`. Server: load the wet check + its WCBs; reject if any WCB is `billed`/invoiced (or reassign only the non-invoiced ones and report which were skipped); in a transaction update the wet check + non-invoiced WCBs as above; resolve target `companyId` from the chosen customer; write audit entries.
+2. Reassign UI: customer picker (billing-visible customers) + branch selector (the target customer's `branches`), a diff/confirmation panel, and the invoiced/derived-record guards/warnings.
+3. Wire the Reassign action into the reconciliation rows (and optionally the wet-check record's `…` menu).
+
+### Tests
+- Reassigning a wet check with one pending snapshot moves both the wet check (incl. `companyId`) and the snapshot (`customerId`/`customerName`/`propertyAddress`/`branchName`).
+- A wet check with **two** snapshots moves **both** non-invoiced ones.
+- A snapshot with an `invoiceId` is **not** moved (blocked / skipped with a message).
+- A wet check with a derived work order surfaces a warning listing it; the WO is not silently moved.
+- Post-reassign, the (now correctly-scoped) snapshot is visible to the target customer's billing.
+
+### Acceptance
+- Admin can manually land mis-assigned wet checks + their non-invoiced snapshots under the correct PNC customer/branch, with the company corrected, safely (invoiced records protected, derived records flagged).
+
+---
+
+## Out of scope
+- Auto-detecting "wrong" customer (this is a human-judgment tool — the page surfaces, the admin decides).
+- Cascading into invoiced/billed records.
+- Merging/deduping the customer records themselves (separate cleanup — recommended alongside, see below).
+- Field-tech screens.
+
+## Recommended companions (not this spec, but do them to stop recurrence)
+- Ship the *Wet-Check Customer Picker → billing-visible* fix so new wet checks can't pick the bad records.
+- Deactivate (hide-from-billing) or merge the duplicate First Bank / First Bank of Colorado records into the canonical PNC customer's branches.
+
+## Relevant files
+- `artifacts/api-server/src/routes/routes.ts` (new reconciliation + reassign endpoints)
+- `artifacts/api-server/src/storage.ts` (`getWetCheckBillingsByWetCheckId`, wet-check + WCB updates, audit)
+- `lib/db/src/schema/schema.ts` (reference: `wet_checks`, `wet_check_billings`, `customers.branches`)
+- New admin page under `artifacts/irrigopro/src/pages/` + a reassign modal/component

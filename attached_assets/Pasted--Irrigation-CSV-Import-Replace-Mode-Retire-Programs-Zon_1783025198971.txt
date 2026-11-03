@@ -1,0 +1,57 @@
+# Irrigation CSV Import — Replace Mode (Retire Programs/Zones Not In File)
+
+This is a single self-contained capability addition. Do not deviate or expand scope beyond what's specified here.
+
+**What & Why**
+Today's import (`storage.importIrrigationProfile`, `storage.ts:~10906-11305`) only ever **adds or updates** what's present in the CSV for a matched controller — it never touches a program or zone that exists in the DB but isn't in the file (the diff loops at `storage.ts:11010` and `storage.ts:11038` iterate `group.programs`/`group.zones`, which come from the CSV, never the reverse). That's the right default for incremental imports, but Randy has now re-imported Villas at the Boulders three times as the source-of-truth spreadsheet got corrected (zone reassigned between programs, a zone added, runtimes changed), and wants a way to say "this file is now the complete, authoritative state for this controller — remove anything on it that isn't in the file," without hand-editing leftovers in the UI after every re-import.
+
+**Design decision:**
+- **Scope: one matched controller at a time, never the whole property.** A CSV commonly covers a subset of a property's clocks. A property-wide "replace everything" mode risks silently deleting controllers the file never mentioned. Replace mode only ever touches a controller that this import actually matched and is writing to.
+- **Mechanism: real delete, not the `isActive` flag.** `isActive` on `irrigation_programs`/`irrigation_profile_zones` is set at creation but is never filtered on anywhere in the app today (checked: no read path in `storage.ts`, the profile page, the PDF renderer, or the wet-check resolver ever queries by it). Soft-deleting via a flag nobody reads would just leave confusing dead rows in place. Retrofitting every read path to respect it is materially bigger scope than this request — flagged as an alternative below, not pursued here.
+- **Why a hard delete is safe here:** wet-check history (`wet_check_zone_records`) keys off `controllerLetter` + `zoneNumber` as plain values — there is no foreign key from wet-check data to `irrigation_profile_zones.id` or `irrigation_programs.id` (confirmed in `schema.ts:1394-1427`). Deleting a zone/program row here cannot orphan or corrupt wet-check history.
+- **The one real cost, surfaced not hidden:** a zone's `notes`, `overrideStartTime`, `overrideDays` (`schema.ts:1822-1826`) aren't part of the CSV format. If a manager set those by hand and Replace mode removes that zone, they're gone. The preview must show these fields for anything slated for deletion so the manager can see what they'd lose before confirming — never a blind delete.
+- **Opt-in, per import, default off.** Nothing about today's "Update" behavior changes unless Replace is explicitly selected.
+
+## Slice 1 — Preview: compute what Replace would remove
+
+### Files: `artifacts/api-server/src/storage.ts` (`importIrrigationProfile`, preview path), `artifacts/api-server/src/routes/irrigation-profile-routes.ts`
+
+- Accept a new param on the import request: `replaceControllers?: string[]` — the list of controller names (from this CSV) the manager has opted into Replace mode for. Empty/omitted = today's behavior for every controller.
+- In the diff-building loop (`storage.ts:10984-11082`), for each controller where `replaceControllers` includes `ctrlName` **and** `ctrlDiff.action === "update"` (Replace only makes sense against an existing controller): compute `programsToRemove = existingPrograms.filter(p => !group.programs.has(p.name))` and `zonesToRemove = existingZones.filter(z => !group.zones.has(z.zoneNumber))`.
+- Add these to the controller's diff payload: `programsToRemove: Array<{ id, name }>`, `zonesToRemove: Array<{ id, zoneNumber, name, zoneType, runTimeMinutes, notes, overrideStartTime, overrideDays }>` — include the hand-set fields explicitly so the client can flag "this zone has notes/an override that will be lost."
+- Client preview (`IrrigationCsvImportModal.tsx`): add a "Replace mode" toggle per controller card (default off). When on and `zonesToRemove`/`programsToRemove` is non-empty, render a clearly-marked removal list ("3 zones will be deleted: Zone 9 (has notes), Zone 14, Zone 22 — override set"). Selecting Replace for a controller sends its name in `replaceControllers` on commit.
+
+## Slice 2 — Commit: snapshot, then delete
+
+### Files: `artifacts/api-server/src/storage.ts` (`importIrrigationProfile`, commit path, `~11097-11305`)
+
+- Before any deletes for a controller in Replace mode, capture the **pre-change** state (current controller + programs + zones, i.e. what's about to be removed) and include it in the `irrigation_profile_history` snapshot for this commit — today's snapshot (`storage.ts:11294-11303`) only captures the post-import state; Replace mode needs the pre-image preserved too so a bad replace is recoverable by a manager from the history tab without needing Replit. Store it as an additional `removed: { programs, zones }` key alongside the existing `{ controller, programs, zones }` snapshot shape.
+- After the existing create/update loops run (`storage.ts:11193-11276`) for a Replace-mode controller, delete: `irrigationProfileZones` rows whose id is in that controller's `zonesToRemove`, then `irrigationPrograms` rows whose id is in `programsToRemove` (zones first — a zone's `programId` FK is `onDelete: "set null"`, so deleting programs first would just null out zones instead of the zones themselves being removed as intended; deleting zones first avoids relying on that cascade).
+- This all happens inside the existing transaction (`db.transaction(...)`, `storage.ts:11100`) so a Replace delete and its accompanying creates/updates commit or roll back together.
+- `totalZones` on the controller should reflect the post-delete zone set, not just `Math.max` of the CSV's zone numbers (today's logic at `storage.ts:11141-11143` only ever grows it) — for a Replace-mode controller, recompute it from the final zone list after deletes.
+
+## Tests
+
+- Importing with Replace mode off (today's default) behaves identically to current behavior — a program/zone not in the CSV is left untouched. Regression test.
+- Replace mode on, for a controller where the CSV omits a zone that exists in the DB: that zone is deleted, its FK-referencing... (n/a — no external FK into this table) — and it does not appear in the controller's zone list after commit.
+- Replace mode on, for a controller where the CSV omits a program: the program is deleted; any zone that pointed at it via `programId` must not have been part of `zonesToRemove` — confirm its `programId` doesn't dangle (it shouldn't, since deleted zones are removed first and any zone still present should reference a program still present, per the CSV).
+- Deleted zones' `notes`/override fields are visible in the preview's removal list before commit.
+- Pre-delete state is present in the `irrigation_profile_history` snapshot for that commit (`removed` key populated).
+- Replace mode selected for Controller A doesn't touch Controller B on the same import, even if B is also being updated — scope is strictly per-controller.
+- Re-running the exact same CSV with Replace mode on a second time is a no-op (nothing left to remove, matches the import's existing idempotency contract).
+- Company isolation: unchanged — Replace mode doesn't introduce any new cross-tenant surface, since it only ever operates on controllers already resolved within the caller's company/customer/branch guard.
+
+## Acceptance checklist
+
+- [ ] Replace mode is opt-in per controller, default off; today's Update behavior is the unchanged default for everything else.
+- [ ] Replace mode never operates outside the controller(s) explicitly selected — no property-wide delete path exists.
+- [ ] Preview shows exactly what will be deleted, including any zone-level notes/override fields, before commit is possible.
+- [ ] Deletes are real (not the inert `isActive` flag) and wrapped in the same transaction as the rest of the commit.
+- [ ] Pre-delete state is captured in `irrigation_profile_history` so a Replace can be manually reversed from history if needed.
+- [ ] `totalZones` reflects the post-delete zone count for Replace-mode controllers.
+
+## Out of scope
+
+- Property-wide "replace everything for this customer" mode — rejected above; too easy to nuke controllers a CSV never mentioned.
+- Wiring up `isActive` as a real soft-delete/filter mechanism across the profile page, PDF report, and wet-check resolver — a legitimate longer-term alternative to hard delete, but materially bigger than this request; worth its own spec if Randy wants soft-delete-with-undo instead of hard-delete-with-history-recovery.
+- A one-click "undo last import" — the history snapshot makes manual recovery possible, but automated rollback-from-history isn't part of this slice.

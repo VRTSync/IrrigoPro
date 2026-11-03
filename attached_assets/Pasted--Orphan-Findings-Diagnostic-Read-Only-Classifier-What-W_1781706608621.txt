@@ -1,0 +1,46 @@
+# Orphan Findings Diagnostic — Read-Only Classifier
+
+**What & Why**
+With the standalone "Findings to route" lane removed from Manager Workspace, findings now reach a manager only through their parent wet check. That's correct — but it means any finding that is **unrouted** (no billing FK) yet sits on a wet check that's already `converted`/`approved` is now **invisible**: the wet check won't appear in Needs Review (it's done), and there's no findings lane to catch the stray. These are the old pre-redesign stragglers (the First Bank vintage).
+
+This is a **read-only** script that finds and classifies them so we can decide what to do. It **mutates nothing**.
+
+Single slice. No schema change. No app/route change.
+
+---
+
+## Done looks like
+- A script classifies every finding with **all four routing FKs null** (`billingSheetId`, `estimateId`, `workOrderId`, `wetCheckBillingId`) **and** `resolution != 'documented_only'`, by its parent `wet_checks.status`:
+  - **Class A — active** (`submitted` / `pending_manager_review`): already surfaced via Needs Review; no action.
+  - **Class B — partially_converted**: surfaced via Needs Review (the membership fix includes these); no action.
+  - **Class C — converted / approved**: **invisible** — the ones that need a decision.
+- For each class it prints counts, plus breakdowns by **age**, by `resolution`, by `techDisposition`, by `companyId`, and a flag for findings carrying a **dollar amount** (`partPrice`/`quantity` non-null) — i.e., money that may never get billed.
+- It writes `orphaned-findings-report.csv` with one row per finding: `findingId, wetCheckId, wcStatus, resolution, techDisposition, companyId, customerName, partPrice, quantity, ageDays`.
+- Zero rows mutated.
+
+## Steps
+1. **Add a read-only script** `artifacts/api-server/scripts/diagnose-orphaned-findings.ts` (match the existing script + run convention in that folder — e.g. `tsx`/`ts-node` via a `package.json` script). It must open a read-only connection and run only `SELECT`s.
+2. **Query** `wet_check_findings` joined to `wet_checks`, filtered to: `billingSheetId IS NULL AND estimateId IS NULL AND workOrderId IS NULL AND wetCheckBillingId IS NULL AND resolution <> 'documented_only'`. Select the finding fields above plus `wet_checks.status` and `customers.name`.
+3. **Classify** each row into A / B / C by `wet_checks.status`:
+   - A = `submitted`, `pending_manager_review`
+   - B = `partially_converted`
+   - C = `converted`, `approved` (and any other terminal status)
+4. **Aggregate & print** a summary table to stdout: per-class counts, age buckets (e.g. 0–30 / 31–60 / 60+ days), count carrying a dollar amount, and a per-company breakdown. Emphasize **Class C** (the actionable set).
+5. **Write the CSV** next to the script (or to a path passed as an arg).
+6. Print a one-line summary at the end, e.g. `Class C: N findings (M with $ value) across K wet checks — see orphaned-findings-report.csv`.
+
+## Remediation (do NOT implement — for Randy after reviewing the output)
+For **Class C** only, once counts are known, pick per the data:
+- (a) Sweep to `documented_only` — if they were never meant to bill.
+- (b) Reopen the parent wet check to `partially_converted` so triage can route them — if they represent unbilled work that should be invoiced.
+- (c) Leave as-is — if amounts are negligible/legacy.
+Each is a one-paragraph follow-up; the diagnostic decides which.
+
+## Out of scope
+- Any mutation of findings or wet checks.
+- Re-introducing a findings lane or surfacing closed wet checks in Needs Review.
+- The reconciliation page (separate, for mis-assigned snapshots).
+
+## Relevant files
+- `artifacts/api-server/scripts/diagnose-orphaned-findings.ts` (new)
+- `lib/db/src/schema/schema.ts` (read-only reference: `wet_check_findings`, `wet_checks`, `customers`)

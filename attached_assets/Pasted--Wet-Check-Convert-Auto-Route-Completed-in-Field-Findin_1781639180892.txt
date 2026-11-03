@@ -1,0 +1,72 @@
+# Wet Check Convert — Auto-Route Completed-in-Field Findings into the Snapshot
+
+**What & Why**
+In the wet-check review surface (e.g. WC-81), findings the tech marked **completed in field** can land with **"no billing route"** and a warning to "Open the Manager Workspace findings queue" — a queue that has been **removed**. The system already knows these findings belong to the wet check; they should roll into that wet check's WC Snapshot automatically. They don't, because of an **asymmetry between two code paths**:
+
+- **Submit path** (`storage.ts` ~line 7551, `completedInFieldUnrouted`) has a rescue: it catches `techDisposition === 'completed_in_field'` findings **even when `resolution === 'pending'`**, routes them into the wet check's WCB, and stamps `resolution = 'repaired_in_field'`.
+- **Convert path** (`storage.ts:8681`, `convertWetCheckToWetCheckBilling`) — what **"Approve & Convert"** runs — only bills findings where **`resolution !== 'pending'`** (`eligible` filter ~line 8711). It has **no** completed-in-field rescue. So a completed-in-field finding whose resolution was never stamped (auto-bill off at submit, submitted pre-auto-bill, or simply slipped through) is excluded → "no billing route."
+
+Result: the manager is told to manually route via a deleted queue, for work that should auto-bill.
+
+**Fix:** give the convert path the same completed-in-field rescue, remove the stale warning, and stop presenting completed-in-field findings as "pending triage."
+
+No schema change.
+
+---
+
+## Slice 1 — Convert path: rescue completed-in-field findings (core)
+
+### Files
+- `artifacts/api-server/src/storage.ts` — `convertWetCheckToWetCheckBilling` (~8681).
+
+### Concrete changes
+- In `convertWetCheckToWetCheckBilling`, before/within the `eligible` computation, treat `techDisposition === 'completed_in_field'` findings as repaired-in-field even when `resolution === 'pending'` — mirroring the submit path (7551–7574). Specifically: include findings where `techDisposition === 'completed_in_field' && convertedAt == null && wetCheckBillingId == null && billingSheetId == null && estimateId == null && workOrderId == null && resolution !== 'repaired_in_field'` in the `repaired` set, route them into the wet check's WCB via `_writeRepairedInFieldBilling` (reusing `priorWcbId` so it appends to the one snapshot), and **stamp `resolution = 'repaired_in_field'`** on them so they leave the pending set.
+- Keep the existing idempotency/`convertedAt` guards so re-running convert doesn't double-bill.
+- Net effect: "Approve & Convert" now auto-routes completed-in-field findings into this wet check's snapshot — no manual step.
+
+### Tests
+- A wet check with `completed_in_field` findings at `resolution = 'pending'` → after convert, each has `wetCheckBillingId` set and `resolution = 'repaired_in_field'`; exactly one WCB for the wet check; totals correct.
+- Re-running convert does not create a second WCB or double-bill.
+- Findings already routed to estimate/WO/documented are unaffected.
+
+---
+
+## Slice 2 — Remove the stale "Manager Workspace findings queue" warning
+
+### Files
+- `artifacts/irrigopro/src/components/manager/wet-check-wizard.tsx` (~1223–1234, the `unroutedCompletedInField` warning).
+
+### Concrete changes
+- The warning that says completed-in-field findings "have no billing route — Open the Manager Workspace findings queue to route them" points at a removed queue. After Slice 1 these auto-route on Approve & Convert, so the warning should no longer fire for completed-in-field findings. Either remove the block, or replace its copy with accurate guidance: *"These were completed in the field and will be added to this wet check's snapshot when you Approve & Convert."* No reference to any Manager Workspace queue.
+- (This supersedes the stale-copy item in the earlier *Findings-Lane Cleanup* ticket for this specific message.)
+
+---
+
+## Slice 3 — Stop counting completed-in-field as "pending triage"
+
+### Files
+- `artifacts/irrigopro/src/components/wet-check-review/CombinedReviewSurface.tsx` (`unroutedFindings` ~447).
+- `artifacts/irrigopro/src/components/manager/wet-check-wizard.tsx` (triage progress / `unroutedCompletedInField`).
+
+### Concrete changes
+- Resolve the "3 pending" vs "100% triaged" contradiction: a `completed_in_field` finding requires **no manual triage** — it auto-bills on convert. Exclude `techDisposition === 'completed_in_field'` findings from the `unroutedFindings` "needs triage / N pending" count in `CombinedReviewSurface` (they are not awaiting a manager decision). Show them as **"Auto-billed → snapshot"** rather than pending.
+- Ensure the Step 1 badge and the wizard progress agree: only findings genuinely needing a manager routing decision (no disposition, or `needs_review`) count toward "pending."
+
+### Tests
+- A wet check whose only un-billed findings are `completed_in_field` shows **0 pending** in Step 1 and no manual-routing warning; "Approve & Convert" is the clear next action.
+- A wet check with a genuinely undecided finding still shows it as pending.
+
+---
+
+## Note — verify the WC-81 status display
+The header badge showed **"In Progress."** `convertWetCheckToWetCheckBilling` throws if status is not `submitted`/`partially_converted` (~8695). If WC-81 is genuinely `in_progress`, Approve & Convert would error — so confirm whether the badge is accurate or mislabeled. If real in-progress wet checks are reaching the review surface, that's a separate membership bug to flag; if it's just a stale/wrong label, fix the display. (Does not block Slice 1.)
+
+## Out of scope
+- The auto-bill-at-submit path (already correct — Slice 1 brings convert to parity with it).
+- `WET_CHECK_AUTO_BILL` flag behavior.
+- Estimate/WO routing for findings the manager genuinely sends elsewhere.
+
+## Relevant files
+- `artifacts/api-server/src/storage.ts` (`convertWetCheckToWetCheckBilling` ~8681; submit rescue ~7551 as the reference implementation)
+- `artifacts/irrigopro/src/components/manager/wet-check-wizard.tsx` (~1223–1234 warning; triage counts)
+- `artifacts/irrigopro/src/components/wet-check-review/CombinedReviewSurface.tsx` (`unroutedFindings` ~447)

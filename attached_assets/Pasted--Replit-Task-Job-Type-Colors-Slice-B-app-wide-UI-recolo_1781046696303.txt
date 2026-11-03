@@ -1,0 +1,101 @@
+# Replit Task — Job-Type Colors, Slice B (app-wide UI recolor)
+
+Make the web app use the canonical job-type colors so the on-screen
+billing surfaces match the invoice PDF. Four types, four distinct colors,
+consistent everywhere:
+
+| Type | Color | Token (from Slice A) |
+|---|---|---|
+| Work Order | blue `#1E5A99` | `jobtype-wo` |
+| Billing Sheet | amber `#B06820` | `jobtype-bs` |
+| Wet Check Billing | green `#5E8C2A` | `jobtype-wcb` |
+| Estimate | slate `#475569` | `jobtype-est` |
+
+> **Why.** Today the customer profile colors Work Orders **green** and
+> Estimates **blue** — which collides with the canonical (green = Wet
+> Check, blue = Work Order). The same color means different things on
+> screen vs. on the invoice. This slice fixes that.
+
+## Hard rule: recolor the TYPE axis only, never the STATUS axis
+
+Only recolor where a color **denotes the job type** (a WO/BS/WCB/estimate
+card, row, count tile, or legend). **Do NOT** touch:
+- Status badges / state colors (submitted, pending review, approved,
+  completed, billed) — `status-badge.tsx`, `row-badges.tsx`,
+  `customer-billing.tsx` status maps. Different axis; leave as-is.
+- Selection / info-state accents (e.g. a card whose left border turns
+  blue when *selected*, or an info callout) — these aren't type legends.
+- The purple "converted/billed" treatment in the customer profile — a
+  state indicator, not a type.
+
+When unsure whether a colored element means *type* or *state*, leave it
+and list it in the PR for review.
+
+## Confirmed surfaces to recolor (TYPE axis)
+
+`artifacts/irrigopro/src/components/customers/customer-profile.tsx`:
+- Estimate cards — `border-l-blue-500` → `border-l-jobtype-est`
+  (and the `from-blue-50/...` gradient / hover to the slate equivalent),
+  `:375`.
+- Work Order cards — `border-l-green-500` → `border-l-jobtype-wo`,
+  hover + `from-green-50` gradient + `group-hover:text-green-700` title
+  → blue equivalents, `:440,452`.
+- Work Order count tile — `text-green-700` → `text-jobtype-wo`, `:220`.
+- Billing Sheet cards — `border-l-orange-500` → `border-l-jobtype-bs`,
+  hover + gradient + `group-hover:text-orange-700` + the
+  `text-orange-600` amount → amber equivalents, `:554,563,568`.
+- Billing Sheet count tile — `text-orange-700` → `text-jobtype-bs`, `:228`.
+
+Wet Check Billing cards/rows (wherever they list — e.g. the WC Billings
+tab on `customer-billing.tsx` and/or `wet-check-billings/` row
+components): give the **type** accent green `jobtype-wcb`. Apply only to
+the type accent, not the status badge already on those rows.
+
+## Sweep for the rest
+
+Grep the web `src` for type-denoting color classes and convert any that
+represent a job type to the matching token:
+
+```
+grep -rnE "border-l-(green|orange|blue|amber)-[0-9]|text-(green|orange)-[0-9]00" artifacts/irrigopro/src --include=*.tsx
+```
+
+For each hit, decide TYPE vs STATE per the hard rule above. Known
+**leave-alone** examples found in the sweep (selection/info state, not
+type): `estimates/wizard/*` step cards (blue = selected/active),
+`work-orders/billing-sheet.tsx:258` (info card), `manager/wet-check-confirm.tsx`
+color map (state-driven). Confirm each in the PR notes.
+
+## Done looks like
+
+- Customer profile: Work Order cards + count read **blue**, Billing Sheet
+  cards + count read **amber**, Estimates read **slate**, and any
+  Wet Check Billing list accent reads **green** — matching the invoice.
+- No surface still colors a Work Order green or an Estimate the same blue
+  as a Work Order. All four types are visually distinct.
+- All type colors come from the Slice A `jobtype-*` Tailwind tokens (no
+  new hardcoded hexes; no purgeable arbitrary values).
+- Status badges, selection-state accents, and the purple billed treatment
+  are unchanged.
+- `pnpm typecheck` and `pnpm test` (web) pass.
+
+## Tests
+
+- Extend/added `customer-profile` render tests: assert Work Order cards
+  carry a `jobtype-wo` (blue) class and Billing Sheet cards a `jobtype-bs`
+  (amber) class; assert no Work Order card carries a green border class.
+- A small guard test that the four `jobtype-*` tokens resolve to the four
+  distinct Slice A hexes (snapshot of the Tailwind color map or a DOM
+  computed-style check in one representative card).
+
+## Out of scope
+
+- Status / state colors (separate axis).
+- Mobile recolor (separate package; follow-up if desired).
+- Billing-tab dot/underline polish (optional; can be a tiny follow-up).
+- Changing the PDF (already canonical via #1163/#1164/Slice A).
+
+## Dependencies
+
+- **Slice A** (shared tokens + Tailwind `jobtype-*` colors) must land
+  first — this slice consumes those classes.

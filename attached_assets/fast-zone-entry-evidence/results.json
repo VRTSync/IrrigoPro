@@ -1,0 +1,26 @@
+{
+  "environment": "development preview only",
+  "fixture": "Fast Zone Entry Acceptance — isolated 20-zone controller",
+  "surfaces": [
+    {
+      "surface": "full-profile",
+      "keyboardNames": 10,
+      "listRefetchesDuringNaming": 0,
+      "namedChips": 10,
+      "bulkRows": 20,
+      "foldedHistory": "Zones edited: 1-10",
+      "bulkHistory": "Zones 1-20 set: Type Rotor, Runtime 12 min"
+    },
+    {
+      "surface": "customer-card",
+      "keyboardNames": 10,
+      "listRefetchesDuringNaming": 0,
+      "namedChips": 10,
+      "bulkRows": 20,
+      "foldedHistory": "Zones edited: 1-10",
+      "bulkHistory": "Zones 1-20 set: Type Rotor, Runtime 12 min"
+    }
+  ],
+  "errors": [],
+  "forbidden": []
+}
