@@ -2644,8 +2644,12 @@ export class DatabaseStorage implements IStorage {
     return customer || undefined;
   }
 
-  async getCustomerByQuickBooksId(quickbooksId: string): Promise<Customer | undefined> {
-    const [customer] = await db.select().from(customers).where(eq(customers.quickbooksId, quickbooksId));
+  /** The customer in `companyId` linked to QuickBooks customer `quickbooksId`.
+   *  Scoped by company: QuickBooks ids repeat across QuickBooks companies. */
+  async getCustomerByQuickBooksId(companyId: number, quickbooksId: string): Promise<Customer | undefined> {
+    const [customer] = await db.select().from(customers).where(
+      and(eq(customers.companyId, companyId), eq(customers.quickbooksId, quickbooksId)),
+    );
     return customer || undefined;
   }
 

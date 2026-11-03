@@ -1,6 +1,10 @@
 {
   "api-billing": [
     {
+      "name": "customer-quickbooks-lookup",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/customer-quickbooks-lookup.test.ts"
+    },
+    {
       "name": "invoice-number-format",
       "command": "pnpm --filter @workspace/shared exec node --import tsx --test --test-reporter=spec src/invoice-number.test.ts"
     },

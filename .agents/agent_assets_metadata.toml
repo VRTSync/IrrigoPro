@@ -263,3 +263,45 @@ mtime_ms = 1793723023510
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/03af2f6e-1ac5-4fa2-89fa-69d8a6ce496d/fc87a631-a1fd-43dc-9778-331e42a33bcf"
 storage_version_token = "1793723024138391"
 content_type = "text/html"
+
+[[outputs]]
+id = "GdU677GsFeqKN0hKkYrQQ"
+uri = "file://generated-artifacts/customer-quickbooks-lookup/acceptance.html"
+type = "html"
+title = "Customer lookup acceptance evidence"
+description = "Duplicate gate results, both validation-lane summaries, database/index verification, clean grep and commit proof, with sync and post-merge evidence explicitly marked unverified."
+logical_id = "7868d150-c52e-499f-b62f-9ec45d8fb99c"
+content_hash = "sha256:4941c7feeb27c270ed9c11c4176006c508509ad86ad293d5d17b7213215f1d47"
+size = 5251
+mtime_ms = 1793735089419
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/7868d150-c52e-499f-b62f-9ec45d8fb99c/658998ef-09e9-4dda-9f05-c90a174a3bbf"
+storage_version_token = "1793735112718498"
+content_type = "text/html"
+
+[[outputs]]
+id = "Kuvjn31Du2CSb94nir-0B"
+uri = "file://generated-artifacts/customer-quickbooks-lookup/api-billing.log"
+type = "unspecified"
+title = "API billing lane output"
+description = "Full output: 19 entries passed, including the new tenant-safe customer lookup tests."
+logical_id = "687268db-0b40-4553-ad9c-2dec656f4e90"
+content_hash = "sha256:5d95d9fa6a13fa745ced09a921dfa8db542aee8d4b7bac79528ebe75790fc5b0"
+size = 164570
+mtime_ms = 1793734755935
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/687268db-0b40-4553-ad9c-2dec656f4e90/3c67e1ed-47c7-415c-9145-5579f8aa6f1e"
+storage_version_token = "1793735113121169"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "v9p6RpYDGQjq3p9QDZO8x"
+uri = "file://generated-artifacts/customer-quickbooks-lookup/types.log"
+type = "unspecified"
+title = "Types lane output"
+description = "Final full output: all four entries passed after retaining explicit missing-context narrowing."
+logical_id = "cc604f5c-1dfa-4ed7-9b01-b690744ff3ea"
+content_hash = "sha256:244d1adb45450dd4ce13a41012925bab155f5ae118de68c2934f96db5f86bb38"
+size = 57256
+mtime_ms = 1793735048915
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/cc604f5c-1dfa-4ed7-9b01-b690744ff3ea/090ee309-5c40-4df2-a05d-cfa4a44ddd37"
+storage_version_token = "1793735113568967"
+content_type = "application/octet-stream"

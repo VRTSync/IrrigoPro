@@ -149,6 +149,12 @@ export const customers = pgTable("customers", {
   // Task #532 — index company-scoped lookups (the customers list endpoint
   // and almost every join coming off a customer is filtered by companyId).
   companyIdx: index("customers_company_idx").on(table.companyId),
+  // Customer Records Slice 1 — one IrrigoPro customer per QuickBooks customer, per company.
+  // QuickBooks ids repeat across QuickBooks companies, so uniqueness is per company.
+  // Unlinked customers (null or '') are not covered.
+  quickbooksIdUnique: uniqueIndex("customers_company_quickbooks_id_unique")
+    .on(table.companyId, table.quickbooksId)
+    .where(sql`${table.quickbooksId} IS NOT NULL AND ${table.quickbooksId} <> ''`),
 }));
 
 export const customerBudgetMonths = pgTable("customer_budget_months", {

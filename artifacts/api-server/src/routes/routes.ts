@@ -9173,7 +9173,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       
       const userCompanyId = resolveCompanyId(req);
-      if (!userCompanyId) {
+      const companyId = userCompanyId ? Number(userCompanyId) : NaN;
+      if (!userCompanyId || !Number.isInteger(companyId) || companyId <= 0) {
         res.status(400).json({ success: false, message: "Company context is required." });
         return;
       }
@@ -9304,12 +9305,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (const qbCustomer of validCustomers) {
         try {
           // Check if customer already exists
-          const existingCustomer = await storage.getCustomerByQuickBooksId(qbCustomer.qb_id);
+          const existingCustomer = await storage.getCustomerByQuickBooksId(companyId, qbCustomer.qb_id);
           
           if (!existingCustomer) {
-            // Use company ID from header (set earlier in this route)
-            const companyId = parseInt(userCompanyId || '1') || 1;
-            
             // Create new customer from QuickBooks data with QuickBooks ID mapping
             const newCustomer = await storage.createCustomer({
               name: qbCustomer.name,
@@ -9328,12 +9326,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             customersAdded++;
             results.push({ action: 'created', customer: newCustomer });
           } else {
-            // Cross-company safety: skip if the matched QB ID belongs to a different company
-            if (String(existingCustomer.companyId) !== String(userCompanyId)) {
-              results.push({ action: 'skipped_other_company', customer: { qb_id: qbCustomer.qb_id, name: qbCustomer.name } });
-              continue;
-            }
-
             // Non-destructive update: only write fields QB actually provides
             const patch = qbFields(qbCustomer);
 
