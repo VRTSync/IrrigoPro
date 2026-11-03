@@ -24,6 +24,10 @@ export const companies = pgTable("companies", {
   nextEstimateNumber: integer("next_estimate_number").notNull().default(50000),
   // Next IR- invoice number. Allocated atomically; never reused.
   nextInvoiceNumber: integer("next_invoice_number").notNull().default(1001),
+  // Customer Records Slice 3a — QuickBooks-owned details are managed outside IrrigoPro.
+  customerRecordsLocked: boolean("customer_records_locked").notNull().default(false),
+  // Null displays as "your customer system".
+  customerRecordsSystemName: text("customer_records_system_name"),
   // Task #1887 — minimum days between two payment reminders for the same
   // invoice. Enforced on the server, not in the UI. Configurable per company
   // because a 7-day cadence is a policy, not a law; 7 is the default.
@@ -1195,6 +1199,8 @@ export const apiKeys = pgTable("api_keys", {
 // Drizzle insert schemas
 // Zod schemas for validation
 export const insertCompanySchema = createInsertSchema(companies).omit({
+  customerRecordsLocked: true,
+  customerRecordsSystemName: true,
   id: true,
   createdAt: true,
   updatedAt: true,

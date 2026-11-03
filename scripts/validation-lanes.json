@@ -1,6 +1,14 @@
 {
   "api-billing": [
     {
+      "name": "customer-records-shared",
+      "command": "pnpm --filter @workspace/shared exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/customer-records.test.ts"
+    },
+    {
+      "name": "customer-records-lock",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/customer-records-lock.test.ts"
+    },
+    {
       "name": "customer-tenant-guard",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 --test-reporter=spec src/routes/customer-tenant-guard.test.ts"
     },

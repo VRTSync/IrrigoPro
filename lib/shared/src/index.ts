@@ -11,3 +11,4 @@ export * from "./budget-status.js";
 export * from "./wet-check-labor.js";
 export * from "./action-board-plan.js";
 export * from "./irrigation-zones.js";
+export * from "./customer-records.js";

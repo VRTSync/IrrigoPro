@@ -319,3 +319,17 @@ mtime_ms = 1793740276995
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/07e5415a-7665-42cd-8243-379618ae846a/0a7d19f5-0675-4ca0-9f29-1594e1fe0b38"
 storage_version_token = "1793740285563075"
 content_type = "text/html"
+
+[[outputs]]
+id = "ToAVEcMoLYGVg4eEYK5MY"
+uri = "file://generated-artifacts/customer-records/acceptance-evidence.html"
+type = "html"
+title = "Customer Records server lock — acceptance evidence"
+description = "Passing billing and types outputs, exact single-list grep, development curl requests, scoped audit query, fixture cleanup, and verification limitations."
+logical_id = "39ed77f8-0f71-4ec4-a779-a78aaf9503fb"
+content_hash = "sha256:d7151d17d89fc2e9c647d0743a61d03d015c194fdf2c7d13f880744f02588b77"
+size = 283941
+mtime_ms = 1793743742408
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/39ed77f8-0f71-4ec4-a779-a78aaf9503fb/becded3e-f1c5-4461-8611-b78ee5fde5f1"
+storage_version_token = "1793743743116583"
+content_type = "text/html"

@@ -6,6 +6,8 @@ import { z } from "zod/v4";
 import { insertCustomerSchema } from "@workspace/db";
 import { withDbRetry } from "@workspace/db";
 import { storage } from "../storage";
+import { getCustomerRecordsLock } from "../lib/customer-records-lock";
+import { changedLockedFields, customerRecordsLabel, QB_OWNED_CUSTOMER_FIELDS } from "@workspace/shared";
 import {
   applyMonthOverride,
   generateBudgetMonths,
@@ -53,12 +55,17 @@ export function registerCustomerRoutes(
       const budgetMonthOverrides = req.body?.budgetMonthOverrides as
         | Record<string, string | number>
         | undefined;
-      if (Array.isArray(req.body?.budgetSeasonCurveOverride)) validateCurve(req.body.budgetSeasonCurveOverride);
       const companyId = req.authenticatedUserCompanyId;
       if (!companyId) {
         res.status(403).json({ message: "Forbidden: user has no company association" });
         return;
       }
+      const lock = await getCustomerRecordsLock(companyId);
+      if (lock.locked) {
+        res.status(403).json({ code: "CUSTOMER_RECORDS_LOCKED", message: `New customers are added in ${customerRecordsLabel(lock.systemName)}.` });
+        return;
+      }
+      if (Array.isArray(req.body?.budgetSeasonCurveOverride)) validateCurve(req.body.budgetSeasonCurveOverride);
       let customerData = createCustomerSchema.parse({ ...req.body, companyId });
       // Only billing_manager may set billingNotes at creation time
       if ('billingNotes' in customerData && req.authenticatedUserRole !== 'billing_manager') {
@@ -112,7 +119,23 @@ export function registerCustomerRoutes(
         const { billingNotes, ...rest } = customerData;
         customerData = rest;
       }
-      const customer = await withDbRetry(() => storage.updateCustomer(id, customerData));
+      const current = req.tenantScopedCustomer!;
+      const lock = await getCustomerRecordsLock(current.companyId);
+      if (lock.locked) {
+        const changed = changedLockedFields(current as Record<string, unknown>, customerData as Record<string, unknown>);
+        if (changed.length > 0) {
+          const label = customerRecordsLabel(lock.systemName);
+          res.status(409).json({ code: "CUSTOMER_RECORDS_LOCKED", lockedFields: changed,
+            message: `${changed.join(", ")} ${changed.length === 1 ? "is" : "are"} managed in ${label}. Edit ${changed.length === 1 ? "it" : "them"} there.` });
+          return;
+        }
+        for (const f of QB_OWNED_CUSTOMER_FIELDS) delete (customerData as Record<string, unknown>)[f];
+      }
+      // An unchanged full form can become empty after removing owned keys.
+      // Drizzle rejects an empty SET; return the guarded row without a write.
+      const customer = lock.locked && Object.keys(customerData).length === 0
+        ? current
+        : await withDbRetry(() => storage.updateCustomer(id, customerData));
       if (!customer) {
         res.status(404).json({ message: "Customer not found" });
         return;
@@ -156,7 +179,21 @@ export function registerCustomerRoutes(
         const { billingNotes, ...rest } = customerData;
         customerData = rest;
       }
-      const customer = await withDbRetry(() => storage.updateCustomer(id, customerData));
+      const current = req.tenantScopedCustomer!;
+      const lock = await getCustomerRecordsLock(current.companyId);
+      if (lock.locked) {
+        const changed = changedLockedFields(current as Record<string, unknown>, customerData as Record<string, unknown>);
+        if (changed.length > 0) {
+          const label = customerRecordsLabel(lock.systemName);
+          res.status(409).json({ code: "CUSTOMER_RECORDS_LOCKED", lockedFields: changed,
+            message: `${changed.join(", ")} ${changed.length === 1 ? "is" : "are"} managed in ${label}. Edit ${changed.length === 1 ? "it" : "them"} there.` });
+          return;
+        }
+        for (const f of QB_OWNED_CUSTOMER_FIELDS) delete (customerData as Record<string, unknown>)[f];
+      }
+      const customer = lock.locked && Object.keys(customerData).length === 0
+        ? current
+        : await withDbRetry(() => storage.updateCustomer(id, customerData));
       if (!customer) {
         res.status(404).json({ message: "Customer not found" });
         return;
@@ -209,6 +246,13 @@ export function registerCustomerRoutes(
   app.delete("/api/customers/:id", requireAuthentication, requireCompanyAdminAccess, requireCustomerInTenant, async (req, res) => {
     try {
       const id = req.tenantScopedCustomer!.id;
+      const current = req.tenantScopedCustomer!;
+      const lock = await getCustomerRecordsLock(current.companyId);
+      if (lock.locked && (current.quickbooksId ?? "").trim() !== "") {
+        res.status(409).json({ code: "CUSTOMER_RECORDS_LOCKED",
+          message: `This customer comes from QuickBooks. It can't be deleted in IrrigoPro while customer details are managed in ${customerRecordsLabel(lock.systemName)}.` });
+        return;
+      }
       const success = await withDbRetry(() => storage.deleteCustomer(id));
       if (!success) {
         res.status(404).json({ message: "Customer not found" });

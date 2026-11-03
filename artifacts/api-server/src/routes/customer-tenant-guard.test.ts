@@ -18,6 +18,11 @@ mock.module("@workspace/db", {
   namedExports: { insertCustomerSchema, withDbRetry: async (fn: () => unknown) => fn() },
 });
 mock.module("../storage", { namedExports: { storage: {} } });
+mock.module("../lib/customer-records-lock", {
+  namedExports: {
+    getCustomerRecordsLock: () => { throw new Error("Unexpected lock lookup in database-free schema/guard suite"); },
+  },
+});
 mock.module("../services/generate-budget-months", {
   namedExports: {
     applyMonthOverride: () => { throw new Error("Unexpected budget write"); },

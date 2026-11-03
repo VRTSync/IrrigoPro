@@ -387,6 +387,7 @@ import { registerBillingWorkspaceBulkApproveRoutes } from "./billing-workspace-b
 import { registerManagerWorkspaceRoutes, ACTIVE_WC, APPROVED_WC } from "./manager-workspace-routes";
 import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
+import { registerCustomerRecordsRoutes } from "./customer-records-routes";
 import { registerBudgetRoutes } from "./budget-routes";
 import { registerQbHealthSweepRoute } from "./qb-health-sweep-route";
 import { registerFinancialPulseRoutes } from "./financial-pulse";
@@ -4684,6 +4685,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to update company profile" });
     }
   });
+
+  registerCustomerRecordsRoutes(app, { requireAuthentication });
 
   // Company logo upload endpoint
   app.post("/api/company/logo/upload", requireAuthentication, async (req, res) => {
