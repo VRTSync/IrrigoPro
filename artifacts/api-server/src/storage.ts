@@ -171,6 +171,7 @@ import { applyNoPartNeededInvariant } from "./storage/wet-check-finding-invarian
 import { computeWetCheckBillingPartsSubtotal } from "./wet-check-billing-view";
 import { humanizeIssueType } from "./inspection-issue-labels";
 import { buildInspectionEstimateItems } from "./inspection-estimate-items";
+import { formatIrrigoInvoiceNumber } from "@workspace/shared";
 import {
   computeLifecycleStatus,
   isPlaceholderZone,
@@ -767,6 +768,8 @@ export interface IStorage {
   ): Promise<{ amount: number; invoiceCount: number; month: string }>;
   getInvoiceById(id: number, companyId: number | null): Promise<InvoiceWithItems | undefined>;
   createInvoice(invoice: InsertInvoice & { invoiceNumber?: string }): Promise<Invoice>;
+  /** Allocates permanently, even if the subsequent insert or push fails. No null-company fallback. */
+  createInvoiceWithNextNumber(invoice: Omit<InsertInvoice, "invoiceNumber"> & { companyId: number }): Promise<Invoice>;
   updateInvoice(id: number, invoice: Partial<InsertInvoice> & { invoiceNumber?: string }): Promise<Invoice | undefined>;
   deleteInvoice(id: number): Promise<boolean>;
   deleteInvoiceItemsByInvoiceId(invoiceId: number): Promise<boolean>;
@@ -7451,6 +7454,18 @@ export class DatabaseStorage implements IStorage {
   async createInvoice(invoice: InsertInvoice & { invoiceNumber?: string; companyId: number }): Promise<Invoice> {
     const [newInvoice] = await db.insert(invoices).values(toDrizzleInsert<DrizzleInvoiceInsert>(invoice)).returning();
     return newInvoice;
+  }
+
+  async createInvoiceWithNextNumber(invoice: Omit<InsertInvoice, "invoiceNumber"> & { companyId: number }): Promise<Invoice> {
+    // Deliberately autocommitted separately from insertion/rollback: a timed-out
+    // QuickBooks create may have succeeded, so an allocated number is never reused.
+    const result = await db.execute(sql`UPDATE companies
+      SET next_invoice_number = next_invoice_number + 1, updated_at = NOW()
+      WHERE id = ${invoice.companyId}
+      RETURNING (next_invoice_number - 1) AS allocated`);
+    const rows = (Array.isArray(result) ? result : result.rows ?? []) as { allocated: number }[];
+    if (rows[0]?.allocated == null) throw new Error(`Failed to allocate invoice number for company ${invoice.companyId}`);
+    return this.createInvoice({ ...invoice, invoiceNumber: formatIrrigoInvoiceNumber(Number(rows[0].allocated)) });
   }
 
   async updateInvoice(id: number, invoice: Partial<InsertInvoice> & { invoiceNumber?: string }): Promise<Invoice | undefined> {

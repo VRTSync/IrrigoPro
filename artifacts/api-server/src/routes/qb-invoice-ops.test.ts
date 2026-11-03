@@ -9,6 +9,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  readQbCustomTxnNumbers,
+  findQbInvoiceIdsByDocNumber,
+  qbDocNumberMismatch,
   getQbInvoiceById,
   findQbInvoicesByDocNumberForCustomer,
   syncAppInvoiceToQb,
@@ -16,6 +19,7 @@ import {
   buildAndPostQbInvoice,
   updateQbInvoiceInPlace,
 } from "./qb-invoice-ops";
+import { checkQbCustomTxnNumbersCached, QB_CUSTOM_TXN_DISABLED, QB_SESSION_EXPIRED } from "./qb-invoice-preflight";
 import type { QbMakeRequestFn, QbLookupServiceItemFn } from "./qb-invoice-ops";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
@@ -42,6 +46,154 @@ const MOCK_CUSTOMER = {
 };
 
 const QB_LINES = [{ amount: 150.0, description: "Irrigation service" }];
+
+describe("IR number guard primitives", () => {
+  for (const [label, body, expected] of [
+    ["true", { Preferences: { SalesFormsPrefs: { CustomTxnNumbers: true } } }, true],
+    ["false", { Preferences: { SalesFormsPrefs: { CustomTxnNumbers: false } } }, false],
+    ["missing", {}, false],
+    ["truthy string", { Preferences: { SalesFormsPrefs: { CustomTxnNumbers: "true" } } }, false],
+  ] as const) {
+    it(`reads CustomTxnNumbers: ${label}`, async () => {
+      const request: QbMakeRequestFn = async (url, opts, _operation, realm) => {
+        assert.equal(url, `${API_BASE}/v3/company/${REALM}/preferences?minorversion=73`);
+        assert.equal(opts?.method, "GET");
+        assert.equal(realm, REALM);
+        return makeJsonResponse(body);
+      };
+      assert.equal(await readQbCustomTxnNumbers(request, API_BASE, INTEGRATION), expected);
+    });
+  }
+  it("propagates settings auth, HTTP, network and malformed JSON failures", async () => {
+    assert.equal(await readQbCustomTxnNumbers(async () => makeJsonResponse({}, 401), API_BASE, INTEGRATION), "auth_error");
+    for (const status of [404, 429, 500]) {
+      await assert.rejects(() => readQbCustomTxnNumbers(async () => makeJsonResponse({}, status), API_BASE, INTEGRATION));
+    }
+    await assert.rejects(() => readQbCustomTxnNumbers(async () => { throw new Error("timeout"); }, API_BASE, INTEGRATION), /timeout/);
+    await assert.rejects(() => readQbCustomTxnNumbers(async () => new Response("{"), API_BASE, INTEGRATION));
+  });
+  it("searches company-wide with escaped number, requesting only IDs", async () => {
+    const request: QbMakeRequestFn = async url => {
+      const query = new URL(url).searchParams.get("query");
+      assert.equal(query, "SELECT Id FROM Invoice WHERE DocNumber = 'IR-1001\\\\\\''");
+      assert.ok(!url.includes("CustomerRef"));
+      return makeJsonResponse({ QueryResponse: { Invoice: [{ Id: "900" }, { Id: "901" }] } });
+    };
+    assert.deepEqual(await findQbInvoiceIdsByDocNumber(request, API_BASE, INTEGRATION, "IR-1001\\'"), ["900", "901"]);
+    assert.deepEqual(await findQbInvoiceIdsByDocNumber(async () => makeJsonResponse({}), API_BASE, INTEGRATION, "IR-1001"), []);
+    assert.equal(await findQbInvoiceIdsByDocNumber(async () => makeJsonResponse({}, 401), API_BASE, INTEGRATION, "IR-1001"), "auth_error");
+    for (const status of [404, 429, 500]) {
+      await assert.rejects(() => findQbInvoiceIdsByDocNumber(async () => makeJsonResponse({}, status), API_BASE, INTEGRATION, "IR-1001"));
+    }
+    await assert.rejects(() => findQbInvoiceIdsByDocNumber(async () => { throw new Error("timeout"); }, API_BASE, INTEGRATION, "IR-1001"), /timeout/);
+  });
+  it("records only differing, present returned numbers", () => {
+    assert.equal(qbDocNumberMismatch("IR-1001", "1034"), "1034");
+    for (const returned of ["IR-1001", "", null, undefined]) assert.equal(qbDocNumberMismatch("IR-1001", returned), null);
+  });
+});
+
+describe("Custom transaction numbers true-only realm cache", () => {
+  it("isolates realms and expires true at exactly ten minutes", async () => {
+    let now = 10;
+    let reads = 0;
+    const cache = new Map<string, number>();
+    const request: QbMakeRequestFn = async () => {
+      reads++;
+      return makeJsonResponse({ Preferences: { SalesFormsPrefs: { CustomTxnNumbers: true } } });
+    };
+    const check = (realmId = REALM) => checkQbCustomTxnNumbersCached(request, API_BASE, { ...INTEGRATION, realmId }, cache, () => now);
+    assert.deepEqual(await check(), { ok: true });
+    now += 599999;
+    await check();
+    assert.equal(reads, 1);
+    await check("other-realm");
+    assert.equal(reads, 2);
+    now++;
+    await check();
+    assert.equal(reads, 3);
+  });
+  it("does not cache false, auth, thrown or malformed responses; immediate retry can succeed", async () => {
+    const cache = new Map<string, number>([[REALM, 5]]);
+    let response: boolean | number | Error | "malformed" = false;
+    let reads = 0;
+    const request: QbMakeRequestFn = async () => {
+      reads++;
+      if (response instanceof Error) throw response;
+      if (response === "malformed") return new Response("{");
+      if (typeof response === "number") return makeJsonResponse({}, response);
+      return makeJsonResponse({ Preferences: { SalesFormsPrefs: { CustomTxnNumbers: response } } });
+    };
+    const check = () => checkQbCustomTxnNumbersCached(request, API_BASE, INTEGRATION, cache, () => 10);
+    for (let i = 0; i < 2; i++) assert.deepEqual(await check(), { ok: false, status: 409, message: QB_CUSTOM_TXN_DISABLED });
+    response = 401;
+    assert.deepEqual(await check(), { ok: false, status: 401, message: QB_SESSION_EXPIRED });
+    for (const failure of [500, new Error("timeout"), "malformed"] as const) {
+      response = failure;
+      await assert.rejects(check);
+      assert.equal(cache.size, 0);
+    }
+    response = true;
+    assert.deepEqual(await check(), { ok: true });
+    assert.equal(reads, 7);
+    assert.equal(cache.get(REALM), 600010);
+  });
+});
+
+describe("unlinked IR sync uses company-wide refuse-only guard", () => {
+  const params = {
+    apiBase: API_BASE, integration: INTEGRATION, customer: MOCK_CUSTOMER,
+    docNumber: "IR-1001", qbLines: QB_LINES, serviceItemName: "Irrigation Services",
+    storedQbInvoiceId: null, txnDate: "2026-05-01", dueDate: null,
+  };
+  it("refuses CRM's same number under another customer, with no POST or customer filter", async () => {
+    const calls: string[] = [];
+    const result = await syncAppInvoiceToQb(async (url, opts) => {
+      assert.equal(opts?.method, "GET");
+      calls.push(url);
+      assert.equal(new URL(url).searchParams.get("query"), "SELECT Id FROM Invoice WHERE DocNumber = 'IR-1001'");
+      return makeJsonResponse({ QueryResponse: { Invoice: [{ Id: "900", CustomerRef: { value: "77" } }] } });
+    }, MOCK_SERVICE_ITEM, params);
+    assert.deepEqual(result, {
+      outcome: "refused", httpStatus: 409,
+      message: "QuickBooks already has an invoice numbered IR-1001 (QuickBooks id 900) that IrrigoPro is not linked to. IrrigoPro will not take it over or create a duplicate.",
+    });
+    assert.equal(calls.length, 1);
+    assert.ok(calls.every(url => !url.includes("CustomerRef")));
+  });
+  it("creates on empty search without changing the returned-number contract", async () => {
+    let posts = 0;
+    const result = await syncAppInvoiceToQb(async (url, opts) => {
+      if (url.includes("/query")) return makeJsonResponse({ QueryResponse: {} });
+      posts++;
+      assert.equal(JSON.parse(opts?.body as string).DocNumber, "IR-1001");
+      return makeJsonResponse({ Invoice: { Id: "901", DocNumber: "1034", SyncToken: "0" } });
+    }, MOCK_SERVICE_ITEM, params);
+    assert.equal(result.outcome, "created");
+    assert.equal(posts, 1);
+  });
+  it("refuses auth, throws on query failures, and never POSTs", async () => {
+    assert.equal((await syncAppInvoiceToQb(async () => makeJsonResponse({}, 401), MOCK_SERVICE_ITEM, params)).outcome, "refused");
+    await assert.rejects(() => syncAppInvoiceToQb(async () => makeJsonResponse({}, 500), MOCK_SERVICE_ITEM, params));
+  });
+  it("verified stored IR ID updates in place without a number search or transaction-date change", async () => {
+    let posts = 0;
+    const result = await syncAppInvoiceToQb(async (url, opts) => {
+      assert.ok(!url.includes("/query"));
+      if (opts?.method === "GET") return makeJsonResponse({ Invoice: {
+        Id: "500", DocNumber: "IR-1001", CustomerRef: { value: "42" }, SyncToken: "3",
+      } });
+      posts++;
+      const body = JSON.parse(opts?.body as string);
+      assert.equal(body.Id, "500");
+      assert.equal(body.DocNumber, "IR-1001");
+      assert.ok(!("TxnDate" in body));
+      return makeJsonResponse({ Invoice: { Id: "500", SyncToken: "4" } });
+    }, MOCK_SERVICE_ITEM, { ...params, storedQbInvoiceId: "500" });
+    assert.equal(result.outcome, "updated");
+    assert.equal(posts, 1);
+  });
+});
 
 describe("getQbInvoiceById", () => {
   it("maps invoice fields and URL-encodes the stored id", async () => {

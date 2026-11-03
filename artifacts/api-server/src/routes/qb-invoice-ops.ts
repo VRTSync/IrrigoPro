@@ -11,6 +11,7 @@
 //         Self-healing: re-fetch the current token from QB, retry once.
 
 import type { QbInvoice, QbInvoiceCreateResponse } from "../types/quickbooks";
+import { isIrrigoInvoiceNumber } from "@workspace/shared";
 
 // ─── Dependency types ────────────────────────────────────────────────────────
 
@@ -69,6 +70,47 @@ function extractQbFaultCode(body: string): string | undefined {
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
+
+/** Read settings strictly; only a literal true permits invoice pushes. */
+export async function readQbCustomTxnNumbers(
+  makeRequest: QbMakeRequestFn,
+  apiBase: string,
+  integration: { realmId: string; accessToken: string },
+): Promise<boolean | "auth_error"> {
+  const resp = await makeRequest(
+    `${apiBase}/v3/company/${integration.realmId}/preferences?minorversion=73`,
+    { method: "GET", headers: { Authorization: `Bearer ${integration.accessToken}`, Accept: "application/json" } },
+    "QB Custom transaction numbers preflight", integration.realmId,
+  );
+  if (resp.status === 401) return "auth_error";
+  if (!resp.ok) throw qbReadError(resp, "preferences read");
+  const data = await resp.json() as { Preferences?: { SalesFormsPrefs?: { CustomTxnNumbers?: unknown } } };
+  return data.Preferences?.SalesFormsPrefs?.CustomTxnNumbers === true;
+}
+
+/** Company-wide REFUSE-ONLY search. A returned id is never an ownership link. */
+export async function findQbInvoiceIdsByDocNumber(
+  makeRequest: QbMakeRequestFn,
+  apiBase: string,
+  integration: { realmId: string; accessToken: string },
+  docNumber: string,
+): Promise<string[] | "auth_error"> {
+  const escaped = docNumber.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const query = encodeURIComponent(`SELECT Id FROM Invoice WHERE DocNumber = '${escaped}'`);
+  const resp = await makeRequest(
+    `${apiBase}/v3/company/${integration.realmId}/query?query=${query}&minorversion=73`,
+    { method: "GET", headers: { Authorization: `Bearer ${integration.accessToken}`, Accept: "application/json" } },
+    "QB company-wide DocNumber guard", integration.realmId,
+  );
+  if (resp.status === 401) return "auth_error";
+  if (!resp.ok) throw qbReadError(resp, "company-wide invoice query");
+  const data = await resp.json() as { QueryResponse?: { Invoice?: Array<{ Id: string }> } };
+  return (data.QueryResponse?.Invoice ?? []).map(row => row.Id);
+}
+
+export function qbDocNumberMismatch(sent: string, returned: string | null | undefined): string | null {
+  return returned && returned !== sent ? returned : null;
+}
 
 /** Only GET 404 or GET 400/fault 610 means missing. All other failures stop sync. */
 export async function getQbInvoiceById(
@@ -175,12 +217,21 @@ export async function syncAppInvoiceToQb(
     }
     console.warn(`[QB] stored invoice ${storedQbInvoiceId} not found in QuickBooks; treating as unlinked`);
   }
+  if (isIrrigoInvoiceNumber(docNumber)) {
+    const ids = await findQbInvoiceIdsByDocNumber(makeRequest, apiBase, integration, docNumber);
+    if (ids === "auth_error") return authError;
+    if (ids.length) return {
+      outcome: "refused", httpStatus: 409,
+      message: `QuickBooks already has an invoice numbered ${docNumber} (QuickBooks id ${ids.join(", ")}) that IrrigoPro is not linked to. IrrigoPro will not take it over or create a duplicate.`,
+    };
+  } else {
   const matches = await findQbInvoicesByDocNumberForCustomer(makeRequest, apiBase, integration, docNumber, customer.quickbooksId);
   if (matches === "auth_error") return authError;
   if (matches.length) return {
     outcome: "refused", httpStatus: 409,
     message: `QuickBooks already has invoice #${docNumber} for this customer (QuickBooks id ${matches.map((row) => row.id).join(", ")}) that IrrigoPro is not linked to. IrrigoPro will not take it over or create a duplicate. Delete or renumber that QuickBooks invoice, then sync again.`,
   };
+  }
   const result = await buildAndPostQbInvoice(makeRequest, lookupServiceItem, { ...params, operation: "Invoice Sync Creation" });
   if (result.quickbooksError) return { outcome: "refused", httpStatus: 502, message: result.quickbooksError };
   return { outcome: "created", quickbooksId: result.quickbooksId, qbDocNumber: result.qbDocNumber, quickbooksSyncToken: result.quickbooksSyncToken };

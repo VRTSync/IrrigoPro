@@ -186,6 +186,7 @@ function makeInvoice(over: Partial<StubInvoice> = {}): StubInvoice {
     balance: null as any,
     paymentSyncedAt: null as any,
     qbVoidDetectedAt: null as any,
+    qbDocNumberMismatch: null,
     createdAt: now,
     updatedAt: now,
   };

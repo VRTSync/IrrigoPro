@@ -397,9 +397,14 @@ import {
 import {
   buildAndPostQbInvoice as _buildAndPostQbInvoice,
   syncAppInvoiceToQb as _syncAppInvoiceToQb,
+  findQbInvoiceIdsByDocNumber as _findQbInvoiceIdsByDocNumber,
+  qbDocNumberMismatch,
   type QbSyncOutcome,
 } from "./qb-invoice-ops";
 import { registerInvoiceMarkSentRoutes } from "./invoice-mark-sent-routes";
+import { checkQbCustomTxnNumbersCached, QB_SESSION_EXPIRED } from "./qb-invoice-preflight";
+
+const qbCustomTxnOkUntil = new Map<string, number>();
 import { registerInvoiceListRoutes } from "./invoice-list-routes";
 import {
   createReminderCore,
@@ -6181,7 +6186,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? rawSelectedMonthDetail.trim()
         : previousCalendarMonth();
       const asOfCutoffDetail = resolveAsOfCutoff(selectedMonthDetail);
-      
+
       // Get customer details
       const customer = await storage.getCustomerById(customerId);
       if (!customer) {
@@ -6630,6 +6635,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      try {
+        const preflight = await checkQbCustomTxnNumbers(integration);
+        if (!preflight.ok) {
+          res.status(preflight.status).json({ message: preflight.message, quickbooksError: preflight.message });
+          return;
+        }
+      } catch (err: any) {
+        const message = `Could not read QuickBooks settings: ${err.message}. Try again.`;
+        res.status(502).json({ message, quickbooksError: message });
+        return;
+      }
+
       // Get customer details
       const customer = await storage.getCustomerById(customerId);
       if (!customer) {
@@ -6699,7 +6716,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Create the consolidated monthly invoice
       const currentDate = new Date();
-      const invoiceNumber = `${Date.now().toString().slice(-5)}`;
 
       // Resolve billing period — use caller-supplied dates or fall back to current calendar month
       let periodStart: Date;
@@ -6835,8 +6851,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         selectedWcbs.reduce((sum, wcb) => sum + parseFloat(wcb.totalAmount || '0'), 0);
 
       // Create the invoice record (not yet marking items as billed)
-      let invoice = await storage.createInvoice({
-        invoiceNumber,
+      let invoice = await storage.createInvoiceWithNextNumber({
         customerId,
         companyId: customer.companyId!,
         customerName: customer.name,
@@ -6918,8 +6933,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Send invoice to QuickBooks
       let quickbooksId = null;
       let quickbooksError = null;
+      let quickbooksErrorStatus: number | null = null;
 
       try {
+        const ids = await findQbInvoiceIdsByDocNumber(integration, invoice.invoiceNumber);
+        if (ids === "auth_error") {
+          quickbooksError = QB_SESSION_EXPIRED;
+        } else if (ids.length) {
+          const n = invoice.invoiceNumber;
+          quickbooksError = `QuickBooks already has an invoice numbered ${n}. IrrigoPro did not create a duplicate, and ${n} will not be reused. Find that invoice in QuickBooks, then try again.`;
+          quickbooksErrorStatus = 409;
+        } else {
         console.log("Creating invoice in QuickBooks...");
 
         // Task #1443 — build the generic { amount, description } lines, then
@@ -6971,7 +6995,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const qbResult = await buildAndPostQbInvoice({
           integration,
           customer,
-          docNumber: invoiceNumber,
+          docNumber: invoice.invoiceNumber,
           qbLines,
           operation: 'Monthly Invoice Creation',
         });
@@ -6982,20 +7006,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           quickbooksId = qbResult.quickbooksId ?? null;
           console.log("Successfully created invoice in QuickBooks with ID:", quickbooksId);
 
-          const qbDocNumber = qbResult.qbDocNumber;
           const qbUpdateFields: Partial<InsertInvoice> & { invoiceNumber?: string } = {};
           if (quickbooksId) qbUpdateFields.quickbooksInvoiceId = quickbooksId.toString();
           if (qbResult.quickbooksSyncToken) qbUpdateFields.quickbooksSyncToken = qbResult.quickbooksSyncToken;
-          if (qbDocNumber) {
-            qbUpdateFields.invoiceNumber = qbDocNumber;
-            console.log(`[QB] Syncing invoice number from QB DocNumber: ${qbDocNumber}`);
-          }
+          qbUpdateFields.qbDocNumberMismatch = qbDocNumberMismatch(invoice.invoiceNumber, qbResult.qbDocNumber);
+          if (qbUpdateFields.qbDocNumberMismatch) console.warn("[QB] DocNumber mismatch: sent", invoice.invoiceNumber, "QuickBooks stored", qbUpdateFields.qbDocNumberMismatch);
           if (Object.keys(qbUpdateFields).length > 0) {
             const updated = await storage.updateInvoice(invoice.id, qbUpdateFields);
             if (updated) {
               invoice = updated;
             }
           }
+        }
         }
       } catch (qbError: any) {
         console.error('Error connecting to QuickBooks:', qbError);
@@ -7011,7 +7033,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } catch (rollbackError) {
           console.error('Error during invoice rollback:', rollbackError);
         }
-        res.status(502).json({
+        res.status(quickbooksErrorStatus ?? 502).json({
           message: "Failed to create invoice in QuickBooks. No items were billed. Please try again.",
           quickbooksError
         });
@@ -7235,14 +7257,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const customer = await storage.getCustomerById(customerId);
       if (!customer) { res.status(404).json({ message: "Customer not found" }); return; }
 
+      const userCompanyIdStr = callerCompanyId ? String(callerCompanyId) : null;
+      const qbLookup = userCompanyIdStr ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyIdStr) : null;
+      const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
+      if (integration && integration.accessToken && integration.connectionStatus !== 'reconnect_required') {
+        try {
+          const preflight = await checkQbCustomTxnNumbers(integration);
+          if (!preflight.ok) {
+            res.status(preflight.status).json({ message: preflight.message, quickbooksError: preflight.message });
+            return;
+          }
+        } catch (err: any) {
+          const message = `Could not read QuickBooks settings: ${err.message}. Try again.`;
+          res.status(502).json({ message, quickbooksError: message });
+          return;
+        }
+      }
+
       // ── Create the standalone invoice ────────────────────────────────────
-      const invoiceNumber = `${Date.now().toString().slice(-5)}`;
       // Period = the ticket's work date (start of day → end of day)
       const periodStart = new Date(workDate.getFullYear(), workDate.getMonth(), workDate.getDate());
       const periodEnd = new Date(workDate.getFullYear(), workDate.getMonth(), workDate.getDate(), 23, 59, 59);
 
-      let invoice = await storage.createInvoice({
-        invoiceNumber,
+      let invoice = await storage.createInvoiceWithNextNumber({
         customerId,
         companyId: customer.companyId!,
         customerName: customer.name,
@@ -7315,11 +7352,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // ── QuickBooks sync (non-blocking — follows same pattern as monthly) ──
       let quickbooksId: string | null = null;
       let quickbooksError: string | null = null;
+      let quickbooksErrorStatus: number | null = null;
       try {
-        const userCompanyIdStr = callerCompanyId ? String(callerCompanyId) : null;
-        const qbLookup = userCompanyIdStr ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyIdStr) : null;
-        const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
         if (integration && integration.accessToken && integration.connectionStatus !== 'reconnect_required') {
+          const ids = await findQbInvoiceIdsByDocNumber(integration, invoice.invoiceNumber);
+          if (ids === "auth_error") {
+            quickbooksError = QB_SESSION_EXPIRED;
+          } else if (ids.length) {
+            const n = invoice.invoiceNumber;
+            quickbooksError = `QuickBooks already has an invoice numbered ${n}. IrrigoPro did not create a duplicate, and ${n} will not be reused. Find that invoice in QuickBooks, then try again.`;
+            quickbooksErrorStatus = 409;
+          } else {
           const qbLines: { amount: number; description: string }[] = [];
           if (totalAmount > 0) {
             qbLines.push({ amount: totalAmount, description });
@@ -7327,7 +7370,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const qbResult = await buildAndPostQbInvoice({
             integration,
             customer,
-            docNumber: invoiceNumber,
+            docNumber: invoice.invoiceNumber,
             qbLines,
             operation: 'Standalone Invoice Creation',
           });
@@ -7338,11 +7381,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const qbUpdateFields: Record<string, any> = {};
             if (quickbooksId) qbUpdateFields.quickbooksInvoiceId = quickbooksId;
             if (qbResult.quickbooksSyncToken) qbUpdateFields.quickbooksSyncToken = qbResult.quickbooksSyncToken;
-            if (qbResult.qbDocNumber) qbUpdateFields.invoiceNumber = qbResult.qbDocNumber;
+            qbUpdateFields.qbDocNumberMismatch = qbDocNumberMismatch(invoice.invoiceNumber, qbResult.qbDocNumber);
+            if (qbUpdateFields.qbDocNumberMismatch) console.warn("[QB] DocNumber mismatch: sent", invoice.invoiceNumber, "QuickBooks stored", qbUpdateFields.qbDocNumberMismatch);
             if (Object.keys(qbUpdateFields).length > 0) {
               const updated = await storage.updateInvoice(invoice.id, qbUpdateFields);
               if (updated) invoice = updated;
             }
+          }
           }
         }
       } catch (qbErr: any) {
@@ -7355,7 +7400,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await storage.deleteInvoiceItemsByInvoiceId(invoice.id);
           await storage.deleteInvoice(invoice.id);
         } catch { /* ignore rollback errors */ }
-        res.status(502).json({ message: "Failed to sync to QuickBooks. No items were billed.", quickbooksError });
+        res.status(quickbooksErrorStatus ?? 502).json({ message: "Failed to sync to QuickBooks. No items were billed.", quickbooksError });
         return;
       }
 
@@ -8512,6 +8557,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   }
 
+  async function checkQbCustomTxnNumbers(integration: { realmId: string; accessToken: string }) {
+    const apiBase = process.env.NODE_ENV === 'production'
+      ? 'https://quickbooks.api.intuit.com' : 'https://sandbox-quickbooks.api.intuit.com';
+    return checkQbCustomTxnNumbersCached(makeQuickBooksRequest, apiBase, integration, qbCustomTxnOkUntil);
+  }
+
+  async function findQbInvoiceIdsByDocNumber(integration: { realmId: string; accessToken: string }, docNumber: string) {
+    const apiBase = process.env.NODE_ENV === 'production'
+      ? 'https://quickbooks.api.intuit.com' : 'https://sandbox-quickbooks.api.intuit.com';
+    return _findQbInvoiceIdsByDocNumber(makeQuickBooksRequest, apiBase, integration, docNumber);
+  }
+
   // Task #1443 / #1711 — sync a single app invoice to QuickBooks.
   // Updates only a verified stored QB id; unlinked invoices must pass the
   // customer-scoped collision guard before creation. Persist links only on
@@ -8543,6 +8600,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         400,
       );
     }
+
+    let preflight;
+    try {
+      preflight = await checkQbCustomTxnNumbers(integration);
+    } catch (err: any) {
+      throw new InvoiceSyncError(`Could not read QuickBooks settings: ${err.message}. Try again.`, 502);
+    }
+    if (!preflight.ok) throw new InvoiceSyncError(preflight.message, preflight.status);
 
     const items = await storage.getInvoiceItems(invoiceId);
     const qbLines = items
@@ -8598,7 +8663,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const qbUpdateFields: Partial<InsertInvoice> & { invoiceNumber?: string } = {};
     if (outcome.quickbooksId) qbUpdateFields.quickbooksInvoiceId = outcome.quickbooksId;
-    if (outcome.outcome === "created" && outcome.qbDocNumber) qbUpdateFields.invoiceNumber = outcome.qbDocNumber;
+    qbUpdateFields.qbDocNumberMismatch = outcome.outcome === "created"
+      ? qbDocNumberMismatch(invoice.invoiceNumber, outcome.qbDocNumber) : null;
+    if (qbUpdateFields.qbDocNumberMismatch) console.warn("[QB] DocNumber mismatch: sent", invoice.invoiceNumber, "QuickBooks stored", qbUpdateFields.qbDocNumberMismatch);
     if (outcome.quickbooksSyncToken) qbUpdateFields.quickbooksSyncToken = outcome.quickbooksSyncToken;
     if (Object.keys(qbUpdateFields).length > 0) {
       await storage.updateInvoice(invoiceId, qbUpdateFields);

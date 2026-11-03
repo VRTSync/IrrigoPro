@@ -22,6 +22,8 @@ export const companies = pgTable("companies", {
   // transaction). Default 50000.
   startingEstimateNumber: integer("starting_estimate_number").notNull().default(50000),
   nextEstimateNumber: integer("next_estimate_number").notNull().default(50000),
+  // Next IR- invoice number. Allocated atomically; never reused.
+  nextInvoiceNumber: integer("next_invoice_number").notNull().default(1001),
   // Task #1887 — minimum days between two payment reminders for the same
   // invoice. Enforced on the server, not in the UI. Configurable per company
   // because a 7-day cadence is a policy, not a law; 7 is the default.
@@ -969,6 +971,8 @@ export const invoices = pgTable("invoices", {
   // means no void detected. Cleared when a later sync sees it is no longer voided.
   // Never auto-changes `status` or `paymentStatus`; only surfaces for human review.
   qbVoidDetectedAt: timestamp("qb_void_detected_at"),
+  // QuickBooks' returned number when different; never copied into invoice_number.
+  qbDocNumberMismatch: text("qb_doc_number_mismatch"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({

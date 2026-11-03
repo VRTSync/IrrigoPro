@@ -249,3 +249,17 @@ mtime_ms = 1793720477234
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/0701db7c-ffcb-492c-9700-b6a0178de637/006c4420-4dd0-4c12-a406-37d1432b8560"
 storage_version_token = "1793720485635823"
 content_type = "text/html"
+
+[[outputs]]
+id = "Evjkn-dg-G4V8WmnsC9T-"
+uri = "file://generated-artifacts/ir-invoice-numbers/acceptance-report.html"
+type = "html"
+title = "IR invoice number acceptance report"
+description = "Green billing/types lanes, allocation and guard results, work commit, and explicit live QuickBooks sandbox evidence limitations."
+logical_id = "03af2f6e-1ac5-4fa2-89fa-69d8a6ce496d"
+content_hash = "sha256:25e7cdf35a500983174f2722c650c38814dfbe4c39b6aaf2dbf0f2b957b875b4"
+size = 350069
+mtime_ms = 1793723023510
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/03af2f6e-1ac5-4fa2-89fa-69d8a6ce496d/fc87a631-a1fd-43dc-9778-331e42a33bcf"
+storage_version_token = "1793723024138391"
+content_type = "text/html"

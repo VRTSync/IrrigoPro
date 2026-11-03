@@ -23,6 +23,35 @@ import path from "node:path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+describe("IR number source guards", () => {
+  const src = readFileSync(path.join(__dirname, "routes.ts"), "utf8");
+  const monthly = src.slice(src.indexOf('app.post("/api/invoices/monthly"'), src.indexOf('app.post("/api/invoices/bill-separately"'));
+  const standalone = src.slice(src.indexOf('app.post("/api/invoices/bill-separately"'), src.indexOf('app.post("/api/invoices/bill-separately"') + 18000);
+  const syncStart = src.indexOf("async function createQuickBooksInvoiceForInvoice(");
+  const sync = src.slice(syncStart, src.indexOf("\n  }", syncStart) + 4);
+  it("removes clock numbers and all returned-number adoption", () => {
+    assert.ok(!src.includes(["slice", "(-5)"].join("")));
+    assert.ok(!/invoiceNumber\s*=\s*(?:qbDocNumber|qbResult\.qbDocNumber|result\.qbDocNumber|outcome\.qbDocNumber)/.test(src));
+  });
+  for (const [label, region] of [["monthly", monthly], ["standalone", standalone]] as const) {
+    it(`${label} preflights before allocation and records mismatches`, () => {
+      assert.ok(region.includes("createInvoiceWithNextNumber"));
+      assert.ok(region.includes("checkQbCustomTxnNumbers"));
+      assert.ok(region.indexOf("checkQbCustomTxnNumbers") < region.indexOf("createInvoiceWithNextNumber"));
+      assert.ok(region.includes("qbDocNumberMismatch("));
+      assert.ok(region.indexOf("findQbInvoiceIdsByDocNumber") < region.indexOf("await buildAndPostQbInvoice("));
+      assert.ok(region.includes("quickbooksErrorStatus ?? 502"));
+      assert.ok(region.includes("docNumber: invoice.invoiceNumber"));
+    });
+  }
+  it("sync preflights, never adopts returned numbers, and clears mismatch on update", () => {
+    assert.ok(sync.includes("checkQbCustomTxnNumbers"));
+    assert.ok(sync.indexOf("checkQbCustomTxnNumbers") < sync.indexOf("await syncAppInvoiceToQb("));
+    assert.ok(sync.includes("qbDocNumberMismatch("));
+    assert.match(sync, /qbDocNumberMismatch\(invoice.invoiceNumber, outcome.qbDocNumber\) : null/);
+  });
+});
+
 const routesSrc = readFileSync(path.join(__dirname, "routes.ts"), "utf8");
 const pdfGeneratorSrc = readFileSync(
   path.join(__dirname, "..", "pdf-generator.ts"),
@@ -134,11 +163,10 @@ describe("bill-separately endpoint: standalone stamp", () => {
   });
 
   it("does not set billingType to 'monthly' for standalone invoices", () => {
-    // We verify the createInvoice call inside bill-separately uses 'standalone', not 'monthly'.
-    // The createInvoice call is ~5.1k chars into the handler — use a 6k window.
+    // Bound by the next route, not a fixed width that changes as guards are added.
     const endpointIdx = routesSrc.indexOf('"/api/invoices/bill-separately"');
     assert.ok(endpointIdx >= 0, "endpoint not found");
-    const endpointBlock = routesSrc.slice(endpointIdx, endpointIdx + 6000);
+    const endpointBlock = routesSrc.slice(endpointIdx, routesSrc.indexOf("\n  app.", endpointIdx));
     assert.ok(
       endpointBlock.includes("billingType: 'standalone'"),
       "Expected billingType: 'standalone' inside bill-separately handler",

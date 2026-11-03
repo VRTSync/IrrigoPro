@@ -1,6 +1,14 @@
 {
   "api-billing": [
     {
+      "name": "invoice-number-format",
+      "command": "pnpm --filter @workspace/shared exec node --import tsx --test --test-reporter=spec src/invoice-number.test.ts"
+    },
+    {
+      "name": "invoice-number-allocation",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/invoice-number-allocation.test.ts src/routes/bill-separately.test.ts src/routes/qb-invoice-number-routes.test.ts"
+    },
+    {
       "name": "auth-middleware-coverage",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/routes/auth-middleware-coverage.test.ts"
     },

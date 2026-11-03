@@ -26,3 +26,14 @@ Artifact typechecks may consume stale declarations from referenced workspace lib
 **Why:** An isolated checkout reported missing retirement fields across both API and web while those fields already existed in the schema. Refreshing the library declarations eliminated the errors without changing source.
 
 **How to apply:** Inspect source first, rebuild the referenced libraries with the workspace TypeScript build, then run the requested leaf-package typechecks. Do not repair correct schema code to match stale generated output.
+
+Ignored uploaded assets may disappear when a prerequisite merge removes formerly
+tracked attachments. PDF snapshots can then differ solely because brand loaders
+fall back to text or omit images.
+
+**Why:** A wet-check snapshot failed with no PDF source changes; restoring the
+exact small logo files from the pre-merge history made the unchanged test pass.
+
+**How to apply:** Check missing-asset warnings and compare runtime inputs before
+rewriting a snapshot. Restore known original assets locally for evidence and
+report the environment repair; do not change PDF presentation or assertions.
