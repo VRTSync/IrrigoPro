@@ -21,3 +21,29 @@ the real module — no handler logic is reimplemented in the test.
 Reference files: `routes/wet-check-photo-attach-route.ts` (photo attach), `routes/budget-routes.ts` (budget), `routes/wet-check-finding-patch.ts` (finding patch schema only).
 
 Test runner: `node --import tsx/esm --test --test-reporter=spec "src/<test>.test.ts"` (not vitest in api-server).
+
+## Database-free imports
+
+An in-memory guard suite must also isolate the runtime dependencies of any
+route module it imports for exported schemas.
+
+**Why:** Importing the storage singleton starts initialization and migrations.
+Spying on its methods after a static import does not make a suite database-free.
+
+**How to apply:** Use Node module mocks before dynamically importing the real
+route module; mock storage, database-package runtime exports and any service
+imports that reach the database. Keep the real schema definitions. Enable
+`--experimental-test-module-mocks` in that suite's serial lane command.
+
+## Guarded identifiers
+
+Downstream handlers must use the guard-attached row's ID, not parse route
+parameters again.
+
+**Why:** `Number("1e1")` is 10 but `parseInt("1e1")` is 1. A tenant guard and
+handler using different conversions can authorize one record and disclose
+another, despite both accepting an integer.
+
+**How to apply:** Carry the checked ID into all reads and writes. Regression
+tests should execute real handlers with exponent-form IDs, not just test the
+guard's rejection of obviously malformed inputs.

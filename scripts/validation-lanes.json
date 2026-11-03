@@ -1,6 +1,10 @@
 {
   "api-billing": [
     {
+      "name": "customer-tenant-guard",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 --test-reporter=spec src/routes/customer-tenant-guard.test.ts"
+    },
+    {
       "name": "customer-quickbooks-lookup",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/customer-quickbooks-lookup.test.ts"
     },

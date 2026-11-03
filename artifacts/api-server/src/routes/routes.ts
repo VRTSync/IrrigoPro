@@ -38,6 +38,7 @@ import { resolveTicketPartsSubtotal, ticketItemRowTotal } from "../pdf-view-mode
 import { buildWorkDescriptionPrompt, buildExpandDescriptionPrompt, TEMPLATE_VERSION, CRITICAL_FIELDS, type WorkDescriptionInputs } from "../ai-prompt-templates";
 import { makeRequireSameCompanyAsWorkOrder } from "./work-order-tenant-guard";
 import { makeRequireSameCompanyAsBillingSheet } from "./billing-sheet-tenant-guard";
+import { makeRequireCustomerInTenant } from "./customer-tenant-guard";
 import {
   computeUnbilledPartition,
   resolveAsOfCutoff,
@@ -667,6 +668,7 @@ const requireSameCompanyAsWorkOrder = makeRequireSameCompanyAsWorkOrder(storage)
 // row's tenant is derived via customerId → customers.companyId.
 // See billing-sheet-tenant-guard.ts.
 const requireSameCompanyAsBillingSheet = makeRequireSameCompanyAsBillingSheet(storage);
+const requireCustomerInTenant = makeRequireCustomerInTenant(storage);
 
 // More granular middleware for billing sheet updates that allows field techs to submit for approval
 // TODO(roles): migrate to a capability from lib/shared/src/roles.ts (hasCapability). Inventory: docs/roles-migration-inventory.md
@@ -6144,24 +6146,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   );
 
   // Get individual customer by ID
-  app.get("/api/customers/:id", requireAuthentication, async (req, res) => {
+  app.get("/api/customers/:id", requireAuthentication, requireCustomerInTenant, async (req, res) => {
     try {
-      const customerId = parseInt(req.params.id);
-      
-      // Validate customer ID is a valid number
-      if (isNaN(customerId) || customerId <= 0) {
-        res.status(400).json({ message: "Invalid customer ID" });
-        return;
-      }
-      
-      const customer = await storage.getCustomerById(customerId);
-      
-      if (!customer) {
-        res.status(404).json({ message: "Customer not found" });
-        return;
-      }
-      
-      res.json(applyBillingNotesVisibility(req, customer));
+      res.json(applyBillingNotesVisibility(req, req.tenantScopedCustomer!));
     } catch (error) {
       console.error("Error fetching customer:", error);
       res.status(500).json({ message: "Failed to fetch customer" });
@@ -6169,9 +6156,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get customer billing data - all work orders, billing sheets, and estimates for a customer
-  app.get("/api/customers/:id/billing", requireAuthentication, async (req, res) => {
+  app.get("/api/customers/:id/billing", requireAuthentication, requireCustomerInTenant, async (req, res) => {
     try {
-      const customerId = parseInt(req.params.id);
+      const customerId = req.tenantScopedCustomer!.id;
       
       // Validate customer ID is a valid number
       if (isNaN(customerId) || customerId <= 0) {
@@ -7467,6 +7454,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireAuthentication,
     requireCompanyAdminAccess,
     requireCustomerEditAccess,
+    requireCustomerInTenant,
     applyBillingNotesVisibility,
   });
   // Task #687 — Financial Pulse Slice 1: per-customer budget usage.
@@ -7764,35 +7752,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     ),
   });
 
-  // Multi-tenant guard for property-boundary routes: a customer record belongs
-  // to a company, and only super_admins can cross company boundaries. Returns
-  // the customer (or sends a 403/404 and returns null) so callers can branch.
-  const loadCustomerWithTenantCheck = async (req: any, res: any, id: number) => {
-    const customer = await storage.getCustomer(id);
-    if (!customer) {
-      res.status(404).json({ message: "Customer not found" });
-      return null;
-    }
-    const role = (req as any).authenticatedUserRole || headerUserRole(req);
-    if (role !== 'super_admin') {
-      const userCompanyId = (req as any).authenticatedUserCompanyId
-        ?? (headerUserCompanyId(req)
-          ? parseInt(String(headerUserCompanyId(req)))
-          : null);
-      if (!userCompanyId || Number(userCompanyId) !== Number(customer.companyId)) {
-        res.status(403).json({ message: "Access denied for this customer" });
-        return null;
-      }
-    }
-    return customer;
-  };
-
-  app.get("/api/customers/:id/property-boundary", requireAuthentication, async (req, res) => {
+  app.get("/api/customers/:id/property-boundary", requireAuthentication, requireCustomerInTenant, async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
-      if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid customer id" }); return; }
-      const customer = await loadCustomerWithTenantCheck(req, res, id);
-      if (!customer) return;
+      const customer = req.tenantScopedCustomer!;
       res.json({
         propertyBoundary: customer.propertyBoundary ?? null,
         propertyBoundaryKml: customer.propertyBoundaryKml ?? null,
@@ -7815,12 +7777,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     "/api/customers/:id/property-boundary",
     requireAuthentication,
     requireBoundaryEditAccess,
+    requireCustomerInTenant,
     async (req, res) => {
       try {
-        const id = parseInt(req.params.id);
-        if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid customer id" }); return; }
-        const guard = await loadCustomerWithTenantCheck(req, res, id);
-        if (!guard) return;
+        const id = req.tenantScopedCustomer!.id;
         const parsed = propertyBoundarySchema.parse(req.body);
         const updateData: Partial<InsertCustomer> = {
           propertyBoundary: parsed.propertyBoundary,
@@ -7860,12 +7820,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     "/api/customers/:id/property-boundary",
     requireAuthentication,
     requireBoundaryEditAccess,
+    requireCustomerInTenant,
     async (req, res) => {
       try {
-        const id = parseInt(req.params.id);
-        if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid customer id" }); return; }
-        const guard = await loadCustomerWithTenantCheck(req, res, id);
-        if (!guard) return;
+        const id = req.tenantScopedCustomer!.id;
         const clearData: Partial<InsertCustomer> = {
           propertyBoundary: null,
           propertyBoundaryKml: null,
@@ -7889,9 +7847,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   );
 
   // Customer-related data endpoints
-  app.get("/api/customers/:id/estimates", requireAuthentication, async (req, res) => {
+  app.get("/api/customers/:id/estimates", requireAuthentication, requireCustomerInTenant, async (req, res) => {
     try {
-      const customerId = parseInt(req.params.id);
+      const customerId = req.tenantScopedCustomer!.id;
       const estimates = await storage.getEstimatesByCustomer(customerId);
       // Task #643 — strip pricing for field_tech.
       res.json(applyPricingVisibility(req, estimates));
@@ -7901,9 +7859,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/customers/:id/work-orders", requireAuthentication, async (req, res) => {
+  app.get("/api/customers/:id/work-orders", requireAuthentication, requireCustomerInTenant, async (req, res) => {
     try {
-      const customerId = parseInt(req.params.id);
+      const customerId = req.tenantScopedCustomer!.id;
       const callerCompanyId7414 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
       const workOrders = await storage.getWorkOrdersByCustomer(customerId, callerCompanyId7414);
       res.json(workOrders);
@@ -7913,9 +7871,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/customers/:id/billing-sheets", requireAuthentication, async (req, res) => {
+  app.get("/api/customers/:id/billing-sheets", requireAuthentication, requireCustomerInTenant, async (req, res) => {
     try {
-      const customerId = parseInt(req.params.id);
+      const customerId = req.tenantScopedCustomer!.id;
       const callerCompanyId7425 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
       const billingSheets = await storage.getBillingSheetsByCustomer(customerId, callerCompanyId7425);
       res.json(billingSheets);
@@ -7926,104 +7884,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/customers/import-csv", requireAuthentication, requireCompanyAdminAccess, async (req, res) => {
-    try {
-      const file = req.files?.file;
-      if (!file) {
-        res.status(400).json({ message: "No file uploaded" });
-        return;
-      }
-
-      const csvData = (Array.isArray(file) ? file[0] : file).data.toString();
-      const lines = csvData.split('\n').filter((line: string) => line.trim());
-      
-      if (lines.length < 2) {
-        res.status(400).json({ message: "CSV file must contain at least a header and one data row" });
-        return;
-      }
-
-      const headers = lines[0].split(',').map((h: string) => h.trim().replace(/"/g, ''));
-      const rows = lines.slice(1);
-
-      let imported = 0;
-      let duplicates = 0;
-      const errors: string[] = [];
-
-      for (let i = 0; i < rows.length; i++) {
-        try {
-          const values = rows[i].split(',').map((v: string) => v.trim().replace(/"/g, ''));
-          const customerData: any = {};
-
-          // Map CSV columns to customer fields
-          headers.forEach((header: string, index: number) => {
-            if (values[index]) {
-              switch (header.toLowerCase()) {
-                case 'name':
-                  customerData.name = values[index];
-                  break;
-                case 'email':
-                  customerData.email = values[index];
-                  break;
-                case 'phone':
-                  customerData.phone = values[index];
-                  break;
-                case 'address':
-                  customerData.address = values[index];
-                  break;
-                case 'contracttype':
-                  customerData.contractType = values[index];
-                  break;
-                case 'laborrate':
-                  customerData.laborRate = values[index];
-                  break;
-                case 'discountpercent':
-                  customerData.discountPercent = values[index];
-                  break;
-                case 'paymentterms':
-                  customerData.paymentTerms = values[index];
-                  break;
-                case 'notes':
-                  customerData.notes = values[index];
-                  break;
-              }
-            }
-          });
-
-          // Validate required fields
-          if (!customerData.name || !customerData.email) {
-            errors.push(`Row ${i + 2}: Missing required fields (name, email)`);
-            continue;
-          }
-
-          // Check for duplicate email
-          const existingCustomer = await storage.getCustomers();
-          const duplicate = existingCustomer.find(c => c.email === customerData.email);
-          if (duplicate) {
-            duplicates++;
-            continue;
-          }
-
-          // Validate and create customer
-          const validatedData = insertCustomerSchema.parse(customerData);
-          await storage.createCustomer(validatedData);
-          imported++;
-
-        } catch (error) {
-          console.error(error);
-          errors.push(`Row ${i + 2}: ${error instanceof Error ? error.message : 'Invalid data'}`);
-        }
-      }
-
-      res.json({
-        success: errors.length === 0,
-        imported,
-        duplicates,
-        errors
-      });
-
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to import CSV" });
-    }
+    res.status(410).json({ message: "Customer CSV import was retired. Customers come from QuickBooks or the customer form." });
   });
 
   // Parts + Part Settings + Manual Part Reviews — extracted to ./parts-routes.ts

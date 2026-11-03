@@ -1,7 +1,5 @@
 // Customer CRUD routes — extracted from routes.ts as part of Task #446.
-// Behavior is byte-for-byte identical to the previous inline definitions.
-// Covers GET-by-id (the second copy at the post-collection block), POST
-// create, PUT/PATCH update, PATCH /labor-rates, and DELETE.
+// Covers POST create, PUT/PATCH update, PATCH /labor-rates, and DELETE.
 
 import type { Express, Request, RequestHandler } from "express";
 import { z } from "zod/v4";
@@ -14,10 +12,15 @@ import {
   validateCurve,
 } from "../services/generate-budget-months";
 
+// companyId and quickbooksId are server-owned. Body values are dropped.
+export const createCustomerSchema = insertCustomerSchema.omit({ quickbooksId: true });
+export const updateCustomerSchema = insertCustomerSchema.omit({ companyId: true, quickbooksId: true }).partial();
+
 export interface RegisterCustomerRoutesDeps {
   requireAuthentication: RequestHandler;
   requireCompanyAdminAccess: RequestHandler;
   requireCustomerEditAccess: RequestHandler;
+  requireCustomerInTenant: RequestHandler;
   applyBillingNotesVisibility: <T>(req: Request, data: T) => T;
 }
 
@@ -40,24 +43,10 @@ export function registerCustomerRoutes(
     requireAuthentication,
     requireCompanyAdminAccess,
     requireCustomerEditAccess,
+    requireCustomerInTenant,
     applyBillingNotesVisibility,
   }: RegisterCustomerRoutesDeps,
 ): void {
-  app.get("/api/customers/:id", requireAuthentication, async (req, res) => {
-    try {
-      const id = parseInt(String(req.params.id));
-      const customer = await storage.getCustomer(id);
-      if (!customer) {
-        res.status(404).json({ message: "Customer not found" });
-        return;
-      }
-      res.json(applyBillingNotesVisibility(req, customer));
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to fetch customer" });
-    }
-  });
-
   app.post("/api/customers", requireAuthentication, requireCompanyAdminAccess, async (req, res) => {
     try {
       const budgetYear = Number.isInteger(req.body?.budgetYear) ? req.body.budgetYear : new Date().getFullYear();
@@ -65,7 +54,12 @@ export function registerCustomerRoutes(
         | Record<string, string | number>
         | undefined;
       if (Array.isArray(req.body?.budgetSeasonCurveOverride)) validateCurve(req.body.budgetSeasonCurveOverride);
-      let customerData = insertCustomerSchema.parse(req.body);
+      const companyId = req.authenticatedUserCompanyId;
+      if (!companyId) {
+        res.status(403).json({ message: "Forbidden: user has no company association" });
+        return;
+      }
+      let customerData = createCustomerSchema.parse({ ...req.body, companyId });
       // Only billing_manager may set billingNotes at creation time
       if ('billingNotes' in customerData && req.authenticatedUserRole !== 'billing_manager') {
         const { billingNotes, ...rest } = customerData;
@@ -97,9 +91,9 @@ export function registerCustomerRoutes(
     }
   });
 
-  app.put("/api/customers/:id", requireAuthentication, requireCustomerEditAccess, async (req, res) => {
+  app.put("/api/customers/:id", requireAuthentication, requireCustomerEditAccess, requireCustomerInTenant, async (req, res) => {
     try {
-      const id = parseInt(String(req.params.id));
+      const id = req.tenantScopedCustomer!.id;
       const budgetYear = Number.isInteger(req.body?.budgetYear)
         ? req.body.budgetYear
         : new Date().getFullYear();
@@ -112,7 +106,7 @@ export function registerCustomerRoutes(
       if (Array.isArray(req.body?.budgetSeasonCurveOverride)) {
         validateCurve(req.body.budgetSeasonCurveOverride);
       }
-      let customerData = insertCustomerSchema.partial().parse(req.body);
+      let customerData = updateCustomerSchema.parse(req.body);
       // Only billing_manager may write billingNotes (use authenticated role, not raw header)
       if ('billingNotes' in customerData && req.authenticatedUserRole !== 'billing_manager') {
         const { billingNotes, ...rest } = customerData;
@@ -148,15 +142,15 @@ export function registerCustomerRoutes(
     }
   });
 
-  app.patch("/api/customers/:id", requireAuthentication, requireCustomerEditAccess, async (req, res) => {
+  app.patch("/api/customers/:id", requireAuthentication, requireCustomerEditAccess, requireCustomerInTenant, async (req, res) => {
     try {
-      const id = parseInt(String(req.params.id));
+      const id = req.tenantScopedCustomer!.id;
       const budgetYear = Number.isInteger(req.body?.budgetYear) ? req.body.budgetYear : new Date().getFullYear();
       const hasBudgetFields =
         "annualBudgetGoal" in (req.body ?? {}) ||
         "budgetSeasonCurveOverride" in (req.body ?? {});
       if (Array.isArray(req.body?.budgetSeasonCurveOverride)) validateCurve(req.body.budgetSeasonCurveOverride);
-      let customerData = insertCustomerSchema.partial().parse(req.body);
+      let customerData = updateCustomerSchema.parse(req.body);
       // Only billing_manager may write billingNotes (use authenticated role, not raw header)
       if ('billingNotes' in customerData && req.authenticatedUserRole !== 'billing_manager') {
         const { billingNotes, ...rest } = customerData;
@@ -180,13 +174,13 @@ export function registerCustomerRoutes(
     }
   });
 
-  app.patch("/api/customers/:id/labor-rates", requireAuthentication, async (req, res) => {
+  app.patch("/api/customers/:id/labor-rates", requireAuthentication, requireCustomerInTenant, async (req, res) => {
     try {
       if (req.authenticatedUserRole !== 'company_admin') {
         res.status(403).json({ message: "Access denied. Labor rate changes are restricted to company administrators." });
         return;
       }
-      const id = parseInt(String(req.params.id));
+      const id = req.tenantScopedCustomer!.id;
       const laborRateSchema = z.object({
         laborRate: z.union([z.string(), z.number()]).optional(),
         emergencyLaborRate: z.union([z.string(), z.number()]).optional(),
@@ -212,9 +206,9 @@ export function registerCustomerRoutes(
     }
   });
 
-  app.delete("/api/customers/:id", requireCompanyAdminAccess, async (req, res) => {
+  app.delete("/api/customers/:id", requireAuthentication, requireCompanyAdminAccess, requireCustomerInTenant, async (req, res) => {
     try {
-      const id = parseInt(String(req.params.id));
+      const id = req.tenantScopedCustomer!.id;
       const success = await withDbRetry(() => storage.deleteCustomer(id));
       if (!success) {
         res.status(404).json({ message: "Customer not found" });

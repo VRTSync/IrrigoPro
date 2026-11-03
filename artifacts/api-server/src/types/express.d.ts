@@ -23,6 +23,8 @@ declare global {
       // Populated by requireSameCompanyAsWorkOrder middleware so downstream
       // handlers can reuse the loaded row without a second DB round-trip.
       tenantScopedWorkOrder?: Record<string, unknown>;
+      // Populated by requireCustomerInTenant (customer-tenant-guard.ts).
+      tenantScopedCustomer?: import("@workspace/db/schema").Customer;
       // Populated by requireApiKey middleware (external API routes).
       apiKeyCompanyId?: number;
       apiKeyId?: number;

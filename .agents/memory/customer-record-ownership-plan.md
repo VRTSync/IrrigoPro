@@ -1,6 +1,6 @@
 ---
 name: Customer record ownership plan
-description: Saved customer-route guard plan and instructions for using the latest replacement reference.
+description: Saved single-customer route guard scope and instructions for consulting its detailed specification.
 ---
 
 Use `docs/customer-records-plan.md` as the saved reference. On 2026-11-03 the user explicitly replaced the broad customer-record ownership plan with the narrower "Guard Single Customer Routes" plan. Saving or replacing this reference is not authorization to implement it.
