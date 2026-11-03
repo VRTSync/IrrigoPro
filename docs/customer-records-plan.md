@@ -1,42 +1,71 @@
-#2101 - Guard Single Customer Routes
-What & Why
-Implement Customer Records Slice 2a as one self-contained change: apply a shared authenticated-company guard to every single-customer route enumerated in the attached specification, make company and QuickBooks identifiers server-owned, and retire the broken customer CSV import. This closes cross-company reads and writes without changing the customer interface.
+# PLAN — Customer Records: Design Context (Locked Decisions)
 
-The attachment is the detailed implementation and acceptance contract, including its exact middleware order, response text, schema definitions, guard behavior, route inventory, test matrix, and retirement response. Follow it without pulling in Slice 2b or later slices. Slice 1 is merged and its company-scoped QuickBooks lookup is present in this checkout; preserve that implementation. The broader saved customer-records plan supplies context only where it does not conflict with the narrower attachment.
+This is the overview for the Customer Records family: who owns a customer's details, one customer modal, the lock setting, and keeping IrrigoPro in step with QuickBooks. **There are eleven tickets, one file each. Do not merge them into one task.** Each slice file carries its own decisions, so Replit never needs this file.
 
-Done looks like
-All 12 specified single-customer route registrations use the same guard: GET detail, billing, estimates, work orders and billing sheets; PUT/PATCH detail; PATCH labor rates; DELETE detail; and GET/PUT/DELETE property boundary. Authentication precedes the guard, and existing role middleware keeps its specified position.
-The guard validates positive integer IDs with HTTP 400 Invalid customer ID, loads the customer once, and uses only authenticated role/company fields. Missing and foreign customers both return HTTP 404 Customer not found; a super admin may access any company's customer. Null-company non-super-admin callers cannot access customers. Raw role/company headers cannot bypass the guard.
-Denied cross-company access emits the specified audit warning. Successful guard calls attach the loaded customer to the request; storage failures return HTTP 500 Failed to load customer.
-Customer creation derives company ID from authenticated context and ignores a body-supplied company ID. A caller without company association receives HTTP 403 Forbidden: user has no company association. POST never writes a body QuickBooks ID; PUT/PATCH silently drop both company and QuickBooks IDs. Legitimate editable fields and existing billing-notes/budget behavior remain unchanged.
-The shadowed GET detail registration and header-reading property-boundary helper are removed. Customer DELETE explicitly requires authentication, company-admin access and the tenant guard.
-Customer CSV import retains its existing route and middleware but returns HTTP 410 with the attachment's exact retirement message and performs no writes. The orphan uploader is deleted, with no other web changes and no changes to irrigation-profile CSV import.
-The database-free guard test suite covers the attachment's full ten-case behavioral matrix, route-registration static checks and exported-schema stripping tests. Existing authentication coverage, including Part 8, passes unchanged. New coverage is registered as customer-tenant-guard in the existing serial billing validation lane, with no new workflow.
-Acceptance evidence includes both requested validation lanes, the exact clean grep from the attachment, development customer-profile/edit/labor-rate/property-boundary 200s, customer creation under the authenticated company, an authenticated foreign-customer 404, and customer-import 410. Any unavailable evidence is identified explicitly rather than claimed complete. The newest implementation commit describes this diff accurately.
-Out of scope
-Slice 2b: shared modal, customer form changes, picker changes, or any client changes except deleting the orphan CSV uploader.
-Site-map routes, customer-list route, irrigation-profile CSV import, or unrelated customer endpoints outside the attachment's enumerated scope.
-Customer records lock, field mapping, review/linking workflows, scheduled pull, QuickBooks writes, migrations, production data repair, publishing, or any later slice.
-Redesigning existing role permissions, removing customer deletion, or changing billing-note visibility, budget processing, and labor-rate business rules.
-Steps
-Implement the shared tenant guard — Add the injectable guard and request augmentation exactly as specified, including positive-integer validation, authenticated-context-only checks, super-admin behavior, customer attachment, audit warning and error handling. Match the existing testable guard pattern without importing the large route registration module into behavioral tests.
-Protect every enumerated route together — Wire one guard instance into the route registrations and extracted customer-route dependencies with the attachment's middleware order. Reuse the attached customer where specified, remove the shadowed GET and old boundary helper, and add the missing DELETE authentication while preserving all other handler behavior.
-Enforce identifier ownership and retire CSV — Export the specified create/update schemas, set creation company from authenticated context, and silently strip server-owned body fields. Replace only the customer-import handler body with its exact 410 response while retaining middleware, and delete only the orphan customer CSV component.
-Add bounded regression coverage — Implement the full in-memory guard matrix, source-registration checks and exported-schema tests from the attachment, including spoofed-header rejection and exactly one denial audit line. Add the new test entry to the existing billing lane and retain the existing authentication coverage unchanged.
-Validate and collect acceptance evidence — Run the billing and types validation lanes and the specified clean grep, then perform all attachment development checks with authenticated sessions and capture actual status/results without exposing credentials. Use a second development company and customer only if needed to prove isolation, report any blocked checks honestly, and finish with a scope-matching commit and evidence summary.
-Relevant files
-attached_assets/Pasted--FIX-Customer-Records-Slice-2a-Customer-Routes-Check-th_1793735627583.txt
-docs/customer-records-plan.md
-artifacts/api-server/src/routes/customer-routes.ts
-artifacts/api-server/src/routes/routes.ts
-artifacts/api-server/src/types/express.d.ts
-artifacts/api-server/src/routes/billing-sheet-tenant-guard.ts
-artifacts/api-server/src/routes/billing-sheet-tenant-guard.test.ts
-artifacts/api-server/src/routes/auth-middleware-coverage.test.ts
-artifacts/api-server/src/storage.ts:2649
-artifacts/irrigopro/src/components/customer-csv-upload.tsx
-scripts/validation-lanes.json
-scripts/run-validation-lane.mjs
-Dependencies
+**Background:**
+- "ASSESSMENT - Customer Creation and QuickBooks Sync.md" (Nov 3) holds the code findings and the unlinked-customer count queries.
+- "NOTE TO CRM - Customer Records Rules.md" is the CRM's side.
 
-Customer Records Slice 1: Tenant-safe QuickBooks lookups
+## Why
+
+High Plains keeps customers in three places: QuickBooks, IrrigoPro and High Plains CRM. Customers were typed in more than once and drifted apart. The code audit (`main` @ `c91ea72f`) found:
+
+1. **Four ways a customer gets created in IrrigoPro.**
+   - The customer form.
+   - A second, cut-down form inside the customer picker.
+   - A broken CSV import.
+   - The external work-order API, which creates customers by name.
+2. **The QuickBooks customer lookup ignored the company.** A second company's customers with the same QuickBooks id would never import.
+3. **Single-customer routes didn't check the company.** That covers get, edit, delete and rates. Create also trusted the browser's `companyId`.
+4. **The sync overwrote local edits** whenever QuickBooks had a value, and it created a duplicate for any hand-made customer later added in QuickBooks.
+5. **No concept of a customer going inactive in QuickBooks.**
+6. **QuickBooks sub-customers would arrive as unrelated customers.**
+
+## Locked decisions (Randy, Nov 3)
+
+- **One writer.** Only one system writes a customer's billing details to QuickBooks. For High Plains that is the CRM. IrrigoPro reads them from QuickBooks and never writes customers to QuickBooks. QuickBooks is the hub: CRM → QuickBooks → IrrigoPro.
+- **Lock setting** ("Customer details are managed outside IrrigoPro", Company page):
+  - **On (High Plains):** no customer creation in IrrigoPro, and the QuickBooks-owned fields are read-only, with QuickBooks winning on every sync.
+  - **Off (future IrrigoPro-only companies):** IrrigoPro owns the details, and the sync only fills empty fields.
+  - It can only be turned on while QuickBooks is connected.
+- **QuickBooks-owned fields:** name, company name, billing contact, email, phone, mobile, billing address, service address (QuickBooks ship-to) and payment terms.
+- **Always editable (IrrigoPro-only):** display name, rates, discount, contract, controllers, notes, property and billing notes, budgets, branches, boundary and the Visible toggle.
+- **One customer modal** for create and edit everywhere. The Labor Rates page stays an inline rate editor (Randy).
+- **Never link automatically.** Possible duplicates and sub-customers are held for a person on the Customer review page.
+- **QuickBooks inactive → Hidden** (the Visible toggle), and back to Visible when reactivated, only if QuickBooks hid it. Hiding in IrrigoPro never touches QuickBooks.
+- **Automatic pull every 15 minutes.** Sync now can be run any time.
+- **External work-order API:** nothing calls it today. With the lock on, it matches by QuickBooks id or exact email and never creates a customer. It will be built out later for the CRM and Aspire.
+- **No edit link to the CRM.** The modal says "Edit them in {name}" as plain text.
+- **No destructive changes.** No customer is deleted or merged by these slices, and no column is dropped.
+
+## Order
+
+| # | File | Depends on |
+|---|---|---|
+| 1 | `FIX - Customer Records Slice 1 - QuickBooks Customer Lookups Stay Inside the Company.md` | — (ship first; it starts with a duplicate check that stops the build if duplicates exist) |
+| 2a | `FIX - Customer Records Slice 2a - Customer Routes Check the Company.md` | 1 |
+| 2b | `BUILD - Customer Records Slice 2b - One Customer Modal.md` | 2a |
+| 3a | `BUILD - Customer Records Slice 3a - Customer Records Lock (Server).md` | 1, 2a |
+| 3b | `BUILD - Customer Records Slice 3b - Customer Records Lock (Screens).md` | 2b, 3a |
+| 3c | `BUILD - Customer Records Slice 3c - External Work-Order API Matches Customers, Never Creates While Locked.md` | 1, 3a |
+| 4 | `BUILD - Customer Records Slice 4 - QuickBooks Field Map.md` | 1, 3a, 3b |
+| 5a | `BUILD - Customer Records Slice 5a - Sync Holds Duplicates and Sub-Customers for Review (Server).md` | 4 |
+| 5b | `BUILD - Customer Records Slice 5b - Customer Review Page.md` | 5a |
+| 6 | `BUILD - Customer Records Slice 6 - Scheduled QuickBooks Customer Pull.md` | 4, 5a |
+| 7 | `BUILD - Customer Records Slice 7 - QuickBooks Inactive Hides the Customer.md` | 6 |
+| 8 | Duplicate pairs (hand-made + sync-made) — registry migration | not written; sized once the counts are in |
+
+Migrations are numbered in build order: 0025 (Slice 1), 0026 (3a), 0027 (4), 0028 (5a), 0029 (6), 0030 (7). If slices merge out of order, renumber so the numbers stay unique and increasing.
+
+## When to turn the lock on for High Plains
+
+After **Slice 4** is merged, an admin turns it on (Company → Customer records, Managed in "High Plains CRM"). Before Slice 4, the new fields aren't fed from QuickBooks, so they would sit read-only and blank. Slice 6 then makes new CRM customers arrive automatically.
+
+Before turning it on, run the assessment's count queries and work through Slice 5b's Customer review, so every customer IrrigoPro invoices is linked to QuickBooks.
+
+## Outside these slices
+
+- **The CRM side** (see the CRM note): the only writer, handling direct QuickBooks edits without overwriting, and a way to send a customer to QuickBooks right away.
+- **Full sub-customer support** (per-branch billing): only when a real customer needs it.
+- **Pushing customer edits from IrrigoPro to QuickBooks** for IrrigoPro-only companies: a future slice.
+- **The duplicate `/customers` vs `/admin/customers` list pages**: under the no-duplicate-pages rule, not addressed here.

@@ -1,10 +1,16 @@
 ---
 name: Customer record ownership plan
-description: Saved single-customer route guard scope and instructions for consulting its detailed specification.
+description: Customer-record design decisions, slice boundaries, and safe lock rollout prerequisites.
 ---
 
-Use `docs/customer-records-plan.md` as the saved reference. On 2026-11-03 the user explicitly replaced the broad customer-record ownership plan with the narrower "Guard Single Customer Routes" plan. Saving or replacing this reference is not authorization to implement it.
+Use `docs/customer-records-plan.md` as the saved design-context overview from 2026-11-03. Individual slice specifications govern their own implementation; the overview is not a substitute for them. Uploading or saving a plan is not authorization to implement it.
 
-**Why:** The user wants the new attachment, not the earlier eight-slice overview, stored at the existing plan location.
+**Why:** Customer records use a one-writer model: High Plains CRM → QuickBooks → IrrigoPro. The revised overview splits the work into independent slices with explicit dependencies, avoiding one combined implementation.
 
-**How to apply:** Read the current saved plan before scoping future work. It covers only the single-customer tenant guards, server-owned identifiers, and customer CSV retirement. It refers to a separate detailed specification; consult that contract before implementation rather than inventing its exact requirements. Do not expand into shared-modal or later customer-record slices.
+**How to apply:** Read the current overview and the relevant slice specification before future work. Keep slices separate. Preserve the inline Labor Rates editor and editable IrrigoPro-only fields. Never automatically link possible duplicates or sub-customers; hold them for review. These slices must not delete or merge customers, drop columns, or push customer edits to QuickBooks.
+
+Enable High Plains' ownership lock only through an admin after the field-map slice is merged, the assessment count queries have run, and customer review has linked every customer IrrigoPro invoices.
+
+**Why:** Enabling earlier would leave new QuickBooks-owned fields blank and read-only. This replaces the earlier instruction to enable after the lock slice alone.
+
+**How to apply:** Treat field-map completion and customer-link review as prerequisites, not automatic permission to enable the lock. Scheduled pulling follows later; manual sync remains available.
