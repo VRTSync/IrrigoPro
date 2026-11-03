@@ -1,24 +1,17 @@
-// Unit tests for qb-invoice-ops.ts — DocNumber-first lookup + sync scenarios.
+// Unit tests for stored-ID-only invoice sync and refuse-only collision guards.
 //
 // All QB network calls are stubbed via the `makeRequest` / `lookupServiceItem`
 // injection points so no real QB credentials or network access is required.
 //
-// Coverage:
-//   (a) DocNumber found → update in place; stored id self-heals if it differed
-//   (b) DocNumber not found (e.g. deleted QB invoice) → creates fresh QB invoice
-//   (c) Stale-token fault 5010 → re-fetch + single retry succeeds
-//   (d) 401 auth failure → returns "auth_error", no new invoice created
-//   (e) Two syncs in a row for same invoice → idempotent, no duplicate
-//   (f) No prior quickbooksInvoiceId → creates fresh (fallback via buildAndPostQbInvoice)
-//   (g) Confirmation copy regression: no "-R1", no "manual QB" in ReissueStep pre-reissue text
-//   (h) 5xx QB error → throws retryable error (never silently falls through to create)
-//   (i) Network throw from makeRequest → propagates to caller (never swallowed as "not found")
-//   (j) 404 response → returns null (explicit "not found", falls through to create safely)
+// Coverage includes ownership refusals, strict reader failures, scoped queries,
+// stale-token retry, creation, and original invoice / due-date preservation.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  lookupQbInvoiceByDocNumber,
+  getQbInvoiceById,
+  findQbInvoicesByDocNumberForCustomer,
+  syncAppInvoiceToQb,
   fetchQbSyncToken,
   buildAndPostQbInvoice,
   updateQbInvoiceInPlace,
@@ -50,100 +43,179 @@ const MOCK_CUSTOMER = {
 
 const QB_LINES = [{ amount: 150.0, description: "Irrigation service" }];
 
-// ─── lookupQbInvoiceByDocNumber ───────────────────────────────────────────────
+describe("getQbInvoiceById", () => {
+  it("maps invoice fields and URL-encodes the stored id", async () => {
+    const result = await getQbInvoiceById(async (url) => {
+      assert.equal(url, `${API_BASE}/v3/company/${REALM}/invoice/500%2F%3F?minorversion=73`);
+      return makeJsonResponse({ Invoice: { Id: "500/?", SyncToken: "7", DocNumber: "60897", CustomerRef: { value: "42" } } });
+    }, API_BASE, INTEGRATION, "500/?");
+    assert.deepEqual(result, { kind: "found", id: "500/?", syncToken: "7", docNumber: "60897", customerRef: "42" });
+  });
 
-describe("lookupQbInvoiceByDocNumber", () => {
+  it("defaults absent token, customer and number without treating the invoice as missing", async () => {
+    assert.deepEqual(await getQbInvoiceById(async () => makeJsonResponse({ Invoice: { Id: "500" } }), API_BASE, INTEGRATION, "500"),
+      { kind: "found", id: "500", syncToken: "0", docNumber: null, customerRef: null });
+  });
 
-  it("(a) returns { id, syncToken } when QB has an invoice with the given DocNumber", async () => {
-    const makeRequest: QbMakeRequestFn = async (url) => {
-      assert.ok(url.includes("/query"), "must call the QB query endpoint");
-      assert.ok(url.includes("04723"), "must include the DocNumber in the query");
-      return makeJsonResponse({
-        QueryResponse: {
-          Invoice: [{ Id: "48408", SyncToken: "5" }],
-          startPosition: 1,
-          maxResults: 1,
-        },
-      });
+  for (const [status, code] of [[404, ""], [400, "610"]] as const) {
+    it(`${status}/${code} means not_found`, async () => {
+      assert.deepEqual(await getQbInvoiceById(async () => makeJsonResponse({ Fault: { Error: [{ code }] } }, status), API_BASE, INTEGRATION, "500"), { kind: "not_found" });
+    });
+  }
+  for (const status of [400, 429, 500]) {
+    it(`${status} with another fault throws`, async () => {
+      await assert.rejects(() => getQbInvoiceById(async () => makeJsonResponse({ Fault: { Error: [{ code: "6100" }] } }, status), API_BASE, INTEGRATION, "500"), new RegExp(`${status}.*Retry`));
+    });
+  }
+  it("401 means auth_error", async () => {
+    assert.deepEqual(await getQbInvoiceById(async () => makeJsonResponse({}, 401), API_BASE, INTEGRATION, "500"), { kind: "auth_error" });
+  });
+  it("propagates network failures", async () => {
+    await assert.rejects(() => getQbInvoiceById(async () => { throw new Error("Network timeout"); }, API_BASE, INTEGRATION, "500"), /Network timeout/);
+  });
+  it("rejects malformed or wrong-id successful responses", async () => {
+    for (const body of [{}, { Invoice: { Id: "900" } }]) {
+      await assert.rejects(() => getQbInvoiceById(async () => makeJsonResponse(body), API_BASE, INTEGRATION, "500"), /invalid invoice/);
+    }
+  });
+});
+
+describe("findQbInvoicesByDocNumberForCustomer", () => {
+  it("queries both number and customer, dropping foreign customers", async () => {
+    const result = await findQbInvoicesByDocNumberForCustomer(async (url) => {
+      const query = new URL(url).searchParams.get("query")!;
+      assert.ok(query.includes("DocNumber = '60897'"));
+      assert.ok(query.includes("CustomerRef = '42'"));
+      return makeJsonResponse({ QueryResponse: { Invoice: [
+        { Id: "501", DocNumber: "60897", CustomerRef: { value: "42" } },
+        { Id: "900", DocNumber: "60897", CustomerRef: { value: "77" } },
+        { Id: "901", DocNumber: "60897" },
+      ] } });
+    }, API_BASE, INTEGRATION, "60897", "42");
+    assert.deepEqual(result, [{ id: "501", docNumber: "60897", customerRef: "42" }]);
+  });
+  it("escapes backslashes and quotes in both query values", async () => {
+    await findQbInvoicesByDocNumberForCustomer(async (url) => {
+      const query = new URL(url).searchParams.get("query")!;
+      assert.ok(query.includes("DocNumber = '60\\\\8\\'97'"));
+      assert.ok(query.includes("CustomerRef = '4\\\\2\\''"));
+      return makeJsonResponse({ QueryResponse: {} });
+    }, API_BASE, INTEGRATION, "60\\8'97", "4\\2'");
+  });
+  it("preserves auth refusal", async () => {
+    assert.equal(await findQbInvoicesByDocNumberForCustomer(async () => makeJsonResponse({}, 401), API_BASE, INTEGRATION, "60897", "42"), "auth_error");
+  });
+  for (const status of [400, 404, 429, 500]) {
+    it(`query ${status} throws, even with fault 610`, async () => {
+      await assert.rejects(() => findQbInvoicesByDocNumberForCustomer(async () => makeJsonResponse({ Fault: { Error: [{ code: "610" }] } }, status), API_BASE, INTEGRATION, "60897", "42"), new RegExp(`${status}.*Retry`));
+    });
+  }
+  it("propagates network failures", async () => {
+    await assert.rejects(() => findQbInvoicesByDocNumberForCustomer(async () => { throw new Error("Network timeout"); }, API_BASE, INTEGRATION, "60897", "42"), /Network timeout/);
+  });
+});
+
+describe("syncAppInvoiceToQb — another app's invoice shares the number", () => {
+  function fixture(opts: { storedId?: string | null; number?: string; readStatus?: number; collision?: boolean; postStatus?: number } = {}) {
+    const requests: Array<{ url: string; body: Record<string, unknown> | null; operation?: string }> = [];
+    const foreign = { Id: "900", DocNumber: "60897", CustomerRef: { value: "77" }, SyncToken: "9", Line: [{ Amount: 999 }] };
+    const before = JSON.stringify(foreign);
+    const makeRequest: QbMakeRequestFn = async (url, options, operation) => {
+      const body = options?.body ? JSON.parse(String(options.body)) : null;
+      requests.push({ url, body, operation });
+      assert.notEqual(body?.Id, "900", "foreign invoice must never receive a write");
+      if (url.includes("/query")) {
+        const scoped = new URL(url).searchParams.get("query")!.includes("CustomerRef = '42'");
+        return makeJsonResponse({ QueryResponse: { Invoice: !scoped ? [foreign] : opts.collision ? [{ Id: "501", DocNumber: "60897", CustomerRef: { value: "42" } }] : [] } });
+      }
+      if (!body) {
+        if (opts.readStatus) return makeJsonResponse({ Fault: { Error: [{ code: "610" }] } }, opts.readStatus);
+        return makeJsonResponse({ Invoice: opts.storedId === "900" ? foreign : { Id: "500", DocNumber: opts.number ?? "60897", CustomerRef: { value: "42" }, SyncToken: "7" } });
+      }
+      if (opts.postStatus) return makeJsonResponse({}, opts.postStatus);
+      return makeJsonResponse({ Invoice: { Id: body.Id ?? "502", SyncToken: "8", DocNumber: "60897" } });
     };
-
-    const result = await lookupQbInvoiceByDocNumber(makeRequest, API_BASE, INTEGRATION, "04723");
-    assert.ok(result !== null && result !== "auth_error", "should find the invoice");
-    assert.equal((result as any).id, "48408");
-    assert.equal((result as any).syncToken, "5");
-  });
-
-  it("(b) returns null when QB has no invoice with the given DocNumber", async () => {
-    const makeRequest: QbMakeRequestFn = async () =>
-      makeJsonResponse({ QueryResponse: {}, });
-
-    const result = await lookupQbInvoiceByDocNumber(makeRequest, API_BASE, INTEGRATION, "99999");
-    assert.equal(result, null, "not found must return null");
-  });
-
-  it("(b) returns null when QueryResponse.Invoice is an empty array", async () => {
-    const makeRequest: QbMakeRequestFn = async () =>
-      makeJsonResponse({ QueryResponse: { Invoice: [] } });
-
-    const result = await lookupQbInvoiceByDocNumber(makeRequest, API_BASE, INTEGRATION, "04723");
-    assert.equal(result, null);
-  });
-
-  it('(d) returns "auth_error" on 401 — expired QB token', async () => {
-    const makeRequest: QbMakeRequestFn = async () =>
-      makeJsonResponse({ error: "AuthenticationFailed" }, 401);
-
-    const result = await lookupQbInvoiceByDocNumber(makeRequest, API_BASE, INTEGRATION, "04723");
-    assert.equal(result, "auth_error");
-  });
-
-  it("(j) returns null on a 404 response — explicit not-found falls through to create safely", async () => {
-    const makeRequest: QbMakeRequestFn = async () =>
-      makeJsonResponse({ message: "Object Not Found" }, 404);
-
-    const result = await lookupQbInvoiceByDocNumber(makeRequest, API_BASE, INTEGRATION, "04723");
-    assert.equal(result, null, "404 must return null (not-found), not throw");
-  });
-
-  it("(h) throws a retryable error on a 5xx QB response — must not silently return null", async () => {
-    const makeRequest: QbMakeRequestFn = async () =>
-      makeJsonResponse({ Fault: { Error: [{ code: "500" }] } }, 500);
-
-    await assert.rejects(
-      () => lookupQbInvoiceByDocNumber(makeRequest, API_BASE, INTEGRATION, "04723"),
-      (err: Error) => {
-        assert.ok(err instanceof Error, "must throw an Error");
-        assert.ok(
-          err.message.includes("500"),
-          `error message must include the HTTP status, got: ${err.message}`,
-        );
-        assert.ok(
-          err.message.toLowerCase().includes("retry"),
-          `error message must mention retry, got: ${err.message}`,
-        );
-        return true;
+    return {
+      requests,
+      run: () => syncAppInvoiceToQb(makeRequest, MOCK_SERVICE_ITEM, {
+        apiBase: API_BASE, integration: INTEGRATION, customer: MOCK_CUSTOMER,
+        docNumber: "60897", qbLines: QB_LINES, serviceItemName: "Irrigation Services",
+        storedQbInvoiceId: opts.storedId ?? null, txnDate: "2026-05-01", dueDate: "2026-05-31",
+      }),
+      assertNoWrites: () => {
+        assert.equal(requests.filter((r) => r.body).length, 0);
+        assert.equal(JSON.stringify(foreign), before);
       },
-    );
-  });
-
-  it("(i) propagates network errors from makeRequest — must not swallow as null", async () => {
-    const makeRequest: QbMakeRequestFn = async () => {
-      throw new Error("Network timeout");
     };
-
-    await assert.rejects(
-      () => lookupQbInvoiceByDocNumber(makeRequest, API_BASE, INTEGRATION, "04723"),
-      (err: Error) => {
-        assert.ok(err instanceof Error, "must throw an Error");
-        assert.ok(
-          err.message.includes("Network timeout"),
-          `original network error must propagate, got: ${err.message}`,
-        );
-        return true;
-      },
-    );
+  }
+  it("1. stored 500 updates only 500, with no number query", async () => {
+    const f = fixture({ storedId: "500" });
+    assert.deepEqual(await f.run(), { outcome: "updated", quickbooksId: "500", quickbooksSyncToken: "8" });
+    assert.equal(f.requests.length, 2);
+    assert.ok(f.requests.every((r) => !r.url.includes("/query")));
+    assert.equal(f.requests[1].body?.Id, "500");
+    assert.equal(f.requests[1].body?.SyncToken, "7");
+    assert.equal(f.requests[1].operation, "Invoice In-Place Update (stored id)");
   });
-
+  it("2. unlinked creates despite the foreign customer's matching number", async () => {
+    const f = fixture();
+    assert.deepEqual(await f.run(), { outcome: "created", quickbooksId: "502", quickbooksSyncToken: "8", qbDocNumber: "60897" });
+    assert.equal(f.requests.length, 2);
+    assert.equal(f.requests[1].body?.Id, undefined);
+    assert.equal(f.requests[1].body?.TxnDate, "2026-05-01");
+    assert.equal(f.requests[1].body?.DueDate, "2026-05-31");
+    assert.equal(f.requests[1].operation, "Invoice Sync Creation");
+  });
+  it("3. corrupt stored 900 refuses the foreign customer with zero POSTs", async () => {
+    const f = fixture({ storedId: "900" });
+    assert.deepEqual(await f.run(), { outcome: "refused", httpStatus: 409, message: "QuickBooks invoice 900 belongs to a different QuickBooks customer (77), not Acme Corp (42). IrrigoPro did not change it." });
+    f.assertNoWrites();
+    assert.equal(f.requests.length, 1);
+  });
+  it("4. stored 500 with different number refuses with zero POSTs", async () => {
+    const f = fixture({ storedId: "500", number: "60898" });
+    assert.deepEqual(await f.run(), { outcome: "refused", httpStatus: 409, message: "QuickBooks invoice 500 is numbered 60898 in QuickBooks but #60897 in IrrigoPro. IrrigoPro did not change it." });
+    f.assertNoWrites();
+  });
+  it("5. unlinked same-customer 501 refuses without adoption or POSTs", async () => {
+    const f = fixture({ collision: true });
+    assert.deepEqual(await f.run(), { outcome: "refused", httpStatus: 409, message: "QuickBooks already has invoice #60897 for this customer (QuickBooks id 501) that IrrigoPro is not linked to. IrrigoPro will not take it over or create a duplicate. Delete or renumber that QuickBooks invoice, then sync again." });
+    f.assertNoWrites();
+  });
+  it("6. deleted stored ID (400/610) checks the customer guard then creates", async () => {
+    const f = fixture({ storedId: "500", readStatus: 400 });
+    assert.equal((await f.run()).outcome, "created");
+    assert.equal(f.requests.length, 3);
+    assert.ok(f.requests[1].url.includes("/query"));
+    assert.equal(f.requests[2].body?.Id, undefined);
+  });
+  it("7. GET 401 refuses reconnect with zero POSTs", async () => {
+    const f = fixture({ storedId: "500", readStatus: 401 });
+    assert.deepEqual(await f.run(), { outcome: "refused", httpStatus: 401, message: "QuickBooks session expired. Please reconnect QuickBooks and retry the sync." });
+    f.assertNoWrites();
+  });
+  it("unexpected GET failure stops before query or POST", async () => {
+    const f = fixture({ storedId: "500", readStatus: 500 });
+    await assert.rejects(f.run, /500.*Retry/);
+    f.assertNoWrites();
+    assert.equal(f.requests.length, 1);
+  });
+  for (const storedId of [null, "500"]) {
+    it(`primitive error becomes 502 (${storedId ? "update" : "create"})`, async () => {
+      const f = fixture({ storedId, postStatus: 503 });
+      const result = await f.run();
+      assert.equal(result.outcome, "refused");
+      if (result.outcome === "refused") assert.equal(result.httpStatus, 502);
+    });
+  }
+  it("unsynced customer fails before any request or service lookup", async () => {
+    const unexpected = async (): Promise<never> => { throw new Error("must not call dependencies"); };
+    await assert.rejects(() => syncAppInvoiceToQb(unexpected, unexpected, {
+      apiBase: API_BASE, integration: INTEGRATION, customer: { name: "Unsynced" },
+      docNumber: "60897", qbLines: QB_LINES, serviceItemName: "Irrigation Services",
+      storedQbInvoiceId: "900", txnDate: "2026-05-01", dueDate: null,
+    }), /Customer "Unsynced" has not been synced to QuickBooks/);
+  });
 });
 
 // ─── updateQbInvoiceInPlace (stale-token self-heal) ──────────────────────────
@@ -191,7 +263,7 @@ describe("updateQbInvoiceInPlace — stale-token 5010 retry", () => {
     assert.equal(result.quickbooksSyncToken, "7");
   });
 
-  it("(a) self-heals stored id — uses live id from DocNumber lookup, not stale stored id", async () => {
+  it("update targets exactly the id it is given", async () => {
     // Simulate scenario: stored id is "48408" but QB invoice is actually at "48999"
     // (DocNumber found → updateQbInvoiceInPlace called with the live id "48999")
     let updatedWithId: string | undefined;

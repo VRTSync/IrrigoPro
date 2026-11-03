@@ -1,4 +1,6 @@
-// Extracted QuickBooks invoice operations — CREATE and in-place UPDATE.
+// QuickBooks invoice sync — only the stored invoice ID can authorize an UPDATE.
+// Verify its customer and number first. Unlinked/deleted IDs use a customer-scoped
+// number search only to refuse collisions, never to adopt another app's invoice.
 //
 // These functions are pulled out of routes.ts so they can be unit-tested with
 // a stubbed `makeRequest` + `lookupServiceItem` (no real QB calls). Routes.ts
@@ -8,7 +10,7 @@
 //   5010 — Object Not Found / stale SyncToken (optimistic-lock conflict).
 //         Self-healing: re-fetch the current token from QB, retry once.
 
-import type { QbInvoice, QbInvoiceCreateResponse, QbItemQueryResponse } from "../types/quickbooks";
+import type { QbInvoice, QbInvoiceCreateResponse } from "../types/quickbooks";
 
 // ─── Dependency types ────────────────────────────────────────────────────────
 
@@ -45,16 +47,15 @@ export interface QbUpdateResult {
   quickbooksError?: string;
 }
 
-/**
- * Result of looking up a QB invoice by DocNumber.
- *  - `{ id, syncToken }` — found; use these for an in-place update
- *  - `null`              — not found; fall through to create
- *  - `"auth_error"`     — 401 / expired token; caller must prompt reconnect
- */
-export type QbDocNumberLookupResult =
-  | { id: string; syncToken: string }
-  | null
-  | "auth_error";
+export type QbInvoiceRead =
+  | { kind: "found"; id: string; syncToken: string; docNumber: string | null; customerRef: string | null }
+  | { kind: "not_found" }
+  | { kind: "auth_error" };
+
+export type QbSyncOutcome =
+  | { outcome: "updated"; quickbooksId: string; quickbooksSyncToken?: string }
+  | { outcome: "created"; quickbooksId?: string; qbDocNumber?: string; quickbooksSyncToken?: string }
+  | { outcome: "refused"; httpStatus: 401 | 409 | 502; message: string };
 
 // ─── QB Fault helper ─────────────────────────────────────────────────────────
 
@@ -69,28 +70,15 @@ function extractQbFaultCode(body: string): string | undefined {
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
-/**
- * Look up a QB invoice by DocNumber using the QB query API.
- *
- * Returns:
- *   `{ id, syncToken }` — invoice found; use these values for an in-place update.
- *   `null`              — invoice not found in QB (empty QueryResponse); caller should create.
- *   `"auth_error"`      — 401 response; QB token is expired; caller must prompt reconnect.
- *
- * Throws on any non-401 HTTP error (5xx, 429, etc.) or network failure.
- * This prevents a transient QB outage from silently falling through to a duplicate-create path.
- * The caller is responsible for surfacing the thrown error as a retryable failure.
- */
-export async function lookupQbInvoiceByDocNumber(
+/** Only GET 404 or GET 400/fault 610 means missing. All other failures stop sync. */
+export async function getQbInvoiceById(
   makeRequest: QbMakeRequestFn,
   apiBase: string,
   integration: { realmId: string; accessToken: string },
-  docNumber: string,
-): Promise<QbDocNumberLookupResult> {
-  const query = encodeURIComponent(`SELECT Id, SyncToken FROM Invoice WHERE DocNumber = '${docNumber}'`);
-  // Network errors thrown by makeRequest propagate to the caller — do not swallow them.
+  qbInvoiceId: string,
+): Promise<QbInvoiceRead> {
   const resp = await makeRequest(
-    `${apiBase}/v3/company/${integration.realmId}/query?query=${query}&minorversion=73`,
+    `${apiBase}/v3/company/${integration.realmId}/invoice/${encodeURIComponent(qbInvoiceId)}?minorversion=73`,
     {
       method: "GET",
       headers: {
@@ -98,45 +86,109 @@ export async function lookupQbInvoiceByDocNumber(
         Accept: "application/json",
       },
     },
-    "QB DocNumber lookup",
+    "QB stored invoice read",
     integration.realmId,
   );
 
-  if (resp.status === 401) {
-    return "auth_error";
-  }
-
-  if (resp.status === 404) {
-    // 404 is an explicit "this invoice does not exist in QB" response — fall through to create.
-    return null;
-  }
-
+  if (resp.status === 401) return { kind: "auth_error" };
+  if (resp.status === 404) return { kind: "not_found" };
   if (!resp.ok) {
-    // Non-401, non-404 HTTP error (5xx, 429, etc.): do NOT treat as "not found".
-    // Silently falling through to create would risk duplicating the QB invoice.
-    // Throw so the caller can surface a retryable error instead.
-    const errorText = await resp.text().catch(() => "");
-    const intuitTid = resp.headers.get("intuit_tid");
-    console.warn(
-      `[QB] DocNumber lookup failed with ${resp.status} — aborting sync to avoid duplicate invoice` +
-        (intuitTid ? ` [TID: ${intuitTid}]` : ""),
-      errorText.slice(0, 200),
-    );
-    throw new Error(
-      `QuickBooks DocNumber lookup failed: ${resp.status} ${resp.statusText}` +
-        (intuitTid ? ` [TID: ${intuitTid}]` : "") +
-        ". Retry the sync.",
-    );
+    const body = await resp.text();
+    if (resp.status === 400 && extractQbFaultCode(body) === "610") return { kind: "not_found" };
+    throw qbReadError(resp, "invoice read");
   }
-
-  const data = (await resp.json()) as {
-    QueryResponse?: { Invoice?: Array<{ Id?: string; SyncToken?: string }> };
+  const data = (await resp.json()) as { Invoice?: QbInvoice & { CustomerRef?: { value?: string } } };
+  if (!data.Invoice?.Id || data.Invoice.Id !== qbInvoiceId) {
+    throw new Error("QuickBooks invoice read returned an invalid invoice. Retry the sync.");
+  }
+  return {
+    kind: "found", id: data.Invoice.Id, syncToken: data.Invoice.SyncToken ?? "0",
+    docNumber: data.Invoice.DocNumber ?? null, customerRef: data.Invoice.CustomerRef?.value ?? null,
   };
-  const first = data?.QueryResponse?.Invoice?.[0];
-  if (!first?.Id) {
-    return null;
+}
+
+/** Refuse-only customer-scoped search. Never use a match as an update target. */
+export async function findQbInvoicesByDocNumberForCustomer(
+  makeRequest: QbMakeRequestFn,
+  apiBase: string,
+  integration: { realmId: string; accessToken: string },
+  docNumber: string,
+  qbCustomerId: string,
+): Promise<Array<{ id: string; docNumber: string; customerRef: string }> | "auth_error"> {
+  const escape = (v: string) => v.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const query = encodeURIComponent(`SELECT Id, DocNumber, CustomerRef FROM Invoice WHERE DocNumber = '${escape(docNumber)}' AND CustomerRef = '${escape(qbCustomerId)}'`);
+  const resp = await makeRequest(
+    `${apiBase}/v3/company/${integration.realmId}/query?query=${query}&minorversion=73`,
+    { method: "GET", headers: { Authorization: `Bearer ${integration.accessToken}`, Accept: "application/json" } },
+    "QB customer-scoped DocNumber guard", integration.realmId,
+  );
+  if (resp.status === 401) return "auth_error";
+  if (!resp.ok) throw qbReadError(resp, "customer-scoped invoice query");
+  const data = (await resp.json()) as {
+    QueryResponse?: { Invoice?: Array<{ Id: string; DocNumber: string; CustomerRef?: { value: string } }> };
+  };
+  return (data.QueryResponse?.Invoice ?? [])
+    .filter((row) => row.CustomerRef?.value === qbCustomerId)
+    .map((row) => ({ id: row.Id, docNumber: row.DocNumber, customerRef: qbCustomerId }));
+}
+
+export async function syncAppInvoiceToQb(
+  makeRequest: QbMakeRequestFn,
+  lookupServiceItem: QbLookupServiceItemFn,
+  params: {
+    apiBase: string; integration: { realmId: string; accessToken: string };
+    customer: { quickbooksId?: string | null; name?: string };
+    docNumber: string; qbLines: QbLineInput[]; serviceItemName: string;
+    storedQbInvoiceId: string | null;
+    txnDate: Date | string; dueDate: Date | string | null;
+  },
+): Promise<QbSyncOutcome> {
+  const { apiBase, integration, customer, docNumber, storedQbInvoiceId } = params;
+  if (!customer.quickbooksId) {
+    throw new Error(
+      `Customer "${customer.name ?? "Unknown"}" has not been synced to QuickBooks. ` +
+      "Please sync this customer in the Customers section and try again.",
+    );
   }
-  return { id: first.Id, syncToken: first.SyncToken ?? "0" };
+  const authError: QbSyncOutcome = {
+    outcome: "refused", httpStatus: 401,
+    message: "QuickBooks session expired. Please reconnect QuickBooks and retry the sync.",
+  };
+  if (storedQbInvoiceId) {
+    const read = await getQbInvoiceById(makeRequest, apiBase, integration, storedQbInvoiceId);
+    if (read.kind === "auth_error") return authError;
+    if (read.kind === "found") {
+      if (read.customerRef !== customer.quickbooksId) return {
+        outcome: "refused", httpStatus: 409,
+        message: `QuickBooks invoice ${read.id} belongs to a different QuickBooks customer (${read.customerRef ?? "none"}), not ${customer.name} (${customer.quickbooksId}). IrrigoPro did not change it.`,
+      };
+      if (read.docNumber !== docNumber) return {
+        outcome: "refused", httpStatus: 409,
+        message: `QuickBooks invoice ${read.id} is numbered ${read.docNumber ?? "(blank)"} in QuickBooks but #${docNumber} in IrrigoPro. IrrigoPro did not change it.`,
+      };
+      const result = await updateQbInvoiceInPlace(makeRequest, lookupServiceItem, {
+        ...params, quickbooksInvoiceId: read.id, quickbooksSyncToken: read.syncToken,
+        operation: "Invoice In-Place Update (stored id)",
+      });
+      if (result.quickbooksError) return { outcome: "refused", httpStatus: 502, message: result.quickbooksError };
+      return { outcome: "updated", quickbooksId: read.id, quickbooksSyncToken: result.quickbooksSyncToken };
+    }
+    console.warn(`[QB] stored invoice ${storedQbInvoiceId} not found in QuickBooks; treating as unlinked`);
+  }
+  const matches = await findQbInvoicesByDocNumberForCustomer(makeRequest, apiBase, integration, docNumber, customer.quickbooksId);
+  if (matches === "auth_error") return authError;
+  if (matches.length) return {
+    outcome: "refused", httpStatus: 409,
+    message: `QuickBooks already has invoice #${docNumber} for this customer (QuickBooks id ${matches.map((row) => row.id).join(", ")}) that IrrigoPro is not linked to. IrrigoPro will not take it over or create a duplicate. Delete or renumber that QuickBooks invoice, then sync again.`,
+  };
+  const result = await buildAndPostQbInvoice(makeRequest, lookupServiceItem, { ...params, operation: "Invoice Sync Creation" });
+  if (result.quickbooksError) return { outcome: "refused", httpStatus: 502, message: result.quickbooksError };
+  return { outcome: "created", quickbooksId: result.quickbooksId, qbDocNumber: result.qbDocNumber, quickbooksSyncToken: result.quickbooksSyncToken };
+}
+
+function qbReadError(resp: Response, operation: string): Error {
+  const tid = resp.headers.get("intuit_tid");
+  return new Error(`QuickBooks ${operation} failed: ${resp.status} ${resp.statusText}${tid ? ` [TID: ${tid}]` : ""}. Retry the sync.`);
 }
 
 /**

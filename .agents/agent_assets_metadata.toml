@@ -235,3 +235,17 @@ mtime_ms = 1791836144607
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/9d9dea97-3499-461d-ba22-376b55b0b4cc/35f41d47-500f-4a3d-99d6-ea086bf49804"
 storage_version_token = "1791836158139984"
 content_type = "text/plain"
+
+[[outputs]]
+id = "dknXXiNxTTw1sXIh3BqcT"
+uri = "file://generated-artifacts/qb-stored-id/acceptance-report.html"
+type = "html"
+title = "QuickBooks stored-ID sync acceptance report"
+description = "Full billing-lane and caller-suite output, seven required scenarios, grep proof, work commit, and explicit live sandbox evidence limitations."
+logical_id = "0701db7c-ffcb-492c-9700-b6a0178de637"
+content_hash = "sha256:727ea8323de55d75dc474fb8c34892dbcd159d117025d360c07041cde17aa7be"
+size = 277670
+mtime_ms = 1793720477234
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/0701db7c-ffcb-492c-9700-b6a0178de637/006c4420-4dd0-4c12-a406-37d1432b8560"
+storage_version_token = "1793720485635823"
+content_type = "text/html"

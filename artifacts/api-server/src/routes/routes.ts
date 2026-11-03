@@ -396,9 +396,8 @@ import {
 } from "./invoice-sync-quickbooks-route";
 import {
   buildAndPostQbInvoice as _buildAndPostQbInvoice,
-  updateQbInvoiceInPlace as _updateQbInvoiceInPlace,
-  fetchQbSyncToken as _fetchQbSyncToken,
-  lookupQbInvoiceByDocNumber as _lookupQbInvoiceByDocNumber,
+  syncAppInvoiceToQb as _syncAppInvoiceToQb,
+  type QbSyncOutcome,
 } from "./qb-invoice-ops";
 import { registerInvoiceMarkSentRoutes } from "./invoice-mark-sent-routes";
 import { registerInvoiceListRoutes } from "./invoice-list-routes";
@@ -8500,64 +8499,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   }
 
-  // Task #1711 — fetch the current SyncToken for an existing QB invoice.
-  // Used before an in-place update when no token is stored locally (legacy rows).
-  async function fetchQbSyncToken(
-    integration: any,
-    invoiceId: string,
-  ): Promise<string | null> {
+  async function syncAppInvoiceToQb(
+    params: Omit<Parameters<typeof _syncAppInvoiceToQb>[2], "apiBase" | "serviceItemName">,
+  ): Promise<QbSyncOutcome> {
     const apiBase = process.env.NODE_ENV === 'production'
       ? 'https://quickbooks.api.intuit.com'
       : 'https://sandbox-quickbooks.api.intuit.com';
-    return _fetchQbSyncToken(makeQuickBooksRequest, apiBase, integration, invoiceId);
-  }
-
-  // Task #1764 — look up a QB invoice by DocNumber (query API).
-  // Returns { id, syncToken } when found, null when not found, "auth_error" on 401.
-  async function lookupQbInvoiceByDocNumber(
-    integration: any,
-    docNumber: string,
-  ) {
-    const apiBase = process.env.NODE_ENV === 'production'
-      ? 'https://quickbooks.api.intuit.com'
-      : 'https://sandbox-quickbooks.api.intuit.com';
-    return _lookupQbInvoiceByDocNumber(makeQuickBooksRequest, apiBase, integration, docNumber);
-  }
-
-  // Task #1711 — update an existing QB invoice in-place (sparse update).
-  // Prefers the stored SyncToken; fetches it from QB when missing (legacy rows).
-  // Self-heals on fault 5010 (stale token). Never falls back to a duplicate create.
-  async function updateQbInvoiceInPlace(params: {
-    integration: any;
-    customer: any;
-    docNumber: string;
-    qbLines: { amount: number; description: string }[];
-    operation: string;
-    quickbooksInvoiceId: string;
-    quickbooksSyncToken: string | null | undefined;
-  }): Promise<{ quickbooksId?: string; quickbooksSyncToken?: string; quickbooksError?: string }> {
-    const apiBase = process.env.NODE_ENV === 'production'
-      ? 'https://quickbooks.api.intuit.com'
-      : 'https://sandbox-quickbooks.api.intuit.com';
-    return _updateQbInvoiceInPlace(makeQuickBooksRequest, lookupQBServiceItem, {
+    return _syncAppInvoiceToQb(makeQuickBooksRequest, lookupQBServiceItem, {
+      ...params,
       apiBase,
-      integration: params.integration,
-      customer: params.customer,
-      docNumber: params.docNumber,
-      qbLines: params.qbLines,
-      operation: params.operation,
       serviceItemName: QB_SERVICE_ITEM_NAME,
-      quickbooksInvoiceId: params.quickbooksInvoiceId,
-      quickbooksSyncToken: params.quickbooksSyncToken,
     });
   }
 
   // Task #1443 / #1711 — sync a single app invoice to QuickBooks.
-  // Routes to in-place UPDATE when the invoice already carries a QB id
-  // (preserves DocNumber, avoids duplicate records), and to CREATE for
-  // genuinely unlinked invoices. SyncToken is persisted on every success so
-  // future updates don't need a pre-flight GET. Throws InvoiceSyncError so
-  // the route maps it to a clear HTTP status.
+  // Updates only a verified stored QB id; unlinked invoices must pass the
+  // customer-scoped collision guard before creation. Persist links only on
+  // success. All sync, correction, and editability callers share this flow.
   async function createQuickBooksInvoiceForInvoice(
     invoiceId: number,
     opts: { callerCompanyId: number | null },
@@ -8600,49 +8558,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
     }
 
-    // Task #1764 — DocNumber-first lookup: find the QB invoice by number so we
-    // self-heal a stale or deleted stored id (e.g. QB #48408 deleted manually).
-    // If the lookup returns auth_error the QB token is expired — surface a clear
-    // "reconnect" message and do NOT fall through to create a duplicate.
-    const docLookup = await lookupQbInvoiceByDocNumber(integration, invoice.invoiceNumber);
-
-    if (docLookup === "auth_error") {
-      throw new InvoiceSyncError(
-        "QuickBooks session expired. Please reconnect QuickBooks and retry the sync.",
-        401,
-      );
-    }
-
-    if (docLookup) {
-      // QB has an invoice with this DocNumber → update in place using the live
-      // id + SyncToken (self-heals if the stored id differed).
-      let updateResult: { quickbooksId?: string; quickbooksSyncToken?: string; quickbooksError?: string };
-      try {
-        updateResult = await updateQbInvoiceInPlace({
-          integration,
-          customer,
-          docNumber: invoice.invoiceNumber,
-          qbLines,
-          operation: 'Invoice In-Place Update (DocNumber-first)',
-          quickbooksInvoiceId: docLookup.id,
-          quickbooksSyncToken: docLookup.syncToken,
-        });
-      } catch (err: any) {
-        throw new InvoiceSyncError(err?.message || "Failed to update invoice in QuickBooks.", 400);
-      }
-      if (updateResult.quickbooksError) {
-        throw new InvoiceSyncError(updateResult.quickbooksError, 502);
-      }
-      const qbUpdateFields: Partial<InsertInvoice> = {};
-      if (updateResult.quickbooksId) qbUpdateFields.quickbooksInvoiceId = updateResult.quickbooksId;
-      if (updateResult.quickbooksSyncToken) qbUpdateFields.quickbooksSyncToken = updateResult.quickbooksSyncToken;
-      if (Object.keys(qbUpdateFields).length > 0) {
-        await storage.updateInvoice(invoiceId, qbUpdateFields);
-      }
-      return { quickbooksId: updateResult.quickbooksId ?? docLookup.id };
-    }
-
-    // DocNumber not found in QB → create a fresh QB invoice.
     // Resolve the stable invoice date: the earliest revision's createdAt for this
     // (companyId, invoiceNumber) pair.  A corrected reissue (Rev 2) must reproduce
     // the original QB TxnDate (Rev 1's createdAt) rather than stamping today.
@@ -8665,37 +8580,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ? new Date(invoice.dueDate)
       : null;
 
-    let result: { quickbooksId?: string; qbDocNumber?: string; quickbooksSyncToken?: string; quickbooksError?: string };
+    let outcome: QbSyncOutcome;
     try {
-      result = await buildAndPostQbInvoice({
+      outcome = await syncAppInvoiceToQb({
         integration,
         customer,
         docNumber: invoice.invoiceNumber,
         qbLines,
-        operation: 'Invoice Sync Creation',
+        storedQbInvoiceId: invoice.quickbooksInvoiceId ?? null,
         txnDate,
         dueDate,
       });
     } catch (err: any) {
-      // Precondition / connection errors thrown by the create core (missing
-      // service item, customer not synced). Surface the clear message as a
-      // 400 so the billing manager knows the corrective action.
-      throw new InvoiceSyncError(err?.message || "Failed to create invoice in QuickBooks.", 400);
+      throw new InvoiceSyncError(err?.message || "QuickBooks sync failed. Retry the sync.", 502);
     }
-
-    if (result.quickbooksError) {
-      throw new InvoiceSyncError(result.quickbooksError, 502);
-    }
+    if (outcome.outcome === "refused") throw new InvoiceSyncError(outcome.message, outcome.httpStatus);
 
     const qbUpdateFields: Partial<InsertInvoice> & { invoiceNumber?: string } = {};
-    if (result.quickbooksId) qbUpdateFields.quickbooksInvoiceId = result.quickbooksId;
-    if (result.qbDocNumber) qbUpdateFields.invoiceNumber = result.qbDocNumber;
-    if (result.quickbooksSyncToken) qbUpdateFields.quickbooksSyncToken = result.quickbooksSyncToken;
+    if (outcome.quickbooksId) qbUpdateFields.quickbooksInvoiceId = outcome.quickbooksId;
+    if (outcome.outcome === "created" && outcome.qbDocNumber) qbUpdateFields.invoiceNumber = outcome.qbDocNumber;
+    if (outcome.quickbooksSyncToken) qbUpdateFields.quickbooksSyncToken = outcome.quickbooksSyncToken;
     if (Object.keys(qbUpdateFields).length > 0) {
       await storage.updateInvoice(invoiceId, qbUpdateFields);
     }
 
-    return { quickbooksId: result.quickbooksId };
+    return { quickbooksId: outcome.quickbooksId };
   }
 
   // Function to exchange authorization code for access tokens
