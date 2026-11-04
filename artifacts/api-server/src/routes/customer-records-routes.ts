@@ -2,10 +2,61 @@ import type { Express, RequestHandler } from "express";
 import { z } from "zod/v4";
 import { eq } from "drizzle-orm";
 import { companies } from "@workspace/db/schema";
+import type { Customer, InsertCustomer } from "@workspace/db";
+import { customerRecordsLabel } from "@workspace/shared";
+import type { CustomerRecordsLock } from "../lib/customer-records-lock";
 import { db } from "../db";
 import { storage } from "../storage";
 import { getCustomerRecordsLock } from "../lib/customer-records-lock";
 import { recordAuditEvent } from "./audit-log";
+
+export type ExternalCustomerInput = {
+  name: string; email?: string; phone?: string; address?: string; quickbooksId?: string;
+};
+export type ExternalCustomerDeps = {
+  getCustomerRecordsLock(companyId: number): Promise<CustomerRecordsLock>;
+  getCustomerByQuickBooksId(companyId: number, quickbooksId: string): Promise<Customer | undefined>;
+  getCustomers(companyId: number): Promise<Customer[]>;
+  createCustomer(data: InsertCustomer): Promise<Customer>;
+};
+export type ExternalCustomerResult =
+  | { ok: true; customer: Customer; created: boolean }
+  | { ok: false; status: 409 | 422; body: { error: "CUSTOMER_AMBIGUOUS" | "CUSTOMER_NOT_FOUND"; message: string } };
+
+export async function resolveExternalCustomer(
+  companyId: number, input: ExternalCustomerInput, deps: ExternalCustomerDeps,
+): Promise<ExternalCustomerResult> {
+  const lock = await deps.getCustomerRecordsLock(companyId);
+  if (input.quickbooksId) {
+    const byQb = await deps.getCustomerByQuickBooksId(companyId, input.quickbooksId);
+    if (byQb) return { ok: true, customer: byQb, created: false };
+  }
+  const all = await deps.getCustomers(companyId);
+  if (input.email) {
+    const email = input.email.trim().toLowerCase();
+    const matches = all.filter((c) => (c.email ?? "").trim().toLowerCase() === email);
+    if (lock.locked && matches.length > 1) {
+      return { ok: false, status: 409, body: { error: "CUSTOMER_AMBIGUOUS",
+        message: `${matches.length} customers share the email ${input.email}. Send customer.quickbooksId.` } };
+    }
+    if (matches[0]) return { ok: true, customer: matches[0], created: false };
+  }
+  if (lock.locked) {
+    return { ok: false, status: 422, body: { error: "CUSTOMER_NOT_FOUND",
+      message: `No customer matches. Customer details for this company are managed in ${customerRecordsLabel(lock.systemName)}; the customer must exist in QuickBooks and be synced to IrrigoPro first. Send customer.quickbooksId.` } };
+  }
+  const byName = all.find((c) => c.name.toLowerCase() === input.name.toLowerCase());
+  if (byName) return { ok: true, customer: byName, created: false };
+  const created = await deps.createCustomer({
+    companyId,
+    name: input.name,
+    email: input.email || "",
+    phone: input.phone || undefined,
+    address: input.address || undefined,
+    notes: `Created via API integration on ${new Date().toISOString()}`,
+  });
+  return { ok: true, customer: created, created: true };
+}
 
 const settingsSchema = z.object({
   locked: z.boolean(),

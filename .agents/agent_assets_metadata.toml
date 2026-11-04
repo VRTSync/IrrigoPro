@@ -347,3 +347,87 @@ mtime_ms = 1793750288686
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/ce310495-4a1d-493a-b075-8b5cf4e1a3ad/5cc5197f-17ee-4f58-a3de-331998de5394"
 storage_version_token = "1793750299537030"
 content_type = "text/html"
+
+[[outputs]]
+id = "sQrOi_F8Ai-VyDW3U6cdc"
+uri = "file://generated-artifacts/customer-records-3c/acceptance-checklist.txt"
+type = "text"
+title = "Acceptance checklist"
+description = "Complete implementation checklist, development API counts, validation results, and explicit synthetic QuickBooks fixture limitation."
+logical_id = "5eab6e81-28fa-4054-9f70-841a0bf254ad"
+content_hash = "sha256:9d1d42b9cb034a0d0c7e7e9d44a283662f47aa6be329fdc7e6368a47c75a962a"
+size = 5109
+mtime_ms = 1793810541763
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/5eab6e81-28fa-4054-9f70-841a0bf254ad/b231a2cd-ebf9-431a-a04b-ffde3a47b215"
+storage_version_token = "1793810558288577"
+content_type = "text/plain"
+
+[[outputs]]
+id = "TQfKNjBxO1mK7ZuWUIGA8"
+uri = "file://generated-artifacts/customer-records-3c/api-billing.txt"
+type = "text"
+title = "API billing validation — 23 passed"
+description = "Actual complete output of node scripts/run-validation-lane.mjs api-billing."
+logical_id = "4eb91cdd-9ac6-4a40-a32c-579772d31efc"
+content_hash = "sha256:6ec1441e48faf92da63e696867f0fbe5b85dbd401708242509f13c61effc9dee"
+size = 194723
+mtime_ms = 1793810541759
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/4eb91cdd-9ac6-4a40-a32c-579772d31efc/68c70673-0cd5-4bb9-bc3a-5c3d35f518ae"
+storage_version_token = "1793810558787449"
+content_type = "text/plain"
+
+[[outputs]]
+id = "4HeASpb78JTF0Cwhej33s"
+uri = "file://generated-artifacts/customer-records-3c/types.txt"
+type = "text"
+title = "Types validation — 4 passed"
+description = "Actual complete output of node scripts/run-validation-lane.mjs types."
+logical_id = "d49dbb99-2d95-4255-bf76-c801669a14ff"
+content_hash = "sha256:df618682a8958e25242e16482848e03ba795807c4d14b3c4f9b08dd6bf258472"
+size = 57193
+mtime_ms = 1793810295672
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/d49dbb99-2d95-4255-bf76-c801669a14ff/24844206-e907-42e9-99f9-df321224ede4"
+storage_version_token = "1793810559566351"
+content_type = "text/plain"
+
+[[outputs]]
+id = "aEKkpcAaltVzjaLOzZjWQ"
+uri = "file://generated-artifacts/customer-records-3c/development-api.txt"
+type = "text"
+title = "Development API acceptance proof"
+description = "Redacted locked and unlocked request results, scoped customer/work-order counts, restored settings, and fixture cleanup."
+logical_id = "4e064e63-9e12-49d8-9f59-92ccbed547ba"
+content_hash = "sha256:fe5c480b537bb38b887110fa647c553ed2aa4e8ed47cc9cead43bbe426d0f32a"
+size = 1976
+mtime_ms = 1793810295676
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/4e064e63-9e12-49d8-9f59-92ccbed547ba/8c7aa917-7ca9-4607-91fc-94e555db45b2"
+storage_version_token = "1793810559993276"
+content_type = "text/plain"
+
+[[outputs]]
+id = "y1KjMX41Eaen8G3CLbNvE"
+uri = "file://generated-artifacts/customer-records-3c/external-parts-catalog.txt"
+type = "text"
+title = "External parts regression — 24 tests passed"
+description = "Actual output of the unchanged external parts catalog and API-key regression suite."
+logical_id = "9fad3b87-665c-45eb-81a3-ff4ecada5cf7"
+content_hash = "sha256:bee20c9e25e8a426bb0e8f052894c54925547ddda91a99abdbec04d602fd734e"
+size = 3018
+mtime_ms = 1793810295680
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/9fad3b87-665c-45eb-81a3-ff4ecada5cf7/6b543b42-6cd8-47d1-8999-09bc89640986"
+storage_version_token = "1793810560484620"
+content_type = "text/plain"
+
+[[outputs]]
+id = "CsGL6bWrFRPMGaSOh4JUm"
+uri = "file://generated-artifacts/customer-records-3c/newest-commit.txt"
+type = "text"
+title = "Newest commit evidence"
+description = "Final commit fec149e7 and file summary: Enforce customer-record locks in external work-order matching."
+logical_id = "20bf7a61-a835-4279-9a30-72cc8663894d"
+content_hash = "sha256:ba0a9bf46a85bfb5344bf199b306437871ab3544e685ce7564f2f26f8e66d79c"
+size = 490
+mtime_ms = 1793810541751
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/20bf7a61-a835-4279-9a30-72cc8663894d/990898c2-59cc-4984-8ffb-2df30dac3673"
+storage_version_token = "1793810561103062"
+content_type = "text/plain"

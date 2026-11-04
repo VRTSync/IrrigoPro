@@ -387,7 +387,8 @@ import { registerBillingWorkspaceBulkApproveRoutes } from "./billing-workspace-b
 import { registerManagerWorkspaceRoutes, ACTIVE_WC, APPROVED_WC } from "./manager-workspace-routes";
 import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
-import { registerCustomerRecordsRoutes } from "./customer-records-routes";
+import { registerCustomerRecordsRoutes, resolveExternalCustomer } from "./customer-records-routes";
+import { getCustomerRecordsLock } from "../lib/customer-records-lock";
 import { registerBudgetRoutes } from "./budget-routes";
 import { registerQbHealthSweepRoute } from "./qb-health-sweep-route";
 import { registerFinancialPulseRoutes } from "./financial-pulse";
@@ -15441,6 +15442,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const externalWorkOrderSchema = z.object({
         customer: z.object({
           name: z.string().min(1, "Customer name is required"),
+          quickbooksId: z.string().trim().min(1).optional(),
           email: z.string().email().optional(),
           phone: z.string().optional(),
           address: z.string().optional(),
@@ -15474,38 +15476,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { customer, workOrder } = validationResult.data;
       const companyId = req.apiKeyCompanyId!;
 
-      // Find or create the customer
-      let existingCustomer = null;
-      const allCustomers = await storage.getCustomers(companyId);
-      
-      // Try to match by email or name
-      if (customer.email) {
-        existingCustomer = allCustomers.find(c => 
-          c.email?.toLowerCase() === customer.email?.toLowerCase()
-        );
+      const resolved = await resolveExternalCustomer(companyId, customer, {
+        getCustomerRecordsLock,
+        getCustomerByQuickBooksId: (cid, qb) => storage.getCustomerByQuickBooksId(cid, qb),
+        getCustomers: (cid) => storage.getCustomers(cid),
+        createCustomer: (data) => storage.createCustomer(data),
+      });
+      if (!resolved.ok) {
+        res.status(resolved.status).json(resolved.body);
+        return;
       }
-      if (!existingCustomer) {
-        existingCustomer = allCustomers.find(c => 
-          c.name.toLowerCase() === customer.name.toLowerCase()
-        );
-      }
-
-      let customerId: number;
-      
-      if (existingCustomer) {
-        customerId = existingCustomer.id;
-      } else {
-        // Create new customer
-        const newCustomer = await storage.createCustomer({
-          companyId,
-          name: customer.name,
-          email: customer.email || '',
-          phone: customer.phone || undefined,
-          address: customer.address || undefined,
-          notes: `Created via API integration on ${new Date().toISOString()}`
-        });
-        customerId = newCustomer.id;
-      }
+      const existingCustomer = resolved.created ? null : resolved.customer;
+      const customerId = resolved.customer.id;
 
       // Find the irrigation manager for auto-assignment
       const irrigationManager = await storage.getIrrigationManagerForCompany(companyId);

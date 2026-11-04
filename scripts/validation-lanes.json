@@ -1,6 +1,10 @@
 {
   "api-billing": [
     {
+      "name": "external-customer-resolve",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 --test-reporter=spec src/routes/external-customer-resolve.test.ts"
+    },
+    {
       "name": "customer-records-shared",
       "command": "pnpm --filter @workspace/shared exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/customer-records.test.ts"
     },
