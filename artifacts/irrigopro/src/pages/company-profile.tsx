@@ -14,6 +14,7 @@ import { Loader2, Building, Mail, Phone, Globe, MapPin, Image, Upload } from "lu
 import type { Company, InsertCompany } from "@workspace/db/schema";
 import { apiRequest } from "@/lib/queryClient";
 import CompanySetup from "@/components/company/company-setup";
+import { CustomerRecordsCard } from "@/components/company/customer-records-card";
 import { ObjectUploader } from "@/components/ObjectUploader";
 
 const companyProfileSchema = z.object({
@@ -496,6 +497,8 @@ export default function CompanyProfile() {
               </form>
             </CardContent>
           </Card>
+
+          <CustomerRecordsCard companyId={companyId} canEdit={user?.role === "company_admin"} />
 
           {/* Email Templates */}
           <Card>

@@ -26,6 +26,11 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   useQuery: useQueryMock,
 }));
 
+// Collect the real form and its shared lock dependency before timed cases.
+// Importing this large module inside the first case can exhaust its timeout
+// before the preview is rendered, leaving that render in the next case.
+import { LiveBudgetPreview } from "./customer-form";
+
 describe("LiveBudgetPreview re-fetch contract", () => {
   it("calls refetch() inside a useEffect whose deps include caps + thresholds", () => {
     // Pull out the LiveBudgetPreview function body.
@@ -115,7 +120,6 @@ describe("LiveBudgetPreview rendered output", () => {
       isLoading: false,
       refetch: vi.fn(),
     });
-    const { LiveBudgetPreview } = await import("./customer-form");
     type PreviewProps = React.ComponentProps<typeof LiveBudgetPreview>;
 
     function Harness() {
@@ -170,7 +174,6 @@ describe("LiveBudgetPreview rendered output", () => {
       isLoading: false,
       refetch: vi.fn(),
     });
-    const { LiveBudgetPreview } = await import("./customer-form");
     type PreviewProps = React.ComponentProps<typeof LiveBudgetPreview>;
     function Harness() {
       const form = useForm({

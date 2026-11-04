@@ -10,6 +10,7 @@ import { Search, Plus, User, Building, Mail, Phone, MapPin } from "lucide-react"
 import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { CustomerForm } from "@/components/customer-form";
 import { useAuth } from "@/lib/auth-context";
+import { useCustomerRecordsLock } from "@/hooks/use-customer-records-lock";
 import type { Customer } from "@workspace/db/schema";
 
 interface CustomerSelectorProps {
@@ -41,7 +42,8 @@ export function CustomerSelector({
 }: CustomerSelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const { user } = useAuth();
-  const showCreate = canCreateCustomer && user?.role === "company_admin";
+  const lock = useCustomerRecordsLock();
+  const showCreate = canCreateCustomer && user?.role === "company_admin" && lock.canCreateCustomers;
   const [isOpen, setIsOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const autoOpenedRef = useRef(false);
@@ -192,6 +194,10 @@ export function CustomerSelector({
                 }
                 onSaved={(created) => handleSelectCustomer(created)}
               />
+            )}
+
+            {canCreateCustomer && user?.role === "company_admin" && lock.locked && (
+              <p className="text-xs text-slate-500 text-center">New customers are added in {lock.label}.</p>
             )}
 
             {/* Customer List */}

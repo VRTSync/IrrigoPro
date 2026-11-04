@@ -9,6 +9,7 @@ import { useState, useEffect } from "react";
 import { Switch } from "@/components/ui/switch";
 import type { Customer } from "@workspace/db/schema";
 import { CustomerForm } from "@/components/customer-form";
+import { useCustomerRecordsLock } from "@/hooks/use-customer-records-lock";
 import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { displayCustomerAddress } from "@/lib/customer-address";
 import { useToast } from "@/hooks/use-toast";
@@ -25,6 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 
 export default function AdminCustomers() {
+  const lock = useCustomerRecordsLock();
   const [searchQuery, setSearchQuery] = useState("");
   const [userRole, setUserRole] = useState<string>("company_admin");
   const queryClient = useQueryClient();
@@ -116,6 +118,7 @@ export default function AdminCustomers() {
         title="All Customers"
         subtitle="Master customer list — manage billing visibility for all customers"
         actions={
+          lock.canCreateCustomers ? (
           <CustomerForm
             trigger={
               <Button className="hidden sm:flex">
@@ -124,8 +127,12 @@ export default function AdminCustomers() {
               </Button>
             }
           />
+          ) : lock.locked ? <p className="text-sm text-slate-500">New customers are added in {lock.label}.</p> : null
         }
       />
+      {lock.locked && !lock.quickbooksConnected && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">QuickBooks is disconnected. New customers can't reach IrrigoPro until it is reconnected.</div>
+      )}
 
       <PageContent className="space-y-5">
         <div className="flex gap-4 text-sm text-slate-600">
@@ -161,9 +168,9 @@ export default function AdminCustomers() {
               <p className="text-slate-500 mb-6">
                 {searchQuery ? "No customers match your search." : "Add your first customer to get started."}
               </p>
-              {!searchQuery && (
+              {!searchQuery && (lock.canCreateCustomers ? (
                 <CustomerForm trigger={<Button><Plus className="w-4 h-4 mr-2" />Add Customer</Button>} />
-              )}
+              ) : lock.locked ? <p className="text-sm text-slate-500">New customers are added in {lock.label}.</p> : null)}
             </CardContent>
           </Card>
         ) : (
@@ -294,7 +301,7 @@ export default function AdminCustomers() {
                                   </Button>
                                 }
                               />
-                              <AlertDialog>
+                              {!(lock.locked && customer.quickbooksId) && <AlertDialog>
                                 <AlertDialogTrigger asChild>
                                   <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600" onClick={(e) => e.stopPropagation()}>
                                     <Trash2 className="w-4 h-4" />
@@ -318,7 +325,7 @@ export default function AdminCustomers() {
                                     </AlertDialogAction>
                                   </AlertDialogFooter>
                                 </AlertDialogContent>
-                              </AlertDialog>
+                              </AlertDialog>}
                             </div>
                           </td>
                         </tr>
@@ -331,13 +338,13 @@ export default function AdminCustomers() {
           </>
         )}
 
-        <CustomerForm
+        {lock.canCreateCustomers && <CustomerForm
           trigger={
             <button className="fab sm:hidden" type="button">
               <Plus className="w-7 h-7" />
             </button>
           }
-        />
+        />}
       </PageContent>
     </PageContainer>
   );

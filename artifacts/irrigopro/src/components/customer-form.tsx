@@ -21,7 +21,8 @@ import { apiRequest } from "@/lib/queryClient";
 import { insertCustomerSchema } from "@workspace/db/schema";
 import type { Customer, User } from "@workspace/db/schema";
 import { composeStructuredAddress } from "@/lib/customer-address";
-import { parseBudgetGoalInput, type BudgetStatus } from "@workspace/shared";
+import { parseBudgetGoalInput, QB_OWNED_CUSTOMER_FIELDS, type BudgetStatus } from "@workspace/shared";
+import { useCustomerRecordsLock } from "@/hooks/use-customer-records-lock";
 
 const moneyOrBlank = z
   .string()
@@ -179,6 +180,9 @@ interface CustomerFormProps {
 }
 
 export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenChange, onSaved, initialSection }: CustomerFormProps) {
+  const lock = useCustomerRecordsLock();
+  const fieldsLocked = lock.locked && !!customer;
+  const isLockedField = (field: string) => fieldsLocked && (QB_OWNED_CUSTOMER_FIELDS as readonly string[]).includes(field);
   const [open, setOpenState] = useState(defaultOpen);
   const setOpen = (next: boolean) => {
     setOpenState(next);
@@ -223,7 +227,7 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
       state: "",
       zip: "",
       country: "",
-      companyId: companyId || currentUser?.companyId || 3,
+      companyId: companyId ?? 0,
       totalControllers: 1,
       contractType: "standard",
       laborRate: "45.00",
@@ -293,13 +297,13 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
       // Task #347 — when the user has filled in any structured address part,
       // also keep the legacy single-line `address` in sync so older code
       // paths (PDFs, QuickBooks sync, list rows) keep working.
-      const structured = composeStructuredAddress(data);
+      const structured = fieldsLocked ? "" : composeStructuredAddress(data);
       const addressForServer = structured || (data.address || "");
 
       return apiRequest(endpoint, method, {
         ...data,
         annualBudgetGoal: parseBudgetGoalInput(data.annualBudgetGoal)?.toFixed(2) ?? null,
-        address: addressForServer,
+        ...(fieldsLocked ? {} : { address: addressForServer }),
         contractStartDate: data.contractStartDate ? new Date(data.contractStartDate).toISOString() : null,
         contractEndDate: data.contractEndDate ? new Date(data.contractEndDate).toISOString() : null,
       });
@@ -319,8 +323,11 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
           queryKey: [`/api/customers/${customer.id}/budget-usage`],
         });
       }
-      justSavedValues.current = variables;
-      form.reset(variables);
+      // The locked wire payload omits owned fields, but the reopened form
+      // still needs their loaded values for display and schema validation.
+      const savedValues = fieldsLocked ? { ...form.getValues(), ...variables } : variables;
+      justSavedValues.current = savedValues;
+      form.reset(savedValues);
       setOpen(false);
       onSaved?.(result as Customer);
       toast({
@@ -353,6 +360,9 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
       return;
     }
     
+    if (fieldsLocked) {
+      for (const field of QB_OWNED_CUSTOMER_FIELDS) delete (submissionData as Record<string, unknown>)[field];
+    }
     mutation.mutate({
       ...submissionData,
       companyId: submissionData.companyId as number
@@ -371,7 +381,9 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
           </DialogTitle>
         </DialogHeader>
 
-        {isLoadingUser ? (
+        {!customer && lock.locked ? (
+          <p className="text-sm text-slate-600 p-4">New customers are added in {lock.label}.</p>
+        ) : isLoadingUser || (!customer && lock.isLoading) ? (
           <div className="flex items-center justify-center p-8">
             <div className="text-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
@@ -387,6 +399,11 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
                 <CardTitle className="text-lg">Basic Information</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
+                {fieldsLocked && (
+                  <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800" data-testid="customer-details-locked-note">
+                    Customer details are managed in {lock.label}. Edit them there. They update here on the next QuickBooks sync.
+                  </div>
+                )}
                 {/* IrrigoPro Display Name — prominently styled */}
                 <div className="rounded-xl border-2 border-emerald-400 bg-emerald-50 p-4 shadow-sm">
                   <FormField
@@ -424,7 +441,7 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
                       <FormItem>
                         <FormLabel>Official Customer Name</FormLabel>
                         <FormControl>
-                          <Input placeholder="Enter official/QuickBooks customer name" {...field} />
+                          <Input placeholder="Enter official/QuickBooks customer name" {...field} disabled={isLockedField("name")} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -437,7 +454,7 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
                       <FormItem>
                         <FormLabel>Email Address</FormLabel>
                         <FormControl>
-                          <Input type="email" placeholder="Enter email address" {...field} />
+                          <Input type="email" placeholder="Enter email address" {...field} disabled={isLockedField("email")} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -452,7 +469,7 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
                       <FormItem>
                         <FormLabel>Phone Number</FormLabel>
                         <FormControl>
-                          <Input placeholder="Enter phone number" {...field} value={field.value || ""} />
+                          <Input placeholder="Enter phone number" {...field} value={field.value || ""} disabled={isLockedField("phone")} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -472,7 +489,7 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
                       <FormItem>
                         <FormLabel className="text-xs">Street</FormLabel>
                         <FormControl>
-                          <Input placeholder="123 Main St" {...field} value={field.value || ""} />
+                          <Input placeholder="123 Main St" {...field} value={field.value || ""} disabled={isLockedField("street")} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -486,7 +503,7 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
                         <FormItem>
                           <FormLabel className="text-xs">City</FormLabel>
                           <FormControl>
-                            <Input placeholder="Springfield" {...field} value={field.value || ""} />
+                            <Input placeholder="Springfield" {...field} value={field.value || ""} disabled={isLockedField("city")} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -500,7 +517,7 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
                           <FormItem>
                             <FormLabel className="text-xs">State</FormLabel>
                             <FormControl>
-                              <Input placeholder="IL" maxLength={32} {...field} value={field.value || ""} />
+                              <Input placeholder="IL" maxLength={32} {...field} value={field.value || ""} disabled={isLockedField("state")} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -513,7 +530,7 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
                           <FormItem>
                             <FormLabel className="text-xs">ZIP / Postal</FormLabel>
                             <FormControl>
-                              <Input placeholder="62704" {...field} value={field.value || ""} />
+                              <Input placeholder="62704" {...field} value={field.value || ""} disabled={isLockedField("zip")} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -528,7 +545,7 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
                       <FormItem>
                         <FormLabel className="text-xs">Country</FormLabel>
                         <FormControl>
-                          <Input placeholder="USA" {...field} value={field.value || ""} />
+                          <Input placeholder="USA" {...field} value={field.value || ""} disabled={isLockedField("country")} />
                         </FormControl>
                         <FormDescription className="text-xs">
                           Optional — defaults to USA when geocoding the address.

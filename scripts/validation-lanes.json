@@ -161,6 +161,14 @@
   ],
   "web": [
     {
+      "name": "customer-form-locked",
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/customer-form-locked.test.tsx"
+    },
+    {
+      "name": "customer-records-card",
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/company/customer-records-card.test.tsx"
+    },
+    {
       "name": "customer-selector-one-modal",
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/ui/customer-selector.test.tsx"
     },

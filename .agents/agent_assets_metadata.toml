@@ -333,3 +333,17 @@ mtime_ms = 1793743742408
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/39ed77f8-0f71-4ec4-a779-a78aaf9503fb/becded3e-f1c5-4461-8611-b78ee5fde5f1"
 storage_version_token = "1793743743116583"
 content_type = "text/html"
+
+[[outputs]]
+id = "xntGQMQYEy56uKV7ndJ5d"
+uri = "file://generated-artifacts/customer-records/acceptance.html"
+type = "html"
+title = "Customer Records Lock — acceptance evidence"
+description = "Development screenshots, full passing web/types outputs, locked rate-save request and persistence proof, restored settings, and the explicitly documented manager-route limitation."
+logical_id = "ce310495-4a1d-493a-b075-8b5cf4e1a3ad"
+content_hash = "sha256:56fac814d6f355cbf91db2a2fa29b6d09dc0d67d7753be3129f7719b0cf1d4fc"
+size = 1825804
+mtime_ms = 1793750288686
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/ce310495-4a1d-493a-b075-8b5cf4e1a3ad/5cc5197f-17ee-4f58-a3de-331998de5394"
+storage_version_token = "1793750299537030"
+content_type = "text/html"

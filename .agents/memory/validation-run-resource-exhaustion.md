@@ -52,6 +52,16 @@ against the real response contract, and await the actual outcome. Keep relevant
 components real; isolate unrelated features locally rather than widening
 timeouts. Verify targeted fixes under the unchanged concurrent lanes.
 
+For render-only suites, collect large shared feature modules before timed cases
+rather than cold-importing them inside the first case.
+
+**Why:** Import work can outlive a case's timeout and cleanup, then mount its UI
+late in the next case. Follow-on duplicate-element errors can therefore hide the
+original import timeout rather than indicate a broken selector.
+
+**How to apply:** Keep the actual component and hoisted dependency mocks; move
+module loading to collection instead of increasing case or global deadlines.
+
 For a focused Vitest validation under PID pressure, setting only `--maxWorkers=1`
 can fail before tests run with "options.minThreads and options.maxThreads must not
 conflict." Set **both** `--maxWorkers=1 --minWorkers=1` (or use the single-fork

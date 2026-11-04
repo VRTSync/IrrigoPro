@@ -9,8 +9,16 @@ const state = vi.hoisted(() => ({
   role: "company_admin" as string | null,
   stubForm: false,
   apiRequest: vi.fn(),
+  locked: false,
+  loading: false,
 }));
 
+vi.mock("@/hooks/use-customer-records-lock", () => ({
+  useCustomerRecordsLock: () => ({
+    locked: state.locked, isLoading: state.loading, label: "High Plains CRM",
+    canCreateCustomers: !state.loading && !state.locked,
+  }),
+}));
 vi.mock("@/lib/auth-context", () => ({
   useAuth: () => ({ user: state.role ? { id: 7, companyId: 3, role: state.role } : null }),
 }));
@@ -76,12 +84,38 @@ beforeEach(() => {
     disconnect() {}
   });
   state.role = "company_admin";
+  state.locked = false;
+  state.loading = false;
   state.stubForm = false;
   state.apiRequest.mockReset();
   localStorage.setItem("user", JSON.stringify({ id: 7, companyId: 3, role: "company_admin" }));
 });
 
 describe("one shared customer modal in the selector", () => {
+  it("replaces creation with the shared message for locked company admins", () => {
+    state.locked = true;
+    mount(<CustomerSelector onSelectCustomer={vi.fn()} />);
+    openPicker();
+    expect(screen.queryByRole("button", { name: "Create New Customer" })).not.toBeInTheDocument();
+    expect(screen.getByText("New customers are added in High Plains CRM.")).toBeInTheDocument();
+  });
+
+  it("does not show creation or replacement text while loading", () => {
+    state.loading = true;
+    mount(<CustomerSelector onSelectCustomer={vi.fn()} />);
+    openPicker();
+    expect(screen.queryByRole("button", { name: "Create New Customer" })).not.toBeInTheDocument();
+    expect(screen.queryByText("New customers are added in High Plains CRM.")).not.toBeInTheDocument();
+  });
+
+  it.each(["billing_manager", "company_admin"])("honors opt-out while locked for %s", (role) => {
+    state.role = role;
+    state.locked = true;
+    mount(<CustomerSelector canCreateCustomer={false} onSelectCustomer={vi.fn()} />);
+    openPicker();
+    expect(screen.queryByText("New customers are added in High Plains CRM.")).not.toBeInTheDocument();
+  });
+
   it("opens the real full Add New Customer form for company admins", async () => {
     mount(<CustomerSelector onSelectCustomer={vi.fn()} />);
     openPicker();

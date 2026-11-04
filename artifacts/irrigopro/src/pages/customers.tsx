@@ -12,6 +12,7 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import type { Customer } from "@workspace/db/schema";
 import { CustomerForm } from "@/components/customer-form";
+import { useCustomerRecordsLock } from "@/hooks/use-customer-records-lock";
 import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { displayCustomerAddress } from "@/lib/customer-address";
 import { useToast } from "@/hooks/use-toast";
@@ -28,6 +29,7 @@ import {
 } from "@/components/ui/alert-dialog";
 
 export default function Customers() {
+  const lock = useCustomerRecordsLock();
   const [searchQuery, setSearchQuery] = useState("");
   const [userRole, setUserRole] = useState<string>("company_admin");
   const [activeExpanded, setActiveExpanded] = useState(true);
@@ -119,7 +121,7 @@ export default function Customers() {
         title="Customers"
         subtitle="Manage your customer database"
         actions={
-          (userRole === 'company_admin' || userRole === 'super_admin') && (
+          (userRole === 'company_admin' || userRole === 'super_admin') && (lock.canCreateCustomers ? (
             <CustomerForm
               trigger={
                 <Button className="hidden sm:flex" data-testid="button-add-customer">
@@ -128,7 +130,7 @@ export default function Customers() {
                 </Button>
               }
             />
-          )
+          ) : lock.locked ? <p className="text-sm text-slate-500">New customers are added in {lock.label}.</p> : null)
         }
       />
 
@@ -305,7 +307,7 @@ export default function Customers() {
                                         <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-900" onClick={(e) => { e.stopPropagation(); setLocation(`/customers/${customer.id}/profile`); }}>
                                           <Eye className="w-4 h-4" />
                                         </Button>
-                                        {(userRole === 'company_admin' || userRole === 'super_admin') && (
+                                        {(userRole === 'company_admin' || userRole === 'super_admin') && !(lock.locked && customer.quickbooksId) && (
                                           <AlertDialog>
                                             <AlertDialogTrigger asChild>
                                               <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600" onClick={(e) => e.stopPropagation()}><Trash2 className="w-4 h-4" /></Button>
@@ -353,7 +355,7 @@ export default function Customers() {
                         : "Get started by adding your first customer."
                     }
                   </p>
-                  {(userRole === 'company_admin' || userRole === 'super_admin') && (
+                  {(userRole === 'company_admin' || userRole === 'super_admin') && (lock.canCreateCustomers ? (
                     <CustomerForm
                       trigger={
                         <Button data-testid="button-add-customer-empty">
@@ -362,7 +364,7 @@ export default function Customers() {
                         </Button>
                       }
                     />
-                  )}
+                  ) : lock.locked ? <p className="text-sm text-slate-500">New customers are added in {lock.label}.</p> : null)}
                 </CardContent>
               </Card>
             )}
@@ -372,7 +374,7 @@ export default function Customers() {
       </PageContent>
 
       {/* FAB for Mobile - Admin Users Only */}
-      {(userRole === 'company_admin' || userRole === 'super_admin') && (
+      {(userRole === 'company_admin' || userRole === 'super_admin') && lock.canCreateCustomers && (
         <CustomerForm
           trigger={
             <button 
