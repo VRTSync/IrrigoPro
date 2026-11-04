@@ -1,3 +1,4 @@
+import { applyQbCustomers } from "../lib/qb-customer-sync";
 import express, { type Express } from "express";
 import type { Request, Response } from "express";
 import { createServer, type Server } from "http";
@@ -9112,117 +9113,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      console.log(`Found ${qbCustomers.length} active customers in QuickBooks`);
-      
-      const quickBooksCustomers = (qbCustomers as Record<string, unknown>[]).map((customer: Record<string, unknown>) => {
-        const billAddr = customer.BillAddr as Record<string, string> | undefined;
-        const line1 = billAddr?.Line1 || '';
-        const line2 = billAddr?.Line2 || '';
-        const line3 = billAddr?.Line3 || '';
-        const streetParts = [line1, line2, line3].filter(Boolean);
-        const street = streetParts.join(', ');
-        const city = billAddr?.City || '';
-        const state = billAddr?.CountrySubDivisionCode || '';
-        const zip = billAddr?.PostalCode || '';
-        const country = billAddr?.Country || '';
-        const addressParts = [street, city, state, zip].filter(Boolean);
-        return {
-          qb_id: customer.Id as string,
-          name: (String(customer.DisplayName || '').trim() || String(customer.CompanyName || '').trim() || String(customer.Name || '').trim()),
-          email: ((customer.PrimaryEmailAddr as Record<string, string> | undefined)?.Address || ''),
-          phone: ((customer.PrimaryPhone as Record<string, string> | undefined)?.FreeFormNumber || ''),
-          address: addressParts.join(' ').trim(),
-          street,
-          city,
-          state,
-          zip,
-          country,
-        };
+      let termNames: Map<string, string> | null = null;
+      let termsError: string | undefined;
+      try {
+        const response = await makeQuickBooksRequest(
+          `${apiBase}/v3/company/${integration.realmId}/query?query=${encodeURIComponent("SELECT * FROM Term")}`,
+          { headers: { Authorization: `Bearer ${integration.accessToken}`, Accept: "application/json" } },
+          "Terms Query", integration.realmId,
+        );
+        if (!response.ok) throw new Error(String(response.status));
+        const data = await response.json() as { QueryResponse?: { Term?: Array<{ Id: string; Name: string }> } };
+        termNames = new Map((data.QueryResponse?.Term ?? []).map(term => [term.Id, term.Name]));
+      } catch (error) {
+        termsError = `Could not read QuickBooks terms: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      const summary = await applyQbCustomers({
+        companyId, qbCustomers, termNames, termsError,
+        deps: {
+          getCustomerRecordsLock,
+          getCustomerByQuickBooksId: (cid, qb) => storage.getCustomerByQuickBooksId(cid, qb),
+          createCustomer: (d) => storage.createCustomer(d),
+          updateCustomer: (id, d) => storage.updateCustomer(id, d),
+        },
       });
-
-      // Returns only the subset of fields that QB actually has a non-empty value for.
-      // email is NOT NULL in the schema so it is only included when non-empty.
-      function qbFields(qb: typeof quickBooksCustomers[number]): Record<string, string> {
-        const patch: Record<string, string> = {};
-        if (qb.name) patch.name = qb.name;
-        if (qb.email) patch.email = qb.email;
-        if (qb.phone) patch.phone = qb.phone;
-        if (qb.address) patch.address = qb.address;
-        if (qb.street) patch.street = qb.street;
-        if (qb.city) patch.city = qb.city;
-        if (qb.state) patch.state = qb.state;
-        if (qb.zip) patch.zip = qb.zip;
-        if (qb.country) patch.country = qb.country;
-        return patch;
-      }
-      
-      console.log(`After mapping: ${quickBooksCustomers.length} customers to process`);
-      
-      const validCustomers = quickBooksCustomers.filter(customer => customer.name && customer.name.trim() !== '');
-
-      let customersAdded = 0;
-      let customersUpdated = 0;
-      let customersUnchanged = 0;
-      const results = [];
-
-      console.log(`Processing ${validCustomers.length} valid customers`);
-      
-      for (const qbCustomer of validCustomers) {
-        try {
-          // Check if customer already exists
-          const existingCustomer = await storage.getCustomerByQuickBooksId(companyId, qbCustomer.qb_id);
-          
-          if (!existingCustomer) {
-            // Create new customer from QuickBooks data with QuickBooks ID mapping
-            const newCustomer = await storage.createCustomer({
-              name: qbCustomer.name,
-              email: qbCustomer.email,
-              phone: qbCustomer.phone || '',
-              address: qbCustomer.address || '',
-              street: qbCustomer.street || null,
-              city: qbCustomer.city || null,
-              state: qbCustomer.state || null,
-              zip: qbCustomer.zip || null,
-              country: qbCustomer.country || null,
-              quickbooksId: qbCustomer.qb_id,
-              companyId: companyId
-            });
-            
-            customersAdded++;
-            results.push({ action: 'created', customer: newCustomer });
-          } else {
-            // Non-destructive update: only write fields QB actually provides
-            const patch = qbFields(qbCustomer);
-
-            // Change detection: skip the DB write if nothing actually changed
-            const existingAny = existingCustomer as Record<string, unknown>;
-            const changed = Object.keys(patch).some(
-              k => patch[k] !== (existingAny[k] ?? '')
-            );
-
-            if (!changed) {
-              customersUnchanged++;
-              results.push({ action: 'unchanged', customer: existingCustomer });
-            } else {
-              const updatedCustomer = await storage.updateCustomer(existingCustomer.id, patch);
-              customersUpdated++;
-              results.push({ action: 'updated', customer: updatedCustomer ?? existingCustomer });
-            }
-          }
-        } catch (error) {
-          console.error(`Error syncing customer ${qbCustomer.name}:`, error);
-          results.push({ action: 'error', customer: qbCustomer, error: error instanceof Error ? error.message : String(error) });
-        }
-      }
-
       res.json({
-        success: true,
-        customersAdded,
-        customersUpdated,
-        customersUnchanged,
-        totalCustomers: quickBooksCustomers.length,
-        results,
-        message: `${customersAdded} added, ${customersUpdated} updated, ${customersUnchanged} unchanged`
+        success: true, ...summary,
+        message: `${summary.customersAdded} added, ${summary.customersUpdated} updated, ${summary.customersUnchanged} unchanged` +
+          (summary.unmappedTerms.length ? `; payment terms not recognized: ${summary.unmappedTerms.join(", ")}` : ""),
       });
 
     } catch (error) {

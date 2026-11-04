@@ -1,6 +1,10 @@
 {
   "api-billing": [
     {
+      "name": "qb-customer-sync",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/lib/qb-customer-sync.test.ts"
+    },
+    {
       "name": "external-customer-resolve",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 --test-reporter=spec src/routes/external-customer-resolve.test.ts"
     },

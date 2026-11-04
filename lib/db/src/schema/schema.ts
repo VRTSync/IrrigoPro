@@ -109,6 +109,16 @@ export const customers = pgTable("customers", {
   state: text("state"),
   zip: text("zip"),
   country: text("country"),
+  // QuickBooks-owned details when the company's customer records are locked.
+  companyName: text("company_name"),
+  contactFirstName: text("contact_first_name"),
+  contactLastName: text("contact_last_name"),
+  mobilePhone: text("mobile_phone"),
+  serviceStreet: text("service_street"),
+  serviceCity: text("service_city"),
+  serviceState: text("service_state"),
+  serviceZip: text("service_zip"),
+  qbLastUpdatedAt: timestamp("qb_last_updated_at", { withTimezone: true }),
   // Irrigation system details
   totalControllers: integer("total_controllers").default(1), // Number of controllers (1-26)
   // Contract-based billing rates

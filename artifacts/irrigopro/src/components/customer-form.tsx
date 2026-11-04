@@ -60,6 +60,14 @@ const customerFormSchema = insertCustomerSchema.extend({
   state: z.string().optional(),
   zip: z.string().optional(),
   country: z.string().optional(),
+  companyName: z.string().optional(),
+  contactFirstName: z.string().optional(),
+  contactLastName: z.string().optional(),
+  mobilePhone: z.string().optional(),
+  serviceStreet: z.string().optional(),
+  serviceCity: z.string().optional(),
+  serviceState: z.string().optional(),
+  serviceZip: z.string().optional(),
   // Task #687 — budget caps + alert routing. Caps are strings on the wire
   // (matches laborRate convention so the existing apiRequest path passes
   // them through unchanged); thresholds are integers; channels is a
@@ -141,6 +149,14 @@ function customerToFormValues(customer: Customer): CustomerFormData {
     state: customer.state || "",
     zip: customer.zip || "",
     country: customer.country || "",
+    companyName: customer.companyName || "",
+    contactFirstName: customer.contactFirstName || "",
+    contactLastName: customer.contactLastName || "",
+    mobilePhone: customer.mobilePhone || "",
+    serviceStreet: customer.serviceStreet || "",
+    serviceCity: customer.serviceCity || "",
+    serviceState: customer.serviceState || "",
+    serviceZip: customer.serviceZip || "",
     companyId: customer.companyId,
     totalControllers: customer.totalControllers || 1,
     contractType: toContractType(customer.contractType),
@@ -227,6 +243,14 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
       state: "",
       zip: "",
       country: "",
+      companyName: "",
+      contactFirstName: "",
+      contactLastName: "",
+      mobilePhone: "",
+      serviceStreet: "",
+      serviceCity: "",
+      serviceState: "",
+      serviceZip: "",
       companyId: companyId ?? 0,
       totalControllers: 1,
       contractType: "standard",
@@ -477,6 +501,36 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
                   />
                 </div>
 
+                <FormField control={form.control} name="companyName" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Company Name</FormLabel>
+                    <FormControl><Input {...field} value={field.value || ""} disabled={isLockedField("companyName")} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField control={form.control} name="contactFirstName" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Billing Contact First Name</FormLabel>
+                      <FormControl><Input {...field} value={field.value || ""} disabled={isLockedField("contactFirstName")} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form.control} name="contactLastName" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Last Name</FormLabel>
+                      <FormControl><Input {...field} value={field.value || ""} disabled={isLockedField("contactLastName")} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+                <FormField control={form.control} name="mobilePhone" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Mobile Phone</FormLabel>
+                    <FormControl><Input {...field} value={field.value || ""} disabled={isLockedField("mobilePhone")} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
                 {/* Structured address (Task #347) — better geocoding + search.
                     The legacy single-line `address` is hidden but still
                     populated from these parts on submit for back-compat. */}
@@ -555,6 +609,39 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
                     )}
                   />
                   <AddressPreview form={form} />
+                  <p className="text-xs font-medium text-slate-500 mt-2">Service address (if different from billing)</p>
+                  <FormField control={form.control} name="serviceStreet" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs">Service Street</FormLabel>
+                      <FormControl><Input placeholder="123 Main St" {...field} value={field.value || ""} disabled={isLockedField("serviceStreet")} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <FormField control={form.control} name="serviceCity" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs">Service City</FormLabel>
+                        <FormControl><Input placeholder="Springfield" {...field} value={field.value || ""} disabled={isLockedField("serviceCity")} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <div className="grid grid-cols-2 gap-4">
+                      <FormField control={form.control} name="serviceState" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs">Service State</FormLabel>
+                          <FormControl><Input placeholder="IL" maxLength={32} {...field} value={field.value || ""} disabled={isLockedField("serviceState")} /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                      <FormField control={form.control} name="serviceZip" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs">Service ZIP / Postal</FormLabel>
+                          <FormControl><Input placeholder="62704" {...field} value={field.value || ""} disabled={isLockedField("serviceZip")} /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                    </div>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField
@@ -653,7 +740,7 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
                       <FormLabel>Payment Terms</FormLabel>
                       <Select onValueChange={field.onChange} defaultValue={field.value}>
                         <FormControl>
-                          <SelectTrigger>
+                          <SelectTrigger disabled={isLockedField("paymentTerms")}>
                             <SelectValue placeholder="Select payment terms" />
                           </SelectTrigger>
                         </FormControl>

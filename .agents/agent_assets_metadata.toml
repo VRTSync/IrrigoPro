@@ -431,3 +431,17 @@ mtime_ms = 1793810541751
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/20bf7a61-a835-4279-9a30-72cc8663894d/990898c2-59cc-4984-8ffb-2df30dac3673"
 storage_version_token = "1793810561103062"
 content_type = "text/plain"
+
+[[outputs]]
+id = "fliKKpo-ZM11tHKJS3hTt"
+uri = "file://generated-artifacts/customer-qb-field-map/acceptance-evidence.html"
+type = "html"
+title = "QuickBooks field-map validation evidence"
+description = "Full api-billing, web, and types output; development schema proof; and the four sandbox checks explicitly blocked by reconnection."
+logical_id = "c980a0b8-c7f4-4719-8bb0-75dfba0f12d7"
+content_hash = "sha256:3357b6939c891886c516011507738bc2314fb60a8c7c1d4f554c4a513a7525e2"
+size = 386976
+mtime_ms = 1793832352713
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/c980a0b8-c7f4-4719-8bb0-75dfba0f12d7/75c0908f-7b36-4bcf-8d1e-11cc59ac7d4a"
+storage_version_token = "1793832353442954"
+content_type = "text/html"

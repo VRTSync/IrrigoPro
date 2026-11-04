@@ -1,0 +1,9 @@
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_name text;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS contact_first_name text;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS contact_last_name text;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS mobile_phone text;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS service_street text;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS service_city text;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS service_state text;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS service_zip text;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS qb_last_updated_at timestamptz;

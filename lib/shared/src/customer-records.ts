@@ -1,8 +1,10 @@
 /** Customer fields owned by QuickBooks when a company's customer records are locked.
- * The QuickBooks customer sync writes exactly these. Customer Records Slice 4 appends to it.
+ * The QuickBooks customer sync owns these details, but not bookkeeping timestamps.
  * Every lock check (server and client) reads this list. Never copy it. */
 export const QB_OWNED_CUSTOMER_FIELDS = [
   "name", "email", "phone", "address", "street", "city", "state", "zip", "country",
+  "companyName", "contactFirstName", "contactLastName", "mobilePhone",
+  "serviceStreet", "serviceCity", "serviceState", "serviceZip", "paymentTerms",
 ] as const;
 export type QbOwnedCustomerField = (typeof QB_OWNED_CUSTOMER_FIELDS)[number];
 

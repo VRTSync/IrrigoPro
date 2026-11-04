@@ -93,11 +93,14 @@ describe("company-scoped QuickBooks lookup (real development database)", () => {
 
 describe("customer sync source guards", () => {
   it("uses the scoped lookup without a company fallback or cross-company skip", () => {
-    assert.match(handler, /getCustomerByQuickBooksId\(companyId,/);
+    const sync = readFileSync(new URL("lib/qb-customer-sync.ts", sourceRoot), "utf8");
+    assert.match(handler, /applyQbCustomers\(\{\s*companyId,/);
+    assert.match(handler, /getCustomerByQuickBooksId: \(cid, qb\) => storage\.getCustomerByQuickBooksId\(cid, qb\)/);
+    assert.match(sync, /deps\.getCustomerByQuickBooksId\(companyId, mapped\.qbId\)/);
     assert.ok(!handler.includes(["parseInt(userCompanyId ||", " '1')"].join("")));
     assert.ok(!handler.includes(["skipped", "other", "company"].join("_")));
     assert.match(handler, /getQuickBooksIntegrationByCompanyId\(userCompanyId\)/);
-    assert.match(handler, /companyId: companyId/);
+    assert.match(sync, /companyId, quickbooksId: mapped\.qbId/);
   });
 
   it("rejects invalid company context before integration lookup or processing", () => {
