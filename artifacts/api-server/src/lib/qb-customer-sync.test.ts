@@ -17,7 +17,7 @@ const raw = {
 const mapped = () => mapQbCustomer(raw, terms);
 function customer(overrides: Partial<Customer> = {}): Customer {
   return {
-    id: 1, companyId: 7,
+    id: 1, companyId: 7, hiddenFromBilling: false, hiddenByQuickbooks: false,
     ...Object.fromEntries(QB_OWNED_CUSTOMER_FIELDS.map(field => [field, mapped()[field]])),
     qbLastUpdatedAt: mapped().qbLastUpdatedAt, ...overrides,
   } as Customer;
@@ -40,7 +40,7 @@ function harness(existing: Record<string, Customer> = {}, locked = true) {
 describe("QuickBooks customer mapping and application (database-free)", () => {
   it("1. maps every field with trimmed address lines and country-free legacy address", () => {
     assert.deepEqual(mapped(), {
-      qbId: "101", qbParentId: null, name: "Acme", companyName: "Acme LLC", contactFirstName: "Pat", contactLastName: "Smith",
+      qbId: "101", active: true, qbParentId: null, name: "Acme", companyName: "Acme LLC", contactFirstName: "Pat", contactLastName: "Smith",
       email: "a@example.invalid", phone: "111", mobilePhone: "222",
       street: "1 Main St, Ste 2", city: "Denver", state: "CO", zip: "80202", country: "US",
       address: "1 Main St, Ste 2 Denver CO 80202", serviceStreet: "2 Service St, Floor 3, Unit B",
@@ -144,14 +144,82 @@ describe("QuickBooks customer mapping and application (database-free)", () => {
 // No routes import, database, credentials, or network is needed.
 const source = readFileSync(new URL("../routes/routes.ts", import.meta.url), "utf8");
 const handler = source.slice(source.indexOf('app.post("/api/quickbooks/sync-customers"'), source.indexOf('\n  });', source.indexOf('app.post("/api/quickbooks/sync-customers"')));
-const fetchSource = source.slice(source.indexOf("  async function fetchActiveQbCustomers("), source.indexOf("  async function fetchQbCustomerById("));
+const fetchSource = source.slice(source.indexOf("  async function fetchAllQbCustomers("), source.indexOf("  async function fetchQbCustomerById("));
+describe("QuickBooks visibility ownership", () => {
+  for (const locked of [true, false]) {
+    it(`hides a visible linked customer using only visibility fields (locked=${locked})`, async () => {
+      const { deps, calls } = harness({ "101": customer({ name: "Local", email: "local@example.invalid", phone: "old" }) }, locked);
+      const result = await applyQbCustomers({ companyId: 7, termNames: terms, deps, qbCustomers: [{ ...raw, Active: false }] });
+      assert.deepEqual(calls.updates, [[1, { hiddenFromBilling: true, hiddenByQuickbooks: true }]]);
+      assert.equal(result.hiddenByQuickbooks, 1);
+      assert.equal(result.customersUpdated, 1);
+      assert.equal(result.results[0].action, "updated");
+    });
+    it(`leaves an already-hidden linked customer completely unchanged (locked=${locked})`, async () => {
+      for (const hiddenByQuickbooks of [false, true]) {
+        const { deps, calls } = harness({ "101": customer({ hiddenFromBilling: true, hiddenByQuickbooks, phone: "old" }) }, locked);
+        const result = await applyQbCustomers({ companyId: 7, termNames: terms, deps, qbCustomers: [{ ...raw, Active: false }] });
+        assert.deepEqual(calls.updates, []);
+        assert.equal(result.customersUnchanged, 1);
+        assert.equal(result.hiddenByQuickbooks, 0);
+      }
+    });
+    it(`restores QB-hidden visibility and combines the normal field patch (locked=${locked})`, async () => {
+      const { deps, calls } = harness({ "101": customer({ hiddenFromBilling: true, hiddenByQuickbooks: true, phone: null }) }, locked);
+      const result = await applyQbCustomers({ companyId: 7, termNames: terms, deps, qbCustomers: [{ ...raw, Active: true }] });
+      assert.deepEqual(calls.updates, [[1, { phone: "111", hiddenFromBilling: false, hiddenByQuickbooks: false }]]);
+      assert.equal(result.unhiddenByQuickbooks, 1);
+      assert.equal(result.customersUpdated, 1);
+    });
+    it(`counts visibility-only restoration as updated (locked=${locked})`, async () => {
+      const { deps, calls } = harness({ "101": customer({ hiddenFromBilling: true, hiddenByQuickbooks: true }) }, locked);
+      const result = await applyQbCustomers({ companyId: 7, termNames: terms, deps, qbCustomers: [raw] });
+      assert.deepEqual(calls.updates, [[1, { hiddenFromBilling: false, hiddenByQuickbooks: false }]]);
+      assert.equal(result.customersUpdated, 1);
+      assert.equal(result.customersUnchanged, 0);
+      assert.equal(result.unhiddenByQuickbooks, 1);
+    });
+    it(`never changes manually-hidden visibility on active rows (locked=${locked})`, async () => {
+      const { deps, calls } = harness({ "101": customer({ hiddenFromBilling: true, phone: null }) }, locked);
+      const result = await applyQbCustomers({ companyId: 7, termNames: terms, deps, qbCustomers: [{ ...raw, Active: true }] });
+      assert.deepEqual(calls.updates, [[1, { phone: "111" }]]);
+      assert.equal(result.unhiddenByQuickbooks, 0);
+    });
+    it(`ignores inactive unlinked rows before every review guard (locked=${locked})`, async () => {
+      const { deps, calls } = harness({}, locked);
+      deps.getReviewRow = async () => { throw new Error("must not read reviews"); };
+      deps.getUnlinkedCustomers = async () => [{ id: 2, name: "Acme" }];
+      const result = await applyQbCustomers({ companyId: 7, termNames: terms, deps,
+        qbCustomers: [{ ...raw, Active: false, ParentRef: { value: "parent" } }] });
+      assert.equal(result.ignored, 1);
+      assert.equal(result.results[0].action, "ignored");
+      assert.equal(result.heldForReview, 0);
+      assert.deepEqual(calls.creates, []);
+      assert.deepEqual(calls.reviews, []);
+    });
+    it(`treats missing Active as active for creation (locked=${locked})`, async () => {
+      const { deps, calls } = harness({}, locked);
+      const result = await applyQbCustomers({ companyId: 7, termNames: terms, deps, qbCustomers: [raw] });
+      assert.equal(mapQbCustomer(raw, terms).active, true);
+      assert.equal(result.customersAdded, 1);
+      assert.equal(calls.creates.length, 1);
+      assert.equal(result.hiddenByQuickbooks, 0);
+    });
+    it(`handles a nameless inactive row without losing the visibility change (locked=${locked})`, async () => {
+      const { deps, calls } = harness({ "101": customer() }, locked);
+      const result = await applyQbCustomers({ companyId: 7, termNames: null, deps, qbCustomers: [{ Id: "101", Active: false }, { Id: "unlinked", Active: false }] });
+      assert.deepEqual(calls.updates, [[1, { hiddenFromBilling: true, hiddenByQuickbooks: true }]]);
+      assert.deepEqual(result.results.map(row => row.action), ["updated", "ignored"]);
+    });
+  }
+});
 describe("manual sync handler delegation (database-free)", () => {
   it("handler-scoped guard retains pagination and delegates without qbFields", () => {
     assert.match(handler, /runCustomerPull\(integration, "manual", pullDeps\)/);
     assert.doesNotMatch(handler, /applyQbCustomers\(/);
     assert.doesNotMatch(handler, /function qbFields/);
-    assert.match(fetchSource, /WHERE Active = true STARTPOSITION/);
-    assert.match(source, /fetchFull: integration => fetchActiveQbCustomers\(integration, customerPullApiBase\)/);
+    assert.match(fetchSource, /WHERE Active IN \(true, false\) STARTPOSITION/);
+    assert.match(source, /fetchFull: integration => fetchAllQbCustomers\(integration, customerPullApiBase\)/);
     assert.equal((source.match(/SELECT \* FROM Term/g) ?? []).length, 1);
     assert.match(source, /"Terms Query", integration\.realmId/);
     assert.match(handler, /payment terms not recognized:/);
@@ -280,21 +348,21 @@ describe("shared QuickBooks customer reads (injected transport, no database)", (
     const { transform } = await import("esbuild");
     const singleSource = source.slice(source.indexOf("  async function fetchQbCustomerById("), source.indexOf("  async function fetchQbTermNames("));
     const compiled = await transform(fetchSource + singleSource, { loader: "ts", target: "es2022" });
-    return new Function("makeQuickBooksRequest", "console", `${compiled.code}; return { fetchActiveQbCustomers, fetchQbCustomerById };`)(
+    return new Function("makeQuickBooksRequest", "console", `${compiled.code}; return { fetchAllQbCustomers, fetchQbCustomerById };`)(
       request, { log() {}, error() {} });
   }
-  it("pages active customers with 1000 rows, same realm/auth/base and refresh-aware transport", async () => {
+  it("pages all customers with 1000 rows, same realm/auth/base and refresh-aware transport", async () => {
     const calls: any[][] = [];
     const helpers = await readers(async (...args: any[]) => {
       calls.push(args);
       return { ok: true, json: async () => ({ QueryResponse: { Customer: calls.length === 1
         ? Array.from({ length: 1000 }, (_, n) => ({ Id: String(n) })) : [{ Id: "last" }] } }) };
     });
-    const result = await helpers.fetchActiveQbCustomers({ realmId: "realm", accessToken: "fixture" }, "https://sandbox-quickbooks.api.intuit.com");
+    const result = await helpers.fetchAllQbCustomers({ realmId: "realm", accessToken: "fixture" }, "https://sandbox-quickbooks.api.intuit.com");
     assert.equal(result.customers.length, 1001);
     assert.equal(calls.length, 2);
-    assert.equal(new URL(calls[0][0]).searchParams.get("query"), "SELECT * FROM Customer WHERE Active = true STARTPOSITION 1 MAXRESULTS 1000");
-    assert.equal(new URL(calls[1][0]).searchParams.get("query"), "SELECT * FROM Customer WHERE Active = true STARTPOSITION 1001 MAXRESULTS 1000");
+    assert.equal(new URL(calls[0][0]).searchParams.get("query"), "SELECT * FROM Customer WHERE Active IN (true, false) STARTPOSITION 1 MAXRESULTS 1000");
+    assert.equal(new URL(calls[1][0]).searchParams.get("query"), "SELECT * FROM Customer WHERE Active IN (true, false) STARTPOSITION 1001 MAXRESULTS 1000");
     for (const [url, options, operation, realm] of calls) {
       assert.ok(url.startsWith("https://sandbox-quickbooks.api.intuit.com/v3/company/realm/"));
       assert.equal(options.headers.Authorization, "Bearer fixture");
@@ -306,7 +374,7 @@ describe("shared QuickBooks customer reads (injected transport, no database)", (
     for (const status of [401, 403, 500]) {
       const helpers = await readers(async () => ({ ok: false, status, text: async () => "failure",
         headers: { get: () => "fixture-tid" } }));
-      const result = await helpers.fetchActiveQbCustomers({ realmId: "realm", accessToken: "fixture" }, "https://quickbooks.api.intuit.com");
+      const result = await helpers.fetchAllQbCustomers({ realmId: "realm", accessToken: "fixture" }, "https://quickbooks.api.intuit.com");
       assert.deepEqual(result, status === 401 || status === 403 ? {
         ok: false, status: 403, message: "QuickBooks authorization expired or invalid. Please reconnect to QuickBooks.", needsReconnection: true,
       } : { ok: false, status: 500, message: "Failed to fetch customers from QuickBooks: 500 [TID: fixture-tid]" });

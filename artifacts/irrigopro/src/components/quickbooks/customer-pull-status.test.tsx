@@ -72,12 +72,14 @@ describe("existing QuickBooks card's real sync mutation", () => {
     render(<QueryClientProvider client={h.client}><QuickBooksIntegration /></QueryClientProvider>);
     return h;
   }
-  it("Sync now immediately invalidates status as well as both customer queries", async () => {
+  it("Sync now immediately invalidates status, lists and cached customer profiles", async () => {
     const statusRead = vi.fn(async () => ({ ...empty, lastSuccessAt: new Date().toISOString() }));
     const h = card(statusRead);
+    h.client.setQueryData(["/api/customers/123"], { hiddenFromBilling: false });
     const invalidation = vi.spyOn(h.client, "invalidateQueries");
     mocks.apiRequest.mockResolvedValue({ message: "1 added, 0 updated, 0 unchanged" });
     fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+    await waitFor(() => expect(h.client.getQueryState(["/api/customers/123"])?.isInvalidated).toBe(true));
     await waitFor(() => expect(invalidation).toHaveBeenCalledWith({ queryKey: key }));
     expect(invalidation).toHaveBeenCalledWith({ queryKey: ["/api/customers"] });
     expect(invalidation).toHaveBeenCalledWith({ queryKey: ["/api/customers/billing-preview"] });

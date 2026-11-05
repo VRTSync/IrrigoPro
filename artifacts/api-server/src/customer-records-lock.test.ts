@@ -58,6 +58,9 @@ describe("customer records lock (real development database)", { concurrency: fal
     const migration = readFileSync(new URL("../../../lib/db/migrations/0026_customer_records_lock.sql", import.meta.url), "utf8");
     await db.execute(sql.raw(migration));
     await db.execute(sql.raw(migration));
+    const visibilityMigration = readFileSync(new URL("../../../lib/db/migrations/0030_customer_hidden_by_quickbooks.sql", import.meta.url), "utf8");
+    await db.execute(sql.raw(visibilityMigration));
+    await db.execute(sql.raw(visibilityMigration));
     const ts = `${Date.now()}-${process.pid}`;
     for (const label of ["L", "U"]) {
       const [row] = await db.insert(companies).values({ name: `cr3a-${label}-${ts}` }).returning();
@@ -148,6 +151,29 @@ describe("customer records lock (real development database)", { concurrency: fal
   it("6. PATCH permits display name", async () => {
     assert.equal((await request("PATCH", customer(L1), { irrigoName: "Front lot" })).status, 200);
     assert.equal((await storage.getCustomer(L1))!.irrigoName, "Front lot");
+  });
+  it("manual PUT and PATCH visibility choices clear QB provenance in either lock mode", async () => {
+    for (const [id, cid] of [[L1, L], [U1, U]]) {
+      for (const method of ["PUT", "PATCH"]) for (const hiddenFromBilling of [false, true]) {
+        await db.update(customers).set({ hiddenFromBilling: true, hiddenByQuickbooks: true }).where(eq(customers.id, id));
+        assert.equal((await request(method, customer(id), { hiddenFromBilling }, cid)).status, 200);
+        const saved = (await storage.getCustomer(id))!;
+        assert.equal(saved.hiddenFromBilling, hiddenFromBilling);
+        assert.equal(saved.hiddenByQuickbooks, false);
+      }
+    }
+  });
+  it("clients cannot set QB provenance through create, PUT or PATCH", async () => {
+    for (const [id, cid] of [[L1, L], [U1, U]]) for (const method of ["PUT", "PATCH"]) {
+      for (const original of [false, true]) {
+        await db.update(customers).set({ hiddenByQuickbooks: original }).where(eq(customers.id, id));
+        assert.equal((await request(method, customer(id), { hiddenByQuickbooks: !original }, cid)).status, 200);
+        assert.equal((await storage.getCustomer(id))!.hiddenByQuickbooks, original);
+      }
+    }
+    const created = await request("POST", "/api/customers", { name: "Server provenance", email: "test@example.invalid", hiddenByQuickbooks: true }, U);
+    assert.equal(created.status, 201);
+    assert.equal((await storage.getCustomer(Number(created.body.id)))!.hiddenByQuickbooks, false);
   });
   it("7. unlocked customer owned details remain editable", async () => {
     assert.equal((await request("PUT", customer(U1), { name: "Changed" }, U)).status, 200);

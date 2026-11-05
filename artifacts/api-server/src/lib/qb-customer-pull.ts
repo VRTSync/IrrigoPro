@@ -10,7 +10,8 @@ export const QB_CUSTOMER_PULL_BUSY = "A customer sync is already running. Try ag
 export type PullMode = "incremental" | "full" | "manual";
 export type PullSummary = {
   mode: PullMode; added: number; updated: number; unchanged: number;
-  heldForReview: number; skippedInactiveOrDeleted: number; unmappedTerms: string[];
+  heldForReview: number; skippedDeleted: number; unmappedTerms: string[];
+  hiddenByQuickbooks: number; unhiddenByQuickbooks: number;
 };
 export type PullState = {
   lastAttemptAt: Date | null; lastSuccessAt: Date | null;
@@ -33,7 +34,7 @@ export type PullDeps = {
   now(): Date;
 };
 export type PullOutcome = { status: "busy" } |
-  { status: "success"; summary: QbSyncSummary; mode: PullMode; skippedInactiveOrDeleted: number } |
+  { status: "success"; summary: QbSyncSummary; mode: PullMode; skippedDeleted: number } |
   { status: "error"; httpStatus: number; message: string; needsReconnection?: boolean };
 
 export function choosePullMode(lastSuccessAt: Date | null, now: Date):
@@ -46,7 +47,7 @@ export function choosePullMode(lastSuccessAt: Date | null, now: Date):
 }
 
 export function filterUsableQbCustomers(rows: Record<string, unknown>[]) {
-  const usable = rows.filter(row => row.status !== "Deleted" && row.Active !== false);
+  const usable = rows.filter(row => row.status !== "Deleted");
   return { usable, skipped: rows.length - usable.length };
 }
 
@@ -78,9 +79,10 @@ export async function runCustomerPull(integration: Integration, mode: PullMode, 
           lastSuccessAt: startedAt, lastError: null,
           lastSummary: { mode: chosen.mode, added: summary.customersAdded, updated: summary.customersUpdated,
             unchanged: summary.customersUnchanged, heldForReview: summary.heldForReview,
-            skippedInactiveOrDeleted: skipped, unmappedTerms: summary.unmappedTerms },
+            skippedDeleted: skipped, unmappedTerms: summary.unmappedTerms,
+            hiddenByQuickbooks: summary.hiddenByQuickbooks, unhiddenByQuickbooks: summary.unhiddenByQuickbooks },
         });
-        return { status: "success", summary, mode: chosen.mode, skippedInactiveOrDeleted: skipped };
+        return { status: "success", summary, mode: chosen.mode, skippedDeleted: skipped };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         await deps.saveState(integration.realmId, { lastError: message });
@@ -117,7 +119,9 @@ export function startQbCustomerPullJob(
             ...(result.status === "success" ? { mode: result.mode, added: result.summary.customersAdded,
               updated: result.summary.customersUpdated, unchanged: result.summary.customersUnchanged,
               heldForReview: result.summary.heldForReview, ignored: result.summary.ignored,
-              skippedInactiveOrDeleted: result.skippedInactiveOrDeleted } : {}) };
+              skippedDeleted: result.skippedDeleted,
+              hiddenByQuickbooks: result.summary.hiddenByQuickbooks,
+              unhiddenByQuickbooks: result.summary.unhiddenByQuickbooks } : {}) };
           if (result.status === "error") logger.error({ ...context, message: result.message }, "[QB customer pull] Realm failed");
           else logger.info(context, "[QB customer pull] Realm finished");
         } catch {

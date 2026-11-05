@@ -4693,7 +4693,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   registerCustomerRecordsRoutes(app, { requireAuthentication });
   registerCustomerReviewRoutes(app, { requireAuthentication, requireQuickBooksAccess,
-    integrationFor, fetchActiveQbCustomers, fetchQbCustomerById, fetchQbTermNames });
+    integrationFor, fetchAllQbCustomers, fetchQbCustomerById, fetchQbTermNames });
 
   // Company logo upload endpoint
   app.post("/api/company/logo/upload", requireAuthentication, async (req, res) => {
@@ -8355,12 +8355,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return lookup?.realmId ? await storage.getQuickBooksIntegration(lookup.realmId) : null;
   }
 
-  async function fetchActiveQbCustomers(integration: QbReadIntegration, apiBase: string):
+  async function fetchAllQbCustomers(integration: QbReadIntegration, apiBase: string):
     Promise<{ ok: true; customers: Record<string, unknown>[] } | QbReadError> {
     const customers: Record<string, unknown>[] = [];
     const maxResults = 1000;
     for (let startPosition = 1; ; startPosition += maxResults) {
-      const query = `SELECT * FROM Customer WHERE Active = true STARTPOSITION ${startPosition} MAXRESULTS ${maxResults}`;
+      const query = `SELECT * FROM Customer WHERE Active IN (true, false) STARTPOSITION ${startPosition} MAXRESULTS ${maxResults}`;
       const response = await makeQuickBooksRequest(
         `${apiBase}/v3/company/${integration.realmId}/query?query=${encodeURIComponent(query)}`,
         { headers: { Authorization: `Bearer ${integration.accessToken}`, Accept: "application/json" } },
@@ -8425,7 +8425,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     ? "https://quickbooks.api.intuit.com" : "https://sandbox-quickbooks.api.intuit.com";
   const pullDeps: PullDeps = {
     withRealmLock: createCustomerPullRealmLock(pool),
-    fetchFull: integration => fetchActiveQbCustomers(integration, customerPullApiBase),
+    fetchFull: integration => fetchAllQbCustomers(integration, customerPullApiBase),
     fetchChanged: (integration, changedSince) => fetchQbChangedCustomers(integration, customerPullApiBase, changedSince),
     fetchTerms: async integration => {
       try {
@@ -9195,6 +9195,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         success: true, ...summary,
         message: `${summary.customersAdded} added, ${summary.customersUpdated} updated, ${summary.customersUnchanged} unchanged` +
+          (summary.hiddenByQuickbooks ? `; ${summary.hiddenByQuickbooks} hidden (inactive in QuickBooks)` : "") +
+          (summary.unhiddenByQuickbooks ? `; ${summary.unhiddenByQuickbooks} visible again` : "") +
           (summary.unmappedTerms.length ? `; payment terms not recognized: ${summary.unmappedTerms.join(", ")}` : ""),
       });
 

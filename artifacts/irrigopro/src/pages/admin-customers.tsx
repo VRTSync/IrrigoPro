@@ -217,7 +217,12 @@ export default function AdminCustomers() {
                           }
                           disabled={toggleHiddenMutation.isPending}
                         />
-                        <span className="text-xs text-slate-400">{customer.hiddenFromBilling ? "Hidden" : "Visible"}</span>
+                        <span className="text-xs text-slate-400">
+                          {customer.hiddenFromBilling ? "Hidden" : "Visible"}
+                          {customer.hiddenFromBilling && customer.hiddenByQuickbooks && (
+                            <span className="block text-[10px] text-slate-400">Inactive in QuickBooks</span>
+                          )}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -288,6 +293,9 @@ export default function AdminCustomers() {
                               />
                               <span className={`text-xs ${customer.hiddenFromBilling ? "text-slate-400" : "text-sky-600 font-medium"}`}>
                                 {customer.hiddenFromBilling ? "Hidden" : "Visible"}
+                                {customer.hiddenFromBilling && customer.hiddenByQuickbooks && (
+                                  <span className="block text-[10px] text-slate-400">Inactive in QuickBooks</span>
+                                )}
                               </span>
                             </div>
                           </td>

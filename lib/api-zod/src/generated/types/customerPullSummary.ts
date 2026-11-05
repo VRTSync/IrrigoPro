@@ -13,6 +13,8 @@ export interface CustomerPullSummary {
   updated: number;
   unchanged: number;
   heldForReview: number;
-  skippedInactiveOrDeleted: number;
+  skippedDeleted: number;
+  hiddenByQuickbooks: number;
+  unhiddenByQuickbooks: number;
   unmappedTerms: string[];
 }

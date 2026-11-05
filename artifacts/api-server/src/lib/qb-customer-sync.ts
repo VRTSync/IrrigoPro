@@ -2,6 +2,7 @@ import type { Customer, InsertCustomer, InsertCustomerSyncReview } from "@worksp
 import { changedLockedFields, QB_OWNED_CUSTOMER_FIELDS } from "@workspace/shared";
 
 export type MappedQbCustomer = {
+  active: boolean;
   qbId: string; name: string; companyName: string; contactFirstName: string; contactLastName: string;
   email: string; phone: string; mobilePhone: string;
   address: string; street: string; city: string; state: string; zip: string; country: string;
@@ -43,6 +44,7 @@ export function mapQbCustomer(raw: Record<string, unknown>, termNames: Map<strin
   const date = timestamp ? new Date(timestamp) : null;
   return {
     qbId: text(raw.Id),
+    active: raw.Active !== false,
     qbParentId: text(record(raw.ParentRef).value) || null,
     name: text(raw.DisplayName) || text(raw.CompanyName) || text(raw.FullyQualifiedName),
     companyName: text(raw.CompanyName), contactFirstName: text(raw.GivenName), contactLastName: text(raw.FamilyName),
@@ -73,6 +75,7 @@ export function buildSyncPatch(existing: Customer, mapped: MappedQbCustomer, loc
 }
 
 export type QbSyncSummary = {
+  hiddenByQuickbooks: number; unhiddenByQuickbooks: number;
   heldForReview: number; ignored: number;
   customersAdded: number; customersUpdated: number; customersUnchanged: number;
   totalCustomers: number; unmappedTerms: string[]; termsError?: string;
@@ -138,6 +141,7 @@ export async function applyQbCustomers(args: {
     if (name && (!unlinked.has(name) || customer.id < unlinked.get(name)!)) unlinked.set(name, customer.id);
   }
   const summary: QbSyncSummary = {
+    hiddenByQuickbooks: 0, unhiddenByQuickbooks: 0,
     heldForReview: 0, ignored: 0,
     customersAdded: 0, customersUpdated: 0, customersUnchanged: 0,
     totalCustomers: qbCustomers.length, unmappedTerms: [], results: [],
@@ -148,10 +152,15 @@ export async function applyQbCustomers(args: {
     let mapped: MappedQbCustomer | undefined;
     try {
       mapped = mapQbCustomer(raw, termNames);
-      if (!mapped.name) continue;
+      if (!mapped.name && mapped.active) continue;
       if (mapped.paymentTerms === null && mapped.termName !== null) unmapped.add(mapped.termName);
       const existing = await deps.getCustomerByQuickBooksId(companyId, mapped.qbId);
       if (!existing) {
+        if (!mapped.active) {
+          summary.ignored++;
+          summary.results.push({ action: "ignored", customer: mapped });
+          continue;
+        }
         const review = await deps.getReviewRow(companyId, mapped.qbId);
         if (review?.status === "dismissed") {
           summary.ignored++;
@@ -173,11 +182,29 @@ export async function applyQbCustomers(args: {
         summary.customersAdded++;
         summary.results.push({ action: "created", customer });
       } else {
+        if (!mapped.active) {
+          if (!existing.hiddenFromBilling) {
+            const customer = await deps.updateCustomer(existing.id, { hiddenFromBilling: true, hiddenByQuickbooks: true });
+            summary.hiddenByQuickbooks++;
+            summary.customersUpdated++;
+            summary.results.push({ action: "updated", customer: customer ?? existing });
+          } else {
+            summary.customersUnchanged++;
+            summary.results.push({ action: "unchanged", customer: existing });
+          }
+          continue;
+        }
         const { patch, ownedChanged } = buildSyncPatch(existing, mapped, locked);
+        if (existing.hiddenByQuickbooks) {
+          patch.hiddenFromBilling = false;
+          patch.hiddenByQuickbooks = false;
+        }
         const customer = Object.keys(patch).length ? await deps.updateCustomer(existing.id, patch) : existing;
-        if (ownedChanged) summary.customersUpdated++;
+        if (existing.hiddenByQuickbooks) summary.unhiddenByQuickbooks++;
+        const updated = ownedChanged || existing.hiddenByQuickbooks;
+        if (updated) summary.customersUpdated++;
         else summary.customersUnchanged++;
-        summary.results.push({ action: ownedChanged ? "updated" : "unchanged", customer: customer ?? existing });
+        summary.results.push({ action: updated ? "updated" : "unchanged", customer: customer ?? existing });
       }
     } catch (error) {
       summary.results.push({ action: "error", customer: mapped ?? raw, error: error instanceof Error ? error.message : String(error) });

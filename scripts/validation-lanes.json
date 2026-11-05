@@ -177,6 +177,10 @@
   ],
   "web": [
     {
+      "name": "customer-visibility-chip",
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/customers/customer-visibility-chip.test.tsx"
+    },
+    {
       "name": "customer-pull-status",
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/quickbooks/customer-pull-status.test.tsx"
     },

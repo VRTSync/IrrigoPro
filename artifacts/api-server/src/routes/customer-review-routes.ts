@@ -13,7 +13,7 @@ export type CustomerReviewDeps = {
   requireAuthentication: RequestHandler;
   requireQuickBooksAccess: RequestHandler;
   integrationFor(companyId: number): Promise<QbReadIntegration | null | undefined>;
-  fetchActiveQbCustomers(integration: QbReadIntegration, apiBase: string):
+  fetchAllQbCustomers(integration: QbReadIntegration, apiBase: string):
     Promise<{ ok: true; customers: Record<string, unknown>[] } | QbReadError>;
   fetchQbCustomerById(integration: QbReadIntegration, apiBase: string, qbId: string):
     Promise<{ ok: true; customer: Record<string, unknown> } | QbReadError>;
@@ -101,9 +101,10 @@ export function registerCustomerReviewRoutes(app: Express, deps: CustomerReviewD
     let qbError: string | undefined;
     let mapped: ReturnType<typeof mapQbCustomer>[] = [];
     try {
-      const fetched = await deps.fetchActiveQbCustomers(await integration(cid), apiBase());
+      const fetched = await deps.fetchAllQbCustomers(await integration(cid), apiBase());
       if (!fetched.ok) throw new Error(fetched.message);
-      mapped = fetched.customers.map(row => mapQbCustomer(row, null)).filter(c => c.qbId && !claimedIds.has(c.qbId));
+      mapped = fetched.customers.filter(row => row.Active !== false)
+        .map(row => mapQbCustomer(row, null)).filter(c => c.qbId && !claimedIds.has(c.qbId));
     } catch (err) { qbError = err instanceof Error ? err.message : String(err); }
     return { held, unlinked: unlinked.map(customer => ({ customer, candidates: rankQbCandidates(customer, mapped) })),
       ...(qbError === undefined ? {} : { qbError }) };

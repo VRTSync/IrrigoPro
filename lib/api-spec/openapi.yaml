@@ -66,7 +66,7 @@ components:
             - type: "null"
     CustomerPullSummary:
       type: object
-      required: [mode, added, updated, unchanged, heldForReview, skippedInactiveOrDeleted, unmappedTerms]
+      required: [mode, added, updated, unchanged, heldForReview, skippedDeleted, hiddenByQuickbooks, unhiddenByQuickbooks, unmappedTerms]
       properties:
         mode:
           type: string
@@ -79,7 +79,11 @@ components:
           type: integer
         heldForReview:
           type: integer
-        skippedInactiveOrDeleted:
+        skippedDeleted:
+          type: integer
+        hiddenByQuickbooks:
+          type: integer
+        unhiddenByQuickbooks:
           type: integer
         unmappedTerms:
           type: array

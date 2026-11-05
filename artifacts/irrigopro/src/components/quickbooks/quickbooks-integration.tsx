@@ -352,6 +352,9 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
         variant: "default"
       });
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
+      queryClient.invalidateQueries({
+        predicate: query => typeof query.queryKey[0] === "string" && /^\/api\/customers\/\d+(?:\/|$)/.test(query.queryKey[0]),
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
       queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/customer-pull-status"] });
       queryClient.invalidateQueries({ queryKey: ["/api/customer-review/summary"] });

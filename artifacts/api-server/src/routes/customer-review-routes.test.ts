@@ -92,6 +92,7 @@ describe("customer sync review resolution (real development database, injected Q
     await customer("Linked candidate", 0, { quickbooksId: "claimed" });
     remoteRows = [
       { Id: "700", DisplayName: "Cedar Ridge HOA" },
+      { Id: "inactive", DisplayName: "Cedar Ridge", Active: false },
       { Id: "claimed", DisplayName: "Cedar Ridge" },
       { Id: "other", DisplayName: "Other", BillAddr: { PostalCode: "80000" } },
     ];
@@ -109,7 +110,7 @@ describe("customer sync review resolution (real development database, injected Q
         assert.ok(companyIds.includes(cid));
         return { realmId: "injected-fixture", accessToken: "injected-not-a-credential" };
       },
-      async fetchActiveQbCustomers() {
+      async fetchAllQbCustomers() {
         fetches++;
         return remoteFailure ? { ok: false, status: 503, message: "Sandbox unavailable" } : { ok: true, customers: remoteRows };
       },

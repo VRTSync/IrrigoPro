@@ -15,6 +15,7 @@ const now = new Date("2026-11-05T12:00:00Z");
 const integration: Integration = { companyId: "7", realmId: "realm-7", accessToken: "fixture",
   connectionStatus: "connected", customerPullLastSuccessAt: new Date(now.getTime() - 3600000) };
 const summary: QbSyncSummary = { customersAdded: 1, customersUpdated: 2, customersUnchanged: 3,
+  hiddenByQuickbooks: 1, unhiddenByQuickbooks: 2,
   totalCustomers: 9, heldForReview: 1, ignored: 1, unmappedTerms: ["Net 45"],
   termsError: "term warning", results: [{ action: "error", customer: {}, error: "isolated row failure" }] };
 function harness() {
@@ -30,7 +31,7 @@ function harness() {
     },
     fetchTerms: async () => { events.push("terms"); return { termNames: null, termsError: "term warning" }; },
     apply: async (cid, usable, terms) => {
-      events.push("apply"); assert.equal(cid, 7); assert.deepEqual(usable, [{ Id: "1" }]);
+      events.push("apply"); assert.equal(cid, 7); assert.deepEqual(usable, [{ Id: "1" }, { Id: "2", Active: false }]);
       assert.equal(terms.termsError, "term warning"); return summary;
     },
     saveState: async (realm, state) => {
@@ -57,10 +58,10 @@ describe("customer pull pure decisions", () => {
     assert.equal(choosePullMode(new Date(+now - QB_CDC_MAX_AGE_MS + 3600000), now).mode, "incremental");
     assert.deepEqual(choosePullMode(new Date("invalid"), now), { mode: "full" });
   });
-  it("filters only exact Deleted and boolean false without mutating input", () => {
+  it("keeps inactive rows and filters only exact Deleted without mutating input", () => {
     const rows = [{ Id: "1", Active: true }, { Id: "2", Active: false },
       { Id: "3", status: "Deleted" }, { Id: "4" }];
-    assert.deepEqual(filterUsableQbCustomers(rows), { usable: [rows[0], rows[3]], skipped: 2 });
+    assert.deepEqual(filterUsableQbCustomers(rows), { usable: [rows[0], rows[1], rows[3]], skipped: 1 });
     assert.equal(rows.length, 4);
     assert.equal(filterUsableQbCustomers([{ status: "deleted" }, { Active: "false" }, { Active: null }]).skipped, 0);
   });
@@ -73,7 +74,7 @@ describe("one realm orchestration, stub-only", () => {
     assert.deepEqual(events, ["lock", "save", "incremental", "terms", "apply", "save"]);
     assert.deepEqual(states, [{ lastAttemptAt: now }, { lastSuccessAt: now, lastError: null,
       lastSummary: { mode: "incremental", added: 1, updated: 2, unchanged: 3, heldForReview: 1,
-        skippedInactiveOrDeleted: 2, unmappedTerms: ["Net 45"] } }]);
+        skippedDeleted: 1, hiddenByQuickbooks: 1, unhiddenByQuickbooks: 2, unmappedTerms: ["Net 45"] } }]);
     assert.equal(outcome.status, "success");
     if (outcome.status === "success") assert.equal(outcome.summary, summary);
   });
@@ -352,7 +353,7 @@ describe("real route bodies with injected seams and static registration guards",
       }
       if (outcome.status === "success") {
         assert.deepEqual(res.body, { success: true, ...summary,
-          message: "1 added, 2 updated, 3 unchanged; payment terms not recognized: Net 45" });
+          message: "1 added, 2 updated, 3 unchanged; 1 hidden (inactive in QuickBooks); 2 visible again; payment terms not recognized: Net 45" });
       }
     }
   });

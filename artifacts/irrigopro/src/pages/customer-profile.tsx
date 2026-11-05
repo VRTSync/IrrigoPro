@@ -9,11 +9,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { BudgetBar } from "@/components/budget/BudgetBar";
 import { CustomerForm } from "@/components/customer-form";
+import { CustomerVisibilityChip } from "@/components/customers/customer-visibility-chip";
 import type { BudgetStatus } from "@workspace/shared";
 import {
   ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt, DollarSign,
   Bell, Droplets, Wrench, Calendar, Package, ChevronDown, ChevronRight, User,
-  LayoutDashboard, Trees, Edit, ClipboardList, Clock, Building2, CheckCircle, RefreshCw,
+  LayoutDashboard, Trees, Edit, ClipboardList, Clock, Building2, RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Customer, Estimate, WorkOrder, BillingSheetWithItems, SiteMap } from "@workspace/db/schema";
@@ -283,10 +284,7 @@ export default function CustomerProfile() {
             <div className="flex-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 leading-tight">{displayName}</h1>
-                {/* Green "Active" chip */}
-                <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200 text-xs font-medium">
-                  <CheckCircle className="w-3.5 h-3.5" />Active
-                </span>
+                <CustomerVisibilityChip customer={customer} />
                 {/* Sky "QuickBooks Synced" chip */}
                 {customer.quickbooksId && (
                   <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-sky-300 text-sky-700 text-xs font-medium">

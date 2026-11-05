@@ -543,3 +543,45 @@ mtime_ms = 1793846595254
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/76f2f95b-1444-47a8-bb63-ac131069893d/1e09e337-1daf-45b3-a3e0-6c55683ceb05"
 storage_version_token = "1793895578460034"
 content_type = "text/html"
+
+[[outputs]]
+id = "JAbUOg4XHvAd-_9jy00xg"
+uri = "file://generated-artifacts/customer-visibility/profile-hidden.png"
+type = "image"
+title = "Hidden customer profile"
+description = "Authenticated development screenshot showing Hidden while existing work history is retained. Injected QuickBooks input; live sandbox verification remains blocked."
+logical_id = "b248f716-8672-4ab3-a95a-171b69d4aa46"
+content_hash = "sha256:914fcff08ce4a3ac7b0a810b3fd4e6ac0a96691b0944f0bfc937d961816ab4c2"
+size = 262395
+mtime_ms = 1793895877811
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/b248f716-8672-4ab3-a95a-171b69d4aa46/145a262a-3045-4388-b546-f884bdf8dbe1"
+storage_version_token = "1793896458088042"
+content_type = "image/png"
+
+[[outputs]]
+id = "klndESImnnjWR3VwbvYq_"
+uri = "file://generated-artifacts/customer-visibility/profile-restored.png"
+type = "image"
+title = "Reactivated customer profile"
+description = "The same synthetic customer is Visible again after active QuickBooks input. No live QuickBooks writes or production changes."
+logical_id = "9478e09e-f1e3-475f-b48f-d28736b966ed"
+content_hash = "sha256:22bad84d7bad0dba3ee1850923aba857b1a439f52d99b47b2149c65f078c6f45"
+size = 262482
+mtime_ms = 1793895886803
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/9478e09e-f1e3-475f-b48f-d28736b966ed/b3bed34d-24fd-4793-8a31-a05f864f31b4"
+storage_version_token = "1793896458569745"
+content_type = "image/png"
+
+[[outputs]]
+id = "ozRu5_TLBpBjAkfkga8Nn"
+uri = "file://generated-artifacts/customer-visibility/verification-report.html"
+type = "html"
+title = "QuickBooks visibility verification report"
+description = "Required API billing 26/26, web 26/26, types 4/4 passed. Includes static guards, real development acceptance and embedded profile/list screenshots. Live sandbox acceptance is explicitly BLOCKED."
+logical_id = "8b98cdc8-c84b-4ed7-884f-36e16ff08f29"
+content_hash = "sha256:c88c30288c57304ea7404bdf7772b87945680c49e627409d4b33e60fca2ddcc9"
+size = 1806985
+mtime_ms = 1793896397744
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/8b98cdc8-c84b-4ed7-884f-36e16ff08f29/f954ce94-6e97-4c50-90a3-143135085969"
+storage_version_token = "1793896459262550"
+content_type = "text/html"

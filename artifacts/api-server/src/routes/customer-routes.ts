@@ -15,8 +15,8 @@ import {
 } from "../services/generate-budget-months";
 
 // companyId and quickbooksId are server-owned. Body values are dropped.
-export const createCustomerSchema = insertCustomerSchema.omit({ quickbooksId: true, qbNotInQuickbooksAt: true });
-export const updateCustomerSchema = insertCustomerSchema.omit({ companyId: true, quickbooksId: true, qbNotInQuickbooksAt: true }).partial();
+export const createCustomerSchema = insertCustomerSchema.omit({ quickbooksId: true, qbNotInQuickbooksAt: true, hiddenByQuickbooks: true });
+export const updateCustomerSchema = insertCustomerSchema.omit({ companyId: true, quickbooksId: true, qbNotInQuickbooksAt: true, hiddenByQuickbooks: true }).partial();
 
 export interface RegisterCustomerRoutesDeps {
   requireAuthentication: RequestHandler;
@@ -114,6 +114,7 @@ export function registerCustomerRoutes(
         validateCurve(req.body.budgetSeasonCurveOverride);
       }
       let customerData = updateCustomerSchema.parse(req.body);
+      if ("hiddenFromBilling" in customerData) (customerData as Record<string, unknown>).hiddenByQuickbooks = false;
       // Only billing_manager may write billingNotes (use authenticated role, not raw header)
       if ('billingNotes' in customerData && req.authenticatedUserRole !== 'billing_manager') {
         const { billingNotes, ...rest } = customerData;
@@ -133,7 +134,7 @@ export function registerCustomerRoutes(
       }
       // An unchanged full form can become empty after removing owned keys.
       // Drizzle rejects an empty SET; return the guarded row without a write.
-      const customer = lock.locked && Object.keys(customerData).length === 0
+      const customer = Object.keys(customerData).length === 0
         ? current
         : await withDbRetry(() => storage.updateCustomer(id, customerData));
       if (!customer) {
@@ -174,6 +175,7 @@ export function registerCustomerRoutes(
         "budgetSeasonCurveOverride" in (req.body ?? {});
       if (Array.isArray(req.body?.budgetSeasonCurveOverride)) validateCurve(req.body.budgetSeasonCurveOverride);
       let customerData = updateCustomerSchema.parse(req.body);
+      if ("hiddenFromBilling" in customerData) (customerData as Record<string, unknown>).hiddenByQuickbooks = false;
       // Only billing_manager may write billingNotes (use authenticated role, not raw header)
       if ('billingNotes' in customerData && req.authenticatedUserRole !== 'billing_manager') {
         const { billingNotes, ...rest } = customerData;
@@ -191,7 +193,7 @@ export function registerCustomerRoutes(
         }
         for (const f of QB_OWNED_CUSTOMER_FIELDS) delete (customerData as Record<string, unknown>)[f];
       }
-      const customer = lock.locked && Object.keys(customerData).length === 0
+      const customer = Object.keys(customerData).length === 0
         ? current
         : await withDbRetry(() => storage.updateCustomer(id, customerData));
       if (!customer) {

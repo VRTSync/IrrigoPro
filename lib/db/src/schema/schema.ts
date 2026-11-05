@@ -137,6 +137,7 @@ export const customers = pgTable("customers", {
   billingNotes: text("billing_notes"), // Private notes for billing manager use only
   quickbooksId: text("quickbooks_id"), // QuickBooks customer ID for integration
   hiddenFromBilling: boolean("hidden_from_billing").default(false),
+  hiddenByQuickbooks: boolean("hidden_by_quickbooks").notNull().default(false), // Customer Records Slice 7
   branches: text("branches").array(), // Optional list of branch names for customers with multiple locations
   // Property boundary (GIS) — uploaded KML/KMZ converted to GeoJSON
   propertyBoundary: text("property_boundary"), // GeoJSON Feature (Polygon | MultiPolygon) as string
@@ -708,7 +709,8 @@ export const quickbooksIntegration = pgTable("quickbooks_integration", {
   customerPullLastError: text("customer_pull_last_error"),
   customerPullLastSummary: jsonb("customer_pull_last_summary").$type<{
     mode: "incremental" | "full" | "manual"; added: number; updated: number; unchanged: number;
-    heldForReview: number; skippedInactiveOrDeleted: number; unmappedTerms: string[];
+    heldForReview: number; skippedDeleted: number; unmappedTerms: string[];
+    hiddenByQuickbooks: number; unhiddenByQuickbooks: number;
   }>(),
   id: serial("id").primaryKey(),
   companyId: text("company_id").notNull(),
