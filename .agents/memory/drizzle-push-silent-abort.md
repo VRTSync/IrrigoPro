@@ -12,3 +12,10 @@ Never trust a plain `drizzle-kit push` exit code. When the diff contains data-lo
 
 ## Ordering rule for retired tables
 Before a schema push that drops a legacy table reaches any environment, confirm its data has been imported into the replacement table. For production this means: run the relevant idempotent Super Admin registry migration in the deployed app **before re-publishing**, because the publish-time schema diff drops the legacy table in prod.
+
+## A failed push can leave foreign keys removed
+Treat a failed push as potentially partially applied, not automatically rolled back. Check foreign keys in `pg_constraint` before rerunning DB-backed tests.
+
+**Why:** The installed Drizzle Kit executes push statements sequentially without a surrounding transaction, and orders foreign-key drops before column additions and foreign-key recreation. PostgreSQL's 63-character identifier truncation can also make generated long FK names appear changed. An in-memory reconstruction reproduced dropping profile cascade constraints before the customer-column addition that failed in setup; the original push did not log its SQL, so that initiating removal remains an inference rather than an audited fact.
+
+**How to apply:** After a failed push, inspect both column drift and constraint presence. A passing table/column verifier alone does not establish that cascades exist. DB-backed fixture cleanup may delete parent rows successfully yet leave children behind when cascade constraints are missing. Never fix this by silently deleting non-fixture data or bypassing constraints.
