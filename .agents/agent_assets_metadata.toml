@@ -585,3 +585,59 @@ mtime_ms = 1793896397744
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/8b98cdc8-c84b-4ed7-884f-36e16ff08f29/f954ce94-6e97-4c50-90a3-143135085969"
 storage_version_token = "1793896459262550"
 content_type = "text/html"
+
+[[outputs]]
+id = "4DwU-8G_rXMCEG8miwl2w"
+uri = "file://generated-artifacts/controller-orphan-investigation/counts-and-foreign-keys.csv"
+type = "table"
+title = "Controller orphan counts and foreign keys"
+description = "All ten tables in development and production, including exact pg_constraint names and definitions."
+logical_id = "7aba5597-c10e-4069-b6a0-16a75b47a4f9"
+content_hash = "sha256:51c86c655e5230c39370df6e19a102d1594888dde27313cb23b09378c2f11b8f"
+size = 3637
+mtime_ms = 1793898580328
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/7aba5597-c10e-4069-b6a0-16a75b47a4f9/1f6cd036-42ae-4b96-bdbb-9140e6bb75ba"
+storage_version_token = "1793898581089460"
+content_type = "text/csv"
+
+[[outputs]]
+id = "8QnWmuatpl0t9BPSXbR_P"
+uri = "file://generated-artifacts/controller-orphan-investigation/controller-recovery-review.csv"
+type = "table"
+title = "Missing controller recovery review"
+description = "All 43 missing controller groups: company, customer, snapshot letter and branch, dates, candidates, and proposed action."
+logical_id = "608a3f67-026e-47c6-9844-ea0e89d7b899"
+content_hash = "sha256:a4aa127e4b2648e7286b3a6340fce1c0908ef983b373fae1c1aff9cff97654d3"
+size = 21985
+mtime_ms = 1793898581584
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/608a3f67-026e-47c6-9844-ea0e89d7b899/95687561-09f7-490f-a2f4-c326be2a3730"
+storage_version_token = "1793898582332751"
+content_type = "text/csv"
+
+[[outputs]]
+id = "IOV5-mCUEuIwyejr6F8kc"
+uri = "file://generated-artifacts/controller-orphan-investigation/orphan-zones.csv"
+type = "table"
+title = "All 399 orphan zones"
+description = "One row per zone, with ownership, timestamps, recovery candidates, and profile-history, wet-check, billing, estimate, work-order and photo reference counts."
+logical_id = "1e5fb876-df8f-42c6-8697-54f72fe9f62e"
+content_hash = "sha256:b2f589f7399b122d4b4dd77657a07aeb7034c20bfd281df5b19695a676197e8d"
+size = 136539
+mtime_ms = 1793898582920
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/1e5fb876-df8f-42c6-8697-54f72fe9f62e/f9602c57-d5d3-4887-85c0-edb4d1558912"
+storage_version_token = "1793898583700850"
+content_type = "text/csv"
+
+[[outputs]]
+id = "lMbWBk2k2VA6NWnlLifWv"
+uri = "file://generated-artifacts/controller-orphan-investigation/orphan-profile-history.csv"
+type = "table"
+title = "All 115 orphan profile-history rows"
+description = "Every retained history row with actor, summary, event timestamp, snapshot controller timestamps and recovery assessment."
+logical_id = "1d44f157-19da-464a-b7a0-57079ffe2f66"
+content_hash = "sha256:9271bb5b9aed7c62aab5c59cc98652f71d2fc759ce6326a8b1c408ca7332c4e8"
+size = 44191
+mtime_ms = 1793898584632
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/1d44f157-19da-464a-b7a0-57079ffe2f66/94c4722b-1fe6-4a64-be93-dc21f255eb08"
+storage_version_token = "1793898584984553"
+content_type = "text/csv"
