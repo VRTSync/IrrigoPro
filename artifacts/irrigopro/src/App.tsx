@@ -46,6 +46,7 @@ const MissingLocationDataReportPage = lazyPage(() => import("@/pages/missing-loc
 const MissingLocationTicketDetail = lazyPage(() => import("@/pages/missing-location-ticket-detail"));
 const CustomerBilling = lazyPage(() => import("@/pages/customer-billing"));
 const QuickBooksPage = lazyPage(() => import("@/pages/quickbooks"));
+const CustomerReviewPage = lazyPage(() => import("@/pages/customer-review"));
 const AdminControllers = lazyPage(() => import("@/pages/admin-controllers"));
 const Operations = lazyPage(() => import("@/pages/operations"));
 const SystemUserManagement = lazyPage(() => import("@/pages/system-user-management"));
@@ -387,6 +388,7 @@ function Router() {
                   <Route path="/customers" component={Customers} />
                   <Route path="/customers/:id/profile" component={CustomerProfile} />
                   <Route path="/quickbooks" component={QuickBooksPage} />
+                  <Route path="/customer-review" component={CustomerReviewPage} />
                   <Route path="/user-profile" component={UserProfile} />
                   <Route path="/license-agreement" component={LicenseAgreement} />
                   <Route path="/privacy-policy" component={PrivacyPolicy} />
@@ -448,6 +450,7 @@ function Router() {
                   <Route path="/parts-pending-approval" component={PartsPendingApproval} />
                   <Route path="/estimates/pending-approval" component={EstimatesPendingApproval} />
                   <Route path="/quickbooks" component={QuickBooksPage} />
+                  <Route path="/customer-review" component={CustomerReviewPage} />
                   <Route path="/invoices" component={InvoicesPage} />
                   <Route path="/reports/missing-location-data" component={MissingLocationDataReportPage} />
                   <Route path="/admin/issue-types" component={AdminIssueTypesPage} />

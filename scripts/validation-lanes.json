@@ -181,6 +181,10 @@
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/quickbooks/customer-pull-status.test.tsx"
     },
     {
+      "name": "customer-review-page",
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run src/pages/customer-review.test.tsx src/pages/quickbooks-review.test.tsx src/components/quickbooks/quickbooks-review-sync.test.tsx"
+    },
+    {
       "name": "customer-form-locked",
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/customer-form-locked.test.tsx"
     },

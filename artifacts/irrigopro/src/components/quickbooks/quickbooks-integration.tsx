@@ -347,12 +347,14 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     onSuccess: (data) => {
       toast({
         title: "Customer Sync Complete",
-        description: data.message || `${data.customersAdded || 0} added, ${data.customersAlreadySynced || 0} already synced`,
+        description: (data.message || `${data.customersAdded || 0} added, ${data.customersAlreadySynced || 0} already synced`)
+          + (data.heldForReview > 0 ? ` — ${data.heldForReview} held for review` : ""),
         variant: "default"
       });
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
       queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/customer-pull-status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customer-review/summary"] });
     },
     onError: (error) => {
       console.error("Customer sync error:", error);

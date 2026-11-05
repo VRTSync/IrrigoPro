@@ -1,8 +1,16 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
 import { Settings, DollarSign, Users } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
+import { Button } from "@/components/ui/button";
 
 export default function QuickBooksPage() {
+  const review = useQuery<{ held: number; unlinked: number }>({
+    queryKey: ["/api/customer-review/summary"],
+    staleTime: 30_000,
+    retry: false,
+  });
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="w-full px-4 lg:px-6 py-4 lg:py-6">
@@ -121,6 +129,26 @@ export default function QuickBooksPage() {
               </div>
             </CardContent>
           </Card>
+          {review.isSuccess && review.data && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="w-5 h-5 text-indigo-600" />
+                  Customer review
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {review.data.held === 0 && review.data.unlinked === 0 ? (
+                  <p className="text-sm text-gray-600">Nothing to review.</p>
+                ) : (
+                  <>
+                    <p className="text-sm text-gray-600">{review.data.held} held by the sync · {review.data.unlinked} not linked to QuickBooks</p>
+                    <Button asChild><Link href="/customer-review">Open customer review</Link></Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>

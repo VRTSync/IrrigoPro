@@ -529,3 +529,17 @@ mtime_ms = 1793846033394
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/0db3663e-f059-4f56-8c37-6027b4c26d78/504dc0a8-c00d-49a5-abfb-5173a4f332d7"
 storage_version_token = "1793847308021839"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "KSSdk63YHeJXk2W5wTslv"
+uri = "file://generated-artifacts/customer-review-page/acceptance.html"
+type = "html"
+title = "Customer review — acceptance evidence"
+description = "Self-contained screenshots, full web/types outputs, focused test results and cleanup notes. Clearly identifies synthetic candidate screenshots and the blocked live QuickBooks next-sync check."
+logical_id = "76f2f95b-1444-47a8-bb63-ac131069893d"
+content_hash = "sha256:8664c94672cc7d6b058d0686f6d33a37d836b0ae8557468e71293f5ad66e2448"
+size = 2828485
+mtime_ms = 1793846595254
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/76f2f95b-1444-47a8-bb63-ac131069893d/1e09e337-1daf-45b3-a3e0-6c55683ceb05"
+storage_version_token = "1793895578460034"
+content_type = "text/html"
