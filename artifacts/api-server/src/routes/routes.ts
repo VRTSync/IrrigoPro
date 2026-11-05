@@ -389,6 +389,7 @@ import { registerManagerWorkspaceRoutes, ACTIVE_WC, APPROVED_WC } from "./manage
 import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
 import { registerCustomerRecordsRoutes, resolveExternalCustomer } from "./customer-records-routes";
+import { registerCustomerReviewRoutes, type QbReadIntegration, type QbReadError } from "./customer-review-routes";
 import { getCustomerRecordsLock } from "../lib/customer-records-lock";
 import { registerBudgetRoutes } from "./budget-routes";
 import { registerQbHealthSweepRoute } from "./qb-health-sweep-route";
@@ -4689,6 +4690,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   registerCustomerRecordsRoutes(app, { requireAuthentication });
+  registerCustomerReviewRoutes(app, { requireAuthentication, requireQuickBooksAccess,
+    integrationFor, fetchActiveQbCustomers, fetchQbCustomerById, fetchQbTermNames });
 
   // Company logo upload endpoint
   app.post("/api/company/logo/upload", requireAuthentication, async (req, res) => {
@@ -8345,6 +8348,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return response;
   }
 
+  async function integrationFor(companyId: number) {
+    const lookup = await storage.getQuickBooksIntegrationByCompanyId(String(companyId));
+    return lookup?.realmId ? await storage.getQuickBooksIntegration(lookup.realmId) : null;
+  }
+
+  async function fetchActiveQbCustomers(integration: QbReadIntegration, apiBase: string):
+    Promise<{ ok: true; customers: Record<string, unknown>[] } | QbReadError> {
+    const customers: Record<string, unknown>[] = [];
+    const maxResults = 1000;
+    for (let startPosition = 1; ; startPosition += maxResults) {
+      const query = `SELECT * FROM Customer WHERE Active = true STARTPOSITION ${startPosition} MAXRESULTS ${maxResults}`;
+      const response = await makeQuickBooksRequest(
+        `${apiBase}/v3/company/${integration.realmId}/query?query=${encodeURIComponent(query)}`,
+        { headers: { Authorization: `Bearer ${integration.accessToken}`, Accept: "application/json" } },
+        "Customers Query", integration.realmId);
+      if (!response.ok) {
+        const errorText = await response.text();
+        const tid = response.headers.get("intuit_tid");
+        console.error("Failed to fetch customers from QuickBooks:", response.status, errorText);
+        if (response.status === 403) return { ok: false, status: 403,
+          message: "QuickBooks authorization expired or invalid. Please reconnect to QuickBooks.", needsReconnection: true };
+        return { ok: false, status: 500,
+          message: `Failed to fetch customers from QuickBooks: ${response.status}${tid ? ` [TID: ${tid}]` : ""}` };
+      }
+      const data = await response.json() as QbCustomerQueryResponse;
+      const page = (data.QueryResponse?.Customer ?? []) as Record<string, unknown>[];
+      customers.push(...page);
+      if (page.length < maxResults) return { ok: true, customers };
+    }
+  }
+
+  async function fetchQbCustomerById(integration: QbReadIntegration, apiBase: string, qbId: string):
+    Promise<{ ok: true; customer: Record<string, unknown> } | QbReadError> {
+    const response = await makeQuickBooksRequest(
+      `${apiBase}/v3/company/${integration.realmId}/customer/${encodeURIComponent(qbId)}`,
+      { headers: { Authorization: `Bearer ${integration.accessToken}`, Accept: "application/json" } },
+      "Customer Read", integration.realmId);
+    if (!response.ok) return { ok: false, status: response.status === 403 ? 403 : 502,
+      message: response.status === 403 ? "QuickBooks authorization expired or invalid. Please reconnect to QuickBooks."
+        : `Failed to fetch customer from QuickBooks: ${response.status}`,
+      ...(response.status === 403 ? { needsReconnection: true } : {}) };
+    const data = await response.json() as { Customer: Record<string, unknown> };
+    return { ok: true, customer: data.Customer };
+  }
+
+  async function fetchQbTermNames(integration: QbReadIntegration, apiBase: string): Promise<Map<string, string> | null> {
+    const response = await makeQuickBooksRequest(
+      `${apiBase}/v3/company/${integration.realmId}/query?query=${encodeURIComponent("SELECT * FROM Term")}`,
+      { headers: { Authorization: `Bearer ${integration.accessToken}`, Accept: "application/json" } },
+      "Terms Query", integration.realmId);
+    if (!response.ok) throw new Error(String(response.status));
+    const data = await response.json() as { QueryResponse?: { Term?: Array<{ Id: string; Name: string }> } };
+    return new Map((data.QueryResponse?.Term ?? []).map(term => [term.Id, term.Name]));
+  }
+
   const QB_SERVICE_ITEM_NAME = 'Irrigation Services - IrrigoPro';
 
   // Shared helper: look up the "Irrigation Services - IrrigoPro" item in a QB account.
@@ -9064,54 +9122,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? 'https://quickbooks.api.intuit.com' 
         : 'https://sandbox-quickbooks.api.intuit.com';
       
-      const qbCustomers: Record<string, unknown>[] = [];
-      let startPosition = 1;
-      const maxResults = 1000;
-      let fetchMore = true;
-
-      while (fetchMore) {
-        const query = `SELECT * FROM Customer WHERE Active = true STARTPOSITION ${startPosition} MAXRESULTS ${maxResults}`;
-        const customersResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/query?query=${encodeURIComponent(query)}`, {
-          headers: {
-            'Authorization': `Bearer ${integration.accessToken}`,
-            'Accept': 'application/json'
-          }
-        }, 'Customers Query', integration.realmId);
-
-        if (!customersResponse.ok) {
-          const errorText = await customersResponse.text();
-          const customersTid = customersResponse.headers.get('intuit_tid');
-          console.error('Failed to fetch customers from QuickBooks:', customersResponse.status, errorText);
-          
-          if (customersResponse.status === 403) {
-            res.status(403).json({ 
-              success: false, 
-              message: "QuickBooks authorization expired or invalid. Please reconnect to QuickBooks.",
-              errorCode: "AUTHORIZATION_FAILED",
-              needsReconnection: true
-            });
-            return;
-          }
-          
-          res.status(500).json({ 
-            success: false, 
-            message: `Failed to fetch customers from QuickBooks: ${customersResponse.status}${customersTid ? ` [TID: ${customersTid}]` : ''}` 
-          });
-          return;
-        }
-
-        const qbData = (await customersResponse.json()) as QbCustomerQueryResponse;
-        const page = (qbData?.QueryResponse?.Customer ?? []) as Record<string, unknown>[];
-        qbCustomers.push(...page);
-
-        console.log(`Fetched page starting at ${startPosition}: ${page.length} customers (total so far: ${qbCustomers.length})`);
-
-        if (page.length < maxResults) {
-          fetchMore = false;
-        } else {
-          startPosition += maxResults;
-        }
+      const fetched = await fetchActiveQbCustomers(integration, apiBase);
+      if (!fetched.ok) {
+        res.status(fetched.status).json({ success: false, message: fetched.message,
+          ...(fetched.needsReconnection ? { errorCode: "AUTHORIZATION_FAILED", needsReconnection: true } : {}) });
+        return;
       }
+      const qbCustomers = fetched.customers;
 
       let termNames: Map<string, string> | null = null;
       let termsError: string | undefined;
@@ -9132,8 +9149,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         deps: {
           getCustomerRecordsLock,
           getCustomerByQuickBooksId: (cid, qb) => storage.getCustomerByQuickBooksId(cid, qb),
+          getReviewRow: async (cid, qb) => {
+            const row = await storage.getCustomerSyncReviewRow(cid, qb);
+            return row ? { status: row.status as "open" | "dismissed" } : undefined;
+          },
+          getUnlinkedCustomers: (cid) => storage.getUnlinkedCustomers(cid),
+          insertReviewRow: (row) => storage.insertCustomerSyncReviewRow(row),
           createCustomer: (d) => storage.createCustomer(d),
-          updateCustomer: (id, d) => storage.updateCustomer(id, d),
+          updateCustomer: async (id, d) => {
+            const [customer] = await db.update(customers).set(d).where(and(eq(customers.id, id), eq(customers.companyId, companyId))).returning();
+            return customer;
+          },
         },
       });
       res.json({

@@ -222,13 +222,15 @@ describe("customer route registrations and ownership", () => {
 
 describe("customer schemas silently strip server-owned identifiers", () => {
   it("create drops QuickBooks ID without changing editable fields", () => {
-    const data = createCustomerSchema.parse({ name: "A", email: "a@x.invalid", companyId: 1, quickbooksId: "57" });
+    const data = createCustomerSchema.parse({ name: "A", email: "a@x.invalid", companyId: 1, quickbooksId: "57",
+      qbNotInQuickbooksAt: new Date() });
     assert.equal("quickbooksId" in data, false);
+    assert.equal("qbNotInQuickbooksAt" in data, false);
     assert.equal(data.companyId, 1);
     assert.equal(data.name, "A");
   });
   it("update drops company and QuickBooks IDs but retains labor rate", () => {
-    assert.deepEqual(updateCustomerSchema.parse({ companyId: 2, quickbooksId: "57", laborRate: "50.00" }), { laborRate: "50.00" });
+    assert.deepEqual(updateCustomerSchema.parse({ companyId: 2, quickbooksId: "57", qbNotInQuickbooksAt: new Date(), laborRate: "50.00" }), { laborRate: "50.00" });
   });
 });
 

@@ -445,3 +445,59 @@ mtime_ms = 1793832352713
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/c980a0b8-c7f4-4719-8bb0-75dfba0f12d7/75c0908f-7b36-4bcf-8d1e-11cc59ac7d4a"
 storage_version_token = "1793832353442954"
 content_type = "text/html"
+
+[[outputs]]
+id = "uhqBY8guUSpY7XSCS_uq4"
+uri = "file://generated-artifacts/customer-review/api-billing.txt"
+type = "text"
+title = "Billing validation output"
+description = "Actual api-billing lane output: 25 entries passed, no failures. Final scoped refinements and sandbox limitations are detailed in the acceptance report."
+logical_id = "824b3c5e-badb-468a-9f4a-b1ab37e10fb6"
+content_hash = "sha256:795f80499e1b8e29bb085997872372207b4dc8385b45a91374cf73a7eba46cc6"
+size = 201031
+mtime_ms = 1793834533358
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/824b3c5e-badb-468a-9f4a-b1ab37e10fb6/8877d147-7a39-42b9-9c90-ab645492eadf"
+storage_version_token = "1793834557954084"
+content_type = "text/plain"
+
+[[outputs]]
+id = "B3vUfOb7oQhW4NdpX6c8W"
+uri = "file://generated-artifacts/customer-review/types-final.txt"
+type = "text"
+title = "Final types validation output"
+description = "Final types lane run after the source changes: all 4 entries passed."
+logical_id = "b5ab8102-492d-4b9c-8914-6bd71e6cee33"
+content_hash = "sha256:b76e2cdd3a386ed2ff46b6764d225ae2730cad9015d0332ac29cc045ecc0761e"
+size = 57127
+mtime_ms = 1793834492826
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/b5ab8102-492d-4b9c-8914-6bd71e6cee33/d129c675-db31-43a0-8f3a-8ae9c8aec830"
+storage_version_token = "1793834558664119"
+content_type = "text/plain"
+
+[[outputs]]
+id = "f-2iXgFttEbL7S3cItj7u"
+uri = "file://docs/customer-sync-review-acceptance.md"
+type = "text"
+title = "Updated customer review acceptance report"
+description = "Includes the candidate-deletion fix, latest verification results, original lane outputs, and the explicitly unavailable live QuickBooks sandbox proof."
+logical_id = "2b92d0ca-16a1-48e4-9c14-562b5edf7bb7"
+content_hash = "sha256:ed629503f4869d06f7c62dbb6da2646e312a4f9492745009f7f4ae560768ba4c"
+size = 5884
+mtime_ms = 1793835156198
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/2b92d0ca-16a1-48e4-9c14-562b5edf7bb7/8627c9fd-71af-4033-913e-895b54a6415e"
+storage_version_token = "1793835170311941"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "86LlpkTB1KOAamAUR8xGh"
+uri = "file://generated-artifacts/customer-review/route-suite-after-delete-fix.txt"
+type = "text"
+title = "Customer deletion regression checks"
+description = "Latest real-development-database review suite: all 17 tests passed, including deletion of open and historical candidates and successful resolution after deletion."
+logical_id = "8a73b1bd-dc70-476b-b1a2-597b7ebe6500"
+content_hash = "sha256:e2b0256ac11192b3ff1c958980a4fea191268aff107c55fc61987eadfce4960d"
+size = 2180
+mtime_ms = 1793835090070
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/8a73b1bd-dc70-476b-b1a2-597b7ebe6500/a38fa9ba-50a7-46d4-98ca-74fdfd17909e"
+storage_version_token = "1793835169803743"
+content_type = "text/plain"

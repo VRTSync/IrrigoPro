@@ -2,6 +2,9 @@ import {
   companies,
   users,
   customers, 
+  customerSyncReview,
+  type CustomerSyncReview,
+  type InsertCustomerSyncReview,
   parts, 
   assemblies,
   assemblyParts,
@@ -502,6 +505,13 @@ export interface IStorage {
   revokeMobileRefreshTokenById(id: number): Promise<boolean>;
 
   // Customers
+  getCustomerSyncReviewRow(companyId: number, qbId: string): Promise<CustomerSyncReview | undefined>;
+  insertCustomerSyncReviewRow(row: InsertCustomerSyncReview): Promise<void>;
+  listCustomerSyncReview(companyId: number): Promise<CustomerSyncReview[]>;
+  getCustomerSyncReviewById(companyId: number, id: number): Promise<CustomerSyncReview | undefined>;
+  resolveCustomerSyncReview(companyId: number, id: number, status: "linked" | "created" | "dismissed", userId: number): Promise<void>;
+  resolveOpenReviewRowsForQbId(companyId: number, qbId: string, status: "linked", userId: number): Promise<void>;
+  getUnlinkedCustomers(companyId: number): Promise<Customer[]>;
   getCustomers(companyId?: number): Promise<Customer[]>;
   getCustomer(id: number): Promise<Customer | undefined>;
   createCustomer(customer: InsertCustomer): Promise<Customer>;
@@ -2651,6 +2661,50 @@ export class DatabaseStorage implements IStorage {
       and(eq(customers.companyId, companyId), eq(customers.quickbooksId, quickbooksId)),
     );
     return customer || undefined;
+  }
+
+  async getCustomerSyncReviewRow(companyId: number, qbId: string): Promise<CustomerSyncReview | undefined> {
+    const [row] = await db.select().from(customerSyncReview).where(and(
+      eq(customerSyncReview.companyId, companyId), eq(customerSyncReview.qbCustomerId, qbId),
+      inArray(customerSyncReview.status, ["open", "dismissed"])));
+    return row;
+  }
+
+  async insertCustomerSyncReviewRow(row: InsertCustomerSyncReview): Promise<void> {
+    // A candidate from a different tenant must never be persisted as a review hint.
+    if (row.candidateCustomerId != null) {
+      const [candidate] = await db.select({ id: customers.id }).from(customers).where(and(
+        eq(customers.companyId, row.companyId), eq(customers.id, row.candidateCustomerId)));
+      if (!candidate) throw new Error("Candidate customer not found");
+    }
+    await db.insert(customerSyncReview).values(row).onConflictDoNothing();
+  }
+
+  async listCustomerSyncReview(companyId: number): Promise<CustomerSyncReview[]> {
+    return db.select().from(customerSyncReview).where(and(eq(customerSyncReview.companyId, companyId),
+      eq(customerSyncReview.status, "open"))).orderBy(desc(customerSyncReview.createdAt), desc(customerSyncReview.id));
+  }
+
+  async getCustomerSyncReviewById(companyId: number, id: number): Promise<CustomerSyncReview | undefined> {
+    const [row] = await db.select().from(customerSyncReview).where(and(
+      eq(customerSyncReview.companyId, companyId), eq(customerSyncReview.id, id)));
+    return row;
+  }
+
+  async resolveCustomerSyncReview(companyId: number, id: number, status: "linked" | "created" | "dismissed", userId: number): Promise<void> {
+    await db.update(customerSyncReview).set({ status, resolvedByUserId: userId, resolvedAt: new Date() }).where(and(
+      eq(customerSyncReview.companyId, companyId), eq(customerSyncReview.id, id), eq(customerSyncReview.status, "open")));
+  }
+
+  async resolveOpenReviewRowsForQbId(companyId: number, qbId: string, status: "linked", userId: number): Promise<void> {
+    await db.update(customerSyncReview).set({ status, resolvedByUserId: userId, resolvedAt: new Date() }).where(and(
+      eq(customerSyncReview.companyId, companyId), eq(customerSyncReview.qbCustomerId, qbId), eq(customerSyncReview.status, "open")));
+  }
+
+  async getUnlinkedCustomers(companyId: number): Promise<Customer[]> {
+    return db.select().from(customers).where(and(eq(customers.companyId, companyId),
+      or(isNull(customers.quickbooksId), eq(customers.quickbooksId, "")),
+      isNull(customers.qbNotInQuickbooksAt))).orderBy(customers.id);
   }
 
   async createCustomer(customer: InsertCustomer): Promise<Customer> {

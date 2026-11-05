@@ -119,6 +119,7 @@ export const customers = pgTable("customers", {
   serviceState: text("service_state"),
   serviceZip: text("service_zip"),
   qbLastUpdatedAt: timestamp("qb_last_updated_at", { withTimezone: true }),
+  qbNotInQuickbooksAt: timestamp("qb_not_in_quickbooks_at", { withTimezone: true }),
   // Irrigation system details
   totalControllers: integer("total_controllers").default(1), // Number of controllers (1-26)
   // Contract-based billing rates
@@ -170,6 +171,29 @@ export const customers = pgTable("customers", {
     .on(table.companyId, table.quickbooksId)
     .where(sql`${table.quickbooksId} IS NOT NULL AND ${table.quickbooksId} <> ''`),
 }));
+
+export const customerSyncReview = pgTable("customer_sync_review", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  kind: text("kind", { enum: ["possible_duplicate", "sub_customer"] }).notNull(),
+  qbCustomerId: text("qb_customer_id").notNull(),
+  qbName: text("qb_name"),
+  qbAddress: text("qb_address"),
+  qbParentId: text("qb_parent_id"),
+  candidateCustomerId: integer("candidate_customer_id").references(() => customers.id, { onDelete: "set null" }),
+  status: text("status", { enum: ["open", "linked", "created", "dismissed"] }).notNull().default("open"),
+  resolvedByUserId: integer("resolved_by_user_id").references(() => users.id),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  companyStatus: index("customer_sync_review_company_status_idx").on(table.companyId, table.status),
+  activeQbId: uniqueIndex("customer_sync_review_active_qb_id_unique").on(table.companyId, table.qbCustomerId)
+    .where(sql`${table.status} IN ('open', 'dismissed')`),
+  validKind: check("customer_sync_review_kind_check", sql`${table.kind} IN ('possible_duplicate', 'sub_customer')`),
+  validStatus: check("customer_sync_review_status_check", sql`${table.status} IN ('open', 'linked', 'created', 'dismissed')`),
+}));
+export type CustomerSyncReview = typeof customerSyncReview.$inferSelect;
+export type InsertCustomerSyncReview = typeof customerSyncReview.$inferInsert;
 
 export const customerBudgetMonths = pgTable("customer_budget_months", {
   id: serial("id").primaryKey(),

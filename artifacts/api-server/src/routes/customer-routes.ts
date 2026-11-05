@@ -15,8 +15,8 @@ import {
 } from "../services/generate-budget-months";
 
 // companyId and quickbooksId are server-owned. Body values are dropped.
-export const createCustomerSchema = insertCustomerSchema.omit({ quickbooksId: true });
-export const updateCustomerSchema = insertCustomerSchema.omit({ companyId: true, quickbooksId: true }).partial();
+export const createCustomerSchema = insertCustomerSchema.omit({ quickbooksId: true, qbNotInQuickbooksAt: true });
+export const updateCustomerSchema = insertCustomerSchema.omit({ companyId: true, quickbooksId: true, qbNotInQuickbooksAt: true }).partial();
 
 export interface RegisterCustomerRoutesDeps {
   requireAuthentication: RequestHandler;
