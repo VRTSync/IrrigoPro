@@ -94,8 +94,10 @@ describe("company-scoped QuickBooks lookup (real development database)", () => {
 describe("customer sync source guards", () => {
   it("uses the scoped lookup without a company fallback or cross-company skip", () => {
     const sync = readFileSync(new URL("lib/qb-customer-sync.ts", sourceRoot), "utf8");
-    assert.match(handler, /applyQbCustomers\(\{\s*companyId,/);
-    assert.match(handler, /getCustomerByQuickBooksId: \(cid, qb\) => storage\.getCustomerByQuickBooksId\(cid, qb\)/);
+    assert.match(handler, /runCustomerPull\(integration, "manual", pullDeps\)/);
+    const pullDeps = routes.slice(routes.indexOf("  const pullDeps: PullDeps"), routes.indexOf("  const QB_SERVICE_ITEM_NAME"));
+    assert.match(pullDeps, /applyQbCustomers\(\{\s*companyId,/);
+    assert.match(pullDeps, /getCustomerByQuickBooksId: \(cid, qb\) => storage\.getCustomerByQuickBooksId\(cid, qb\)/);
     assert.match(sync, /deps\.getCustomerByQuickBooksId\(companyId, mapped\.qbId\)/);
     assert.ok(!handler.includes(["parseInt(userCompanyId ||", " '1')"].join("")));
     assert.ok(!handler.includes(["skipped", "other", "company"].join("_")));

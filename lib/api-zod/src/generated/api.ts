@@ -8,6 +8,28 @@
 import * as zod from "zod";
 
 /**
+ * @summary Read the authenticated company's QuickBooks customer pull state
+ */
+export const GetCustomerPullStatusResponse = zod.object({
+  intervalMinutes: zod.literal(15),
+  lastAttemptAt: zod.coerce.date().nullable(),
+  lastSuccessAt: zod.coerce.date().nullable(),
+  lastError: zod.string().nullable(),
+  lastSummary: zod.union([
+    zod.object({
+      mode: zod.enum(["incremental", "full", "manual"]),
+      added: zod.number(),
+      updated: zod.number(),
+      unchanged: zod.number(),
+      heldForReview: zod.number(),
+      skippedInactiveOrDeleted: zod.number(),
+      unmappedTerms: zod.array(zod.string()),
+    }),
+    zod.null(),
+  ]),
+});
+
+/**
  * Returns server health status
  * @summary Health check
  */

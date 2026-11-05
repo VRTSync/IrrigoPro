@@ -5,6 +5,43 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export type CustomerPullStatusIntervalMinutes =
+  (typeof CustomerPullStatusIntervalMinutes)[keyof typeof CustomerPullStatusIntervalMinutes];
+
+export const CustomerPullStatusIntervalMinutes = {
+  NUMBER_15: 15,
+} as const;
+
+export type CustomerPullSummaryMode =
+  (typeof CustomerPullSummaryMode)[keyof typeof CustomerPullSummaryMode];
+
+export const CustomerPullSummaryMode = {
+  incremental: "incremental",
+  full: "full",
+  manual: "manual",
+} as const;
+
+export interface CustomerPullSummary {
+  mode: CustomerPullSummaryMode;
+  added: number;
+  updated: number;
+  unchanged: number;
+  heldForReview: number;
+  skippedInactiveOrDeleted: number;
+  unmappedTerms: string[];
+}
+
+export interface CustomerPullStatus {
+  intervalMinutes: CustomerPullStatusIntervalMinutes;
+  /** @nullable */
+  lastAttemptAt: string | null;
+  /** @nullable */
+  lastSuccessAt: string | null;
+  /** @nullable */
+  lastError: string | null;
+  lastSummary: CustomerPullSummary | null;
+}
+
 export interface HealthStatus {
   status: string;
 }

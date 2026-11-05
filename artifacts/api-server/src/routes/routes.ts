@@ -1,4 +1,6 @@
 import { applyQbCustomers } from "../lib/qb-customer-sync";
+import { runCustomerPull, startQbCustomerPullJob, QB_CUSTOMER_PULL_BUSY, type PullDeps, type FetchResult } from "../lib/qb-customer-pull";
+import { createCustomerPullRealmLock } from "../lib/qb-customer-pull-lock";
 import express, { type Express } from "express";
 import type { Request, Response } from "express";
 import { createServer, type Server } from "http";
@@ -1015,10 +1017,10 @@ import {
   requireQuickBooksAccess,
   requireBulkBudgetGoalsAdmin,
 } from "./role-guards";
-import { db } from "../db";
+import { db, pool } from "../db";
 import { 
   customers, estimates, workOrders, estimateItems, parts, billingSheets, billingSheetItems, 
-  users, invoices, invoiceItems, notifications,
+  users, invoices, invoiceItems, notifications, quickbooksIntegration,
   companies, siteMaps, controllers, irrigationZones, partUsage, utilityMarkers, invoicePdfs,
   wetCheckPhotos, wetChecks, wetCheckFindings, wetCheckBillings,
   workOrderZonePhotos,
@@ -8364,11 +8366,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { headers: { Authorization: `Bearer ${integration.accessToken}`, Accept: "application/json" } },
         "Customers Query", integration.realmId);
       if (!response.ok) {
-        const errorText = await response.text();
-        const tid = response.headers.get("intuit_tid");
-        console.error("Failed to fetch customers from QuickBooks:", response.status, errorText);
-        if (response.status === 403) return { ok: false, status: 403,
+        if (response.status === 401 || response.status === 403) return { ok: false, status: 403,
           message: "QuickBooks authorization expired or invalid. Please reconnect to QuickBooks.", needsReconnection: true };
+        const tid = response.headers.get("intuit_tid");
         return { ok: false, status: 500,
           message: `Failed to fetch customers from QuickBooks: ${response.status}${tid ? ` [TID: ${tid}]` : ""}` };
       }
@@ -8402,6 +8402,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const data = await response.json() as { QueryResponse?: { Term?: Array<{ Id: string; Name: string }> } };
     return new Map((data.QueryResponse?.Term ?? []).map(term => [term.Id, term.Name]));
   }
+
+  async function fetchQbChangedCustomers(integration: QbReadIntegration, apiBase: string, changedSince: string): Promise<FetchResult> {
+    const response = await makeQuickBooksRequest(
+      `${apiBase}/v3/company/${integration.realmId}/cdc?entities=Customer&changedSince=${encodeURIComponent(changedSince)}&minorversion=73`,
+      { headers: { Authorization: `Bearer ${integration.accessToken}`, Accept: "application/json" } },
+      "Customers CDC", integration.realmId);
+    if (!response.ok) {
+      const tid = response.headers.get("intuit_tid");
+      if (response.status === 401 || response.status === 403) return { ok: false, status: 403,
+        message: "QuickBooks authorization expired or invalid. Please reconnect to QuickBooks.", needsReconnection: true };
+      return { ok: false, status: 500,
+        message: `Failed to fetch customers from QuickBooks: ${response.status}${tid ? ` [TID: ${tid}]` : ""}` };
+    }
+    const data = await response.json() as {
+      CDCResponse?: Array<{ QueryResponse?: Array<{ Customer?: Record<string, unknown>[] }> }>;
+    };
+    return { ok: true, customers: data.CDCResponse?.[0]?.QueryResponse?.[0]?.Customer ?? [] };
+  }
+
+  const customerPullApiBase = process.env.NODE_ENV === "production"
+    ? "https://quickbooks.api.intuit.com" : "https://sandbox-quickbooks.api.intuit.com";
+  const pullDeps: PullDeps = {
+    withRealmLock: createCustomerPullRealmLock(pool),
+    fetchFull: integration => fetchActiveQbCustomers(integration, customerPullApiBase),
+    fetchChanged: (integration, changedSince) => fetchQbChangedCustomers(integration, customerPullApiBase, changedSince),
+    fetchTerms: async integration => {
+      try {
+        return { termNames: await fetchQbTermNames(integration, customerPullApiBase) };
+      } catch (error) {
+        return { termNames: null, termsError: `Could not read QuickBooks terms: ${error instanceof Error ? error.message : String(error)}` };
+      }
+    },
+    apply: (companyId, qbCustomers, terms) => applyQbCustomers({
+      companyId, qbCustomers, ...terms,
+      deps: {
+        getCustomerRecordsLock,
+        getCustomerByQuickBooksId: (cid, qb) => storage.getCustomerByQuickBooksId(cid, qb),
+        getReviewRow: async (cid, qb) => {
+          const row = await storage.getCustomerSyncReviewRow(cid, qb);
+          return row ? { status: row.status as "open" | "dismissed" } : undefined;
+        },
+        getUnlinkedCustomers: cid => storage.getUnlinkedCustomers(cid),
+        insertReviewRow: row => storage.insertCustomerSyncReviewRow(row),
+        createCustomer: data => storage.createCustomer(data),
+        updateCustomer: async (id, data) => {
+          const [customer] = await db.update(customers).set(data)
+            .where(and(eq(customers.id, id), eq(customers.companyId, companyId))).returning();
+          return customer;
+        },
+      },
+    }),
+    saveState: async (realmId, state) => {
+      const patch = {
+        ...(state.lastAttemptAt !== undefined ? { customerPullLastAttemptAt: state.lastAttemptAt } : {}),
+        ...(state.lastSuccessAt !== undefined ? { customerPullLastSuccessAt: state.lastSuccessAt } : {}),
+        ...(state.lastError !== undefined ? { customerPullLastError: state.lastError } : {}),
+        ...(state.lastSummary !== undefined ? { customerPullLastSummary: state.lastSummary } : {}),
+      };
+      const rows = await db.update(quickbooksIntegration).set(patch)
+        .where(eq(quickbooksIntegration.realmId, realmId)).returning({ realmId: quickbooksIntegration.realmId });
+      if (rows.length !== 1) throw new Error("QuickBooks integration state could not be saved.");
+    },
+    now: () => new Date(),
+  };
 
   const QB_SERVICE_ITEM_NAME = 'Irrigation Services - IrrigoPro';
 
@@ -9117,51 +9181,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
-      // Use production QuickBooks API for deployment, sandbox for development
-      const apiBase = process.env.NODE_ENV === 'production' 
-        ? 'https://quickbooks.api.intuit.com' 
-        : 'https://sandbox-quickbooks.api.intuit.com';
-      
-      const fetched = await fetchActiveQbCustomers(integration, apiBase);
-      if (!fetched.ok) {
-        res.status(fetched.status).json({ success: false, message: fetched.message,
-          ...(fetched.needsReconnection ? { errorCode: "AUTHORIZATION_FAILED", needsReconnection: true } : {}) });
+      const outcome = await runCustomerPull(integration, "manual", pullDeps);
+      if (outcome.status === "busy") {
+        res.status(409).json({ success: false, message: QB_CUSTOMER_PULL_BUSY });
         return;
       }
-      const qbCustomers = fetched.customers;
-
-      let termNames: Map<string, string> | null = null;
-      let termsError: string | undefined;
-      try {
-        const response = await makeQuickBooksRequest(
-          `${apiBase}/v3/company/${integration.realmId}/query?query=${encodeURIComponent("SELECT * FROM Term")}`,
-          { headers: { Authorization: `Bearer ${integration.accessToken}`, Accept: "application/json" } },
-          "Terms Query", integration.realmId,
-        );
-        if (!response.ok) throw new Error(String(response.status));
-        const data = await response.json() as { QueryResponse?: { Term?: Array<{ Id: string; Name: string }> } };
-        termNames = new Map((data.QueryResponse?.Term ?? []).map(term => [term.Id, term.Name]));
-      } catch (error) {
-        termsError = `Could not read QuickBooks terms: ${error instanceof Error ? error.message : String(error)}`;
+      if (outcome.status === "error") {
+        res.status(outcome.httpStatus).json({ success: false, message: outcome.message,
+          ...(outcome.needsReconnection ? { errorCode: "AUTHORIZATION_FAILED", needsReconnection: true } : {}) });
+        return;
       }
-      const summary = await applyQbCustomers({
-        companyId, qbCustomers, termNames, termsError,
-        deps: {
-          getCustomerRecordsLock,
-          getCustomerByQuickBooksId: (cid, qb) => storage.getCustomerByQuickBooksId(cid, qb),
-          getReviewRow: async (cid, qb) => {
-            const row = await storage.getCustomerSyncReviewRow(cid, qb);
-            return row ? { status: row.status as "open" | "dismissed" } : undefined;
-          },
-          getUnlinkedCustomers: (cid) => storage.getUnlinkedCustomers(cid),
-          insertReviewRow: (row) => storage.insertCustomerSyncReviewRow(row),
-          createCustomer: (d) => storage.createCustomer(d),
-          updateCustomer: async (id, d) => {
-            const [customer] = await db.update(customers).set(d).where(and(eq(customers.id, id), eq(customers.companyId, companyId))).returning();
-            return customer;
-          },
-        },
-      });
+      const summary = outcome.summary;
       res.json({
         success: true, ...summary,
         message: `${summary.customersAdded} added, ${summary.customersUpdated} updated, ${summary.customersUnchanged} unchanged` +
@@ -9171,6 +9201,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("QuickBooks customer sync error:", error);
       res.status(500).json({ message: "Failed to sync customers from QuickBooks" });
+    }
+  });
+
+  app.get("/api/quickbooks/customer-pull-status", requireAuthentication, requireQuickBooksAccess, async (req, res) => {
+    const companyId = Number(resolveCompanyId(req));
+    if (!Number.isInteger(companyId) || companyId <= 0) {
+      res.status(400).json({ message: "Company context is required." });
+      return;
+    }
+    try {
+      const integration = await storage.getQuickBooksIntegrationByCompanyId(String(companyId));
+      res.json({ intervalMinutes: 15,
+        lastAttemptAt: integration?.customerPullLastAttemptAt ?? null,
+        lastSuccessAt: integration?.customerPullLastSuccessAt ?? null,
+        lastError: integration?.customerPullLastError ?? null,
+        lastSummary: integration?.customerPullLastSummary ?? null });
+    } catch {
+      req.log.error("[QB customer pull] Failed to read status");
+      res.status(500).json({ message: "Failed to read customer sync status" });
     }
   });
 
@@ -15820,6 +15869,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     24 * 60 * 60 * 1000
   );
   if (typeof _qbHealthTimer.unref === "function") _qbHealthTimer.unref();
+  const _qbCustomerPullTimer = startQbCustomerPullJob(() => storage.getAllActiveQuickBooksIntegrations(), pullDeps);
+  if (typeof _qbCustomerPullTimer.unref === "function") _qbCustomerPullTimer.unref();
 
   // QB Harden #4 — External daily health probe.
   //

@@ -703,6 +703,13 @@ export const estimateItems = pgTable("estimate_items", {
 
 // QuickBooks integration
 export const quickbooksIntegration = pgTable("quickbooks_integration", {
+  customerPullLastAttemptAt: timestamp("customer_pull_last_attempt_at", { withTimezone: true }),
+  customerPullLastSuccessAt: timestamp("customer_pull_last_success_at", { withTimezone: true }),
+  customerPullLastError: text("customer_pull_last_error"),
+  customerPullLastSummary: jsonb("customer_pull_last_summary").$type<{
+    mode: "incremental" | "full" | "manual"; added: number; updated: number; unchanged: number;
+    heldForReview: number; skippedInactiveOrDeleted: number; unmappedTerms: string[];
+  }>(),
   id: serial("id").primaryKey(),
   companyId: text("company_id").notNull(),
   accessToken: text("access_token").notNull(),

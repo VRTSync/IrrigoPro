@@ -22,12 +22,29 @@ import {
   AlertCircle
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, adaptiveRefetchInterval, useArrayQuery } from "@/lib/queryClient";
+import { apiRequest, adaptiveRefetchInterval, useArrayQuery, parseApiError } from "@/lib/queryClient";
 import { format, formatDistanceToNow } from "date-fns";
 import { formatEstimateNumber } from "@workspace/shared";
+import type { CustomerPullStatus as CustomerPullStatusData } from "@workspace/api-client-react";
 
 interface QuickBooksConnectionProps {
   className?: string;
+}
+
+export function CustomerPullStatus() {
+  const { data, error } = useQuery<CustomerPullStatusData>({
+    queryKey: ["/api/quickbooks/customer-pull-status"], refetchInterval: 60_000,
+  });
+  return (
+    <div className="space-y-1">
+      <p className="text-sm text-green-700">Customers sync from QuickBooks automatically every 15 minutes.</p>
+      {error ? <p className="text-sm text-red-700">Unable to load customer sync status.</p> :
+        <p className="text-sm text-green-700">
+          {data?.lastSuccessAt ? `Last synced ${formatDistanceToNow(new Date(data.lastSuccessAt))} ago` : "Not synced yet"}
+        </p>}
+      {data?.lastError && <p className="text-sm text-red-700">Last attempt failed: {data.lastError}</p>}
+    </div>
+  );
 }
 
 interface QbConnectionStatus {
@@ -335,12 +352,13 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
       });
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/customer-pull-status"] });
     },
     onError: (error) => {
       console.error("Customer sync error:", error);
       toast({
         title: "Sync Failed",
-        description: error.message || "Failed to sync customers from QuickBooks",
+        description: parseApiError(error, "Failed to sync customers from QuickBooks"),
         variant: "destructive"
       });
     }
@@ -561,14 +579,12 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                       ) : (
                         <>
                           <RefreshCw className="w-4 h-4 mr-2" />
-                          Import Customers
+                          Sync now
                         </>
                       )}
                     </Button>
                   </div>
-                  <p className="text-sm text-green-700">
-                    Import existing customers from QuickBooks to populate your IrrigoPro customer list.
-                  </p>
+                  <CustomerPullStatus />
                 </div>
               </div>
             ) : !isReconnectRequired ? (

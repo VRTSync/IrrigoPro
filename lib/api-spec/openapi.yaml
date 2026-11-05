@@ -11,6 +11,25 @@ tags:
   - name: health
     description: Health operations
 paths:
+  /quickbooks/customer-pull-status:
+    get:
+      operationId: getCustomerPullStatus
+      summary: Read the authenticated company's QuickBooks customer pull state
+      responses:
+        "200":
+          description: Pull state, with null fields when no integration exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerPullStatus"
+        "400":
+          description: Company context is required
+        "401":
+          description: Authentication is required
+        "403":
+          description: QuickBooks access is required
+        "500":
+          description: Failed to read sync state
   /healthz:
     get:
       operationId: healthCheck
@@ -26,6 +45,46 @@ paths:
                 $ref: "#/components/schemas/HealthStatus"
 components:
   schemas:
+    CustomerPullStatus:
+      type: object
+      required: [intervalMinutes, lastAttemptAt, lastSuccessAt, lastError, lastSummary]
+      properties:
+        intervalMinutes:
+          type: integer
+          enum: [15]
+        lastAttemptAt:
+          type: [string, "null"]
+          format: date-time
+        lastSuccessAt:
+          type: [string, "null"]
+          format: date-time
+        lastError:
+          type: [string, "null"]
+        lastSummary:
+          oneOf:
+            - $ref: "#/components/schemas/CustomerPullSummary"
+            - type: "null"
+    CustomerPullSummary:
+      type: object
+      required: [mode, added, updated, unchanged, heldForReview, skippedInactiveOrDeleted, unmappedTerms]
+      properties:
+        mode:
+          type: string
+          enum: [incremental, full, manual]
+        added:
+          type: integer
+        updated:
+          type: integer
+        unchanged:
+          type: integer
+        heldForReview:
+          type: integer
+        skippedInactiveOrDeleted:
+          type: integer
+        unmappedTerms:
+          type: array
+          items:
+            type: string
     HealthStatus:
       type: object
       properties:

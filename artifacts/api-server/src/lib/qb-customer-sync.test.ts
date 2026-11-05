@@ -147,53 +147,46 @@ const handler = source.slice(source.indexOf('app.post("/api/quickbooks/sync-cust
 const fetchSource = source.slice(source.indexOf("  async function fetchActiveQbCustomers("), source.indexOf("  async function fetchQbCustomerById("));
 describe("manual sync handler delegation (database-free)", () => {
   it("handler-scoped guard retains pagination and delegates without qbFields", () => {
-    assert.match(handler, /applyQbCustomers\(/);
+    assert.match(handler, /runCustomerPull\(integration, "manual", pullDeps\)/);
+    assert.doesNotMatch(handler, /applyQbCustomers\(/);
     assert.doesNotMatch(handler, /function qbFields/);
     assert.match(fetchSource, /WHERE Active = true STARTPOSITION/);
-    assert.match(handler, /fetchActiveQbCustomers\(integration, apiBase\)/);
-    assert.equal((handler.match(/SELECT \* FROM Term/g) ?? []).length, 1);
-    assert.match(handler, /"Terms Query", integration\.realmId/);
+    assert.match(source, /fetchFull: integration => fetchActiveQbCustomers\(integration, customerPullApiBase\)/);
+    assert.equal((source.match(/SELECT \* FROM Term/g) ?? []).length, 1);
+    assert.match(source, /"Terms Query", integration\.realmId/);
     assert.match(handler, /payment terms not recognized:/);
   });
-  it("non-OK and thrown Terms Query failures still sync customers through the same module", async () => {
+  it("non-OK and thrown Terms Query failures remain nonfatal through the shared pull adapter", async () => {
     const { transform } = await import("esbuild");
-    const body = handler.slice(handler.indexOf("async (req, res) => {") + "async (req, res) => {".length);
-    const compiled = await transform(`async function run(req, res) {${body}\n}`, { loader: "ts", target: "es2022" });
-    const fetchCompiled = await transform(fetchSource, { loader: "ts", target: "es2022" });
-    const createFetch = new Function("makeQuickBooksRequest", "console", `${fetchCompiled.code}; return fetchActiveQbCustomers;`);
-    const create = new Function("resolveCompanyId", "storage", "makeQuickBooksRequest", "applyQbCustomers", "getCustomerRecordsLock", "process", "console", "fetchActiveQbCustomers", `${compiled.code}; return run;`);
+    const termStart = source.indexOf("  async function fetchQbTermNames(");
+    const termEnd = source.indexOf("  async function fetchQbChangedCustomers(", termStart);
+    const adapterStart = source.indexOf("    fetchTerms: async integration => {", source.indexOf("  const pullDeps: PullDeps"));
+    const adapterEnd = source.indexOf("\n    apply:", adapterStart);
+    const compiled = await transform(source.slice(termStart, termEnd) +
+      `\nconst adapter = {${source.slice(adapterStart, adapterEnd)}};`, { loader: "ts", target: "es2022" });
+    const create = new Function("makeQuickBooksRequest", "customerPullApiBase", `${compiled.code}; return adapter.fetchTerms;`);
     for (const failure of [503, "term transport failed", null]) {
       const requests: Array<{ url: string; operation: string; realm: string }> = [];
       const { deps, calls } = harness();
       const integration = { realmId: "sandbox-test", accessToken: "test-only-not-a-credential" };
       const request = async (url: string, _opts: unknown, operation: string, realm: string) => {
         requests.push({ url, operation, realm });
-        if (operation === "Customers Query") return { ok: true, json: async () => ({ QueryResponse: { Customer: [raw] } }) };
         if (typeof failure === "string") throw new Error(failure);
         return { ok: failure === null, status: failure, json: async () => ({ QueryResponse: { Term: [{ Id: "3", Name: "Net 45" }] } }) };
       };
-      const quiet = { log() {}, error() {} };
-      const run = create(() => 7, {
-        getQuickBooksIntegrationByCompanyId: async () => integration,
-        getQuickBooksIntegration: async () => integration,
-        getCustomerSyncReviewRow: deps.getReviewRow,
-        insertCustomerSyncReviewRow: deps.insertReviewRow,
-        ...deps,
-      }, request, applyQbCustomers, deps.getCustomerRecordsLock, { env: { NODE_ENV: "development" } }, quiet, createFetch(request, quiet));
-      let response: Record<string, unknown> = {};
-      await run({}, { json(value: Record<string, unknown>) { response = value; }, status() { throw new Error("Unexpected HTTP error"); } });
-      assert.equal(response.success, true);
+      const fetchTerms = create(request, "https://sandbox-quickbooks.api.intuit.com");
+      const termsResult = await fetchTerms(integration);
+      const response = await applyQbCustomers({ companyId: 7, qbCustomers: [raw], ...termsResult, deps });
       assert.equal(response.customersAdded, 1);
-      assert.equal(requests.length, 2);
+      assert.equal(requests.length, 1);
       assert.ok(requests.every(request => request.realm === integration.realmId && request.url.startsWith("https://sandbox-quickbooks.api.intuit.com/")));
-      assert.equal(requests[1].operation, "Terms Query");
-      assert.equal(new URL(requests[1].url).searchParams.get("query"), "SELECT * FROM Term");
+      assert.equal(requests[0].operation, "Terms Query");
+      assert.equal(new URL(requests[0].url).searchParams.get("query"), "SELECT * FROM Term");
       assert.equal("paymentTerms" in calls.creates[0], false);
       if (failure !== null) {
         assert.equal(response.termsError, `Could not read QuickBooks terms: ${failure}`);
-        assert.equal(response.message, "1 added, 0 updated, 0 unchanged");
       } else {
-        assert.equal(response.message, "1 added, 0 updated, 0 unchanged; payment terms not recognized: Net 45");
+        assert.deepEqual(response.unmappedTerms, ["Net 45"]);
       }
     }
   });
@@ -310,11 +303,11 @@ describe("shared QuickBooks customer reads (injected transport, no database)", (
     }
   });
   it("preserves authorization/reconnection and 500/TID results", async () => {
-    for (const status of [403, 500]) {
+    for (const status of [401, 403, 500]) {
       const helpers = await readers(async () => ({ ok: false, status, text: async () => "failure",
         headers: { get: () => "fixture-tid" } }));
       const result = await helpers.fetchActiveQbCustomers({ realmId: "realm", accessToken: "fixture" }, "https://quickbooks.api.intuit.com");
-      assert.deepEqual(result, status === 403 ? {
+      assert.deepEqual(result, status === 401 || status === 403 ? {
         ok: false, status: 403, message: "QuickBooks authorization expired or invalid. Please reconnect to QuickBooks.", needsReconnection: true,
       } : { ok: false, status: 500, message: "Failed to fetch customers from QuickBooks: 500 [TID: fixture-tid]" });
     }

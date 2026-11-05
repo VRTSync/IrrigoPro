@@ -13,7 +13,7 @@ import type {
   UseQueryResult,
 } from "@tanstack/react-query";
 
-import type { HealthStatus } from "./api.schemas";
+import type { CustomerPullStatus, HealthStatus } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
 import type { ErrorType } from "../custom-fetch";
@@ -23,6 +23,81 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+/**
+ * @summary Read the authenticated company's QuickBooks customer pull state
+ */
+export const getGetCustomerPullStatusUrl = () => {
+  return `/api/quickbooks/customer-pull-status`;
+};
+
+export const getCustomerPullStatus = async (
+  options?: RequestInit,
+): Promise<CustomerPullStatus> => {
+  return customFetch<CustomerPullStatus>(getGetCustomerPullStatusUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetCustomerPullStatusQueryKey = () => {
+  return [`/api/quickbooks/customer-pull-status`] as const;
+};
+
+export const getGetCustomerPullStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCustomerPullStatus>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getCustomerPullStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetCustomerPullStatusQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCustomerPullStatus>>
+  > = ({ signal }) => getCustomerPullStatus({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCustomerPullStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCustomerPullStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCustomerPullStatus>>
+>;
+export type GetCustomerPullStatusQueryError = ErrorType<void>;
+
+/**
+ * @summary Read the authenticated company's QuickBooks customer pull state
+ */
+
+export function useGetCustomerPullStatus<
+  TData = Awaited<ReturnType<typeof getCustomerPullStatus>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getCustomerPullStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCustomerPullStatusQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * Returns server health status

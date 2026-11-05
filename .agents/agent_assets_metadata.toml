@@ -501,3 +501,31 @@ mtime_ms = 1793835090070
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/8a73b1bd-dc70-476b-b1a2-597b7ebe6500/a38fa9ba-50a7-46d4-98ca-74fdfd17909e"
 storage_version_token = "1793835169803743"
 content_type = "text/plain"
+
+[[outputs]]
+id = "I9QoRvH_Nq4kKYVToEL2J"
+uri = "file://generated-artifacts/customer-pull/verification-evidence.txt"
+type = "text"
+title = "Updated verification and documented retry limitation"
+description = "Full green lane outputs plus the explicit ticket-required row-error checkpoint semantics and the resulting automatic-retry limitation. Live QuickBooks acceptance remains unavailable."
+logical_id = "b7f10011-3003-4013-ba19-bbd1ee539bd0"
+content_hash = "sha256:0e41167fef1493216b8ddbeb023bc235de19e588a8bba65c973dde281e989967"
+size = 394278
+mtime_ms = 1793847834593
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/b7f10011-3003-4013-ba19-bbd1ee539bd0/1a5cfcf4-cbd6-4842-9c10-8810508a1e0c"
+storage_version_token = "1793847861569403"
+content_type = "text/plain"
+
+[[outputs]]
+id = "b36NGIiKxVal90G5_u0Tl"
+uri = "file://generated-artifacts/customer-pull/quickbooks-unauthenticated.jpg"
+type = "image"
+title = "Unauthenticated QuickBooks preview"
+description = "The preview reaches sign-in. This is not evidence of the signed-in card or automatic customer arrival."
+logical_id = "0db3663e-f059-4f56-8c37-6027b4c26d78"
+content_hash = "sha256:58c6ffb2a61f6e54c3d44e0a5bec178d049a82d2a3a20e60c65fabf8e49e003b"
+size = 75256
+mtime_ms = 1793846033394
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/0db3663e-f059-4f56-8c37-6027b4c26d78/504dc0a8-c00d-49a5-abfb-5173a4f332d7"
+storage_version_token = "1793847308021839"
+content_type = "image/jpeg"
