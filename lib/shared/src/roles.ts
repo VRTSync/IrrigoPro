@@ -20,6 +20,7 @@ export const ROLES = [
   "irrigation_manager",
   "field_tech",
   "bookkeeper",
+  "system_documenter",
 ] as const;
 
 export type Role = (typeof ROLES)[number];
@@ -239,6 +240,37 @@ export const CAN_READ_LOCATION_REPORT = new Set<Role>([
   "irrigation_manager",
   "bookkeeper",
 ]);
+
+/**
+ * Reproduces pre-existing irrigation profile reads, including billing managers
+ * and field techs. Documenters may read system data, subject to their API
+ * allowlist (which deliberately excludes legacy full/lazy-seeding reads).
+ */
+export const CAN_READ_IRRIGATION_PROFILE = new Set<Role>(["super_admin", "company_admin", "irrigation_manager", "billing_manager", "field_tech", "system_documenter"]);
+
+/**
+ * Reproduces pre-existing zone writes: field_tech can edit zones, attach photos,
+ * and log backflow tests. Documenters need these same capture actions.
+ */
+export const CAN_EDIT_IRRIGATION_ZONES = new Set<Role>(["super_admin", "company_admin", "irrigation_manager", "field_tech", "system_documenter"]);
+
+/**
+ * Reproduces pre-existing equipment/program management (not field techs or
+ * billing managers). Documenters capture and deactivate equipment.
+ */
+export const CAN_MANAGE_IRRIGATION_EQUIPMENT = new Set<Role>(["super_admin", "company_admin", "irrigation_manager", "system_documenter"]);
+
+/**
+ * Reproduces pre-existing equipment deletion. Deliberately excludes
+ * system_documenter: documenters deactivate ("Not at this location"), never delete.
+ */
+export const CAN_DELETE_IRRIGATION_EQUIPMENT = new Set<Role>(["super_admin", "company_admin", "irrigation_manager"]);
+
+/**
+ * Documentation uses the pre-existing equipment-manager membership plus the
+ * documenter. Field techs retain their irrigation access, not the new wizard.
+ */
+export const CAN_DOCUMENT_IRRIGATION_SYSTEM = new Set<Role>(["super_admin", "company_admin", "irrigation_manager", "system_documenter"]);
 
 /** A capability is just a role set from this module. */
 export type Capability = ReadonlySet<Role>;

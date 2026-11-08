@@ -9,7 +9,7 @@
 // comparing role strings. See lib/shared/src/roles.ts for the membership and
 // the reasoning behind each capability set.
 
-import type { Request } from "express";
+import type { Request, Response } from "express";
 
 // Deliberately `(req: any, res: any, next: any)` rather than Express's
 // `RequestHandler`. Typing these as RequestHandler changes which `app.get`
@@ -19,6 +19,7 @@ import type { Request } from "express";
 type Guard = (req: any, res: any, next: any) => void;
 import {
   hasCapability,
+  isApiAllowedForRole,
   CAN_READ_INVOICES,
   CAN_READ_AR_NOTES,
   CAN_EDIT_INVOICES,
@@ -29,6 +30,15 @@ import {
   CAN_READ_LOCATION_REPORT,
   CAN_MANAGE_BULK_BUDGET_GOALS,
 } from "@workspace/shared";
+
+export function enforceRoleApiAllowlist(req: Request, res: Response): boolean {
+  const role = req.authenticatedUserRole;
+  const path = (req.originalUrl ?? req.url).split("?")[0];
+  if (isApiAllowedForRole(role, req.method, path)) return true;
+  req.log?.warn?.({ role, method: req.method, path }, "role api allowlist refused");
+  res.status(403).json({ message: "Not available for this role" });
+  return false;
+}
 
 // ── header auth (dev only) ───────────────────────────────────────────────────
 //

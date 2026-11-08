@@ -24,6 +24,7 @@ import type { InsertInvoice, InsertCustomer } from "@workspace/db";
 import { PRICING_FIELDS_TO_STRIP } from "@workspace/db";
 import {
   hasCapability,
+  isRole,
   CAN_READ_INVOICES,
   CAN_EDIT_INVOICES,
   CAN_SEND_INVOICE_EMAIL,
@@ -843,6 +844,7 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
       // Throttle still applies to impersonated traffic so a stuck
       // automation can't bypass the cap by impersonating.
       if (!checkAuthenticatedThrottle(req, res)) return;
+      if (!enforceRoleApiAllowlist(req, res)) return;
       next();
       return;
     }
@@ -875,6 +877,7 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
       req.authenticatedUserRole = user.role;
       req.authenticatedUserCompanyId = user.companyId ?? null;
       if (!checkAuthenticatedThrottle(req, res)) return;
+      if (!enforceRoleApiAllowlist(req, res)) return;
       next();
       return;
     }
@@ -950,6 +953,7 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
     req.authenticatedUserCompanyId = userCompanyId ? parseInt(userCompanyId.toString()) : null;
 
     if (!checkAuthenticatedThrottle(req, res)) return;
+    if (!enforceRoleApiAllowlist(req, res)) return;
     next();
   } catch (error) {
     console.error('Authentication error:', {
@@ -1016,6 +1020,7 @@ import {
   requireArNotesAccess,
   requireQuickBooksAccess,
   requireBulkBudgetGoalsAdmin,
+  enforceRoleApiAllowlist,
 } from "./role-guards";
 import { db, pool } from "../db";
 import { 
@@ -4929,8 +4934,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // User routes
   // Role rank for ceiling checks (higher = more privileged).
-  // Every role in the registry needs an entry — an unlisted role falls back to
-  // rank 0, which makes it unassignable by anyone below super_admin.
+  // Every role in the registry needs an entry. Validate supplied roles before
+  // comparing ranks; unknown roles must never pass as rank 0.
   const ROLE_RANK: Record<string, number> = {
     super_admin: 4,
     company_admin: 3,
@@ -4938,6 +4943,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     irrigation_manager: 2,
     bookkeeper: 2, // Task #1886 — same rank as the other non-admin company roles.
     field_tech: 1,
+    system_documenter: 1, // Document System Slice 1 — same rank as field_tech.
   };
 
   app.get("/api/users", requireAuthentication, async (req, res) => {
@@ -4973,6 +4979,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(403).json({ message: "Forbidden: super_admin only" });
         return;
       }
+      if (req.body?.role !== undefined && !isRole(req.body.role)) {
+        res.status(400).json({ message: "Unknown role" }); return;
+      }
       const userData = insertUserSchema.parse(req.body);
       const user = await storage.createUser(userData);
       // Remove password from response
@@ -4994,13 +5003,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = parseInt(req.params.id);
       const callerRole = req.authenticatedUserRole;
       const callerCompanyId = req.authenticatedUserCompanyId ?? null;
-      const userData = insertUserSchema.partial().parse(req.body);
       const before = await storage.getUser(userId);
       // Cross-company guard: non-super_admin callers can only edit users in their own company.
       if (callerRole !== 'super_admin' && before && before.companyId !== callerCompanyId) {
         res.status(403).json({ message: "Forbidden: cannot edit users from another company" });
         return;
       }
+      if (req.body?.role !== undefined && !isRole(req.body.role)) {
+        res.status(400).json({ message: "Unknown role" }); return;
+      }
+      const userData = insertUserSchema.partial().parse(req.body);
       // Role-ceiling guard: only fires when the role is actually changing (so
       // echoing the existing role in a self-edit is never blocked).
       if (userData.role && userData.role !== before?.role && callerRole !== 'super_admin') {
@@ -5175,13 +5187,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       const callerRolePatch = req.authenticatedUserRole;
       const callerCompanyIdPatch = req.authenticatedUserCompanyId ?? null;
-      const userData = insertUserSchema.partial().parse(req.body);
       const before = await storage.getUser(id);
       // Cross-company guard.
       if (callerRolePatch !== 'super_admin' && before && before.companyId !== callerCompanyIdPatch) {
         res.status(403).json({ message: "Forbidden: cannot edit users from another company" });
         return;
       }
+      if (req.body?.role !== undefined && !isRole(req.body.role)) {
+        res.status(400).json({ message: "Unknown role" }); return;
+      }
+      const userData = insertUserSchema.partial().parse(req.body);
       // Role-ceiling guard (only fires when the role is actually changing).
       if (userData.role && userData.role !== before?.role && callerRolePatch !== 'super_admin') {
         const callerRankPatch = ROLE_RANK[callerRolePatch ?? ''] ?? 0;
@@ -5296,6 +5311,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(403).json({ message: "Forbidden: cannot create users in another company" });
         return;
       }
+      if (req.body?.role !== undefined && !isRole(req.body.role)) {
+        res.status(400).json({ message: "Unknown role" }); return;
+      }
       // Role-ceiling guard: callers can only assign roles strictly below their own rank.
       const newRole: string = typeof req.body.role === 'string' ? req.body.role : '';
       if (newRole && callerRolePost !== 'super_admin') {
@@ -5385,6 +5403,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
+      if (req.body?.role !== undefined && !isRole(req.body.role)) {
+        res.status(400).json({ message: "Unknown role" }); return;
+      }
       const userData = insertUserSchema.partial().parse(req.body);
       // Role-ceiling guard: only fires when the role is actually changing.
       if (userData.role && userData.role !== existingUser?.role && callerRolePut !== 'super_admin') {

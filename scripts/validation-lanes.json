@@ -107,6 +107,10 @@
   ],
   "api-field": [
     {
+      "name": "system-documenter-role-matrix",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/routes/irrigation-profile-routes.test.ts src/routes/system-documenter-role-matrix.test.ts"
+    },
+    {
       "name": "document-controller-stamp",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-force-exit --test-reporter=spec src/document-controller-stamp.test.ts"
     },
@@ -176,6 +180,10 @@
     }
   ],
   "web": [
+    {
+      "name": "unsupported-role-routing",
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run src/App.unsupported-role.test.tsx --maxWorkers=1 --minWorkers=1"
+    },
     {
       "name": "customer-visibility-chip",
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/customers/customer-visibility-chip.test.tsx"

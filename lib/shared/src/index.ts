@@ -4,6 +4,7 @@ export * from "./invoice-number.js";
 export * from "./job-type-colors.js";
 export * from "./irrigation-schedule.js";
 export * from "./roles.js";
+export * from "./system-documenter-api.js";
 export * from "./invoice-aging.js";
 export * from "./work-order-labor-hours.js";
 export * from "./budget-goal.js";

@@ -12,7 +12,6 @@ import { clearStaleCache } from "@/utils/clearStaleCache";
 import Login from "@/pages/login";
 import NotFound from "@/pages/not-found";
 import FieldTechDashboard from "@/pages/field-tech-dashboard";
-import AdminDashboard from "@/pages/admin-dashboard";
 import ManagerWorkspace from "@/pages/manager-workspace";
 // Eager: public token-gated page — must cold-load from a direct URL with no session.
 import EstimateApproval from "@/pages/estimate-approval";
@@ -48,7 +47,6 @@ const CustomerBilling = lazyPage(() => import("@/pages/customer-billing"));
 const QuickBooksPage = lazyPage(() => import("@/pages/quickbooks"));
 const CustomerReviewPage = lazyPage(() => import("@/pages/customer-review"));
 const AdminControllers = lazyPage(() => import("@/pages/admin-controllers"));
-const Operations = lazyPage(() => import("@/pages/operations"));
 const SystemUserManagement = lazyPage(() => import("@/pages/system-user-management"));
 const CompanyUserManagement = lazyPage(() => import("@/pages/company-user-management"));
 const CompanyProfile = lazyPage(() => import("@/pages/company-profile"));
@@ -86,7 +84,6 @@ const WetCheckReconciliationPage = lazyPage(() => import("@/pages/wet-check-reco
 const CustomerSiteMapsPage = lazyPage(() => import("@/pages/customer-site-maps-page"));
 const IrrigationProfilePage = lazyPage(() => import("@/pages/customers/IrrigationProfile"));
 const FieldTechMaps = lazyPage(() => import("@/pages/field-tech-maps"));
-import { NotificationPermissionBanner } from "@/components/notifications/notification-permission-banner";
 import CompanyAdminApp from "@/components/company-admin-app";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 import { DesktopShell } from "@/components/layout/desktop-shell";
@@ -94,6 +91,8 @@ import { billingManagerNav, bookkeeperNav, managerNav, superAdminNav } from "@/c
 import { ServiceWorkerRegistration, ServiceWorkerUpdatePrompt } from "@/components/offline/service-worker-update-prompt";
 import { ConflictToastBridge } from "@/components/offline/conflict-toast-bridge";
 import { SessionExpiredBanner } from "@/components/auth/session-expired-banner";
+import { UnsupportedRoleScreen } from "@/components/auth/unsupported-role-screen";
+import { hasRoleApiAllowlist } from "@workspace/shared";
 
 
 function RedirectToCommandCenter() {
@@ -155,7 +154,7 @@ function RouteSuspenseFallback() {
   );
 }
 
-function Router() {
+export function AppRoutes() {
   // User state comes from the AuthProvider (wraps the app in main.tsx).
   // The provider reads localStorage synchronously so the very first render
   // already knows the correct role — no stale-null window.
@@ -225,7 +224,7 @@ function Router() {
   // letting non-super-admin roles fall through to NotFound from their
   // role-scoped Switch. Super admins are excluded from this short-circuit
   // so the route renders inside their DesktopShell (Task #592).
-  if (currentPath === "/super-admin/app-health" && user.role !== "super_admin") {
+  if (currentPath === "/super-admin/app-health" && user.role !== "super_admin" && !hasRoleApiAllowlist(user.role)) {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
@@ -551,54 +550,7 @@ function Router() {
     );
   }
 
-  // Default fallback - treat as regular admin
-  return (
-    <TooltipProvider>
-      <QueryClientProvider client={queryClient}>
-        <div className="min-h-screen pb-20 lg:pb-0 flex flex-col">
-          <Navigation />
-          <div className="px-4 bg-gray-50 flex-1">
-            <Suspense fallback={<RouteSuspenseFallback />}>
-              <Switch>
-                <Route path="/" component={AdminDashboard} />
-                <Route path="/admin" component={AdminDashboard} />
-                <Route path="/operations" component={Operations} />
-                <Route path="/parts" component={PartsCatalog} />
-                <Route path="/customers" component={Customers} />
-                <Route path="/site-maps" component={SiteMapsPage} />
-                <Route path="/customer-billing" component={CustomerBilling} />
-                {/* /field-tech route removed by Task #1857 */}
-                <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
-                <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
-                <Route path="/billing-sheets" component={BillingSheets} />
-                <Route path="/wet-checks/pending-review" component={RedirectToWetChecksNeedsReview} />
-                <Route path="/wet-checks/:id/review" component={CombinedReviewPage} />
-                <Route path="/wet-checks" component={WetCustomerPickerPage} />
-                <Route path="/wet-checks/c/:clientId" component={WetChecksRoutingPage} />
-                <Route path="/wet-checks/:id/summary" component={WetCheckInspectionSummaryPage} />
-                <Route path="/wet-checks/:id" component={WetChecksRoutingPage} />
-                <Route path="/user-manager" component={SystemUserManagement} />
-                <Route path="/user-profile" component={UserProfile} />
-                <Route path="/license-agreement" component={LicenseAgreement} />
-                <Route path="/privacy-policy" component={PrivacyPolicy} />
-                <Route path="/login" component={Login} />
-                {/* /field-portal route removed by Task #1857 */}
-                {/* Redirect estimates and work-orders to operations page */}
-                <Route path="/estimates/command-center" component={EstimateCommandCenter} />
-                <Route path="/estimates/pending-approval" component={RedirectPendingApprovalToCC} />
-                <Route path="/estimates" component={Operations} />
-                <Route path="/work-orders" component={Operations} />
-                <Route component={NotFound} />
-              </Switch>
-            </Suspense>
-          </div>
-          <PoweredByFooter />
-        </div>
-        <NotificationPermissionBanner />
-        <Toaster />
-      </QueryClientProvider>
-    </TooltipProvider>
-  );
+  return <TooltipProvider><UnsupportedRoleScreen role={user.role} /></TooltipProvider>;
 }
 
 function App() {
@@ -606,7 +558,7 @@ function App() {
     <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
       <ServiceWorkerRegistration />
       <ConflictToastBridge />
-      <Router />
+      <AppRoutes />
     </WouterRouter>
   );
 }

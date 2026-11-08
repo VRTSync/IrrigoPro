@@ -66,7 +66,7 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   email: text("email"),
   phone: text("phone"),
-  role: text("role").notNull().default("field_tech"), // super_admin, company_admin, irrigation_manager, field_tech, billing_manager, bookkeeper (Task #643 retired the legacy `manager` alias — `irrigation_manager` is canonical). Canonical set lives in the role registry (`ROLES` in @workspace/shared); keep this comment in step with it.
+  role: text("role").notNull().default("field_tech"), // super_admin, company_admin, irrigation_manager, field_tech, billing_manager, bookkeeper, system_documenter (Task #643 retired the legacy `manager` alias — `irrigation_manager` is canonical). Canonical set lives in the role registry (`ROLES` in @workspace/shared); keep this comment in step with it.
   companyId: integer("company_id").references(() => companies.id), // null for super_admin
   isActive: boolean("is_active").notNull().default(true),
   isDeleted: boolean("is_deleted").notNull().default(false), // Soft delete flag

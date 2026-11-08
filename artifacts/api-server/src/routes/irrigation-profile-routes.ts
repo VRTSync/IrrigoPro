@@ -31,6 +31,10 @@ import { customers, irrigationControllers, irrigationProfileZones } from "@works
 import { storage, ZoneCountClearError } from "../storage";
 import type { IrrigationImportRow, IrrigationImportRowError, IrrigationZoneTypeEnum } from "../storage";
 import { ZoneProgramError } from "../lib/controller-zone-records";
+import {
+  hasCapability, CAN_READ_IRRIGATION_PROFILE, CAN_EDIT_IRRIGATION_ZONES,
+  CAN_MANAGE_IRRIGATION_EQUIPMENT, CAN_DELETE_IRRIGATION_EQUIPMENT,
+} from "@workspace/shared";
 
 // ── Role helpers ──────────────────────────────────────────────────────────────
 
@@ -42,20 +46,8 @@ const MANAGER_ROLES = new Set([
   "billing_manager",
 ]);
 
-// TODO(roles): migrate to a capability from lib/shared/src/roles.ts (hasCapability). Inventory: docs/roles-migration-inventory.md
-const WRITE_ROLES = new Set([
-  "company_admin",
-  "super_admin",
-  "irrigation_manager",
-  // field_tech: can create and edit zones, attach photos, and log backflow tests
-]);
-
 function isManagerRole(role: string | undefined): boolean {
   return !!role && MANAGER_ROLES.has(role);
-}
-
-function canWrite(role: string | undefined): boolean {
-  return !!role && (WRITE_ROLES.has(role) || role === "field_tech");
 }
 
 function isSuperAdmin(role: string | undefined): boolean {
@@ -241,7 +233,7 @@ export function registerIrrigationProfileRoutes(
       if (!customerId) return badId(res, "customer");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!isManagerRole(role) && role !== "field_tech") {
+      if (!hasCapability(role, CAN_READ_IRRIGATION_PROFILE)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -322,12 +314,8 @@ export function registerIrrigationProfileRoutes(
       if (!customerId) return badId(res, "customer");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!canWrite(role)) {
+      if (!hasCapability(role, CAN_MANAGE_IRRIGATION_EQUIPMENT)) {
         return res.status(403).json({ message: "Forbidden" });
-      }
-      // field_tech cannot create controllers (only zones and photos).
-      if (role === "field_tech") {
-        return res.status(403).json({ message: "Field technicians cannot create controllers" });
       }
 
       const callerCompanyId = getCallerCompanyId(req);
@@ -394,7 +382,7 @@ export function registerIrrigationProfileRoutes(
       if (!id) return badId(res, "controller");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!isManagerRole(role) && role !== "field_tech") {
+      if (!hasCapability(role, CAN_READ_IRRIGATION_PROFILE)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -423,7 +411,7 @@ export function registerIrrigationProfileRoutes(
       if (!id) return badId(res, "controller");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!WRITE_ROLES.has(role ?? "") || role === "field_tech") {
+      if (!hasCapability(role, CAN_MANAGE_IRRIGATION_EQUIPMENT)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -496,7 +484,7 @@ export function registerIrrigationProfileRoutes(
       if (!id) return badId(res, "controller");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!WRITE_ROLES.has(role ?? "") || role === "field_tech") {
+      if (!hasCapability(role, CAN_DELETE_IRRIGATION_EQUIPMENT)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -539,7 +527,7 @@ export function registerIrrigationProfileRoutes(
       if (!controllerId) return badId(res, "controller");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!WRITE_ROLES.has(role ?? "") || role === "field_tech") {
+      if (!hasCapability(role, CAN_MANAGE_IRRIGATION_EQUIPMENT)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -585,7 +573,7 @@ export function registerIrrigationProfileRoutes(
       if (!id) return badId(res, "program");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!WRITE_ROLES.has(role ?? "") || role === "field_tech") {
+      if (!hasCapability(role, CAN_MANAGE_IRRIGATION_EQUIPMENT)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -624,7 +612,7 @@ export function registerIrrigationProfileRoutes(
       if (!id) return badId(res, "program");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!WRITE_ROLES.has(role ?? "") || role === "field_tech") {
+      if (!hasCapability(role, CAN_MANAGE_IRRIGATION_EQUIPMENT)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -657,7 +645,7 @@ export function registerIrrigationProfileRoutes(
       if (!controllerId) return badId(res, "controller");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!canWrite(role)) {
+      if (!hasCapability(role, CAN_EDIT_IRRIGATION_ZONES)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -699,7 +687,7 @@ export function registerIrrigationProfileRoutes(
       if (!id) return badId(res, "zone");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!canWrite(role)) {
+      if (!hasCapability(role, CAN_EDIT_IRRIGATION_ZONES)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -732,7 +720,7 @@ export function registerIrrigationProfileRoutes(
   // ── PUT /api/irrigation-controllers/:id/zones/bulk ────────────────────────
   app.put("/api/irrigation-controllers/:id/zones/bulk", requireAuthentication, async (req: any, res: any) => {
     const role = req.authenticatedUserRole;
-    if (!canWrite(role)) return res.status(403).json({ message: "Forbidden" });
+    if (!hasCapability(role, CAN_EDIT_IRRIGATION_ZONES)) return res.status(403).json({ message: "Forbidden" });
     const companyId = getCallerCompanyId(req);
     const rawCompanyId = req.authenticatedUserCompanyId;
     const validContext = (typeof rawCompanyId === "number" || (typeof rawCompanyId === "string" && /^[1-9]\d*$/.test(rawCompanyId))) &&
@@ -798,7 +786,7 @@ export function registerIrrigationProfileRoutes(
       if (!id) return badId(res, "controller");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!canWrite(role)) {
+      if (!hasCapability(role, CAN_EDIT_IRRIGATION_ZONES)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -1346,7 +1334,7 @@ export function registerIrrigationProfileRoutes(
       if (!customerId) return badId(res, "customer");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!isManagerRole(role) && role !== "field_tech") {
+      if (!hasCapability(role, CAN_READ_IRRIGATION_PROFILE)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -1387,7 +1375,7 @@ export function registerIrrigationProfileRoutes(
       if (!customerId) return badId(res, "customer");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!canWrite(role) || role === "field_tech") {
+      if (!hasCapability(role, CAN_MANAGE_IRRIGATION_EQUIPMENT)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -1456,7 +1444,7 @@ export function registerIrrigationProfileRoutes(
       if (!id) return badId(res, "backflow");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!canWrite(role) || role === "field_tech") {
+      if (!hasCapability(role, CAN_MANAGE_IRRIGATION_EQUIPMENT)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -1498,7 +1486,7 @@ export function registerIrrigationProfileRoutes(
       if (!id) return badId(res, "backflow");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!canWrite(role) || role === "field_tech") {
+      if (!hasCapability(role, CAN_DELETE_IRRIGATION_EQUIPMENT)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -1532,7 +1520,7 @@ export function registerIrrigationProfileRoutes(
       if (!id) return badId(res, "backflow");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!canWrite(role)) {
+      if (!hasCapability(role, CAN_EDIT_IRRIGATION_ZONES)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 

@@ -3,6 +3,8 @@ import App from "./App";
 import "./index.css";
 import { AppErrorBoundary } from "./components/error-boundary";
 import { AuthProvider } from "./lib/auth-context";
+import { hasRoleApiAllowlist } from "@workspace/shared";
+import { safeGet } from "./utils/safeStorage";
 
 // Render React first. Anything that touches IndexedDB, the service worker,
 // notifications, or the network must NOT run at module scope — a thrown
@@ -36,6 +38,14 @@ mount();
 // thrown IndexedDB / dynamic-import / notification error cannot strand the
 // page on a blank shell. Each side-effect is independently guarded.
 function deferredBoot() {
+  // Restricted accounts have no operational screens/queue. Do not replay a
+  // previous user's field mutations or start background API polling here.
+  // Login reloads the document, so the effective saved role is available now.
+  try {
+    const saved = safeGet("user");
+    if (saved && hasRoleApiAllowlist(JSON.parse(saved)?.role)) return;
+  } catch { /* AuthProvider handles malformed saved user data. */ }
+
   // Offline mutation queue replay engine (Slice 4B / Task #298). Behind the
   // OFFLINE_QUEUE feature flag (VITE_OFFLINE_QUEUE, default on).
   void (async () => {

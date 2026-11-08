@@ -11,7 +11,7 @@ Read `attached_assets/Pasted--Document-System-Design-Context-Locked-Decisions-Re
 
 **Why:** The user-provided context explicitly locks staged delivery and existing-role compatibility.
 
-**How to apply:** The wizard belongs in the phone-first web app, not Expo. Exclude site maps, Command Center, and the existing Irrigation Profile edit flows/permission flags. Preserve field-tech, billing-manager, and bookkeeper behavior. The new documenter role gets only its property picker and wizard, becomes assignable only in Slice 7, and needs a deny-by-default API allowlist.
+**How to apply:** The wizard belongs in the phone-first web app, not Expo. Exclude site maps, Command Center, and the existing Irrigation Profile edit flows/permission flags. Preserve field-tech, billing-manager, and bookkeeper behavior. The new documenter role gets only its property picker and wizard and needs a deny-by-default API allowlist. The Slice 1 specification clarifies that administrative API assignment is allowed immediately under existing rank/admin rules; only UI role-picker assignment waits until Slice 7.
 
 **Rule:** Confirm the five flagged design decisions before handing off Slice 2: edits invalidate verification; absent equipment is deactivated rather than deleted; explicit zone-type confirmation; four backflow-test answers; online-only step saves.
 
