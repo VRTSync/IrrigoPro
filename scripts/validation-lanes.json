@@ -107,6 +107,14 @@
   ],
   "api-field": [
     {
+      "name": "system-documentation-shared",
+      "command": "pnpm --filter @workspace/shared exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/irrigation-zones.test.ts src/system-documentation.test.ts"
+    },
+    {
+      "name": "zone-type-confirmed-migration",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/lib/migrations/backfill-zone-type-confirmed.test.ts"
+    },
+    {
       "name": "system-documenter-role-matrix",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/routes/irrigation-profile-routes.test.ts src/routes/system-documenter-role-matrix.test.ts"
     },

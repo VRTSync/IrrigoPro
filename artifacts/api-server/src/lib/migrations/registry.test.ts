@@ -19,6 +19,15 @@ import { sql } from "drizzle-orm";
 // ── Static registry shape ──────────────────────────────────────────────────────
 
 describe("migration registry — static shape", () => {
+  it("includes confirmed zone type backfill with the required shape and unique ids", () => {
+    const migrations = listMigrations();
+    assert.equal(new Set(migrations.map(m => m.id)).size, migrations.length);
+    const m = getMigration("backfill-zone-type-confirmed-v1")!;
+    assert.ok(m);
+    assert.ok(m.title && m.description && m.appSettingsKey);
+    for (const key of ["check", "preview", "run"] as const) assert.equal(typeof m[key], "function");
+    assert.ok(!m.deprecated);
+  });
   it("contains repair-ticket-total-drift-v1", () => {
     const ids = listMigrations().map((m) => m.id);
     assert.ok(

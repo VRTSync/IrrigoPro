@@ -1996,6 +1996,9 @@ export const irrigationControllers = pgTable("irrigation_controllers", {
   lastUpdatedByUserId: integer("last_updated_by_user_id").references(() => users.id),
   lastUpdatedByName: text("last_updated_by_name"),
   lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true }),
+  fieldVerifiedAt: timestamp("field_verified_at", { withTimezone: true }),
+  fieldVerifiedByUserId: integer("field_verified_by_user_id").references(() => users.id),
+  fieldVerifiedByName: text("field_verified_by_name"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
@@ -2060,6 +2063,8 @@ export const irrigationProfileZones = pgTable("irrigation_profile_zones", {
   name: text("name").notNull(),
   // Enum values: pop_up_spray | rotor | drip | netafim | bubbler | other.
   zoneType: text("zone_type").notNull().default("other"),
+  // Document System D9: true once a person or CSV import chose this type. Placeholders are false.
+  zoneTypeConfirmed: boolean("zone_type_confirmed").notNull().default(false),
   runTimeMinutes: integer("run_time_minutes").notNull().default(0),
   // Drive sequential schedule order within a program.
   zoneOrder: integer("zone_order").notNull().default(0),
@@ -2141,12 +2146,17 @@ export const irrigationBackflows = pgTable("irrigation_backflows", {
   lastTestResult: text("last_test_result"),
   // enum: pass | fail | null
   lastTestedBy: text("last_tested_by"),
+  // enum: never_tested | no_tag | null. Cleared by log-test.
+  testUnknownReason: text("test_unknown_reason"),
   // Audit / meta
   isActive: boolean("is_active").notNull().default(true),
   vrtSyncId: text("vrt_sync_id"),
   lastUpdatedByUserId: integer("last_updated_by_user_id").references(() => users.id),
   lastUpdatedByName: text("last_updated_by_name"),
   lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true }),
+  fieldVerifiedAt: timestamp("field_verified_at", { withTimezone: true }),
+  fieldVerifiedByUserId: integer("field_verified_by_user_id").references(() => users.id),
+  fieldVerifiedByName: text("field_verified_by_name"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
@@ -2160,6 +2170,26 @@ export const irrigationBackflows = pgTable("irrigation_backflows", {
 export const insertIrrigationBackflowSchema = createInsertSchema(irrigationBackflows);
 export type IrrigationBackflow = typeof irrigationBackflows.$inferSelect;
 export type InsertIrrigationBackflow = typeof irrigationBackflows.$inferInsert;
+
+export const irrigationSiteDocumentation = pgTable("irrigation_site_documentation", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id).notNull(),
+  branchName: text("branch_name").notNull().default(""),
+  noBackflowConfirmedAt: timestamp("no_backflow_confirmed_at", { withTimezone: true }),
+  noBackflowConfirmedByUserId: integer("no_backflow_confirmed_by_user_id").references(() => users.id),
+  noBackflowConfirmedByName: text("no_backflow_confirmed_by_name"),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  verifiedByUserId: integer("verified_by_user_id").references(() => users.id),
+  verifiedByName: text("verified_by_name"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  uniqueSite: uniqueIndex("uniq_irr_site_doc").on(table.companyId, table.customerId, table.branchName),
+}));
+export const insertIrrigationSiteDocumentationSchema = createInsertSchema(irrigationSiteDocumentation);
+export type IrrigationSiteDocumentation = typeof irrigationSiteDocumentation.$inferSelect;
+export type InsertIrrigationSiteDocumentation = typeof irrigationSiteDocumentation.$inferInsert;
 
 // Internal migration-tracking table — must be declared here so drizzle-kit
 // does not treat it as an unknown table and attempt to drop it during db:push.

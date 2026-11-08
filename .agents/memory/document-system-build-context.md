@@ -13,8 +13,8 @@ Read `attached_assets/Pasted--Document-System-Design-Context-Locked-Decisions-Re
 
 **How to apply:** The wizard belongs in the phone-first web app, not Expo. Exclude site maps, Command Center, and the existing Irrigation Profile edit flows/permission flags. Preserve field-tech, billing-manager, and bookkeeper behavior. The new documenter role gets only its property picker and wizard and needs a deny-by-default API allowlist. The Slice 1 specification clarifies that administrative API assignment is allowed immediately under existing rank/admin rules; only UI role-picker assignment waits until Slice 7.
 
-**Rule:** Confirm the five flagged design decisions before handing off Slice 2: edits invalidate verification; absent equipment is deactivated rather than deleted; explicit zone-type confirmation; four backflow-test answers; online-only step saves.
+**Rule:** The user approved all five flagged design decisions at the Slice 2 handoff: edits invalidate verification; absent equipment is deactivated rather than deleted; explicit zone-type confirmation (existing Other zones unconfirmed); four backflow-test answers; online-only step saves with retained failed entries.
 
-**Why:** The supplied context distinguishes these proposed decisions from the user's already-locked decisions.
+**Why:** The original context flagged these for confirmation, and the subsequent explicit approval locks them for later slices.
 
-**How to apply:** Do not interpret the document upload as approval of the flagged proposals. Use the original context for exact capture requirements, gap codes, verification rules, and exclusions.
+**How to apply:** Do not re-ask these decisions. Use the original context and each slice specification for exact capture requirements, gap codes, verification rules, and exclusions.

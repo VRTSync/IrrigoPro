@@ -1312,6 +1312,7 @@ export function registerIrrigationProfileRoutes(
     lastTestedDate: z.string().nullish(),
     nextTestDueDate: z.string().nullish(),
     lastTestResult: z.enum(["pass", "fail"]).nullish(),
+    testUnknownReason: z.enum(["never_tested", "no_tag"]).nullish(),
     lastTestedBy: z.string().nullish(),
     isActive: z.boolean().optional(),
   });
@@ -1395,6 +1396,9 @@ export function registerIrrigationProfileRoutes(
       if (!parsed.success) {
         return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
       }
+      if (parsed.data.testUnknownReason != null && parsed.data.lastTestResult != null) {
+        return res.status(400).json({ message: "This backflow has a test on file" });
+      }
 
       const userId = req.authenticatedUserId as number | undefined;
       const me = userId ? await storage.getUser(userId) : undefined;
@@ -1421,6 +1425,7 @@ export function registerIrrigationProfileRoutes(
           lastTestedDate: parsed.data.lastTestedDate ?? null,
           nextTestDueDate: parsed.data.nextTestDueDate ?? null,
           lastTestResult: parsed.data.lastTestResult ?? null,
+          testUnknownReason: parsed.data.testUnknownReason ?? null,
           lastTestedBy: parsed.data.lastTestedBy ?? null,
           isActive: parsed.data.isActive ?? true,
           lastUpdatedByUserId: me?.id ?? null,
@@ -1462,6 +1467,12 @@ export function registerIrrigationProfileRoutes(
       const me = userId ? await storage.getUser(userId) : undefined;
 
       try {
+        const existing = await storage.getBackflow(isSuperAdmin(role) ? null : callerCompanyId, id);
+        if (!existing) return notFound(res, "Backflow");
+        const mergedResult = parsed.data.lastTestResult === undefined ? existing.lastTestResult : parsed.data.lastTestResult;
+        if (parsed.data.testUnknownReason != null && mergedResult != null) {
+          return res.status(400).json({ message: "This backflow has a test on file" });
+        }
         const updated = await storage.updateBackflow(
           isSuperAdmin(role) ? null : callerCompanyId,
           id,

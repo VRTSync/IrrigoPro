@@ -174,6 +174,94 @@ async function cleanupControllers() {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+describe("Document System Slice 2 — existing route/storage boundaries", () => {
+  let srv: ReturnType<typeof makeTestServer>;
+  const backflowIds: number[] = [];
+  before(async () => {
+    if (!companyAId) await setupCompanies();
+    srv = makeTestServer({ role: "irrigation_manager", companyId: companyAId, userId: managerAUserId });
+  });
+  after(async () => {
+    for (const id of backflowIds) await storage.deleteBackflow(null, id);
+    await cleanupControllers(); await srv.close();
+  });
+  it("single and bulk chosen types confirm; forged flags fail; unrelated edits preserve; raised counts remain false", async () => {
+    const ctrl = await storage.createIrrigationController({ companyId: companyAId, customerId: customerAId, name: "Doc flags", totalZones: 2 });
+    createdControllerIds.push(ctrl.id);
+    const graph = () => storage.getIrrigationController(companyAId, ctrl.id);
+    const [a, b] = (await graph())!.zones;
+    assert.ok((await graph())!.zones.every(z => !z.zoneTypeConfirmed));
+    assert.equal((await hit(srv.base, "PUT", `/api/irrigation-zones/${a.id}`, { zoneTypeConfirmed: true, name: "Renamed" })).status, 200);
+    assert.equal((await graph())!.zones[0].zoneTypeConfirmed, false);
+    assert.equal((await hit(srv.base, "PUT", `/api/irrigation-zones/${a.id}`, { zoneType: "other" })).status, 200);
+    assert.equal((await graph())!.zones[0].zoneTypeConfirmed, true);
+    await hit(srv.base, "PUT", `/api/irrigation-zones/${a.id}`, { name: "Still chosen" });
+    assert.equal((await graph())!.zones[0].zoneTypeConfirmed, true);
+    const bulk = (patch: object) => hit(srv.base, "PUT", `/api/irrigation-controllers/${ctrl.id}/zones/bulk`, { zoneIds: [a.id, b.id], patch });
+    assert.equal((await bulk({ zoneTypeConfirmed: true })).status, 400);
+    assert.equal((await bulk({ runTimeMinutes: 5 })).status, 200);
+    assert.deepEqual((await graph())!.zones.map(z => z.zoneTypeConfirmed), [true, false]);
+    assert.equal((await bulk({ zoneType: "drip" })).status, 200);
+    assert.ok((await graph())!.zones.every(z => z.zoneTypeConfirmed));
+    const raised = await hit(srv.base, "PUT", `/api/irrigation-controllers/${ctrl.id}/zone-count`, { totalZones: 3 });
+    assert.equal(raised.status, 200, JSON.stringify(raised.body));
+    assert.equal((await graph())!.zones.find(z => z.zoneNumber === 3)!.zoneTypeConfirmed, false);
+    const foreign = await storage.createIrrigationController({ companyId: companyBId, customerId: customerBId, name: "Foreign flags", totalZones: 1 });
+    createdControllerIds.push(foreign.id);
+    const foreignZone = (await storage.getIrrigationController(companyBId, foreign.id))!.zones[0];
+    assert.equal((await hit(srv.base, "PUT", `/api/irrigation-zones/${foreignZone.id}`, { zoneType: "rotor" })).status, 404);
+    assert.equal((await storage.getIrrigationController(companyBId, foreign.id))!.zones[0].zoneTypeConfirmed, false);
+  });
+  it("CSV insert/update, unchanged typed rows and replace-reset inherit correct confirmation", async () => {
+    const name = "Doc CSV";
+    const row = { controllerName: name, location: null, brand: null, model: null, programName: null, wateringDays: null, startTimes: null, seasonalAdjustPct: 100, zoneNumber: 1, zoneName: "Zone 1", zoneType: "other" as const, runTimeMinutes: 0 };
+    await storage.importIrrigationProfile(companyAId, customerAId, "", [row, { ...row, zoneNumber: 3, zoneType: "rotor" }], "commit");
+    const ctrl = (await storage.listIrrigationControllers(companyAId, customerAId)).find(c => c.name === name)!;
+    createdControllerIds.push(ctrl.id);
+    const graph = () => storage.getIrrigationController(companyAId, ctrl.id);
+    assert.deepEqual((await graph())!.zones.map(z => z.zoneTypeConfirmed), [true, false, true]);
+    await db.update(irrigationProfileZones).set({ zoneTypeConfirmed: false }).where(eq(irrigationProfileZones.controllerId, ctrl.id));
+    // A validated CSV choice must confirm even if every older column already matches.
+    await storage.importIrrigationProfile(companyAId, customerAId, "", [row], "commit");
+    assert.equal((await graph())!.zones[0].zoneTypeConfirmed, true);
+    await storage.importIrrigationProfile(companyAId, customerAId, "", [{ ...row, zoneNumber: 2, zoneType: "drip" }], "commit", undefined, [name]);
+    const result = (await graph())!.zones;
+    assert.equal(result.find(z => z.zoneNumber === 1)!.zoneTypeConfirmed, false);
+    assert.equal(result.find(z => z.zoneNumber === 2)!.zoneTypeConfirmed, true);
+  });
+  it("backflow create/update validate reasons and merged results, foreign ownership precedes contradiction; log-test clears", async () => {
+    const create = (body: object) => hit(srv.base, "POST", `/api/customers/${customerAId}/backflows`, { name: "Doc backflow", ...body });
+    for (const reason of ["bad", "", 123]) assert.equal((await create({ testUnknownReason: reason })).status, 400);
+    for (const result of ["pass", "fail"]) {
+      const bad = await create({ testUnknownReason: "no_tag", lastTestResult: result });
+      assert.equal(bad.status, 400); assert.equal(bad.body.message, "This backflow has a test on file");
+    }
+    const created = await create({ testUnknownReason: "never_tested" });
+    assert.equal(created.status, 201); backflowIds.push(created.body.id);
+    const id = created.body.id;
+    assert.equal(created.body.testUnknownReason, "never_tested");
+    const put = (body: object, target = id) => hit(srv.base, "PUT", `/api/backflows/${target}`, body);
+    assert.equal((await put({ testUnknownReason: "no_tag" })).status, 200);
+    assert.equal((await put({ testUnknownReason: "bad" })).status, 400);
+    const logged = await hit(srv.base, "POST", `/api/backflows/${id}/log-test`, { lastTestResult: "pass", lastTestedDate: "2026-11-08", lastTestedBy: "Tester" });
+    assert.equal(logged.status, 200); assert.equal(logged.body.testUnknownReason, null);
+    for (const body of [{ testUnknownReason: "never_tested" }, { testUnknownReason: "no_tag", lastTestResult: "fail" }]) {
+      const bad = await put(body); assert.equal(bad.status, 400); assert.equal(bad.body.message, "This backflow has a test on file");
+    }
+    assert.equal((await put({ testUnknownReason: null })).status, 200);
+    const cleared = await put({ testUnknownReason: "never_tested", lastTestResult: null });
+    assert.equal(cleared.status, 200); assert.equal(cleared.body.lastTestResult, null);
+    const foreign = await storage.createBackflow({ companyId: companyBId, customerId: customerBId, name: "Foreign", lastTestResult: "pass" });
+    backflowIds.push(foreign.id);
+    assert.equal((await put({ testUnknownReason: "never_tested" }, foreign.id)).status, 404);
+    const superSrv = makeTestServer({ role: "super_admin", companyId: null, userId: managerAUserId });
+    try {
+      assert.equal((await hit(superSrv.base, "PUT", `/api/backflows/${foreign.id}`, { testUnknownReason: "no_tag" })).status, 400);
+      assert.equal((await hit(superSrv.base, "PUT", `/api/backflows/${foreign.id}`, { lastTestResult: null, testUnknownReason: "no_tag" })).status, 200);
+    } finally { await superSrv.close(); }
+  });
+});
+
 describe("Zone range inverse", () => {
   it("round-trips compressed unions and rejects malformed ranges", () => {
     assert.deepEqual(parseZoneRanges(compressZoneRanges([7, 4, 3, 7, 8, 9, 12])), [3, 4, 7, 8, 9, 12]);

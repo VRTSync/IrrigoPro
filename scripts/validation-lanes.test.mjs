@@ -79,6 +79,12 @@ test("manifest has exactly four lanes and unique names and commands", () => {
   assert.equal(manifest.types[0].command, "node --test scripts/validation-lanes.test.mjs");
 });
 
+test("Document System shared rules and backfill stay in the bounded field lane", () => {
+  const commands = manifest["api-field"].map(entry => entry.command);
+  assert.ok(commands.some(command => command.includes("src/irrigation-zones.test.ts") && command.includes("src/system-documentation.test.ts")));
+  assert.ok(commands.some(command => command.includes("src/lib/migrations/backfill-zone-type-confirmed.test.ts")));
+});
+
 test("guard rejects duplicates and unexpected lanes", () => {
   for (const property of ["name", "command"]) {
     const bad = structuredClone(manifest);

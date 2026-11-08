@@ -11625,7 +11625,7 @@ export class DatabaseStorage implements IStorage {
       if (patch.zoneType !== undefined) fields.zoneType = patch.zoneType;
       if (patch.programId !== undefined) fields.programId = patch.programId;
       if (patch.runTimeMinutes !== undefined) fields.runTimeMinutes = patch.runTimeMinutes;
-      const updated = await tx.update(irrigationProfileZones).set({ ...fields, updatedAt: new Date() }).where(scope).returning();
+      const updated = await tx.update(irrigationProfileZones).set({ ...fields, ...(patch.zoneType !== undefined ? { zoneTypeConfirmed: true } : {}), updatedAt: new Date() }).where(scope).returning();
       const stamped = await this._stampControllerUpdated(tx, ctrl.id, actor?.id != null ? { id: actor.id, name: actor.name } : undefined);
       const labels: Record<string, string> = { pop_up_spray: "Pop-up Spray", rotor: "Rotor", drip: "Drip", netafim: "Netafim", bubbler: "Bubbler", other: "Other" };
       const descriptions = [
@@ -12267,7 +12267,7 @@ export class DatabaseStorage implements IStorage {
 
       const [updated] = await tx
         .update(irrigationProfileZones)
-        .set({ ...patch, updatedAt: new Date() })
+        .set({ ...patch, ...(patch.zoneType !== undefined ? { zoneTypeConfirmed: true } : {}), updatedAt: new Date() })
         .where(eq(irrigationProfileZones.id, id))
         .returning();
 
@@ -12476,6 +12476,9 @@ export class DatabaseStorage implements IStorage {
           if (existingZone.zoneType !== row.zoneType) {
             changes.push({ field: "zoneType", from: existingZone.zoneType, to: row.zoneType });
           }
+          if (!existingZone.zoneTypeConfirmed) {
+            changes.push({ field: "zoneTypeConfirmed", from: "unconfirmed", to: "confirmed" });
+          }
           if (existingZone.runTimeMinutes !== row.runTimeMinutes) {
             changes.push({ field: "runTimeMinutes", from: existingZone.runTimeMinutes, to: row.runTimeMinutes });
           }
@@ -12501,7 +12504,7 @@ export class DatabaseStorage implements IStorage {
           .filter((z) => z.zoneNumber > target
             ? !z.retiredAt
             : z.zoneNumber >= 1 && (
-              !!z.retiredAt || z.name !== `Zone ${z.zoneNumber}` || z.zoneType !== "other" ||
+              !!z.retiredAt || z.name !== `Zone ${z.zoneNumber}` || z.zoneType !== "other" || z.zoneTypeConfirmed ||
               z.runTimeMinutes !== 0 || z.zoneOrder !== z.zoneNumber || !z.isActive ||
               z.programId !== null || z.notes !== null ||
               z.overrideStartTime !== null || z.overrideDays !== null
@@ -12718,6 +12721,7 @@ export class DatabaseStorage implements IStorage {
                 zoneNumber: zoneNum,
                 name: resolvedName,
                 zoneType: row.zoneType,
+                zoneTypeConfirmed: true,
                 runTimeMinutes: row.runTimeMinutes,
                 zoneOrder: zoneNum,
                 isActive: true,
@@ -12730,6 +12734,7 @@ export class DatabaseStorage implements IStorage {
               .set({
                 name: resolvedName,
                 zoneType: row.zoneType,
+                zoneTypeConfirmed: true,
                 runTimeMinutes: row.runTimeMinutes,
                 programId,
                 updatedAt: new Date(),
@@ -12939,6 +12944,7 @@ export class DatabaseStorage implements IStorage {
       .set({
         lastTestedDate: data.lastTestedDate,
         lastTestResult: data.lastTestResult,
+        testUnknownReason: null,
         lastTestedBy: data.lastTestedBy ?? null,
         nextTestDueDate: nextDue,
         lastUpdatedByUserId: actor?.id ?? null,

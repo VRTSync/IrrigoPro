@@ -1,3 +1,4 @@
+export * from "./system-documentation.js";
 export * from "./lifecycle.js";
 export * from "./estimate-number.js";
 export * from "./invoice-number.js";

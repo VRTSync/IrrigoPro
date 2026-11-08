@@ -13,7 +13,7 @@ export function validateZoneCount(target: number): void {
 }
 
 export function zonePlaceholder(n: number) {
-  return { name: `Zone ${n}`, zoneType: "other", runTimeMinutes: 0, zoneOrder: n, isActive: true };
+  return { name: `Zone ${n}`, zoneType: "other", zoneTypeConfirmed: false, runTimeMinutes: 0, zoneOrder: n, isActive: true };
 }
 
 export function compressZoneRanges(numbers: number[]): string {
