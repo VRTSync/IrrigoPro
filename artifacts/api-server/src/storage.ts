@@ -215,6 +215,8 @@ import {
 import { recordAuditEvent } from "./routes/audit-log";
 import { normalizeUsername } from "./lib/normalize-username";
 import { ZoneCountClearError, validateZoneCount, zonePlaceholder, zoneCountSummary, compressZoneRanges, parseZoneRanges, zoneEditSummary, ZONE_EDIT_SUMMARY_PREFIX, ZoneProgramError, type BulkZonePatch, type ZoneActor, type ZoneChanges } from "./lib/controller-zone-records";
+import { controllerDocumentationGaps, backflowDocumentationGaps } from "@workspace/shared";
+import { DocumentationError } from "./lib/documentation-error";
 export { ZoneCountClearError } from "./lib/controller-zone-records";
 
 
@@ -462,6 +464,8 @@ export type CurrentZoneSummary = {
 };
 
 export interface IStorage {
+  fieldVerifyIrrigationController(companyId: number | null, id: number, actor: ZoneActor): Promise<IrrigationController | null>;
+  fieldVerifyBackflow(companyId: number | null, id: number, actor: ZoneActor): Promise<IrrigationBackflow | null>;
   resolveControllerIdsByLetter(q: DbExecutor, scope: { companyId: number; customerId: number; branchName: string | null }, letters: (string | null | undefined)[]): Promise<Map<string, number | null>>;
   listCurrentZoneSummaries(controllers: { id: number; companyId: number }[]): Promise<Map<number, CurrentZoneSummary[]>>;
   bulkUpdateIrrigationZones(companyId: number | null, controllerId: number, zoneIds: number[], patch: BulkZonePatch, actor?: ZoneActor): Promise<IrrigationProfileZone[] | null>;
@@ -11554,6 +11558,49 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Snapshot the full controller+programs+zones state into irrigation_profile_history.
+  async fieldVerifyIrrigationController(companyId: number | null, id: number, actor: ZoneActor): Promise<IrrigationController | null> {
+    return db.transaction(async tx => {
+      const [ctrl] = await tx.select().from(irrigationControllers).where(and(
+        eq(irrigationControllers.id, id), this._irrigationCompanyWhere(irrigationControllers, companyId),
+      )).for("update");
+      if (!ctrl) return null;
+      if (!ctrl.isActive) throw new DocumentationError("This item is marked not at this location");
+      const programs = await tx.select().from(irrigationPrograms).where(and(
+        eq(irrigationPrograms.companyId, ctrl.companyId), eq(irrigationPrograms.controllerId, id),
+      )).orderBy(irrigationPrograms.sortOrder, irrigationPrograms.id);
+      const zones = await tx.select().from(irrigationProfileZones).where(and(
+        eq(irrigationProfileZones.companyId, ctrl.companyId), eq(irrigationProfileZones.controllerId, id), isNull(irrigationProfileZones.retiredAt),
+      )).orderBy(irrigationProfileZones.zoneNumber);
+      const gaps = controllerDocumentationGaps({ ...ctrl, programs, zones });
+      if (gaps.length) throw new DocumentationError("Still needed: " + gaps.map(g => g.label).join(", "), gaps);
+      const now = new Date();
+      const [updated] = await tx.update(irrigationControllers).set({
+        fieldVerifiedAt: now, fieldVerifiedByUserId: actor.id, fieldVerifiedByName: actor.name,
+        lastUpdatedAt: now, lastUpdatedByUserId: actor.id, lastUpdatedByName: actor.name, updatedAt: now,
+      }).where(and(eq(irrigationControllers.id, id), eq(irrigationControllers.companyId, ctrl.companyId))).returning();
+      await this._appendIrrigationSnapshot(tx, updated, actor, `Verified in field by ${actor.name}`);
+      return updated;
+    });
+  }
+
+  async fieldVerifyBackflow(companyId: number | null, id: number, actor: ZoneActor): Promise<IrrigationBackflow | null> {
+    return db.transaction(async tx => {
+      const [row] = await tx.select().from(irrigationBackflows).where(and(
+        eq(irrigationBackflows.id, id), this._irrigationCompanyWhere(irrigationBackflows, companyId),
+      )).for("update");
+      if (!row) return null;
+      if (!row.isActive) throw new DocumentationError("This item is marked not at this location");
+      const gaps = backflowDocumentationGaps(row);
+      if (gaps.length) throw new DocumentationError("Still needed: " + gaps.map(g => g.label).join(", "), gaps);
+      const now = new Date();
+      const [updated] = await tx.update(irrigationBackflows).set({
+        fieldVerifiedAt: now, fieldVerifiedByUserId: actor.id, fieldVerifiedByName: actor.name,
+        lastUpdatedAt: now, lastUpdatedByUserId: actor.id, lastUpdatedByName: actor.name, updatedAt: now,
+      }).where(and(eq(irrigationBackflows.id, id), eq(irrigationBackflows.companyId, row.companyId))).returning();
+      return updated;
+    });
+  }
+
   // Called inside a transaction after any mutating save.
   private async _appendIrrigationSnapshot(
     tx: DbExecutor,

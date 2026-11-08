@@ -5,6 +5,211 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export interface DocumentationSiteInput {
+  branchName?: string;
+}
+
+export interface DocumentationNoBackflowInput {
+  branchName?: string;
+  confirmed: boolean;
+}
+
+export interface DocumentationGap {
+  step: string;
+  code: string;
+  label: string;
+}
+
+export interface DocumentationError {
+  message: string;
+  gaps?: DocumentationGap[];
+  reasons?: string[];
+}
+
+export type DocumentationSiteStatus =
+  (typeof DocumentationSiteStatus)[keyof typeof DocumentationSiteStatus];
+
+export const DocumentationSiteStatus = {
+  verified: "verified",
+  not_verified: "not_verified",
+  nothing_on_file: "nothing_on_file",
+} as const;
+
+export interface DocumentationSiteBlock {
+  status: DocumentationSiteStatus;
+  /** @nullable */
+  verifiedAt: string | null;
+  /** @nullable */
+  verifiedByName: string | null;
+  noBackflowConfirmed: boolean;
+}
+
+export interface DocumentationSiteSummary {
+  branchName: string;
+  status: DocumentationSiteStatus;
+  /** @nullable */
+  verifiedAt: string | null;
+  controllerCount: number;
+  backflowCount: number;
+}
+
+export interface DocumentationCustomer {
+  id: number;
+  name: string;
+  /** @nullable */
+  address: string | null;
+  branches: string[];
+}
+
+export interface DocumentationPickerCustomer {
+  customerId: number;
+  name: string;
+  /** @nullable */
+  address: string | null;
+  branches: string[];
+  sites: DocumentationSiteSummary[];
+}
+
+export interface DocumentationSites {
+  customers: DocumentationPickerCustomer[];
+}
+
+export interface DocumentationZone {
+  id: number;
+  zoneNumber: number;
+  name: string;
+  zoneType: string;
+  zoneTypeConfirmed: boolean;
+  /** @nullable */
+  programId: number | null;
+  runTimeMinutes: number;
+}
+
+export interface DocumentationProgram {
+  id: number;
+  companyId: number;
+  controllerId: number;
+  name: string;
+  /** @nullable */
+  wateringDays: string[] | null;
+  /** @nullable */
+  startTimes: string[] | null;
+  seasonalAdjustPct: number;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DocumentationController {
+  id: number;
+  /** @nullable */
+  letter: string | null;
+  name: string;
+  /** @nullable */
+  location: string | null;
+  /** @nullable */
+  brand: string | null;
+  /** @nullable */
+  model: string | null;
+  /** @nullable */
+  totalZones: number | null;
+  /** @nullable */
+  settingsPhotoUrl: string | null;
+  /** @nullable */
+  notes: string | null;
+  /** @nullable */
+  lastUpdatedAt: string | null;
+  /** @nullable */
+  fieldVerifiedAt: string | null;
+  /** @nullable */
+  fieldVerifiedByName: string | null;
+  gaps: DocumentationGap[];
+  verified: boolean;
+}
+
+export type DocumentationControllerGraph = DocumentationController & {
+  programs: DocumentationProgram[];
+  zones: DocumentationZone[];
+};
+
+export interface DocumentationEquipmentAudit {
+  isActive: boolean;
+  /** @nullable */
+  lastUpdatedByUserId: number | null;
+  /** @nullable */
+  lastUpdatedByName: string | null;
+  /** @nullable */
+  lastUpdatedAt: string | null;
+  /** @nullable */
+  fieldVerifiedByUserId: number | null;
+  /** @nullable */
+  fieldVerifiedByName: string | null;
+  /** @nullable */
+  fieldVerifiedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DocumentationEquipmentOwner {
+  companyId: number;
+  customerId: number;
+  branchName: string;
+}
+
+export type DocumentationControllerVerification = DocumentationController &
+  DocumentationEquipmentAudit &
+  DocumentationEquipmentOwner;
+
+export type DocumentationBackflow = DocumentationEquipmentAudit & {
+  id: number;
+  branchName: string;
+  name: string;
+  /** @nullable */
+  brand: string | null;
+  /** @nullable */
+  model: string | null;
+  /** @nullable */
+  size: string | null;
+  deviceType: string;
+  /** @nullable */
+  serialNumber: string | null;
+  /** @nullable */
+  location: string | null;
+  /** @nullable */
+  installDate: string | null;
+  /** @nullable */
+  photoUrl: string | null;
+  /** @nullable */
+  notes: string | null;
+  /** @nullable */
+  lastTestedDate: string | null;
+  /** @nullable */
+  nextTestDueDate: string | null;
+  /** @nullable */
+  lastTestResult: string | null;
+  /** @nullable */
+  lastTestedBy: string | null;
+  /** @nullable */
+  testUnknownReason: string | null;
+  gaps: DocumentationGap[];
+  verified: boolean;
+};
+
+export type DocumentationBackflowVerification = DocumentationBackflow &
+  DocumentationEquipmentOwner & {
+    /** @nullable */
+    vrtSyncId: string | null;
+  };
+
+export interface DocumentationSite {
+  customer: DocumentationCustomer;
+  branchName: string;
+  controllers: DocumentationControllerGraph[];
+  backflows: DocumentationBackflow[];
+  site: DocumentationSiteBlock;
+}
+
 export type CustomerPullStatusIntervalMinutes =
   (typeof CustomerPullStatusIntervalMinutes)[keyof typeof CustomerPullStatusIntervalMinutes];
 
@@ -47,3 +252,7 @@ export interface CustomerPullStatus {
 export interface HealthStatus {
   status: string;
 }
+
+export type GetDocumentationSiteParams = {
+  branchName?: string;
+};

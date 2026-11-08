@@ -121,21 +121,21 @@ export interface IrrigationProfileRouteDeps {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function parseId(raw: string): number | null {
+export function parseId(raw: string): number | null {
   const n = parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-function getCallerCompanyId(req: any): number | null {
+export function getCallerCompanyId(req: any): number | null {
   const cid = req.authenticatedUserCompanyId;
   return cid != null ? Number(cid) : null;
 }
 
-function badId(res: any, entity: string): void {
+export function badId(res: any, entity: string): void {
   res.status(400).json({ message: `Invalid ${entity} id` });
 }
 
-function notFound(res: any, entity: string): void {
+export function notFound(res: any, entity: string): void {
   res.status(404).json({ message: `${entity} not found` });
 }
 

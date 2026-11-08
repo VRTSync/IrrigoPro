@@ -66,6 +66,13 @@ export default defineConfig({
         },
         useDates: true,
         useBigInt: true,
+        operations: {
+          // Orval names the path Zod schema and query TS type *Params when
+          // an operation has both. This route reuses the irrigation ID parser.
+          getDocumentationSite: { zod: { generate: { param: false } } },
+          confirmDocumentationNoBackflow: { zod: { strict: { body: true } } },
+          verifyDocumentationSite: { zod: { strict: { body: true } } },
+        },
       },
     },
   },

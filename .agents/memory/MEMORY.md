@@ -72,4 +72,5 @@
 - [Operational board roles](operational-board-role-policy.md) — dispatch access is separate from financial budget access; bookkeeper location audit remains read-only.
 - [Shared QuickBooks billing](shared-quickbooks-billing.md) — High Plains CRM shares the QB company; keep ownership safety separate from staged numbering changes.
 - [Customer records saved plan](customer-record-ownership-plan.md) — Overview of the Customer Records slices; the slice ticket in hand is always authoritative.
-- [Document System build context](document-system-build-context.md) — Seven ordered slices; locked web-only scope and five decisions awaiting confirmation before Slice 2.
+- [Document System build context](document-system-build-context.md) — Seven ordered slices; web-only scope and confirmed verification/capture decisions.
+- [Orval path/query naming](orval-path-query-collision.md) — Combined path/query operations can collide across the generated validation and type barrels.

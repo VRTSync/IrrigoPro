@@ -11,6 +11,131 @@ tags:
   - name: health
     description: Health operations
 paths:
+  /system-documentation/sites:
+    get:
+      operationId: getDocumentationSites
+      summary: List privacy-safe documentation sites
+      responses:
+        "200":
+          description: Visible customers in display-name order
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentationSites" }
+        "401": { description: Authentication required }
+        "403": { description: Forbidden }
+        "500": { description: Could not save — please retry }
+  /system-documentation/customers/{customerId}/site:
+    get:
+      operationId: getDocumentationSite
+      summary: Read one location without seeding equipment
+      parameters:
+        - { name: customerId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: branchName, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Active equipment, gaps, and location verification
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentationSite" }
+        "400": { description: "Invalid customer id, Pick a location, or Unknown location" }
+        "401": { description: Authentication required }
+        "403": { description: Forbidden }
+        "404": { description: Customer not found }
+        "500": { description: Could not save — please retry }
+  /irrigation-controllers/{id}/field-verify:
+    post:
+      operationId: fieldVerifyController
+      summary: Verify a complete active controller atomically
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: Updated controller row with identical verification and audit timestamps
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentationControllerVerification" }
+        "400":
+          description: Inactive or incomplete item
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentationError" }
+        "401": { description: Authentication required }
+        "403": { description: Forbidden }
+        "404": { description: Controller not found }
+        "500": { description: Could not save — please retry }
+  /backflows/{id}/field-verify:
+    post:
+      operationId: fieldVerifyBackflow
+      summary: Verify a complete active backflow atomically
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: Updated backflow row with identical verification and audit timestamps
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentationBackflowVerification" }
+        "400":
+          description: Inactive or incomplete item
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentationError" }
+        "401": { description: Authentication required }
+        "403": { description: Forbidden }
+        "404": { description: Backflow not found }
+        "500": { description: Could not save — please retry }
+  /system-documentation/customers/{customerId}/site/no-backflow:
+    post:
+      operationId: confirmDocumentationNoBackflow
+      summary: Set the no-backflow answer and invalidate Finish when changed
+      parameters:
+        - { name: customerId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DocumentationNoBackflowInput" }
+      responses:
+        "200":
+          description: Derived site block
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentationSiteBlock" }
+        "400":
+          description: Invalid body, branch, or active backflow on file
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentationError" }
+        "401": { description: Authentication required }
+        "403": { description: Forbidden }
+        "404": { description: Customer not found }
+        "500": { description: Could not save — please retry }
+  /system-documentation/customers/{customerId}/site/verify:
+    post:
+      operationId: verifyDocumentationSite
+      summary: Finish a location only after every active item is verified
+      parameters:
+        - { name: customerId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DocumentationSiteInput" }
+      responses:
+        "200":
+          description: Derived site block
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentationSiteBlock" }
+        "400":
+          description: Ordered reasons preventing Finish
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentationError" }
+        "401": { description: Authentication required }
+        "403": { description: Forbidden }
+        "404": { description: Customer not found }
+        "500": { description: Could not save — please retry }
   /quickbooks/customer-pull-status:
     get:
       operationId: getCustomerPullStatus
@@ -45,6 +170,193 @@ paths:
                 $ref: "#/components/schemas/HealthStatus"
 components:
   schemas:
+    DocumentationSiteInput:
+      type: object
+      additionalProperties: false
+      properties:
+        branchName: { type: string }
+    DocumentationNoBackflowInput:
+      type: object
+      additionalProperties: false
+      required: [confirmed]
+      properties:
+        branchName: { type: string }
+        confirmed: { type: boolean }
+    DocumentationGap:
+      type: object
+      required: [step, code, label]
+      properties:
+        step: { type: string }
+        code: { type: string }
+        label: { type: string }
+    DocumentationError:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+        gaps: { type: array, items: { $ref: "#/components/schemas/DocumentationGap" } }
+        reasons: { type: array, items: { type: string } }
+    DocumentationSiteStatus:
+      type: string
+      enum: [verified, not_verified, nothing_on_file]
+    DocumentationSiteBlock:
+      type: object
+      required: [status, verifiedAt, verifiedByName, noBackflowConfirmed]
+      properties:
+        status: { $ref: "#/components/schemas/DocumentationSiteStatus" }
+        verifiedAt: { type: [string, "null"], format: date-time }
+        verifiedByName: { type: [string, "null"] }
+        noBackflowConfirmed: { type: boolean }
+    DocumentationSiteSummary:
+      type: object
+      required: [branchName, status, verifiedAt, controllerCount, backflowCount]
+      properties:
+        branchName: { type: string }
+        status: { $ref: "#/components/schemas/DocumentationSiteStatus" }
+        verifiedAt: { type: [string, "null"], format: date-time }
+        controllerCount: { type: integer }
+        backflowCount: { type: integer }
+    DocumentationCustomer:
+      type: object
+      required: [id, name, address, branches]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        address: { type: [string, "null"] }
+        branches: { type: array, items: { type: string } }
+    DocumentationPickerCustomer:
+      type: object
+      required: [customerId, name, address, branches, sites]
+      properties:
+        customerId: { type: integer }
+        name: { type: string }
+        address: { type: [string, "null"] }
+        branches: { type: array, items: { type: string } }
+        sites: { type: array, items: { $ref: "#/components/schemas/DocumentationSiteSummary" } }
+    DocumentationSites:
+      type: object
+      required: [customers]
+      properties:
+        customers: { type: array, items: { $ref: "#/components/schemas/DocumentationPickerCustomer" } }
+    DocumentationZone:
+      type: object
+      required: [id, zoneNumber, name, zoneType, zoneTypeConfirmed, programId, runTimeMinutes]
+      properties:
+        id: { type: integer }
+        zoneNumber: { type: integer }
+        name: { type: string }
+        zoneType: { type: string }
+        zoneTypeConfirmed: { type: boolean }
+        programId: { type: [integer, "null"] }
+        runTimeMinutes: { type: integer }
+    DocumentationProgram:
+      type: object
+      required: [id, companyId, controllerId, name, wateringDays, startTimes, seasonalAdjustPct, isActive, sortOrder, createdAt, updatedAt]
+      properties:
+        id: { type: integer }
+        companyId: { type: integer }
+        controllerId: { type: integer }
+        name: { type: string }
+        wateringDays: { type: [array, "null"], items: { type: string } }
+        startTimes: { type: [array, "null"], items: { type: string } }
+        seasonalAdjustPct: { type: integer }
+        isActive: { type: boolean }
+        sortOrder: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DocumentationController:
+      type: object
+      required: [id, letter, name, location, brand, model, totalZones, settingsPhotoUrl, notes, lastUpdatedAt, fieldVerifiedAt, fieldVerifiedByName, gaps, verified]
+      properties:
+        id: { type: integer }
+        letter: { type: [string, "null"] }
+        name: { type: string }
+        location: { type: [string, "null"] }
+        brand: { type: [string, "null"] }
+        model: { type: [string, "null"] }
+        totalZones: { type: [integer, "null"] }
+        settingsPhotoUrl: { type: [string, "null"] }
+        notes: { type: [string, "null"] }
+        lastUpdatedAt: { type: [string, "null"], format: date-time }
+        fieldVerifiedAt: { type: [string, "null"], format: date-time }
+        fieldVerifiedByName: { type: [string, "null"] }
+        gaps: { type: array, items: { $ref: "#/components/schemas/DocumentationGap" } }
+        verified: { type: boolean }
+    DocumentationControllerGraph:
+      allOf:
+        - { $ref: "#/components/schemas/DocumentationController" }
+        - type: object
+          required: [programs, zones]
+          properties:
+            programs: { type: array, items: { $ref: "#/components/schemas/DocumentationProgram" } }
+            zones: { type: array, items: { $ref: "#/components/schemas/DocumentationZone" } }
+    DocumentationEquipmentAudit:
+      type: object
+      required: [isActive, lastUpdatedByUserId, lastUpdatedByName, lastUpdatedAt, fieldVerifiedByUserId, fieldVerifiedByName, fieldVerifiedAt, createdAt, updatedAt]
+      properties:
+        isActive: { type: boolean }
+        lastUpdatedByUserId: { type: [integer, "null"] }
+        lastUpdatedByName: { type: [string, "null"] }
+        lastUpdatedAt: { type: [string, "null"], format: date-time }
+        fieldVerifiedByUserId: { type: [integer, "null"] }
+        fieldVerifiedByName: { type: [string, "null"] }
+        fieldVerifiedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DocumentationEquipmentOwner:
+      type: object
+      required: [companyId, customerId, branchName]
+      properties:
+        companyId: { type: integer }
+        customerId: { type: integer }
+        branchName: { type: string }
+    DocumentationControllerVerification:
+      allOf:
+        - { $ref: "#/components/schemas/DocumentationController" }
+        - { $ref: "#/components/schemas/DocumentationEquipmentAudit" }
+        - { $ref: "#/components/schemas/DocumentationEquipmentOwner" }
+    DocumentationBackflow:
+      allOf:
+        - { $ref: "#/components/schemas/DocumentationEquipmentAudit" }
+        - type: object
+          required: [id, branchName, name, brand, model, size, deviceType, serialNumber, location, installDate, photoUrl, notes, lastTestedDate, nextTestDueDate, lastTestResult, lastTestedBy, testUnknownReason, gaps, verified]
+          properties:
+            id: { type: integer }
+            branchName: { type: string }
+            name: { type: string }
+            brand: { type: [string, "null"] }
+            model: { type: [string, "null"] }
+            size: { type: [string, "null"] }
+            deviceType: { type: string }
+            serialNumber: { type: [string, "null"] }
+            location: { type: [string, "null"] }
+            installDate: { type: [string, "null"] }
+            photoUrl: { type: [string, "null"] }
+            notes: { type: [string, "null"] }
+            lastTestedDate: { type: [string, "null"] }
+            nextTestDueDate: { type: [string, "null"] }
+            lastTestResult: { type: [string, "null"] }
+            lastTestedBy: { type: [string, "null"] }
+            testUnknownReason: { type: [string, "null"] }
+            gaps: { type: array, items: { $ref: "#/components/schemas/DocumentationGap" } }
+            verified: { type: boolean }
+    DocumentationBackflowVerification:
+      allOf:
+        - { $ref: "#/components/schemas/DocumentationBackflow" }
+        - { $ref: "#/components/schemas/DocumentationEquipmentOwner" }
+        - type: object
+          required: [vrtSyncId]
+          properties:
+            vrtSyncId: { type: [string, "null"] }
+    DocumentationSite:
+      type: object
+      required: [customer, branchName, controllers, backflows, site]
+      properties:
+        customer: { $ref: "#/components/schemas/DocumentationCustomer" }
+        branchName: { type: string }
+        controllers: { type: array, items: { $ref: "#/components/schemas/DocumentationControllerGraph" } }
+        backflows: { type: array, items: { $ref: "#/components/schemas/DocumentationBackflow" } }
+        site: { $ref: "#/components/schemas/DocumentationSiteBlock" }
     CustomerPullStatus:
       type: object
       required: [intervalMinutes, lastAttemptAt, lastSuccessAt, lastError, lastSummary]

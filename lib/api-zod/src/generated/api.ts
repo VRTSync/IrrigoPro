@@ -8,6 +8,307 @@
 import * as zod from "zod";
 
 /**
+ * @summary List privacy-safe documentation sites
+ */
+export const GetDocumentationSitesResponse = zod.object({
+  customers: zod.array(
+    zod.object({
+      customerId: zod.number(),
+      name: zod.string(),
+      address: zod.string().nullable(),
+      branches: zod.array(zod.string()),
+      sites: zod.array(
+        zod.object({
+          branchName: zod.string(),
+          status: zod.enum(["verified", "not_verified", "nothing_on_file"]),
+          verifiedAt: zod.coerce.date().nullable(),
+          controllerCount: zod.number(),
+          backflowCount: zod.number(),
+        }),
+      ),
+    }),
+  ),
+});
+
+/**
+ * @summary Read one location without seeding equipment
+ */
+export const GetDocumentationSiteQueryParams = zod.object({
+  branchName: zod.string().optional(),
+});
+
+export const GetDocumentationSiteResponse = zod.object({
+  customer: zod.object({
+    id: zod.number(),
+    name: zod.string(),
+    address: zod.string().nullable(),
+    branches: zod.array(zod.string()),
+  }),
+  branchName: zod.string(),
+  controllers: zod.array(
+    zod
+      .object({
+        id: zod.number(),
+        letter: zod.string().nullable(),
+        name: zod.string(),
+        location: zod.string().nullable(),
+        brand: zod.string().nullable(),
+        model: zod.string().nullable(),
+        totalZones: zod.number().nullable(),
+        settingsPhotoUrl: zod.string().nullable(),
+        notes: zod.string().nullable(),
+        lastUpdatedAt: zod.date().nullable(),
+        fieldVerifiedAt: zod.date().nullable(),
+        fieldVerifiedByName: zod.string().nullable(),
+        gaps: zod.array(
+          zod.object({
+            step: zod.string(),
+            code: zod.string(),
+            label: zod.string(),
+          }),
+        ),
+        verified: zod.boolean(),
+      })
+      .and(
+        zod.object({
+          programs: zod.array(
+            zod.object({
+              id: zod.number(),
+              companyId: zod.number(),
+              controllerId: zod.number(),
+              name: zod.string(),
+              wateringDays: zod.array(zod.string()).nullable(),
+              startTimes: zod.array(zod.string()).nullable(),
+              seasonalAdjustPct: zod.number(),
+              isActive: zod.boolean(),
+              sortOrder: zod.number(),
+              createdAt: zod.date(),
+              updatedAt: zod.date(),
+            }),
+          ),
+          zones: zod.array(
+            zod.object({
+              id: zod.number(),
+              zoneNumber: zod.number(),
+              name: zod.string(),
+              zoneType: zod.string(),
+              zoneTypeConfirmed: zod.boolean(),
+              programId: zod.number().nullable(),
+              runTimeMinutes: zod.number(),
+            }),
+          ),
+        }),
+      ),
+  ),
+  backflows: zod.array(
+    zod
+      .object({
+        isActive: zod.boolean(),
+        lastUpdatedByUserId: zod.number().nullable(),
+        lastUpdatedByName: zod.string().nullable(),
+        lastUpdatedAt: zod.date().nullable(),
+        fieldVerifiedByUserId: zod.number().nullable(),
+        fieldVerifiedByName: zod.string().nullable(),
+        fieldVerifiedAt: zod.date().nullable(),
+        createdAt: zod.date(),
+        updatedAt: zod.date(),
+      })
+      .and(
+        zod.object({
+          id: zod.number(),
+          branchName: zod.string(),
+          name: zod.string(),
+          brand: zod.string().nullable(),
+          model: zod.string().nullable(),
+          size: zod.string().nullable(),
+          deviceType: zod.string(),
+          serialNumber: zod.string().nullable(),
+          location: zod.string().nullable(),
+          installDate: zod.string().nullable(),
+          photoUrl: zod.string().nullable(),
+          notes: zod.string().nullable(),
+          lastTestedDate: zod.string().nullable(),
+          nextTestDueDate: zod.string().nullable(),
+          lastTestResult: zod.string().nullable(),
+          lastTestedBy: zod.string().nullable(),
+          testUnknownReason: zod.string().nullable(),
+          gaps: zod.array(
+            zod.object({
+              step: zod.string(),
+              code: zod.string(),
+              label: zod.string(),
+            }),
+          ),
+          verified: zod.boolean(),
+        }),
+      ),
+  ),
+  site: zod.object({
+    status: zod.enum(["verified", "not_verified", "nothing_on_file"]),
+    verifiedAt: zod.date().nullable(),
+    verifiedByName: zod.string().nullable(),
+    noBackflowConfirmed: zod.boolean(),
+  }),
+});
+
+/**
+ * @summary Verify a complete active controller atomically
+ */
+
+export const FieldVerifyControllerParams = zod.object({
+  id: zod.coerce.number().min(1),
+});
+
+export const FieldVerifyControllerResponse = zod
+  .object({
+    id: zod.number(),
+    letter: zod.string().nullable(),
+    name: zod.string(),
+    location: zod.string().nullable(),
+    brand: zod.string().nullable(),
+    model: zod.string().nullable(),
+    totalZones: zod.number().nullable(),
+    settingsPhotoUrl: zod.string().nullable(),
+    notes: zod.string().nullable(),
+    lastUpdatedAt: zod.coerce.date().nullable(),
+    fieldVerifiedAt: zod.coerce.date().nullable(),
+    fieldVerifiedByName: zod.string().nullable(),
+    gaps: zod.array(
+      zod.object({
+        step: zod.string(),
+        code: zod.string(),
+        label: zod.string(),
+      }),
+    ),
+    verified: zod.boolean(),
+  })
+  .and(
+    zod.object({
+      isActive: zod.boolean(),
+      lastUpdatedByUserId: zod.number().nullable(),
+      lastUpdatedByName: zod.string().nullable(),
+      lastUpdatedAt: zod.coerce.date().nullable(),
+      fieldVerifiedByUserId: zod.number().nullable(),
+      fieldVerifiedByName: zod.string().nullable(),
+      fieldVerifiedAt: zod.coerce.date().nullable(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+    }),
+  )
+  .and(
+    zod.object({
+      companyId: zod.number(),
+      customerId: zod.number(),
+      branchName: zod.string(),
+    }),
+  );
+
+/**
+ * @summary Verify a complete active backflow atomically
+ */
+
+export const FieldVerifyBackflowParams = zod.object({
+  id: zod.coerce.number().min(1),
+});
+
+export const FieldVerifyBackflowResponse = zod
+  .object({
+    isActive: zod.boolean(),
+    lastUpdatedByUserId: zod.number().nullable(),
+    lastUpdatedByName: zod.string().nullable(),
+    lastUpdatedAt: zod.coerce.date().nullable(),
+    fieldVerifiedByUserId: zod.number().nullable(),
+    fieldVerifiedByName: zod.string().nullable(),
+    fieldVerifiedAt: zod.coerce.date().nullable(),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  })
+  .and(
+    zod.object({
+      id: zod.number(),
+      branchName: zod.string(),
+      name: zod.string(),
+      brand: zod.string().nullable(),
+      model: zod.string().nullable(),
+      size: zod.string().nullable(),
+      deviceType: zod.string(),
+      serialNumber: zod.string().nullable(),
+      location: zod.string().nullable(),
+      installDate: zod.string().nullable(),
+      photoUrl: zod.string().nullable(),
+      notes: zod.string().nullable(),
+      lastTestedDate: zod.string().nullable(),
+      nextTestDueDate: zod.string().nullable(),
+      lastTestResult: zod.string().nullable(),
+      lastTestedBy: zod.string().nullable(),
+      testUnknownReason: zod.string().nullable(),
+      gaps: zod.array(
+        zod.object({
+          step: zod.string(),
+          code: zod.string(),
+          label: zod.string(),
+        }),
+      ),
+      verified: zod.boolean(),
+    }),
+  )
+  .and(
+    zod.object({
+      companyId: zod.number(),
+      customerId: zod.number(),
+      branchName: zod.string(),
+    }),
+  )
+  .and(
+    zod.object({
+      vrtSyncId: zod.string().nullable(),
+    }),
+  );
+
+/**
+ * @summary Set the no-backflow answer and invalidate Finish when changed
+ */
+
+export const ConfirmDocumentationNoBackflowParams = zod.object({
+  customerId: zod.number().min(1),
+});
+
+export const ConfirmDocumentationNoBackflowBody = zod
+  .object({
+    branchName: zod.string().optional(),
+    confirmed: zod.boolean(),
+  })
+  .strict();
+
+export const ConfirmDocumentationNoBackflowResponse = zod.object({
+  status: zod.enum(["verified", "not_verified", "nothing_on_file"]),
+  verifiedAt: zod.date().nullable(),
+  verifiedByName: zod.string().nullable(),
+  noBackflowConfirmed: zod.boolean(),
+});
+
+/**
+ * @summary Finish a location only after every active item is verified
+ */
+
+export const VerifyDocumentationSiteParams = zod.object({
+  customerId: zod.number().min(1),
+});
+
+export const VerifyDocumentationSiteBody = zod
+  .object({
+    branchName: zod.string().optional(),
+  })
+  .strict();
+
+export const VerifyDocumentationSiteResponse = zod.object({
+  status: zod.enum(["verified", "not_verified", "nothing_on_file"]),
+  verifiedAt: zod.date().nullable(),
+  verifiedByName: zod.string().nullable(),
+  noBackflowConfirmed: zod.boolean(),
+});
+
+/**
  * @summary Read the authenticated company's QuickBooks customer pull state
  */
 export const GetCustomerPullStatusResponse = zod.object({

@@ -5,24 +5,595 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
+  MutationFunction,
   QueryFunction,
   QueryKey,
+  UseMutationOptions,
+  UseMutationResult,
   UseQueryOptions,
   UseQueryResult,
 } from "@tanstack/react-query";
 
-import type { CustomerPullStatus, HealthStatus } from "./api.schemas";
+import type {
+  CustomerPullStatus,
+  DocumentationBackflowVerification,
+  DocumentationControllerVerification,
+  DocumentationError,
+  DocumentationNoBackflowInput,
+  DocumentationSite,
+  DocumentationSiteBlock,
+  DocumentationSiteInput,
+  DocumentationSites,
+  GetDocumentationSiteParams,
+  HealthStatus,
+} from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
-import type { ErrorType } from "../custom-fetch";
+import type { ErrorType, BodyType } from "../custom-fetch";
 
 type AwaitedInput<T> = PromiseLike<T> | T;
 
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+/**
+ * @summary List privacy-safe documentation sites
+ */
+export const getGetDocumentationSitesUrl = () => {
+  return `/api/system-documentation/sites`;
+};
+
+export const getDocumentationSites = async (
+  options?: RequestInit,
+): Promise<DocumentationSites> => {
+  return customFetch<DocumentationSites>(getGetDocumentationSitesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetDocumentationSitesQueryKey = () => {
+  return [`/api/system-documentation/sites`] as const;
+};
+
+export const getGetDocumentationSitesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDocumentationSites>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getDocumentationSites>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetDocumentationSitesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDocumentationSites>>
+  > = ({ signal }) => getDocumentationSites({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDocumentationSites>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDocumentationSitesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDocumentationSites>>
+>;
+export type GetDocumentationSitesQueryError = ErrorType<void>;
+
+/**
+ * @summary List privacy-safe documentation sites
+ */
+
+export function useGetDocumentationSites<
+  TData = Awaited<ReturnType<typeof getDocumentationSites>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getDocumentationSites>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDocumentationSitesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Read one location without seeding equipment
+ */
+export const getGetDocumentationSiteUrl = (
+  customerId: number,
+  params?: GetDocumentationSiteParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/system-documentation/customers/${customerId}/site?${stringifiedParams}`
+    : `/api/system-documentation/customers/${customerId}/site`;
+};
+
+export const getDocumentationSite = async (
+  customerId: number,
+  params?: GetDocumentationSiteParams,
+  options?: RequestInit,
+): Promise<DocumentationSite> => {
+  return customFetch<DocumentationSite>(
+    getGetDocumentationSiteUrl(customerId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetDocumentationSiteQueryKey = (
+  customerId: number,
+  params?: GetDocumentationSiteParams,
+) => {
+  return [
+    `/api/system-documentation/customers/${customerId}/site`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetDocumentationSiteQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDocumentationSite>>,
+  TError = ErrorType<void>,
+>(
+  customerId: number,
+  params?: GetDocumentationSiteParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDocumentationSite>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetDocumentationSiteQueryKey(customerId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDocumentationSite>>
+  > = ({ signal }) =>
+    getDocumentationSite(customerId, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!customerId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDocumentationSite>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDocumentationSiteQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDocumentationSite>>
+>;
+export type GetDocumentationSiteQueryError = ErrorType<void>;
+
+/**
+ * @summary Read one location without seeding equipment
+ */
+
+export function useGetDocumentationSite<
+  TData = Awaited<ReturnType<typeof getDocumentationSite>>,
+  TError = ErrorType<void>,
+>(
+  customerId: number,
+  params?: GetDocumentationSiteParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDocumentationSite>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDocumentationSiteQueryOptions(
+    customerId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Verify a complete active controller atomically
+ */
+export const getFieldVerifyControllerUrl = (id: number) => {
+  return `/api/irrigation-controllers/${id}/field-verify`;
+};
+
+export const fieldVerifyController = async (
+  id: number,
+  options?: RequestInit,
+): Promise<DocumentationControllerVerification> => {
+  return customFetch<DocumentationControllerVerification>(
+    getFieldVerifyControllerUrl(id),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getFieldVerifyControllerMutationOptions = <
+  TError = ErrorType<DocumentationError | void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof fieldVerifyController>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof fieldVerifyController>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["fieldVerifyController"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof fieldVerifyController>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return fieldVerifyController(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type FieldVerifyControllerMutationResult = NonNullable<
+  Awaited<ReturnType<typeof fieldVerifyController>>
+>;
+
+export type FieldVerifyControllerMutationError =
+  ErrorType<DocumentationError | void>;
+
+/**
+ * @summary Verify a complete active controller atomically
+ */
+export const useFieldVerifyController = <
+  TError = ErrorType<DocumentationError | void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof fieldVerifyController>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof fieldVerifyController>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getFieldVerifyControllerMutationOptions(options));
+};
+
+/**
+ * @summary Verify a complete active backflow atomically
+ */
+export const getFieldVerifyBackflowUrl = (id: number) => {
+  return `/api/backflows/${id}/field-verify`;
+};
+
+export const fieldVerifyBackflow = async (
+  id: number,
+  options?: RequestInit,
+): Promise<DocumentationBackflowVerification> => {
+  return customFetch<DocumentationBackflowVerification>(
+    getFieldVerifyBackflowUrl(id),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getFieldVerifyBackflowMutationOptions = <
+  TError = ErrorType<DocumentationError | void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof fieldVerifyBackflow>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof fieldVerifyBackflow>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["fieldVerifyBackflow"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof fieldVerifyBackflow>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return fieldVerifyBackflow(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type FieldVerifyBackflowMutationResult = NonNullable<
+  Awaited<ReturnType<typeof fieldVerifyBackflow>>
+>;
+
+export type FieldVerifyBackflowMutationError =
+  ErrorType<DocumentationError | void>;
+
+/**
+ * @summary Verify a complete active backflow atomically
+ */
+export const useFieldVerifyBackflow = <
+  TError = ErrorType<DocumentationError | void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof fieldVerifyBackflow>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof fieldVerifyBackflow>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getFieldVerifyBackflowMutationOptions(options));
+};
+
+/**
+ * @summary Set the no-backflow answer and invalidate Finish when changed
+ */
+export const getConfirmDocumentationNoBackflowUrl = (customerId: number) => {
+  return `/api/system-documentation/customers/${customerId}/site/no-backflow`;
+};
+
+export const confirmDocumentationNoBackflow = async (
+  customerId: number,
+  documentationNoBackflowInput: DocumentationNoBackflowInput,
+  options?: RequestInit,
+): Promise<DocumentationSiteBlock> => {
+  return customFetch<DocumentationSiteBlock>(
+    getConfirmDocumentationNoBackflowUrl(customerId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(documentationNoBackflowInput),
+    },
+  );
+};
+
+export const getConfirmDocumentationNoBackflowMutationOptions = <
+  TError = ErrorType<DocumentationError | void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmDocumentationNoBackflow>>,
+    TError,
+    { customerId: number; data: BodyType<DocumentationNoBackflowInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof confirmDocumentationNoBackflow>>,
+  TError,
+  { customerId: number; data: BodyType<DocumentationNoBackflowInput> },
+  TContext
+> => {
+  const mutationKey = ["confirmDocumentationNoBackflow"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof confirmDocumentationNoBackflow>>,
+    { customerId: number; data: BodyType<DocumentationNoBackflowInput> }
+  > = (props) => {
+    const { customerId, data } = props ?? {};
+
+    return confirmDocumentationNoBackflow(customerId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConfirmDocumentationNoBackflowMutationResult = NonNullable<
+  Awaited<ReturnType<typeof confirmDocumentationNoBackflow>>
+>;
+export type ConfirmDocumentationNoBackflowMutationBody =
+  BodyType<DocumentationNoBackflowInput>;
+export type ConfirmDocumentationNoBackflowMutationError =
+  ErrorType<DocumentationError | void>;
+
+/**
+ * @summary Set the no-backflow answer and invalidate Finish when changed
+ */
+export const useConfirmDocumentationNoBackflow = <
+  TError = ErrorType<DocumentationError | void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmDocumentationNoBackflow>>,
+    TError,
+    { customerId: number; data: BodyType<DocumentationNoBackflowInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof confirmDocumentationNoBackflow>>,
+  TError,
+  { customerId: number; data: BodyType<DocumentationNoBackflowInput> },
+  TContext
+> => {
+  return useMutation(getConfirmDocumentationNoBackflowMutationOptions(options));
+};
+
+/**
+ * @summary Finish a location only after every active item is verified
+ */
+export const getVerifyDocumentationSiteUrl = (customerId: number) => {
+  return `/api/system-documentation/customers/${customerId}/site/verify`;
+};
+
+export const verifyDocumentationSite = async (
+  customerId: number,
+  documentationSiteInput: DocumentationSiteInput,
+  options?: RequestInit,
+): Promise<DocumentationSiteBlock> => {
+  return customFetch<DocumentationSiteBlock>(
+    getVerifyDocumentationSiteUrl(customerId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(documentationSiteInput),
+    },
+  );
+};
+
+export const getVerifyDocumentationSiteMutationOptions = <
+  TError = ErrorType<DocumentationError | void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof verifyDocumentationSite>>,
+    TError,
+    { customerId: number; data: BodyType<DocumentationSiteInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof verifyDocumentationSite>>,
+  TError,
+  { customerId: number; data: BodyType<DocumentationSiteInput> },
+  TContext
+> => {
+  const mutationKey = ["verifyDocumentationSite"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof verifyDocumentationSite>>,
+    { customerId: number; data: BodyType<DocumentationSiteInput> }
+  > = (props) => {
+    const { customerId, data } = props ?? {};
+
+    return verifyDocumentationSite(customerId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type VerifyDocumentationSiteMutationResult = NonNullable<
+  Awaited<ReturnType<typeof verifyDocumentationSite>>
+>;
+export type VerifyDocumentationSiteMutationBody =
+  BodyType<DocumentationSiteInput>;
+export type VerifyDocumentationSiteMutationError =
+  ErrorType<DocumentationError | void>;
+
+/**
+ * @summary Finish a location only after every active item is verified
+ */
+export const useVerifyDocumentationSite = <
+  TError = ErrorType<DocumentationError | void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof verifyDocumentationSite>>,
+    TError,
+    { customerId: number; data: BodyType<DocumentationSiteInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof verifyDocumentationSite>>,
+  TError,
+  { customerId: number; data: BodyType<DocumentationSiteInput> },
+  TContext
+> => {
+  return useMutation(getVerifyDocumentationSiteMutationOptions(options));
+};
 
 /**
  * @summary Read the authenticated company's QuickBooks customer pull state

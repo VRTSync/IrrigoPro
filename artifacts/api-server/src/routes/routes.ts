@@ -449,6 +449,7 @@ import { registerInspectionZoneBackfillRoutes } from "./admin-inspection-zone-ba
 import { registerCleanupInvoice71256Routes } from "./cleanup-invoice-71256";
 import { registerWetCheckReconciliationRoutes } from "./wet-check-reconciliation-routes";
 import { registerIrrigationProfileRoutes } from "./irrigation-profile-routes";
+import { registerSystemDocumentationRoutes } from "./system-documentation-routes";
 import { makePropertyControllerPatch } from "./property-controller-patch";
 import { makePropertyControllerGet } from "./property-controller-get";
 import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
@@ -18047,6 +18048,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Irrigation System Profile — Build 1.
   // Controllers, programs, zones, history, and settings photo attach.
   registerIrrigationProfileRoutes(app, { requireAuthentication });
+  registerSystemDocumentationRoutes(app, { requireAuthentication });
 
   return httpServer;
 }

@@ -107,6 +107,10 @@
   ],
   "api-field": [
     {
+      "name": "system-documentation-routes",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/routes/system-documentation-routes.test.ts"
+    },
+    {
       "name": "system-documentation-shared",
       "command": "pnpm --filter @workspace/shared exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/irrigation-zones.test.ts src/system-documentation.test.ts"
     },

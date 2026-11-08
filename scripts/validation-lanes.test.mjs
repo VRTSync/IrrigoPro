@@ -83,6 +83,7 @@ test("Document System shared rules and backfill stay in the bounded field lane",
   const commands = manifest["api-field"].map(entry => entry.command);
   assert.ok(commands.some(command => command.includes("src/irrigation-zones.test.ts") && command.includes("src/system-documentation.test.ts")));
   assert.ok(commands.some(command => command.includes("src/lib/migrations/backfill-zone-type-confirmed.test.ts")));
+  assert.ok(commands.some(command => command.includes("src/routes/system-documentation-routes.test.ts") && command.includes("--test-concurrency=1")));
 });
 
 test("guard rejects duplicates and unexpected lanes", () => {
