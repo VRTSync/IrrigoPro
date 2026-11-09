@@ -43,8 +43,8 @@ Read `attached_assets/Pasted--Document-System-Design-Context-Locked-Decisions-Re
 
 **How to apply:** Preserve the 0–120 per-zone range and 1–120 Set all range, including program-pick minute defaults. Do not reintroduce a positive-minutes completeness requirement or rewrite the uploaded historical reference.
 
-**Rule:** Documenters control the wizard controller list's presentation order without changing the underlying controller.
+**Rule:** The controller-letter context supplied on 2026-11-09 supersedes the earlier manual-reorder requirement. Read `attached_assets/Pasted--Controller-Letters-Design-Context-Locked-Decisions-Rea_1794263036857.txt` before either controller-letter slice.
 
-**Why:** The user clarified on 2026-11-09 that reordering must not change the controller that already exists in the system.
+**Why:** Field testing exposed conflicting auto-assigned letters and typed clock names. The user explicitly approved letter identity and removal of manual reordering.
 
-**How to apply:** Keep manual list order separate from controller identity, letters, names, settings, and references. Do not interpret a moved row as a request to reletter or rename equipment.
+**How to apply:** Build server/rules and UI/removal as two separate, ordered slices; publish only after both merge. Letters are chosen explicitly, names are server-derived as `Controller <letter>`, and active-letter conflicts require a confirmed atomic swap with history. Existing letters start unconfirmed; only on-site wizard confirmation satisfies verification and permits old-name normalization with meaningful names preserved in notes. Office changes and the other clock in a swap remain unconfirmed. Slice 2 removes reorder UI and its stored order column; lists sort by letter. Preserve frozen ticket letters, site maps, Expo, customer billing, and wet-check controller references. Ticket `(now P)` display is a later third slice. The context attachment alone is not an instruction to implement either slice.
