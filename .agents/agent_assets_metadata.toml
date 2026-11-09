@@ -683,3 +683,17 @@ mtime_ms = 1794248433370
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/c77922ce-4986-437e-8c07-1450408f93e1/4af635c0-9600-4abc-9aa9-04a4f9ea28a1"
 storage_version_token = "1794248451592815"
 content_type = "text/html"
+
+[[outputs]]
+id = "yaKqCPpsBFpM2jLV0sGK7"
+uri = "file://generated-artifacts/typed-minutes/phone-run-times.png"
+type = "image"
+title = "Run times at phone width"
+description = "390×844 Chromium emulation using browser-only fixtures: typed 32, normalized 120, and Set all 100. Native phone keyboard not verified."
+logical_id = "4eadc39a-d4a7-45c9-9bf2-3f2c706eb091"
+content_hash = "sha256:cae01d67e027d0bd98cf4a6b5937c5a89987fa1b9f1dd02919b41e1d6a81e59b"
+size = 74617
+mtime_ms = 1794251781001
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/4eadc39a-d4a7-45c9-9bf2-3f2c706eb091/93831f7f-cb53-4f35-a3c9-5f7a108a8fc3"
+storage_version_token = "1794251829872133"
+content_type = "image/png"

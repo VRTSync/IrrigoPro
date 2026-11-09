@@ -689,7 +689,7 @@ describe("Slice 5 — run times and review", () => {
     fireEvent.click(screen.getByLabelText("Set all more minutes"));
     fireEvent.click(screen.getByTestId("button-apply-all"));
     for (let i = 0; i < 3; i++) fireEvent.click(screen.getByLabelText("Zone 5 more minutes"));
-    expect(screen.getByTestId("text-minutes-5")).toHaveTextContent("15");
+    expect(screen.getByTestId("input-minutes-5")).toHaveValue("15");
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-review");
     expect(bulk()).toEqual([
@@ -701,8 +701,8 @@ describe("Slice 5 — run times and review", () => {
   it("9. picking a program on a 0-minute row uses the Set all minutes", async () => {
     await open(ctrl(71, "A", { totalZones: 2, zones: ready(2), programs: [p5(9, "A")], gaps: gap("run_times") }), "step-run-times");
     fireEvent.click(screen.getByLabelText("Zone 2 on program A"));
-    expect(screen.getByTestId("text-minutes-2")).toHaveTextContent("10");
-    expect(screen.getByTestId("text-minutes-1")).toHaveTextContent("0");
+    expect(screen.getByTestId("input-minutes-2")).toHaveValue("10");
+    expect(screen.getByTestId("input-minutes-1")).toHaveValue("0");
   });
 
   it("10. a failing second bulk call; Retry sends only the unsent group", async () => {
@@ -716,7 +716,7 @@ describe("Slice 5 — run times and review", () => {
     fireEvent.click(screen.getByLabelText("Zone 2 more minutes"));
     fireEvent.click(screen.getByTestId("button-next"));
     expect(await screen.findByTestId("text-save-error")).toHaveTextContent("Couldn't save: Could not update zones");
-    expect(screen.getByTestId("text-minutes-2")).toHaveTextContent("11");
+    expect(screen.getByTestId("input-minutes-2")).toHaveValue("11");
     fireEvent.click(screen.getByTestId("button-retry"));
     await screen.findByTestId("step-review");
     const g1 = ["/api/irrigation-controllers/72/zones/bulk", "PUT", { zoneIds: [101], patch: { programId: 9, runTimeMinutes: 10 } }];
@@ -752,6 +752,198 @@ describe("Slice 5 — run times and review", () => {
   });
 });
 
+describe("Run times — typed minutes", () => {
+  async function openMinutes(o: Partial<Z> = {}, count = 4) {
+    return open(ctrl(90, "A", {
+      totalZones: count,
+      zones: range(count, { zoneType: "rotor", zoneTypeConfirmed: true, programId: 9, runTimeMinutes: 10, ...o }),
+      programs: [p5(9, "A")], gaps: gap("run_times"),
+    }), "step-run-times");
+  }
+  function input(n: number | "all" = 1) {
+    return screen.getByTestId(n === "all" ? "input-set-all-minutes" : `input-minutes-${n}`) as HTMLInputElement;
+  }
+  function typeMinutes(n: number | "all", text: string) {
+    const el = input(n);
+    act(() => el.focus());
+    fireEvent.change(el, { target: { value: text } });
+    return el;
+  }
+  function blur(el: HTMLInputElement) {
+    act(() => el.blur());
+  }
+
+  it("selects the current text, keeps typing local, and saves typed 32 with Next", async () => {
+    await openMinutes({ runTimeMinutes: 0 }, 1);
+    const el = input();
+    expect(el).toHaveAttribute("type", "text");
+    expect(el).toHaveAttribute("inputmode", "numeric");
+    expect(el).toHaveAttribute("pattern", "[0-9]*");
+    expect(el).toHaveAttribute("enterkeyhint", "next");
+    expect(el).toHaveAccessibleName("Zone 1 minutes");
+    act(() => el.focus());
+    expect([el.selectionStart, el.selectionEnd]).toEqual([0, 1]);
+    const calls = apiRequestSpy.mock.calls.length;
+    fireEvent.change(el, { target: { value: "3" } });
+    fireEvent.change(el, { target: { value: "32" } });
+    expect(el).toHaveValue("32");
+    expect(apiRequestSpy).toHaveBeenCalledTimes(calls);
+    expect(screen.getByTestId("button-next")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+    expect(bulk()).toEqual([["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneIds: [101], patch: { programId: 9, runTimeMinutes: 32 } }]]);
+  });
+
+  it("keeps overflow text red across rerenders, commits 120, and normalizes on blur", async () => {
+    const { qc } = await openMinutes();
+    const el = typeMinutes(1, "150");
+    expect(el).toHaveValue("150");
+    expect(el).toHaveClass("border-red-400");
+    expect(screen.getByLabelText("Zone 1 more minutes")).toBeDisabled();
+    await act(async () => { await qc.refetchQueries(); });
+    expect(el).toHaveValue("150");
+    blur(el);
+    expect(el).toHaveValue("120");
+    expect(el).not.toHaveClass("border-red-400");
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+    expect(bulk()[0][2]).toEqual({ zoneIds: [101], patch: { programId: 9, runTimeMinutes: 120 } });
+  });
+
+  it("restores a blank without a new edit, even after a refetch or an earlier commit", async () => {
+    const { qc } = await openMinutes();
+    const el = typeMinutes(1, "");
+    await act(async () => { await qc.refetchQueries(); });
+    expect(el).toHaveValue("");
+    blur(el);
+    expect(el).toHaveValue("10");
+    fireEvent.click(screen.getByTestId("button-doc-back"));
+    await screen.findByTestId("step-programs");
+    expect(bulk()).toEqual([]);
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-run-times");
+    typeMinutes(1, "32");
+    fireEvent.change(input(), { target: { value: "" } });
+    blur(input());
+    expect(input()).toHaveValue("32");
+    fireEvent.click(screen.getByTestId("button-save-exit"));
+    await screen.findByTestId("status-doc-flash");
+    expect(bulk()).toEqual([["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneIds: [101], patch: { programId: 9, runTimeMinutes: 32 } }]]);
+  });
+
+  it("drops letters and limits the raw text to three digits", async () => {
+    await openMinutes();
+    const el = typeMinutes(1, "3a2");
+    expect(el).toHaveValue("32");
+    fireEvent.change(el, { target: { value: "12345x" } });
+    expect(el).toHaveValue("123");
+    blur(el);
+    expect(el).toHaveValue("120");
+    typeMinutes(1, "0");
+    expect(screen.getByLabelText("Zone 1 fewer minutes")).toBeDisabled();
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+  });
+
+  it("Enter blurs and selects the next numbered zone; terminal and Set all Enter just blur", async () => {
+    await openMinutes();
+    const third = typeMinutes(3, "32");
+    fireEvent.keyDown(third, { key: "Enter" });
+    expect(input(4)).toHaveFocus();
+    expect([input(4).selectionStart, input(4).selectionEnd]).toEqual([0, 2]);
+    fireEvent.keyDown(input(4), { key: "Enter" });
+    expect(input(4)).not.toHaveFocus();
+    const all = typeMinutes("all", "32");
+    fireEvent.keyDown(all, { key: "Enter" });
+    expect(all).not.toHaveFocus();
+    expect(input(1)).not.toHaveFocus();
+    expect(bulk()).toEqual([]);
+  });
+
+  it("Set all typing affects no rows until Apply, then uses the typed value on every row", async () => {
+    await openMinutes();
+    const all = typeMinutes("all", "32");
+    expect(all).toHaveAccessibleName("Set all minutes");
+    expect([all.selectionStart, all.selectionEnd]).toEqual([2, 2]);
+    for (const n of [1, 2, 3, 4]) expect(input(n)).toHaveValue("10");
+    expect(writes()).toEqual([]);
+    blur(all);
+    fireEvent.click(screen.getByTestId("button-apply-all"));
+    for (const n of [1, 2, 3, 4]) expect(input(n)).toHaveValue("32");
+    fireEvent.click(screen.getByLabelText("Set all fewer minutes"));
+    expect(all).toHaveValue("31");
+    fireEvent.click(screen.getByLabelText("Set all more minutes"));
+    expect(all).toHaveValue("32");
+    fireEvent.click(screen.getByLabelText("Zone 1 fewer minutes"));
+    expect(input()).toHaveValue("31");
+    fireEvent.click(screen.getByLabelText("Zone 1 more minutes"));
+    expect(input()).toHaveValue("32");
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+    expect(bulk()).toEqual([["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneIds: [101, 102, 103, 104], patch: { programId: 9, runTimeMinutes: 32 } }]]);
+  });
+
+  it("Set all enforces 1–120, restores blanks, and supplies program defaults", async () => {
+    await openMinutes({ programId: null, runTimeMinutes: 0 });
+    const all = typeMinutes("all", "0");
+    blur(all);
+    expect(all).toHaveValue("1");
+    typeMinutes("all", "150");
+    expect(all).toHaveValue("150");
+    expect(all).toHaveClass("border-red-400");
+    blur(all);
+    expect(all).toHaveValue("120");
+    typeMinutes("all", "");
+    blur(all);
+    expect(all).toHaveValue("120");
+    typeMinutes("all", "32");
+    blur(all);
+    fireEvent.click(screen.getByLabelText("Zone 1 on program A"));
+    expect(input()).toHaveValue("32");
+    expect(input(2)).toHaveValue("0");
+    expect(writes()).toEqual([]);
+  });
+
+  it("minutes without a program stay amber and incomplete and persist with Back and Save & exit", async () => {
+    await openMinutes({ programId: null, runTimeMinutes: 0 }, 2);
+    typeMinutes(1, "32");
+    expect(screen.getByLabelText("Zone 1 on program A")).toHaveAttribute("aria-pressed", "false");
+    expect(within(screen.getByTestId("row-run-zone-1")).getByText("Zone 1")).toHaveClass("text-amber-700");
+    expect(screen.getByTestId("text-still-needed")).toHaveTextContent("2 zones without a program and minutes");
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    expect(writes()).toEqual([]);
+    fireEvent.click(screen.getByTestId("button-doc-back"));
+    await screen.findByTestId("step-programs");
+    expect(bulk()).toEqual([["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneIds: [101], patch: { programId: null, runTimeMinutes: 32 } }]]);
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-run-times");
+    expect(input()).toHaveValue("32");
+    typeMinutes(2, "15");
+    fireEvent.click(screen.getByTestId("button-save-exit"));
+    await screen.findByTestId("status-doc-flash");
+    expect(bulk().at(-1)?.[2]).toEqual({ zoneIds: [102], patch: { programId: null, runTimeMinutes: 15 } });
+  });
+
+  it("typed values survive a failed group and Retry sends only the unsent group", async () => {
+    let n = 0;
+    custom = (url) => {
+      if (url.endsWith("/zones/bulk") && ++n === 2) throw new Error("500: save failed");
+      return undefined;
+    };
+    await openMinutes({}, 2);
+    typeMinutes(1, "32");
+    typeMinutes(2, "15");
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("text-save-error");
+    expect(input()).toHaveValue("32");
+    expect(input(2)).toHaveValue("15");
+    fireEvent.click(screen.getByTestId("button-retry"));
+    await screen.findByTestId("step-review");
+    const first = ["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneIds: [101], patch: { programId: 9, runTimeMinutes: 32 } }];
+    const second = ["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneIds: [102], patch: { programId: 9, runTimeMinutes: 15 } }];
+    expect(bulk()).toEqual([first, second, second]);
+  });
+});
+
 describe("Slice 5 — review fixes", () => {
   const ready = (n: number, o: Partial<Z> = {}) => range(n, { zoneType: "rotor", zoneTypeConfirmed: true, ...o });
 
@@ -763,7 +955,7 @@ describe("Slice 5 — review fixes", () => {
     expect(bulk()).toEqual([["/api/irrigation-controllers/80/zones/bulk", "PUT", { zoneIds: [101], patch: { programId: null, runTimeMinutes: 1 } }]]);
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-run-times");
-    expect(screen.getByTestId("text-minutes-1")).toHaveTextContent("1");
+    expect(screen.getByTestId("input-minutes-1")).toHaveValue("1");
     fireEvent.click(screen.getByLabelText("Zone 2 more minutes"));
     fireEvent.click(screen.getByTestId("button-save-exit"));
     await screen.findByTestId("status-doc-flash");
@@ -858,7 +1050,7 @@ describe("Slice 5 — review fixes", () => {
       act(() => nav.navigate(path));
       fireEvent.click(await screen.findByTestId(`row-controller-${id}`));
       await screen.findByTestId("step-run-times");
-      expect(screen.getByTestId("text-minutes-1")).toHaveTextContent("0");
+      expect(screen.getByTestId("input-minutes-1")).toHaveValue("0");
       fireEvent.click(screen.getByTestId("button-apply-all"));
       fireEvent.click(screen.getByTestId("button-next"));
       await screen.findByTestId("step-review");

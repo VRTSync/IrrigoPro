@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { Info, Minus, Plus, X } from "lucide-react";
 import type { DocumentationProgram, DocumentationZone } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
@@ -177,6 +178,47 @@ export function ProgramsStep({
 
 // ── Run times ────────────────────────────────────────────────────────────────
 
+function MinutesInput({ value, min, max, onCommit, ariaLabel, testId, onEnterNext }:
+  { value: number; min: number; max: number; onCommit: (n: number) => void; ariaLabel: string; testId: string; onEnterNext?: () => void }) {
+  const [text, setText] = useState(String(value));
+  const focused = useRef(false);
+  const clamp = (n: number) => Math.min(max, Math.max(min, n));
+  useEffect(() => {
+    if (!focused.current) setText(String(value));
+  }, [value]);
+
+  return (
+    <input
+      type="text" inputMode="numeric" pattern="[0-9]*" enterKeyHint="next"
+      aria-label={ariaLabel} data-testid={testId}
+      className={cn("h-11 w-14 rounded-[10px] border border-slate-300 bg-white text-center text-lg font-bold tabular-nums focus:outline-none focus:ring-2 focus:ring-primary",
+        Number(text) > max && "border-red-400")}
+      value={text}
+      onFocus={(e) => { focused.current = true; e.currentTarget.select(); }}
+      onChange={(e) => {
+        const next = e.target.value.replace(/\D/g, "").slice(0, 3);
+        setText(next);
+        if (next !== "") onCommit(clamp(parseInt(next, 10)));
+      }}
+      onBlur={() => {
+        focused.current = false;
+        setText(text === "" ? String(value) : String(clamp(parseInt(text, 10))));
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+          onEnterNext?.();
+        }
+      }}
+    />
+  );
+}
+
+function focusMinutes(n: number) {
+  document.querySelector<HTMLInputElement>(`[data-testid="input-minutes-${n}"]`)?.focus();
+}
+
 function ProgramChips({ programs, value, onPick, label }: { programs: DocumentationProgram[]; value: number | null; onPick: (id: number) => void; label: (p: DocumentationProgram) => string }) {
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -217,7 +259,8 @@ export function RunTimesStep({ zones, programs, ready, h, onReload }: { zones: D
               <span className="w-16 text-sm text-muted-foreground">Minutes</span>
               <Button type="button" variant="outline" className="h-11 w-11 rounded-[10px]" aria-label="Set all fewer minutes"
                 onClick={() => h.update((x) => ({ ...x, setAllMinutes: Math.max(1, x.setAllMinutes - 1) }))}><Minus className="h-5 w-5" /></Button>
-              <span className="w-10 text-center text-xl font-bold tabular-nums" data-testid="text-set-all-minutes">{d.setAllMinutes}</span>
+              <MinutesInput value={d.setAllMinutes} min={1} max={120} ariaLabel="Set all minutes" testId="input-set-all-minutes"
+                onCommit={(n) => h.update((x) => ({ ...x, setAllMinutes: n }))} />
               <Button type="button" variant="outline" className="h-11 w-11 rounded-[10px]" aria-label="Set all more minutes"
                 onClick={() => h.update((x) => ({ ...x, setAllMinutes: Math.min(120, x.setAllMinutes + 1) }))}><Plus className="h-5 w-5" /></Button>
             </div>
@@ -242,7 +285,10 @@ export function RunTimesStep({ zones, programs, ready, h, onReload }: { zones: D
                   <div className="flex items-center gap-1">
                     <Button type="button" variant="outline" className="h-11 w-11 rounded-[10px]" aria-label={`Zone ${z.zoneNumber} fewer minutes`} disabled={z.runTimeMinutes <= 0}
                       onClick={() => applyRun(h, [z.id], { runTimeMinutes: Math.max(0, z.runTimeMinutes - 1) })}><Minus className="h-5 w-5" /></Button>
-                    <span className="w-9 text-center text-lg font-bold tabular-nums" data-testid={`text-minutes-${z.zoneNumber}`}>{z.runTimeMinutes}</span>
+                    <MinutesInput value={z.runTimeMinutes} min={0} max={120}
+                      ariaLabel={`Zone ${z.zoneNumber} minutes`} testId={`input-minutes-${z.zoneNumber}`}
+                      onCommit={(n) => applyRun(h, [z.id], { runTimeMinutes: n })}
+                      onEnterNext={() => focusMinutes(z.zoneNumber + 1)} />
                     <Button type="button" variant="outline" className="h-11 w-11 rounded-[10px]" aria-label={`Zone ${z.zoneNumber} more minutes`} disabled={z.runTimeMinutes >= 120}
                       onClick={() => applyRun(h, [z.id], { runTimeMinutes: Math.min(120, z.runTimeMinutes + 1) })}><Plus className="h-5 w-5" /></Button>
                   </div>
