@@ -30,3 +30,9 @@ Read `attached_assets/Pasted--Document-System-Design-Context-Locked-Decisions-Re
 **Why:** Local calendar-year arithmetic in Denver gave March 8 for a March 9 anniversary across a daylight-saving transition, while the UTC API returned March 9. Matching the source code's local operation does not match its semantics across timezones.
 
 **How to apply:** Use timezone-independent calendar arithmetic for the wizard's due-date preview, retain the API's leap-day rollover, and verify DST boundaries in multiple browser timezones.
+
+**Rule:** Restricted documenter account switching means ending the server session and authenticating as the next user, not selecting another local user perspective.
+
+**Why:** The legacy Switch User screen enumerates general users and only changes local state; the documenter allowlist intentionally denies that list. Reusing the route must not leave an unusable account action or justify widening permissions.
+
+**How to apply:** Keep the restricted path separate before the legacy selector mounts. Test the real destination and logout response, absence of the user-list request, cleared session, and a fresh sign-in; do not hide that boundary behind a mocked page.

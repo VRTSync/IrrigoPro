@@ -10,6 +10,14 @@ no style, and a component that looks unstyled for no visible reason.
 
 **Why:** this repo shipped `--success` and `--warning` for a long time with neither registered, so
 `bg-success` and `text-warning` were dead class names anyone could reach for.
+Missing gradient-stop utilities can invalidate the whole background, not just change its colour;
+white header text can become unreadable even though every class looks correct in source.
+
+**Scope rule:** when existing-role appearance must remain unchanged, prefer a component-local
+token-based gradient over globally activating a previously unregistered colour.
+
+**Why:** registering a missing colour also activates matching classes already used on unrelated
+screens. A local gradient preserves the requested appearance without silently restyling those screens.
 
 **How to apply:** when adding or auditing a semantic colour, check both halves, and prove the class
 generates rather than assuming. Tailwind's JIT only emits utilities it finds in scanned content, so

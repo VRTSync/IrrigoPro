@@ -50,8 +50,6 @@ function mount(role: string, path: string) {
 describe("unsupported roles fail closed at real app routing", () => {
   for (const [role, path] of [
     ["wizard", "/"],
-    ["system_documenter", "/"],
-    ["system_documenter", "/super-admin/app-health"],
   ]) {
     it(`${role} at ${path} mounts only the unsupported card, with no queries`, async () => {
       mount(role, path);
@@ -67,7 +65,7 @@ describe("unsupported roles fail closed at real app routing", () => {
     });
   }
   it("the Log out button uses the existing logout, clears user/cache and posts logout", async () => {
-    mount("system_documenter", "/");
+    mount("wizard", "/");
     queryClient.setQueryData(["private-fixture"], { secret: true });
     fireEvent.click(screen.getByRole("button", { name: "Log out" }));
     expect(clearSessionAndLogout).toHaveBeenCalledTimes(1);
@@ -85,6 +83,7 @@ describe("unsupported roles fail closed at real app routing", () => {
       ["company_admin", "Company admin app"], ["field_tech", "Field tech dashboard"],
       ["irrigation_manager", "Desktop admin shell"], ["billing_manager", "Desktop admin shell"],
       ["bookkeeper", "Desktop admin shell"], ["super_admin", "Desktop admin shell"],
+      ["system_documenter", "System Documenter"],
     ]) {
       mount(role, "/");
       expect(screen.queryByText("No screens for this account")).toBeNull();

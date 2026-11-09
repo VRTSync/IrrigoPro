@@ -30,17 +30,23 @@ function SkeletonFrame() {
   );
 }
 
-export default function DocumentSystemPage() {
+export type DocumentSystemVariant = "staff" | "documenter";
+
+export default function DocumentSystemPage({ variant = "staff" }: { variant?: DocumentSystemVariant; params?: unknown } = {}) {
   const params = useParams<{ customerId: string }>();
   const customerId = Number(params.customerId);
   const branchParam = new URLSearchParams(useSearch()).get("branch");
   // Keyed so flow/flash state can never outlive a customer or branch change.
-  return <DocumentSystemScreen key={`${customerId}|${branchParam ?? ""}`} customerId={customerId} branchParam={branchParam} />;
+  return <DocumentSystemScreen key={`${customerId}|${branchParam ?? ""}`} customerId={customerId} branchParam={branchParam} variant={variant} />;
 }
 
-function DocumentSystemScreen({ customerId, branchParam }: { customerId: number; branchParam: string | null }) {
+function DocumentSystemScreen({ customerId, branchParam, variant }: { customerId: number; branchParam: string | null; variant: DocumentSystemVariant }) {
   const [, setLocation] = useLocation();
-  const profileUrl = `/customers/${customerId}/profile`;
+  const documenter = variant === "documenter";
+  // Staff exits go to the customer profile; the documenter app has no profile screen.
+  const profileUrl = documenter ? "/" : `/customers/${customerId}/profile`;
+  // Documenter has no bottom nav, so sticky footers sit flush (Slice 7).
+  const footerOffsetClass = documenter ? "bottom-0" : undefined;
 
   const [flash, setFlash] = useState<string | null>(null);
   const [flow, setFlow] = useState<null | { kind: "controller" | "backflow"; id: number | null; key: number }>(null);
@@ -59,7 +65,7 @@ function DocumentSystemScreen({ customerId, branchParam }: { customerId: number;
 
   if (branchParam === null && sites.isError) {
     return (
-      <DocFrame title="Document System" onBack={() => setLocation(profileUrl)}>
+      <DocFrame title="Document System" footerOffsetClass={footerOffsetClass} onBack={() => setLocation(profileUrl)}>
         <div role="alert" className="flex flex-col items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800" data-testid="doc-sites-error">
           <span className="flex items-center gap-2 font-semibold"><AlertCircle className="h-4 w-4" />Couldn't load this customer's locations.</span>
           <Button variant="outline" className="h-11" onClick={() => void sites.refetch()} data-testid="button-sites-retry">Retry</Button>
@@ -77,7 +83,7 @@ function DocumentSystemScreen({ customerId, branchParam }: { customerId: number;
           branches={branches}
           customerName={name}
           customerAddress={entry?.address ?? site.data?.customer.address ?? null}
-          backLabel="Back to customer"
+          backLabel={documenter ? "Back to properties" : "Back to customer"}
           badgeFor={(b) => {
             const s = entry?.sites.find((x) => x.branchName === b);
             if (!s) return null;
@@ -95,7 +101,7 @@ function DocumentSystemScreen({ customerId, branchParam }: { customerId: number;
 
   if (site.isError || !site.data) {
     return (
-      <DocFrame title="Document System" subtitle={name || null} onBack={() => setLocation(profileUrl)}>
+      <DocFrame title="Document System" subtitle={name || null} footerOffsetClass={footerOffsetClass} onBack={() => setLocation(profileUrl)}>
         <div role="alert" className="flex flex-col items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800" data-testid="doc-load-error">
           <span className="flex items-center gap-2 font-semibold"><AlertCircle className="h-4 w-4" />Couldn't load this location.</span>
           <Button variant="outline" className="h-11" onClick={() => void site.refetch()} data-testid="button-load-retry">Retry</Button>
@@ -106,6 +112,10 @@ function DocumentSystemScreen({ customerId, branchParam }: { customerId: number;
 
   const data = site.data;
   const subtitle = branchName ? `${data.customer.name}, ${branchName}` : data.customer.name;
+  // Documenter summary exits: back to the location step when the customer has branches, else home.
+  const summaryExitUrl = documenter
+    ? (branches.length > 0 ? `/customers/${customerId}/document-system` : "/")
+    : profileUrl;
 
   if (done) {
     const rows: [string, number][] = [
@@ -117,7 +127,10 @@ function DocumentSystemScreen({ customerId, branchParam }: { customerId: number;
         title="Document System"
         subtitle={subtitle}
         onBack={() => setDone(null)}
-        footer={<Button className="h-12 w-full text-base" onClick={() => setLocation(profileUrl)} data-testid="button-back-to-customer">Back to customer</Button>}
+        footerOffsetClass={footerOffsetClass}
+        footer={documenter
+          ? <Button className="h-12 w-full text-base" onClick={() => setLocation("/")} data-testid="button-back-to-properties">Back to properties</Button>
+          : <Button className="h-12 w-full text-base" onClick={() => setLocation(profileUrl)} data-testid="button-back-to-customer">Back to customer</Button>}
       >
         <section className="flex flex-col items-center gap-3 pt-4 text-center" data-testid="doc-done">
           <span className="flex h-[88px] w-[88px] items-center justify-center rounded-full bg-green-100 text-green-700 animate-fade-in">
@@ -154,6 +167,7 @@ function DocumentSystemScreen({ customerId, branchParam }: { customerId: number;
         backflow={snapshot}
         draftName={`Backflow ${data.backflows.length + 1}`}
         onExit={exitFlow}
+        footerOffsetClass={footerOffsetClass}
       />
     );
   }
@@ -168,6 +182,7 @@ function DocumentSystemScreen({ customerId, branchParam }: { customerId: number;
         site={data}
         controller={snapshot}
         onExit={exitFlow}
+        footerOffsetClass={footerOffsetClass}
       />
     );
   }
@@ -179,8 +194,9 @@ function DocumentSystemScreen({ customerId, branchParam }: { customerId: number;
       site={data}
       subtitle={subtitle}
       flash={flash}
-      onBack={() => setLocation(profileUrl)}
-      onDone={() => setLocation(profileUrl)}
+      onBack={() => setLocation(summaryExitUrl)}
+      onDone={() => setLocation(summaryExitUrl)}
+      footerOffsetClass={footerOffsetClass}
       onOpenController={(id) => { setFlash(null); setFlow({ kind: "controller", id, key: Date.now() }); }}
       onAddController={() => { setFlash(null); setFlow({ kind: "controller", id: null, key: Date.now() }); }}
       onOpenBackflow={(id) => { setFlash(null); setFlow({ kind: "backflow", id, key: Date.now() }); }}

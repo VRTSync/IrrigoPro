@@ -669,3 +669,17 @@ mtime_ms = 1794245840046
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/1efaca44-714b-4b0d-8edc-06083174e681/b380b19c-7ceb-495e-a137-ce9f935bbc96"
 storage_version_token = "1794245840503880"
 content_type = "text/html"
+
+[[outputs]]
+id = "WOeFsH3oNTpPD7R7FMzKp"
+uri = "file://generated-artifacts/slice7/acceptance-gallery.html"
+type = "html"
+title = "Verified System Documenter screenshots"
+description = "Updated acceptance gallery: property picker, locations, verified summary and Done; five staff home comparisons; real Switch User logout and fresh company-admin sign-in verified without a user-list request."
+logical_id = "c77922ce-4986-437e-8c07-1450408f93e1"
+content_hash = "sha256:0f6d3a300e27b55c8f573895353c23349c83b05d6bca8513479e813996ef4140"
+size = 1326104
+mtime_ms = 1794248433370
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/c77922ce-4986-437e-8c07-1450408f93e1/4af635c0-9600-4abc-9aa9-04a4f9ea28a1"
+storage_version_token = "1794248451592815"
+content_type = "text/html"

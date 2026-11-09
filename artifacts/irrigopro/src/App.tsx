@@ -86,6 +86,7 @@ const IrrigationProfilePage = lazyPage(() => import("@/pages/customers/Irrigatio
 const DocumentSystemPage = lazyPage(() => import("@/pages/customers/DocumentSystemPage"));
 const FieldTechMaps = lazyPage(() => import("@/pages/field-tech-maps"));
 import CompanyAdminApp from "@/components/company-admin-app";
+import DocumenterApp from "@/components/documenter-app";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 import { DesktopShell } from "@/components/layout/desktop-shell";
 import { billingManagerNav, bookkeeperNav, managerNav, superAdminNav } from "@/components/layout/nav-config";
@@ -174,7 +175,8 @@ export function AppRoutes() {
   // Public token-gated page — renders regardless of auth state and before the
   // login gate. No app shell, no sidebar, no authenticated API calls. Hoisted
   // above the loading check so a direct URL works even during auth bootstrap.
-  if (currentPath.startsWith("/estimate-approval/")) {
+  // Documenters stay in their three-route app, including for pasted approval URLs.
+  if (currentPath.startsWith("/estimate-approval/") && user?.role !== "system_documenter") {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
@@ -238,6 +240,20 @@ export function AppRoutes() {
             </div>
             <PoweredByFooter />
           </div>
+          <Toaster />
+        </QueryClientProvider>
+      </TooltipProvider>
+    );
+  }
+
+  // Document System Slice 7 — the System Documenter gets its own phone app:
+  // property picker, wizard and Switch User only. No Navigation, DesktopShell,
+  // notifications or footer (each fetches data the role cannot read).
+  if (user.role === "system_documenter") {
+    return (
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <DocumenterApp user={user} />
           <Toaster />
         </QueryClientProvider>
       </TooltipProvider>

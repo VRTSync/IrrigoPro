@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, User, Edit, UserX, Mail, Shield, Wrench, Crown, Trash2, AlertTriangle, Archive, Database, Key, MailCheck, CheckCircle, MoreVertical, Calculator } from "lucide-react";
+import { Plus, User, Edit, UserX, Mail, Shield, Wrench, Crown, Trash2, AlertTriangle, Archive, Database, Key, MailCheck, CheckCircle, MoreVertical, Calculator, ClipboardCheck } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useForm } from "react-hook-form";
@@ -25,14 +25,14 @@ const userFormSchema = z.object({
   password: z.string().min(6, "Password must be at least 6 characters"),
   name: z.string().min(1, "Name is required"),
   email: z.string().email("Must be a valid email").optional().or(z.literal("")),
-  role: z.enum(["irrigation_manager", "field_tech", "billing_manager", "bookkeeper"]),
+  role: z.enum(["irrigation_manager", "field_tech", "system_documenter", "billing_manager", "bookkeeper"]),
 });
 
 const editUserFormSchema = z.object({
   phone: z.string().optional().or(z.literal("")),
   name: z.string().min(1, "Name is required"),
   email: z.string().email("Must be a valid email").optional().or(z.literal("")),
-  role: z.enum(["irrigation_manager", "field_tech", "billing_manager", "bookkeeper"]),
+  role: z.enum(["irrigation_manager", "field_tech", "system_documenter", "billing_manager", "bookkeeper"]),
 });
 
 const changePasswordSchema = z.object({
@@ -369,6 +369,8 @@ export default function CompanyUserManagement() {
         return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
       case "field_tech":
         return "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200";
+      case "system_documenter":
+        return "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200";
       case "billing_manager":
         return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200";
       case "bookkeeper":
@@ -386,6 +388,8 @@ export default function CompanyUserManagement() {
         return <Shield className="w-4 h-4" />;
       case "field_tech":
         return <Wrench className="w-4 h-4" />;
+      case "system_documenter":
+        return <ClipboardCheck className="w-4 h-4" />;
       case "billing_manager":
         return <Mail className="w-4 h-4" />;
       case "bookkeeper":
@@ -403,6 +407,8 @@ export default function CompanyUserManagement() {
         return "Irrigation Manager";
       case "field_tech":
         return "Field Tech";
+      case "system_documenter":
+        return "System Documenter";
       case "billing_manager":
         return "Billing Manager";
       case "bookkeeper":
@@ -520,6 +526,7 @@ export default function CompanyUserManagement() {
                         <SelectContent>
                           <SelectItem value="irrigation_manager">Manager</SelectItem>
                           <SelectItem value="field_tech">Field Tech</SelectItem>
+                          <SelectItem value="system_documenter">System Documenter</SelectItem>
                           <SelectItem value="billing_manager">Billing Manager</SelectItem>
                           <SelectItem value="bookkeeper">Bookkeeper</SelectItem>
                         </SelectContent>
@@ -938,6 +945,7 @@ export default function CompanyUserManagement() {
                       <SelectContent>
                         <SelectItem value="irrigation_manager">Manager</SelectItem>
                         <SelectItem value="field_tech">Field Tech</SelectItem>
+                        <SelectItem value="system_documenter">System Documenter</SelectItem>
                         <SelectItem value="billing_manager">Billing Manager</SelectItem>
                         <SelectItem value="bookkeeper">Bookkeeper</SelectItem>
                       </SelectContent>

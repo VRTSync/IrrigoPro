@@ -1,6 +1,8 @@
 import { safeGet } from "@/utils/safeStorage";
 import { UserSelector } from "@/components/user-selector";
 import { useState, useEffect } from "react";
+import { useAuth } from "@/lib/auth-context";
+import { clearSessionAndLogout } from "@/lib/queryClient";
 
 interface UserProfile {
   id: number;
@@ -13,6 +15,20 @@ interface UserProfile {
 }
 
 export default function SwitchUser() {
+  const { user } = useAuth();
+  // Restricted accounts must authenticate as the next user, never enumerate
+  // users or merely change the locally stored role. Branch before mounting
+  // UserSelector so even the first render makes no forbidden /api/users read.
+  if (user?.role === "system_documenter") return <DocumenterAccountSwitch />;
+  return <StaffSwitchUser />;
+}
+
+function DocumenterAccountSwitch() {
+  useEffect(() => { clearSessionAndLogout(); }, []);
+  return <p role="status" className="mx-auto max-w-[480px] p-4 text-sm">Signing out to switch accounts…</p>;
+}
+
+function StaffSwitchUser() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
 
   useEffect(() => {
