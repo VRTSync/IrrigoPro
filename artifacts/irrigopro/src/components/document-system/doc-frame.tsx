@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArrowLeft, Droplets } from "lucide-react";
+import { ArrowLeft, Droplets, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WizardHeader } from "@/components/wizard-shared/wizard-header";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,9 @@ export interface DocFrameFlow {
   stepTitles: string[];
   onSaveExit: () => void;
   busy?: boolean;
+  /** WizardHeader kind; defaults to Controller. */
+  kindLabel?: string;
+  icon?: LucideIcon;
 }
 
 export interface DocFrameProps {
@@ -61,8 +64,8 @@ export function DocFrame({ title, subtitle, onBack, flow, children, contentDisab
       </div>
       {flow && (
         <WizardHeader
-          icon={Droplets}
-          kindLabel="Controller"
+          icon={flow.icon ?? Droplets}
+          kindLabel={flow.kindLabel ?? "Controller"}
           mode={flow.mode}
           recordIdentifier={flow.recordIdentifier}
           currentStep={flow.currentStep}

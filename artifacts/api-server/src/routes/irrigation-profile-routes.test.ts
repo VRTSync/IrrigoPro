@@ -262,6 +262,86 @@ describe("Document System Slice 2 — existing route/storage boundaries", () => 
   });
 });
 
+describe("Document System Slice 6 — backflow serial conflicts", () => {
+  let a: ReturnType<typeof makeTestServer>;
+  let b: ReturnType<typeof makeTestServer>;
+  const backflowIds: number[] = [];
+  async function create(base: string, customerId: number, serialNumber: string) {
+    const result = await hit(base, "POST", `/api/customers/${customerId}/backflows`, { name: "Serial fixture", serialNumber });
+    if (result.status === 201) backflowIds.push(result.body.id);
+    return result;
+  }
+  before(async () => {
+    if (!companyAId) await setupCompanies();
+    a = makeTestServer({ role: "irrigation_manager", companyId: companyAId, userId: managerAUserId });
+    b = makeTestServer({ role: "irrigation_manager", companyId: companyBId, userId: managerBUserId });
+  });
+  after(async () => {
+    for (const id of backflowIds) await storage.deleteBackflow(null, id);
+    await a.close(); await b.close();
+  });
+  it("real create collisions return the exact 409 while another company can reuse K81234", async () => {
+    assert.equal((await create(a.base, customerAId, "K81234")).status, 201);
+    assert.deepEqual(await create(a.base, customerAId, "K81234"), {
+      status: 409, body: { message: "Another backflow already has serial K81234" },
+    });
+    const reused = await create(b.base, customerBId, "K81234");
+    assert.equal(reused.status, 201);
+    assert.equal(reused.body.companyId, companyBId);
+    // Ownership is checked before any write or uniqueness probe.
+    assert.deepEqual(await create(a.base, customerBId, "K81234"), {
+      status: 404, body: { message: "Customer not found" },
+    });
+  });
+  it("real update collision keeps the original serial; foreign records return 404 rather than a serial oracle", async () => {
+    const original = await create(a.base, customerAId, "K81235");
+    assert.equal(original.status, 201);
+    assert.deepEqual(await hit(a.base, "PUT", `/api/backflows/${original.body.id}`, { serialNumber: "K81234" }), {
+      status: 409, body: { message: "Another backflow already has serial K81234" },
+    });
+    assert.equal((await storage.getBackflow(companyAId, original.body.id))!.serialNumber, "K81235");
+    const foreign = await create(b.base, customerBId, "K81236");
+    assert.equal(foreign.status, 201);
+    assert.deepEqual(await hit(a.base, "PUT", `/api/backflows/${foreign.body.id}`, { serialNumber: "K81234" }), {
+      status: 404, body: { message: "Backflow not found" },
+    });
+    assert.equal((await storage.getBackflow(companyBId, foreign.body.id))!.serialNumber, "K81236");
+    // Forged ownership fields cannot transfer a backflow out of the caller's tenant.
+    const edited = await hit(a.base, "PUT", `/api/backflows/${original.body.id}`, { companyId: companyBId, serialNumber: "K81237" });
+    assert.equal(edited.status, 200);
+    assert.equal(edited.body.companyId, companyAId);
+  });
+  it("only the named unique constraint is translated, whether direct or wrapped", async () => {
+    const target = await create(a.base, customerAId, "S6-MOCK-TARGET");
+    assert.equal(target.status, 201);
+    const cases = [
+      [{ code: "23505", constraint: "uniq_irr_backflow_serial" }, 409],
+      [{ code: "23505", cause: { constraint: "uniq_irr_backflow_serial" } }, 409],
+      [{ cause: { code: "23505", constraint: "uniq_irr_backflow_serial" } }, 409],
+      [{ code: "23505", constraint: "other_unique_constraint" }, 500],
+      [{ code: "23505" }, 500],
+      [{ code: "23503", constraint: "uniq_irr_backflow_serial" }, 500],
+      [new Error("Unavailable"), 500],
+    ] as const;
+    for (const [error, expected] of cases) {
+      const createSpy = mock.method(storage, "createBackflow", async () => { throw error; });
+      const updateSpy = mock.method(storage, "updateBackflow", async () => { throw error; });
+      try {
+        for (const [method, path] of [
+          ["POST", `/api/customers/${customerAId}/backflows`],
+          ["PUT", `/api/backflows/${target.body.id}`],
+        ] as const) {
+          const result = await hit(a.base, method, path, { name: "Serial failure", serialNumber: "S6-SUBMITTED" });
+          assert.equal(result.status, expected);
+          assert.equal(result.body.message, expected === 409
+            ? "Another backflow already has serial S6-SUBMITTED"
+            : method === "POST" ? "Could not create backflow — please retry" : "Could not update backflow — please retry");
+        }
+      } finally { createSpy.mock.restore(); updateSpy.mock.restore(); }
+    }
+  });
+});
+
 describe("Zone range inverse", () => {
   it("round-trips compressed unions and rejects malformed ranges", () => {
     assert.deepEqual(parseZoneRanges(compressZoneRanges([7, 4, 3, 7, 8, 9, 12])), [3, 4, 7, 8, 9, 12]);

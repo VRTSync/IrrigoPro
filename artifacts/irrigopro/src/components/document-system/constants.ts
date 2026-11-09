@@ -34,3 +34,16 @@ export const DOC_ZONE_TYPES = [
 
 /** Stored day format, same values and order as DAYS_OF_WEEK in irrigation-controller-grid.tsx. */
 export const WEEK_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
+/** Values = backflowCreateBody.deviceType (irrigation-profile-routes.ts). */
+export const BACKFLOW_TYPES = [
+  { value: "rpz", label: "RPZ" }, { value: "double_check", label: "Double check" }, { value: "pvb", label: "PVB" },
+  { value: "spill_resistant_pvb", label: "Spill-resistant PVB" }, { value: "other", label: "Other" },
+] as const;
+export const BACKFLOW_SIZES = ['3/4"', '1"', '1-1/4"', '1-1/2"', '2"', '2-1/2"', '3"'];
+export const BACKFLOW_BRANDS = ["Febco", "Watts", "Wilkins", "Zurn", "Ames"];
+export const BACKFLOW_LOCATIONS = ["By meter", "Front entry", "Side yard", "Vault", "Mech room"];
+
+export function backflowTypeLabel(value: string | null | undefined): string {
+  return BACKFLOW_TYPES.find((t) => t.value === value)?.label ?? (value || "");
+}

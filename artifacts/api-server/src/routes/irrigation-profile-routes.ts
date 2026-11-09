@@ -36,6 +36,13 @@ import {
   CAN_MANAGE_IRRIGATION_EQUIPMENT, CAN_DELETE_IRRIGATION_EQUIPMENT,
 } from "@workspace/shared";
 
+/** Drizzle may wrap the PostgreSQL error in cause; only this tenant-scoped index is a serial conflict. */
+function isBackflowSerialConflict(error: unknown): boolean {
+  const e = error as { code?: string; constraint?: string; cause?: { code?: string; constraint?: string } } | null;
+  return (e?.code ?? e?.cause?.code) === "23505"
+    && (e?.constraint ?? e?.cause?.constraint) === "uniq_irr_backflow_serial";
+}
+
 // ── Role helpers ──────────────────────────────────────────────────────────────
 
 // TODO(roles): migrate to a capability from lib/shared/src/roles.ts (hasCapability). Inventory: docs/roles-migration-inventory.md
@@ -1435,6 +1442,9 @@ export function registerIrrigationProfileRoutes(
         res.status(201).json(row);
       } catch (e: any) {
         req.log?.error?.({ err: e, customerId }, "createBackflow failed");
+        if (isBackflowSerialConflict(e)) {
+          return res.status(409).json({ message: `Another backflow already has serial ${parsed.data.serialNumber}` });
+        }
         res.status(500).json({ message: "Could not create backflow — please retry" });
       }
     },
@@ -1483,6 +1493,9 @@ export function registerIrrigationProfileRoutes(
         res.json(updated);
       } catch (e: any) {
         req.log?.error?.({ err: e, id }, "updateBackflow failed");
+        if (isBackflowSerialConflict(e)) {
+          return res.status(409).json({ message: `Another backflow already has serial ${parsed.data.serialNumber}` });
+        }
         res.status(500).json({ message: "Could not update backflow — please retry" });
       }
     },

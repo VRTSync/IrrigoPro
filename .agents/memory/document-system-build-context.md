@@ -18,3 +18,15 @@ Read `attached_assets/Pasted--Document-System-Design-Context-Locked-Decisions-Re
 **Why:** The original context flagged these for confirmation, and the subsequent explicit approval locks them for later slices.
 
 **How to apply:** Do not re-ask these decisions. Use the original context and each slice specification for exact capture requirements, gap codes, verification rules, and exclusions.
+
+**Rule:** Treat completed earlier slices as satisfied prerequisites; recovering archived scheduling records must not introduce another implementation or acceptance gate.
+
+**Why:** The user explicitly corrected the historical planning snapshot: Slice 4 was already built. Recreating its task or requiring another approval would repeat work rather than advance the requested slice.
+
+**How to apply:** Inspect the current implementation to consume its contracts. Stop only for an actually missing dependency, not a historical statement that it was absent.
+
+**Rule:** Date-only backflow anniversaries must match the API's UTC calendar rollover independently of the phone's timezone.
+
+**Why:** Local calendar-year arithmetic in Denver gave March 8 for a March 9 anniversary across a daylight-saving transition, while the UTC API returned March 9. Matching the source code's local operation does not match its semantics across timezones.
+
+**How to apply:** Use timezone-independent calendar arithmetic for the wizard's due-date preview, retain the API's leap-day rollover, and verify DST boundaries in multiple browser timezones.

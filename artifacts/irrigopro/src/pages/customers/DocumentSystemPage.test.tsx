@@ -8,7 +8,7 @@ import { render, screen, fireEvent, waitFor, within, act } from "@testing-librar
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Router, Route } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
-import type { DocumentationControllerGraph, DocumentationSite, DocumentationSites } from "@workspace/api-client-react";
+import type { DocumentationBackflow, DocumentationControllerGraph, DocumentationSite, DocumentationSites } from "@workspace/api-client-react";
 
 const { apiRequestSpy, uploadSpy, authState } = vi.hoisted(() => ({
   apiRequestSpy: vi.fn(),
@@ -127,7 +127,7 @@ describe("DocumentSystemPage — Slice 4", () => {
     expect(screen.getByTestId("status-controller-2")).toHaveTextContent("Ready to verify");
     expect(screen.getByTestId("status-controller-3")).toHaveTextContent("Needs info");
     expect(screen.getByText("What's on file")).toBeInTheDocument();
-    expect(screen.getByText(/Backflow capture is coming to this screen/)).toBeInTheDocument();
+    expect(screen.queryByText(/Backflow capture is coming to this screen/)).toBeNull();
   });
 
   it("shows the empty info box when nothing is on file", async () => {
@@ -870,5 +870,408 @@ describe("Slice 5 — review fixes", () => {
       ["/api/irrigation-controllers/201/zones/bulk", "PUT", { zoneIds: [2001, 2002], patch: { programId: 601, runTimeMinutes: 10 } }],
       ["/api/irrigation-controllers/301/zones/bulk", "PUT", { zoneIds: [3001, 3002], patch: { programId: 701, runTimeMinutes: 10 } }],
     ]);
+  });
+});
+
+// ─── Slice 6 — backflow flow and Finish ───────────────────────────────────────
+
+function bf(id: number, o: Partial<DocumentationBackflow> = {}): DocumentationBackflow {
+  return {
+    id, branchName: "", name: `Backflow ${id}`, brand: "Watts", model: "009", size: '1"', deviceType: "rpz",
+    serialNumber: "K1", location: "By meter", installDate: null, photoUrl: `bfp-${id}`, notes: null,
+    lastTestedDate: "2024-05-10", nextTestDueDate: "2025-05-10", lastTestResult: "pass", lastTestedBy: "Delta Testing",
+    testUnknownReason: null, gaps: [], verified: false,
+    isActive: true, lastUpdatedByUserId: null, lastUpdatedByName: null, lastUpdatedAt: null,
+    fieldVerifiedByUserId: null, fieldVerifiedByName: null, fieldVerifiedAt: null, createdAt: "", updatedAt: "", ...o,
+  };
+}
+const noTest = { lastTestResult: null, lastTestedDate: null, lastTestedBy: null, nextTestDueDate: null };
+const withBf = (controllers: DocumentationControllerGraph[], backflows: DocumentationBackflow[], o: Partial<DocumentationSite["site"]> = {}) => {
+  const s6 = siteOf(controllers);
+  return { ...s6, backflows, site: { ...s6.site, ...o } };
+};
+async function openBf(b: DocumentationBackflow, testId: string, others: DocumentationBackflow[] = []) {
+  site = withBf([], [b, ...others]);
+  const r = renderPage();
+  fireEvent.click(await screen.findByTestId(`row-backflow-${b.id}`));
+  await screen.findByTestId(testId);
+  return r;
+}
+
+describe("Slice 6 — backflow flow", () => {
+  it("3. backflow rows are buttons with BF badge and subtitle, and open the flow", async () => {
+    site = withBf([], [bf(1), bf(2, { serialNumber: null, size: null, deviceType: "double_check" })]);
+    renderPage();
+    const row = await screen.findByTestId("row-backflow-1");
+    expect(row.tagName).toBe("BUTTON");
+    expect(row).toHaveTextContent("BF");
+    expect(row).toHaveTextContent('RPZ 1", SN K1');
+    expect(screen.getByTestId("row-backflow-2")).toHaveTextContent("Double check, no serial");
+    expect(screen.queryByText(/Backflow capture is coming/)).toBeNull();
+    expect(screen.queryByTestId("link-controllers-zones")).toBeNull();
+    expect(screen.queryByTestId("chip-no-backflow")).toBeNull();
+    fireEvent.click(row);
+    expect(await screen.findByTestId("step-review")).toBeInTheDocument();
+    expect(screen.getByText("Backflow · Step 5 of 5")).toBeInTheDocument();
+  });
+
+  it("4. a new backflow writes nothing before Device Next, then one POST named Backflow 2", async () => {
+    uploadSpy.mockResolvedValue("bf-ph");
+    custom = (url, method) => (method === "POST" && url === "/api/customers/7/backflows" ? { id: 77 } : undefined);
+    site = withBf([], [bf(1)]);
+    renderPage();
+    fireEvent.click(await screen.findByTestId("button-add-backflow"));
+    expect(await screen.findByText(/Get the whole device and the serial plate/)).toBeInTheDocument();
+    const file = new File(["x"], "bf.jpg", { type: "image/jpeg" });
+    await act(async () => { fireEvent.change(screen.getByTestId("doc-photo-input"), { target: { files: [file] } }); });
+    await waitFor(() => expect(screen.getByTestId("button-next")).not.toBeDisabled());
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-bf-device");
+    expect(writes()).toHaveLength(0);
+    fireEvent.click(screen.getByTestId("chip-type-rpz"));
+    fireEvent.click(screen.getByTestId('chip-size-1"'));
+    fireEvent.click(screen.getByTestId("chip-bf-brand-Febco"));
+    fireEvent.change(screen.getByTestId("input-serial"), { target: { value: "K81234" } });
+    expect(screen.getByTestId("input-serial")).toHaveAttribute("autocapitalize", "characters");
+    expect(writes()).toHaveLength(0);
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-bf-location");
+    expect(screen.getByTestId("input-bf-name")).toHaveValue("Backflow 2");
+    expect(writes()).toEqual([["/api/customers/7/backflows", "POST", {
+      name: "Backflow 2", branchName: "", deviceType: "rpz", size: '1"', brand: "Febco", model: null, serialNumber: "K81234", photoUrl: "bf-ph",
+    }]]);
+    // Back and forward again updates instead of creating a second row.
+    fireEvent.click(screen.getByTestId("button-doc-back"));
+    await screen.findByTestId("step-bf-device");
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-bf-location");
+    expect(writes().filter(([u]) => u === "/api/customers/7/backflows")).toHaveLength(1);
+  });
+
+  it("draft Save & exit asks with the backflow copy and writes nothing", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByTestId("button-add-backflow"));
+    fireEvent.click(await screen.findByTestId("button-save-exit"));
+    expect(await screen.findByText("This backflow hasn't been saved yet.")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("button-dialog-leave"));
+    await screen.findByText("What's on file");
+    expect(writes()).toHaveLength(0);
+    expect(screen.queryByTestId("status-doc-flash")).toBeNull();
+  });
+
+  it("5. Device: Next disabled without a serial; a 409 keeps inputs and shows its message; Retry resends", async () => {
+    await openBf(bf(5, { serialNumber: null, gaps: [{ step: "device", code: "serial", label: "serial number" }] }), "step-bf-device");
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    expect(screen.getByTestId("text-still-needed")).toHaveTextContent("serial number");
+    fireEvent.change(screen.getByTestId("input-serial"), { target: { value: "K81234" } });
+    let conflict = true;
+    custom = (url, method) => {
+      if (method === "PUT" && url === "/api/backflows/5" && conflict) { conflict = false; throw new Error(`409: ${JSON.stringify({ message: "Another backflow already has serial K81234" })}`); }
+      return undefined;
+    };
+    fireEvent.click(screen.getByTestId("button-next"));
+    expect(await screen.findByTestId("text-save-error")).toHaveTextContent("Another backflow already has serial K81234");
+    expect(screen.getByTestId("input-serial")).toHaveValue("K81234");
+    expect(screen.getByTestId("step-bf-device")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("button-retry"));
+    await screen.findByTestId("step-bf-location");
+    expect(writes()).toEqual([
+      ["/api/backflows/5", "PUT", { serialNumber: "K81234" }],
+      ["/api/backflows/5", "PUT", { serialNumber: "K81234" }],
+    ]);
+  });
+
+  it("changed-only: whitespace-only edits and untouched steps write nothing; real edits send trimmed fields", async () => {
+    await openBf(bf(6, { gaps: [{ step: "device", code: "x", label: "x" }] }), "step-bf-device");
+    fireEvent.change(screen.getByTestId("input-serial"), { target: { value: "K1 " } });
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-bf-location");
+    expect(writes()).toHaveLength(0);
+    fireEvent.change(screen.getByTestId("input-bf-name"), { target: { value: " Pool backflow " } });
+    fireEvent.change(screen.getByTestId("input-install-date"), { target: { value: "2019-04-02" } });
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-bf-last-test");
+    expect(writes()).toEqual([["/api/backflows/6", "PUT", { name: "Pool backflow", installDate: "2019-04-02" }]]);
+  });
+
+  it("6. no test on file: Pass needs a tester; both send log-test; next due follows storage date math", async () => {
+    await openBf(bf(10, { ...noTest, gaps: [{ step: "last_test", code: "test", label: "test result" }] }), "step-bf-last-test");
+    expect(screen.queryByTestId("text-test-on-file")).toBeNull();
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("chip-result-pass"));
+    fireEvent.change(screen.getByTestId("input-test-date"), { target: { value: "2024-05-10" } });
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    expect(screen.getByTestId("text-still-needed")).toHaveTextContent("test date and tester");
+    expect(screen.getByTestId("text-next-due")).toHaveTextContent("Next test due May 10, 2025");
+    fireEvent.change(screen.getByTestId("input-tested-by"), { target: { value: " Delta Testing " } });
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+    expect(writes()).toEqual([["/api/backflows/10/log-test", "POST", { lastTestedDate: "2024-05-10", lastTestResult: "pass", lastTestedBy: "Delta Testing" }]]);
+  });
+
+  it("6b. Never tested sends PUT { testUnknownReason } and a stored reason is preselected", async () => {
+    await openBf(bf(11, { ...noTest, gaps: [{ step: "last_test", code: "test", label: "test result" }] }), "step-bf-last-test");
+    fireEvent.click(screen.getByTestId("chip-result-never_tested"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+    expect(screen.getByTestId("text-review-last-test")).toHaveTextContent("Never tested");
+    expect(writes()).toEqual([["/api/backflows/11", "PUT", { testUnknownReason: "never_tested" }]]);
+  });
+
+  it("a stored no_tag reason is preselected and Next resends nothing", async () => {
+    await openBf(bf(12, { ...noTest, testUnknownReason: "no_tag", gaps: [{ step: "device", code: "x", label: "x" }] }), "step-bf-device");
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-bf-location");
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-bf-last-test");
+    expect(screen.getByTestId("chip-result-no_tag")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("7. test on file: Next gated until a choice; Matches writes nothing; choice survives re-entry this session only", async () => {
+    await openBf(bf(13, { gaps: [{ step: "last_test", code: "x", label: "x" }] }), "step-bf-last-test");
+    expect(screen.getByTestId("text-test-on-file")).toHaveTextContent("On file: Pass on May 10, 2024 by Delta Testing. Next due May 10, 2025.");
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("chip-test-matches"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+    expect(screen.getByTestId("button-verify")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("button-edit-last-test"));
+    await screen.findByTestId("step-bf-last-test");
+    expect(screen.getByTestId("chip-test-matches")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("button-next")).not.toBeDisabled();
+    expect(writes()).toHaveLength(0);
+    // A new session must look at the tag again.
+    fireEvent.click(screen.getByTestId("button-save-exit"));
+    fireEvent.click(await screen.findByTestId("row-backflow-13"));
+    await screen.findByTestId("step-bf-last-test");
+    expect(screen.getByTestId("chip-test-matches")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    expect(screen.getByTestId("text-still-needed")).toHaveTextContent("check the test tag");
+  });
+
+  it("7b. Tag shows a newer test: Fail with date and tester sends log-test", async () => {
+    await openBf(bf(14, { gaps: [{ step: "last_test", code: "x", label: "x" }] }), "step-bf-last-test");
+    fireEvent.click(screen.getByTestId("chip-test-newer"));
+    expect(screen.queryByTestId("chip-result-never_tested")).toBeNull();
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("chip-result-fail"));
+    fireEvent.change(screen.getByTestId("input-test-date"), { target: { value: "2025-06-01" } });
+    fireEvent.change(screen.getByTestId("input-tested-by"), { target: { value: "Ames Testing" } });
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+    expect(writes()).toEqual([["/api/backflows/14/log-test", "POST", { lastTestedDate: "2025-06-01", lastTestResult: "fail", lastTestedBy: "Ames Testing" }]]);
+  });
+
+  it("a partial newer test is never claimed saved on Save & exit, from Last test or Review", async () => {
+    await openBf(bf(15, { gaps: [{ step: "last_test", code: "x", label: "x" }] }), "step-bf-last-test");
+    fireEvent.click(screen.getByTestId("chip-test-newer"));
+    fireEvent.click(screen.getByTestId("chip-result-pass"));
+    fireEvent.change(screen.getByTestId("input-test-date"), { target: { value: "2025-06-01" } });
+    fireEvent.click(screen.getByTestId("button-save-exit"));
+    expect(await screen.findByTestId("text-save-error")).toHaveTextContent("date and tester");
+    expect(screen.getByTestId("input-test-date")).toHaveValue("2025-06-01");
+    // Back keeps the draft locally; exit from an earlier step still refuses.
+    fireEvent.click(screen.getByTestId("button-doc-back"));
+    await screen.findByTestId("step-bf-location");
+    fireEvent.click(screen.getByTestId("button-save-exit"));
+    expect(await screen.findByTestId("text-save-error")).toHaveTextContent("missing its date or tester");
+    expect(screen.queryByTestId("status-doc-flash")).toBeNull();
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("8. Not at this location sends PUT { isActive: false } after confirming", async () => {
+    await openBf(bf(16, { name: "Front RPZ" }), "step-review");
+    fireEvent.click(screen.getByTestId("button-not-here"));
+    expect(await screen.findByText("Mark Front RPZ as not at this location?")).toBeInTheDocument();
+    expect(screen.getByText("It disappears from this list. Its history is kept.")).toBeInTheDocument();
+    expect(writes()).toHaveLength(0);
+    fireEvent.click(screen.getByTestId("button-dialog-inactive"));
+    expect(await screen.findByTestId("status-doc-flash")).toHaveTextContent("Front RPZ marked not at this location.");
+    expect(writes()).toEqual([["/api/backflows/16", "PUT", { isActive: false }]]);
+  });
+
+  it("a new draft has no Not at this location button", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByTestId("button-add-backflow"));
+    await screen.findByTestId("step-bf-photo");
+    expect(screen.queryByTestId("button-not-here")).toBeNull();
+  });
+
+  it("9. Verify backflow posts field-verify and flashes", async () => {
+    await openBf(bf(17, { name: "Side RPZ" }), "step-review");
+    expect(screen.getByTestId("text-review-device")).toHaveTextContent('RPZ, 1"');
+    expect(screen.getByTestId("text-review-installed")).toHaveTextContent("Not known");
+    expect(screen.getByTestId("button-verify")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("button-edit-last-test"));
+    await screen.findByTestId("step-bf-last-test");
+    fireEvent.click(screen.getByTestId("chip-test-matches"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+    fireEvent.click(screen.getByTestId("button-verify"));
+    expect(await screen.findByTestId("status-doc-flash")).toHaveTextContent("Side RPZ verified.");
+    expect(writes()).toEqual([["/api/backflows/17/field-verify", "POST"]]);
+  });
+
+  it("verified + unchanged Save & exit is silent; a change flashes saved", async () => {
+    await openBf(bf(18, { verified: true }), "step-review");
+    fireEvent.click(screen.getByTestId("button-save-exit"));
+    await screen.findByText("What's on file");
+    expect(screen.queryByTestId("status-doc-flash")).toBeNull();
+    fireEvent.click(screen.getByTestId("row-backflow-18"));
+    fireEvent.click(await screen.findByTestId("button-edit-name"));
+    await screen.findByTestId("step-bf-location");
+    fireEvent.change(screen.getByTestId("input-bf-name"), { target: { value: "Shop RPZ" } });
+    fireEvent.click(screen.getByTestId("button-save-exit"));
+    expect(await screen.findByTestId("status-doc-flash")).toHaveTextContent("Shop RPZ saved. It stays unverified until you finish it.");
+  });
+
+  it("controls are disabled while a backflow save is pending", async () => {
+    let release: () => void = () => {};
+    custom = (url, method) => (method === "PUT" && url === "/api/backflows/19" ? new Promise((r) => { release = () => r({}); }) : undefined);
+    await openBf(bf(19, { gaps: [{ step: "location", code: "x", label: "x" }] }), "step-bf-location");
+    fireEvent.change(screen.getByTestId("input-bf-name"), { target: { value: "Gate RPZ" } });
+    fireEvent.click(screen.getByTestId("button-next"));
+    await waitFor(() => expect(screen.getByTestId("doc-frame-content")).toBeDisabled());
+    expect(screen.getByTestId("button-save-exit")).toBeDisabled();
+    await act(async () => { release(); });
+    await screen.findByTestId("step-bf-last-test");
+  });
+
+  it("a backflow save marks the Controllers & Zones backflow list and detail stale", async () => {
+    const { qc } = await openBf(bf(20, { gaps: [{ step: "location", code: "x", label: "x" }] }), "step-bf-location");
+    const keys = [["/api/customers/7/backflows"], ["/api/backflows/20"], ["/api/customers/7/controllers-profile"]];
+    for (const k of keys) qc.setQueryData(k, { cached: true });
+    qc.setQueryData(["/api/customers/8/backflows"], { cached: true });
+    fireEvent.change(screen.getByTestId("input-bf-name"), { target: { value: "Vault RPZ" } });
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-bf-last-test");
+    await waitFor(() => { for (const k of keys) expect(qc.getQueryState(k)?.isInvalidated).toBe(true); });
+    expect(qc.getQueryState(["/api/customers/8/backflows"])?.isInvalidated).toBe(false);
+  });
+});
+
+describe("Slice 6 — next due date is timezone-independent", () => {
+  it("rolls the year in UTC like the API server, across DST and leap days", async () => {
+    const { nextDueDate } = await import("@/components/document-system/backflow-model");
+    const realTZ = process.env.TZ;
+    try {
+      for (const tz of ["America/Denver", "Pacific/Auckland", "UTC"]) {
+        process.env.TZ = tz;
+        expect(nextDueDate("2025-03-09")).toBe("2026-03-09"); // US DST start
+        expect(nextDueDate("2025-11-02")).toBe("2026-11-02"); // US DST end
+        expect(nextDueDate("2024-02-29")).toBe("2025-03-01"); // leap day rollover
+        expect(nextDueDate("2024-12-31")).toBe("2025-12-31");
+        expect(nextDueDate("")).toBeNull();
+      }
+    } finally {
+      process.env.TZ = realTZ;
+    }
+  });
+});
+
+describe("Slice 6 — no backflow and Finish", () => {
+  it("10. the no-backflow chip posts confirmed true, then false", async () => {
+    site = withBf([complete(1, "A", { verified: true })], []);
+    custom = (url, method, data) => {
+      if (method === "POST" && url.endsWith("/site/no-backflow")) {
+        site = { ...site, site: { ...site.site, noBackflowConfirmed: (data as { confirmed: boolean }).confirmed } };
+        return {};
+      }
+      return undefined;
+    };
+    renderPage();
+    const chip = await screen.findByTestId("chip-no-backflow");
+    expect(chip).toHaveTextContent("There is no backflow at this location");
+    expect(chip).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(chip);
+    await waitFor(() => expect(screen.getByTestId("chip-no-backflow")).toHaveTextContent("Confirmed: no backflow at this location"));
+    expect(screen.getByTestId("chip-no-backflow")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByTestId("chip-no-backflow"));
+    await waitFor(() => expect(screen.getByTestId("chip-no-backflow")).toHaveAttribute("aria-pressed", "false"));
+    expect(writes()).toEqual([
+      ["/api/system-documentation/customers/7/site/no-backflow", "POST", { branchName: "", confirmed: true }],
+      ["/api/system-documentation/customers/7/site/no-backflow", "POST", { branchName: "", confirmed: false }],
+    ]);
+  });
+
+  it.each([
+    ["no controller", () => withBf([], [bf(1, { verified: true })]), "Add at least one controller."],
+    ["unverified items", () => withBf([complete(1, "A"), complete(2, "B", { verified: true })], [bf(3)]), "2 items still to verify before you can finish."],
+    ["one unverified", () => withBf([complete(1, "A", { verified: true })], [bf(3)]), "1 item still to verify before you can finish."],
+    ["no backflow answer", () => withBf([complete(1, "A", { verified: true })], []), "Add a backflow, or confirm there isn't one."],
+  ])("11. Finish blocked: %s", async (_n, make, text) => {
+    site = make();
+    renderPage();
+    expect(await screen.findByTestId("text-finish-status")).toHaveTextContent(text);
+    expect(screen.getByTestId("button-finish")).toBeDisabled();
+  });
+
+  it("11b. ready Finish posts verify, then shows Done with fixture counts; Back returns to summary", async () => {
+    site = withBf([
+      complete(1, "A", { verified: true, totalZones: 12, programs: [program, { ...program, id: 10, name: "B" }, { ...program, id: 11, name: "C", isActive: false }] }),
+      complete(2, "B", { verified: true, totalZones: 8 }),
+    ], [bf(3, { verified: true })], {}, );
+    site = { ...site, branchName: "North", customer: { ...site.customer, branches: ["North"] } };
+    sites = sitesOf(["North"]);
+    const { nav } = renderPage("/customers/7/document-system?branch=North");
+    expect(await screen.findByTestId("text-finish-status")).toHaveTextContent("Every item is verified.");
+    fireEvent.click(screen.getByTestId("button-finish"));
+    expect(await screen.findByText("System documented")).toBeInTheDocument();
+    expect(writes()).toEqual([["/api/system-documentation/customers/7/site/verify", "POST", { branchName: "North" }]]);
+    expect(screen.getByTestId("text-done-line")).toHaveTextContent(/^Harbor Pines HOA, North, verified in the field by you on [A-Z][a-z]{2} \d{1,2}, \d{4}\.$/);
+    expect(screen.getByTestId("text-done-controllers")).toHaveTextContent("2");
+    expect(screen.getByTestId("text-done-zones")).toHaveTextContent("20");
+    expect(screen.getByTestId("text-done-programs")).toHaveTextContent("3");
+    expect(screen.getByTestId("text-done-backflows")).toHaveTextContent("1");
+    expect(screen.getByText("The office now sees this location as verified, and billing can tie every line to a controller and zone.")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("button-doc-back"));
+    expect(await screen.findByText("What's on file")).toBeInTheDocument();
+    expect(screen.queryByTestId("status-doc-flash")).toBeNull();
+    fireEvent.click(screen.getByTestId("button-finish"));
+    fireEvent.click(await screen.findByTestId("button-back-to-customer"));
+    await waitFor(() => expect(nav.history.at(-1)).toBe("/customers/7/profile"));
+  });
+
+  it("Finish 400 shows the server message and stays on the summary", async () => {
+    site = withBf([complete(1, "A", { verified: true })], [], { noBackflowConfirmed: true });
+    renderPage();
+    failNext = "Controller A is not verified";
+    fireEvent.click(await screen.findByTestId("button-finish"));
+    expect(await screen.findByTestId("text-summary-error")).toHaveTextContent("Controller A is not verified");
+    expect(screen.queryByText("System documented")).toBeNull();
+  });
+
+  it("verified site shows the field banner; Save and leave goes to the profile", async () => {
+    site = withBf([complete(1, "A", { verified: true })], [], { status: "verified", verifiedAt: "2025-03-04T15:00:00Z", verifiedByName: "Pat Rivera", noBackflowConfirmed: true });
+    const { nav } = renderPage();
+    expect(await screen.findByTestId("text-site-verified")).toHaveTextContent(/^Verified in the field on Mar \d, 2025 by Pat Rivera\.$/);
+    fireEvent.click(screen.getByTestId("button-save-leave"));
+    await waitFor(() => expect(nav.history.at(-1)).toBe("/customers/7/profile"));
+  });
+
+  it("Done and flash never carry across a branch or customer change", async () => {
+    const north = { ...withBf([complete(1, "A", { verified: true })], [], { noBackflowConfirmed: true }), branchName: "North" };
+    const south = { ...withBf([complete(2, "B")], [bf(5)]), branchName: "South" };
+    apiRequestSpy.mockImplementation(async (url: string, method = "GET") => {
+      if (method !== "GET") return {};
+      if (url === "/api/system-documentation/sites") return sitesOf(["North", "South"]);
+      return url.includes("branchName=South") ? south : north;
+    });
+    const { nav } = renderPage("/customers/7/document-system?branch=North");
+    fireEvent.click(await screen.findByTestId("button-finish"));
+    await screen.findByText("System documented");
+    act(() => nav.navigate("/customers/7/document-system?branch=South"));
+    expect(await screen.findByTestId("row-backflow-5")).toBeInTheDocument();
+    expect(screen.queryByText("System documented")).toBeNull();
+    expect(screen.getByTestId("text-finish-status")).toHaveTextContent("2 items still to verify");
+    fireEvent.click(screen.getByTestId("row-backflow-5"));
+    await screen.findByTestId("step-review");
+    act(() => nav.navigate("/customers/7/document-system?branch=North"));
+    expect(await screen.findByTestId("row-controller-1")).toBeInTheDocument();
+    expect(screen.queryByTestId("step-review")).toBeNull();
+    expect(writes()).toEqual([["/api/system-documentation/customers/7/site/verify", "POST", { branchName: "North" }]]);
   });
 });

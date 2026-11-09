@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { useLocation, useParams, useSearch } from "wouter";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Check } from "lucide-react";
+import { format } from "date-fns";
 import type { DocumentationSiteStatus } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { BranchPicker } from "@/components/customers/property-picker";
 import { DocFrame } from "@/components/document-system/doc-frame";
-import { SiteSummary } from "@/components/document-system/site-summary";
+import { SiteSummary, type DoneCounts } from "@/components/document-system/site-summary";
+import { BackflowFlow } from "@/components/document-system/backflow-flow";
 import { ControllerFlow } from "@/components/document-system/controller-flow";
 import { useDocSite, useDocSites } from "@/components/document-system/use-doc-site";
 
@@ -41,7 +43,9 @@ function DocumentSystemScreen({ customerId, branchParam }: { customerId: number;
   const profileUrl = `/customers/${customerId}/profile`;
 
   const [flash, setFlash] = useState<string | null>(null);
-  const [flow, setFlow] = useState<null | { id: number | null; key: number }>(null);
+  const [flow, setFlow] = useState<null | { kind: "controller" | "backflow"; id: number | null; key: number }>(null);
+  // Done is screen state, not a route; it only appears after the server accepted Finish.
+  const [done, setDone] = useState<null | { counts: DoneCounts; at: Date }>(null);
 
   const sites = useDocSites();
   const entry = sites.data?.customers.find((c) => c.customerId === customerId) ?? null;
@@ -103,6 +107,57 @@ function DocumentSystemScreen({ customerId, branchParam }: { customerId: number;
   const data = site.data;
   const subtitle = branchName ? `${data.customer.name}, ${branchName}` : data.customer.name;
 
+  if (done) {
+    const rows: [string, number][] = [
+      ["Controllers", done.counts.controllers], ["Zones", done.counts.zones],
+      ["Programs", done.counts.programs], ["Backflows", done.counts.backflows],
+    ];
+    return (
+      <DocFrame
+        title="Document System"
+        subtitle={subtitle}
+        onBack={() => setDone(null)}
+        footer={<Button className="h-12 w-full text-base" onClick={() => setLocation(profileUrl)} data-testid="button-back-to-customer">Back to customer</Button>}
+      >
+        <section className="flex flex-col items-center gap-3 pt-4 text-center" data-testid="doc-done">
+          <span className="flex h-[88px] w-[88px] items-center justify-center rounded-full bg-green-100 text-green-700 animate-fade-in">
+            <Check className="h-11 w-11" strokeWidth={2.5} aria-hidden />
+          </span>
+          <h2 className="text-[22px] font-bold text-slate-900" data-testid="text-done-title">System documented</h2>
+          <p className="text-[15px] text-slate-700" data-testid="text-done-line">
+            {subtitle}, verified in the field by you on {format(done.at, "MMM d, yyyy")}.
+          </p>
+        </section>
+        <dl className="divide-y rounded-2xl border border-slate-200 bg-white">
+          {rows.map(([label, n]) => (
+            <div key={label} className="flex min-h-11 items-center justify-between px-3.5 py-3">
+              <dt className="text-sm text-muted-foreground">{label}</dt>
+              <dd className="text-[17px] font-semibold tabular-nums text-slate-900" data-testid={`text-done-${label.toLowerCase()}`}>{n}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="text-sm text-muted-foreground">The office now sees this location as verified, and billing can tie every line to a controller and zone.</p>
+      </DocFrame>
+    );
+  }
+
+  const exitFlow = (msg: string | null) => { setFlow(null); setFlash(msg); };
+
+  if (flow?.kind === "backflow") {
+    const snapshot = flow.id == null ? null : data.backflows.find((b) => b.id === flow.id) ?? null;
+    return (
+      <BackflowFlow
+        key={flow.key}
+        customerId={customerId}
+        branchName={branchName}
+        site={data}
+        backflow={snapshot}
+        draftName={`Backflow ${data.backflows.length + 1}`}
+        onExit={exitFlow}
+      />
+    );
+  }
+
   if (flow) {
     const snapshot = flow.id == null ? null : data.controllers.find((c) => c.id === flow.id) ?? null;
     return (
@@ -112,7 +167,7 @@ function DocumentSystemScreen({ customerId, branchParam }: { customerId: number;
         branchName={branchName}
         site={data}
         controller={snapshot}
-        onExit={(msg) => { setFlow(null); setFlash(msg); }}
+        onExit={exitFlow}
       />
     );
   }
@@ -120,13 +175,17 @@ function DocumentSystemScreen({ customerId, branchParam }: { customerId: number;
   return (
     <SiteSummary
       customerId={customerId}
+      branchName={branchName}
       site={data}
       subtitle={subtitle}
       flash={flash}
       onBack={() => setLocation(profileUrl)}
       onDone={() => setLocation(profileUrl)}
-      onOpenController={(id) => { setFlash(null); setFlow({ id, key: Date.now() }); }}
-      onAddController={() => { setFlash(null); setFlow({ id: null, key: Date.now() }); }}
+      onOpenController={(id) => { setFlash(null); setFlow({ kind: "controller", id, key: Date.now() }); }}
+      onAddController={() => { setFlash(null); setFlow({ kind: "controller", id: null, key: Date.now() }); }}
+      onOpenBackflow={(id) => { setFlash(null); setFlow({ kind: "backflow", id, key: Date.now() }); }}
+      onAddBackflow={() => { setFlash(null); setFlow({ kind: "backflow", id: null, key: Date.now() }); }}
+      onFinished={(counts) => { setFlash(null); setDone({ counts, at: new Date() }); }}
     />
   );
 }
