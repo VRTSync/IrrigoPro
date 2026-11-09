@@ -7,7 +7,6 @@ import {
   GetDocumentationSitesResponse, GetDocumentationSiteResponse,
   FieldVerifyControllerResponse, FieldVerifyBackflowResponse,
   ConfirmDocumentationNoBackflowResponse, VerifyDocumentationSiteResponse,
-  SaveDocumentationControllerOrderBody, SaveDocumentationControllerOrderResponse,
 } from "@workspace/api-zod";
 import {
   customers, irrigationControllers, irrigationBackflows, irrigationSiteDocumentation,
@@ -22,7 +21,6 @@ import { storage } from "../storage";
 import { parseId, getCallerCompanyId, badId, notFound } from "./irrigation-profile-routes";
 import { DocumentationError } from "../lib/documentation-error";
 import { readSiteRecord, saveSiteDocumentation, siteBlock } from "../lib/site-documentation";
-import { ControllerOrderConflict, orderedDocumentationControllers, saveDocumentationControllerOrder } from "../lib/documentation-controller-order";
 export { DocumentationError } from "../lib/documentation-error";
 
 const customerColumns = {
@@ -64,7 +62,6 @@ export function registerSystemDocumentationRoutes(app: Express, deps: { requireA
       try {
         await handler(req, res, companyId);
       } catch (error) {
-        if (error instanceof ControllerOrderConflict) return res.status(409).json({ message: error.message });
         if (error instanceof DocumentationError) {
           return res.status(400).json({
             message: error.message,
@@ -175,25 +172,10 @@ export function registerSystemDocumentationRoutes(app: Express, deps: { requireA
     const record = await readSiteRecord(c.companyId, c.id, branchName);
     res.json(GetDocumentationSiteResponse.parse({
       customer: { id: c.id, name: displayName(c), address: serviceAddress(c), branches: c.branches ?? [] },
-      branchName, controllers: orderedDocumentationControllers(controllers, record?.controllerOrder), backflows,
+      branchName, controllers: [...controllers].sort((a, b) => (a.letter ?? "").localeCompare(b.letter ?? "") || a.id - b.id), backflows,
       site: siteBlock(activeControllers, activeBackflows, record),
     }));
   }));
-
-  app.put("/api/system-documentation/customers/:customerId/site/controller-order", deps.requireAuthentication,
-    boundary(async (req, res, companyId) => {
-      const c = await customerFor(req, res, companyId);
-      if (!c) return;
-      const parsed = SaveDocumentationControllerOrderBody.safeParse(req.body);
-      if (!parsed.success || Object.keys(req.body ?? {}).some(k => !["branchName", "controllerIds", "previousControllerIds"].includes(k)) ||
-        (parsed.success && [parsed.data.controllerIds, parsed.data.previousControllerIds].some(ids => new Set(ids).size !== ids.length))) {
-        return res.status(400).json({ message: "Invalid controller order" });
-      }
-      const branchName = resolveBranch(c, parsed.data.branchName);
-      const result = await saveDocumentationControllerOrder(c.companyId, c.id, branchName, parsed.data.controllerIds, parsed.data.previousControllerIds);
-      if (!result) return notFound(res, "Customer");
-      res.json(SaveDocumentationControllerOrderResponse.parse(result));
-    }));
 
   for (const kind of ["controller", "backflow"] as const) {
     app.post(`/api/${kind === "controller" ? "irrigation-controllers" : "backflows"}/:id/field-verify`,

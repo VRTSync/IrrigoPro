@@ -35,6 +35,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { LetterPicker, type TakenLetter } from "@/components/customers/letter-picker";
 import { PhotoImage } from "@/components/ui/photo-image";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -1031,6 +1033,8 @@ interface ControllerGridTileProps {
   onOpenZone: (id: number) => void;
   onFocusConsumed: (token: number) => void;
   onExpand: () => void;
+  /** Other active controllers at this location, for the letter picker. */
+  siblings: ControllerWithZones[];
 }
 
 function ControllerGridTile({
@@ -1045,10 +1049,15 @@ function ControllerGridTile({
   onOpenZone,
   onFocusConsumed,
   onExpand,
+  siblings,
 }: ControllerGridTileProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [editingDetails, setEditingDetails] = useState(false);
+  const [changingLetter, setChangingLetter] = useState(false);
+  const [newLetter, setNewLetter] = useState<string | null>(null);
+  const [swapWanted, setSwapWanted] = useState(false);
+  const [swapAsk, setSwapAsk] = useState<TakenLetter | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [retireZone, setRetireZone] = useState<ZoneSummary | null>(null);
   const [showRetired, setShowRetired] = useState(false);
@@ -1198,6 +1207,40 @@ function ControllerGridTile({
     },
   });
 
+  const takenLetters: TakenLetter[] = siblings
+    .filter((s) => s.id !== controller.id && s.isActive && s.letter)
+    .map((s) => ({
+      letter: s.letter as string,
+      controllerId: s.id,
+      label: `Controller ${s.letter}${s.location ? ` · ${s.location}` : ""}`,
+    }));
+
+  const letterMutation = useMutation({
+    mutationFn: (v: { letter: string; swap: boolean }) =>
+      apiRequest(`/api/irrigation-controllers/${controller.id}/letter`, "POST", { letter: v.letter, swap: v.swap }),
+    onSuccess: (_res, v) => {
+      const old = controller.letter;
+      toast({ title: `Controller ${old} is now ${v.letter}${v.swap ? ` (Controller ${v.letter} is now ${old})` : ""}` });
+      setChangingLetter(false);
+      setSwapAsk(null);
+      setSwapWanted(false);
+      queryClient.invalidateQueries({ queryKey: [`/api/irrigation-controllers/${controller.id}`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/customers/${customerId}/controllers-profile`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/irrigation-controllers/${controller.id}/history`] });
+      onRefreshList();
+    },
+    onError: (err: any) => {
+      toast({ title: "Letter change failed", description: parseApiError(err, "Try again"), variant: "destructive" });
+    },
+  });
+
+  const detailsChanged =
+    (draft.location ?? null) !== (controller.location ?? null) ||
+    (draft.brand ?? null) !== (controller.brand ?? null) ||
+    (draft.model ?? null) !== (controller.model ?? null) ||
+    (draft.notes ?? null) !== (controller.notes ?? null) ||
+    (draft.isActive ?? true) !== controller.isActive;
+
   const deleteMutation = useMutation({
     mutationFn: () => apiRequest(`/api/irrigation-controllers/${controller.id}`, "DELETE"),
     onSuccess: () => {
@@ -1253,7 +1296,6 @@ function ControllerGridTile({
 
   const startEditDetails = () => {
     setDraft({
-      name: controller.name,
       location: controller.location,
       brand: controller.brand,
       model: controller.model,
@@ -1284,6 +1326,11 @@ function ControllerGridTile({
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 flex items-center gap-1.5 flex-wrap">
                 {controller.name}
+                {!controller.letterConfirmed && (
+                  <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-xs" data-testid={`badge-letter-unconfirmed-${controller.id}`}>
+                    Letter not confirmed on site
+                  </Badge>
+                )}
                 {!controller.isActive && (
                   <Badge className="bg-amber-100 text-amber-800 border-amber-200 gap-1 text-xs">
                     <AlertTriangle className="w-3 h-3" /> Needs attention
@@ -1393,6 +1440,16 @@ function ControllerGridTile({
                         Edit Details
                       </Button>
                     )}
+                    {canManageControllers && !editingDetails && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setNewLetter(controller.letter ?? null); setSwapWanted(false); setSwapAsk(null); setChangingLetter(true); }}
+                        data-testid={`button-change-letter-${controller.id}`}
+                      >
+                        Change letter
+                      </Button>
+                    )}
                     <HistoryDrawer controllerId={controller.id} />
                     {canManageControllers && (
                       <Button
@@ -1410,14 +1467,6 @@ function ControllerGridTile({
                 {editingDetails ? (
                   <div className="space-y-3 p-3 border rounded-lg bg-blue-50/20">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <Label className="text-xs">Name *</Label>
-                        <Input
-                          value={draft.name ?? ""}
-                          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                          className="h-8 text-sm mt-1"
-                        />
-                      </div>
                       <div>
                         <Label className="text-xs">Location</Label>
                         <Input
@@ -1471,7 +1520,7 @@ function ControllerGridTile({
                     <div className="flex gap-2 border-t pt-2">
                       <Button
                         size="sm"
-                        disabled={saveMutation.isPending || !draft.name}
+                        disabled={saveMutation.isPending || !detailsChanged}
                         onClick={() => saveMutation.mutate(draft)}
                         className="gap-1.5"
                       >
@@ -1727,6 +1776,48 @@ function ControllerGridTile({
           </AlertDialogContent>
         </AlertDialog>
       )}
+      {/* Change letter */}
+      <Dialog open={changingLetter} onOpenChange={(o) => { if (!o && !letterMutation.isPending) { setChangingLetter(false); setSwapAsk(null); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change letter</DialogTitle>
+            <DialogDescription>
+              The name always follows the letter. The letter stays unconfirmed until a tech checks it on site.
+            </DialogDescription>
+          </DialogHeader>
+          <LetterPicker
+            value={newLetter}
+            taken={takenLetters}
+            disabled={letterMutation.isPending}
+            onPick={(l) => {
+              const holder = takenLetters.find((t) => t.letter.toUpperCase() === l);
+              if (holder) { setSwapAsk(holder); return; }
+              setSwapAsk(null); setSwapWanted(false); setNewLetter(l);
+            }}
+          />
+          {swapAsk && (
+            <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" data-testid="swap-confirmation">
+              <p>
+                Letter {swapAsk.letter} is {swapAsk.label}. Swap letters? Controller {swapAsk.letter} becomes {controller.letter} and will need its letter confirmed.
+              </p>
+              <div className="mt-2 flex gap-2">
+                <Button size="sm" onClick={() => { setNewLetter(swapAsk.letter.toUpperCase()); setSwapWanted(true); setSwapAsk(null); }} data-testid="button-swap-confirm">Swap</Button>
+                <Button size="sm" variant="ghost" onClick={() => setSwapAsk(null)}>Cancel</Button>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setChangingLetter(false)} disabled={letterMutation.isPending}>Cancel</Button>
+            <Button
+              disabled={letterMutation.isPending || !newLetter || newLetter === controller.letter || !!swapAsk}
+              onClick={() => newLetter && letterMutation.mutate({ letter: newLetter, swap: swapWanted })}
+              data-testid="button-save-letter"
+            >
+              {letterMutation.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {/* Delete confirmation */}
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
@@ -1807,6 +1898,7 @@ export function IrrigationControllerGrid({
             focus={focusZone?.controllerId === ctrl.id ? focusZone : null}
             onFocusConsumed={consumeFocus}
             onRefreshList={onRefreshList ?? (() => {})}
+            siblings={controllers.filter((c) => c.id !== ctrl.id && (c.branchName ?? "") === (ctrl.branchName ?? ""))}
           />
         </div>
       ))}

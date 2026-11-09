@@ -20,7 +20,6 @@ export interface DocFrameProps {
   title: string;
   subtitle?: string | null;
   onBack: () => void;
-  backDisabled?: boolean;
   flow?: DocFrameFlow;
   children: ReactNode;
   /** Disables every control in the content while a save is in flight. */
@@ -30,7 +29,7 @@ export interface DocFrameProps {
   footerOffsetClass?: string;
 }
 
-export function DocFrame({ title, subtitle, onBack, backDisabled, flow, children, contentDisabled, footer, footerOffsetClass = "bottom-20" }: DocFrameProps) {
+export function DocFrame({ title, subtitle, onBack, flow, children, contentDisabled, footer, footerOffsetClass = "bottom-20" }: DocFrameProps) {
   return (
     <div className="mx-auto w-full max-w-[480px] px-4 pt-3 pb-4 flex flex-col gap-4" data-testid="doc-frame">
       <div className="flex items-center gap-3">
@@ -41,7 +40,7 @@ export function DocFrame({ title, subtitle, onBack, backDisabled, flow, children
           className="h-11 w-11 shrink-0 rounded-xl"
           aria-label="Back"
           onClick={onBack}
-          disabled={backDisabled || flow?.busy}
+          disabled={flow?.busy}
           data-testid="button-doc-back"
         >
           <ArrowLeft className="h-5 w-5" />

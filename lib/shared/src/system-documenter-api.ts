@@ -10,7 +10,6 @@ export type ApiRule = { method: "GET" | "POST" | "PUT" | "DELETE"; pattern: RegE
 export const SYSTEM_DOCUMENTER_API: readonly ApiRule[] = [
   { method: "GET", pattern: /^\/api\/system-documentation\/sites$/ },
   { method: "GET", pattern: /^\/api\/system-documentation\/customers\/\d+\/site$/ },
-  { method: "PUT", pattern: /^\/api\/system-documentation\/customers\/\d+\/site\/controller-order$/ },
   { method: "POST", pattern: /^\/api\/system-documentation\/customers\/\d+\/site\/(no-backflow|verify)$/ },
   { method: "POST", pattern: /^\/api\/customers\/\d+\/controllers-profile$/ },
   { method: "PUT", pattern: /^\/api\/irrigation-controllers\/\d+$/ },

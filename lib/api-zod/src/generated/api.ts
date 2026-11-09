@@ -304,24 +304,6 @@ export const FieldVerifyBackflowResponse = zod
   );
 
 /**
- * @summary Save wizard-only controller presentation order without editing equipment
- */
-
-export const SaveDocumentationControllerOrderParams = zod.object({
-  customerId: zod.coerce.number().min(1),
-});
-
-export const SaveDocumentationControllerOrderBody = zod.object({
-  branchName: zod.string(),
-  controllerIds: zod.array(zod.number().min(1)),
-  previousControllerIds: zod.array(zod.number().min(1)),
-});
-
-export const SaveDocumentationControllerOrderResponse = zod.object({
-  controllerIds: zod.array(zod.number().min(1)),
-});
-
-/**
  * @summary Set the no-backflow answer and invalidate Finish when changed
  */
 

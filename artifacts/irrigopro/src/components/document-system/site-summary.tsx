@@ -10,7 +10,6 @@ import { DocFrame } from "./doc-frame";
 import { DocChip } from "./doc-chip";
 import { backflowTypeLabel, serverMessage } from "./constants";
 import { docSiteKey, useInvalidateDocSite } from "./use-doc-site";
-import { ControllerOrderList } from "./controller-order-list";
 
 type Item = { verified: boolean; gaps: DocumentationGap[] };
 
@@ -51,7 +50,7 @@ function Pill({ item, testId }: { item: Item; testId: string }) {
   );
 }
 
-function RowBody({ badge, badgeCls, name, subtitle, item, pillId }: { badge: string; badgeCls?: string; name: string; subtitle: string; item: Item; pillId: string }) {
+function RowBody({ badge, badgeCls, name, subtitle, subtitleCls, item, pillId }: { badge: string; badgeCls?: string; name: string; subtitle: string; subtitleCls?: string; item: Item; pillId: string }) {
   return (
     <>
       <span className={cn("flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl bg-primary font-bold text-white", badgeCls)}>
@@ -59,7 +58,7 @@ function RowBody({ badge, badgeCls, name, subtitle, item, pillId }: { badge: str
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[15px] font-semibold text-slate-900">{name}</span>
-        <span className="block truncate text-sm text-muted-foreground">{subtitle}</span>
+        <span className={cn("block truncate text-sm text-muted-foreground", subtitleCls)}>{subtitle}</span>
       </span>
       <Pill item={item} testId={pillId} />
     </>
@@ -97,7 +96,6 @@ export function SiteSummary({
   const busyRef = useRef(false);
   const [busy, setBusy] = useState<null | "chip" | "finish">(null);
   const [error, setError] = useState<{ message: string; retry: () => void } | null>(null);
-  const [reordering, setReordering] = useState(false);
   const blocker = finishBlocker(site);
   const confirmed = site.site.noBackflowConfirmed;
 
@@ -132,9 +130,8 @@ export function SiteSummary({
       title="Document System"
       subtitle={subtitle}
       onBack={onBack}
-      backDisabled={reordering}
       footerOffsetClass={footerOffsetClass}
-      footer={reordering ? null :
+      footer={
         <>
           {error && (
             <div role="alert" className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-800" data-testid="text-summary-error">
@@ -149,10 +146,10 @@ export function SiteSummary({
             {blocker ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />}
             {blocker ?? "Every item is verified."}
           </p>
-          <Button className="h-12 w-full text-base" disabled={!!blocker || busy !== null || reordering} onClick={finish} data-testid="button-finish">
+          <Button className="h-12 w-full text-base" disabled={!!blocker || busy !== null} onClick={finish} data-testid="button-finish">
             {busy === "finish" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Finish documentation
           </Button>
-          <Button variant="outline" className="h-12 w-full text-base" onClick={onDone} disabled={busy !== null || reordering} data-testid="button-save-leave">
+          <Button variant="outline" className="h-12 w-full text-base" onClick={onDone} disabled={busy !== null} data-testid="button-save-leave">
             Save and leave
           </Button>
         </>
@@ -187,18 +184,19 @@ export function SiteSummary({
       )}
 
       <section className="flex flex-col gap-2" aria-label="Controllers">
-        <ControllerOrderList key={`${customerId}:${branchName}`} customerId={customerId} branchName={branchName}
-          controllers={site.controllers} disabled={busy !== null} onEditingChange={setReordering}
-          onOpen={onOpenController} renderBody={c => (
+        {[...site.controllers].sort((a, b) => (a.letter ?? "").localeCompare(b.letter ?? "") || a.id - b.id).map((c) => (
+          <button key={c.id} type="button" onClick={() => onOpenController(c.id)} disabled={busy !== null} className={ROW} data-testid={`row-controller-${c.id}`}>
             <RowBody
               badge={c.letter ?? "?"}
-              name={c.name?.trim() ? c.name : "Unnamed controller"}
-              subtitle={`${[c.brand, c.model].filter(Boolean).join(" ") || "Brand not set"} · ${c.totalZones ? `${c.totalZones} zones` : "zones not set"}`}
+              name={c.letter ? `Controller ${c.letter}` : "Controller"}
+              subtitle={`${c.letterConfirmed ? "" : "Letter not confirmed · "}${[c.brand, c.model].filter(Boolean).join(" ") || "Brand not set"} · ${c.totalZones ? `${c.totalZones} zones` : "zones not set"}`}
+              subtitleCls={c.letterConfirmed ? undefined : "text-amber-800"}
               item={c}
               pillId={`status-controller-${c.id}`}
             />
-          )} />
-        <button type="button" onClick={onAddController} disabled={reordering || busy !== null} className={ADD} data-testid="button-add-controller">
+          </button>
+        ))}
+        <button type="button" onClick={onAddController} disabled={busy !== null} className={ADD} data-testid="button-add-controller">
           <Plus className="h-5 w-5" aria-hidden /> Add controller
         </button>
       </section>
@@ -206,7 +204,7 @@ export function SiteSummary({
       <section className="flex flex-col gap-2" aria-label="Backflows">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Backflows</h3>
         {site.backflows.map((b) => (
-          <button key={b.id} type="button" onClick={() => onOpenBackflow(b.id)} disabled={reordering || busy !== null} className={ROW} data-testid={`row-backflow-${b.id}`}>
+          <button key={b.id} type="button" onClick={() => onOpenBackflow(b.id)} disabled={busy !== null} className={ROW} data-testid={`row-backflow-${b.id}`}>
             <RowBody
               badge="BF"
               badgeCls="bg-[hsl(var(--primary-dark))] text-sm"
@@ -217,12 +215,12 @@ export function SiteSummary({
             />
           </button>
         ))}
-        <button type="button" onClick={onAddBackflow} disabled={reordering || busy !== null} className={ADD} data-testid="button-add-backflow">
+        <button type="button" onClick={onAddBackflow} disabled={busy !== null} className={ADD} data-testid="button-add-backflow">
           <Plus className="h-5 w-5" aria-hidden /> Add backflow
         </button>
         {site.backflows.length === 0 && (
           <div>
-            <DocChip selected={confirmed} disabled={busy !== null || reordering} onClick={() => toggleNoBackflow(!confirmed)} testId="chip-no-backflow">
+            <DocChip selected={confirmed} disabled={busy !== null} onClick={() => toggleNoBackflow(!confirmed)} testId="chip-no-backflow">
               {confirmed ? "Confirmed: no backflow at this location" : "There is no backflow at this location"}
             </DocChip>
           </div>

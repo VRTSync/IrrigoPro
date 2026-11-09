@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, parseApiError } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,23 +35,26 @@ import type {
 } from "@workspace/db/schema";
 import { IrrigationControllerGrid, type ControllerWithZones } from "@/components/customers/irrigation-controller-grid";
 import { IrrigationCsvImportModal } from "@/components/customers/IrrigationCsvImportModal";
+import { LetterPicker, type TakenLetter } from "@/components/customers/letter-picker";
 import { BackflowSection } from "@/components/customers/BackflowSection";
 
 // ── Add controller form ──────────────────────────────────────────────────────
 
 function AddControllerForm({
   customerId,
+  controllers,
   onAdded,
   onCancel,
 }: {
   customerId: number;
+  controllers: ControllerWithZones[];
   onAdded: () => void;
   onCancel: () => void;
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState({
-    name: "",
+    letter: "",
     location: "",
     brand: "",
     model: "",
@@ -59,10 +62,18 @@ function AddControllerForm({
     notes: "",
   });
 
+  const takenLetters: TakenLetter[] = controllers
+    .filter((c) => c.isActive && c.letter && (c.branchName ?? "") === "")
+    .map((c) => ({
+      letter: c.letter as string,
+      controllerId: c.id,
+      label: `Controller ${c.letter}${c.location ? ` · ${c.location}` : ""}`,
+    }));
+
   const mutation = useMutation({
     mutationFn: (data: typeof draft) =>
       apiRequest(`/api/customers/${customerId}/controllers-profile`, "POST", {
-        name: data.name,
+        letter: data.letter,
         location: data.location || null,
         brand: data.brand || null,
         model: data.model || null,
@@ -80,7 +91,7 @@ function AddControllerForm({
     onError: (err: any) => {
       toast({
         title: "Failed to add controller",
-        description: err?.message ?? "Try again",
+        description: parseApiError(err, "Try again"),
         variant: "destructive",
       });
     },
@@ -91,14 +102,13 @@ function AddControllerForm({
       <CardContent className="pt-4 space-y-3">
         <p className="font-medium text-sm text-green-800">New Controller</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <Label className="text-xs">Name *</Label>
-            <Input
-              value={draft.name}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              className="h-8 text-sm mt-1"
-              placeholder="e.g. Controller A"
-              autoFocus
+          <div className="sm:col-span-2">
+            <Label className="text-xs">Clock letter *</Label>
+            <p className="text-xs text-muted-foreground mb-2">Read it off the clock or its label.</p>
+            <LetterPicker
+              value={draft.letter || null}
+              onPick={(letter) => setDraft({ ...draft, letter })}
+              taken={takenLetters}
             />
           </div>
           <div>
@@ -151,7 +161,7 @@ function AddControllerForm({
         <div className="flex gap-2 border-t pt-2">
           <Button
             size="sm"
-            disabled={mutation.isPending || !draft.name}
+            disabled={mutation.isPending || !draft.letter}
             onClick={() => mutation.mutate(draft)}
             className="gap-1.5"
           >
@@ -496,6 +506,7 @@ export default function IrrigationProfile() {
       {showAddController && (
         <AddControllerForm
           customerId={parseInt(customerId!)}
+          controllers={controllers}
           onAdded={() => {
             setShowAddController(false);
             refetchControllers();

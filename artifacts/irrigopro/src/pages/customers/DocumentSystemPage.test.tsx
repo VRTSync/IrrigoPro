@@ -161,7 +161,8 @@ describe("DocumentSystemPage — Slice 4", () => {
     renderPage();
     fireEvent.click(await screen.findByTestId("row-controller-4"));
     expect(await screen.findByTestId("step-details")).toBeInTheDocument();
-    expect(screen.getByText("This clock is letter A. The letter never changes when you rename it.")).toBeInTheDocument();
+    expect(screen.getByTestId("letter-A")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByTestId("input-name")).toBeNull();
     const next = screen.getByTestId("button-next");
     expect(next).toBeDisabled();
     expect(screen.getByTestId("text-still-needed")).toHaveTextContent("Still needed: model");
@@ -183,29 +184,88 @@ describe("DocumentSystemPage — Slice 4", () => {
     expect(screen.getByTestId("button-next")).toBeDisabled();
   });
 
-  it("5. new controller cannot bypass on-site letter confirmation before the letter-picker slice", async () => {
+  it("5. new controller: no Name field, taken letter shows the OK-only dialog, free letter POSTs letter + confirmLetter", async () => {
     uploadSpy.mockResolvedValue("ph-123");
+    site = siteOf([complete(1, "P")]);
     renderPage();
     fireEvent.click(await screen.findByTestId("button-add-controller"));
     expect(await screen.findByText("Tap to take photo")).toBeInTheDocument();
-    expect(screen.getByTestId("button-next")).toBeDisabled();
     const file = new File(["x"], "clock.jpg", { type: "image/jpeg" });
     await act(async () => { fireEvent.change(screen.getByTestId("doc-photo-input"), { target: { files: [file] } }); });
     await waitFor(() => expect(screen.getByTestId("button-next")).not.toBeDisabled());
-    expect(screen.getByText("Tap to retake")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-details");
-    expect(screen.getByText("A letter is assigned when you save.")).toBeInTheDocument();
-    expect(writes()).toHaveLength(0);
-    fireEvent.change(screen.getByTestId("input-name"), { target: { value: "Clubhouse Clock" } });
+    expect(screen.queryByTestId("input-name")).toBeNull();
+    expect(screen.getByText("Read it off the clock or its label.")).toBeInTheDocument();
+    expect(document.querySelector('[aria-pressed="true"][data-testid^="letter-"]')).toBeNull();
     fireEvent.click(screen.getByTestId("chip-location-Mech room"));
     fireEvent.click(screen.getByTestId("chip-brand-Rain Bird"));
     fireEvent.click(screen.getByTestId("chip-model-ESP-ME3"));
     expect(screen.getByTestId("text-still-needed")).toHaveTextContent("clock letter confirmed on site");
     expect(screen.getByTestId("button-next")).toBeDisabled();
-    fireEvent.click(screen.getByTestId("button-next"));
-    expect(screen.getByTestId("step-details")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("letter-P"));
+    expect(await screen.findByText("Letter P is already Controller P. Pick another letter, or change that clock's letter first.")).toBeInTheDocument();
+    expect(screen.queryByTestId("button-dialog-swap")).toBeNull();
+    fireEvent.click(screen.getByTestId("button-dialog-ok"));
+    await waitFor(() => expect(screen.queryByTestId("button-dialog-ok")).toBeNull());
+    expect(screen.getByTestId("letter-P")).toHaveAttribute("aria-pressed", "false");
     expect(writes()).toHaveLength(0);
+    fireEvent.click(screen.getByTestId("letter-D"));
+    expect(screen.getByTestId("button-next")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-zone-count");
+    expect(writes()).toEqual([["/api/customers/7/controllers-profile", "POST", {
+      letter: "D", confirmLetter: true, location: "Mech room", brand: "Rain Bird", model: "ESP-ME3",
+      branchName: "", settingsPhotoUrl: "ph-123",
+    }]]);
+  });
+
+  it("an unconfirmed controller named Clock P starts with nothing selected and P suggested", async () => {
+    site = siteOf([ctrl(4, "B", { name: "Clock P", letterConfirmed: false, gaps: [{ step: "details", code: "letter", label: "clock letter confirmed on site" }] })]);
+    renderPage();
+    fireEvent.click(await screen.findByTestId("row-controller-4"));
+    await screen.findByTestId("step-details");
+    expect(document.querySelector('[aria-pressed="true"][data-testid^="letter-"]')).toBeNull();
+    expect(screen.getByTestId("letter-P")).toHaveAttribute("aria-label", "Letter P, suggested");
+    expect(screen.getByTestId("text-name-on-file")).toHaveTextContent("Name on file: Clock P");
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("letter-P"));
+    expect(screen.getByTestId("button-next")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-zone-count");
+    expect(writes()).toEqual([["/api/irrigation-controllers/4/letter", "POST", { letter: "P", confirm: true, swap: false }]]);
+  });
+
+  it("tapping a letter another clock holds offers a swap, sends swap: true, and the flash names the other clock", async () => {
+    site = siteOf([
+      ctrl(4, "B", { name: "Clock P", letterConfirmed: false, gaps: [{ step: "details", code: "letter", label: "clock letter confirmed on site" }] }),
+      ctrl(5, "P", { location: "Garage wall" }),
+    ]);
+    renderPage();
+    fireEvent.click(await screen.findByTestId("row-controller-4"));
+    await screen.findByTestId("step-details");
+    fireEvent.click(screen.getByTestId("letter-P"));
+    expect(await screen.findByText(/Letter P is Controller P · Garage wall\. Swap letters\?/)).toBeInTheDocument();
+    expect(screen.getByText("Controller P becomes B and will need its letter confirmed.")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("button-dialog-swap"));
+    expect(screen.getByTestId("letter-P")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-zone-count");
+    expect(writes()).toEqual([["/api/irrigation-controllers/4/letter", "POST", { letter: "P", confirm: true, swap: true }]]);
+    fireEvent.click(screen.getByTestId("button-save-exit"));
+    expect(await screen.findByTestId("status-doc-flash")).toHaveTextContent("Controller P is now B and needs its letter confirmed.");
+  });
+
+  it("Review shows Letter: Controller P · confirmed on site, and the summary has no Reorder button", async () => {
+    site = siteOf([complete(8, "P"), complete(7, "A", { verified: true })]);
+    renderPage();
+    await screen.findByTestId("row-controller-8");
+    expect(screen.queryByRole("button", { name: "Reorder" })).toBeNull();
+    const rows = screen.getAllByTestId(/^row-controller-/).map((r) => r.getAttribute("data-testid"));
+    expect(rows).toEqual(["row-controller-7", "row-controller-8"]);
+    fireEvent.click(screen.getByTestId("row-controller-8"));
+    await screen.findByTestId("step-review");
+    expect(screen.getByTestId("text-review-letter")).toHaveTextContent("Controller P · confirmed on site");
   });
 
   it("Save & exit on an unsaved draft asks before leaving", async () => {
@@ -278,22 +338,22 @@ describe("DocumentSystemPage — Slice 4", () => {
     expect(writes()).toEqual([["/api/irrigation-controllers/9", "PUT", { isActive: false }]]);
   });
 
-  it("9. a failed save keeps the typed name and Retry resends", async () => {
+  it("9. a failed save keeps the typed location and Retry resends", async () => {
     site = siteOf([ctrl(10, "G", { gaps: [{ step: "details", code: "x", label: "x" }] })]);
     renderPage();
     fireEvent.click(await screen.findByTestId("row-controller-10"));
     await screen.findByTestId("step-details");
-    fireEvent.change(screen.getByTestId("input-name"), { target: { value: "Pool Clock" } });
+    fireEvent.change(screen.getByTestId("input-location"), { target: { value: "Pool house" } });
     failNext = "Database unavailable";
     fireEvent.click(screen.getByTestId("button-next"));
     expect(await screen.findByTestId("text-save-error")).toHaveTextContent("Couldn't save: Database unavailable");
-    expect(screen.getByTestId("input-name")).toHaveValue("Pool Clock");
+    expect(screen.getByTestId("input-location")).toHaveValue("Pool house");
     expect(screen.getByTestId("step-details")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("button-retry"));
     await screen.findByTestId("step-zone-count");
     expect(writes()).toEqual([
-      ["/api/irrigation-controllers/10", "PUT", { name: "Pool Clock" }],
-      ["/api/irrigation-controllers/10", "PUT", { name: "Pool Clock" }],
+      ["/api/irrigation-controllers/10", "PUT", { location: "Pool house" }],
+      ["/api/irrigation-controllers/10", "PUT", { location: "Pool house" }],
     ]);
   });
 
@@ -307,10 +367,10 @@ describe("DocumentSystemPage — Slice 4", () => {
     expect(screen.queryByTestId("status-doc-flash")).toBeNull();
     fireEvent.click(screen.getByTestId("row-controller-12"));
     await screen.findByTestId("step-details");
-    fireEvent.change(screen.getByTestId("input-name"), { target: { value: "Shop Clock" } });
+    fireEvent.change(screen.getByTestId("input-location"), { target: { value: "Shop" } });
     fireEvent.click(screen.getByTestId("button-save-exit"));
     expect(await screen.findByTestId("status-doc-flash")).toHaveTextContent("Controller J saved. It stays unverified until you finish it.");
-    expect(writes()).toEqual([["/api/irrigation-controllers/12", "PUT", { name: "Shop Clock" }]]);
+    expect(writes()).toEqual([["/api/irrigation-controllers/12", "PUT", { location: "Shop" }]]);
   });
 
   it("a successful save invalidates exactly the site key", async () => {
@@ -319,7 +379,7 @@ describe("DocumentSystemPage — Slice 4", () => {
     const spy = vi.spyOn(qc, "invalidateQueries");
     fireEvent.click(await screen.findByTestId("row-controller-13"));
     await screen.findByTestId("step-details");
-    fireEvent.change(screen.getByTestId("input-name"), { target: { value: "Gate Clock" } });
+    fireEvent.change(screen.getByTestId("input-location"), { target: { value: "Gate" } });
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-zone-count");
     expect(spy).toHaveBeenCalledWith({ queryKey: ["/api/system-documentation/customers", 7, "site", ""], exact: true });
@@ -353,19 +413,6 @@ describe("Review regressions", () => {
     expect(writes()).toEqual([["/api/irrigation-controllers/21", "PUT", { location: null }]]);
   });
 
-  it("a cleared name on Save & exit shows an error, stays, and never claims saved", async () => {
-    site = siteOf([ctrl(22, "T", { gaps: [{ step: "details", code: "x", label: "x" }] })]);
-    renderPage();
-    fireEvent.click(await screen.findByTestId("row-controller-22"));
-    await screen.findByTestId("step-details");
-    fireEvent.change(screen.getByTestId("input-name"), { target: { value: "" } });
-    fireEvent.click(screen.getByTestId("button-save-exit"));
-    expect(await screen.findByTestId("text-save-error")).toHaveTextContent("Name can't be blank");
-    expect(screen.getByTestId("step-details")).toBeInTheDocument();
-    expect(screen.queryByTestId("status-doc-flash")).toBeNull();
-    expect(writes()).toHaveLength(0);
-  });
-
   it("Back on a complete unsaved draft keeps it locally and does not POST", async () => {
     uploadSpy.mockResolvedValue("ph-9");
     renderPage();
@@ -374,7 +421,7 @@ describe("Review regressions", () => {
     await waitFor(() => expect(screen.getByTestId("button-next")).not.toBeDisabled());
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-details");
-    fireEvent.change(screen.getByTestId("input-name"), { target: { value: "Pool" } });
+    fireEvent.click(screen.getByTestId("letter-F"));
     fireEvent.click(screen.getByTestId("chip-location-Pedestal"));
     fireEvent.click(screen.getByTestId("chip-brand-Toro"));
     fireEvent.click(screen.getByTestId("chip-model-Tempus"));
@@ -383,7 +430,7 @@ describe("Review regressions", () => {
     expect(writes()).toHaveLength(0);
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-details");
-    expect(screen.getByTestId("input-name")).toHaveValue("Pool");
+    expect(screen.getByTestId("letter-F")).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(screen.getByTestId("button-save-exit"));
     expect(await screen.findByText("Leave without saving?")).toBeInTheDocument();
   });

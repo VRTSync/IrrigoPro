@@ -19,8 +19,6 @@ export * from "./documentationBackflow";
 export * from "./documentationBackflowVerification";
 export * from "./documentationController";
 export * from "./documentationControllerGraph";
-export * from "./documentationControllerOrder";
-export * from "./documentationControllerOrderInput";
 export * from "./documentationControllerVerification";
 export * from "./documentationCustomer";
 export * from "./documentationEquipmentAudit";

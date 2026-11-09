@@ -627,3 +627,68 @@ describe("connected controller tiles", () => {
     });
   }
 });
+
+describe("controller letters — Controllers & Zones", () => {
+  const tileOf = (id: number, letter: string, o: Partial<ControllerWithZones> = {}): ControllerWithZones => ({
+    ...controller, id, letter, name: `Controller ${letter}`, letterConfirmed: true, location: id === 8 ? "Garage wall" : null,
+    totalZones: 2, zones: controller.zones.slice(0, 2), ...o,
+  });
+  function mountMany(list: ControllerWithZones[]) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    for (const c of list) qc.setQueryData([`/api/irrigation-controllers/${c.id}`], { ...c, zones: zones.slice(0, 2), programs: [], retiredZones: [] });
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    render(<QueryClientProvider client={qc}>
+      <IrrigationControllerGrid controllers={list} customerId={9} canManageControllers canEditZones onRefreshList={vi.fn()} />
+    </QueryClientProvider>);
+    return { invalidate };
+  }
+
+  it("Edit Details has no Name input, Save needs a change, and the body carries no name", async () => {
+    mountMany([tileOf(7, "A")]);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Details" }));
+    expect(screen.queryByText("Name *")).toBeNull();
+    const save = screen.getByRole("button", { name: "Save" });
+    expect(save).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText("e.g. Rainbird"), { target: { value: "Hunter" } });
+    expect(save).not.toBeDisabled();
+    fireEvent.click(save);
+    await waitFor(() => expect(request).toHaveBeenCalledWith("/api/irrigation-controllers/7", "PUT", expect.objectContaining({ brand: "Hunter" })));
+    const body = request.mock.calls.find(([u, m]) => u === "/api/irrigation-controllers/7" && m === "PUT")![2];
+    expect(body).not.toHaveProperty("name");
+    expect(body).not.toHaveProperty("letter");
+  });
+
+  it("Change letter to a taken letter asks to swap, then sends { letter, swap: true } and names both clocks", async () => {
+    const { invalidate } = mountMany([tileOf(7, "B"), tileOf(8, "P")]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Expand" })[0]);
+    fireEvent.click(await screen.findByTestId("button-change-letter-7"));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByTestId("letter-B")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(dialog).getByTestId("letter-P"));
+    expect(within(dialog).getByTestId("swap-confirmation")).toHaveTextContent("Letter P is Controller P · Garage wall. Swap letters? Controller P becomes B and will need its letter confirmed.");
+    fireEvent.click(within(dialog).getByTestId("button-swap-confirm"));
+    fireEvent.click(within(dialog).getByTestId("button-save-letter"));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("/api/irrigation-controllers/7/letter", "POST", { letter: "P", swap: true }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith({ title: "Controller B is now P (Controller P is now B)" }));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["/api/customers/9/controllers-profile"] });
+  });
+
+  it("Change letter to a free letter sends no swap and no confirm", async () => {
+    mountMany([tileOf(7, "B")]);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    fireEvent.click(await screen.findByTestId("button-change-letter-7"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByTestId("letter-Q"));
+    fireEvent.click(within(dialog).getByTestId("button-save-letter"));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("/api/irrigation-controllers/7/letter", "POST", { letter: "Q", swap: false }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith({ title: "Controller B is now Q" }));
+  });
+
+  it("the Letter not confirmed on site badge shows only when letterConfirmed is false", () => {
+    mountMany([tileOf(7, "B", { letterConfirmed: false }), tileOf(8, "P")]);
+    expect(screen.getAllByText("Letter not confirmed on site")).toHaveLength(1);
+    expect(screen.getByTestId("badge-letter-unconfirmed-7")).toBeInTheDocument();
+    expect(screen.queryByTestId("badge-letter-unconfirmed-8")).toBeNull();
+  });
+});

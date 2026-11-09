@@ -2171,8 +2171,6 @@ export const irrigationSiteDocumentation = pgTable("irrigation_site_documentatio
   companyId: integer("company_id").references(() => companies.id).notNull(),
   customerId: integer("customer_id").references(() => customers.id).notNull(),
   branchName: text("branch_name").notNull().default(""),
-  // Wizard presentation metadata only; never stamps equipment or invalidates verification.
-  controllerOrder: jsonb("controller_order").$type<number[]>().notNull().default(sql`'[]'::jsonb`),
   noBackflowConfirmedAt: timestamp("no_backflow_confirmed_at", { withTimezone: true }),
   noBackflowConfirmedByUserId: integer("no_backflow_confirmed_by_user_id").references(() => users.id),
   noBackflowConfirmedByName: text("no_backflow_confirmed_by_name"),

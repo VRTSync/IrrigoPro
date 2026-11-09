@@ -1,10 +1,11 @@
 import { useMemo, useRef, useState } from "react";
 import { AlertTriangle, Info, Loader2, Minus, Plus } from "lucide-react";
 import type { DocumentationControllerGraph, DocumentationSite } from "@workspace/api-client-react";
-import { controllerDocumentationGaps, type ControllerDocInput, type DocGap } from "@workspace/shared";
+import { controllerDocumentationGaps, controllerNameFor, type ControllerDocInput, type DocGap } from "@workspace/shared";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LetterPicker, type TakenLetter } from "@/components/customers/letter-picker";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -36,7 +37,6 @@ const stepIndex = (k: StepKey) => FLOW_STEPS.findIndex((s) => s.key === k);
 
 type Values = {
   photo: string | null;
-  name: string;
   location: string;
   brand: string;
   model: string;
@@ -56,7 +56,6 @@ type SaveResult = "ok" | "failed" | "needs-confirm";
 function valuesOf(c: DocumentationControllerGraph | null): Values {
   return {
     photo: c?.settingsPhotoUrl ?? null,
-    name: c?.name ?? "",
     location: c?.location ?? "",
     brand: c?.brand ?? "",
     model: c?.model ?? "",
@@ -107,7 +106,7 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ message: string; retry: () => void } | null>(null);
   const [dialog, setDialog] = useState<
-    null | { type: "retire"; action: Action } | { type: "leave" } | { type: "inactive" } | { type: "program"; id: number; name: string }
+    null | { type: "retire"; action: Action } | { type: "swap"; letter: string; holder: TakenLetter } | { type: "taken-new"; holder: TakenLetter } | { type: "leave" } | { type: "inactive" } | { type: "program"; id: number; name: string }
   >(null);
   const s5 = useSlice5Draft();
   const [officeZones] = useState<number | null>(controller?.totalZones ?? null);
@@ -117,6 +116,11 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
   const reconciledRef = useRef<number | null>(null);
   const [photoState, setPhotoState] = useState<"idle" | "uploading" | "failed">("idle");
   const photoBlocked = photoState !== "idle";
+  // Letter picked by a person this session (L1/L5). Nothing is preselected until they look and tap.
+  const [picked, setPicked] = useState<string | null>(null);
+  const [swap, setSwap] = useState(false);
+  const sentLetterRef = useRef<string | null>(controller?.letterConfirmed ? controller.letter : null);
+  const swapNoteRef = useRef<string | null>(null);
   const [brandOther, setBrandOther] = useState(() => !!controller?.brand && !CONTROLLER_BRANDS.includes(controller.brand));
 
   const live = useMemo(
@@ -126,6 +130,23 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
   const base = live ?? controller;
   const letter = live?.letter ?? controller?.letter ?? createdLetter ?? "";
   const stepKey: StepKey = FLOW_STEPS[step].key;
+  const takenLetters: TakenLetter[] = useMemo(() => site.controllers
+    .filter((c) => c.id !== savedId && c.letter)
+    .map((c) => ({ letter: c.letter as string, controllerId: c.id, label: `Controller ${c.letter}${c.location ? ` · ${c.location}` : ""}` })),
+  [site, savedId]);
+  const confirmedLetter = base?.letterConfirmed ? base.letter : null;
+  const shownLetter = picked ?? confirmedLetter;
+  const suggested = (() => {
+    if (!controller || controller.letterConfirmed) return null;
+    const m = /(?:clock|controller)\s+([a-z])\s*$/i.exec(base?.name ?? controller.name ?? "");
+    return (m ? m[1] : controller.letter)?.toUpperCase() ?? null;
+  })();
+  const nameOnFile = base && !base.letterConfirmed && base.name && base.letter && base.name !== controllerNameFor(base.letter) ? base.name : null;
+  function pickLetter(l: string) {
+    const holder = takenLetters.find((t) => t.letter.toUpperCase() === l);
+    if (!holder) { setPicked(l); setSwap(false); return; }
+    setDialog(savedId != null ? { type: "swap", letter: l, holder } : { type: "taken-new", holder });
+  }
 
   const baseZones = useMemo(() => base?.zones ?? [], [base]);
   const allPrograms = useMemo(() => mergePrograms(base?.programs ?? [], s5.draft), [base, s5.draft]);
@@ -136,9 +157,9 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
 
   const draftInput: ControllerDocInput = useMemo(() => {
     return {
-      letterConfirmed: base?.letterConfirmed ?? false,
+      letterConfirmed: picked != null || (base?.letterConfirmed ?? false),
       settingsPhotoUrl: values.photo,
-      name: values.name,
+      name: base?.name ?? null,
       location: values.location,
       brand: values.brand,
       model: values.model,
@@ -146,7 +167,7 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
       programs,
       zones: !zoneTouched || zones.length === values.totalZones ? zones : resizeZones(zones, values.totalZones),
     };
-  }, [zones, programs, values, zoneTouched, base?.letterConfirmed]);
+  }, [zones, programs, values, zoneTouched, base?.letterConfirmed, base?.name, picked]);
   const allGaps: DocGap[] = useMemo(() => controllerDocumentationGaps(draftInput), [draftInput]);
   const stepGaps = allGaps.filter((g) => g.step === stepKey);
 
@@ -173,28 +194,36 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
       savedRef.current = { ...savedRef.current, photo: v.photo };
     } else if (key === "details") {
       if (id == null) {
-        const complete = [v.name, v.location, v.brand, v.model].every((s) => s.trim());
+        const complete = !!picked && [v.location, v.brand, v.model].every((s) => s.trim());
         // A draft row is only created by a complete forward Next; Back keeps the local draft.
         if (!complete || !forward) return "ok";
         const created = await apiRequest(`/api/customers/${customerId}/controllers-profile`, "POST", {
-          name: v.name.trim(), location: v.location.trim(), brand: v.brand.trim(), model: v.model.trim(),
+          letter: picked, confirmLetter: true, location: v.location.trim(), brand: v.brand.trim(), model: v.model.trim(),
           branchName, settingsPhotoUrl: v.photo,
         });
         const newId = Number(created?.id);
         if (!Number.isFinite(newId)) throw new Error("The server did not return the new controller.");
         savedIdRef.current = newId;
         setSavedId(newId);
-        if (created?.letter) setCreatedLetter(String(created.letter));
-        savedRef.current = { ...savedRef.current, name: v.name, location: v.location, brand: v.brand, model: v.model, photo: v.photo };
+        setCreatedLetter(String(created?.letter ?? picked));
+        sentLetterRef.current = picked;
+        savedRef.current = { ...savedRef.current, location: v.location, brand: v.brand, model: v.model, photo: v.photo };
       } else {
-        const body: Record<string, string | null> = {};
-        for (const k of ["name", "location", "brand", "model"] as const) {
-          if (v[k] !== saved[k]) body[k] = k === "name" ? v[k].trim() : (v[k].trim() || null);
+        if (picked && picked !== sentLetterRef.current) {
+          const oldLetter = base?.letter ?? controller?.letter ?? null;
+          await apiRequest(`/api/irrigation-controllers/${id}/letter`, "POST", { letter: picked, confirm: true, swap });
+          sentLetterRef.current = picked;
+          if (swap && oldLetter) swapNoteRef.current = `Controller ${picked} is now ${oldLetter} and needs its letter confirmed.`;
+          setSwap(false);
+          changedRef.current = true;
         }
-        if (!Object.keys(body).length) return "ok";
-        if ("name" in body && !body.name) throw new Error("Name can't be blank. Enter a name to save this clock.");
+        const body: Record<string, string | null> = {};
+        for (const k of ["location", "brand", "model"] as const) {
+          if (v[k] !== saved[k]) body[k] = v[k].trim() || null;
+        }
+        if (!Object.keys(body).length) { void invalidate(); return "ok"; }
         await apiRequest(`/api/irrigation-controllers/${id}`, "PUT", body);
-        savedRef.current = { ...savedRef.current, name: v.name, location: v.location, brand: v.brand, model: v.model };
+        savedRef.current = { ...savedRef.current, location: v.location, brand: v.brand, model: v.model };
       }
     } else if (key === "zone_count") {
       const n = v.totalZones;
@@ -233,7 +262,7 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
   function finishExit() {
     if (savedIdRef.current == null) { onExit(null); return; }
     if (controller?.verified && !changedRef.current) { onExit(null); return; }
-    onExit(`Controller ${letter} saved. It stays unverified until you finish it.`);
+    onExit(`Controller ${letter} saved. It stays unverified until you finish it.${swapNoteRef.current ? ` ${swapNoteRef.current}` : ""}`);
   }
 
   // Serialized: one action runs at a time; further taps are ignored.
@@ -279,7 +308,7 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
         const id = savedIdRef.current!;
         await apiRequest(`/api/irrigation-controllers/${id}/field-verify`, "POST");
         void invalidate();
-        onExit(`Controller ${letter} verified.`);
+        onExit(`Controller ${letter} verified.${swapNoteRef.current ? ` ${swapNoteRef.current}` : ""}`);
       }
     } catch (e) {
       setError({ message: serverMessage(e), retry: () => { void run(action, confirmedRetire); } });
@@ -342,12 +371,12 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
   return (
     <>
       <DocFrame
-        title={values.name.trim() || (controller ? "Unnamed controller" : "New controller")}
+        title={letter ? `Controller ${letter}` : "New controller"}
         subtitle={branchName ? `${site.customer.name}, ${branchName}` : site.customer.name}
         onBack={back}
         flow={{
           mode: controller ? "edit" : "new",
-          recordIdentifier: `${letter || "New"} · ${values.name.trim() || "Unnamed"}`,
+          recordIdentifier: `${letter || "New"}${values.location.trim() ? ` · ${values.location.trim()}` : ""}`,
           currentStep: step + 1,
           stepTitles: STEP_TITLES,
           onSaveExit: saveAndExit,
@@ -367,14 +396,11 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
 
         {stepKey === "details" && (
           <section className="flex flex-col gap-4" data-testid="step-details">
-            <p className="rounded-xl bg-slate-100 px-3.5 py-2.5 text-sm text-slate-700" data-testid="text-letter-note">
-              {savedId != null && letter
-                ? `This clock is letter ${letter}. The letter never changes when you rename it.`
-                : "A letter is assigned when you save."}
-            </p>
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="doc-name" className="text-sm font-semibold">Name <span className="text-red-600">*</span></label>
-              <Input id="doc-name" className="h-12 text-base" placeholder="e.g. Clubhouse Clock" value={values.name} onChange={(e) => set("name", e.target.value)} data-testid="input-name" />
+              <span className="text-sm font-semibold">Clock letter <span className="text-red-600">*</span></span>
+              <p className="text-sm text-muted-foreground">Read it off the clock or its label.</p>
+              <LetterPicker value={shownLetter} onPick={pickLetter} taken={takenLetters} suggested={suggested} disabled={busy} />
+              {nameOnFile && <p className="text-sm text-muted-foreground" data-testid="text-name-on-file">Name on file: {nameOnFile}</p>}
             </div>
             <div className="flex flex-col gap-1.5">
               <span className="text-sm font-semibold">Where is it? <span className="text-red-600">*</span></span>
@@ -492,7 +518,11 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
             <dl className="divide-y rounded-2xl border border-slate-200 bg-white">
               {([
                 ["Photo", values.photo ? "Taken" : "Missing", 0],
-                ["Name", values.name || "Not set", 1],
+                ["Letter", shownLetter ? (
+                  <>Controller {shownLetter}{draftInput.letterConfirmed
+                    ? " · confirmed on site"
+                    : <span className="text-amber-800"> · not confirmed</span>}</>
+                ) : "Not set", 1],
                 ["Location", values.location || "Not set", 1],
                 ["Brand", [values.brand, values.model].filter(Boolean).join(" ") || "Not set", 1],
                 ["Zones", values.totalZones ? String(values.totalZones) : "Not set", stepIndex("zone_count")],
@@ -529,6 +559,29 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
               <AlertDialogFooter>
                 <AlertDialogCancel data-testid="button-dialog-cancel">Cancel</AlertDialogCancel>
                 <AlertDialogAction data-testid="button-dialog-retire" onClick={() => { const a = dialog.action; setDialog(null); void run(a, true); }}>Retire</AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          )}
+          {dialog?.type === "swap" && (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Letter {dialog.letter} is {dialog.holder.label}. Swap letters?</AlertDialogTitle>
+                <AlertDialogDescription>Controller {dialog.letter} becomes {base?.letter ?? controller?.letter} and will need its letter confirmed.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel data-testid="button-dialog-cancel">Cancel</AlertDialogCancel>
+                <AlertDialogAction data-testid="button-dialog-swap" onClick={() => { const l = dialog.letter; setDialog(null); setPicked(l); setSwap(true); }}>Swap</AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          )}
+          {dialog?.type === "taken-new" && (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Letter {dialog.holder.letter} is taken</AlertDialogTitle>
+                <AlertDialogDescription>Letter {dialog.holder.letter} is already Controller {dialog.holder.letter}. Pick another letter, or change that clock's letter first.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogAction data-testid="button-dialog-ok" onClick={() => setDialog(null)}>OK</AlertDialogAction>
               </AlertDialogFooter>
             </>
           )}

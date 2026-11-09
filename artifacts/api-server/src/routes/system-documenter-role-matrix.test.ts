@@ -209,7 +209,6 @@ describe("documenter registry and exact API matcher", () => {
   const rules = [
     ["GET", "/api/system-documentation/sites"],
     ["GET", "/api/system-documentation/customers/1/site"],
-    ["PUT", "/api/system-documentation/customers/1/site/controller-order"],
     ["POST", "/api/system-documentation/customers/1/site/no-backflow"],
     ["POST", "/api/system-documentation/customers/1/site/verify"],
     ["POST", "/api/customers/1/controllers-profile"],
@@ -239,7 +238,7 @@ describe("documenter registry and exact API matcher", () => {
       if (method === "GET") assert.equal(isApiAllowedForRole("system_documenter", "HEAD", path), true);
       assert.equal(isApiAllowedForRole("system_documenter", "PATCH", path), false);
     }
-    for (const path of ["/api/irrigation-controllers/1/history", "/api/irrigation-controllers/abc", "/api/photos/", "/api/system-documentation/sites-evil", "/api/system-documentation/customers/1/site/controller-order-evil"]) {
+    for (const path of ["/api/irrigation-controllers/1/history", "/api/irrigation-controllers/abc", "/api/photos/", "/api/system-documentation/sites-evil", "/api/system-documentation/customers/1/site/evil"]) {
       for (const method of ["GET", "POST", "PUT", "DELETE"]) assert.equal(isApiAllowedForRole("system_documenter", method, path), false);
     }
   });

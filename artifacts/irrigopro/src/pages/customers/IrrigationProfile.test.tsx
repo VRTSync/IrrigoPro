@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -389,5 +389,29 @@ describe("IrrigationProfile — prop flow: irrigation_manager", () => {
     setup("irrigation_manager");
     const props = MockSection.mock.calls[MockSection.mock.calls.length - 1]?.[0] ?? {};
     expect(props.canLogTest).toBe(true);
+  });
+});
+
+describe("IrrigationProfile — Add Controller letter picker", () => {
+  it("has no Name input; submit stays disabled until a letter is picked; body carries letter and no confirmLetter", async () => {
+    const { apiRequest } = await import("@/lib/queryClient");
+    const spy = apiRequest as unknown as ReturnType<typeof vi.fn>;
+    spy.mockClear();
+    setup("company_admin", [makeController({ letter: "A", branchName: "" })]);
+    fireEvent.click(screen.getByRole("button", { name: /Add Controller/i }));
+    expect(screen.queryByText("Name *")).toBeNull();
+    const submit = () => { const all = screen.getAllByRole("button", { name: /Add Controller/i }); return all[all.length - 1]; };
+    expect(submit()).toBeDisabled();
+    expect(screen.getByTestId("letter-A")).toHaveAttribute("aria-label", expect.stringContaining("used by Controller A"));
+    fireEvent.click(screen.getByTestId("letter-C"));
+    expect(submit()).not.toBeDisabled();
+    fireEvent.click(submit());
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    const [url, method, body] = spy.mock.calls.find(([u, m]) => m === "POST")!;
+    expect(url).toBe("/api/customers/42/controllers-profile");
+    expect(method).toBe("POST");
+    expect(body).toMatchObject({ letter: "C" });
+    expect(body).not.toHaveProperty("confirmLetter");
+    expect(body).not.toHaveProperty("name");
   });
 });

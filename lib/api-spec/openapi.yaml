@@ -111,29 +111,6 @@ paths:
         "403": { description: Forbidden }
         "404": { description: Backflow not found }
         "500": { description: Could not save — please retry }
-  /system-documentation/customers/{customerId}/site/controller-order:
-    put:
-      operationId: saveDocumentationControllerOrder
-      summary: Save wizard-only controller presentation order without editing equipment
-      parameters:
-        - { name: customerId, in: path, required: true, schema: { type: integer, minimum: 1 } }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/DocumentationControllerOrderInput" }
-      responses:
-        "200":
-          description: Saved ordered active controller IDs
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/DocumentationControllerOrder" }
-        "400": { description: Invalid body or location }
-        "401": { description: Authentication required }
-        "403": { description: Forbidden }
-        "404": { description: Customer not found }
-        "409": { description: Controller list or saved order changed; reload before reordering }
-        "500": { description: Could not save — please retry }
   /system-documentation/customers/{customerId}/site/no-backflow:
     post:
       operationId: confirmDocumentationNoBackflow
@@ -438,27 +415,6 @@ components:
           required: [vrtSyncId]
           properties:
             vrtSyncId: { type: [string, "null"] }
-    DocumentationControllerOrderInput:
-      type: object
-      additionalProperties: false
-      required: [branchName, controllerIds, previousControllerIds]
-      properties:
-        branchName: { type: string }
-        controllerIds:
-          type: array
-          uniqueItems: true
-          items: { type: integer, minimum: 1 }
-        previousControllerIds:
-          type: array
-          uniqueItems: true
-          items: { type: integer, minimum: 1 }
-    DocumentationControllerOrder:
-      type: object
-      required: [controllerIds]
-      properties:
-        controllerIds:
-          type: array
-          items: { type: integer, minimum: 1 }
     DocumentationSite:
       type: object
       required: [customer, branchName, controllers, backflows, site]
