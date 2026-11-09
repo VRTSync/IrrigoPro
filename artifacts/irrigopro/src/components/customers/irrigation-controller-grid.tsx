@@ -35,6 +35,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PhotoImage } from "@/components/ui/photo-image";
 import { useToast } from "@/hooks/use-toast";
 import {
   ChevronDown,
@@ -527,8 +528,9 @@ function SettingsPhoto({
     <div className="space-y-2">
       {controller.settingsPhotoUrl ? (
         <div className="relative">
-          <img
-            src={controller.settingsPhotoUrl}
+          <PhotoImage
+            photoUrl={controller.settingsPhotoUrl}
+            variant="medium"
             alt="Controller settings"
             className="w-full max-w-xs h-40 object-cover rounded-lg border"
           />

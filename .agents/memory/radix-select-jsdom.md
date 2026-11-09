@@ -18,3 +18,12 @@ trigger with `fireEvent.pointerDown` followed by `fireEvent.click` —
 `userEvent.click` alone does not open it. Note that jsdom applies no media
 queries, so a page rendering both a desktop table and a mobile card list will
 have two of every control; take the first match.
+
+For a DropdownMenu file picker whose `onSelect` prevents default, send Escape
+after selecting the picker in a jsdom test before querying the surrounding page.
+
+**Why:** The menu remains open and Radix marks the rest of the page aria-hidden.
+A successfully updated image can then appear missing to `getByRole`.
+
+**How to apply:** Exercise the menu item and file input, then dismiss the menu
+explicitly rather than weakening the image assertion with hidden-role queries.

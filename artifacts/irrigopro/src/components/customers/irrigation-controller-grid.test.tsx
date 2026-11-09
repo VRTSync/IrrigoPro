@@ -1,10 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { IrrigationControllerGrid, type ControllerWithZones } from "./irrigation-controller-grid";
 import type { IrrigationController, IrrigationProfileZone, IrrigationProgram } from "@workspace/db/schema";
 import { IrrigationSystemCard } from "./irrigation-system-card";
 import type { Customer } from "@workspace/db/schema";
+import { uploadPhotoToStorage } from "@/pages/wet-checks/helpers";
 const proto = Element.prototype as any;
 proto.hasPointerCapture ??= () => false;
 proto.setPointerCapture ??= () => {};
@@ -49,6 +50,88 @@ function mount(ctrl = controller, canManage = true, canEdit = true, retiredZones
 }
 
 beforeEach(() => { auth.role = "company_admin"; request.mockReset(); toast.mockReset(); request.mockResolvedValue({ controller, created: [], restored: [], retired: [] }); });
+afterEach(() => { vi.unstubAllGlobals(); });
+
+describe("controller settings photos", () => {
+  function mockSignedUrls() {
+    const fetchPhoto = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if ((init?.method ?? "GET") === "GET" && /^\/api\/photos\/photos\/[^/]+\/signed-url\?variant=medium$/.test(url)) {
+        const id = url.split("/")[4];
+        return new Response(JSON.stringify({ url: `https://images.example.test/${id}.jpg` }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected fetch: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchPhoto);
+    return fetchPhoto;
+  }
+
+  it("resolves the stored identifier through the real PhotoImage medium signed-URL request", async () => {
+    const fetchPhoto = mockSignedUrls();
+    mount({ ...counted(1), settingsPhotoUrl: "photos/abc" });
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expect(document.querySelector('img[src="photos/abc"]')).toBeNull();
+    const image = await screen.findByRole("img", { name: "Controller settings" });
+    expect(fetchPhoto).toHaveBeenCalledTimes(1);
+    expect(fetchPhoto).toHaveBeenCalledWith("/api/photos/photos/abc/signed-url?variant=medium", {
+      headers: expect.any(Object), credentials: "include",
+    });
+    expect(image).toHaveAttribute("src", "https://images.example.test/abc.jpg");
+    expect(image).toHaveClass("w-full", "max-w-xs", "h-40", "object-cover", "rounded-lg", "border");
+    expect(image.parentElement).toHaveClass("relative");
+    expect(document.querySelector('img[src="photos/abc"]')).toBeNull();
+  });
+
+  it("keeps the no-photo state and read-only controls unchanged", async () => {
+    const fetchPhoto = mockSignedUrls();
+    mount(counted(1), false, false);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expect(await screen.findByText("No photo yet")).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Controller settings" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add Photo|Replace Photo/ })).toBeNull();
+    expect(fetchPhoto).not.toHaveBeenCalled();
+  });
+
+  for (const initialPhoto of [null, "photos/existing"]) {
+    it(`${initialPhoto ? "Replace Photo" : "Add Photo"} uploads, attaches the identifier and displays the resolved photo`, async () => {
+      const fetchPhoto = mockSignedUrls();
+      vi.mocked(uploadPhotoToStorage).mockReset().mockResolvedValue("photos/uploaded");
+      let detail = { ...counted(1), settingsPhotoUrl: initialPhoto, programs: [], retiredZones: [] };
+      request.mockImplementation(async (url, method, body) => {
+        if (url === "/api/irrigation-controllers/7/photo" && method === "POST") {
+          detail = { ...detail, settingsPhotoUrl: body.url };
+          return detail;
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      });
+      const { invalidate } = mount(detail, true, true, [], async () => detail);
+      fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+      const action = await screen.findByRole("button", { name: initialPhoto ? "Replace Photo" : "Add Photo" });
+      if (!initialPhoto) expect(screen.getByText("No photo yet")).toBeInTheDocument();
+      fireEvent.pointerDown(action, { button: 0, ctrlKey: false, pointerType: "mouse" });
+      const library = await screen.findByRole("menuitem", { name: "Choose from Library" });
+      const input = document.querySelector<HTMLInputElement>('input[type="file"]:not([capture])')!;
+      const picker = vi.spyOn(input, "click");
+      fireEvent.click(library);
+      expect(picker).toHaveBeenCalledOnce();
+      fireEvent.keyDown(library, { key: "Escape" });
+      const file = new File(["controller settings"], "settings.jpg", { type: "image/jpeg" });
+      fireEvent.change(input, { target: { files: [file] } });
+      await waitFor(() => expect(request).toHaveBeenCalledWith("/api/irrigation-controllers/7/photo", "POST", { url: "photos/uploaded" }));
+      expect(uploadPhotoToStorage).toHaveBeenCalledTimes(1);
+      expect(uploadPhotoToStorage).toHaveBeenCalledWith(file);
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["/api/irrigation-controllers/7"] });
+      await waitFor(() => expect(screen.getByRole("img", { name: "Controller settings" })).toHaveAttribute("src", "https://images.example.test/uploaded.jpg"));
+      expect(fetchPhoto).toHaveBeenCalledWith("/api/photos/photos/uploaded/signed-url?variant=medium", expect.objectContaining({ credentials: "include" }));
+      expect(document.querySelector('img[src^="photos/"]')).toBeNull();
+      expect(screen.queryByText("No photo yet")).toBeNull();
+      expect(screen.getByRole("button", { name: "Replace Photo" })).toBeEnabled();
+      expect(toast).toHaveBeenCalledWith({ title: "Photo saved" });
+    });
+  }
+});
 
 async function openSheet(count = 5) {
   const mounted = mount(counted(count));

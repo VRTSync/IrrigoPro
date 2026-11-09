@@ -697,3 +697,31 @@ mtime_ms = 1794251781001
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/4eadc39a-d4a7-45c9-9bf2-3f2c706eb091/93831f7f-cb53-4f35-a3c9-5f7a108a8fc3"
 storage_version_token = "1794251829872133"
 content_type = "image/png"
+
+[[outputs]]
+id = "C0majoTnMAGHKFHINDP6r"
+uri = "file://generated-artifacts/controller-settings-photos/grid-added-photo.jpg"
+type = "image"
+title = "Grid-added settings photo — test record"
+description = "Desktop browser verification using temporary test data, not Aspen Townhomes."
+logical_id = "b210d7c0-f568-4d49-8dfa-a62d7c0019b9"
+content_hash = "sha256:8e290a0234cee48c911a07c0ee1c372c27d67e181ba25aed2fdae215e61c5f7f"
+size = 119547
+mtime_ms = 1794252512001
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/b210d7c0-f568-4d49-8dfa-a62d7c0019b9/a063d3c6-843b-4fd1-9698-65efd0259265"
+storage_version_token = "1794252571920366"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "hwNIPY-IC8yjaTd3L5pYo"
+uri = "file://generated-artifacts/controller-settings-photos/grid-replaced-photo.jpg"
+type = "image"
+title = "Replaced settings photo — test record"
+description = "Replacement uploaded, attached and displayed successfully in the desktop grid."
+logical_id = "83460e8e-e21f-4a12-9a18-c3048afe7813"
+content_hash = "sha256:8420ff80658633a360aad9894abd52f8ca9c2b5c86a9731acfaab5e49522c105"
+size = 108567
+mtime_ms = 1794252513529
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/83460e8e-e21f-4a12-9a18-c3048afe7813/85eaa135-fff3-40d8-bd6d-31d6b2bd37d6"
+storage_version_token = "1794252572469317"
+content_type = "image/jpeg"
