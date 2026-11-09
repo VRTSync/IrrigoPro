@@ -21,3 +21,16 @@ export function serverMessage(err: unknown): string {
   } catch { /* not JSON */ }
   return body;
 }
+
+/** Server enum values (irrigation-profile-routes.ts zone type enum); short labels fit a 60px tile. */
+export const DOC_ZONE_TYPES = [
+  { value: "pop_up_spray", label: "Spray",   tile: "bg-sky-100 border-sky-300" },
+  { value: "rotor",        label: "Rotor",   tile: "bg-green-100 border-green-300" },
+  { value: "drip",         label: "Drip",    tile: "bg-amber-100 border-amber-300" },
+  { value: "netafim",      label: "Netafim", tile: "bg-orange-100 border-orange-300" },
+  { value: "bubbler",      label: "Bubbler", tile: "bg-violet-100 border-violet-300" },
+  { value: "other",        label: "Other",   tile: "bg-slate-200 border-slate-400" },
+] as const;
+
+/** Stored day format, same values and order as DAYS_OF_WEEK in irrigation-controller-grid.tsx. */
+export const WEEK_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;

@@ -641,3 +641,17 @@ mtime_ms = 1793898584632
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/1d44f157-19da-464a-b7a0-57079ffe2f66/94c4722b-1fe6-4a64-be93-dc21f255eb08"
 storage_version_token = "1793898584984553"
 content_type = "text/csv"
+
+[[outputs]]
+id = "h_7D5PrHuojxk6KxM49RU"
+uri = "file://generated-artifacts/slice5/phone-acceptance.html"
+type = "html"
+title = "Slice 5 phone walkthrough screenshots"
+description = "All seven controller steps, successful verification, and 24-zone brush capture at 390px."
+logical_id = "b0a91977-999f-435c-81c8-b05e7a3f3514"
+content_hash = "sha256:0e3a78e8f2a4415712e9bbee1ddc52803b632c937154f268bb8386d2e9ee404c"
+size = 895388
+mtime_ms = 1794244220785
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/b0a91977-999f-435c-81c8-b05e7a3f3514/0c540904-e1d6-40be-abcf-5991116e2884"
+storage_version_token = "1794244221267009"
+content_type = "text/html"

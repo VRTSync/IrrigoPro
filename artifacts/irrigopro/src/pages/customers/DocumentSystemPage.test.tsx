@@ -72,12 +72,14 @@ function sitesOf(branches: string[] = []): DocumentationSites {
 let site: DocumentationSite;
 let sites: DocumentationSites;
 let failNext: string | null = null;
+let custom: ((url: string, method: string, data: unknown) => unknown) | null = null;
 
 function installApi() {
   apiRequestSpy.mockImplementation(async (url: string, method = "GET", data?: unknown) => {
     void data;
     if (method === "GET" && url === "/api/system-documentation/sites") return sites;
     if (method === "GET" && url.startsWith("/api/system-documentation/customers/7/site")) return site;
+    if (custom) { const out = custom(url, method, data); if (out !== undefined) return out; }
     if (failNext) { const m = failNext; failNext = null; throw new Error(`500: ${JSON.stringify({ message: m })}`); }
     if (url === "/api/customers/7/controllers-profile") return { id: 55, letter: "D" };
     return {};
@@ -105,6 +107,7 @@ beforeEach(() => {
   apiRequestSpy.mockReset();
   uploadSpy.mockReset();
   failNext = null;
+  custom = null;
   sites = sitesOf();
   site = siteOf([]);
   installApi();
@@ -235,18 +238,18 @@ describe("DocumentSystemPage — Slice 4", () => {
     expect(await screen.findByText("Retire zones 11 to 12?")).toBeInTheDocument();
     expect(writes()).toHaveLength(0);
     fireEvent.click(screen.getByTestId("button-dialog-retire"));
-    await screen.findByTestId("step-review");
+    await screen.findByTestId("step-zone-types");
     expect(writes()).toEqual([["/api/irrigation-controllers/6/zone-count", "PUT", { totalZones: 10 }]]);
   });
 
   it("7. Review: Verify disabled with gaps", async () => {
-    site = siteOf([ctrl(7, "C", { gaps: slice5Gaps })]);
+    site = siteOf([ctrl(7, "C", { gaps: [] })]);
     renderPage();
     fireEvent.click(await screen.findByTestId("row-controller-7"));
     await screen.findByTestId("step-review");
     expect(screen.getByTestId("button-verify")).toBeDisabled();
     expect(screen.getByTestId("text-review-gaps")).toHaveTextContent("Still needed:");
-    expect(screen.getByTestId("link-finish-in-profile")).toHaveAttribute("href", "/customers/7/irrigation-profile");
+    expect(screen.queryByTestId("link-finish-in-profile")).toBeNull();
   });
 
   it("7b. Review without gaps posts field-verify and flashes", async () => {
@@ -342,7 +345,7 @@ describe("Review regressions", () => {
     fireEvent.click(screen.getByTestId("chip-office-zones"));
     expect(screen.getByTestId("button-next")).not.toBeDisabled();
     fireEvent.click(screen.getByTestId("button-next"));
-    await screen.findByTestId("step-review");
+    await screen.findByTestId("step-zone-types");
     expect(writes()).toEqual([["/api/irrigation-controllers/20/zone-count", "PUT", { totalZones: 2 }]]);
   });
 
@@ -481,4 +484,391 @@ describe("10. Document System button role gate", () => {
     },
     20000,
   );
+});
+
+// ─── Slice 5 — zone types, programs and run times ─────────────────────────────
+
+type Z = DocumentationControllerGraph["zones"][number];
+type P = DocumentationControllerGraph["programs"][number];
+const z5 = (n: number, o: Partial<Z> = {}): Z => ({ id: 100 + n, zoneNumber: n, name: `Zone ${n}`, zoneType: "other", zoneTypeConfirmed: false, programId: null, runTimeMinutes: 0, ...o });
+const p5 = (id: number, name: string, o: Partial<P> = {}): P => ({ ...program, id, name, wateringDays: ["Mon"], startTimes: ["05:00"], ...o });
+const range = (n: number, o: Partial<Z> = {}) => Array.from({ length: n }, (_, i) => z5(i + 1, o));
+const gap = (step: string) => [{ step, code: step, label: step }];
+const bulk = () => writes().filter(([u]) => String(u).endsWith("/zones/bulk"));
+
+async function open(c: DocumentationControllerGraph, testId: string) {
+  site = siteOf([c]);
+  const r = renderPage();
+  fireEvent.click(await screen.findByTestId(`row-controller-${c.id}`));
+  await screen.findByTestId(testId);
+  return r;
+}
+
+describe("Slice 5 — zone types", () => {
+  it("1. brush Rotor on zones 3 and 4 shows Rotor and the counter goes up by 2", async () => {
+    await open(ctrl(50, "A", { totalZones: 4, zones: range(4), gaps: gap("zone_types") }), "step-zone-types");
+    expect(screen.getByTestId("text-typed-counter")).toHaveTextContent("0 of 4 zones typed");
+    fireEvent.click(screen.getByTestId("chip-brush-rotor"));
+    fireEvent.click(screen.getByLabelText("Zone 3, no type"));
+    fireEvent.click(screen.getByLabelText("Zone 4, no type"));
+    expect(screen.getByLabelText("Zone 3, Rotor")).toHaveTextContent("Rotor");
+    expect(screen.getByLabelText("Zone 4, Rotor")).toHaveTextContent("Rotor");
+    expect(screen.getByTestId("text-typed-counter")).toHaveTextContent("2 of 4 zones typed");
+  });
+
+  it("2. a stored-other zone tapped with Other is still sent, grouped by type", async () => {
+    const zones = range(7).map((z) => ([3, 4, 7].includes(z.zoneNumber) ? z : { ...z, zoneType: "rotor", zoneTypeConfirmed: true }));
+    await open(ctrl(51, "A", { totalZones: 7, zones, gaps: gap("zone_types") }), "step-zone-types");
+    fireEvent.click(screen.getByTestId("chip-brush-rotor"));
+    fireEvent.click(screen.getByTestId("tile-zone-3"));
+    fireEvent.click(screen.getByTestId("tile-zone-4"));
+    fireEvent.click(screen.getByTestId("chip-brush-other"));
+    fireEvent.click(screen.getByTestId("tile-zone-7"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-programs");
+    expect(writes()).toEqual([
+      ["/api/irrigation-controllers/51/zones/bulk", "PUT", { zoneIds: [103, 104], patch: { zoneType: "rotor" } }],
+      ["/api/irrigation-controllers/51/zones/bulk", "PUT", { zoneIds: [107], patch: { zoneType: "other" } }],
+    ]);
+  });
+
+  it("3. Next disabled until every zone typed; Set the 5 untyped zones to Spray fills exactly those", async () => {
+    const zones = range(7).map((z) => (z.zoneNumber <= 2 ? { ...z, zoneType: "drip", zoneTypeConfirmed: true } : z));
+    await open(ctrl(52, "A", { totalZones: 7, zones, gaps: gap("zone_types") }), "step-zone-types");
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("button-fill-untyped"));
+    expect(screen.queryByTestId("button-fill-untyped")).toBeNull();
+    expect(screen.getByLabelText("Zone 1, Drip")).toBeInTheDocument();
+    for (const n of [3, 4, 5, 6, 7]) expect(screen.getByLabelText(`Zone ${n}, Spray`)).toBeInTheDocument();
+    expect(screen.getByTestId("button-next")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-programs");
+    expect(writes()).toEqual([["/api/irrigation-controllers/52/zones/bulk", "PUT", { zoneIds: [103, 104, 105, 106, 107], patch: { zoneType: "pop_up_spray" } }]]);
+  });
+
+  it("the fill button label counts untyped zones", async () => {
+    await open(ctrl(53, "A", { totalZones: 5, zones: range(5), gaps: gap("zone_types") }), "step-zone-types");
+    expect(screen.getByTestId("button-fill-untyped")).toHaveTextContent("Set the 5 untyped zones to Spray");
+  });
+
+  it("tapped tiles survive a site refetch", async () => {
+    const { qc } = await open(ctrl(54, "A", { totalZones: 3, zones: range(3), gaps: gap("zone_types") }), "step-zone-types");
+    fireEvent.click(screen.getByTestId("chip-brush-drip"));
+    fireEvent.click(screen.getByTestId("tile-zone-2"));
+    await act(async () => { await qc.refetchQueries(); });
+    expect(screen.getByLabelText("Zone 2, Drip")).toBeInTheDocument();
+    expect(screen.getByTestId("text-typed-counter")).toHaveTextContent("1 of 3 zones typed");
+  });
+
+  it("drafts stay with their controller", async () => {
+    site = siteOf([
+      ctrl(56, "A", { totalZones: 2, zones: range(2), gaps: gap("zone_types") }),
+      ctrl(57, "B", { totalZones: 2, zones: range(2).map((z) => ({ ...z, id: z.id + 50 })), gaps: gap("zone_types") }),
+    ]);
+    renderPage();
+    fireEvent.click(await screen.findByTestId("row-controller-56"));
+    await screen.findByTestId("step-zone-types");
+    fireEvent.click(screen.getByTestId("tile-zone-1"));
+    fireEvent.click(screen.getByTestId("button-save-exit"));
+    await screen.findByText("What's on file");
+    fireEvent.click(screen.getByTestId("row-controller-57"));
+    await screen.findByTestId("step-zone-types");
+    expect(screen.getByLabelText("Zone 1, no type")).toBeInTheDocument();
+    expect(writes()).toEqual([["/api/irrigation-controllers/56/zones/bulk", "PUT", { zoneIds: [101], patch: { zoneType: "pop_up_spray" } }]]);
+  });
+
+  it("a new controller gets real zone ids after Zone count", async () => {
+    uploadSpy.mockResolvedValue("ph-1");
+    custom = (url, method) => {
+      if (url === "/api/irrigation-controllers/55/zone-count" && method === "PUT") {
+        site = siteOf([ctrl(55, "D", { totalZones: 3, zones: [z5(1, { id: 551 }), z5(2, { id: 552 }), z5(3, { id: 553 })] })]);
+        return {};
+      }
+      return undefined;
+    };
+    renderPage();
+    fireEvent.click(await screen.findByTestId("button-add-controller"));
+    await act(async () => { fireEvent.change(await screen.findByTestId("doc-photo-input"), { target: { files: [new File(["x"], "a.jpg")] } }); });
+    await waitFor(() => expect(screen.getByTestId("button-next")).not.toBeDisabled());
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-details");
+    fireEvent.change(screen.getByTestId("input-name"), { target: { value: "Pool" } });
+    fireEvent.click(screen.getByTestId("chip-location-Pedestal"));
+    fireEvent.click(screen.getByTestId("chip-brand-Toro"));
+    fireEvent.click(screen.getByTestId("chip-model-Tempus"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-zone-count");
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByLabelText("More zones"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-zone-types");
+    fireEvent.click(await screen.findByTestId("button-fill-untyped"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-programs");
+    expect(bulk()).toEqual([["/api/irrigation-controllers/55/zones/bulk", "PUT", { zoneIds: [551, 552, 553], patch: { zoneType: "pop_up_spray" } }]]);
+  });
+});
+
+describe("Slice 5 — programs", () => {
+  const typed = (n: number, o: Partial<Z> = {}) => range(n, { zoneType: "rotor", zoneTypeConfirmed: true, ...o });
+
+  it("4. with A and inactive C, + Add program posts B and selects it", async () => {
+    custom = (url, method, data) => (method === "POST" && url.endsWith("/programs") ? { ...p5(12, (data as { name: string }).name, { wateringDays: [], startTimes: [] }) } : undefined);
+    await open(ctrl(60, "A", { totalZones: 2, zones: typed(2), programs: [p5(9, "A"), p5(11, "C", { isActive: false })], gaps: gap("programs") }), "step-programs");
+    expect(screen.queryByTestId("tab-program-C")).toBeNull();
+    fireEvent.click(screen.getByTestId("button-add-program"));
+    await waitFor(() => expect(screen.getByTestId("tab-program-B")).toHaveAttribute("aria-pressed", "true"));
+    expect(writes()).toEqual([["/api/irrigation-controllers/60/programs", "POST", { name: "B", wateringDays: [], startTimes: [], seasonalAdjustPct: 100 }]]);
+  });
+
+  it("no active programs shows the info box", async () => {
+    await open(ctrl(61, "A", { totalZones: 2, zones: typed(2), programs: [], gaps: gap("programs") }), "step-programs");
+    expect(screen.getByTestId("text-no-programs")).toHaveTextContent("No programs yet. Add the first one that's set on the clock.");
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+  });
+
+  it("5. days and times are sent in week order, blanks dropped, sorted", async () => {
+    await open(ctrl(62, "A", { totalZones: 2, zones: typed(2), programs: [p5(9, "A", { wateringDays: [], startTimes: [] })], gaps: gap("programs") }), "step-programs");
+    fireEvent.click(screen.getByTestId("chip-day-Wed"));
+    fireEvent.click(screen.getByTestId("chip-day-Mon"));
+    fireEvent.change(screen.getByTestId("input-start-time-0"), { target: { value: "18:30" } });
+    fireEvent.click(screen.getByTestId("button-add-time"));
+    fireEvent.click(screen.getByTestId("button-add-time"));
+    fireEvent.change(screen.getByTestId("input-start-time-2"), { target: { value: "05:00" } });
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-run-times");
+    expect(writes()).toEqual([["/api/irrigation-programs/9", "PUT", { wateringDays: ["Mon", "Wed"], startTimes: ["05:00", "18:30"] }]]);
+  });
+
+  it("6. a program with no days blocks Next", async () => {
+    await open(ctrl(63, "A", { totalZones: 2, zones: typed(2), programs: [p5(9, "A", { wateringDays: [] })], gaps: gap("programs") }), "step-programs");
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    expect(screen.getByTestId("text-still-needed")).toHaveTextContent("Still needed: Program A days");
+  });
+
+  it("7. Remove program confirms, then DELETEs immediately", async () => {
+    await open(ctrl(64, "A", { totalZones: 2, zones: typed(2), programs: [p5(9, "A")], gaps: gap("programs") }), "step-programs");
+    fireEvent.click(screen.getByTestId("button-remove-program"));
+    expect(await screen.findByText("Remove Program A? Zones on it lose their program.")).toBeInTheDocument();
+    expect(writes()).toHaveLength(0);
+    fireEvent.click(screen.getByTestId("button-dialog-remove-program"));
+    await screen.findByTestId("text-no-programs");
+    expect(writes()).toEqual([["/api/irrigation-programs/9", "DELETE"]]);
+  });
+
+  it("removing a program clears its zone assignments", async () => {
+    await open(ctrl(65, "A", { totalZones: 2, zones: typed(2, { programId: 9, runTimeMinutes: 10 }), programs: [p5(9, "A"), p5(10, "B")], gaps: gap("programs") }), "step-programs");
+    fireEvent.click(screen.getByTestId("button-remove-program"));
+    fireEvent.click(await screen.findByTestId("button-dialog-remove-program"));
+    await waitFor(() => expect(screen.queryByTestId("tab-program-A")).toBeNull());
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-run-times");
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    expect(screen.getByTestId("text-still-needed")).toHaveTextContent("2 zones without a program and minutes");
+  });
+
+  it("switching tabs keeps each program's draft; only edited programs are sent", async () => {
+    await open(ctrl(66, "A", { totalZones: 2, zones: typed(2), programs: [p5(9, "A"), p5(10, "B")], gaps: gap("programs") }), "step-programs");
+    fireEvent.click(screen.getByTestId("chip-day-Tue"));
+    fireEvent.click(screen.getByTestId("tab-program-B"));
+    expect(screen.getByTestId("chip-day-Tue")).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByTestId("tab-program-A"));
+    expect(screen.getByTestId("chip-day-Tue")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByTestId("button-seasonal-plus"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-run-times");
+    expect(writes()).toEqual([["/api/irrigation-programs/9", "PUT", { wateringDays: ["Mon", "Tue"], seasonalAdjustPct: 110 }]]);
+  });
+});
+
+describe("Slice 5 — run times and review", () => {
+  const ready = (n: number, o: Partial<Z> = {}) => range(n, { zoneType: "rotor", zoneTypeConfirmed: true, ...o });
+
+  it("8. Set all (A, 12), zone 5 to 15, Next sends two grouped bulk calls", async () => {
+    await open(ctrl(70, "A", { totalZones: 5, zones: ready(5), programs: [p5(9, "A")], gaps: gap("run_times") }), "step-run-times");
+    fireEvent.click(screen.getByLabelText("Set all more minutes"));
+    fireEvent.click(screen.getByLabelText("Set all more minutes"));
+    fireEvent.click(screen.getByTestId("button-apply-all"));
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByLabelText("Zone 5 more minutes"));
+    expect(screen.getByTestId("text-minutes-5")).toHaveTextContent("15");
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+    expect(bulk()).toEqual([
+      ["/api/irrigation-controllers/70/zones/bulk", "PUT", { zoneIds: [101, 102, 103, 104], patch: { programId: 9, runTimeMinutes: 12 } }],
+      ["/api/irrigation-controllers/70/zones/bulk", "PUT", { zoneIds: [105], patch: { programId: 9, runTimeMinutes: 15 } }],
+    ]);
+  });
+
+  it("9. picking a program on a 0-minute row uses the Set all minutes", async () => {
+    await open(ctrl(71, "A", { totalZones: 2, zones: ready(2), programs: [p5(9, "A")], gaps: gap("run_times") }), "step-run-times");
+    fireEvent.click(screen.getByLabelText("Zone 2 on program A"));
+    expect(screen.getByTestId("text-minutes-2")).toHaveTextContent("10");
+    expect(screen.getByTestId("text-minutes-1")).toHaveTextContent("0");
+  });
+
+  it("10. a failing second bulk call; Retry sends only the unsent group", async () => {
+    let n = 0;
+    custom = (url) => {
+      if (url.endsWith("/zones/bulk") && ++n === 2) throw new Error(`500: ${JSON.stringify({ message: "Could not update zones" })}`);
+      return undefined;
+    };
+    await open(ctrl(72, "A", { totalZones: 2, zones: ready(2), programs: [p5(9, "A")], gaps: gap("run_times") }), "step-run-times");
+    fireEvent.click(screen.getByTestId("button-apply-all"));
+    fireEvent.click(screen.getByLabelText("Zone 2 more minutes"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    expect(await screen.findByTestId("text-save-error")).toHaveTextContent("Couldn't save: Could not update zones");
+    expect(screen.getByTestId("text-minutes-2")).toHaveTextContent("11");
+    fireEvent.click(screen.getByTestId("button-retry"));
+    await screen.findByTestId("step-review");
+    const g1 = ["/api/irrigation-controllers/72/zones/bulk", "PUT", { zoneIds: [101], patch: { programId: 9, runTimeMinutes: 10 } }];
+    const g2 = ["/api/irrigation-controllers/72/zones/bulk", "PUT", { zoneIds: [102], patch: { programId: 9, runTimeMinutes: 11 } }];
+    expect(bulk()).toEqual([g1, g2, g2]);
+  });
+
+  it("11. Review shows Types and Programs lines and no Controllers & Zones link", async () => {
+    const zones = ready(4, { programId: 9, runTimeMinutes: 12 }).map((z) => (z.zoneNumber < 4 ? { ...z, zoneType: "pop_up_spray" } : z));
+    await open(ctrl(73, "A", { totalZones: 4, zones, programs: [p5(9, "A", { wateringDays: ["Fri", "Mon", "Wed"] })] }), "step-review");
+    expect(screen.getByTestId("text-review-types")).toHaveTextContent("Spray 3, Rotor 1");
+    expect(screen.getByTestId("text-review-programs")).toHaveTextContent("Program A: Mon Wed Fri at 5:00 AM, 100%, 4 zones, 48 min");
+    expect(screen.queryByTestId("link-finish-in-profile")).toBeNull();
+  });
+
+  it("12. full path from zone types to an enabled Verify", async () => {
+    custom = (url, method) => (method === "POST" && url.endsWith("/programs") ? p5(12, "A", { wateringDays: [], startTimes: [] }) : undefined);
+    await open(ctrl(74, "A", { totalZones: 2, zones: range(2), programs: [], gaps: gap("zone_types") }), "step-zone-types");
+    fireEvent.click(screen.getByTestId("button-fill-untyped"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-programs");
+    fireEvent.click(screen.getByTestId("button-add-program"));
+    await screen.findByTestId("card-program-A");
+    fireEvent.click(screen.getByTestId("chip-day-Mon"));
+    fireEvent.change(screen.getByTestId("input-start-time-0"), { target: { value: "05:00" } });
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-run-times");
+    fireEvent.click(screen.getByTestId("button-apply-all"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+    expect(screen.getByTestId("button-verify")).toHaveTextContent("Verify controller A");
+    expect(screen.getByTestId("button-verify")).not.toBeDisabled();
+  });
+});
+
+describe("Slice 5 — review fixes", () => {
+  const ready = (n: number, o: Partial<Z> = {}) => range(n, { zoneType: "rotor", zoneTypeConfirmed: true, ...o });
+
+  it("Back and Save & exit persist minutes on rows without a program (programId: null)", async () => {
+    await open(ctrl(80, "A", { totalZones: 2, zones: ready(2), programs: [p5(9, "A")], gaps: gap("run_times") }), "step-run-times");
+    fireEvent.click(screen.getByLabelText("Zone 1 more minutes"));
+    fireEvent.click(screen.getByTestId("button-doc-back"));
+    await screen.findByTestId("step-programs");
+    expect(bulk()).toEqual([["/api/irrigation-controllers/80/zones/bulk", "PUT", { zoneIds: [101], patch: { programId: null, runTimeMinutes: 1 } }]]);
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-run-times");
+    expect(screen.getByTestId("text-minutes-1")).toHaveTextContent("1");
+    fireEvent.click(screen.getByLabelText("Zone 2 more minutes"));
+    fireEvent.click(screen.getByTestId("button-save-exit"));
+    await screen.findByTestId("status-doc-flash");
+    expect(bulk().at(-1)).toEqual(["/api/irrigation-controllers/80/zones/bulk", "PUT", { zoneIds: [102], patch: { programId: null, runTimeMinutes: 1 } }]);
+  });
+
+  it("controls are disabled while a save is pending", async () => {
+    let release!: () => void;
+    custom = (url) => (url.endsWith("/zones/bulk") || url.startsWith("/api/irrigation-programs/")
+      ? new Promise((r) => { release = () => r({}); }) : undefined);
+    await open(ctrl(81, "A", { totalZones: 2, zones: range(2), programs: [p5(9, "A")], gaps: gap("zone_types") }), "step-zone-types");
+    fireEvent.click(screen.getByTestId("button-fill-untyped"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await waitFor(() => expect(screen.getByTestId("tile-zone-1")).toBeDisabled());
+    expect(screen.getByTestId("chip-brush-rotor")).toBeDisabled();
+    await act(async () => { release(); });
+    await screen.findByTestId("step-programs");
+    fireEvent.click(screen.getByTestId("chip-day-Tue"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await waitFor(() => expect(screen.getByTestId("input-start-time-0")).toBeDisabled());
+    expect(screen.getByTestId("chip-day-Wed")).toBeDisabled();
+    expect(screen.getByTestId("button-remove-program")).toBeDisabled();
+    await act(async () => { release(); });
+    await screen.findByTestId("step-run-times");
+  });
+
+  it("a save marks profile list (any branch), detail, history and picker caches stale", async () => {
+    const { qc } = await open(ctrl(82, "A", { totalZones: 2, zones: range(2), gaps: gap("zone_types") }), "step-zone-types");
+    const keys = [
+      ["/api/customers/7/controllers-profile"],
+      ["/api/customers/7/controllers-profile?branchName=North"],
+      ["/api/irrigation-controllers/82"],
+      ["/api/irrigation-controllers/82/history"],
+    ];
+    const sitesReads = () => apiRequestSpy.mock.calls.filter(([u]) => u === "/api/system-documentation/sites").length;
+    const before = sitesReads();
+    const other = ["/api/customers/8/controllers-profile"];
+    for (const k of [...keys, other]) qc.setQueryData(k, { cached: true });
+    fireEvent.click(screen.getByTestId("button-fill-untyped"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-programs");
+    await waitFor(() => { for (const k of keys) expect(qc.getQueryState(k)?.isInvalidated).toBe(true); });
+    expect(qc.getQueryState(other)?.isInvalidated).toBe(false);
+    // The picker statuses list is mounted, so invalidation refetches it.
+    await waitFor(() => expect(sitesReads()).toBeGreaterThan(before));
+  });
+
+  it("a deleted program's letter is free again", async () => {
+    custom = (url, method, data) => (method === "POST" && url.endsWith("/programs") ? p5(12, (data as { name: string }).name, { wateringDays: [], startTimes: [] }) : undefined);
+    await open(ctrl(83, "A", { totalZones: 2, zones: ready(2), programs: [p5(9, "A")], gaps: gap("programs") }), "step-programs");
+    fireEvent.click(screen.getByTestId("button-remove-program"));
+    fireEvent.click(await screen.findByTestId("button-dialog-remove-program"));
+    await screen.findByTestId("text-no-programs");
+    fireEvent.click(screen.getByTestId("button-add-program"));
+    await screen.findByTestId("tab-program-A");
+    expect(writes().at(-1)).toEqual(["/api/irrigation-controllers/83/programs", "POST", { name: "A", wateringDays: [], startTimes: [], seasonalAdjustPct: 100 }]);
+  });
+
+  it("sends only the selected controller's zone and program IDs across branch and customer navigation", async () => {
+    const scoped = (id: number, programId: number, zoneId: number, step: string) =>
+      ctrl(id, "A", {
+        totalZones: 2,
+        programs: [p5(programId, "A", { controllerId: id })],
+        zones: range(2, { zoneTypeConfirmed: step !== "zone_types" }).map((z, i) => ({ ...z, id: zoneId + i })),
+        gaps: gap(step),
+      });
+    const north = siteOf([scoped(101, 501, 1001, "zone_types"), scoped(102, 502, 1101, "run_times")], "North", ["North", "South"]);
+    const south = siteOf([scoped(201, 601, 2001, "run_times")], "South", ["North", "South"]);
+    const other = { ...siteOf([scoped(301, 701, 3001, "run_times")], "West"), customer: { ...site.customer, id: 8, name: "Other property", branches: ["West"] } };
+    apiRequestSpy.mockImplementation(async (url: string, method = "GET") => {
+      if (method !== "GET") return {};
+      if (url === "/api/system-documentation/sites") return sitesOf(["North", "South"]);
+      if (url.includes("/customers/8/site")) return other;
+      return url.includes("branchName=South") ? south : north;
+    });
+    const { nav } = renderPage("/customers/7/document-system?branch=North");
+    fireEvent.click(await screen.findByTestId("row-controller-101"));
+    await screen.findByTestId("step-zone-types");
+    fireEvent.click(screen.getByTestId("button-fill-untyped"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-programs");
+    fireEvent.click(screen.getByTestId("chip-day-Tue"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-run-times");
+    fireEvent.click(screen.getByTestId("button-apply-all"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+    for (const [path, id] of [
+      ["/customers/7/document-system?branch=South", 201],
+      ["/customers/8/document-system?branch=West", 301],
+    ] as const) {
+      act(() => nav.navigate(path));
+      fireEvent.click(await screen.findByTestId(`row-controller-${id}`));
+      await screen.findByTestId("step-run-times");
+      expect(screen.getByTestId("text-minutes-1")).toHaveTextContent("0");
+      fireEvent.click(screen.getByTestId("button-apply-all"));
+      fireEvent.click(screen.getByTestId("button-next"));
+      await screen.findByTestId("step-review");
+    }
+    expect(writes()).toEqual([
+      ["/api/irrigation-controllers/101/zones/bulk", "PUT", { zoneIds: [1001, 1002], patch: { zoneType: "pop_up_spray" } }],
+      ["/api/irrigation-programs/501", "PUT", { wateringDays: ["Mon", "Tue"] }],
+      ["/api/irrigation-controllers/101/zones/bulk", "PUT", { zoneIds: [1001, 1002], patch: { programId: 501, runTimeMinutes: 10 } }],
+      ["/api/irrigation-controllers/201/zones/bulk", "PUT", { zoneIds: [2001, 2002], patch: { programId: 601, runTimeMinutes: 10 } }],
+      ["/api/irrigation-controllers/301/zones/bulk", "PUT", { zoneIds: [3001, 3002], patch: { programId: 701, runTimeMinutes: 10 } }],
+    ]);
+  });
 });

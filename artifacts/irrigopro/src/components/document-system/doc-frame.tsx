@@ -19,12 +19,14 @@ export interface DocFrameProps {
   onBack: () => void;
   flow?: DocFrameFlow;
   children: ReactNode;
+  /** Disables every control in the content while a save is in flight. */
+  contentDisabled?: boolean;
   footer?: ReactNode;
   /** Clears the fixed mobile bottom nav. Slice 7 passes `bottom-0`. */
   footerOffsetClass?: string;
 }
 
-export function DocFrame({ title, subtitle, onBack, flow, children, footer, footerOffsetClass = "bottom-20" }: DocFrameProps) {
+export function DocFrame({ title, subtitle, onBack, flow, children, contentDisabled, footer, footerOffsetClass = "bottom-20" }: DocFrameProps) {
   return (
     <div className="mx-auto w-full max-w-[480px] px-4 pt-3 pb-4 flex flex-col gap-4" data-testid="doc-frame">
       <div className="flex items-center gap-3">
@@ -69,7 +71,8 @@ export function DocFrame({ title, subtitle, onBack, flow, children, footer, foot
           accent="blue"
         />
       )}
-      <div className="flex flex-col gap-4">{children}</div>
+      {/* Disabled while a save runs so nothing can change under a pending request. */}
+      <fieldset disabled={!!contentDisabled} className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0" data-testid="doc-frame-content">{children}</fieldset>
       {footer && (
         <div className={cn("sticky z-20 lg:bottom-0 bg-white border-t -mx-4 px-4 pt-3 pb-4 flex flex-col gap-2", footerOffsetClass)}>
           {footer}

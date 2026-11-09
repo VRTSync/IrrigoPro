@@ -22,3 +22,9 @@ screenshot — queries firing on mount fail invisibly, and a background 403 on a
 page is the most common way a new role ships half-broken. Separate the 403s the new role is
 *supposed* to get from ones that also affect existing roles, so pre-existing gaps are reported
 rather than silently "fixed" into scope creep.
+
+**Rule:** Phone-wizard acceptance must prove that lower controls are reachable by real scrolling, not only by DOM-triggered clicks.
+
+**Why:** A programmatic click can pass on an off-screen control while a sticky footer hides it in the captured viewport. A passing mutation alone does not prove a technician can reach it.
+
+**How to apply:** Scroll the actual phone viewport, check target and bottom-navigation bounds, and capture both upper and lower portions of long steps. Dismiss the development preview banner before pointer checks.

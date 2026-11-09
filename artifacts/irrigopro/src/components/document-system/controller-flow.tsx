@@ -1,5 +1,4 @@
 import { useMemo, useRef, useState } from "react";
-import { Link } from "wouter";
 import { AlertTriangle, Info, Loader2, Minus, Plus } from "lucide-react";
 import type { DocumentationControllerGraph, DocumentationSite } from "@workspace/api-client-react";
 import { controllerDocumentationGaps, type ControllerDocInput, type DocGap } from "@workspace/shared";
@@ -13,19 +12,27 @@ import {
 import { DocFrame } from "./doc-frame";
 import { DocChip } from "./doc-chip";
 import { DocPhotoField } from "./doc-photo-field";
+import { ProgramsStep, RunTimesStep, ZoneTypesStep } from "./slice5-steps";
+import {
+  activeSorted, mergePrograms, mergeZones, nextProgramName, programAdded, programDeleted, programsSummary,
+  saveProgramsStep, saveRunTimes, saveZoneTypes, typesSummary, useSlice5Draft,
+} from "./slice5-model";
 import { CLOCK_LOCATIONS, CONTROLLER_BRANDS, CONTROLLER_MODELS, QUICK_ZONE_COUNTS, serverMessage } from "./constants";
 import { useInvalidateDocSite } from "./use-doc-site";
 
-// Slice 4 steps. Slice 5 inserts zone_types, programs and run_times before review.
+// Keys match CONTROLLER_DOC_STEPS (lib/shared/src/system-documentation.ts).
 export const FLOW_STEPS = [
   { key: "photo", title: "Clock photo" },
   { key: "details", title: "Clock details" },
   { key: "zone_count", title: "Zone count" },
+  { key: "zone_types", title: "Zone types" },
+  { key: "programs", title: "Programs" },
+  { key: "run_times", title: "Run times" },
   { key: "review", title: "Review" },
 ] as const;
 type StepKey = (typeof FLOW_STEPS)[number]["key"];
 const STEP_TITLES = FLOW_STEPS.map((s) => s.title);
-const LATER_STEPS = new Set(["zone_types", "programs", "run_times"]);
+const stepIndex = (k: StepKey) => FLOW_STEPS.findIndex((s) => s.key === k);
 
 type Values = {
   photo: string | null;
@@ -40,7 +47,9 @@ type Action =
   | { kind: "step"; to: number }
   | { kind: "exit" }
   | { kind: "verify" }
-  | { kind: "inactive" };
+  | { kind: "inactive" }
+  | { kind: "add-program" }
+  | { kind: "delete-program"; id: number; name: string };
 
 type SaveResult = "ok" | "failed" | "needs-confirm";
 
@@ -85,7 +94,8 @@ export interface ControllerFlowProps {
 }
 
 export function ControllerFlow({ customerId, branchName, site, controller, onExit, footerOffsetClass }: ControllerFlowProps) {
-  const invalidate = useInvalidateDocSite(customerId, branchName);
+  const invalidateSite = useInvalidateDocSite(customerId, branchName);
+  const invalidate = () => invalidateSite(savedIdRef.current);
   const [step, setStep] = useState(() => initialStepFor(controller));
   const [values, setValues] = useState<Values>(() => valuesOf(controller));
   const savedRef = useRef<Values>(valuesOf(controller));
@@ -96,7 +106,10 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ message: string; retry: () => void } | null>(null);
-  const [dialog, setDialog] = useState<null | { type: "retire"; action: Action } | { type: "leave" } | { type: "inactive" }>(null);
+  const [dialog, setDialog] = useState<
+    null | { type: "retire"; action: Action } | { type: "leave" } | { type: "inactive" } | { type: "program"; id: number; name: string }
+  >(null);
+  const s5 = useSlice5Draft();
   const [officeZones] = useState<number | null>(controller?.totalZones ?? null);
   // True once the user deliberately picks a count on this step (stepper, input,
   // quick chip or "Matches"). Until then a header/record mismatch stays a gap.
@@ -114,8 +127,14 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
   const letter = live?.letter ?? controller?.letter ?? createdLetter ?? "";
   const stepKey: StepKey = FLOW_STEPS[step].key;
 
+  const baseZones = useMemo(() => base?.zones ?? [], [base]);
+  const allPrograms = useMemo(() => mergePrograms(base?.programs ?? [], s5.draft), [base, s5.draft]);
+  const programs = useMemo(() => activeSorted(allPrograms), [allPrograms]);
+  const zones = useMemo(() => mergeZones(baseZones, s5.draft), [baseZones, s5.draft]);
+  // Zone tiles need real zone ids; after a fresh count they arrive with the refetch.
+  const zonesReady = values.totalZones != null && zones.length === values.totalZones && zones.every((z) => Number.isFinite(z.id));
+
   const draftInput: ControllerDocInput = useMemo(() => {
-    const zones = base?.zones ?? [];
     return {
       settingsPhotoUrl: values.photo,
       name: values.name,
@@ -123,13 +142,12 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
       brand: values.brand,
       model: values.model,
       totalZones: values.totalZones,
-      programs: base?.programs ?? [],
+      programs,
       zones: !zoneTouched || zones.length === values.totalZones ? zones : resizeZones(zones, values.totalZones),
     };
-  }, [base, values, zoneTouched]);
+  }, [zones, programs, values, zoneTouched]);
   const allGaps: DocGap[] = useMemo(() => controllerDocumentationGaps(draftInput), [draftInput]);
   const stepGaps = allGaps.filter((g) => g.step === stepKey);
-  const laterGaps = allGaps.some((g) => LATER_STEPS.has(g.step));
 
   const set = <K extends keyof Values>(k: K, v: Values[K]) => {
     if (k === "totalZones") setZoneTouched(true);
@@ -187,6 +205,22 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
       await apiRequest(`/api/irrigation-controllers/${id}/zone-count`, "PUT", { totalZones: n });
       savedRef.current = { ...savedRef.current, totalZones: n };
       reconciledRef.current = n;
+      changedRef.current = true;
+      // Zone types needs the real zone ids, so wait for the refetch here.
+      await invalidate();
+      return "ok";
+    } else if (key === "zone_types" || key === "programs" || key === "run_times") {
+      if (id == null) return "ok";
+      let sent = false;
+      const onSent = () => { sent = true; changedRef.current = true; };
+      try {
+        if (key === "zone_types") await saveZoneTypes(id, s5, baseZones, onSent);
+        else if (key === "programs") await saveProgramsStep(s5, onSent);
+        else await saveRunTimes(id, s5, baseZones, onSent);
+      } finally {
+        if (sent) void invalidate();
+      }
+      return "ok";
     } else {
       return "ok";
     }
@@ -214,6 +248,26 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
         changedRef.current = true;
         void invalidate();
         onExit(`Controller ${letter} marked not at this location.`);
+        return;
+      }
+      if (action.kind === "add-program") {
+        const id = savedIdRef.current!;
+        const name = nextProgramName(mergePrograms(base?.programs ?? [], s5.ref.current));
+        if (!name) throw new Error("This clock already has programs A to F.");
+        const created = await apiRequest(`/api/irrigation-controllers/${id}/programs`, "POST", {
+          name, wateringDays: [], startTimes: [], seasonalAdjustPct: 100,
+        });
+        if (!created || !Number.isFinite(Number(created.id))) throw new Error("The server did not return the new program.");
+        programAdded(s5, { isActive: true, sortOrder: 0, wateringDays: [], startTimes: [], seasonalAdjustPct: 100, ...created, name: created.name ?? name });
+        changedRef.current = true;
+        void invalidate();
+        return;
+      }
+      if (action.kind === "delete-program") {
+        await apiRequest(`/api/irrigation-programs/${action.id}`, "DELETE");
+        programDeleted(s5, action.id, baseZones);
+        changedRef.current = true;
+        void invalidate();
         return;
       }
       const res = await saveStep(stepKey, confirmedRetire, action.kind === "step" && action.to > step);
@@ -299,6 +353,7 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
           busy: busy || photoBlocked,
         }}
         footer={footer}
+        contentDisabled={busy}
         footerOffsetClass={footerOffsetClass}
       >
         {stepKey === "photo" && (
@@ -418,6 +473,14 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
           </section>
         )}
 
+        {stepKey === "zone_types" && <ZoneTypesStep zones={zones} ready={zonesReady} h={s5} onReload={() => void invalidate()} />}
+        {stepKey === "programs" && (
+          <ProgramsStep programs={programs} h={s5} busy={busy}
+            onAdd={() => void run({ kind: "add-program" })}
+            onRemove={(p) => setDialog({ type: "program", id: p.id, name: p.name })} />
+        )}
+        {stepKey === "run_times" && <RunTimesStep zones={zones} programs={programs} ready={zonesReady} h={s5} onReload={() => void invalidate()} />}
+
         {isReview && (
           <section className="flex flex-col gap-3" data-testid="step-review">
             {values.photo ? (
@@ -431,11 +494,13 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
                 ["Name", values.name || "Not set", 1],
                 ["Location", values.location || "Not set", 1],
                 ["Brand", [values.brand, values.model].filter(Boolean).join(" ") || "Not set", 1],
-                ["Zones", values.totalZones ? String(values.totalZones) : "Not set", 2],
+                ["Zones", values.totalZones ? String(values.totalZones) : "Not set", stepIndex("zone_count")],
+                ["Types", typesSummary(zones), stepIndex("zone_types")],
+                ["Programs", programsSummary(programs, zones), stepIndex("programs")],
               ] as const).map(([label, value, to]) => (
                 <div key={label} className="flex items-center gap-3 px-3.5 py-3">
-                  <dt className="w-20 shrink-0 text-sm text-muted-foreground">{label}</dt>
-                  <dd className="min-w-0 flex-1 truncate text-[15px] font-medium" data-testid={`text-review-${label.toLowerCase()}`}>{value}</dd>
+                  <dt className="w-20 shrink-0 self-start pt-0.5 text-sm text-muted-foreground">{label}</dt>
+                  <dd className={label === "Types" || label === "Programs" ? "min-w-0 flex-1 whitespace-pre-line text-[15px] font-medium" : "min-w-0 flex-1 truncate text-[15px] font-medium"} data-testid={`text-review-${label.toLowerCase()}`}>{value}</dd>
                   <button type="button" className="min-h-11 px-2 text-sm font-semibold text-primary" disabled={busy} onClick={() => void run({ kind: "step", to })} data-testid={`button-edit-${label.toLowerCase()}`}>
                     Edit
                   </button>
@@ -446,11 +511,6 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
               <p className="text-sm font-medium text-amber-800" data-testid="text-review-gaps">
                 Still needed: {allGaps.map((g) => g.label).join(", ")}
               </p>
-            )}
-            {laterGaps && (
-              <Link href={`/customers/${customerId}/irrigation-profile`} className="text-sm font-medium text-primary underline" data-testid="link-finish-in-profile">
-                Finish zone types, programs and run times in Controllers &amp; Zones
-              </Link>
             )}
             {notHereButton}
           </section>
@@ -480,6 +540,18 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
               <AlertDialogFooter>
                 <AlertDialogCancel data-testid="button-dialog-cancel">Keep editing</AlertDialogCancel>
                 <AlertDialogAction data-testid="button-dialog-leave" onClick={() => { setDialog(null); onExit(null); }}>Leave</AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          )}
+          {dialog?.type === "program" && (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove Program {dialog.name}? Zones on it lose their program.</AlertDialogTitle>
+                <AlertDialogDescription>This happens right away.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel data-testid="button-dialog-cancel">Cancel</AlertDialogCancel>
+                <AlertDialogAction data-testid="button-dialog-remove-program" onClick={() => { const { id, name } = dialog; setDialog(null); void run({ kind: "delete-program", id, name }); }}>Remove</AlertDialogAction>
               </AlertDialogFooter>
             </>
           )}
