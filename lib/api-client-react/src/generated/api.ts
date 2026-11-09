@@ -19,6 +19,8 @@ import type {
 import type {
   CustomerPullStatus,
   DocumentationBackflowVerification,
+  DocumentationControllerOrder,
+  DocumentationControllerOrderInput,
   DocumentationControllerVerification,
   DocumentationError,
   DocumentationNoBackflowInput,
@@ -409,6 +411,99 @@ export const useFieldVerifyBackflow = <
   TContext
 > => {
   return useMutation(getFieldVerifyBackflowMutationOptions(options));
+};
+
+/**
+ * @summary Save wizard-only controller presentation order without editing equipment
+ */
+export const getSaveDocumentationControllerOrderUrl = (customerId: number) => {
+  return `/api/system-documentation/customers/${customerId}/site/controller-order`;
+};
+
+export const saveDocumentationControllerOrder = async (
+  customerId: number,
+  documentationControllerOrderInput: DocumentationControllerOrderInput,
+  options?: RequestInit,
+): Promise<DocumentationControllerOrder> => {
+  return customFetch<DocumentationControllerOrder>(
+    getSaveDocumentationControllerOrderUrl(customerId),
+    {
+      ...options,
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(documentationControllerOrderInput),
+    },
+  );
+};
+
+export const getSaveDocumentationControllerOrderMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof saveDocumentationControllerOrder>>,
+    TError,
+    { customerId: number; data: BodyType<DocumentationControllerOrderInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof saveDocumentationControllerOrder>>,
+  TError,
+  { customerId: number; data: BodyType<DocumentationControllerOrderInput> },
+  TContext
+> => {
+  const mutationKey = ["saveDocumentationControllerOrder"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof saveDocumentationControllerOrder>>,
+    { customerId: number; data: BodyType<DocumentationControllerOrderInput> }
+  > = (props) => {
+    const { customerId, data } = props ?? {};
+
+    return saveDocumentationControllerOrder(customerId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SaveDocumentationControllerOrderMutationResult = NonNullable<
+  Awaited<ReturnType<typeof saveDocumentationControllerOrder>>
+>;
+export type SaveDocumentationControllerOrderMutationBody =
+  BodyType<DocumentationControllerOrderInput>;
+export type SaveDocumentationControllerOrderMutationError = ErrorType<void>;
+
+/**
+ * @summary Save wizard-only controller presentation order without editing equipment
+ */
+export const useSaveDocumentationControllerOrder = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof saveDocumentationControllerOrder>>,
+    TError,
+    { customerId: number; data: BodyType<DocumentationControllerOrderInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof saveDocumentationControllerOrder>>,
+  TError,
+  { customerId: number; data: BodyType<DocumentationControllerOrderInput> },
+  TContext
+> => {
+  return useMutation(
+    getSaveDocumentationControllerOrderMutationOptions(options),
+  );
 };
 
 /**

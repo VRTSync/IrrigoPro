@@ -36,6 +36,7 @@ const auth: RequestHandler = (req, res, next) => {
 registerIrrigationProfileRoutes(app, { requireAuthentication: auth });
 registerSystemDocumentationRoutes(app, { requireAuthentication: auth });
 app.get("/api/customers", auth, (_req, res) => { res.json({ privateFixture: true }); });
+app.get("/api/users", auth, (_req, res) => { res.json({ privateFixture: true }); });
 const server = createServer(app);
 
 async function hit(method: string, path: string, body?: unknown, role = "system_documenter", company: number | "none" = a) {
@@ -376,5 +377,94 @@ describe("Document System reads and atomic verification (real DB/routes)", { con
     assert.deepEqual(await storage.getIrrigationController(a, ctrl.id), before);
     assert.deepEqual(await storage.getIrrigationHistory(a, ctrl.id), historyBefore);
     assert.ok(loggedErrors.length > 0);
+  });
+
+  it("saves wizard-only order across reads without touching equipment, history, profile ordering or Finish", async () => {
+    const c = await customer("Controller order preservation");
+    const one = await controller(c.id), two = await controller(c.id);
+    await hit("POST", verifyCtrl(one.id)); await hit("POST", verifyCtrl(two.id));
+    await hit("POST", confirm(c.id), { confirmed: true }); await hit("POST", finish(c.id), {});
+    const before = (await hit("GET", site(c.id))).body;
+    const graphs = await Promise.all([one, two].map(x => storage.getIrrigationController(a, x.id)));
+    const histories = await Promise.all([one, two].map(x => storage.getIrrigationHistory(a, x.id)));
+    const profile = await storage.listIrrigationControllers(a, c.id, "");
+    const docBefore = await record(c.id);
+    const previousControllerIds = before.controllers.map((x: any) => x.id);
+    const controllerIds = [...previousControllerIds].reverse();
+    const body = { branchName: "", controllerIds, previousControllerIds };
+    const url = `${site(c.id)}/controller-order`;
+    assert.deepEqual(await hit("PUT", url, body), { status: 200, body: { controllerIds } });
+    assert.deepEqual(await hit("PUT", url, body), { status: 200, body: { controllerIds } }, "lost response retry");
+    for (let i = 0; i < 2; i++) {
+      const afterRead = (await hit("GET", site(c.id))).body;
+      assert.deepEqual(afterRead.controllers, [...before.controllers].reverse());
+      assert.deepEqual(afterRead.site, before.site);
+      assert.deepEqual(afterRead.backflows, before.backflows);
+    }
+    assert.deepEqual(await Promise.all([one, two].map(x => storage.getIrrigationController(a, x.id))), graphs);
+    assert.deepEqual(await Promise.all([one, two].map(x => storage.getIrrigationHistory(a, x.id))), histories);
+    assert.deepEqual(await storage.listIrrigationControllers(a, c.id, ""), profile);
+    assert.deepEqual(await record(c.id), { ...docBefore, controllerOrder: controllerIds });
+    const added = await controller(c.id, false);
+    assert.deepEqual((await hit("GET", site(c.id))).body.controllers.map((x: any) => x.id), [...controllerIds, added.id]);
+    await storage.updateIrrigationController(a, two.id, { isActive: false });
+    assert.deepEqual((await hit("GET", site(c.id))).body.controllers.map((x: any) => x.id), [one.id, added.id]);
+    assert.equal((await hit("PUT", url, body)).status, 409, "stale membership cannot overwrite");
+  });
+
+  it("controller order validates bodies, ownership, active membership, branches and existing role boundaries", async () => {
+    const c = await customer("Ordering boundaries", { branches: ["North", "South"] });
+    const north = await controller(c.id, false, { branchName: "North" });
+    const other = await controller(c.id, false, { branchName: "South" });
+    const inactive = await controller(c.id, false, { branchName: "North", isActive: false });
+    const url = `${site(c.id)}/controller-order`;
+    const body = { branchName: "North", controllerIds: [north.id], previousControllerIds: [north.id] };
+    for (const patch of [
+      { controllerIds: [north.id, north.id] }, { previousControllerIds: [north.id, north.id] },
+      { controllerIds: [-1] }, { controllerIds: ["1"] }, { controllerIds: null }, { companyId: b },
+    ]) assert.equal((await hit("PUT", url, { ...body, ...patch })).status, 400);
+    for (const ids of [[other.id], [inactive.id], [], [north.id, other.id], [999999999]]) {
+      assert.equal((await hit("PUT", url, { ...body, controllerIds: ids })).status, 409);
+    }
+    for (const branchName of ["", "Unknown"]) assert.equal((await hit("PUT", url, { ...body, branchName })).status, 400);
+    assert.equal((await hit("PUT", url, {}, "system_documenter", b)).status, 404, "ownership before body validation");
+    assert.equal((await hit("PUT", url, { ...body, controllerIds: [other.id] }, "system_documenter", b)).status, 404);
+    for (const role of ["field_tech", "billing_manager", "bookkeeper", "unknown_role"]) {
+      assert.equal((await hit("PUT", url, body, role)).status, 403);
+    }
+    for (const role of ["system_documenter", "irrigation_manager", "company_admin", "super_admin"]) {
+      assert.equal((await hit("PUT", url, body, role, role === "super_admin" ? "none" : a)).status, 200);
+    }
+    assert.equal((await fetch(base + url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).status, 401);
+    assert.equal((await hit("PUT", url, body, "system_documenter", "none")).status, 401);
+    assert.equal((await hit("GET", "/api/users")).status, 403);
+    assert.equal((await hit("DELETE", `/api/irrigation-controllers/${north.id}`)).status, 403);
+    assert.deepEqual((await hit("GET", site(c.id, "South"))).body.controllers.map((x: any) => x.id), [other.id]);
+  });
+
+  it("serializes conflicting reorders, rejects stale previous order, and rolls back failed writes", async () => {
+    const c = await customer("Concurrent order");
+    const rows = await Promise.all([0, 1, 2].map(() => controller(c.id, false)));
+    const previousControllerIds = (await hit("GET", site(c.id))).body.controllers.map((x: any) => x.id) as number[];
+    const url = `${site(c.id)}/controller-order`;
+    const orders = [[previousControllerIds[1], previousControllerIds[0], previousControllerIds[2]], [...previousControllerIds].reverse()];
+    const results = await Promise.all(orders.map(controllerIds => hit("PUT", url, { branchName: "", previousControllerIds, controllerIds })));
+    assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
+    const saved = results.find(r => r.status === 200)!.body.controllerIds;
+    assert.deepEqual((await hit("GET", site(c.id))).body.controllers.map((x: any) => x.id), saved);
+    const before = await record(c.id);
+    // Failure at the actual write boundary must not leak a partial order.
+    const transaction = db.transaction.bind(db);
+    const write = mock.method(db, "transaction", (async (fn: any) => transaction(async tx => {
+      await fn(tx);
+      throw new Error("Injected failure after order write, before commit");
+    })) as typeof db.transaction);
+    try {
+      assert.equal((await hit("PUT", url, { branchName: "", previousControllerIds: saved, controllerIds: previousControllerIds })).status, 500);
+    } finally { write.mock.restore(); }
+    assert.deepEqual(await record(c.id), before);
+    assert.equal(rows.length, 3);
+    const empty = await customer("No controllers to sort");
+    assert.deepEqual(await hit("PUT", `${site(empty.id)}/controller-order`, { branchName: "", previousControllerIds: [], controllerIds: [] }), { status: 200, body: { controllerIds: [] } });
   });
 });

@@ -202,6 +202,16 @@ export type DocumentationBackflowVerification = DocumentationBackflow &
     vrtSyncId: string | null;
   };
 
+export interface DocumentationControllerOrderInput {
+  branchName: string;
+  controllerIds: number[];
+  previousControllerIds: number[];
+}
+
+export interface DocumentationControllerOrder {
+  controllerIds: number[];
+}
+
 export interface DocumentationSite {
   customer: DocumentationCustomer;
   branchName: string;

@@ -306,7 +306,7 @@
     },
     {
       "name": "document-system-page",
-      "command": "pnpm --filter @workspace/irrigopro exec vitest run src/pages/customers/DocumentSystemPage.test.tsx src/pages/wet-checks/CustomerPickerPage.test.tsx src/components/documenter-app.test.tsx src/pages/company-user-management.documenter.test.tsx src/App.unsupported-role.test.tsx --maxWorkers=1 --minWorkers=1"
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run src/pages/customers/DocumentSystemPage.test.tsx src/pages/wet-checks/CustomerPickerPage.test.tsx src/components/documenter-app.test.tsx src/components/document-system/controller-order-list.test.tsx src/pages/company-user-management.documenter.test.tsx src/App.unsupported-role.test.tsx --maxWorkers=1 --minWorkers=1"
     }
   ],
   "types": [

@@ -16,6 +16,9 @@ export function useDocSite(customerId: number, branchName: string, enabled = tru
   return useQuery<DocumentationSite>({
     queryKey: docSiteKey(customerId, branchName),
     queryFn: () => apiRequest(docSiteUrl(customerId, branchName), "GET"),
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
     enabled: enabled && Number.isFinite(customerId) && customerId > 0,
   });
 }
