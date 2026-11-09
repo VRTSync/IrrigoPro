@@ -213,7 +213,7 @@ describe("Document System Slice 2 — existing route/storage boundaries", () => 
     assert.equal((await storage.getIrrigationController(companyBId, foreign.id))!.zones[0].zoneTypeConfirmed, false);
   });
   it("CSV insert/update, unchanged typed rows and replace-reset inherit correct confirmation", async () => {
-    const name = "Doc CSV";
+    const name = "Controller Z";
     const row = { controllerName: name, location: null, brand: null, model: null, programName: null, wateringDays: null, startTimes: null, seasonalAdjustPct: 100, zoneNumber: 1, zoneName: "Zone 1", zoneType: "other" as const, runTimeMinutes: 0 };
     await storage.importIrrigationProfile(companyAId, customerAId, "", [row, { ...row, zoneNumber: 3, zoneType: "rotor" }], "commit");
     const ctrl = (await storage.listIrrigationControllers(companyAId, customerAId)).find(c => c.name === name)!;
@@ -599,7 +599,7 @@ describe("Irrigation Profile routes — Happy path", () => {
 
   it("POST /api/customers/:id/controllers-profile creates a controller", async () => {
     const r = await hit(srv.base, "POST", `/api/customers/${customerAId}/controllers-profile`, {
-      name: "Controller A",
+      letter: "A",
       brand: "Hunter",
       model: "Pro-C",
       totalZones: 12,
@@ -699,7 +699,7 @@ describe("Irrigation Profile routes — Happy path", () => {
   });
 
   it("list batches current summaries and retired counts rather than querying each controller", async () => {
-    const added = await hit(srv.base, "POST", `/api/customers/${customerAId}/controllers-profile`, { name: "Controller B", totalZones: 2 });
+    const added = await hit(srv.base, "POST", `/api/customers/${customerAId}/controllers-profile`, { letter: "B", totalZones: 2 });
     assert.equal(added.status, 201);
     createdControllerIds.push(added.body.id);
     const original = db.select.bind(db);
@@ -784,7 +784,7 @@ describe("Irrigation Profile routes — Tenant isolation", () => {
 
     // Create controller A under company A.
     const rA = await hit(srvA.base, "POST", `/api/customers/${customerAId}/controllers-profile`, {
-      name: "Controller A",
+      letter: "A",
     });
     assert.equal(rA.status, 201, JSON.stringify(rA.body));
     ctrlAId = rA.body.id;
@@ -792,7 +792,7 @@ describe("Irrigation Profile routes — Tenant isolation", () => {
 
     // Create controller B under company B.
     const rB = await hit(srvB.base, "POST", `/api/customers/${customerBId}/controllers-profile`, {
-      name: "Controller A", // Same name — should not collide (different company).
+      letter: "A", // Same letter/name, different company.
     });
     assert.equal(rB.status, 201, JSON.stringify(rB.body));
     ctrlBId = rB.body.id;
@@ -908,7 +908,7 @@ describe("Irrigation Profile routes — Tenant isolation", () => {
     // is that company B's "Controller A" and company A's controllers share no
     // uniqueness scope — they are invisible to each other.
     const rCtrlA = await hit(srvA.base, "POST", `/api/customers/${customerAId}/controllers-profile`, {
-      name: "Controller X",
+      letter: "X",
     });
     assert.equal(rCtrlA.status, 201, JSON.stringify(rCtrlA.body));
     const ctrlA2Id = rCtrlA.body.id;
@@ -1056,7 +1056,8 @@ describe("Slice 1 — zone record foundation", () => {
   const allZones = (controllerId: number) => db.select().from(irrigationProfileZones)
     .where(eq(irrigationProfileZones.controllerId, controllerId)).orderBy(irrigationProfileZones.zoneNumber);
   const create = async (name: string, totalZones: number | null) => {
-    const result = await hit(srv.base, "POST", `/api/customers/${customerAId}/controllers-profile`, { name, totalZones });
+    const letter = await storage.nextControllerLetter(companyAId, customerAId);
+    const result = await hit(srv.base, "POST", `/api/customers/${customerAId}/controllers-profile`, { letter, totalZones });
     assert.equal(result.status, 201, JSON.stringify(result.body));
     createdControllerIds.push(result.body.id);
     return result.body.id as number;
@@ -1151,29 +1152,30 @@ describe("Slice 1 — zone record foundation", () => {
   });
   it("9. CSV Replace retires above max; sparse add fills gaps; sparse Replace resets omissions", async () => {
     const replaceId = await create("CSV foundation", 12);
+    const replaceName = (await storage.getIrrigationController(companyAId, replaceId))!.name;
     const before = await allZones(replaceId);
     await storage.updateIrrigationZone(companyAId, before[2].id, { notes: "Reset me", overrideDays: ["Tue"], isActive: false, runTimeMinutes: 17 });
     const row = (name: string, n: number) => ({ controllerName: name, zoneNumber: n, zoneName: `Imported ${n}`, zoneType: "rotor", runTimeMinutes: 9, seasonalAdjustPct: 100 });
     const endpoint = `/api/customers/${customerAId}/irrigation-profile/import-csv`;
-    const result = await hit(srv.base, "POST", endpoint, { mode: "commit", rows: Array.from({ length: 10 }, (_, i) => row("CSV foundation", i + 1)), replaceControllers: ["CSV foundation"] });
+    const result = await hit(srv.base, "POST", endpoint, { mode: "commit", rows: Array.from({ length: 10 }, (_, i) => row(replaceName, i + 1)), replaceControllers: [replaceName] });
     assert.equal(result.status, 200, JSON.stringify(result.body));
     const after = await allZones(replaceId);
     assert.equal(after.length, 12); assert.ok(after[10].retiredAt); assert.ok(after[11].retiredAt);
     assert.deepEqual(after.map(z => z.id), before.map(z => z.id));
-    const sparse = await hit(srv.base, "POST", endpoint, { mode: "commit", rows: [1, 2, 5].map(n => row("Sparse foundation", n)) });
+    const sparse = await hit(srv.base, "POST", endpoint, { mode: "commit", rows: [1, 2, 5].map(n => row("Controller Z", n)) });
     assert.equal(sparse.status, 200, JSON.stringify(sparse.body));
-    const sparseCtrl = (await storage.listIrrigationControllers(companyAId, customerAId)).find(c => c.name === "Sparse foundation")!;
+    const sparseCtrl = (await storage.listIrrigationControllers(companyAId, customerAId)).find(c => c.name === "Controller Z")!;
     createdControllerIds.push(sparseCtrl.id);
     const sparseZones = await allZones(sparseCtrl.id);
     assert.equal(sparseCtrl.totalZones, 5); assert.equal(sparseZones.length, 5);
     assert.equal(sparseZones[2].name, "Zone 3"); assert.equal(sparseZones[3].runTimeMinutes, 0);
-    const reset = await hit(srv.base, "POST", endpoint, { mode: "commit", rows: [1, 2, 10].map(n => row("CSV foundation", n)), replaceControllers: ["CSV foundation"] });
+    const reset = await hit(srv.base, "POST", endpoint, { mode: "commit", rows: [1, 2, 10].map(n => row(replaceName, n)), replaceControllers: [replaceName] });
     assert.equal(reset.status, 200, JSON.stringify(reset.body));
     const resetZone = (await allZones(replaceId))[2];
     assert.equal(resetZone.id, before[2].id); assert.equal(resetZone.name, "Zone 3");
     assert.equal(resetZone.notes, null); assert.equal(resetZone.overrideDays, null);
     assert.equal(resetZone.isActive, true); assert.equal(resetZone.runTimeMinutes, 0);
-    const nonshrink = await hit(srv.base, "POST", endpoint, { mode: "commit", rows: [row("CSV foundation", 1)] });
+    const nonshrink = await hit(srv.base, "POST", endpoint, { mode: "commit", rows: [row(replaceName, 1)] });
     assert.equal(nonshrink.status, 200); assert.equal((await storage.getIrrigationController(companyAId, replaceId))!.totalZones, 10);
   });
   it("10. foreign tenant is 404; super admin and current field-tech count access succeed", async () => {
@@ -1223,7 +1225,7 @@ describe("Slice 1 — zone record foundation", () => {
   });
   it("creation letter collisions retry the whole transaction without leaking zones or history", async () => {
     const ctrls = await Promise.all(["Retry A", "Retry B"].map(name => storage.createIrrigationController({
-      companyId: companyAId, customerId: customerAId, branchName: "retry", name, letter: "A", totalZones: 38,
+      companyId: companyAId, customerId: customerAId, branchName: "retry", name, totalZones: 38,
     })));
     createdControllerIds.push(...ctrls.map(ctrl => ctrl.id));
     assert.equal(new Set(ctrls.map(ctrl => ctrl.letter)).size, 2);
@@ -1273,7 +1275,7 @@ describe("Irrigation Profile routes — CSV import", () => {
 
   const BASE_ROWS = [
     {
-      controllerName: "CSV Ctrl 1",
+      controllerName: "Clock P",
       location: "Front Yard",
       brand: "Hunter",
       model: "Pro-C",
@@ -1287,7 +1289,7 @@ describe("Irrigation Profile routes — CSV import", () => {
       runTimeMinutes: 15,
     },
     {
-      controllerName: "CSV Ctrl 1",
+      controllerName: "Clock P",
       location: "Front Yard",
       brand: "Hunter",
       model: "Pro-C",
@@ -1336,7 +1338,7 @@ describe("Irrigation Profile routes — CSV import", () => {
 
     // Verify controller was created
     const ctrls = await storage.listIrrigationControllers(companyAId, customerAId, "");
-    const ctrl = ctrls.find((c) => c.name === "CSV Ctrl 1");
+    const ctrl = ctrls.find((c) => c.name === "Controller P");
     assert.ok(ctrl, "controller should have been created");
     createdControllerIds.push(ctrl!.id);
 
@@ -1551,7 +1553,7 @@ describe("CSV import — Replace mode", () => {
       srv.base,
       "POST",
       `/api/customers/${customerAId}/controllers-profile`,
-      { name: ctrlName, totalZones: Math.max(...zones.map(z => z.zoneNumber)) },
+      { letter: await storage.nextControllerLetter(companyAId, customerAId), totalZones: Math.max(...zones.map(z => z.zoneNumber)) },
     );
     assert.equal(r.status, 201, `Seed controller: ${JSON.stringify(r.body)}`);
     const ctrlId = r.body.id;
@@ -1784,16 +1786,14 @@ describe("CSV import — Replace mode", () => {
   });
 
   it("Replace for Controller A does not touch Controller B on same import", async () => {
-    const [idA, idB] = await Promise.all([
-      seedController(`ReplaceIsoA_${Date.now()}`, [
+    const idA = await seedController(`ReplaceIsoA_${Date.now()}`, [
         { zoneNumber: 1, name: "A1" },
         { zoneNumber: 2, name: "A2" },
-      ]),
-      seedController(`ReplaceIsoB_${Date.now()}`, [
+      ]);
+    const idB = await seedController(`ReplaceIsoB_${Date.now()}`, [
         { zoneNumber: 1, name: "B1" },
         { zoneNumber: 2, name: "B2" },
-      ]),
-    ]);
+      ]);
     const nameA = (await hit(srv.base, "GET", `/api/irrigation-controllers/${idA}`)).body.name;
     const nameB = (await hit(srv.base, "GET", `/api/irrigation-controllers/${idB}`)).body.name;
 
@@ -2130,7 +2130,7 @@ describe("Irrigation Profile routes — permission matrix", () => {
         adminSrv.base,
         "POST",
         `/api/customers/${customerAId}/controllers-profile`,
-        { name: `PermMatrix_${Date.now()}`, brand: "Hunter", model: "Pro-C", totalZones: 4 },
+        { letter: await storage.nextControllerLetter(companyAId, customerAId), brand: "Hunter", model: "Pro-C", totalZones: 4 },
       );
       createdControllerIds.push(ctrlR.body.id);
 
@@ -2181,7 +2181,7 @@ describe("Irrigation Profile routes — permission matrix", () => {
         s.base,
         "POST",
         `/api/customers/${customerAId}/controllers-profile`,
-        { name: `PermTest_${Date.now()}`, brand: "Rain Bird", model: "ESP", totalZones: 2 },
+        { letter: await storage.nextControllerLetter(companyAId, customerAId), brand: "Rain Bird", model: "ESP", totalZones: 2 },
       );
       if (r.body?.id) createdControllerIds.push(r.body.id);
       return r.status;

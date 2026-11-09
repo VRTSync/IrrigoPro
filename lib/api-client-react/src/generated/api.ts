@@ -17,6 +17,9 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  ControllerLetterConflict,
+  ControllerLetterInput,
+  ControllerLetterResult,
   CustomerPullStatus,
   DocumentationBackflowVerification,
   DocumentationControllerOrder,
@@ -40,6 +43,94 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+/**
+ * @summary Confirm, change or atomically swap an active controller letter
+ */
+export const getSetControllerLetterUrl = (id: number) => {
+  return `/api/irrigation-controllers/${id}/letter`;
+};
+
+export const setControllerLetter = async (
+  id: number,
+  controllerLetterInput: ControllerLetterInput,
+  options?: RequestInit,
+): Promise<ControllerLetterResult> => {
+  return customFetch<ControllerLetterResult>(getSetControllerLetterUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(controllerLetterInput),
+  });
+};
+
+export const getSetControllerLetterMutationOptions = <
+  TError = ErrorType<void | ControllerLetterConflict>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setControllerLetter>>,
+    TError,
+    { id: number; data: BodyType<ControllerLetterInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof setControllerLetter>>,
+  TError,
+  { id: number; data: BodyType<ControllerLetterInput> },
+  TContext
+> => {
+  const mutationKey = ["setControllerLetter"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof setControllerLetter>>,
+    { id: number; data: BodyType<ControllerLetterInput> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return setControllerLetter(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SetControllerLetterMutationResult = NonNullable<
+  Awaited<ReturnType<typeof setControllerLetter>>
+>;
+export type SetControllerLetterMutationBody = BodyType<ControllerLetterInput>;
+export type SetControllerLetterMutationError =
+  ErrorType<void | ControllerLetterConflict>;
+
+/**
+ * @summary Confirm, change or atomically swap an active controller letter
+ */
+export const useSetControllerLetter = <
+  TError = ErrorType<void | ControllerLetterConflict>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setControllerLetter>>,
+    TError,
+    { id: number; data: BodyType<ControllerLetterInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof setControllerLetter>>,
+  TError,
+  { id: number; data: BodyType<ControllerLetterInput> },
+  TContext
+> => {
+  return useMutation(getSetControllerLetterMutationOptions(options));
+};
 
 /**
  * @summary List privacy-safe documentation sites

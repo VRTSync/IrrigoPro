@@ -101,10 +101,47 @@ export interface DocumentationProgram {
   updatedAt: string;
 }
 
+export interface ControllerLetterInput {
+  /** @pattern ^[A-Za-z]$ */
+  letter: string;
+  confirm?: boolean;
+  swap?: boolean;
+}
+
+export interface ControllerLetterRecord {
+  id: number;
+  /** @nullable */
+  letter: string | null;
+  name: string;
+  letterConfirmed: boolean;
+  /** @nullable */
+  location: string | null;
+  [key: string]: unknown;
+}
+
+export interface ControllerLetterResult {
+  controller: ControllerLetterRecord;
+  swappedWith: ControllerLetterRecord | null;
+}
+
+export type ControllerLetterConflictHolder = {
+  id: number;
+  /** @nullable */
+  letter: string | null;
+  /** @nullable */
+  location: string | null;
+};
+
+export interface ControllerLetterConflict {
+  message: string;
+  holder: ControllerLetterConflictHolder;
+}
+
 export interface DocumentationController {
   id: number;
   /** @nullable */
   letter: string | null;
+  letterConfirmed: boolean;
   name: string;
   /** @nullable */
   location: string | null;

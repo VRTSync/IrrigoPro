@@ -6,6 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from "./controllerLetterConflict";
+export * from "./controllerLetterConflictHolder";
+export * from "./controllerLetterInput";
+export * from "./controllerLetterRecord";
+export * from "./controllerLetterResult";
 export * from "./customerPullStatus";
 export * from "./customerPullStatusIntervalMinutes";
 export * from "./customerPullSummary";

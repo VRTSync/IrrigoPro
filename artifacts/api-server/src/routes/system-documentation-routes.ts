@@ -105,6 +105,7 @@ export function registerSystemDocumentationRoutes(app: Express, deps: { requireA
     const controllerRows = await db.select({
       customerId: irrigationControllers.customerId, branchName: irrigationControllers.branchName,
       isActive: irrigationControllers.isActive, fieldVerifiedAt: irrigationControllers.fieldVerifiedAt,
+      letterConfirmed: irrigationControllers.letterConfirmed,
       lastUpdatedAt: irrigationControllers.lastUpdatedAt,
     }).from(irrigationControllers).where(and(inArray(irrigationControllers.customerId, ids),
       eq(irrigationControllers.isActive, true), ownerScope(irrigationControllers)));
@@ -156,7 +157,7 @@ export function registerSystemDocumentationRoutes(app: Express, deps: { requireA
       // Do not expose retired zones, tenancy, audit IDs, or future controller fields.
       const programs = graph.programs.filter(p => p.companyId === c.companyId);
       controllers.push({
-        id: graph.id, letter: graph.letter, name: graph.name, location: graph.location,
+        id: graph.id, letter: graph.letter, letterConfirmed: graph.letterConfirmed, name: graph.name, location: graph.location,
         brand: graph.brand, model: graph.model, totalZones: graph.totalZones, settingsPhotoUrl: graph.settingsPhotoUrl,
         notes: graph.notes, lastUpdatedAt: graph.lastUpdatedAt, fieldVerifiedAt: graph.fieldVerifiedAt,
         fieldVerifiedByName: graph.fieldVerifiedByName, programs,

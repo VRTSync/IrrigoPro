@@ -165,7 +165,7 @@ import { db, pool } from "./db";
 // read into an empty array. A pool-acquisition failure must NOT degrade: it
 // has to reach the route so the client renders an error state.
 import { isConnectionAcquisitionError } from "@workspace/db";
-import { sql, eq, like, ilike, desc, and, gte, lte, or, isNull, isNotNull, inArray, gt } from "drizzle-orm";
+import { sql, eq, ne, like, ilike, desc, and, gte, lte, or, isNull, isNotNull, inArray, gt } from "drizzle-orm";
 import { logger } from "./lib/logger";
 import bcrypt from "bcrypt";
 import { processEstimatePayload, type EstimatePayloadInput } from "./estimate-payload";
@@ -215,7 +215,9 @@ import {
 import { recordAuditEvent } from "./routes/audit-log";
 import { normalizeUsername } from "./lib/normalize-username";
 import { ZoneCountClearError, validateZoneCount, zonePlaceholder, zoneCountSummary, compressZoneRanges, parseZoneRanges, zoneEditSummary, ZONE_EDIT_SUMMARY_PREFIX, ZoneProgramError, type BulkZonePatch, type ZoneActor, type ZoneChanges } from "./lib/controller-zone-records";
-import { controllerDocumentationGaps, backflowDocumentationGaps } from "@workspace/shared";
+import { controllerDocumentationGaps, backflowDocumentationGaps, controllerNameFor } from "@workspace/shared";
+import { LetterError, letterConflict, notesWithFormerName } from "./lib/controller-letters";
+export { LetterError } from "./lib/controller-letters";
 import { DocumentationError } from "./lib/documentation-error";
 export { ZoneCountClearError } from "./lib/controller-zone-records";
 
@@ -1597,14 +1599,12 @@ export class DatabaseStorage implements IStorage {
     this.repairDivergedBillingSheets();
     this.applyCompanyIdColumns();
     // NOTE: backfillControllerLetters is intentionally NOT called here.
-    // It is called via initialize() in app.ts BEFORE the server starts listening,
-    // so the NOT NULL + unique index constraints are in place before any
-    // controller-create request is processed.
+    // It is called via initialize() before serving requests for legacy schemas.
+    // The Controller Letters audit schema retires its auto-repair/hardening.
   }
 
-  // Called and awaited in app.ts before registerRoutes() so the NOT NULL +
-  // unique index on irrigation_controllers.letter are in place before the
-  // server accepts requests. Failures throw and crash startup.
+  // Awaited before registerRoutes(); audit-schema environments skip the
+  // retired legacy backfill. Failures in older schemas still crash startup.
   async initialize(): Promise<void> {
     await this.backfillControllerLetters();
   }
@@ -1792,6 +1792,16 @@ export class DatabaseStorage implements IStorage {
   // is restored from a snapshot that predates the DDL, the invariants must be applied
   // before the server serves requests — the marker alone is not sufficient.
   private async backfillControllerLetters(): Promise<void> {
+    // Controller Letters: the old all-row uniqueness / NOT NULL hardening is
+    // incompatible with active-only identity and the temporary NULL in swaps.
+    // Once the audit schema is installed, never auto-repair existing letters
+    // or reintroduce those retired constraints on startup/snapshot restore.
+    const auditSchema = await db.execute(sql`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'irrigation_controllers'
+        AND column_name = 'letter_confirmed'
+    `);
+    if (auditSchema.rows.length) return;
     const MIGRATION_KEY = 'controller-letter-backfill-v1';
     const ADVISORY_LOCK_ID = 1856001; // unique integer for this migration
     const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -11962,6 +11972,7 @@ export class DatabaseStorage implements IStorage {
         eq(irrigationControllers.companyId, companyId),
         eq(irrigationControllers.customerId, customerId),
         eq(irrigationControllers.branchName, branch),
+        eq(irrigationControllers.isActive, true),
         isNotNull(irrigationControllers.letter),
       ));
     const usedLetters = new Set<string>(
@@ -11995,18 +12006,22 @@ export class DatabaseStorage implements IStorage {
         ),
       );
 
-    const haveNames = new Set(existing.map((c) => c.name));
+    const active = existing.filter(c => c.isActive);
+    const haveNames = new Set(active.map((c) => c.name));
     // Track assigned letters so gap-reuse within this batch works correctly.
     const usedLetters = new Set<string>(
-      existing.map(c => c.letter).filter((l): l is string => l != null),
+      active.map(c => c.letter).filter((l): l is string => l != null),
     );
 
     for (const config of configs) {
       if (haveNames.has(config.name)) continue;
+      const namedLetter = /^\s*(?:clock|controller)\s+([a-z])\s*$/i.exec(config.name)?.[1].toUpperCase();
+      if (active.some(c => c.letter === (config.letter ?? namedLetter))) continue;
 
       // Assign the next available letter for this scope.
-      let letter = config.letter;
+      let letter = config.letter ?? namedLetter;
       if (!letter || usedLetters.has(letter)) {
+        letter = undefined;
         // Prefer the requested letter if free; otherwise pick the next gap.
         const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
         for (const candidate of ALPHABET) {
@@ -12025,18 +12040,19 @@ export class DatabaseStorage implements IStorage {
       // Use the same transactional insert/reconcile/history and letter retry as creation.
       try {
         const inserted = await this.createIrrigationController({
-          companyId, customerId, branchName: branch, name: config.name,
-          letter, totalZones: config.zoneCount, isActive: true,
+          companyId, customerId, branchName: branch, name: controllerNameFor(letter),
+          letter, letterConfirmed: false, totalZones: config.zoneCount, isActive: true,
         });
         if (inserted.letter) usedLetters.add(inserted.letter);
         haveNames.add(inserted.name);
+        haveNames.add(config.name);
       } catch (err: any) {
-        const unique = err?.code === "23505" || err?.cause?.code === "23505";
+        const unique = err instanceof LetterError || err?.code === "23505" || err?.cause?.code === "23505";
         if (!unique) throw err;
         // A concurrent ensure may have seeded this exact name; do not silently
         // swallow a letter collision that failed to create the requested row.
         const concurrent = await this.listIrrigationControllers(companyId, customerId, branch);
-        const found = concurrent.find(ctrl => ctrl.name === config.name);
+        const found = concurrent.find(ctrl => ctrl.isActive && ctrl.letter === letter);
         if (!found) throw err;
         haveNames.add(found.name);
         for (const ctrl of concurrent) if (ctrl.letter) usedLetters.add(ctrl.letter);
@@ -12092,11 +12108,8 @@ export class DatabaseStorage implements IStorage {
   async createIrrigationController(
     data: InsertIrrigationController,
   ): Promise<IrrigationController> {
-    // Task #1856: auto-assign a letter if one was not provided by the caller.
-    // Retry up to 3 times on unique-index violation (23505) — rare concurrent
-    // creation race where two requests both see the same free letter and try
-    // to insert simultaneously. The unique index on (company, customer, branch,
-    // letter) will reject the second; we retry with the next free gap.
+    // Internal lazy seeds may allocate a letter; interactive routes require it.
+    // Never silently replace a person's chosen letter on a collision.
     const branch = typeof data.branchName === "string" ? data.branchName.trim() : "";
     let letter = data.letter;
     const MAX_RETRIES = 3;
@@ -12107,6 +12120,19 @@ export class DatabaseStorage implements IStorage {
       }
       try {
         return await db.transaction(async tx => {
+        await tx.select({ id: customers.id }).from(customers).where(and(
+          eq(customers.id, data.customerId), eq(customers.companyId, data.companyId),
+        )).for("update");
+        if (data.isActive !== false) {
+          const [holder] = await tx.select().from(irrigationControllers).where(and(
+            eq(irrigationControllers.companyId, data.companyId),
+            eq(irrigationControllers.customerId, data.customerId),
+            eq(irrigationControllers.branchName, branch),
+            eq(irrigationControllers.isActive, true),
+            eq(irrigationControllers.letter, letter!),
+          )).for("update");
+          if (holder) throw letterConflict(holder);
+        }
         const [ctrl] = await tx
           .insert(irrigationControllers)
           .values({
@@ -12114,6 +12140,8 @@ export class DatabaseStorage implements IStorage {
             branchName: branch,
             totalZones: null,
             letter,
+            name: controllerNameFor(letter!),
+            letterConfirmed: data.letterConfirmed ?? false,
             lastUpdatedAt: data.lastUpdatedAt ?? new Date(),
             updatedAt: new Date(),
           })
@@ -12132,7 +12160,7 @@ export class DatabaseStorage implements IStorage {
         const isUniqueViolation =
           err?.code === "23505" || err?.cause?.code === "23505" ||
           (typeof err?.message === "string" && err.message.includes("uniq_irr_ctrl_letter"));
-        if (isUniqueViolation && attempt < MAX_RETRIES) {
+        if (!data.letter && (isUniqueViolation || err instanceof LetterError) && attempt < MAX_RETRIES) {
           letter = undefined; // force re-pick on next iteration
           lastErr = err;
           continue;
@@ -12141,6 +12169,67 @@ export class DatabaseStorage implements IStorage {
       }
     }
     throw lastErr ?? new Error("createIrrigationController: failed after retries");
+  }
+
+  async setControllerLetter(
+    companyId: number | null,
+    id: number,
+    input: { letter: string; confirm?: boolean; swap?: boolean },
+    actor: ZoneActor,
+  ): Promise<{ controller: IrrigationController; swappedWith: IrrigationController | null } | null> {
+    if (companyId !== null && (!Number.isInteger(companyId) || companyId <= 0)) return null;
+    const letter = input.letter.toUpperCase();
+    if (!/^[A-Z]$/.test(letter)) throw new LetterError(400, "Letter must be a single character A–Z");
+    return db.transaction(async tx => {
+      const scope = and(eq(irrigationControllers.id, id),
+        companyId === null ? undefined : eq(irrigationControllers.companyId, companyId));
+      const [visible] = await tx.select().from(irrigationControllers).where(scope);
+      if (!visible) return null;
+      // Lock the shared parent first: opposite-direction swaps and creates
+      // serialize rather than deadlocking after each locks its own clock.
+      await tx.select({ id: customers.id }).from(customers).where(and(
+        eq(customers.id, visible.customerId), eq(customers.companyId, visible.companyId),
+      )).for("update");
+      const [before] = await tx.select().from(irrigationControllers).where(scope).for("update");
+      if (!before) return null;
+      if (!before.isActive) throw new LetterError(400, "This controller is marked not at this location");
+      const [holder] = await tx.select().from(irrigationControllers).where(and(
+        eq(irrigationControllers.companyId, before.companyId),
+        eq(irrigationControllers.customerId, before.customerId),
+        eq(irrigationControllers.branchName, before.branchName),
+        eq(irrigationControllers.isActive, true), eq(irrigationControllers.letter, letter),
+        ne(irrigationControllers.id, id),
+      )).for("update");
+      if (holder && !input.swap) throw letterConflict(holder);
+      if (holder && !before.letter) throw new LetterError(400, "Choose an unused letter before swapping this legacy controller");
+      const now = new Date();
+      const stamp = { lastUpdatedAt: now, lastUpdatedByUserId: actor.id,
+        lastUpdatedByName: actor.name, updatedAt: now };
+      if (holder) {
+        // Free BOTH partial unique indexes, invisible outside this transaction.
+        await tx.update(irrigationControllers).set({ letter: null, isActive: false })
+          .where(and(eq(irrigationControllers.id, holder.id), eq(irrigationControllers.companyId, before.companyId)));
+      }
+      const [controller] = await tx.update(irrigationControllers).set({
+        letter, name: controllerNameFor(letter), letterConfirmed: input.confirm === true,
+        notes: notesWithFormerName(before.name, before.notes), ...stamp,
+      }).where(scope).returning();
+      let swappedWith: IrrigationController | null = null;
+      if (holder) {
+        [swappedWith] = await tx.update(irrigationControllers).set({
+          letter: before.letter, name: controllerNameFor(before.letter!), isActive: true,
+          letterConfirmed: false, notes: notesWithFormerName(holder.name, holder.notes), ...stamp,
+        }).where(and(eq(irrigationControllers.id, holder.id),
+          eq(irrigationControllers.companyId, before.companyId))).returning();
+        await this._appendIrrigationSnapshot(tx, swappedWith, actor,
+          `Letter ${holder.letter} → ${before.letter} (swapped with Controller ${letter}) by ${actor.name}`);
+      }
+      const summary = before.letter === letter && input.confirm
+        ? `Letter ${letter} confirmed in field by ${actor.name}`
+        : `Letter ${before.letter ?? "unassigned"} → ${letter}${holder ? ` (swapped with Controller ${letter})` : ""} by ${actor.name}`;
+      await this._appendIrrigationSnapshot(tx, controller, actor, summary);
+      return { controller, swappedWith };
+    });
   }
 
   async updateIrrigationController(
@@ -12362,6 +12451,9 @@ export class DatabaseStorage implements IStorage {
       try {
         return await db.transaction(async tx => {
           await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`irrigation-import:${companyId}:${customerId}:${branchName}`}))`);
+          await tx.select({ id: customers.id }).from(customers).where(and(
+            eq(customers.id, customerId), eq(customers.companyId, companyId),
+          )).for("update");
           // Read the diff only after taking all controller locks, in a stable order.
           await tx.select({ id: irrigationControllers.id }).from(irrigationControllers).where(and(
             eq(irrigationControllers.companyId, companyId), eq(irrigationControllers.customerId, customerId),
@@ -12436,13 +12528,19 @@ export class DatabaseStorage implements IStorage {
       );
 
     // Build lookup maps for existing data
-    const existingCtrlByName = new Map(existingCtrlList.map((c) => [c.name, c]));
+    const activeControllers = existingCtrlList.filter(c => c.isActive);
+    const existingCtrlByName = new Map(activeControllers.map((c) => [c.name, c]));
+    for (const name of ctrlGroups.keys()) {
+      const letter = /^\s*(?:clock|controller)\s+([a-z])\s*$/i.exec(name)?.[1].toUpperCase();
+      const match = letter && activeControllers.find(c => c.letter === letter);
+      if (match) existingCtrlByName.set(name, match);
+    }
 
     // Task #1856: track which letters are already in use so we can assign
     // the next free letter to each newly-created controller in commit mode.
     // This Set is mutated during the commit-mode loop below.
     const csvUsedLetters = new Set<string>(
-      existingCtrlList.map(c => c.letter).filter((l): l is string => l != null),
+      activeControllers.map(c => c.letter).filter((l): l is string => l != null),
     );
 
     // ── Build the diff ────────────────────────────────────────────────────────
@@ -12624,8 +12722,9 @@ export class DatabaseStorage implements IStorage {
           // is satisfied. csvUsedLetters tracks both existing and newly-created
           // controllers within this import run.
           const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-          let ctrlLetter: string | undefined;
-          for (const candidate of ALPHABET) {
+          const requestedLetter = /^\s*(?:clock|controller)\s+([a-z])\s*$/i.exec(ctrlName)?.[1].toUpperCase();
+          let ctrlLetter = requestedLetter && !csvUsedLetters.has(requestedLetter) ? requestedLetter : undefined;
+          if (!ctrlLetter) for (const candidate of ALPHABET) {
             if (!csvUsedLetters.has(candidate)) { ctrlLetter = candidate; break; }
           }
           if (!ctrlLetter) {
@@ -12641,8 +12740,9 @@ export class DatabaseStorage implements IStorage {
               companyId,
               customerId,
               branchName,
-              name: ctrlName,
+              name: controllerNameFor(ctrlLetter),
               letter: ctrlLetter,
+              letterConfirmed: false,
               location: group.location,
               brand: group.brand,
               model: group.model,

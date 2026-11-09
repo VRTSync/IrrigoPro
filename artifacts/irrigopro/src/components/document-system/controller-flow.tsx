@@ -136,6 +136,7 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
 
   const draftInput: ControllerDocInput = useMemo(() => {
     return {
+      letterConfirmed: base?.letterConfirmed ?? false,
       settingsPhotoUrl: values.photo,
       name: values.name,
       location: values.location,
@@ -145,7 +146,7 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
       programs,
       zones: !zoneTouched || zones.length === values.totalZones ? zones : resizeZones(zones, values.totalZones),
     };
-  }, [zones, programs, values, zoneTouched]);
+  }, [zones, programs, values, zoneTouched, base?.letterConfirmed]);
   const allGaps: DocGap[] = useMemo(() => controllerDocumentationGaps(draftInput), [draftInput]);
   const stepGaps = allGaps.filter((g) => g.step === stepKey);
 

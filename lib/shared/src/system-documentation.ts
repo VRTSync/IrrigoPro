@@ -2,6 +2,7 @@ export const CONTROLLER_DOC_STEPS = ["photo", "details", "zone_count", "zone_typ
 export const BACKFLOW_DOC_STEPS = ["photo", "device", "location", "last_test", "review"] as const;
 export type DocGap = { step: string; code: string; label: string };
 export type ControllerDocInput = {
+  letterConfirmed: boolean;
   settingsPhotoUrl: string | null; name: string | null; location: string | null; brand: string | null; model: string | null;
   totalZones: number | null;
   programs: { id: number; name: string; isActive: boolean; wateringDays: string[] | null; startTimes: string[] | null }[];
@@ -19,7 +20,8 @@ export function controllerDocumentationGaps(c: ControllerDocInput): DocGap[] {
   const gaps: DocGap[] = [];
   const add = (step: string, code: string, label: string) => gaps.push({ step, code, label });
   if (!hasText(c.settingsPhotoUrl)) add("photo", "photo", "clock photo");
-  for (const key of ["name", "location", "brand", "model"] as const) {
+  if (!c.letterConfirmed) add("details", "letter", "clock letter confirmed on site");
+  for (const key of ["location", "brand", "model"] as const) {
     if (!hasText(c[key])) add("details", key, key);
   }
   const countGap = c.totalZones === null || c.totalZones < 1 || c.zones.length !== c.totalZones;
@@ -53,11 +55,12 @@ export function backflowDocumentationGaps(b: BackflowDocInput): DocGap[] {
 }
 
 type Stamp = Date | string | null;
-type Equipment = { isActive: boolean; fieldVerifiedAt: Stamp; lastUpdatedAt: Stamp };
+type Equipment = { isActive: boolean; fieldVerifiedAt: Stamp; lastUpdatedAt: Stamp; letterConfirmed?: boolean };
 const time = (stamp: Date | string) => new Date(stamp).getTime();
-export function isFieldVerified(x: { fieldVerifiedAt: Stamp; lastUpdatedAt: Stamp }): boolean {
-  return x.fieldVerifiedAt !== null && x.lastUpdatedAt !== null && time(x.fieldVerifiedAt) >= time(x.lastUpdatedAt);
+export function isFieldVerified(x: { fieldVerifiedAt: Stamp; lastUpdatedAt: Stamp; letterConfirmed?: boolean }): boolean {
+  return x.letterConfirmed !== false && x.fieldVerifiedAt !== null && x.lastUpdatedAt !== null && time(x.fieldVerifiedAt) >= time(x.lastUpdatedAt);
 }
+export function controllerNameFor(letter: string): string { return `Controller ${letter}`; }
 export type SiteDocStatus = "verified" | "not_verified" | "nothing_on_file";
 export function siteDocumentationStatus(input: {
   controllers: Equipment[]; backflows: Equipment[];

@@ -6,6 +6,7 @@ import {
 } from "./system-documentation";
 
 const controller = (): ControllerDocInput => ({
+  letterConfirmed: true,
   settingsPhotoUrl: "photo", name: "Clock", location: "Outside", brand: "Brand", model: "Model", totalZones: 1,
   programs: [{ id: 1, name: "A", isActive: true, wateringDays: ["Mon"], startTimes: ["06:00"] }],
   zones: [{ zoneNumber: 1, zoneTypeConfirmed: true, programId: 1, runTimeMinutes: 10 }],
@@ -24,7 +25,7 @@ describe("documentation gaps", () => {
   });
   it("complete controller and each required field, including whitespace", () => {
     assert.deepEqual(controllerDocumentationGaps(controller()), []);
-    for (const [field, code] of [["settingsPhotoUrl", "photo"], ["name", "name"], ["location", "location"], ["brand", "brand"], ["model", "model"]] as const) {
+    for (const [field, code] of [["settingsPhotoUrl", "photo"], ["location", "location"], ["brand", "brand"], ["model", "model"]] as const) {
       for (const empty of [null, "", " \t "]) {
         const c = controller(); c[field] = empty;
         assert.deepEqual(codes(controllerDocumentationGaps(c)), [code]);
@@ -37,6 +38,17 @@ describe("documentation gaps", () => {
     const c = controller(); c.totalZones = 12;
     c.zones = Array.from({ length: 11 }, (_, i) => ({ zoneNumber: i + 1, zoneTypeConfirmed: false, programId: null, runTimeMinutes: 0 }));
     assert.deepEqual(controllerDocumentationGaps(c), [{ step: "zone_count", code: "zone_count", label: "zone count" }]);
+  });
+  it("requires on-site letter confirmation, not a typed controller name", () => {
+    const c = controller(); c.letterConfirmed = false; c.name = null; c.location = null;
+    assert.deepEqual(controllerDocumentationGaps(c).filter(g => g.step === "details"), [
+      { step: "details", code: "letter", label: "clock letter confirmed on site" },
+      { step: "details", code: "location", label: "location" },
+    ]);
+    const stamps = { fieldVerifiedAt: "2026-11-09T12:00:00Z", lastUpdatedAt: "2026-11-09T12:00:00Z" };
+    assert.equal(isFieldVerified({ ...stamps, letterConfirmed: false }), false);
+    assert.equal(isFieldVerified({ ...stamps, letterConfirmed: true }), true);
+    assert.equal(isFieldVerified(stamps), true);
   });
   it("pluralizes type and runtime counts and uses active program membership", () => {
     for (const n of [1, 2]) {

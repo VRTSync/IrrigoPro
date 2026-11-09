@@ -35,7 +35,7 @@ import { hasCapability, CAN_DOCUMENT_IRRIGATION_SYSTEM } from "@workspace/shared
 
 function ctrl(id: number, letter: string, o: Partial<DocumentationControllerGraph> = {}): DocumentationControllerGraph {
   return {
-    id, letter, name: `Clock ${letter}`, location: "Garage wall", brand: "Hunter", model: "Pro-C",
+    id, letter, letterConfirmed: true, name: `Clock ${letter}`, location: "Garage wall", brand: "Hunter", model: "Pro-C",
     totalZones: 2, settingsPhotoUrl: `photo-${id}`, notes: null, lastUpdatedAt: null,
     fieldVerifiedAt: null, fieldVerifiedByName: null, gaps: [], verified: false,
     programs: [], zones: [], ...o,
@@ -183,7 +183,7 @@ describe("DocumentSystemPage — Slice 4", () => {
     expect(screen.getByTestId("button-next")).toBeDisabled();
   });
 
-  it("5. new controller: no request until Clock details Next, then one POST with settingsPhotoUrl", async () => {
+  it("5. new controller cannot bypass on-site letter confirmation before the letter-picker slice", async () => {
     uploadSpy.mockResolvedValue("ph-123");
     renderPage();
     fireEvent.click(await screen.findByTestId("button-add-controller"));
@@ -201,18 +201,11 @@ describe("DocumentSystemPage — Slice 4", () => {
     fireEvent.click(screen.getByTestId("chip-location-Mech room"));
     fireEvent.click(screen.getByTestId("chip-brand-Rain Bird"));
     fireEvent.click(screen.getByTestId("chip-model-ESP-ME3"));
+    expect(screen.getByTestId("text-still-needed")).toHaveTextContent("clock letter confirmed on site");
+    expect(screen.getByTestId("button-next")).toBeDisabled();
     fireEvent.click(screen.getByTestId("button-next"));
-    await screen.findByTestId("step-zone-count");
-    expect(writes()).toEqual([[
-      "/api/customers/7/controllers-profile", "POST",
-      { name: "Clubhouse Clock", location: "Mech room", brand: "Rain Bird", model: "ESP-ME3", branchName: "", settingsPhotoUrl: "ph-123" },
-    ]]);
-    // Going back and forward again must not create a second row.
-    fireEvent.click(screen.getByTestId("button-doc-back"));
-    await screen.findByTestId("step-details");
-    fireEvent.click(screen.getByTestId("button-next"));
-    await screen.findByTestId("step-zone-count");
-    expect(writes().filter(([u]) => u.endsWith("controllers-profile"))).toHaveLength(1);
+    expect(screen.getByTestId("step-details")).toBeInTheDocument();
+    expect(writes()).toHaveLength(0);
   });
 
   it("Save & exit on an unsaved draft asks before leaving", async () => {
@@ -577,8 +570,8 @@ describe("Slice 5 — zone types", () => {
     expect(writes()).toEqual([["/api/irrigation-controllers/56/zones/bulk", "PUT", { zoneIds: [101], patch: { zoneType: "pop_up_spray" } }]]);
   });
 
-  it("a new controller gets real zone ids after Zone count", async () => {
-    uploadSpy.mockResolvedValue("ph-1");
+  it("an audited controller with an unknown count gets real zone ids after Zone count", async () => {
+    site = siteOf([ctrl(55, "D", { totalZones: null, zones: [], gaps: [{ step: "zone_count", code: "zone_count", label: "zone count" }] })]);
     custom = (url, method) => {
       if (url === "/api/irrigation-controllers/55/zone-count" && method === "PUT") {
         site = siteOf([ctrl(55, "D", { totalZones: 3, zones: [z5(1, { id: 551 }), z5(2, { id: 552 }), z5(3, { id: 553 })] })]);
@@ -587,16 +580,7 @@ describe("Slice 5 — zone types", () => {
       return undefined;
     };
     renderPage();
-    fireEvent.click(await screen.findByTestId("button-add-controller"));
-    await act(async () => { fireEvent.change(await screen.findByTestId("doc-photo-input"), { target: { files: [new File(["x"], "a.jpg")] } }); });
-    await waitFor(() => expect(screen.getByTestId("button-next")).not.toBeDisabled());
-    fireEvent.click(screen.getByTestId("button-next"));
-    await screen.findByTestId("step-details");
-    fireEvent.change(screen.getByTestId("input-name"), { target: { value: "Pool" } });
-    fireEvent.click(screen.getByTestId("chip-location-Pedestal"));
-    fireEvent.click(screen.getByTestId("chip-brand-Toro"));
-    fireEvent.click(screen.getByTestId("chip-model-Tempus"));
-    fireEvent.click(screen.getByTestId("button-next"));
+    fireEvent.click(await screen.findByTestId("row-controller-55"));
     await screen.findByTestId("step-zone-count");
     for (let i = 0; i < 3; i++) fireEvent.click(screen.getByLabelText("More zones"));
     fireEvent.click(screen.getByTestId("button-next"));

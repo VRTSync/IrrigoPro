@@ -60,6 +60,7 @@ async function customer(name: string, extra = {}) {
 async function controller(customerId: number, complete = true, extra = {}) {
   const c = await storage.createIrrigationController({
     companyId: a, customerId, name: `${prefix} clock ${Math.random()}`,
+    letterConfirmed: complete,
     ...(complete ? { location: "Garage", brand: "Hunter", model: "Pro-C", settingsPhotoUrl: "/api/photos/clock.jpg", totalZones: 2 } : {}),
     ...extra,
   });
@@ -119,14 +120,190 @@ describe("Document System reads and atomic verification (real DB/routes)", { con
     await pool.end();
   });
 
+  it("letters: create requires a chosen letter, derives names, confirms only for documentation roles", async () => {
+    const c = await customer("Chosen letters");
+    const path = `/api/customers/${c.id}/controllers-profile`;
+    assert.equal((await hit("POST", path, { name: "Clock P" })).status, 400);
+    for (const letter of ["", "AB", "1", " Å "]) assert.equal((await hit("POST", path, { letter })).status, 400);
+    const created = await hit("POST", path, { letter: "p", name: "Wrong name", letterConfirmed: true }, "irrigation_manager");
+    assert.equal(created.status, 201); assert.equal(created.body.name, "Controller P");
+    assert.equal(created.body.letter, "P"); assert.equal(created.body.letterConfirmed, false);
+    const confirmed = await hit("POST", path, { letter: "Q", confirmLetter: true }, "irrigation_manager");
+    assert.equal(confirmed.status, 201); assert.equal(confirmed.body.letterConfirmed, true);
+    for (const role of ["field_tech", "billing_manager"]) {
+      assert.equal((await hit("POST", path, { letter: "R", confirmLetter: true }, role)).status, 403);
+    }
+    const duplicate = await hit("POST", path, { letter: "P" });
+    assert.equal(duplicate.status, 409);
+    assert.deepEqual(duplicate.body, { message: "Letter P is used by Controller P",
+      holder: { id: created.body.id, letter: "P", location: null } });
+    await db.update(irrigationControllers).set({ isActive: false }).where(eq(irrigationControllers.id, created.body.id));
+    assert.equal((await hit("POST", path, { letter: "P" })).status, 201, "inactive letter and name do not reserve identity");
+  });
+
+  it("letters: general PUT refuses name and letter, but permits descriptive details", async () => {
+    const c = await customer("Details only"), ctrl = await controller(c.id);
+    const path = `/api/irrigation-controllers/${ctrl.id}`;
+    for (const body of [{ name: "" }, { letter: "Q" }, { name: null }]) {
+      assert.deepEqual(await hit("PUT", path, body), { status: 400,
+        body: { message: "Controller names follow their letter. Use Change letter." } });
+    }
+    const changed = await hit("PUT", path, { location: "North wall", letterConfirmed: false });
+    assert.equal(changed.status, 200); assert.equal(changed.body.name, ctrl.name);
+    assert.equal(changed.body.letterConfirmed, true, "confirmation is not writable through general PUT");
+    assert.equal(changed.body.location, "North wall");
+  });
+
+  it("letters: change, conflict and atomic swap stamp both rows, preserve references and write history", async () => {
+    const c = await customer("Swap letters");
+    const first = await controller(c.id), other = await controller(c.id, true, { letter: "P", location: "Garage wall" });
+    const firstPath = `/api/irrigation-controllers/${first.id}/letter`;
+    const changed = await hit("POST", firstPath, { letter: "Q" });
+    assert.equal(changed.status, 200); assert.equal(changed.body.controller.name, "Controller Q");
+    assert.equal(changed.body.controller.letterConfirmed, false); assert.equal(changed.body.swappedWith, null);
+    assert.ok(new Date(changed.body.controller.lastUpdatedAt).getTime() > first.lastUpdatedAt!.getTime());
+    assert.match((await storage.getIrrigationHistory(a, first.id))[0].summary!, /Letter A → Q by Documenter Fixture/);
+    const before = await storage.getIrrigationController(a, first.id);
+    const otherBefore = await storage.getIrrigationController(a, other.id);
+    const conflict = await hit("POST", firstPath, { letter: "P", confirm: true });
+    assert.deepEqual(conflict, { status: 409, body: { message: "Letter P is used by Controller P",
+      holder: { id: other.id, letter: "P", location: "Garage wall" } } });
+    assert.deepEqual(await storage.getIrrigationController(a, first.id), before);
+    assert.deepEqual(await storage.getIrrigationController(a, other.id), otherBefore);
+    const swapped = await hit("POST", firstPath, { letter: "P", confirm: true, swap: true });
+    assert.equal(swapped.status, 200, JSON.stringify(swapped.body));
+    assert.equal(swapped.body.controller.name, "Controller P"); assert.equal(swapped.body.controller.letterConfirmed, true);
+    assert.equal(swapped.body.swappedWith.name, "Controller Q"); assert.equal(swapped.body.swappedWith.letter, "Q");
+    assert.equal(swapped.body.swappedWith.letterConfirmed, false); assert.equal(swapped.body.swappedWith.isActive, true);
+    assert.equal(swapped.body.controller.lastUpdatedAt, swapped.body.swappedWith.lastUpdatedAt);
+    for (const id of [first.id, other.id]) {
+      const graph = (await storage.getIrrigationController(a, id))!;
+      assert.deepEqual(graph.zones, (id === first.id ? before : otherBefore)!.zones);
+      assert.deepEqual(graph.programs, (id === first.id ? before : otherBefore)!.programs);
+      assert.equal(graph.lastUpdatedByUserId, actorId);
+      assert.match((await storage.getIrrigationHistory(a, id))[0].summary!, /swapped with Controller P/);
+    }
+    assert.equal((await hit("POST", firstPath, { letter: "P", confirm: true, extra: true })).status, 400);
+    for (const role of ["billing_manager", "field_tech"]) assert.equal((await hit("POST", firstPath, { letter: "P", confirm: true }, role)).status, 403);
+    assert.equal((await hit("POST", firstPath, { letter: "P", confirm: true, swap: true }, "irrigation_manager", b)).status, 404);
+    assert.equal((await hit("POST", firstPath, { letter: "invalid" }, "irrigation_manager", b)).status, 404);
+  });
+
+  it("letters: on-site audit preserves meaningful old names exactly once, but not simple letter labels", async () => {
+    const c = await customer("Legacy audit"), ctrl = await controller(c.id, true);
+    await db.update(irrigationControllers).set({ name: "Pool Clock", notes: "Keep these notes", letterConfirmed: false })
+      .where(eq(irrigationControllers.id, ctrl.id));
+    const path = `/api/irrigation-controllers/${ctrl.id}/letter`;
+    const confirmed = await hit("POST", path, { letter: ctrl.letter, confirm: true });
+    assert.equal(confirmed.status, 200); assert.equal(confirmed.body.controller.letterConfirmed, true);
+    assert.equal(confirmed.body.controller.notes, "Formerly named: Pool Clock\nKeep these notes");
+    assert.match((await storage.getIrrigationHistory(a, ctrl.id))[0].summary!, /Letter A confirmed in field by Documenter Fixture/);
+    assert.equal((await hit("POST", path, { letter: ctrl.letter, confirm: true })).body.controller.notes, confirmed.body.controller.notes);
+    for (const role of ["super_admin", "company_admin", "irrigation_manager", "system_documenter"]) {
+      const saved = await hit("POST", path, { letter: ctrl.letter, confirm: true }, role);
+      assert.equal(saved.status, 200, role); assert.equal(saved.body.controller.letterConfirmed, true);
+    }
+    await db.update(irrigationControllers).set({ name: " Clock A ", notes: "Original" }).where(eq(irrigationControllers.id, ctrl.id));
+    assert.equal((await hit("POST", path, { letter: ctrl.letter, confirm: true })).body.controller.notes, "Original");
+    await db.update(irrigationControllers).set({ isActive: false }).where(eq(irrigationControllers.id, ctrl.id));
+    assert.deepEqual(await hit("POST", path, { letter: "Q" }), { status: 400,
+      body: { message: "This controller is marked not at this location" } });
+  });
+
+  it("letters: old verified controllers and sites become not verified until an on-site audit and re-verification", async () => {
+    const c = await customer("Audit verification"), ctrl = await controller(c.id);
+    assert.equal((await hit("POST", verifyCtrl(ctrl.id))).status, 200);
+    assert.equal((await hit("POST", confirm(c.id), { confirmed: true })).status, 200);
+    assert.equal((await hit("POST", finish(c.id))).status, 200);
+    await db.update(irrigationControllers).set({ letterConfirmed: false }).where(eq(irrigationControllers.id, ctrl.id));
+    let read = (await hit("GET", site(c.id))).body;
+    assert.equal(read.controllers[0].letterConfirmed, false); assert.equal(read.controllers[0].verified, false);
+    assert.equal(read.site.status, "not_verified");
+    let list = (await hit("GET", "/api/system-documentation/sites")).body.customers.find((x: any) => x.customerId === c.id);
+    assert.equal(list.sites[0].status, "not_verified");
+    assert.equal((await hit("POST", verifyCtrl(ctrl.id))).status, 400);
+    assert.equal((await hit("POST", `/api/irrigation-controllers/${ctrl.id}/letter`, { letter: ctrl.letter, confirm: true })).status, 200);
+    assert.equal((await hit("POST", verifyCtrl(ctrl.id))).status, 200);
+    assert.equal((await hit("POST", finish(c.id))).status, 200);
+    read = (await hit("GET", site(c.id))).body;
+    assert.equal(read.controllers[0].verified, true); assert.equal(read.site.status, "verified");
+    list = (await hit("GET", "/api/system-documentation/sites")).body.customers.find((x: any) => x.customerId === c.id);
+    assert.equal(list.sites[0].status, "verified");
+  });
+
+  it("letters: CSV aliases Clock P and Controller P update the active letter holder without creating another clock", async () => {
+    const c = await customer("CSV aliases"), ctrl = await controller(c.id, true, { letter: "P" });
+    for (const controllerName of ["Clock P", "Controller P", "clock p"]) {
+      const result = await storage.importIrrigationProfile(a, c.id, "", [{
+        controllerName, location: "New wall", brand: null, model: null, programName: null,
+        wateringDays: null, startTimes: null, seasonalAdjustPct: 100, zoneNumber: 1,
+        zoneName: "Garden", zoneType: "rotor", runTimeMinutes: 5,
+      }], "commit");
+      assert.equal(result.summary.controllersCreated, 0);
+      const rows = await storage.listIrrigationControllers(a, c.id, "");
+      assert.equal(rows.length, 1); assert.equal(rows[0].id, ctrl.id);
+      assert.equal(rows[0].name, "Controller P"); assert.equal(rows[0].location, "New wall");
+    }
+  });
+
+  it("letters: a history failure rolls back both swapped rows, names, notes, stamps and history", async () => {
+    const c = await customer("Swap rollback");
+    const one = await controller(c.id), two = await controller(c.id, true, { letter: "P" });
+    const before = await Promise.all([one.id, two.id].map(id => storage.getIrrigationController(a, id)));
+    const history = await Promise.all([one.id, two.id].map(id => storage.getIrrigationHistory(a, id)));
+    const spy = mock.method(storage as any, "_appendIrrigationSnapshot", async () => { throw new Error("Letter history failure"); });
+    try {
+      assert.equal((await hit("POST", `/api/irrigation-controllers/${one.id}/letter`, { letter: "P", swap: true, confirm: true })).status, 500);
+    } finally { spy.mock.restore(); }
+    assert.deepEqual(await Promise.all([one.id, two.id].map(id => storage.getIrrigationController(a, id))), before);
+    assert.deepEqual(await Promise.all([one.id, two.id].map(id => storage.getIrrigationHistory(a, id))), history);
+  });
+
+  it("letters: concurrent chosen-letter creates cannot silently pick a different letter", async () => {
+    const c = await customer("Concurrent creates");
+    const path = `/api/customers/${c.id}/controllers-profile`;
+    const responses = await Promise.all([hit("POST", path, { letter: "P" }), hit("POST", path, { letter: "P" })]);
+    assert.deepEqual(responses.map(r => r.status).sort(), [201, 409]);
+    const rows = await storage.listIrrigationControllers(a, c.id, "");
+    assert.equal(rows.length, 1); assert.equal(rows[0].letter, "P");
+    await assert.rejects(db.insert(irrigationControllers).values({
+      companyId: a, customerId: c.id, letter: "P", name: "Legacy other name",
+    }), e => (e as any)?.cause?.code === "23505" || (e as any)?.code === "23505");
+    await assert.rejects(db.insert(irrigationControllers).values({
+      companyId: a, customerId: c.id, letter: "Q", name: "Controller P",
+    }), e => (e as any)?.cause?.code === "23505" || (e as any)?.code === "23505");
+  });
+
+  it("letters: opposite-direction swaps serialize without deadlock and retain both histories and old names", async () => {
+    const c = await customer("Concurrent swaps");
+    const one = await controller(c.id), two = await controller(c.id, true, { letter: "P" });
+    await db.update(irrigationControllers).set({ name: "Pool Clock", notes: "One" }).where(eq(irrigationControllers.id, one.id));
+    await db.update(irrigationControllers).set({ name: "Pump Controller", notes: "Two" }).where(eq(irrigationControllers.id, two.id));
+    const results = await Promise.all([
+      hit("POST", `/api/irrigation-controllers/${one.id}/letter`, { letter: "P", swap: true, confirm: true }),
+      hit("POST", `/api/irrigation-controllers/${two.id}/letter`, { letter: "A", swap: true, confirm: true }),
+    ]);
+    assert.deepEqual(results.map(r => r.status), [200, 200]);
+    const first = (await storage.getIrrigationController(a, one.id))!;
+    const second = (await storage.getIrrigationController(a, two.id))!;
+    assert.equal(first.name, "Controller P"); assert.equal(second.name, "Controller A");
+    assert.equal(first.notes, "Formerly named: Pool Clock\nOne");
+    assert.equal(second.notes, "Formerly named: Pump Controller\nTwo");
+    const histories = await Promise.all([one.id, two.id].map(id => storage.getIrrigationHistory(a, id)));
+    assert.ok(histories.every(h => h.some(entry => entry.summary?.includes("swapped with"))));
+  });
+
   it("picker uses four bulk queries, exact customer projection, display sort/address, and branch order", async () => {
     const spy = mock.method(db, "select");
     let response;
     try { response = await hit("GET", "/api/system-documentation/sites"); assert.equal(spy.mock.callCount(), 4); }
     finally { spy.mock.restore(); }
     assert.equal(response.status, 200);
-    assert.deepEqual(response.body.customers.map((c: any) => c.customerId), [emptyId, branchId]);
-    const [first, branched] = response.body.customers;
+    const initial = response.body.customers.filter((c: any) => [emptyId, branchId].includes(c.customerId));
+    assert.deepEqual(initial.map((c: any) => c.customerId), [emptyId, branchId]);
+    const names = response.body.customers.map((c: any) => c.name);
+    assert.deepEqual(names, [...names].sort((x: string, y: string) => x.toLowerCase().localeCompare(y.toLowerCase())));
+    const [first, branched] = initial;
     assert.deepEqual(Object.keys(first).sort(), ["customerId", "name", "address", "branches", "sites"].sort());
     assert.equal(first.name, "Alpha Site"); assert.equal(first.address, "10 Main, City CO 80000");
     assert.deepEqual(first.sites, [{ branchName: "", status: "nothing_on_file", verifiedAt: null, controllerCount: 0, backflowCount: 0 }]);
@@ -182,7 +359,7 @@ describe("Document System reads and atomic verification (real DB/routes)", { con
     const r = await hit("GET", site(c.id));
     assert.equal(r.status, 200); assert.equal(r.body.controllers.length, 1); assert.equal(r.body.backflows.length, 1);
     const ctrl = r.body.controllers[0], device = r.body.backflows[0];
-    assert.deepEqual(Object.keys(ctrl).sort(), ["id", "letter", "name", "location", "brand", "model", "totalZones", "settingsPhotoUrl",
+    assert.deepEqual(Object.keys(ctrl).sort(), ["id", "letter", "letterConfirmed", "name", "location", "brand", "model", "totalZones", "settingsPhotoUrl",
       "notes", "lastUpdatedAt", "fieldVerifiedAt", "fieldVerifiedByName", "programs", "zones", "gaps", "verified"].sort());
     assert.equal(ctrl.programs.length, 2); assert.equal(ctrl.programs[1].isActive, false);
     assert.deepEqual(ctrl.zones.map((z: any) => z.zoneNumber), [1, 2]);

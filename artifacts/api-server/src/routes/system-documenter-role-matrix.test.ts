@@ -272,7 +272,7 @@ describe("documenter real route boundaries", () => {
   it("preserves foreign-company 404 and passes authenticated company scope to storage", async () => {
     const result = await hit("system_documenter", "PUT", "/api/irrigation-controllers/2", { name: "Foreign", companyId: 2 });
     assert.equal(result.status, 404);
-    const calls = (storage.updateIrrigationController as any).mock.calls;
+    const calls = (storage.getIrrigationController as any).mock.calls;
     assert.equal(calls.at(-1).arguments[0], 1);
     assert.equal(calls.at(-1).arguments[1], 2);
   });

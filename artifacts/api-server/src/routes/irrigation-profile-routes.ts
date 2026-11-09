@@ -25,15 +25,17 @@
 
 import type { Express, RequestHandler } from "express";
 import { z } from "zod";
+import { SetControllerLetterBody, SetControllerLetterResponse } from "@workspace/api-zod";
 import { and, eq, inArray, sql, isNull, isNotNull, or } from "drizzle-orm";
 import { db } from "../db";
 import { customers, irrigationControllers, irrigationProfileZones } from "@workspace/db";
-import { storage, ZoneCountClearError } from "../storage";
+import { storage, ZoneCountClearError, LetterError } from "../storage";
 import type { IrrigationImportRow, IrrigationImportRowError, IrrigationZoneTypeEnum } from "../storage";
 import { ZoneProgramError } from "../lib/controller-zone-records";
 import {
   hasCapability, CAN_READ_IRRIGATION_PROFILE, CAN_EDIT_IRRIGATION_ZONES,
   CAN_MANAGE_IRRIGATION_EQUIPMENT, CAN_DELETE_IRRIGATION_EQUIPMENT,
+  CAN_DOCUMENT_IRRIGATION_SYSTEM,
 } from "@workspace/shared";
 
 /** Drizzle may wrap the PostgreSQL error in cause; only this tenant-scoped index is a serial conflict. */
@@ -64,7 +66,8 @@ function isSuperAdmin(role: string | undefined): boolean {
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
 export const createControllerBody = z.object({
-  name: z.string().min(1).max(200),
+  letter: z.string().regex(/^[A-Za-z]$/).transform(letter => letter.toUpperCase()),
+  confirmLetter: z.boolean().optional(),
   branchName: z.string().optional(),
   location: z.string().nullish(),
   brand: z.string().nullish(),
@@ -75,12 +78,10 @@ export const createControllerBody = z.object({
   isActive: z.boolean().optional(),
 });
 
-export const updateControllerBody = createControllerBody.partial().extend({
-  // Task #1856: letter can be changed via the update route; it is NOT part of
-  // createControllerBody (auto-assigned on create). A-Z only, case-insensitive
-  // on input; server normalises to uppercase. Collision check done in the route.
-  letter: z.string().optional(),
-});
+export const updateControllerBody = createControllerBody.omit({ letter: true, confirmLetter: true }).partial();
+export const controllerLetterBody = SetControllerLetterBody.extend({
+  letter: SetControllerLetterBody.shape.letter.transform(letter => letter.toUpperCase()),
+}).strict();
 
 export const createProgramBody = z.object({
   name: z.string().min(1).max(100),
@@ -342,6 +343,9 @@ export function registerIrrigationProfileRoutes(
       if (!parsed.success) {
         return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
       }
+      if (parsed.data.confirmLetter && !hasCapability(role, CAN_DOCUMENT_IRRIGATION_SYSTEM)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
 
       const userId = req.authenticatedUserId as number | undefined;
       const me = userId ? await storage.getUser(userId) : undefined;
@@ -356,7 +360,9 @@ export function registerIrrigationProfileRoutes(
           companyId: companyIdForCreate,
           customerId,
           branchName: effectiveBranch,
-          name: parsed.data.name,
+          name: "", // Storage derives the name; never accept a typed identity.
+          letter: parsed.data.letter,
+          letterConfirmed: parsed.data.confirmLetter === true,
           location: parsed.data.location ?? null,
           brand: parsed.data.brand ?? null,
           model: parsed.data.model ?? null,
@@ -374,6 +380,7 @@ export function registerIrrigationProfileRoutes(
 
         res.status(201).json(controller);
       } catch (e: any) {
+        if (e instanceof LetterError) return res.status(e.status).json({ message: e.message, ...e.details });
         req.log?.error?.({ err: e, customerId }, "createIrrigationController failed");
         res.status(500).json({ message: "Could not create controller — please retry" });
       }
@@ -427,6 +434,12 @@ export function registerIrrigationProfileRoutes(
         return res.status(401).json({ message: "Authentication required" });
       }
 
+      const current = await storage.getIrrigationController(isSuperAdmin(role) ? null : callerCompanyId, id);
+      if (!current) return notFound(res, "Controller");
+      if (Object.prototype.hasOwnProperty.call(req.body ?? {}, "name") ||
+          Object.prototype.hasOwnProperty.call(req.body ?? {}, "letter")) {
+        return res.status(400).json({ message: "Controller names follow their letter. Use Change letter." });
+      }
       const parsed = updateControllerBody.safeParse(req.body ?? {});
       if (!parsed.success) {
         return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
@@ -435,35 +448,7 @@ export function registerIrrigationProfileRoutes(
       const userId = req.authenticatedUserId as number | undefined;
       const me = userId ? await storage.getUser(userId) : undefined;
 
-      // Task #1856 — letter change: validate + collision check before the update.
       const patchData: typeof parsed.data = { ...parsed.data };
-      if (patchData.letter !== undefined) {
-        const normalized = patchData.letter.toUpperCase();
-        if (!/^[A-Z]$/.test(normalized)) {
-          return res.status(400).json({ message: "Letter must be a single uppercase character A–Z" });
-        }
-        // Collision check: another controller in the same (company, customer, branch) scope.
-        const callerCompanyIdForCheck = isSuperAdmin(role) ? null : callerCompanyId;
-        const currentCtrl = await storage.getIrrigationController(callerCompanyIdForCheck, id);
-        if (!currentCtrl) return notFound(res, "Controller");
-        const conflicting = await db
-          .select({ id: irrigationControllers.id, name: irrigationControllers.name })
-          .from(irrigationControllers)
-          .where(and(
-            eq(irrigationControllers.companyId, currentCtrl.companyId),
-            eq(irrigationControllers.customerId, currentCtrl.customerId),
-            eq(irrigationControllers.branchName, currentCtrl.branchName),
-            eq(irrigationControllers.letter, normalized),
-            sql`${irrigationControllers.id} <> ${id}`,
-          ));
-        if (conflicting.length > 0) {
-          return res.status(409).json({
-            message: `Letter ${normalized} is already used by "${conflicting[0].name}"`,
-            holdingController: conflicting[0].name,
-          });
-        }
-        patchData.letter = normalized;
-      }
 
       try {
         const updated = await storage.updateIrrigationController(
@@ -481,6 +466,35 @@ export function registerIrrigationProfileRoutes(
       }
     },
   );
+
+  app.post("/api/irrigation-controllers/:id/letter", requireAuthentication, async (req: any, res: any) => {
+    const id = parseId(req.params.id);
+    if (!id) return badId(res, "controller");
+    const role = req.authenticatedUserRole as string | undefined;
+    if (!hasCapability(role, CAN_MANAGE_IRRIGATION_EQUIPMENT)) return res.status(403).json({ message: "Forbidden" });
+    const companyId = getCallerCompanyId(req);
+    if (!companyId && !isSuperAdmin(role)) return res.status(401).json({ message: "Authentication required" });
+    try {
+      // Ownership before body validation/confirmation checks: no foreign-letter oracle.
+      const scopedCompany = isSuperAdmin(role) ? null : companyId;
+      if (!await storage.getIrrigationController(scopedCompany, id)) return notFound(res, "Controller");
+      const parsed = controllerLetterBody.safeParse(req.body ?? {});
+      if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+      if (parsed.data.confirm && !hasCapability(role, CAN_DOCUMENT_IRRIGATION_SYSTEM)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const actor = await storage.getUser(req.authenticatedUserId);
+      if (!actor) return res.status(401).json({ message: "Authentication required" });
+      const result = await storage.setControllerLetter(scopedCompany, id, parsed.data, { id: actor.id, name: actor.name });
+      if (!result) return notFound(res, "Controller");
+      SetControllerLetterResponse.parse(result);
+      res.json(result);
+    } catch (e) {
+      if (e instanceof LetterError) return res.status(e.status).json({ message: e.message, ...e.details });
+      req.log?.error?.({ err: e, id }, "setControllerLetter failed");
+      res.status(500).json({ message: "Could not save letter — please retry" });
+    }
+  });
 
   // ── DELETE /api/irrigation-controllers/:id ─────────────────────────────────
   app.delete(

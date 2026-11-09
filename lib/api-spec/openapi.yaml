@@ -11,6 +11,33 @@ tags:
   - name: health
     description: Health operations
 paths:
+  /irrigation-controllers/{id}/letter:
+    post:
+      operationId: setControllerLetter
+      summary: Confirm, change or atomically swap an active controller letter
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ControllerLetterInput" }
+      responses:
+        "200":
+          description: Saved controller and the other controller, if swapped
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ControllerLetterResult" }
+        "400": { description: Invalid body or inactive controller }
+        "401": { description: Authentication required }
+        "403": { description: Forbidden }
+        "404": { description: Controller not found }
+        "409":
+          description: Letter is held by another active controller at this location
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ControllerLetterConflict" }
+        "500": { description: Could not save letter — please retry }
   /system-documentation/sites:
     get:
       operationId: getDocumentationSites
@@ -287,12 +314,52 @@ components:
         sortOrder: { type: integer }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
-    DocumentationController:
+    ControllerLetterInput:
       type: object
-      required: [id, letter, name, location, brand, model, totalZones, settingsPhotoUrl, notes, lastUpdatedAt, fieldVerifiedAt, fieldVerifiedByName, gaps, verified]
+      additionalProperties: false
+      required: [letter]
+      properties:
+        letter: { type: string, pattern: "^[A-Za-z]$" }
+        confirm: { type: boolean }
+        swap: { type: boolean }
+    ControllerLetterRecord:
+      type: object
+      additionalProperties: true
+      required: [id, letter, name, letterConfirmed, location]
       properties:
         id: { type: integer }
         letter: { type: [string, "null"] }
+        name: { type: string }
+        letterConfirmed: { type: boolean }
+        location: { type: [string, "null"] }
+    ControllerLetterResult:
+      type: object
+      required: [controller, swappedWith]
+      properties:
+        controller: { $ref: "#/components/schemas/ControllerLetterRecord" }
+        swappedWith:
+          oneOf:
+            - { $ref: "#/components/schemas/ControllerLetterRecord" }
+            - { type: "null" }
+    ControllerLetterConflict:
+      type: object
+      required: [message, holder]
+      properties:
+        message: { type: string }
+        holder:
+          type: object
+          required: [id, letter, location]
+          properties:
+            id: { type: integer }
+            letter: { type: [string, "null"] }
+            location: { type: [string, "null"] }
+    DocumentationController:
+      type: object
+      required: [id, letter, letterConfirmed, name, location, brand, model, totalZones, settingsPhotoUrl, notes, lastUpdatedAt, fieldVerifiedAt, fieldVerifiedByName, gaps, verified]
+      properties:
+        id: { type: integer }
+        letter: { type: [string, "null"] }
+        letterConfirmed: { type: boolean }
         name: { type: string }
         location: { type: [string, "null"] }
         brand: { type: [string, "null"] }

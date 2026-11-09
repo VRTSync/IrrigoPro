@@ -8,6 +8,42 @@
 import * as zod from "zod";
 
 /**
+ * @summary Confirm, change or atomically swap an active controller letter
+ */
+
+export const SetControllerLetterParams = zod.object({
+  id: zod.coerce.number().min(1),
+});
+
+export const setControllerLetterBodyLetterRegExp = new RegExp("^[A-Za-z]$");
+
+export const SetControllerLetterBody = zod.object({
+  letter: zod.string().regex(setControllerLetterBodyLetterRegExp),
+  confirm: zod.boolean().optional(),
+  swap: zod.boolean().optional(),
+});
+
+export const SetControllerLetterResponse = zod.object({
+  controller: zod.object({
+    id: zod.number(),
+    letter: zod.string().nullable(),
+    name: zod.string(),
+    letterConfirmed: zod.boolean(),
+    location: zod.string().nullable(),
+  }),
+  swappedWith: zod.union([
+    zod.object({
+      id: zod.number(),
+      letter: zod.string().nullable(),
+      name: zod.string(),
+      letterConfirmed: zod.boolean(),
+      location: zod.string().nullable(),
+    }),
+    zod.null(),
+  ]),
+});
+
+/**
  * @summary List privacy-safe documentation sites
  */
 export const GetDocumentationSitesResponse = zod.object({
@@ -50,6 +86,7 @@ export const GetDocumentationSiteResponse = zod.object({
       .object({
         id: zod.number(),
         letter: zod.string().nullable(),
+        letterConfirmed: zod.boolean(),
         name: zod.string(),
         location: zod.string().nullable(),
         brand: zod.string().nullable(),
@@ -163,6 +200,7 @@ export const FieldVerifyControllerResponse = zod
   .object({
     id: zod.number(),
     letter: zod.string().nullable(),
+    letterConfirmed: zod.boolean(),
     name: zod.string(),
     location: zod.string().nullable(),
     brand: zod.string().nullable(),

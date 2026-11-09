@@ -11,6 +11,7 @@ export interface DocumentationController {
   id: number;
   /** @nullable */
   letter: string | null;
+  letterConfirmed: boolean;
   name: string;
   /** @nullable */
   location: string | null;

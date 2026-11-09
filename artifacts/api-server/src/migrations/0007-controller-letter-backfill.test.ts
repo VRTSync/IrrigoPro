@@ -105,33 +105,30 @@ let testCustomerName: string;
 
 describe("Task #1856 — controller letter storage", () => {
   before(async () => {
-    const [co] = await db.select({ id: companies.id }).from(companies).limit(1);
-    if (!co) throw new Error("No company in dev DB — cannot run tests");
+    const prefix = `controller_letters_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const [co] = await db.insert(companies).values({ name: prefix }).returning();
     testCompanyId = co.id;
-
-    const custs = await db
-      .select({ id: customers.id, name: customers.name })
-      .from(customers)
-      .where(eq(customers.companyId, testCompanyId))
-      .limit(2);
-    if (custs.length < 2) throw new Error("Need ≥2 customers in dev DB");
+    const custs = await db.insert(customers).values([
+      { companyId: testCompanyId, name: "Letter fixture A", email: `${prefix}a@test.example` },
+      { companyId: testCompanyId, name: "Letter fixture B", email: `${prefix}b@test.example` },
+    ]).returning();
     testCustomerId = custs[0].id;
     testCustomerName = custs[0].name;
     testCustomer2Id = custs[1].id;
 
-    const [u] = await db
-      .select({ id: users.id, name: users.name })
-      .from(users)
-      .where(eq(users.companyId, testCompanyId))
-      .limit(1);
-    if (!u) throw new Error("No user in dev DB for testCompanyId — cannot run wet-check test");
+    const [u] = await db.insert(users).values({ companyId: testCompanyId, name: "Letter test actor",
+      username: prefix, password: "not-a-login-password", role: "irrigation_manager" }).returning();
     testUserId = u.id;
     testUserName = u.name;
   });
 
   after(async () => {
+    await db.delete(wetChecks).where(eq(wetChecks.companyId, testCompanyId));
     await cleanupIrrigCtrls(testCompanyId, testCustomerId);
     await cleanupIrrigCtrls(testCompanyId, testCustomer2Id);
+    await db.delete(customers).where(eq(customers.companyId, testCompanyId));
+    await db.delete(users).where(eq(users.companyId, testCompanyId));
+    await db.delete(companies).where(eq(companies.id, testCompanyId));
   });
 
   // ── 1 & 2. A, B, C assignment + gap reuse ────────────────────────────────
@@ -162,13 +159,14 @@ describe("Task #1856 — controller letter storage", () => {
 
   // ── 3. Rename does NOT change letter ──────────────────────────────────────
 
-  it("renaming a controller does NOT change its letter", async () => {
+  it("on-site confirmation derives the name without changing its letter", async () => {
     const { storage } = await import("../storage");
     const rows = await getLetters(testCompanyId, testCustomerId);
     const aRow = rows.find(r => r.letter === "A");
     assert.ok(aRow, "A must exist");
-    const updated = await storage.updateIrrigationController(testCompanyId, aRow.id, { name: "Completely New Name" });
-    assert.equal(updated?.letter, "A");
+    const updated = await storage.setControllerLetter(testCompanyId, aRow.id, { letter: "A", confirm: true }, { id: testUserId, name: testUserName });
+    assert.equal(updated?.controller.letter, "A");
+    assert.equal(updated?.controller.name, "Controller A");
   });
 
   // ── 4. DB unique-index rejects duplicate ──────────────────────────────────
@@ -206,8 +204,9 @@ describe("Task #1856 — controller letter storage", () => {
     const rows = await getLetters(testCompanyId, testCustomerId);
     const cRow = rows.find(r => r.letter === "C");
     assert.ok(cRow, "C must exist");
-    const updated = await storage.updateIrrigationController(testCompanyId, cRow.id, { letter: "Z" });
-    assert.equal(updated?.letter, "Z");
+    const updated = await storage.setControllerLetter(testCompanyId, cRow.id, { letter: "Z" }, { id: testUserId, name: testUserName });
+    assert.equal(updated?.controller.letter, "Z");
+    assert.equal(updated?.controller.name, "Controller Z");
     const list = await storage.listIrrigationControllers(testCompanyId, testCustomerId, "");
     const letters = list.map(c => c.letter).filter(Boolean) as string[];
     assert.deepEqual(letters, [...letters].sort());
@@ -307,36 +306,22 @@ describe("Task #1856 — controller letter storage", () => {
     });
   });
 
-  // ── 18. Completed-marker with missing DDL: startup re-applies constraints ─────
-  //
-  // If app_settings says 'completed' but the NOT NULL constraint or unique index
-  // is absent (e.g. restored from a snapshot taken before the DDL was applied),
-  // the migration must still apply both DDL pieces before returning. This test
-  // simulates that scenario by dropping the unique index and verifying it is
-  // recreated on the next call.
-
-  it("18. re-applies unique index when completed marker exists but index was dropped", async () => {
-    // Verify the index currently exists (it should after the migration ran at startup)
-    const beforeDrop = await db.execute(sql`
-      SELECT 1 FROM pg_indexes WHERE tablename='irrigation_controllers' AND indexname='uniq_irr_ctrl_letter'
-    `);
-    assert.ok(beforeDrop.rows.length > 0, "index must exist at start of test");
-
-    // Drop the index to simulate a snapshot-restore scenario
-    await db.execute(sql`DROP INDEX IF EXISTS uniq_irr_ctrl_letter`);
-    const afterDrop = await db.execute(sql`
-      SELECT 1 FROM pg_indexes WHERE tablename='irrigation_controllers' AND indexname='uniq_irr_ctrl_letter'
-    `);
-    assert.equal(afterDrop.rows.length, 0, "index must be gone after drop");
-
-    // Call initialize() — should re-apply the index despite the 'completed' marker
+  it("18. audit schema retires startup hardening without assigning letters or recreating all-row constraints", async () => {
+    const before = await db.execute(sql`SELECT id, letter, name, letter_confirmed, notes FROM irrigation_controllers ORDER BY id`);
     const { storage } = await import("../storage");
     await storage.initialize();
-
-    const afterReinit = await db.execute(sql`
+    const after = await db.execute(sql`SELECT id, letter, name, letter_confirmed, notes FROM irrigation_controllers ORDER BY id`);
+    assert.deepEqual(after.rows, before.rows, "startup must not perform an on-site audit or repair");
+    const legacyIndex = await db.execute(sql`
       SELECT 1 FROM pg_indexes WHERE tablename='irrigation_controllers' AND indexname='uniq_irr_ctrl_letter'
     `);
-    assert.ok(afterReinit.rows.length > 0, "index must be recreated by initialize() after snapshot-restore");
+    assert.equal(legacyIndex.rows.length, 0, "startup must not recreate the retired index");
+    const column = await db.execute(sql`SELECT is_nullable FROM information_schema.columns
+      WHERE table_schema='public' AND table_name='irrigation_controllers' AND column_name='letter'`);
+    assert.equal(column.rows[0].is_nullable, "YES", "atomic swaps require a temporary NULL");
+    const activeIndexes = await db.execute(sql`SELECT indexname FROM pg_indexes WHERE tablename='irrigation_controllers'
+      AND indexname IN ('uniq_irr_ctrl_letter_active', 'uniq_irr_ctrl_name_active')`);
+    assert.equal(activeIndexes.rows.length, 2);
   });
 
   // ── 17. Concurrent-start regression: advisory lock is session-pinned ─────────

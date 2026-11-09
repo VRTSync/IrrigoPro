@@ -1981,11 +1981,11 @@ export const irrigationControllers = pgTable("irrigation_controllers", {
   // can use plain typed columns without COALESCE.
   branchName: text("branch_name").notNull().default(""),
   name: text("name").notNull(),
-  // Stored controller letter (A–Z). Auto-assigned on create, editable via
-  // the PATCH /letter endpoint. Nullable during the migration window
-  // (before the backfill + NOT NULL migration run). After Slice 1 of
-  // Task #1856 hardens the column, every row is guaranteed to have a letter.
+  // Stored controller letter (A–Z), chosen by people, never auto-assigned
+  // for a person. Nullable for legacy rows and inside an atomic letter swap.
   letter: text("letter"),
+  // Controller Letters L5: true only after a tech confirms the letter on site (wizard). Office edits and swaps leave it false.
+  letterConfirmed: boolean("letter_confirmed").notNull().default(false),
   location: text("location"),
   brand: text("brand"),
   model: text("model"),
@@ -2005,15 +2005,10 @@ export const irrigationControllers = pgTable("irrigation_controllers", {
   // Efficient list-by-customer queries (the most common read path).
   companyCustomerBranchIdx: index("irr_ctrl_company_customer_branch_idx")
     .on(table.companyId, table.customerId, table.branchName),
-  // Controller name is unique within a customer+branch scope per company.
-  uniqCtrlName: uniqueIndex("uniq_irr_ctrl_name")
-    .on(table.companyId, table.customerId, table.branchName, table.name),
-  // Unique letter within scope — added after backfill hardens every row.
-  // NOTE: this index is created by the second migration (Task #1856 Slice 1
-  // step 6) after the backfill confirms every row has a non-null letter.
-  // The line below is intentionally commented out until that migration runs.
-  // uniqCtrlLetter: uniqueIndex("uniq_irr_ctrl_letter")
-  //   .on(table.companyId, table.customerId, table.branchName, table.letter),
+  uniqCtrlNameActive: uniqueIndex("uniq_irr_ctrl_name_active")
+    .on(table.companyId, table.customerId, table.branchName, table.name).where(sql`${table.isActive}`),
+  uniqCtrlLetterActive: uniqueIndex("uniq_irr_ctrl_letter_active")
+    .on(table.companyId, table.customerId, table.branchName, table.letter).where(sql`${table.isActive} AND ${table.letter} IS NOT NULL`),
 }));
 
 export const insertIrrigationControllerSchema = createInsertSchema(irrigationControllers);
