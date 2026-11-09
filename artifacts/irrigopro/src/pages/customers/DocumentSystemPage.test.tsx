@@ -663,7 +663,7 @@ describe("Slice 5 — programs", () => {
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-run-times");
     expect(screen.getByTestId("button-next")).toBeDisabled();
-    expect(screen.getByTestId("text-still-needed")).toHaveTextContent("2 zones without a program and minutes");
+    expect(screen.getByTestId("text-still-needed")).toHaveTextContent("2 zones without a program");
   });
 
   it("switching tabs keeps each program's draft; only edited programs are sent", async () => {
@@ -703,6 +703,56 @@ describe("Slice 5 — run times and review", () => {
     fireEvent.click(screen.getByLabelText("Zone 2 on program A"));
     expect(screen.getByTestId("input-minutes-2")).toHaveValue("10");
     expect(screen.getByTestId("input-minutes-1")).toHaveValue("0");
+  });
+
+  it("zero-minute Zone 8 is complete, saves zero, appears in Review and can Verify", async () => {
+    const zones = ready(8, { programId: 9, runTimeMinutes: 10 });
+    zones[7] = { ...zones[7], programId: null, runTimeMinutes: 0 };
+    await open(ctrl(79, "A", { totalZones: 8, zones, programs: [p5(9, "A")], gaps: gap("run_times") }), "step-run-times");
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    expect(screen.getByTestId("text-still-needed")).toHaveTextContent("1 zone without a program");
+    fireEvent.click(screen.getByLabelText("Zone 8 on program A"));
+    expect(screen.getByTestId("input-minutes-8")).toHaveValue("10");
+    fireEvent.change(screen.getByTestId("input-minutes-8"), { target: { value: "0" } });
+    expect(within(screen.getByTestId("row-run-zone-8")).getByText("Zone 8")).not.toHaveClass("text-amber-700");
+    expect(screen.getByLabelText("Zone 8 fewer minutes")).toBeDisabled();
+    expect(screen.queryByTestId("text-still-needed")).toBeNull();
+    expect(screen.getByTestId("button-next")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+    expect(bulk()).toEqual([["/api/irrigation-controllers/79/zones/bulk", "PUT", { zoneIds: [108], patch: { programId: 9, runTimeMinutes: 0 } }]]);
+    expect(screen.getByTestId("text-review-programs")).toHaveTextContent("Program A: Mon at 5:00 AM, 100%, 8 zones (1 at 0 min), 70 min");
+    expect(screen.getByTestId("button-verify")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("button-verify"));
+    expect(await screen.findByTestId("status-doc-flash")).toHaveTextContent("Controller A verified.");
+  });
+
+  it("stored zeros and minus-to-zero stay complete; Review counts zeros separately per program", async () => {
+    const zones = [
+      ...ready(3, { programId: 9, runTimeMinutes: 0 }),
+      z5(4, { zoneTypeConfirmed: true, programId: 10, runTimeMinutes: 12 }),
+    ];
+    zones[0].runTimeMinutes = 1;
+    await open(ctrl(78, "A", { totalZones: 4, zones, programs: [p5(9, "A"), p5(10, "B")], gaps: gap("run_times") }), "step-run-times");
+    expect(screen.getByTestId("button-next")).not.toBeDisabled();
+    fireEvent.click(screen.getByLabelText("Zone 1 fewer minutes"));
+    expect(screen.getByTestId("input-minutes-1")).toHaveValue("0");
+    expect(screen.getByLabelText("Zone 1 fewer minutes")).toBeDisabled();
+    for (const n of [1, 2, 3]) expect(within(screen.getByTestId(`row-run-zone-${n}`)).getByText(`Zone ${n}`)).not.toHaveClass("text-amber-700");
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+    expect(screen.getByTestId("text-review-programs")).toHaveTextContent("Program A: Mon at 5:00 AM, 100%, 3 zones (3 at 0 min), 0 min");
+    expect(screen.getByTestId("text-review-programs")).toHaveTextContent("Program B: Mon at 5:00 AM, 100%, 1 zone, 12 min");
+  });
+
+  it.each([null, 999, 10])("missing, unknown and inactive program %s stays amber and blocks Next", async (programId) => {
+    await open(ctrl(77, "A", {
+      totalZones: 1, zones: ready(1, { programId, runTimeMinutes: 10 }),
+      programs: [p5(9, "A"), p5(10, "B", { isActive: false })], gaps: gap("run_times"),
+    }), "step-run-times");
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    expect(screen.getByTestId("text-still-needed")).toHaveTextContent("1 zone without a program");
+    expect(within(screen.getByTestId("row-run-zone-1")).getByText("Zone 1")).toHaveClass("text-amber-700");
   });
 
   it("10. a failing second bulk call; Retry sends only the unsent group", async () => {
@@ -841,7 +891,7 @@ describe("Run times — typed minutes", () => {
     expect(el).toHaveValue("120");
     typeMinutes(1, "0");
     expect(screen.getByLabelText("Zone 1 fewer minutes")).toBeDisabled();
-    expect(screen.getByTestId("button-next")).toBeDisabled();
+    expect(screen.getByTestId("button-next")).not.toBeDisabled();
   });
 
   it("Enter blurs and selects the next numbered zone; terminal and Set all Enter just blur", async () => {
@@ -908,7 +958,7 @@ describe("Run times — typed minutes", () => {
     typeMinutes(1, "32");
     expect(screen.getByLabelText("Zone 1 on program A")).toHaveAttribute("aria-pressed", "false");
     expect(within(screen.getByTestId("row-run-zone-1")).getByText("Zone 1")).toHaveClass("text-amber-700");
-    expect(screen.getByTestId("text-still-needed")).toHaveTextContent("2 zones without a program and minutes");
+    expect(screen.getByTestId("text-still-needed")).toHaveTextContent("2 zones without a program");
     expect(screen.getByTestId("button-next")).toBeDisabled();
     expect(writes()).toEqual([]);
     fireEvent.click(screen.getByTestId("button-doc-back"));

@@ -725,3 +725,45 @@ mtime_ms = 1794252513529
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/83460e8e-e21f-4a12-9a18-c3048afe7813/85eaa135-fff3-40d8-bd6d-31d6b2bd37d6"
 storage_version_token = "1794252572469317"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "Bd2EIg9vq9OmIjZ0j9jRg"
+uri = "file://generated-artifacts/zero-runtime/01-zero-zone-next-enabled.jpg"
+type = "image"
+title = "Zero-minute Zone 8 and enabled Next"
+description = "390px development fixture: Program A, 0 minutes, non-amber row."
+logical_id = "b78d6440-bd03-4f65-a527-419985241b53"
+content_hash = "sha256:569a251b8b12a37ec5176f0143596f6399d64620af9e9181b8dfc34c812dcca8"
+size = 47434
+mtime_ms = 1794252671872
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/b78d6440-bd03-4f65-a527-419985241b53/34cef61d-07d7-4ee9-9a08-8e01fec35ec2"
+storage_version_token = "1794253320749318"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "5xJE7w0bXhQ0N5fKeNVY5"
+uri = "file://generated-artifacts/zero-runtime/02-review-zero-count.jpg"
+type = "image"
+title = "Review counts the zeroed zone"
+description = "8 zones (1 at 0 min), with the unchanged 70-minute sum."
+logical_id = "82535de7-df9a-428d-8ac0-ddf05d4bf654"
+content_hash = "sha256:0dfbabf6119d5e948265cbc5be1b9ffe5d6eab0b3f9fc9b42fc0516befb2a13b"
+size = 42035
+mtime_ms = 1794252672140
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/82535de7-df9a-428d-8ac0-ddf05d4bf654/a0f5098d-d63d-44b9-ba78-03f41d97e451"
+storage_version_token = "1794253321178308"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "LGf-VCDdQMC1eAHVl95yY"
+uri = "file://generated-artifacts/zero-runtime/04-verified.jpg"
+type = "image"
+title = "Controller A verified"
+description = "Real API verification succeeded; isolated development fixture, not the Aspen record."
+logical_id = "36cf185f-3b4e-483d-a9e9-e70972b419bc"
+content_hash = "sha256:d485a631bda717756d30969ac4838bfa7b86b8e9039e9b15e24f65c74c6cb053"
+size = 50531
+mtime_ms = 1794252672404
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/36cf185f-3b4e-483d-a9e9-e70972b419bc/59d7c293-863a-41fc-9182-c1898addffd5"
+storage_version_token = "1794253321609367"
+content_type = "image/jpeg"

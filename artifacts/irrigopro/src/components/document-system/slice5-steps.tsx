@@ -271,7 +271,7 @@ export function RunTimesStep({ zones, programs, ready, h, onReload }: { zones: D
           </div>
           <div>
             {zones.map((z) => {
-              const done = z.programId != null && ids.has(z.programId) && z.runTimeMinutes >= 1;
+              const done = z.programId != null && ids.has(z.programId);
               const type = z.zoneTypeConfirmed ? zoneTypeInfo(z.zoneType).label : "No type";
               return (
                 <div key={z.id} className="flex flex-wrap items-center gap-2 border-b py-2.5" data-testid={`row-run-zone-${z.zoneNumber}`}>

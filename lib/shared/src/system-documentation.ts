@@ -33,8 +33,8 @@ export function controllerDocumentationGaps(c: ControllerDocInput): DocGap[] {
     if (!p.startTimes?.some(hasText)) add("programs", `program_times:${p.id}`, `Program ${p.name.trim()} start time`);
   }
   const ids = new Set(active.map(p => p.id));
-  const incomplete = c.zones.filter(z => z.programId === null || !ids.has(z.programId) || z.runTimeMinutes < 1).length;
-  if (!countGap && incomplete) add("run_times", "run_times", `${zoneLabel(incomplete)} without a program and minutes`);
+  const incomplete = c.zones.filter(z => z.programId === null || !ids.has(z.programId)).length;
+  if (!countGap && incomplete) add("run_times", "run_times", `${zoneLabel(incomplete)} without a program`);
   return gaps;
 }
 

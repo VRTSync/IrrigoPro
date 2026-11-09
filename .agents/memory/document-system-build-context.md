@@ -36,3 +36,9 @@ Read `attached_assets/Pasted--Document-System-Design-Context-Locked-Decisions-Re
 **Why:** The legacy Switch User screen enumerates general users and only changes local state; the documenter allowlist intentionally denies that list. Reusing the route must not leave an unusable account action or justify widening permissions.
 
 **How to apply:** Keep the restricted path separate before the legacy selector mounts. Test the real destination and logout response, absence of the user-list request, cleared session, and a fresh sign-in; do not hide that boundary behind a mocked page.
+
+**Rule:** The 2026-11-09 zero-minutes FIX supersedes the uploaded locked context's positive-runtime requirement. Active controller-program assignment is the answered signal; zero minutes is intentional non-running, not missing data.
+
+**Why:** Field testing confirmed wired, numbered zones may be deliberately zeroed on the clock. Requiring positive minutes prevents faithful documentation and verification.
+
+**How to apply:** Preserve the 0–120 per-zone range and 1–120 Set all range, including program-pick minute defaults. Do not reintroduce a positive-minutes completeness requirement or rewrite the uploaded historical reference.

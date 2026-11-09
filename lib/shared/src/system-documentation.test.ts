@@ -44,10 +44,10 @@ describe("documentation gaps", () => {
       c.zones = Array.from({ length: n }, (_, i) => ({ zoneNumber: i + 1, zoneTypeConfirmed: false, programId: 99, runTimeMinutes: 10 }));
       assert.deepEqual(controllerDocumentationGaps(c), [
         { step: "zone_types", code: "zone_types", label: `${n} zone${n === 1 ? "" : "s"} without a type` },
-        { step: "run_times", code: "run_times", label: `${n} zone${n === 1 ? "" : "s"} without a program and minutes` },
+        { step: "run_times", code: "run_times", label: `${n} zone${n === 1 ? "" : "s"} without a program` },
       ]);
     }
-    for (const patch of [{ programId: null }, { runTimeMinutes: 0 }]) {
+    for (const patch of [{ programId: null }, { programId: 99 }]) {
       const c = controller(); Object.assign(c.zones[0], patch);
       assert.deepEqual(codes(controllerDocumentationGaps(c)), ["run_times"]);
     }
@@ -63,6 +63,18 @@ describe("documentation gaps", () => {
     assert.deepEqual(codes(controllerDocumentationGaps(c)), ["programs", "run_times"]);
     c.programs = [];
     assert.deepEqual(codes(controllerDocumentationGaps(c)), ["programs", "run_times"]);
+  });
+  it("accepts zero through 120 minutes only with active controller-program membership", () => {
+    for (const runTimeMinutes of [0, 1, 120]) {
+      const c = controller(); c.zones[0].runTimeMinutes = runTimeMinutes;
+      assert.deepEqual(controllerDocumentationGaps(c), []);
+    }
+    const c = controller();
+    c.programs.push({ id: 2, name: "B", isActive: false, wateringDays: ["Mon"], startTimes: ["06:00"] });
+    c.zones[0].programId = 2;
+    assert.deepEqual(controllerDocumentationGaps(c), [
+      { step: "run_times", code: "run_times", label: "1 zone without a program" },
+    ]);
   });
   it("backflow exact field labels, required fields, and four test answers", () => {
     assert.deepEqual(backflowDocumentationGaps(backflow()), []);

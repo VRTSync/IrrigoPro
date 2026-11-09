@@ -154,10 +154,11 @@ export function programsSummary(programs: DocumentationProgram[], zones: Documen
   const lines = programs.map((p) => {
     const n = normalizeProgram(p);
     const on = zones.filter((z) => z.programId === p.id);
+    const off = on.filter((z) => z.runTimeMinutes === 0).length;
     const mins = on.reduce((s, z) => s + z.runTimeMinutes, 0);
     const days = n.wateringDays.join(" ") || "no days";
     const times = n.startTimes.map(formatTime12).join(" and ") || "no start time";
-    return `Program ${p.name}: ${days} at ${times}, ${n.seasonalAdjustPct}%, ${on.length} zone${on.length === 1 ? "" : "s"}, ${mins} min`;
+    return `Program ${p.name}: ${days} at ${times}, ${n.seasonalAdjustPct}%, ${on.length} zone${on.length === 1 ? "" : "s"}${off ? ` (${off} at 0 min)` : ""}, ${mins} min`;
   });
   return lines.join("\n") || "Not set";
 }

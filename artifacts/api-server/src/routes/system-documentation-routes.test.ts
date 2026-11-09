@@ -221,6 +221,29 @@ describe("Document System reads and atomic verification (real DB/routes)", { con
     assert.equal((await hit("GET", site(c.id))).body.controllers.find((x: any) => x.id === full.id).verified, false);
   });
 
+  it("verifies an eight-zone controller after the bulk save persists Program A Zone 8 at zero minutes", async () => {
+    const c = await customer("Eight-zone zero-runtime fixture");
+    const full = await controller(c.id, true, { totalZones: 8 });
+    const p = full.programs[0];
+    await storage.updateIrrigationProgram(a, p.id, { name: "A" });
+    const eighth = full.zones.find(z => z.zoneNumber === 8)!;
+    const saved = await hit("PUT", `/api/irrigation-controllers/${full.id}/zones/bulk`, {
+      zoneIds: [eighth.id], patch: { programId: p.id, runTimeMinutes: 0 },
+    }, "irrigation_manager");
+    assert.equal(saved.status, 200);
+    const graph = (await hit("GET", site(c.id))).body.controllers[0];
+    assert.equal(graph.zones.length, 8);
+    assert.equal(graph.zones.find((z: any) => z.zoneNumber === 8).runTimeMinutes, 0);
+    assert.deepEqual(graph.gaps, []);
+    const verified = await hit("POST", verifyCtrl(full.id));
+    assert.equal(verified.status, 200);
+    assert.equal(verified.body.verified, true);
+    assert.deepEqual(verified.body.gaps, []);
+    const stored = (await storage.getIrrigationController(a, full.id))!;
+    assert.ok(stored.fieldVerifiedAt);
+    assert.equal(stored.zones.find(z => z.id === eighth.id)!.runTimeMinutes, 0);
+  });
+
   it("backflow completeness/stamps use shared rules and existing edits/log-test invalidate without history", async () => {
     const c = await customer("Backflow verification");
     const incomplete = await backflow(c.id, false);
