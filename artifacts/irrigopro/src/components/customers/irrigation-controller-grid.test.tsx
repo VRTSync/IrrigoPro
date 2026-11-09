@@ -95,6 +95,98 @@ describe("controller settings photos", () => {
   });
 
   for (const initialPhoto of [null, "photos/existing"]) {
+    for (const failureStage of ["upload", "attachment"] as const) {
+      it(`${initialPhoto ? "Replace Photo" : "Add Photo"} preserves its state after ${failureStage} failure and allows retry`, async () => {
+        const fetchPhoto = mockSignedUrls();
+        const actionName = initialPhoto ? "Replace Photo" : "Add Photo";
+        const error = new Error(`${failureStage} rejected`);
+        let rejectFailure!: (error: Error) => void;
+        const failure = new Promise<never>((_, reject) => { rejectFailure = reject; });
+        const upload = vi.mocked(uploadPhotoToStorage).mockReset();
+        if (failureStage === "upload") upload.mockReturnValueOnce(failure);
+        else upload.mockResolvedValueOnce("photos/rejected");
+        upload.mockResolvedValueOnce("photos/retried");
+
+        let detail = { ...counted(1), settingsPhotoUrl: initialPhoto, programs: [], retiredZones: [] };
+        let attachmentAttempts = 0;
+        // PhotoImage's signed-URL GETs use fetch; only this exact POST can
+        // consume the attachment failure or update the server fixture.
+        request.mockImplementation(async (url, method, body) => {
+          if (url !== "/api/irrigation-controllers/7/photo" || method !== "POST") {
+            throw new Error(`Unexpected request: ${method} ${url}`);
+          }
+          attachmentAttempts++;
+          if (failureStage === "attachment" && attachmentAttempts === 1) return failure;
+          detail = { ...detail, settingsPhotoUrl: body.url };
+          return detail;
+        });
+        const { qc, invalidate } = mount(detail, true, true, [], async () => detail);
+        fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+        await screen.findByRole("button", { name: actionName });
+        if (initialPhoto) {
+          await waitFor(() => expect(screen.getByRole("img", { name: "Controller settings" }))
+            .toHaveAttribute("src", "https://images.example.test/existing.jpg"));
+        } else {
+          expect(screen.getByText("No photo yet")).toBeInTheDocument();
+        }
+
+        const file = new File(["controller settings"], "settings.jpg", { type: "image/jpeg" });
+        async function choosePhoto() {
+          fireEvent.pointerDown(screen.getByRole("button", { name: actionName }), {
+            button: 0, ctrlKey: false, pointerType: "mouse",
+          });
+          const library = await screen.findByRole("menuitem", { name: "Choose from Library" });
+          const input = document.querySelector<HTMLInputElement>('input[type="file"]:not([capture])')!;
+          fireEvent.click(library);
+          fireEvent.keyDown(library, { key: "Escape" });
+          fireEvent.change(input, { target: { files: [file] } });
+        }
+
+        await choosePhoto();
+        expect(screen.getByRole("button", { name: actionName })).toBeDisabled();
+        if (failureStage === "attachment") {
+          await waitFor(() => expect(request).toHaveBeenCalledWith(
+            "/api/irrigation-controllers/7/photo", "POST", { url: "photos/rejected" },
+          ));
+        }
+        rejectFailure(error);
+        await waitFor(() => expect(toast).toHaveBeenCalledWith({
+          title: "Photo upload failed", description: error.message, variant: "destructive",
+        }));
+        expect(screen.getByRole("button", { name: actionName })).toBeEnabled();
+        expect(toast).toHaveBeenCalledTimes(1);
+        expect(upload).toHaveBeenCalledTimes(1);
+        expect(upload).toHaveBeenCalledWith(file);
+        expect(request).toHaveBeenCalledTimes(failureStage === "upload" ? 0 : 1);
+        expect(invalidate).not.toHaveBeenCalled();
+        expect(qc.getQueryData(["/api/irrigation-controllers/7"])).toMatchObject({ settingsPhotoUrl: initialPhoto });
+        if (initialPhoto) {
+          expect(screen.getByRole("img", { name: "Controller settings" }))
+            .toHaveAttribute("src", "https://images.example.test/existing.jpg");
+          expect(screen.queryByText("No photo yet")).toBeNull();
+        } else {
+          expect(screen.getByText("No photo yet")).toBeInTheDocument();
+          expect(screen.queryByRole("img", { name: "Controller settings" })).toBeNull();
+        }
+        expect(fetchPhoto).toHaveBeenCalledTimes(initialPhoto ? 1 : 0);
+        expect(toast).not.toHaveBeenCalledWith({ title: "Photo saved" });
+
+        // Retry the same file through the restored control, not a direct handler.
+        await choosePhoto();
+        await waitFor(() => expect(screen.getByRole("img", { name: "Controller settings" }))
+          .toHaveAttribute("src", "https://images.example.test/retried.jpg"));
+        expect(upload).toHaveBeenCalledTimes(2);
+        expect(upload).toHaveBeenNthCalledWith(2, file);
+        expect(request).toHaveBeenCalledTimes(failureStage === "upload" ? 1 : 2);
+        expect(request).toHaveBeenLastCalledWith("/api/irrigation-controllers/7/photo", "POST", { url: "photos/retried" });
+        expect(invalidate).toHaveBeenCalledWith({ queryKey: ["/api/irrigation-controllers/7"] });
+        expect(fetchPhoto).toHaveBeenCalledWith("/api/photos/photos/retried/signed-url?variant=medium", expect.objectContaining({ credentials: "include" }));
+        expect(screen.queryByText("No photo yet")).toBeNull();
+        expect(screen.getByRole("button", { name: "Replace Photo" })).toBeEnabled();
+        expect(toast).toHaveBeenLastCalledWith({ title: "Photo saved" });
+      });
+    }
+
     it(`${initialPhoto ? "Replace Photo" : "Add Photo"} uploads, attaches the identifier and displays the resolved photo`, async () => {
       const fetchPhoto = mockSignedUrls();
       vi.mocked(uploadPhotoToStorage).mockReset().mockResolvedValue("photos/uploaded");
