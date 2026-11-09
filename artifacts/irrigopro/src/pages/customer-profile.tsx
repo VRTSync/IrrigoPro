@@ -14,7 +14,7 @@ import type { BudgetStatus } from "@workspace/shared";
 import {
   ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt, DollarSign,
   Bell, Droplets, Wrench, Calendar, Package, ChevronDown, ChevronRight, User,
-  LayoutDashboard, Trees, Edit, ClipboardList, Clock, Building2, RefreshCw,
+  LayoutDashboard, Trees, Edit, ClipboardList, Clock, Building2, RefreshCw, ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Customer, Estimate, WorkOrder, BillingSheetWithItems, SiteMap } from "@workspace/db/schema";
@@ -24,6 +24,7 @@ import {
   hasCapability,
   CAN_READ_INVOICES,
   CAN_VIEW_COSTS,
+  CAN_DOCUMENT_IRRIGATION_SYSTEM,
 } from "@workspace/shared";
 import { useAuth } from "@/lib/auth-context";
 import { InvoiceList } from "@/components/billing/invoice-list";
@@ -316,6 +317,11 @@ export default function CustomerProfile() {
               <Button size="sm" variant="outline" className="border-sky-300 text-sky-700 hover:bg-sky-50" onClick={() => setLocation(`/customers/${id}/irrigation-profile`)}>
                 <Droplets className="w-4 h-4 mr-1.5" />Controllers &amp; Zones
               </Button>
+              {hasCapability(userRole, CAN_DOCUMENT_IRRIGATION_SYSTEM) && (
+                <Button size="sm" className="bg-primary text-white" onClick={() => setLocation(`/customers/${id}/document-system`)} data-testid="button-document-system">
+                  <ClipboardCheck className="w-4 h-4 mr-1.5" />Document System
+                </Button>
+              )}
               {isAdmin && (
                 <CustomerForm
                   customer={customer}

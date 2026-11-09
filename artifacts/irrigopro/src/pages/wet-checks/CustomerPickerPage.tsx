@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { Search, Droplets, AlertCircle, GitBranch, ArrowLeft } from "lucide-react";
+import { Search, Droplets, AlertCircle } from "lucide-react";
 import { apiRequest, useArrayQuery, useUnauthenticatedReads } from "@/lib/queryClient";
 import { SessionExpiredEmptyState } from "@/components/auth/session-expired-banner";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { OfflineStrip } from "@/components/offline/sync-ui";
+import { CustomerCard, BranchPicker } from "@/components/customers/property-picker";
 import type { Customer, WetCheck } from "@workspace/db/schema";
 
 // ─── Per-customer status derived from wet check records ──────────────────────
@@ -96,152 +97,25 @@ function StatusChip({ status }: { status: CustomerStatus }) {
   );
 }
 
-// ─── Customer card ────────────────────────────────────────────────────────────
-
-interface CustomerCardProps {
-  customer: Customer;
-  status: CustomerStatus;
-  onClick: () => void;
-}
-
-function CustomerCard({ customer, status, onClick }: CustomerCardProps) {
-  const isInProgress = status.kind === "in_progress";
-
+function CardFooter({ status }: { status: CustomerStatus }) {
   return (
-    <button
-      onClick={onClick}
-      className={[
-        "w-full max-w-full text-left rounded-xl border bg-white p-4 shadow-sm transition-all",
-        "hover:shadow-md hover:-translate-y-px active:translate-y-0 active:shadow-sm",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
-        isInProgress
-          ? "border-blue-400 ring-2 ring-blue-200"
-          : "border-gray-200",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      data-testid={`customer-card-${customer.id}`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-gray-900 truncate">
-              {customer.name}
-            </span>
-            {isInProgress && (
-              <Badge className="bg-blue-600 text-white text-xs shrink-0 px-2 py-0.5">
-                Resume
-              </Badge>
-            )}
-          </div>
-          <p className="text-sm text-gray-500 mt-0.5 truncate">
-            {customer.address ?? "No address on file"}
-          </p>
-          {(customer.branches?.length ?? 0) > 0 && (
-            <p className="text-xs text-indigo-600 mt-0.5 flex items-center gap-1">
-              <GitBranch className="h-3 w-3" />
-              {customer.branches!.length} branch{customer.branches!.length !== 1 ? "es" : ""}
-            </p>
-          )}
-        </div>
-        <StatusChip status={status} />
-      </div>
-
-      <div className="mt-2 text-xs text-gray-400 flex items-center gap-2 flex-wrap">
-        {/* Last check date — shown on every card that has history */}
-        {status.kind !== "never_checked" && status.lastDate && (
-          <span>Last check: {formatLastDate(status.lastDate)}</span>
-        )}
-        {status.kind === "never_checked" && (
-          <span>No wet checks on record</span>
-        )}
-        {/* Status-specific action hint */}
-        {status.kind === "in_progress" && (
-          <>
-            <span className="text-gray-300">·</span>
-            <span className="text-blue-600 font-medium">Tap to resume</span>
-          </>
-        )}
-        {status.kind === "awaiting_review" && (
-          <>
-            <span className="text-gray-300">·</span>
-            <span className="text-amber-600">Awaiting review</span>
-          </>
-        )}
-      </div>
-    </button>
-  );
-}
-
-// ─── Branch picker overlay ────────────────────────────────────────────────────
-
-interface BranchPickerProps {
-  customer: Customer;
-  // Per-branch in-progress check status so we can surface resume indicators.
-  inProgressByBranch: Map<string, boolean>;
-  onSelect: (branchName: string) => void;
-  onBack: () => void;
-}
-
-function BranchPicker({ customer, inProgressByBranch, onSelect, onBack }: BranchPickerProps) {
-  const branches = (customer.branches ?? []) as string[];
-  return (
-    <div className="max-w-4xl mx-auto py-4 space-y-4 px-4 sm:px-4 pb-nav-safe overflow-x-hidden w-full">
-      <div className="flex items-center gap-3">
-        <Droplets className="h-6 w-6 text-blue-600 shrink-0" />
-        <h1 className="text-2xl font-bold text-gray-900">Select Branch</h1>
-      </div>
-
-      <button
-        className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800"
-        onClick={onBack}
-        data-testid="branch-picker-back"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to Customers
-      </button>
-
-      <div className="bg-white rounded-xl border border-gray-200 p-4">
-        <p className="text-sm font-semibold text-gray-900">{customer.name}</p>
-        <p className="text-xs text-gray-500 mt-0.5">{customer.address ?? "No address"}</p>
-      </div>
-
-      <p className="text-sm text-gray-600">
-        This customer has multiple locations. Select the branch you are inspecting today:
-      </p>
-
-      <div className="space-y-2" data-testid="branch-list">
-        {branches.map((branch) => {
-          const hasInProgress = inProgressByBranch.get(branch) === true;
-          return (
-            <button
-              key={branch}
-              onClick={() => onSelect(branch)}
-              className={[
-                "w-full text-left rounded-xl border-2 bg-white p-4 shadow-sm transition-all",
-                "hover:border-blue-400 hover:bg-blue-50",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
-                hasInProgress ? "border-blue-400 ring-2 ring-blue-200" : "border-gray-200",
-              ].join(" ")}
-              data-testid={`branch-option-${branch}`}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex-shrink-0 w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center">
-                    <GitBranch className="h-4 w-4 text-indigo-600" />
-                  </div>
-                  <span className="font-semibold text-gray-900 truncate">{branch}</span>
-                </div>
-                {hasInProgress && (
-                  <Badge className="bg-blue-600 text-white text-xs shrink-0">
-                    Resume
-                  </Badge>
-                )}
-              </div>
-            </button>
-          );
-        })}
-      </div>
+    <div className="mt-2 text-xs text-gray-400 flex items-center gap-2 flex-wrap">
+      {status.kind !== "never_checked" && status.lastDate && (
+        <span>Last check: {formatLastDate(status.lastDate)}</span>
+      )}
+      {status.kind === "never_checked" && <span>No wet checks on record</span>}
+      {status.kind === "in_progress" && (
+        <>
+          <span className="text-gray-300">·</span>
+          <span className="text-blue-600 font-medium">Tap to resume</span>
+        </>
+      )}
+      {status.kind === "awaiting_review" && (
+        <>
+          <span className="text-gray-300">·</span>
+          <span className="text-amber-600">Awaiting review</span>
+        </>
+      )}
     </div>
   );
 }
@@ -371,8 +245,17 @@ export default function CustomerPickerPage() {
   if (branchPickerCustomer) {
     return (
       <BranchPicker
-        customer={branchPickerCustomer}
-        inProgressByBranch={inProgressByBranch}
+        title="Select Branch"
+        intro="This customer has multiple locations. Select the branch you are inspecting today:"
+        customerName={branchPickerCustomer.name}
+        customerAddress={branchPickerCustomer.address}
+        branches={(branchPickerCustomer.branches ?? []) as string[]}
+        highlightFor={(b) => inProgressByBranch.get(b) === true}
+        badgeFor={(b) =>
+          inProgressByBranch.get(b) === true ? (
+            <Badge className="bg-blue-600 text-white text-xs shrink-0">Resume</Badge>
+          ) : null
+        }
         onSelect={(branchName) => {
           const c = branchPickerCustomer;
           setBranchPickerCustomer(null);
@@ -469,9 +352,21 @@ export default function CustomerPickerPage() {
               return (
                 <CustomerCard
                   key={customer.id}
-                  customer={customer}
-                  status={status}
+                  name={customer.name}
+                  address={customer.address}
+                  branchCount={customer.branches?.length ?? 0}
+                  highlighted={status.kind === "in_progress"}
+                  badge={
+                    status.kind === "in_progress" ? (
+                      <Badge className="bg-blue-600 text-white text-xs shrink-0 px-2 py-0.5">
+                        Resume
+                      </Badge>
+                    ) : null
+                  }
+                  trailing={<StatusChip status={status} />}
+                  footer={<CardFooter status={status} />}
                   onClick={() => handleCardClick(customer)}
+                  testId={`customer-card-${customer.id}`}
                 />
               );
             })}

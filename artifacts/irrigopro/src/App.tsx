@@ -83,6 +83,7 @@ const AdminBudgetGoalsPage = lazyPage(() => import("@/pages/admin-budget-goals")
 const WetCheckReconciliationPage = lazyPage(() => import("@/pages/wet-check-reconciliation"));
 const CustomerSiteMapsPage = lazyPage(() => import("@/pages/customer-site-maps-page"));
 const IrrigationProfilePage = lazyPage(() => import("@/pages/customers/IrrigationProfile"));
+const DocumentSystemPage = lazyPage(() => import("@/pages/customers/DocumentSystemPage"));
 const FieldTechMaps = lazyPage(() => import("@/pages/field-tech-maps"));
 import CompanyAdminApp from "@/components/company-admin-app";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
@@ -314,6 +315,7 @@ export function AppRoutes() {
                   <Route path="/customers/:id/profile" component={CustomerProfile} />
                   <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />
                   <Route path="/customers/:customerId/irrigation-profile" component={IrrigationProfilePage} />
+                  <Route path="/customers/:customerId/document-system" component={DocumentSystemPage} />
                   <Route path="/site-maps" component={SiteMapsPage} />
                   <Route path="/work-orders/missing-photos" component={WorkOrdersMissingPhotosReport} />
                   <Route path="/billing-sheets/missing-photos" component={MissingPhotosReport} />
@@ -508,6 +510,7 @@ export function AppRoutes() {
                   <Route path="/customers/:id/profile" component={CustomerProfile} />
                   <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />
                   <Route path="/customers/:customerId/irrigation-profile" component={IrrigationProfilePage} />
+                  <Route path="/customers/:customerId/document-system" component={DocumentSystemPage} />
                   <Route path="/system-users" component={SystemUserManagement} />
                   <Route path="/admin/controllers" component={AdminControllers} />
                   <Route path="/admin/client-errors" component={AdminClientErrorsPage} />
