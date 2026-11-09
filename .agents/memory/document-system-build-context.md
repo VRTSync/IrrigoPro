@@ -42,3 +42,9 @@ Read `attached_assets/Pasted--Document-System-Design-Context-Locked-Decisions-Re
 **Why:** Field testing confirmed wired, numbered zones may be deliberately zeroed on the clock. Requiring positive minutes prevents faithful documentation and verification.
 
 **How to apply:** Preserve the 0–120 per-zone range and 1–120 Set all range, including program-pick minute defaults. Do not reintroduce a positive-minutes completeness requirement or rewrite the uploaded historical reference.
+
+**Rule:** Documenters control the wizard controller list's presentation order without changing the underlying controller.
+
+**Why:** The user clarified on 2026-11-09 that reordering must not change the controller that already exists in the system.
+
+**How to apply:** Keep manual list order separate from controller identity, letters, names, settings, and references. Do not interpret a moved row as a request to reletter or rename equipment.
