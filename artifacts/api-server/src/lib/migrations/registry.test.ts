@@ -4,7 +4,7 @@
 // and replaced by repair-ticket-total-drift-v1, which covers all ticket types
 // regardless of invoice status.
 
-import { describe, it, before, after } from "node:test";
+import { describe, it, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import { listMigrations, getMigration } from "./registry";
 import { resolveCheckState } from "./invoice-sent-status-backfill";
@@ -14,7 +14,241 @@ import {
 } from "./seed-field-work-types";
 import { FIELD_WORK_TYPE_SEEDS } from "../../seeds/field-work-types";
 import { db } from "../../db";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
+import * as schema from "@workspace/db";
+import { BIND_TABLES, bindTickets, countUnbound, type DbExecutor } from "../ticket-controller-binding";
+import { createBindingFixture, cleanupBindingFixture } from "../ticket-controller-binding.fixtures";
+import { buildTicketBindingPreview, loadTicketBindingCounts, runTicketBinding, ticketBindingCheckState } from "./bind-ticket-controllers";
+
+describe("ticket controller binding — scoped candidates", () => {
+  async function isolated(run: (q: DbExecutor, fixture: Awaited<ReturnType<typeof createBindingFixture>>) => Promise<void>) {
+    const rollback = new Error("fixture rollback");
+    try {
+      await db.transaction(async tx => {
+        const fixture = await createBindingFixture(tx);
+        await run(tx, fixture);
+        throw rollback;
+      });
+    } catch (error) { if (error !== rollback) throw error; }
+  }
+  it("normalizes d/null branch, prefers active, permits sole inactive, skips blanks/null customers and reports ambiguous inactive clocks", async () => {
+    await isolated(async (q, f) => {
+      const [d] = f.controllers;
+      await q.insert(schema.irrigationControllers).values([
+        { companyId: f.company.id, customerId: f.customer.id, branchName: "", name: "Retired D", letter: "D", isActive: false },
+        ...["Retired F1", "Retired F2"].map(name => ({ companyId: f.company.id, customerId: f.customer.id, branchName: "", name, letter: "F", isActive: false })),
+        { companyId: f.company.id, customerId: f.customer.id, branchName: "", name: "Retired G", letter: "G", isActive: false },
+      ]);
+      const sheet = await f.sheet({ controllerLetter: " d ", branchName: null });
+      const ambiguous = await f.sheet({ controllerLetter: "F" });
+      await f.sheet({ controllerLetter: "G" });
+      const missing = await f.sheet({ controllerLetter: "Z" });
+      await f.sheet({ controllerLetter: " " });
+      await f.sheet({ customerId: null });
+      const prebound = await f.sheet({ controllerId: f.controllers[1].id });
+      const counts = await countUnbound(q, { companyId: f.company.id });
+      assert.deepEqual(counts.billing_sheets, { bound: 2, unresolved: 2 });
+      assert.equal(counts.unresolvedRows.length, 2);
+      assert.equal(counts.unresolvedRows[0].customerName, f.customer.name);
+      assert.deepEqual(counts.unresolvedRows.map(row => row.id), [ambiguous.id, missing.id]);
+      const preview = buildTicketBindingPreview([{
+        companyId: f.company.id, companyName: f.company.name, counts, unresolvedRows: counts.unresolvedRows,
+      }]);
+      assert.deepEqual(preview.orphanRows, { bindable: 2, unresolved: 2 });
+      assert.equal(preview.warnings.filter(w => w.includes(`billing_sheets #${ambiguous.id} ·`)).length, 1);
+      assert.equal(preview.warnings.filter(w => w.includes(`billing_sheets #${missing.id} ·`)).length, 1);
+      assert.deepEqual((await bindTickets(q, { companyId: f.company.id })).billing_sheets, counts.billing_sheets);
+      const [saved] = await q.select().from(schema.billingSheets).where(eq(schema.billingSheets.id, sheet.id));
+      assert.equal(saved.controllerId, d.id); assert.equal(saved.controllerLetter, " d ");
+      assert.equal((await q.select().from(schema.billingSheets).where(eq(schema.billingSheets.id, prebound.id)))[0].controllerId, prebound.controllerId);
+      assert.deepEqual((await bindTickets(q, { companyId: f.company.id })).billing_sheets, { bound: 0, unresolved: 2 });
+    });
+  });
+  it("counts an ambiguous active legacy letter once and lists that ticket once in warning details", async () => {
+    await isolated(async (q, f) => {
+      // Legacy case-sensitive indexes permit this normalized-letter ambiguity,
+      // just like the existing document-controller-stamp duplicate fixture.
+      await q.insert(schema.irrigationControllers).values(["H", "h"].map((letter, i) => ({
+        companyId: f.company.id, customerId: f.customer.id, branchName: "", name: `Legacy H ${i}`, letter, isActive: true,
+      })));
+      const sheet = await f.sheet({ controllerLetter: " H " });
+      const counts = await countUnbound(q, { companyId: f.company.id });
+      assert.deepEqual(counts.billing_sheets, { bound: 0, unresolved: 1 });
+      assert.deepEqual(counts.unresolvedRows, [{
+        table: "billing_sheets", id: sheet.id, customerId: f.customer.id,
+        customerName: f.customer.name, branchName: "", letter: "H", zoneNumber: 5,
+      }]);
+      const preview = buildTicketBindingPreview([{
+        companyId: f.company.id, companyName: f.company.name, counts, unresolvedRows: counts.unresolvedRows,
+      }]);
+      assert.deepEqual(preview.orphanRows, { bindable: 0, unresolved: 1 });
+      assert.deepEqual(preview.warnings, [
+        "Unmatched tickets keep their letter and stay untied. Listed below.",
+        `${f.customer.name} · — · billing_sheets #${sheet.id} · letter H zone 5`,
+      ]);
+      assert.deepEqual((await bindTickets(q, { companyId: f.company.id })).billing_sheets, { bound: 0, unresolved: 1 });
+      assert.equal((await countUnbound(q, { companyId: f.company.id })).unresolvedRows.length, 1);
+    });
+  });
+  it("binds all seven tables through parent scope, never another company's, customer's or branch's clock", async () => {
+    await isolated(async (q, f) => {
+      const other = await createBindingFixture(q);
+      const [north] = await q.insert(schema.irrigationControllers).values({
+        companyId: f.company.id, customerId: f.customer.id, branchName: "North", letter: "D", name: "North D",
+      }).returning();
+      const [e] = await q.insert(schema.estimates).values({
+        companyId: f.company.id, customerId: f.customer.id, branchName: "North", estimateNumber: "BIND",
+        customerName: "Test", customerEmail: "test@example.com", projectName: "Test", partsSubtotal: "0",
+        laborSubtotal: "0", totalAmount: "0", laborRate: "45", controllerLetter: "d",
+      }).returning();
+      const [w] = await q.insert(schema.workOrders).values({
+        companyId: f.company.id, customerId: f.customer.id, branchName: "North", workOrderNumber: `BIND-${crypto.randomUUID()}`,
+        customerName: "Test", customerEmail: "test@example.com", projectName: "Test", controllerLetter: "d",
+      }).returning();
+      const item = { partName: "Test", partPrice: "0", quantity: 1, totalPrice: "0", controllerLetter: " d " };
+      await q.insert(schema.estimateItems).values({ ...item, estimateId: e.id });
+      await q.insert(schema.workOrderItems).values({ ...item, workOrderId: w.id });
+      await q.insert(schema.workOrderZonePhotos).values({ workOrderId: w.id, controllerLetter: "d", url: "test", takenBy: f.user.id });
+      const wc = await f.wetCheck("North");
+      await q.insert(schema.wetCheckZoneRecords).values({ wetCheckId: wc.id, controllerLetter: "d", zoneNumber: 5 });
+      await f.sheet({ branchName: "North" });
+      await f.sheet({ branchName: "Elsewhere" });
+      await f.sheet({ customerId: other.customer.id }); // a foreign customer cannot supply a clock for this company
+      const foreign = await other.sheet();
+      const result = await bindTickets(q, { companyId: f.company.id, customerId: f.customer.id, branchName: "North" });
+      for (const table of BIND_TABLES) assert.deepEqual(result[table], { bound: 1, unresolved: 0 }, table);
+      for (const table of BIND_TABLES) {
+        const rows = await q.execute(sql`SELECT controller_id FROM ${sql.identifier(table)} WHERE controller_id = ${north.id}`);
+        assert.equal(rows.rows.length, 1, table);
+      }
+      assert.equal((await countUnbound(q, { companyId: f.company.id })).billing_sheets.unresolved, 2);
+      assert.equal((await q.select().from(schema.billingSheets).where(eq(schema.billingSheets.id, foreign.id)))[0].controllerId, null);
+    });
+  });
+  it("caps unresolved detail at 200 and preview warnings at 50, without changing data", async () => {
+    await isolated(async (q, f) => {
+      const base = await f.sheet({ controllerLetter: "Z" });
+      const { id: _id, ...values } = base;
+      await q.insert(schema.billingSheets).values(Array.from({ length: 204 }, () => ({ ...values, billingNumber: `BIND-${crypto.randomUUID()}` })));
+      const counts = await countUnbound(q, { companyId: f.company.id });
+      assert.equal(counts.billing_sheets.unresolved, 205);
+      assert.equal(counts.unresolvedRows.length, 200);
+      const preview = buildTicketBindingPreview([{ companyId: f.company.id, companyName: f.company.name, counts, unresolvedRows: counts.unresolvedRows }]);
+      assert.deepEqual(preview.orphanRows, { bindable: 0, unresolved: 205 });
+      assert.equal(preview.warnings.length, 51);
+      assert.equal(preview.warnings[0], "Unmatched tickets keep their letter and stay untied. Listed below.");
+      assert.match(preview.warnings[1], /Binding customer · — · billing_sheets #\d+ · letter Z zone 5/);
+      assert.match(preview.steps[0].description, /0 tickets to tie to their clock .*205 can't be matched/);
+    });
+  });
+});
+
+describe("bind-ticket-controllers-v1 — acknowledged migration", () => {
+  let f: Awaited<ReturnType<typeof createBindingFixture>>;
+  before(async () => { f = await createBindingFixture(db); await f.sheet(); await f.sheet({ controllerLetter: "Z" }); });
+  after(async () => { await cleanupBindingFixture(db, f.company.id); });
+  it("is registered and checks remaining data, not merely its marker", () => {
+    const m = getMigration("bind-ticket-controllers-v1")!;
+    assert.ok(m); assert.equal(m.appSettingsKey, "bindTicketControllers.done");
+    assert.deepEqual(ticketBindingCheckState(1), { state: "not_started" });
+    assert.equal(ticketBindingCheckState(1, "date").state, "partially_applied");
+    assert.deepEqual(ticketBindingCheckState(0), { state: "completed", completedAt: "" });
+    assert.deepEqual(ticketBindingCheckState(0, "date"), { state: "completed", completedAt: "date" });
+  });
+  it("preview counts match; refuses unacknowledged runs; commits, independently verifies and reruns with zero writes", async () => {
+    const preview = buildTicketBindingPreview(await loadTicketBindingCounts(f.company.id));
+    assert.equal(preview.requiresAcknowledgement, true);
+    assert.deepEqual(preview.orphanRows, { bindable: 1, unresolved: 1 });
+    assert.equal((await runTicketBinding(() => {}, false, f.company.id))[0].status, "failed");
+    const events: string[] = [];
+    const results = await runTicketBinding(event => events.push(event.status), true, f.company.id);
+    assert.ok(results.every(r => r.status === "success"), JSON.stringify(results));
+    assert.equal(results[0].rowsAffected, 1); assert.deepEqual(events, ["running", "success"]);
+    assert.deepEqual(buildTicketBindingPreview(await loadTicketBindingCounts(f.company.id)).orphanRows, { bindable: 0, unresolved: 1 });
+    assert.equal((await runTicketBinding(() => {}, true, f.company.id))[0].rowsAffected, 0);
+  });
+  it("writes the global marker transactionally and check/preview independently read committed facts", async () => {
+    // Restrict tenant enumeration to this fixture; never bind unrelated dev data.
+    const originalSelect = db.select.bind(db);
+    const originalTransaction = db.transaction.bind(db);
+    const oldMarker = await db.execute(sql`SELECT * FROM app_settings WHERE key = 'bindTicketControllers.done'`);
+    await f.sheet();
+    const selectOnlyFixture = (select: typeof db.select) => (...args: any[]) => {
+      const query = (select as any)(...args);
+      const from = query.from.bind(query);
+      query.from = (table: unknown) => {
+        const result = from(table);
+        if (table === schema.companies) result.where = () => from(table).where(eq(schema.companies.id, f.company.id));
+        return result;
+      };
+      return query;
+    };
+    const selectSpy = mock.method(db, "select", selectOnlyFixture(originalSelect));
+    const txSpy = mock.method(db, "transaction", (fn: any) => originalTransaction(async tx => {
+      const spy = mock.method(tx, "select", selectOnlyFixture(tx.select.bind(tx) as typeof db.select));
+      try { return await fn(tx); } finally { spy.mock.restore(); }
+    }));
+    try {
+      await db.execute(sql`DELETE FROM app_settings WHERE key = 'bindTicketControllers.done'`);
+      const m = getMigration("bind-ticket-controllers-v1")!;
+      assert.equal((await m.check()).state, "not_started");
+      assert.equal((await m.preview()).orphanRows.bindable, 1);
+      const result = await m.run(() => {}, { acknowledged: true });
+      assert.ok(result.every(r => r.status === "success"), JSON.stringify(result));
+      assert.equal((await db.execute(sql`SELECT * FROM app_settings WHERE key = 'bindTicketControllers.done'`)).rows.length, 1);
+      assert.equal((await m.check()).state, "completed");
+      assert.equal((await m.run(() => {}, { acknowledged: true }))[0].rowsAffected, 0);
+      await f.sheet();
+      assert.equal((await m.check()).state, "partially_applied");
+    } finally {
+      selectSpy.mock.restore(); txSpy.mock.restore();
+      await db.execute(sql`DELETE FROM app_settings WHERE key = 'bindTicketControllers.done'`);
+      if (oldMarker.rows.length) await db.execute(sql`INSERT INTO app_settings (key, value, updated_at)
+        VALUES ('bindTicketControllers.done', ${oldMarker.rows[0].value}, ${oldMarker.rows[0].updated_at})`);
+    }
+  });
+  it("does not mark completion or emit successful writes when binding leaves bindable rows", async () => {
+    await f.sheet();
+    const originalTransaction = db.transaction.bind(db);
+    const dialect = new PgDialect();
+    const events: string[] = [];
+    const spy = mock.method(db, "transaction", (fn: any) => originalTransaction(async tx => {
+      const execute = tx.execute.bind(tx);
+      const executeSpy = mock.method(tx, "execute", async (query: any) => {
+        const text = dialect.sqlToQuery(query).sql;
+        if (text.includes("UPDATE") && text.includes("updated AS")) return { rows: [{ bound: 0, unresolved: 0 }] };
+        if (text.includes("INSERT INTO app_settings")) throw new Error("Must not mark completion");
+        return execute(query);
+      });
+      try { return await fn(tx); } finally { executeSpy.mock.restore(); }
+    }));
+    try {
+      const result = await runTicketBinding(event => events.push(event.status), true, f.company.id);
+      assert.equal(result.at(-1)!.status, "failed");
+      assert.match(result.at(-1)!.error!, /Bindable tickets remain; no completion marker/);
+      assert.ok(!events.includes("success"));
+    } finally { spy.mock.restore(); }
+  });
+  it("independent verification detects a new bindable row after commit", async () => {
+    const originalTransaction = db.transaction.bind(db);
+    let committed = false;
+    const spy = mock.method(db, "transaction", async (fn: any) => {
+      const result = await originalTransaction(fn);
+      committed = true;
+      await f.sheet();
+      return result;
+    });
+    try {
+      const result = await runTicketBinding(event => {
+        if (event.status === "success") assert.equal(committed, true);
+      }, true, f.company.id);
+      assert.equal(result[0].status, "success");
+      assert.equal(result.at(-1)!.status, "failed");
+      assert.match(result.at(-1)!.error!, /Bindable tickets remain after commit/);
+    } finally { spy.mock.restore(); }
+  });
+});
 
 // ── Static registry shape ──────────────────────────────────────────────────────
 

@@ -1,4 +1,5 @@
 import type { MigrationDefinition } from './types';
+import { bindTicketControllersMigration } from './bind-ticket-controllers';
 import { backfillZoneTypeConfirmedMigration } from './backfill-zone-type-confirmed';
 import { repairWoMatchEstimateMigration } from './repair-wo-match-estimate';
 import { reconcileInspectionPassMigration } from './reconcile-inspection-pass';
@@ -16,6 +17,7 @@ import { repairWorkOrderPartsMigration } from './repair-work-order-parts';
 import { backfillControllerZoneRecordsMigration } from './backfill-controller-zone-records';
 
 const REGISTRY = new Map<string, MigrationDefinition>([
+  [bindTicketControllersMigration.id, bindTicketControllersMigration],
   [backfillZoneTypeConfirmedMigration.id, backfillZoneTypeConfirmedMigration],
   [backfillControllerZoneRecordsMigration.id, backfillControllerZoneRecordsMigration],
   [repairTicketTotalDriftMigration.id, repairTicketTotalDriftMigration],

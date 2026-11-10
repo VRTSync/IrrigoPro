@@ -217,6 +217,7 @@ import { normalizeUsername } from "./lib/normalize-username";
 import { ZoneCountClearError, validateZoneCount, zonePlaceholder, zoneCountSummary, compressZoneRanges, parseZoneRanges, zoneEditSummary, ZONE_EDIT_SUMMARY_PREFIX, ZoneProgramError, type BulkZonePatch, type ZoneActor, type ZoneChanges } from "./lib/controller-zone-records";
 import { controllerDocumentationGaps, backflowDocumentationGaps, controllerNameFor } from "@workspace/shared";
 import { LetterError, letterConflict, notesWithFormerName } from "./lib/controller-letters";
+import { bindTickets, chooseControllerId, normalizeControllerLetter } from "./lib/ticket-controller-binding";
 export { LetterError } from "./lib/controller-letters";
 import { DocumentationError } from "./lib/documentation-error";
 export { ZoneCountClearError } from "./lib/controller-zone-records";
@@ -9946,6 +9947,17 @@ export class DatabaseStorage implements IStorage {
       ));
       if (byClient) return byClient;
     }
+    if (insert.controllerId == null) {
+      const [parent] = await db.select().from(wetChecks).where(and(
+        eq(wetChecks.id, wetCheckId), eq(wetChecks.companyId, companyId),
+      ));
+      if (parent?.customerId != null) {
+        const ids = await this.resolveControllerIdsByLetter(db, {
+          companyId: parent.companyId, customerId: parent.customerId, branchName: parent.branchName,
+        }, [insert.controllerLetter]);
+        insert = { ...insert, controllerId: ids.get(normalizeControllerLetter(insert.controllerLetter) ?? "") ?? null };
+      }
+    }
     // Task #1857: prefer controllerId as the natural key when available;
     // fall back to controllerLetter for historical records without a resolved FK.
     const naturalKeyWhere = insert.controllerId != null
@@ -9958,11 +9970,25 @@ export class DatabaseStorage implements IStorage {
           eq(wetCheckZoneRecords.wetCheckId, wetCheckId),
           eq(wetCheckZoneRecords.controllerLetter, insert.controllerLetter),
           eq(wetCheckZoneRecords.zoneNumber, insert.zoneNumber),
+          isNull(wetCheckZoneRecords.controllerId),
         );
-    const [byNatural] = await db.select().from(wetCheckZoneRecords).where(naturalKeyWhere);
+    let [byNatural] = await db.select().from(wetCheckZoneRecords).where(naturalKeyWhere);
+    if (!byNatural && insert.controllerId != null) {
+      [byNatural] = await db.select().from(wetCheckZoneRecords).where(and(
+        eq(wetCheckZoneRecords.wetCheckId, wetCheckId),
+        eq(wetCheckZoneRecords.controllerLetter, insert.controllerLetter),
+        eq(wetCheckZoneRecords.zoneNumber, insert.zoneNumber),
+        isNull(wetCheckZoneRecords.controllerId),
+      ));
+    }
     if (byNatural) {
       const [updated] = await db.update(wetCheckZoneRecords)
-        .set({ ...insert, wetCheckId })
+        .set({
+          ...insert, wetCheckId,
+          // The ID key may find this clock under a new current letter. Keep
+          // the historical label once bound, rather than rewriting the ticket.
+          ...(byNatural.controllerId != null ? { controllerLetter: byNatural.controllerLetter } : {}),
+        })
         .where(eq(wetCheckZoneRecords.id, byNatural.id))
         .returning();
       return updated;
@@ -11806,10 +11832,10 @@ export class DatabaseStorage implements IStorage {
     scope: { companyId: number; customerId: number; branchName: string | null },
     letters: (string | null | undefined)[],
   ): Promise<Map<string, number | null>> {
-    const normalized = [...new Set(letters.map(l => l?.trim().toUpperCase()).filter((l): l is string => !!l))];
+    const normalized = [...new Set(letters.map(normalizeControllerLetter).filter((l): l is string => !!l))];
     const result = new Map<string, number | null>(normalized.map(l => [l, null]));
     if (!normalized.length) return result;
-    const rows = await q.select({ id: irrigationControllers.id, letter: irrigationControllers.letter })
+    const rows = await q.select({ id: irrigationControllers.id, letter: irrigationControllers.letter, isActive: irrigationControllers.isActive })
       .from(irrigationControllers).where(and(
         eq(irrigationControllers.companyId, scope.companyId),
         eq(irrigationControllers.customerId, scope.customerId),
@@ -11817,8 +11843,8 @@ export class DatabaseStorage implements IStorage {
         inArray(sql`upper(trim(${irrigationControllers.letter}))`, normalized),
       ));
     for (const letter of normalized) {
-      const matches = rows.filter(r => r.letter?.trim().toUpperCase() === letter);
-      result.set(letter, matches.length === 1 ? matches[0].id : null);
+      const matches = rows.filter(r => normalizeControllerLetter(r.letter) === letter);
+      result.set(letter, chooseControllerId(matches));
     }
     return result;
   }
@@ -11834,7 +11860,7 @@ export class DatabaseStorage implements IStorage {
         rows.filter(r => Object.hasOwn(r, "controllerLetter")).map(r => r.controllerLetter));
     return rows.map(row => {
       if (!Object.hasOwn(row, "controllerLetter")) return row;
-      const letter = row.controllerLetter?.trim().toUpperCase();
+      const letter = normalizeControllerLetter(row.controllerLetter);
       const controllerId = letter ? ids.get(letter) ?? null : null;
       if (letter && controllerId == null) logger.warn({
         op: "stampControllerId", companyId: scope.companyId, table,
@@ -11894,9 +11920,14 @@ export class DatabaseStorage implements IStorage {
     const [existing] = await q.select().from(table).where(eq(table.id, id)).for("update");
     if (!existing) return patch;
     const scope = { ...existing, ...patch, companyId: existing.companyId };
-    const scopeChanged = scope.customerId !== existing.customerId || scope.branchName !== existing.branchName;
-    const touchesLocation = ["controllerLetter", "customerId", "branchName"].some(key => Object.hasOwn(patch, key));
-    if (!touchesLocation) return patch;
+    const scopeChanged = scope.customerId !== existing.customerId || (scope.branchName ?? "") !== (existing.branchName ?? "");
+    const letterChanged = Object.hasOwn(patch, "controllerLetter")
+      && normalizeControllerLetter(patch.controllerLetter) !== normalizeControllerLetter(existing.controllerLetter);
+    const touchesLocation = letterChanged || scopeChanged;
+    if (!touchesLocation) {
+      const { controllerId: _ignored, ...preserved } = patch;
+      return preserved;
+    }
     const [stamped] = await this._stampControllerIds(q, scope,
       [{ ...patch, controllerLetter: scope.controllerLetter }], table === estimates ? "estimates" : table === workOrders ? "work_orders" : "billing_sheets");
     if (scopeChanged && table !== billingSheets) {
@@ -12190,6 +12221,7 @@ export class DatabaseStorage implements IStorage {
       await tx.select({ id: customers.id }).from(customers).where(and(
         eq(customers.id, visible.customerId), eq(customers.companyId, visible.companyId),
       )).for("update");
+      await bindTickets(tx, { companyId: visible.companyId, customerId: visible.customerId, branchName: visible.branchName });
       const [before] = await tx.select().from(irrigationControllers).where(scope).for("update");
       if (!before) return null;
       if (!before.isActive) throw new LetterError(400, "This controller is marked not at this location");

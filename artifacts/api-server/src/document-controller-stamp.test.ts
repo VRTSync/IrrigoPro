@@ -105,6 +105,26 @@ describe("document controller stamps (isolated real DB fixtures)", () => {
     assert.notEqual(a, foreign);
   });
 
+  it("live resolution shares the binder's active-unique then all-unique rule", async () => {
+    const rows = await db.insert(s.irrigationControllers).values([
+      { companyId: company, customerId: customer, branchName: "", letter: "R", name: "Active R", isActive: true },
+      { companyId: company, customerId: customer, branchName: "", letter: "R", name: "Retired R", isActive: false },
+      { companyId: company, customerId: customer, branchName: "", letter: "S", name: "Sole retired S", isActive: false },
+      { companyId: company, customerId: customer, branchName: "", letter: "T", name: "Retired T1", isActive: false },
+      { companyId: company, customerId: customer, branchName: "", letter: "T", name: "Retired T2", isActive: false },
+    ]).returning();
+    try {
+      const resolved = await storage.resolveControllerIdsByLetter(db, {
+        companyId: company, customerId: customer, branchName: null,
+      }, [" r ", "s", "t"]);
+      assert.deepEqual(resolved, new Map([["R", rows[0].id], ["S", rows[2].id], ["T", null]]));
+      const estimate = await storage.createEstimate(est({ controllerLetter: " r " }), []);
+      assert.equal(estimate.controllerId, rows[0].id);
+      // Remove the fixture ticket before its referenced clock.
+      await db.delete(s.estimates).where(eq(s.estimates.id, estimate.id));
+    } finally { await db.delete(s.irrigationControllers).where(inArray(s.irrigationControllers.id, rows.map(row => row.id))); }
+  });
+
   it("canonical estimates, replacements, header restamps and unrelated patches retain snapshots", async () => {
     const e = await storage.createEstimate(est(), [item()]);
     assert.equal(e.controllerId, a); assert.equal(e.items[0].controllerId, a);
@@ -293,8 +313,10 @@ describe("document controller stamps (isolated real DB fixtures)", () => {
     const conversion = await storage.convertWetCheckToWetCheckBilling(wc.id, company, { id: user, name: "Stamp manager" });
     const e = (await storage.getEstimate(conversion.estimateId!))!;
     const w = (await storage.getWorkOrder(conversion.workOrderId!, company))!;
-    const estimateRows = await storage.getEstimateItems(e.id);
-    const workRows = await storage.getWorkOrderItems(w.id);
+    // Conversion input order is not the subject of this test. Explicitly put
+    // A before B so reversing below always tests the same B→A client reorder.
+    const estimateRows = (await storage.getEstimateItems(e.id)).sort((x, y) => x.zoneNumber! - y.zoneNumber!);
+    const workRows = (await storage.getWorkOrderItems(w.id)).sort((x, y) => x.zoneNumber! - y.zoneNumber!);
     const { registerRoutes } = await import("./routes/routes");
     const server = await registerRoutes(express().use(express.json()));
     await new Promise<void>(r => server.listen(0, r));

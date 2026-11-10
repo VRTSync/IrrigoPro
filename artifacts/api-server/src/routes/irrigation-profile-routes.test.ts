@@ -29,6 +29,118 @@ import { storage } from "../storage";
 import { makePropertyControllerPatch } from "./property-controller-patch";
 import { makePropertyControllerGet } from "./property-controller-get";
 import { CLEAR_ZONE_COUNT_MESSAGE, compressZoneRanges, parseZoneRanges } from "../lib/controller-zone-records";
+import { createBindingFixture, cleanupBindingFixture } from "../lib/ticket-controller-binding.fixtures";
+import { billingSheets as clockSheets, wetChecks as clockWetChecks, wetCheckZoneRecords as clockZoneRecords } from "@workspace/db";
+
+describe("Clocks Own Their History Slice 1 — rename, edits and technician writes", () => {
+  let f: Awaited<ReturnType<typeof createBindingFixture>>;
+  const actor = () => ({ id: f.user.id, name: f.user.name });
+  const getSheet = async (id: number) => (await db.select().from(clockSheets).where(eq(clockSheets.id, id)))[0];
+  before(async () => { f = await createBindingFixture(db); });
+  after(async () => { await cleanupBindingFixture(db, f.company.id); });
+  it("binds D zone 5 before D→X; unchanged normalized patches ignore supplied ids; real letter and scope changes resolve", async () => {
+    const [d, e] = f.controllers;
+    const sheet = await f.sheet();
+    await storage.setControllerLetter(f.company.id, d.id, { letter: "X" }, actor());
+    assert.equal((await getSheet(sheet.id)).controllerId, d.id);
+    assert.equal((await getSheet(sheet.id)).controllerLetter, "D");
+    await storage.updateBillingSheet(sheet.id, { controllerLetter: " d ", branchName: "", controllerId: e.id });
+    assert.equal((await getSheet(sheet.id)).controllerId, d.id);
+    await storage.updateBillingSheet(sheet.id, { controllerId: null, notes: "Ignore forged clear" });
+    assert.equal((await getSheet(sheet.id)).controllerId, d.id);
+    await storage.updateBillingSheet(sheet.id, { controllerLetter: "E" });
+    assert.equal((await getSheet(sheet.id)).controllerId, e.id);
+    const north = await storage.createIrrigationController({
+      companyId: f.company.id, customerId: f.customer.id, branchName: "North", name: "North E", letter: "E",
+    });
+    await storage.updateBillingSheet(sheet.id, { branchName: "North" });
+    assert.equal((await getSheet(sheet.id)).controllerId, north.id);
+    await storage.setControllerLetter(f.company.id, d.id, { letter: "D" }, actor());
+  });
+  it("swaps D↔E only after both unbound tickets are tied to their original clocks, preserving already-bound tickets and frozen letters", async () => {
+    const [d, e] = f.controllers;
+    const a = await f.sheet(), b = await f.sheet({ controllerLetter: "E" });
+    const already = await f.sheet({ controllerId: d.id, controllerLetter: "E" });
+    await storage.setControllerLetter(f.company.id, d.id, { letter: "E", swap: true }, actor());
+    assert.deepEqual([(await getSheet(a.id)).controllerId, (await getSheet(b.id)).controllerId], [d.id, e.id]);
+    assert.deepEqual([(await getSheet(a.id)).controllerLetter, (await getSheet(b.id)).controllerLetter], ["D", "E"]);
+    assert.equal((await getSheet(already.id)).controllerId, d.id);
+    await storage.updateBillingSheet(a.id, { controllerLetter: "D", controllerId: e.id });
+    assert.equal((await getSheet(a.id)).controllerId, d.id);
+    await storage.setControllerLetter(f.company.id, d.id, { letter: "D", swap: true }, actor());
+  });
+  it("rolls ticket binding back if rename fails after binding", async () => {
+    const sheet = await f.sheet();
+    const [d] = f.controllers;
+    const snapshot = mock.method(storage as any, "_appendIrrigationSnapshot", async () => { throw new Error("Snapshot failure"); });
+    try {
+      await assert.rejects(storage.setControllerLetter(f.company.id, d.id, { letter: "X" }, actor()), /Snapshot failure/);
+      assert.equal((await getSheet(sheet.id)).controllerId, null);
+      assert.equal((await storage.getIrrigationController(f.company.id, d.id))!.letter, "D");
+    } finally { snapshot.mock.restore(); }
+  });
+  it("keeps a bound zone's frozen D label when its renamed clock is written as X", async () => {
+    const history = await createBindingFixture(db);
+    try {
+      const [d] = history.controllers;
+      const wc = await history.wetCheck();
+      const original = await storage.upsertWetCheckZoneRecord(wc.id, history.company.id, {
+        wetCheckId: wc.id, controllerLetter: "D", zoneNumber: 5,
+      });
+      await storage.setControllerLetter(history.company.id, d.id, { letter: "X" }, {
+        id: history.user.id, name: history.user.name,
+      });
+      const edited = await storage.upsertWetCheckZoneRecord(wc.id, history.company.id, {
+        wetCheckId: wc.id, controllerLetter: "X", zoneNumber: 5, notes: "New observation",
+      });
+      assert.equal(edited.id, original.id);
+      assert.equal(edited.controllerId, d.id);
+      assert.equal(edited.controllerLetter, "D");
+      assert.equal(edited.notes, "New observation");
+      const rows = await db.select().from(clockZoneRecords).where(eq(clockZoneRecords.wetCheckId, wc.id));
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].controllerLetter, "D");
+    } finally { await cleanupBindingFixture(db, history.company.id); }
+  });
+  it("binds letter-only zone inserts; ID misses adopt only unbound rows and never merge another clock's historical row", async () => {
+    const [d, e] = f.controllers;
+    const wc = await f.wetCheck();
+    const first = await storage.upsertWetCheckZoneRecord(wc.id, f.company.id, {
+      wetCheckId: wc.id, controllerLetter: "D", zoneNumber: 5, clientId: crypto.randomUUID(),
+    });
+    assert.equal(first.controllerId, d.id);
+    const again = await storage.upsertWetCheckZoneRecord(wc.id, f.company.id, {
+      wetCheckId: wc.id, controllerLetter: "D", zoneNumber: 5, notes: "Same key",
+    });
+    assert.equal(again.id, first.id);
+    const [legacy] = await db.insert(clockZoneRecords).values({ wetCheckId: wc.id, controllerLetter: "E", zoneNumber: 6 }).returning();
+    const adopted = await storage.upsertWetCheckZoneRecord(wc.id, f.company.id, {
+      wetCheckId: wc.id, controllerLetter: "E", zoneNumber: 6,
+    });
+    assert.equal(adopted.id, legacy.id); assert.equal(adopted.controllerId, e.id);
+    await storage.setControllerLetter(f.company.id, d.id, { letter: "E", swap: true }, actor());
+    const newD = await storage.upsertWetCheckZoneRecord(wc.id, f.company.id, {
+      wetCheckId: wc.id, controllerLetter: "D", zoneNumber: 5,
+    });
+    assert.equal(newD.controllerId, e.id); assert.notEqual(newD.id, first.id);
+    const original = (await db.select().from(clockZoneRecords).where(eq(clockZoneRecords.id, first.id)))[0];
+    assert.equal(original.controllerId, d.id); assert.equal(original.controllerLetter, "D");
+    const deduped = await storage.upsertWetCheckZoneRecord(wc.id, f.company.id, {
+      wetCheckId: wc.id, controllerLetter: "D", zoneNumber: 99, clientId: first.clientId,
+    });
+    assert.equal(deduped.id, first.id);
+    // Unresolvable writes also cannot fall back to a different clock's bound row.
+    await db.update(irrigationControllers).set({ letter: "X" }).where(eq(irrigationControllers.id, e.id));
+    const unresolved = await storage.upsertWetCheckZoneRecord(wc.id, f.company.id, {
+      wetCheckId: wc.id, controllerLetter: "D", zoneNumber: 5,
+    });
+    assert.equal(unresolved.controllerId, null); assert.notEqual(unresolved.id, first.id); assert.notEqual(unresolved.id, newD.id);
+    await db.update(clockWetChecks).set({ status: "submitted" }).where(eq(clockWetChecks.id, wc.id));
+    await assert.rejects(storage.upsertWetCheckZoneRecord(wc.id, f.company.id, {
+      wetCheckId: wc.id, controllerLetter: "D", zoneNumber: 5, clientId: first.clientId,
+    }), /only in-progress wet checks can be edited/);
+  });
+});
 
 // ── Test server factory ────────────────────────────────────────────────────────
 
