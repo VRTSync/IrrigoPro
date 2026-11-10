@@ -7,6 +7,7 @@
 - [api-server test suite shared dev DB](api-server-test-shared-db.md) — full suite is slow (>110s) and integration tests share one dev DB; exact-count assertions fail on leftover data, not your change.
 - [Migration registry count test](migration-registry-count-test.md) — registering a new Super Admin DB migration breaks an exact-count assertion in registry.test.ts; prefer membership checks.
 - [Controller identity and startup constraints](controller-letter-stored.md) — field-audited letters supersede auto-assignment; old startup hardening must not restore retired constraints.
+- [Clocks own history](clocks-own-history.md) — permanent clock identity, frozen ticket labels, bind-before-rename and an atomic rename ledger; supersedes prior letter-change plans.
 - [Drizzle phantom column in a select](drizzle-phantom-column-select.md) — a selected column that doesn't exist throws `Object.entries(undefined)` at prepare time and 500s the whole route; TS won't catch it.
 - [Drizzle push silent abort](drizzle-push-silent-abort.md) — plain push exits 0 without applying when the diff has data-loss statements; use push-force, and import legacy-table data before the drop ships.
 - [Role capability registry](role-capability-registry.md) — gate on capabilities, never role strings; unknown/null roles must be false, and prefer allowlists to denylists.
