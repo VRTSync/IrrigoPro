@@ -1267,6 +1267,64 @@ describe("Slice 6 — backflow flow", () => {
     expect(writes()).toEqual([["/api/backflows/6", "PUT", { name: "Pool backflow", installDate: "2019-04-02" }]]);
   });
 
+  it.each(["Next", "Back", "Save & exit"])("clears a stored install date with only installDate: null on %s", async (action) => {
+    await openBf(bf(6, { installDate: "2019-04-02", gaps: [{ step: "location", code: "x", label: "x" }] }), "step-bf-location");
+    const input = screen.getByTestId("input-install-date");
+    expect(input).toHaveValue("2019-04-02");
+    expect(input).toHaveClass("min-w-0", "w-full", "h-12", "text-base", "appearance-none", "text-left", "[&::-webkit-date-and-time-value]:text-left");
+    expect(input.parentElement).toHaveClass("min-w-0");
+    expect(screen.queryByText("Leave blank if you don't know it.")).toBeNull();
+    const clear = screen.getByTestId("button-clear-install-date");
+    expect(clear).toHaveTextContent("Clear (date not known)");
+    expect(clear).toHaveClass("self-start", "min-h-11", "px-1", "text-sm", "font-semibold", "text-primary");
+    fireEvent.click(clear);
+    expect(input).toHaveValue("");
+    expect(screen.queryByTestId("button-clear-install-date")).toBeNull();
+    expect(screen.getByText("Leave blank if you don't know it.")).toHaveClass("text-xs", "text-muted-foreground");
+    expect(writes()).toEqual([]);
+    fireEvent.click(screen.getByTestId(action === "Next" ? "button-next" : action === "Back" ? "button-doc-back" : "button-save-exit"));
+    await screen.findByTestId(action === "Next" ? "step-bf-last-test" : action === "Back" ? "step-bf-device" : "status-doc-flash");
+    expect(writes()).toEqual([["/api/backflows/6", "PUT", { installDate: null }]]);
+    if (action === "Next") {
+      fireEvent.click(screen.getByTestId("chip-test-matches"));
+      fireEvent.click(screen.getByTestId("button-next"));
+      await screen.findByTestId("step-review");
+      expect(screen.getByTestId("text-review-installed")).toHaveTextContent(/^Not known$/);
+      expect(writes()).toEqual([["/api/backflows/6", "PUT", { installDate: null }]]);
+    }
+  });
+
+  it("setting then clearing an initially unknown install date writes nothing on Next", async () => {
+    await openBf(bf(6, { gaps: [{ step: "location", code: "x", label: "x" }] }), "step-bf-location");
+    expect(screen.getByText("Leave blank if you don't know it.")).toBeInTheDocument();
+    expect(screen.queryByTestId("button-clear-install-date")).toBeNull();
+    fireEvent.change(screen.getByTestId("input-install-date"), { target: { value: "2026-11-10" } });
+    expect(screen.queryByText("Leave blank if you don't know it.")).toBeNull();
+    fireEvent.click(screen.getByTestId("button-clear-install-date"));
+    expect(screen.getByTestId("input-install-date")).toHaveValue("");
+    expect(screen.getByText("Leave blank if you don't know it.")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-bf-last-test");
+    expect(writes()).toEqual([]);
+  });
+
+  it("Test date retains its phone sizing and is required without a clear button", async () => {
+    await openBf(bf(10, { ...noTest, gaps: [{ step: "last_test", code: "test", label: "test result" }] }), "step-bf-last-test");
+    fireEvent.click(screen.getByTestId("chip-result-pass"));
+    const input = screen.getByTestId("input-test-date");
+    expect(input).toHaveClass("min-w-0", "w-full", "h-12", "text-base", "appearance-none", "text-left", "[&::-webkit-date-and-time-value]:text-left");
+    expect(input.parentElement).toHaveClass("min-w-0");
+    expect(screen.getByLabelText("Test date *")).toBe(input);
+    expect(screen.queryByRole("button", { name: /Clear/ })).toBeNull();
+    fireEvent.change(screen.getByTestId("input-tested-by"), { target: { value: "Delta Testing" } });
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    fireEvent.change(input, { target: { value: "2024-05-10" } });
+    expect(screen.getByTestId("button-next")).not.toBeDisabled();
+    fireEvent.change(input, { target: { value: "" } });
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    expect(writes()).toEqual([]);
+  });
+
   it("6. no test on file: Pass needs a tester; both send log-test; next due follows storage date math", async () => {
     await openBf(bf(10, { ...noTest, gaps: [{ step: "last_test", code: "test", label: "test result" }] }), "step-bf-last-test");
     expect(screen.queryByTestId("text-test-on-file")).toBeNull();

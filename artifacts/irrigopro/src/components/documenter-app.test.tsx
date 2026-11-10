@@ -50,7 +50,7 @@ proto.scrollIntoView ??= () => {};
 
 function ctrl(id: number, o: Partial<DocumentationControllerGraph> = {}): DocumentationControllerGraph {
   return {
-    id, letter: "A", name: "Clock A", location: "Garage wall", brand: "Hunter", model: "Pro-C",
+    id, letter: "A", letterConfirmed: false, name: "Clock A", location: "Garage wall", brand: "Hunter", model: "Pro-C",
     totalZones: 2, settingsPhotoUrl: `photo-${id}`, notes: null, lastUpdatedAt: null,
     fieldVerifiedAt: null, fieldVerifiedByName: null, gaps: [], verified: false,
     programs: [], zones: [], ...o,
@@ -294,9 +294,13 @@ describe("System Documenter app (Slice 7)", () => {
   it("7. allowlist proof: every apiRequest and fetch call in a real wizard walk is allowed", async () => {
     const nav = mount("/");
     fireEvent.click(await screen.findByTestId("card-property-3"));
+    expect(screen.queryByRole("button", { name: /reorder/i })).toBeNull();
     fireEvent.click(await screen.findByTestId("row-controller-4"));
     expect(await screen.findByTestId("step-details")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("chip-model-ICC2"));
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("letter-A"));
+    expect(screen.getByTestId("button-next")).not.toBeDisabled();
     fireEvent.click(screen.getByTestId("button-next"));
     expect(await screen.findByTestId("step-zone-count")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("button-save-exit"));
@@ -307,6 +311,8 @@ describe("System Documenter app (Slice 7)", () => {
     const apiCalls = vi.mocked(apiRequest).mock.calls.map(([url, method]) => [String(method ?? "GET").toUpperCase(), url] as [string, string]);
     expect(apiCalls).toContainEqual(["PUT", "/api/irrigation-controllers/4"]);
     expect(fetchCalls).toContainEqual(["PUT", "/api/irrigation-controllers/4"]);
+    expect(apiRequest).toHaveBeenCalledWith("/api/irrigation-controllers/4/letter", "POST", { letter: "A", confirm: true, swap: false });
+    expect(fetchCalls).toContainEqual(["POST", "/api/irrigation-controllers/4/letter"]);
     const recorded = [...apiCalls, ...fetchCalls];
     expect(recorded.length).toBeGreaterThan(3);
     const denied = recorded.filter(([m, u]) => !isApiAllowedForRole("system_documenter", m, u));

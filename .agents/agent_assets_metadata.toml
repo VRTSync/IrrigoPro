@@ -767,3 +767,45 @@ mtime_ms = 1794252672404
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/36cf185f-3b4e-483d-a9e9-e70972b419bc/59d7c293-863a-41fc-9182-c1898addffd5"
 storage_version_token = "1794253321609367"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "kjDNgH-Nl6Eat0nFyueGF"
+uri = "file://generated-artifacts/backflow-dates/location-accidental-date-390.jpg"
+type = "image"
+title = "Location at 390px"
+description = "Chromium component fixture: install date and clear control. Not iPhone verification."
+logical_id = "c515be57-e22b-4042-8946-b71a6da59246"
+content_hash = "sha256:f8f1c512d73d3553b47c7aef1a2a8064858324570fe1216f3dcdf6bdc240f777"
+size = 45673
+mtime_ms = 1794329242912
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/c515be57-e22b-4042-8946-b71a6da59246/1348609b-582c-4163-a746-0368d4c2073e"
+storage_version_token = "1794329299748976"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "_OIrQaJqxhiF14f-Qf6-E"
+uri = "file://generated-artifacts/backflow-dates/last-test-390.jpg"
+type = "image"
+title = "Last test at 390px"
+description = "Chromium component fixture: required Test date fits within the screen."
+logical_id = "726b783f-f623-4cd0-b134-10135d9a484c"
+content_hash = "sha256:68f3881876411029c66f70d03a84b55c12742c51a3a89e7725ce46ed5ccc1748"
+size = 39550
+mtime_ms = 1794329243132
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/726b783f-f623-4cd0-b134-10135d9a484c/3e789c5d-0faa-495d-8d52-19d57fbc64f0"
+storage_version_token = "1794329300212447"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "__JLAGpfFHqlFlgmUHkO_"
+uri = "file://generated-artifacts/backflow-dates/review-installed-not-known-390.jpg"
+type = "image"
+title = "Review after clearing"
+description = "Chromium fixture flow reaches Installed: Not known. No physical iPhone was available."
+logical_id = "9c0ce7de-10a2-4b8d-84a1-0ec29eddf5b6"
+content_hash = "sha256:0217e558e3f635f2afbf650803022208f70229c00302a47aaa5e2335d08dd02d"
+size = 38174
+mtime_ms = 1794329243252
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/9c0ce7de-10a2-4b8d-84a1-0ec29eddf5b6/77ebc81f-303c-4b6b-b9e0-d88ba10ca9d2"
+storage_version_token = "1794329300694117"
+content_type = "image/jpeg"

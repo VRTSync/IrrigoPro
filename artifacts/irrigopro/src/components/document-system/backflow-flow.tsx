@@ -272,7 +272,9 @@ export function BackflowFlow({ customerId, branchName, site, backflow, draftName
         <>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="bf-test-date" className="text-sm font-semibold">Test date <span className="text-red-600">*</span></label>
-            <Input id="bf-test-date" type="date" className="h-12 text-base" value={values.testDate} onChange={(e) => set("testDate", e.target.value)} data-testid="input-test-date" />
+            <div className="min-w-0">
+              <Input id="bf-test-date" type="date" className="h-12 text-base min-w-0 w-full appearance-none text-left [&::-webkit-date-and-time-value]:text-left" value={values.testDate} onChange={(e) => set("testDate", e.target.value)} data-testid="input-test-date" />
+            </div>
           </div>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="bf-tested-by" className="text-sm font-semibold">Tested by <span className="text-red-600">*</span></label>
@@ -395,7 +397,17 @@ export function BackflowFlow({ customerId, branchName, site, backflow, draftName
             </div>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="bf-install" className="text-sm font-semibold">Install date (if known)</label>
-              <Input id="bf-install" type="date" className="h-12 text-base" value={values.installDate} onChange={(e) => set("installDate", e.target.value)} data-testid="input-install-date" />
+              <div className="min-w-0">
+                <Input id="bf-install" type="date" className="h-12 text-base min-w-0 w-full appearance-none text-left [&::-webkit-date-and-time-value]:text-left" value={values.installDate} onChange={(e) => set("installDate", e.target.value)} data-testid="input-install-date" />
+              </div>
+              {values.installDate ? (
+                <button type="button" className="self-start min-h-11 px-1 text-sm font-semibold text-primary"
+                  onClick={() => set("installDate", "")} data-testid="button-clear-install-date">
+                  Clear (date not known)
+                </button>
+              ) : (
+                <p className="text-xs text-muted-foreground">Leave blank if you don't know it.</p>
+              )}
             </div>
             {notHereButton}
           </section>
