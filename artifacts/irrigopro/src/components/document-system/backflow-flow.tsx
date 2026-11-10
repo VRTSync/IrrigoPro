@@ -12,6 +12,7 @@ import {
 import { DocFrame } from "./doc-frame";
 import { DocChip } from "./doc-chip";
 import { DocPhotoField } from "./doc-photo-field";
+import { DocNotesField } from "./doc-notes-field";
 import {
   BACKFLOW_BRANDS, BACKFLOW_LOCATIONS, BACKFLOW_SIZES, BACKFLOW_TYPES, backflowTypeLabel, serverMessage,
 } from "./constants";
@@ -111,13 +112,13 @@ export function BackflowFlow({ customerId, branchName, site, backflow, draftName
         if (!complete || !forward) return;
         const created = await apiRequest(`/api/customers/${customerId}/backflows`, "POST", {
           name: v.name.trim() || draftName, branchName, deviceType: v.deviceType, size: v.size, brand: v.brand.trim(),
-          model: v.model.trim() || null, serialNumber: v.serialNumber.trim(), photoUrl: v.photo,
+          model: v.model.trim() || null, serialNumber: v.serialNumber.trim(), photoUrl: v.photo, notes: v.notes.trim() || null,
         });
         const newId = Number(created?.id);
         if (!Number.isFinite(newId)) throw new Error("The server did not return the new backflow.");
         savedIdRef.current = newId;
         setSavedId(newId);
-        savedRef.current = { ...savedRef.current, deviceType: v.deviceType, size: v.size, brand: v.brand, model: v.model, serialNumber: v.serialNumber, photo: v.photo, name: v.name.trim() || draftName };
+        savedRef.current = { ...savedRef.current, deviceType: v.deviceType, size: v.size, brand: v.brand, model: v.model, serialNumber: v.serialNumber, photo: v.photo, name: v.name.trim() || draftName, notes: v.notes };
         wrote = true;
       } else {
         const body: Record<string, string | null> = {};
@@ -133,13 +134,13 @@ export function BackflowFlow({ customerId, branchName, site, backflow, draftName
     } else if (key === "location") {
       if (id == null) return;
       const body: Record<string, string | null> = {};
-      for (const k of ["name", "location", "installDate"] as const) {
+      for (const k of ["name", "location", "installDate", "notes"] as const) {
         if (v[k].trim() !== saved[k].trim()) body[k] = k === "name" ? v[k].trim() : (v[k].trim() || null);
       }
       if (!Object.keys(body).length) return;
       if ("name" in body && !body.name) throw new Error("Name can't be blank. Enter a name to save this backflow.");
       await apiRequest(`/api/backflows/${id}`, "PUT", body);
-      savedRef.current = { ...savedRef.current, name: v.name, location: v.location, installDate: v.installDate };
+      savedRef.current = { ...savedRef.current, name: v.name, location: v.location, installDate: v.installDate, notes: v.notes };
       wrote = true;
     } else if (key === "last_test") {
       if (id == null) return;
@@ -307,6 +308,7 @@ export function BackflowFlow({ customerId, branchName, site, backflow, draftName
     ["Name", values.name || "Not set", stepIndex("location")],
     ["Location", values.location || "Not set", stepIndex("location")],
     ["Installed", values.installDate ? formatDay(values.installDate) : "Not known", stepIndex("location")],
+    ["Notes", values.notes.trim() || "None", stepIndex("location")],
     ["Last test", reviewTest, stepIndex("last_test")],
   ];
 
@@ -409,6 +411,8 @@ export function BackflowFlow({ customerId, branchName, site, backflow, draftName
                 <p className="text-xs text-muted-foreground">Leave blank if you don't know it.</p>
               )}
             </div>
+            <DocNotesField value={values.notes} onChange={(v) => set("notes", v)}
+              placeholder="Access, shutoff, shared vault — anything the next tech needs" testId="input-backflow-notes" />
             {notHereButton}
           </section>
         )}

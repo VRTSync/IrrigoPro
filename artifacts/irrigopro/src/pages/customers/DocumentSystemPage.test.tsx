@@ -29,6 +29,8 @@ vi.mock("@/lib/auth-context", () => ({
 }));
 
 import DocumentSystemPage from "./DocumentSystemPage";
+import { DocNotesField } from "@/components/document-system/doc-notes-field";
+import * as backflowModel from "@/components/document-system/backflow-model";
 import { hasCapability, CAN_DOCUMENT_IRRIGATION_SYSTEM } from "@workspace/shared";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -211,12 +213,13 @@ describe("DocumentSystemPage — Slice 4", () => {
     expect(screen.getByTestId("letter-P")).toHaveAttribute("aria-pressed", "false");
     expect(writes()).toHaveLength(0);
     fireEvent.click(screen.getByTestId("letter-D"));
+    fireEvent.change(screen.getByTestId("input-controller-notes"), { target: { value: "  Door lock broken  " } });
     expect(screen.getByTestId("button-next")).not.toBeDisabled();
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-zone-count");
     expect(writes()).toEqual([["/api/customers/7/controllers-profile", "POST", {
       letter: "D", confirmLetter: true, location: "Mech room", brand: "Rain Bird", model: "ESP-ME3",
-      branchName: "", settingsPhotoUrl: "ph-123",
+      branchName: "", settingsPhotoUrl: "ph-123", notes: "Door lock broken",
     }]]);
   });
 
@@ -1159,6 +1162,145 @@ function bf(id: number, o: Partial<DocumentationBackflow> = {}): DocumentationBa
   };
 }
 const noTest = { lastTestResult: null, lastTestedDate: null, lastTestedBy: null, nextTestDueDate: null };
+
+describe("optional equipment notes", () => {
+  for (const kind of ["controller", "backflow"] as const) {
+    const isController = kind === "controller";
+    const row = `row-${kind}-81`;
+    const field = `input-${kind}-notes`;
+    const step = isController ? "step-details" : "step-bf-location";
+    const nextStep = isController ? "step-zone-count" : "step-bf-last-test";
+    const url = isController ? "/api/irrigation-controllers/81" : "/api/backflows/81";
+    const setSite = (notes: string | null) => {
+      site = isController ? siteOf([complete(81, "A", { notes })])
+        : withBf([complete(82, "B", { verified: true })], [bf(81, { notes, ...noTest, testUnknownReason: "no_tag" })]);
+    };
+    const openNotes = async () => {
+      fireEvent.click(await screen.findByTestId(row));
+      await screen.findByTestId("step-review");
+      fireEvent.click(screen.getByTestId("button-edit-notes"));
+      await screen.findByTestId(step);
+    };
+
+    it(`${kind}: initializes office notes, leaves them untouched, and routes Edit correctly`, async () => {
+      setSite("Formerly named: Pool Clock");
+      renderPage();
+      await openNotes();
+      expect(screen.getByLabelText("Notes (optional)")).toHaveValue("Formerly named: Pool Clock");
+      expect(screen.getByTestId(field)).toHaveAttribute("placeholder", isController
+        ? "Anything the next tech should know about this clock"
+        : "Access, shutoff, shared vault — anything the next tech needs");
+      fireEvent.click(screen.getByTestId("button-next"));
+      await screen.findByTestId(nextStep);
+      expect(writes()).toEqual([]);
+    });
+
+    it(`${kind}: changed-only trimmed notes survive a failure, retry, navigation, Save & exit and reopening`, async () => {
+      setSite(null);
+      renderPage();
+      await openNotes();
+      const note = "Door lock broken\nRain sensor disconnected";
+      fireEvent.change(screen.getByTestId(field), { target: { value: `  ${note}  ` } });
+      failNext = "Try again";
+      fireEvent.click(screen.getByTestId("button-next"));
+      await screen.findByTestId("text-save-error");
+      expect(screen.getByTestId(field)).toHaveValue(`  ${note}  `);
+      custom = (u, m, data) => {
+        if (u === url && m === "PUT") { setSite((data as { notes: string }).notes); return {}; }
+      };
+      fireEvent.click(screen.getByTestId("button-retry"));
+      await screen.findByTestId(nextStep);
+      expect(writes()).toEqual([[url, "PUT", { notes: note }], [url, "PUT", { notes: note }]]);
+      fireEvent.click(screen.getByTestId("button-doc-back"));
+      await screen.findByTestId(step);
+      expect(screen.getByTestId(field)).toHaveValue(`  ${note}  `);
+      fireEvent.change(screen.getByTestId(field), { target: { value: `${note}\nAccess through gate` } });
+      fireEvent.click(screen.getByTestId("button-save-exit"));
+      await screen.findByTestId("status-doc-flash");
+      expect(writes().at(-1)).toEqual([url, "PUT", { notes: `${note}\nAccess through gate` }]);
+      fireEvent.click(screen.getByTestId(row));
+      await screen.findByTestId("step-review");
+      const review = screen.getByTestId("text-review-notes");
+      expect(review.textContent).toBe(`${note}\nAccess through gate`);
+      expect(review).toHaveClass("whitespace-pre-line");
+      expect(screen.getByTestId("button-verify")).not.toBeDisabled();
+      fireEvent.click(screen.getByTestId("button-edit-notes"));
+      await screen.findByTestId(step);
+      expect(screen.getByTestId(field)).toHaveValue(`${note}\nAccess through gate`);
+    });
+
+    it(`${kind}: clearing sends only notes:null and empty notes never block Next, Verify or Finish`, async () => {
+      setSite("Office note");
+      renderPage();
+      await openNotes();
+      fireEvent.change(screen.getByTestId(field), { target: { value: "   " } });
+      expect(screen.queryByTestId("text-still-needed")).toBeNull();
+      expect(screen.getByTestId("button-next")).not.toBeDisabled();
+      custom = (u, m) => { if (u === url && m === "PUT") { setSite(null); return {}; } };
+      fireEvent.click(screen.getByTestId("button-save-exit"));
+      await screen.findByTestId("status-doc-flash");
+      expect(writes()).toEqual([[url, "PUT", { notes: null }]]);
+      fireEvent.click(screen.getByTestId(row));
+      await screen.findByTestId("step-review");
+      expect(screen.getByTestId("text-review-notes")).toHaveTextContent("None");
+      expect(screen.queryByTestId("text-review-gaps")).toBeNull();
+      expect(screen.getByTestId("button-verify")).not.toBeDisabled();
+      custom = (u, m) => {
+        if (u === `${url}/field-verify` && m === "POST") {
+          if (isController) site.controllers[0].verified = true;
+          else site.backflows[0].verified = true;
+          site.site.noBackflowConfirmed = isController;
+          return {};
+        }
+      };
+      fireEvent.click(screen.getByTestId("button-verify"));
+      await screen.findByTestId("status-doc-flash");
+      expect(screen.getByTestId("button-finish")).not.toBeDisabled();
+    });
+  }
+
+  it("shared field has the exact phone-friendly contract and counter boundaries", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<DocNotesField value={"a".repeat(800)} onChange={onChange} placeholder="Hint" testId="notes" />);
+    const field = screen.getByLabelText("Notes (optional)");
+    expect(field).toHaveAttribute("rows", "3");
+    expect(field).toHaveAttribute("maxlength", "1000");
+    expect(field).toHaveClass("w-full", "min-w-0", "rounded-xl", "border", "border-slate-300", "px-3.5", "py-3", "text-base");
+    expect(screen.queryByText("800 / 1000")).toBeNull();
+    for (const length of [801, 1000]) {
+      rerender(<DocNotesField value={"a".repeat(length)} onChange={onChange} placeholder="Hint" testId="notes" />);
+      expect(screen.getByText(`${length} / 1000`)).toHaveAttribute("aria-live", "polite");
+    }
+    fireEvent.change(field, { target: { value: "changed" } });
+    expect(onChange).toHaveBeenCalledWith("changed");
+  });
+
+  it("includes pre-existing draft notes in the backflow create payload without moving creation from Device", async () => {
+    // Location follows Device, so seed the draft initializer to exercise the
+    // create contract separately from the normal post-create Location update.
+    const original = backflowModel.backflowValuesOf;
+    const spy = vi.spyOn(backflowModel, "backflowValuesOf").mockImplementation((b, name) => ({
+      ...original(b, name), photo: "draft-photo", deviceType: "rpz", size: '1"',
+      brand: "Watts", serialNumber: "K2", notes: "  Draft access note  ",
+    }));
+    try {
+      custom = (u, m) => u === "/api/customers/7/backflows" && m === "POST" ? { id: 77 } : undefined;
+      renderPage();
+      fireEvent.click(await screen.findByTestId("button-add-backflow"));
+      await screen.findByTestId("step-bf-photo");
+      fireEvent.click(screen.getByTestId("button-next"));
+      await screen.findByTestId("step-bf-device");
+      expect(writes()).toEqual([]);
+      fireEvent.click(screen.getByTestId("button-next"));
+      await screen.findByTestId("step-bf-location");
+      expect(writes()).toEqual([["/api/customers/7/backflows", "POST", {
+        name: "Backflow 1", branchName: "", deviceType: "rpz", size: '1"', brand: "Watts",
+        model: null, serialNumber: "K2", photoUrl: "draft-photo", notes: "Draft access note",
+      }]]);
+      expect(screen.getByTestId("input-backflow-notes")).toHaveValue("  Draft access note  ");
+    } finally { spy.mockRestore(); }
+  });
+});
 const withBf = (controllers: DocumentationControllerGraph[], backflows: DocumentationBackflow[], o: Partial<DocumentationSite["site"]> = {}) => {
   const s6 = siteOf(controllers);
   return { ...s6, backflows, site: { ...s6.site, ...o } };
@@ -1211,7 +1353,7 @@ describe("Slice 6 — backflow flow", () => {
     await screen.findByTestId("step-bf-location");
     expect(screen.getByTestId("input-bf-name")).toHaveValue("Backflow 2");
     expect(writes()).toEqual([["/api/customers/7/backflows", "POST", {
-      name: "Backflow 2", branchName: "", deviceType: "rpz", size: '1"', brand: "Febco", model: null, serialNumber: "K81234", photoUrl: "bf-ph",
+      name: "Backflow 2", branchName: "", deviceType: "rpz", size: '1"', brand: "Febco", model: null, serialNumber: "K81234", photoUrl: "bf-ph", notes: null,
     }]]);
     // Back and forward again updates instead of creating a second row.
     fireEvent.click(screen.getByTestId("button-doc-back"));
@@ -1219,6 +1361,18 @@ describe("Slice 6 — backflow flow", () => {
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-bf-location");
     expect(writes().filter(([u]) => u === "/api/customers/7/backflows")).toHaveLength(1);
+    // Notes are normally entered after Device has created the row.
+    fireEvent.click(screen.getByTestId("chip-bf-location-By meter"));
+    fireEvent.change(screen.getByTestId("input-backflow-notes"), { target: { value: "  Shared vault with building 4  " } });
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-bf-last-test");
+    expect(writes().at(-1)).toEqual(["/api/backflows/77", "PUT", { location: "By meter", notes: "Shared vault with building 4" }]);
+    fireEvent.click(screen.getByTestId("button-doc-back"));
+    await screen.findByTestId("step-bf-location");
+    expect(screen.getByTestId("input-backflow-notes")).toHaveValue("  Shared vault with building 4  ");
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-bf-last-test");
+    expect(writes()).toHaveLength(2);
   });
 
   it("draft Save & exit asks with the backflow copy and writes nothing", async () => {

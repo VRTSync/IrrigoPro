@@ -809,3 +809,17 @@ mtime_ms = 1794329243252
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/9c0ce7de-10a2-4b8d-84a1-0ec29eddf5b6/77ebc81f-303c-4b6b-b9e0-d88ba10ca9d2"
 storage_version_token = "1794329300694117"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "lHIL_fehsWwQWe17Gw14d"
+uri = "file://generated-artifacts/field-notes/browser-evidence.html"
+type = "html"
+title = "Field notes browser evidence"
+description = "Phone-width notes and verification, plus desktop shared-note confirmation. Fixture API responses; not physical-device or authenticated database evidence."
+logical_id = "2f0bb165-d592-45c5-9244-b08c58c46122"
+content_hash = "sha256:58d29e24b1fb7f7505b2dcbe57aa688e5f696dabbd0a1312ecfb2b5eca88fa3e"
+size = 569217
+mtime_ms = 1794332624381
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/2f0bb165-d592-45c5-9244-b08c58c46122/5953db17-923d-424a-b512-de99f204129d"
+storage_version_token = "1794332637765941"
+content_type = "text/html"

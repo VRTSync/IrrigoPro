@@ -29,6 +29,7 @@ export type BackflowValues = {
   name: string;
   location: string;
   installDate: string;
+  notes: string;
   /** Pass/Fail entry or unknown reason being captured on Last test. */
   result: TestChoice | null;
   testDate: string;
@@ -55,6 +56,7 @@ export function backflowValuesOf(b: DocumentationBackflow | null, draftName: str
     name: b ? s(b.name) : draftName,
     location: s(b?.location),
     installDate: s(b?.installDate).slice(0, 10),
+    notes: s(b?.notes),
     // An on-file test is shown as a card; the entry starts empty for a newer one.
     result: hasTestOnFile(b) ? null : unknown,
     testDate: "",

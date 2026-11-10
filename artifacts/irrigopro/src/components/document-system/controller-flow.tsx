@@ -13,6 +13,7 @@ import {
 import { DocFrame } from "./doc-frame";
 import { DocChip } from "./doc-chip";
 import { DocPhotoField } from "./doc-photo-field";
+import { DocNotesField } from "./doc-notes-field";
 import { ProgramsStep, RunTimesStep, ZoneTypesStep } from "./slice5-steps";
 import {
   activeSorted, mergePrograms, mergeZones, nextProgramName, programAdded, programDeleted, programsSummary,
@@ -40,6 +41,7 @@ type Values = {
   location: string;
   brand: string;
   model: string;
+  notes: string;
   totalZones: number | null;
 };
 
@@ -59,6 +61,7 @@ function valuesOf(c: DocumentationControllerGraph | null): Values {
     location: c?.location ?? "",
     brand: c?.brand ?? "",
     model: c?.model ?? "",
+    notes: c?.notes ?? "",
     totalZones: c?.totalZones ?? null,
   };
 }
@@ -199,7 +202,7 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
         if (!complete || !forward) return "ok";
         const created = await apiRequest(`/api/customers/${customerId}/controllers-profile`, "POST", {
           letter: picked, confirmLetter: true, location: v.location.trim(), brand: v.brand.trim(), model: v.model.trim(),
-          branchName, settingsPhotoUrl: v.photo,
+          branchName, settingsPhotoUrl: v.photo, notes: v.notes.trim() || null,
         });
         const newId = Number(created?.id);
         if (!Number.isFinite(newId)) throw new Error("The server did not return the new controller.");
@@ -207,7 +210,7 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
         setSavedId(newId);
         setCreatedLetter(String(created?.letter ?? picked));
         sentLetterRef.current = picked;
-        savedRef.current = { ...savedRef.current, location: v.location, brand: v.brand, model: v.model, photo: v.photo };
+        savedRef.current = { ...savedRef.current, location: v.location, brand: v.brand, model: v.model, photo: v.photo, notes: v.notes };
       } else {
         if (picked && picked !== sentLetterRef.current) {
           const oldLetter = base?.letter ?? controller?.letter ?? null;
@@ -218,12 +221,12 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
           changedRef.current = true;
         }
         const body: Record<string, string | null> = {};
-        for (const k of ["location", "brand", "model"] as const) {
+        for (const k of ["location", "brand", "model", "notes"] as const) {
           if (v[k] !== saved[k]) body[k] = v[k].trim() || null;
         }
         if (!Object.keys(body).length) { void invalidate(); return "ok"; }
         await apiRequest(`/api/irrigation-controllers/${id}`, "PUT", body);
-        savedRef.current = { ...savedRef.current, location: v.location, brand: v.brand, model: v.model };
+        savedRef.current = { ...savedRef.current, location: v.location, brand: v.brand, model: v.model, notes: v.notes };
       }
     } else if (key === "zone_count") {
       const n = v.totalZones;
@@ -452,6 +455,8 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
               )}
               <Input aria-label="Model" className="h-12 text-base" placeholder="Model" value={values.model} onChange={(e) => set("model", e.target.value)} data-testid="input-model" />
             </div>
+            <DocNotesField value={values.notes} onChange={(v) => set("notes", v)}
+              placeholder="Anything the next tech should know about this clock" testId="input-controller-notes" />
             {notHereButton}
           </section>
         )}
@@ -523,6 +528,7 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
                     ? " · confirmed on site"
                     : <span className="text-amber-800"> · not confirmed</span>}</>
                 ) : "Not set", 1],
+                ["Notes", values.notes.trim() || "None", stepIndex("details")],
                 ["Location", values.location || "Not set", 1],
                 ["Brand", [values.brand, values.model].filter(Boolean).join(" ") || "Not set", 1],
                 ["Zones", values.totalZones ? String(values.totalZones) : "Not set", stepIndex("zone_count")],
@@ -531,7 +537,7 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
               ] as const).map(([label, value, to]) => (
                 <div key={label} className="flex items-center gap-3 px-3.5 py-3">
                   <dt className="w-20 shrink-0 self-start pt-0.5 text-sm text-muted-foreground">{label}</dt>
-                  <dd className={label === "Types" || label === "Programs" ? "min-w-0 flex-1 whitespace-pre-line text-[15px] font-medium" : "min-w-0 flex-1 truncate text-[15px] font-medium"} data-testid={`text-review-${label.toLowerCase()}`}>{value}</dd>
+                  <dd className={label === "Types" || label === "Programs" || label === "Notes" ? "min-w-0 flex-1 whitespace-pre-line break-words text-[15px] font-medium" : "min-w-0 flex-1 truncate text-[15px] font-medium"} data-testid={`text-review-${label.toLowerCase()}`}>{value}</dd>
                   <button type="button" className="min-h-11 px-2 text-sm font-semibold text-primary" disabled={busy} onClick={() => void run({ kind: "step", to })} data-testid={`button-edit-${label.toLowerCase()}`}>
                     Edit
                   </button>

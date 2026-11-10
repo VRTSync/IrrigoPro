@@ -19,6 +19,12 @@ Read `attached_assets/Pasted--Document-System-Design-Context-Locked-Decisions-Re
 
 **How to apply:** Do not re-ask these decisions. Use the original context and each slice specification for exact capture requirements, gap codes, verification rules, and exclusions.
 
+**Rule:** Equipment notes in the Document System are optional field knowledge shared with the office, never a completion requirement. Zone notes are intentionally excluded.
+
+**Why:** The user explicitly said zone problems belong in wet checks rather than the system record; equipment access and condition notes should not prevent documenting or verifying a system.
+
+**How to apply:** Keep controller/backflow notes in the existing shared stores, preserve office and former-name notes unless edited, and do not add zone notes or notes-based gaps to this wizard.
+
 **Rule:** Treat completed earlier slices as satisfied prerequisites; recovering archived scheduling records must not introduce another implementation or acceptance gate.
 
 **Why:** The user explicitly corrected the historical planning snapshot: Slice 4 was already built. Recreating its task or requiring another approval would repeat work rather than advance the requested slice.
