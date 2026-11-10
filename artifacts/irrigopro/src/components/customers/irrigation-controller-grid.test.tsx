@@ -53,6 +53,52 @@ beforeEach(() => { auth.role = "company_admin"; request.mockReset(); toast.mockR
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("controller settings photos", () => {
+  it.each([true, false])("8. shows read-only extra lines below the program control (editable main: %s)", async (canEdit) => {
+    const programs = [
+      { id: 5, name: "A", startTimes: ["06:00"], wateringDays: ["Mon"], seasonalAdjustPct: 100, isActive: true, sortOrder: 0 },
+      { id: 6, name: "B", startTimes: ["07:00"], wateringDays: ["Tue"], seasonalAdjustPct: 100, isActive: true, sortOrder: 1 },
+    ] as IrrigationProgram[];
+    const detail = { ...counted(1), programs, retiredZones: [], zones: [{
+      ...zones[0], programId: 5, runTimeMinutes: 20, extraPrograms: [{ programId: 6, runTimeMinutes: 12 }],
+    }] };
+    mount(counted(1), canEdit, canEdit, [], async () => detail, programs);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    const line = await screen.findByTestId("text-extra-100-6");
+    expect(line).toHaveTextContent("Also B · 12 min");
+    expect(within(line).queryByRole("button")).toBeNull();
+    expect(within(line).queryByRole("combobox")).toBeNull();
+  });
+
+  it.each([true, false])("8. snapshot resolves separate extra lines and tolerates legacy snapshots (has extras: %s)", async (hasExtras) => {
+    const programs = [
+      { id: 5, name: "A", seasonalAdjustPct: 100, isActive: true, sortOrder: 0 },
+      { id: 6, name: "B", seasonalAdjustPct: 100, isActive: true, sortOrder: 1 },
+    ] as IrrigationProgram[];
+    const detail = { ...counted(1), programs, retiredZones: [], zones: [{ ...zones[0], programId: 5, runTimeMinutes: 20 }] };
+    const history = [{ id: 1, changedByName: "Pat", changedAt: "2026-11-10", snapshotJson: {
+      controller: baseController, programs, zones: detail.zones,
+      ...(hasExtras ? { zoneExtraPrograms: [{ zoneId: 100, programId: 6, runTimeMinutes: 12 }] } : {}),
+    } }];
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity,
+      queryFn: ({ queryKey }) => Promise.resolve(String(queryKey[0]).endsWith("/history") ? history : detail) } } });
+    render(<QueryClientProvider client={qc}>
+      <IrrigationControllerGrid controllers={[counted(1)]} customerId={9} canManageControllers={false} canEditZones={false} onRefreshList={vi.fn()} />
+    </QueryClientProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View History" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View snapshot" }));
+    const drawer = within(screen.getByRole("dialog"));
+    const a = drawer.getByText("Program A").parentElement!.parentElement!;
+    const b = drawer.getByText("Program B").parentElement!.parentElement!;
+    expect(within(a).getByText("20 min")).toBeInTheDocument();
+    if (hasExtras) {
+      expect(within(b).getByRole("row", { name: /1 Zone 1 12 min\s*\(also\)/ })).toHaveTextContent("12 min (also)");
+      expect(within(b).queryByText("20 min")).toBeNull();
+    } else {
+      expect(within(b).queryByRole("table")).toBeNull();
+    }
+  });
+
   it("feeds extra program runtimes into the real schedule without inheriting main overrides", async () => {
     const programs = [
       { id: 5, name: "A", startTimes: ["06:00"], wateringDays: ["Mon"], seasonalAdjustPct: 100, isActive: true, sortOrder: 0 },

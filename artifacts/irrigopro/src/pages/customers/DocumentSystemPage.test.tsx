@@ -539,6 +539,162 @@ const range = (n: number, o: Partial<Z> = {}) => Array.from({ length: n }, (_, i
 const gap = (step: string) => [{ step, code: step, label: step }];
 const bulk = () => writes().filter(([u]) => String(u).endsWith("/zones/bulk"));
 
+describe("Zones on more than one program — wizard", () => {
+  const a = p5(9, "A");
+  const b = p5(10, "B", { sortOrder: 1 });
+  const c = p5(11, "C", { sortOrder: 2 });
+  const extra = { programId: b.id, runTimeMinutes: 12 };
+  const endpoint = "/api/irrigation-controllers/160/zones/extra-programs";
+  const replacement = (lines: { programId: number; runTimeMinutes: number }[]) => ({
+    zones: [{ zoneId: 3, lines }],
+  });
+  async function start(extras: Z["extraPrograms"] = [], programs = [a, b, c], main: number | null = a.id) {
+    return open(complete(160, "D", {
+      totalZones: 3, programs,
+      zones: [z5(1, { programId: a.id, zoneTypeConfirmed: true }), z5(2, { programId: a.id, zoneTypeConfirmed: true }),
+        z5(3, { id: 3, programId: main, runTimeMinutes: 20, zoneType: "rotor", zoneTypeConfirmed: true, extraPrograms: extras })],
+      gaps: gap("run_times"),
+    }), "step-run-times");
+  }
+  async function next() {
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+  }
+
+  it("1. adds the first unused active program at Set-all minutes, saves main groups before one replacement, and counts both in Review", async () => {
+    await start([], [c, a, b, p5(12, "D", { isActive: false })]);
+    fireEvent.change(screen.getByTestId("input-set-all-minutes"), { target: { value: "17" } });
+    fireEvent.click(screen.getByTestId("button-add-program-3"));
+    expect(screen.getByTestId("input-extra-minutes-3-B")).toHaveValue("17");
+    fireEvent.change(screen.getByTestId("input-extra-minutes-3-B"), { target: { value: "12" } });
+    fireEvent.change(screen.getByTestId("input-minutes-3"), { target: { value: "21" } });
+    await next();
+    expect(writes()).toEqual([
+      ["/api/irrigation-controllers/160/zones/bulk", "PUT", { zoneIds: [3], patch: { programId: a.id, runTimeMinutes: 21 } }],
+      [endpoint, "PUT", replacement([extra])],
+    ]);
+    expect(screen.getByTestId("text-review-programs")).toHaveTextContent("Program A: Mon at 5:00 AM, 100%, 3 zones (2 at 0 min), 21 min");
+    expect(screen.getByTestId("text-review-programs")).toHaveTextContent("Program B: Mon at 5:00 AM, 100%, 1 zone, 12 min");
+    fireEvent.click(screen.getByTestId("button-verify"));
+    await screen.findByTestId("status-doc-flash");
+    expect(writes().at(-1)).toEqual(["/api/irrigation-controllers/160/field-verify", "POST"]);
+  });
+
+  it("2. removes immediately without a dialog and sends an empty replacement", async () => {
+    await start([extra]);
+    fireEvent.click(screen.getByRole("button", { name: "Remove program B from zone 3" }));
+    expect(screen.queryByTestId("row-extra-3-B")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await next();
+    expect(writes()).toEqual([[endpoint, "PUT", replacement([])]]);
+  });
+
+  it("3–4. excludes other lines from each selector and hides Add when all active programs are used", async () => {
+    await start([extra]);
+    const box = screen.getByRole("region", { name: "Zone 3" });
+    expect(within(box).queryByRole("button", { name: "Zone 3 on program B" })).toBeNull();
+    const line = within(screen.getByTestId("row-extra-3-B"));
+    expect(line.queryByRole("button", { name: /also on program A/ })).toBeNull();
+    expect(line.getByRole("button", { name: /also on program B/ })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByTestId("button-add-program-3"));
+    expect(screen.queryByTestId("button-add-program-3")).toBeNull();
+    expect(within(screen.getByTestId("row-extra-3-B")).queryByRole("button", { name: /also on program C/ })).toBeNull();
+    expect(within(screen.getByTestId("row-extra-3-C")).queryByRole("button", { name: /also on program B/ })).toBeNull();
+    fireEvent.click(screen.getByTestId("button-remove-extra-3-C"));
+    expect(screen.getByTestId("button-add-program-3")).toBeInTheDocument();
+  });
+
+  it("5. Set all removes only a colliding extra and sends only the affected zone, preserving other extras and minutes", async () => {
+    await start([extra, { programId: c.id, runTimeMinutes: 7 }]);
+    fireEvent.click(screen.getByLabelText("Set all on program B"));
+    fireEvent.click(screen.getByTestId("button-apply-all"));
+    expect(screen.queryByTestId("row-extra-3-B")).toBeNull();
+    expect(screen.getByTestId("input-extra-minutes-3-C")).toHaveValue("7");
+    await next();
+    expect(writes()).toEqual([
+      ["/api/irrigation-controllers/160/zones/bulk", "PUT", { zoneIds: [101, 102, 3], patch: { programId: b.id, runTimeMinutes: 10 } }],
+      [endpoint, "PUT", replacement([{ programId: c.id, runTimeMinutes: 7 }])],
+    ]);
+  });
+
+  it("6. failed extras save retains edits across refetch, Retry resends the exact body without repeating successful main groups", async () => {
+    const { qc } = await start();
+    fireEvent.click(screen.getByTestId("button-add-program-3"));
+    fireEvent.change(screen.getByTestId("input-extra-minutes-3-B"), { target: { value: "12" } });
+    fireEvent.change(screen.getByTestId("input-minutes-3"), { target: { value: "21" } });
+    let attempts = 0;
+    custom = (url, method) => {
+      if (url === endpoint && method === "PUT" && ++attempts === 1) throw new Error("500: extras unavailable");
+      return undefined;
+    };
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("text-save-error");
+    await act(async () => { await qc.refetchQueries(); });
+    expect(screen.getByTestId("input-extra-minutes-3-B")).toHaveValue("12");
+    expect(screen.getByTestId("input-minutes-3")).toHaveValue("21");
+    fireEvent.click(screen.getByTestId("button-retry"));
+    await screen.findByTestId("step-review");
+    expect(writes()).toEqual([
+      ["/api/irrigation-controllers/160/zones/bulk", "PUT", { zoneIds: [3], patch: { programId: a.id, runTimeMinutes: 21 } }],
+      [endpoint, "PUT", replacement([extra])],
+      [endpoint, "PUT", replacement([extra])],
+    ]);
+    fireEvent.click(screen.getByTestId("button-doc-back"));
+    await screen.findByTestId("step-run-times");
+    await next();
+    expect(writes()).toHaveLength(3);
+  });
+
+  it("keeps independent unsaved edits through refetch, program changes, remove and re-add, including zero and 120 minutes", async () => {
+    const { qc } = await start();
+    fireEvent.click(screen.getByTestId("button-add-program-3"));
+    fireEvent.change(screen.getByTestId("input-extra-minutes-3-B"), { target: { value: "12" } });
+    await act(async () => { await qc.refetchQueries(); });
+    fireEvent.click(within(screen.getByTestId("row-extra-3-B")).getByRole("button", { name: /also on program C/ }));
+    expect(screen.getByTestId("input-extra-minutes-3-C")).toHaveValue("12");
+    fireEvent.click(screen.getByTestId("button-add-program-3"));
+    fireEvent.change(screen.getByTestId("input-extra-minutes-3-B"), { target: { value: "999" } });
+    fireEvent.blur(screen.getByTestId("input-extra-minutes-3-B"));
+    expect(screen.getByTestId("input-extra-minutes-3-B")).toHaveValue("120");
+    expect(screen.getByLabelText("Zone 3 program B more minutes")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("button-remove-extra-3-C"));
+    fireEvent.click(screen.getByTestId("button-add-program-3"));
+    fireEvent.change(screen.getByTestId("input-extra-minutes-3-C"), { target: { value: "0" } });
+    expect(screen.getByLabelText("Zone 3 program C fewer minutes")).toBeDisabled();
+    await next();
+    expect(writes()).toEqual([[endpoint, "PUT", replacement([
+      { programId: b.id, runTimeMinutes: 120 }, { programId: c.id, runTimeMinutes: 0 },
+    ])]]);
+  });
+
+  it("keeps extras when the main is unset, shows an amber incomplete main and hides Add until a main is picked", async () => {
+    await start([extra], [a, b, c], null);
+    expect(screen.getByTestId("input-extra-minutes-3-B")).toHaveValue("12");
+    expect(screen.queryByTestId("button-add-program-3")).toBeNull();
+    expect(within(screen.getByTestId("row-run-zone-3")).getByText("Zone 3")).toHaveClass("text-amber-700");
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    fireEvent.click(screen.getByLabelText("Zone 3 on program A"));
+    expect(screen.getByTestId("input-extra-minutes-3-B")).toHaveValue("12");
+    await next();
+    expect(writes()).toEqual([["/api/irrigation-controllers/160/zones/bulk", "PUT", { zoneIds: [3], patch: { programId: a.id, runTimeMinutes: 20 } }]]);
+  });
+
+  it("drops remotely deleted programs from an edited list without losing other unsaved minutes", async () => {
+    const { qc } = await start([extra, { programId: c.id, runTimeMinutes: 7 }]);
+    fireEvent.change(screen.getByTestId("input-extra-minutes-3-C"), { target: { value: "15" } });
+    site = { ...site, controllers: site.controllers.map((clock) => ({ ...clock, programs: [a, c] })) };
+    await act(async () => { await qc.refetchQueries(); });
+    await waitFor(() => expect(screen.queryByTestId("row-extra-3-B")).toBeNull());
+    expect(screen.getByTestId("input-extra-minutes-3-C")).toHaveValue("15");
+    fireEvent.click(screen.getByLabelText("Zone 3 program C more minutes"));
+    expect(screen.queryByTestId("row-extra-3-B")).toBeNull();
+    expect(screen.getByTestId("input-extra-minutes-3-C")).toHaveValue("16");
+    await next();
+    expect(writes()).toEqual([[endpoint, "PUT", replacement([{ programId: c.id, runTimeMinutes: 16 }])]]);
+  });
+});
+
 async function open(c: DocumentationControllerGraph, testId: string) {
   site = siteOf([c]);
   const r = renderPage();

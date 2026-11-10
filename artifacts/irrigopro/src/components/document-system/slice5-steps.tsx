@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { DocChip } from "./doc-chip";
 import { DOC_ZONE_TYPES, WEEK_DAYS } from "./constants";
 import {
-  applyRun, applyType, editProgram, freeProgramLetters, programView, zoneTypeInfo,
+  addExtra, removeExtra, setExtra, applyRun, applyType, editProgram, freeProgramLetters, programView, zoneTypeInfo,
   type Slice5Handle,
 } from "./slice5-model";
 
@@ -262,7 +262,7 @@ export function RunTimesStep({ zones, programs, ready, h, onReload }: { zones: D
     <section className="flex flex-col gap-4" data-testid="step-run-times">
       <div>
         <h2 className="text-base font-semibold">Run times</h2>
-        <p className="text-sm text-muted-foreground">Every zone needs a program and minutes. Set them all at once, then adjust the ones that differ.</p>
+        <p className="text-sm text-muted-foreground">Every zone needs a program and minutes. If a zone also runs on another program, tap + Program and enter its minutes.</p>
       </div>
       {programs.length === 0 && (
         <p className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-900">Add a program first, on the Programs step.</p>
@@ -286,34 +286,74 @@ export function RunTimesStep({ zones, programs, ready, h, onReload }: { zones: D
                 onClick={() => h.update((x) => ({ ...x, setAllMinutes: Math.min(120, x.setAllMinutes + 1) }))}><Plus className="h-5 w-5" /></Button>
             </div>
             <Button type="button" variant="secondary" className="h-12 w-full" disabled={setAllProgram == null || zones.length === 0}
-              onClick={() => applyRun(h, zones.map((z) => z.id), { programId: setAllProgram!, runTimeMinutes: d.setAllMinutes })} data-testid="button-apply-all">
+              onClick={() => applyRun(h, zones, { programId: setAllProgram!, runTimeMinutes: d.setAllMinutes })} data-testid="button-apply-all">
               Apply to all zones
             </Button>
+            <p className="text-xs text-muted-foreground">Sets each zone's main program. Second programs are left as they are.</p>
           </div>
-          <div>
+          <div className="flex flex-col gap-2.5">
             {zones.map((z) => {
               const done = z.programId != null && ids.has(z.programId);
               const type = z.zoneTypeConfirmed ? zoneTypeInfo(z.zoneType).label : "No type";
+              const extras = z.extraPrograms ?? [];
+              const unused = programs.filter((p) => p.id !== z.programId && !extras.some((line) => line.programId === p.id));
               return (
-                <div key={z.id} className="flex flex-wrap items-center gap-2 border-b py-2.5" data-testid={`row-run-zone-${z.zoneNumber}`}>
-                  <div className="w-16 shrink-0">
-                    <div className={cn("text-[15px] font-bold", !done && "text-amber-700")}>Zone {z.zoneNumber}</div>
-                    <div className="text-xs text-muted-foreground">{type}</div>
+                <section key={z.id} aria-label={`Zone ${z.zoneNumber}`} className="flex flex-col gap-2.5 rounded-[14px] border bg-white p-3 shadow-sm" data-testid={`row-run-zone-${z.zoneNumber}`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-wrap items-baseline gap-1">
+                      <span className={cn("text-[15px] font-bold", !done && "text-amber-700")}>Zone {z.zoneNumber}</span>
+                      <span className="text-xs text-muted-foreground">{type}</span>
+                    </div>
+                    {z.programId != null && unused.length > 0 && (
+                      <button type="button" className="flex h-9 items-center gap-1 rounded-[10px] border border-dashed border-primary px-3 text-sm font-semibold text-primary"
+                        aria-label={`Add another program to zone ${z.zoneNumber}`} data-testid={`button-add-program-${z.zoneNumber}`}
+                        onClick={() => addExtra(h, z, unused[0].id, d.setAllMinutes)}>
+                        <Plus className="h-3.5 w-3.5" aria-hidden />Program
+                      </button>
+                    )}
                   </div>
-                  <ProgramChips programs={programs} value={z.programId} label={(p) => `Zone ${z.zoneNumber} on program ${p.name}`}
-                    onPick={(id) => applyRun(h, [z.id], z.runTimeMinutes === 0 ? { programId: id, runTimeMinutes: d.setAllMinutes } : { programId: id })} />
-                  <div className="flex-1" />
-                  <div className="flex items-center gap-1">
-                    <Button type="button" variant="outline" className="h-11 w-11 rounded-[10px]" aria-label={`Zone ${z.zoneNumber} fewer minutes`} disabled={z.runTimeMinutes <= 0}
-                      onClick={() => applyRun(h, [z.id], { runTimeMinutes: Math.max(0, z.runTimeMinutes - 1) })}><Minus className="h-5 w-5" /></Button>
-                    <MinutesInput value={z.runTimeMinutes} min={0} max={120}
-                      ariaLabel={`Zone ${z.zoneNumber} minutes`} testId={`input-minutes-${z.zoneNumber}`}
-                      onCommit={(n) => applyRun(h, [z.id], { runTimeMinutes: n })}
-                      onEnterNext={() => focusMinutes(z.zoneNumber + 1)} />
-                    <Button type="button" variant="outline" className="h-11 w-11 rounded-[10px]" aria-label={`Zone ${z.zoneNumber} more minutes`} disabled={z.runTimeMinutes >= 120}
-                      onClick={() => applyRun(h, [z.id], { runTimeMinutes: Math.min(120, z.runTimeMinutes + 1) })}><Plus className="h-5 w-5" /></Button>
+                  <div className="flex items-center justify-between gap-2">
+                    <ProgramChips programs={programs.filter((p) => !extras.some((line) => line.programId === p.id))} value={z.programId} label={(p) => `Zone ${z.zoneNumber} on program ${p.name}`}
+                      onPick={(id) => applyRun(h, [z], z.runTimeMinutes === 0 ? { programId: id, runTimeMinutes: d.setAllMinutes } : { programId: id })} />
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button type="button" variant="outline" className="h-11 w-11 rounded-[10px]" aria-label={`Zone ${z.zoneNumber} fewer minutes`} disabled={z.runTimeMinutes <= 0}
+                        onClick={() => applyRun(h, [z], { runTimeMinutes: Math.max(0, z.runTimeMinutes - 1) })}><Minus className="h-5 w-5" /></Button>
+                      <MinutesInput value={z.runTimeMinutes} min={0} max={120}
+                        ariaLabel={`Zone ${z.zoneNumber} minutes`} testId={`input-minutes-${z.zoneNumber}`}
+                        onCommit={(n) => applyRun(h, [z], { runTimeMinutes: n })}
+                        onEnterNext={() => focusMinutes(z.zoneNumber + 1)} />
+                      <Button type="button" variant="outline" className="h-11 w-11 rounded-[10px]" aria-label={`Zone ${z.zoneNumber} more minutes`} disabled={z.runTimeMinutes >= 120}
+                        onClick={() => applyRun(h, [z], { runTimeMinutes: Math.min(120, z.runTimeMinutes + 1) })}><Plus className="h-5 w-5" /></Button>
+                    </div>
                   </div>
-                </div>
+                  {extras.map((line, index) => {
+                    const name = programs.find((p) => p.id === line.programId)?.name ?? String(line.programId);
+                    const label = `Zone ${z.zoneNumber} program ${name}`;
+                    return (
+                      <div key={index} className="ml-3 flex flex-col gap-2 rounded-[10px] border-l-[3px] border-slate-400 bg-slate-100 p-2.5" data-testid={`row-extra-${z.zoneNumber}-${name}`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">Also runs on</span>
+                          <Button type="button" variant="outline" className="h-9 w-11 rounded-[10px] border-red-200 text-red-700"
+                            aria-label={`Remove program ${name} from zone ${z.zoneNumber}`} data-testid={`button-remove-extra-${z.zoneNumber}-${name}`} onClick={() => removeExtra(h, z, index)}>
+                            <X className="h-4 w-4" aria-hidden />
+                          </Button>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <ProgramChips programs={programs.filter((p) => p.id !== z.programId && !extras.some((other, i) => i !== index && other.programId === p.id))}
+                            value={line.programId} label={(p) => `${label} also on program ${p.name}`} onPick={(programId) => setExtra(h, z, index, { programId })} />
+                          <div className="flex shrink-0 items-center gap-1">
+                            <Button type="button" variant="outline" className="h-11 w-11 rounded-[10px]" aria-label={`${label} fewer minutes`} disabled={line.runTimeMinutes <= 0}
+                              onClick={() => setExtra(h, z, index, { runTimeMinutes: Math.max(0, line.runTimeMinutes - 1) })}><Minus className="h-5 w-5" /></Button>
+                            <MinutesInput value={line.runTimeMinutes} min={0} max={120} ariaLabel={`${label} minutes`} testId={`input-extra-minutes-${z.zoneNumber}-${name}`}
+                              onCommit={(runTimeMinutes) => setExtra(h, z, index, { runTimeMinutes })} />
+                            <Button type="button" variant="outline" className="h-11 w-11 rounded-[10px]" aria-label={`${label} more minutes`} disabled={line.runTimeMinutes >= 120}
+                              onClick={() => setExtra(h, z, index, { runTimeMinutes: Math.min(120, line.runTimeMinutes + 1) })}><Plus className="h-5 w-5" /></Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </section>
               );
             })}
           </div>

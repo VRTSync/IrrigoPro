@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type { DocumentationProgram, DocumentationZone } from "@workspace/api-client-react";
+import { zoneProgramLines, type ZoneExtraProgram } from "@workspace/shared";
 import { apiRequest } from "@/lib/queryClient";
 import { DOC_ZONE_TYPES, WEEK_DAYS } from "./constants";
 
@@ -9,7 +10,7 @@ import { DOC_ZONE_TYPES, WEEK_DAYS } from "./constants";
  * so a refetch never clobbers unsaved work, and it lives in a ref so sequential
  * saves can drain the dirty sets one group at a time.
  */
-export type ZoneEdit = { zoneType?: string; programId?: number | null; runTimeMinutes?: number };
+export type ZoneEdit = { zoneType?: string; programId?: number | null; runTimeMinutes?: number; extraPrograms?: ZoneExtraProgram[] };
 export type ProgramDraft = { wateringDays: string[]; startTimes: string[]; seasonalAdjustPct: number };
 
 export type Slice5Draft = {
@@ -17,6 +18,7 @@ export type Slice5Draft = {
   typed: number[];
   typeDirty: number[];
   runDirty: number[];
+  extraDirty: number[];
   programDrafts: Record<number, ProgramDraft>;
   programBaseline: Record<number, ProgramDraft>;
   programDirty: number[];
@@ -30,7 +32,7 @@ export type Slice5Draft = {
 };
 
 const EMPTY: Slice5Draft = {
-  zoneEdits: {}, typed: [], typeDirty: [], runDirty: [],
+  zoneEdits: {}, typed: [], typeDirty: [], runDirty: [], extraDirty: [],
   programDrafts: {}, programBaseline: {}, programDirty: [],
   addedPrograms: [], renamedPrograms: {}, deletedPrograms: [],
   brush: "pop_up_spray", selectedProgram: null, setAllProgram: null, setAllMinutes: 10,
@@ -64,7 +66,7 @@ export function activeSorted(programs: DocumentationProgram[]): DocumentationPro
   return programs.filter((p) => p.isActive).sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
 }
 
-export function mergeZones(base: DocumentationZone[], d: Slice5Draft): DocumentationZone[] {
+export function mergeZones(base: DocumentationZone[], d: Slice5Draft, programs?: DocumentationProgram[]): DocumentationZone[] {
   return base
     .map((z) => {
       const e = d.zoneEdits[z.id] ?? {};
@@ -76,6 +78,9 @@ export function mergeZones(base: DocumentationZone[], d: Slice5Draft): Documenta
         zoneTypeConfirmed: z.zoneTypeConfirmed || d.typed.includes(z.id),
         programId,
         runTimeMinutes: e.runTimeMinutes ?? z.runTimeMinutes,
+        extraPrograms: (e.extraPrograms ?? z.extraPrograms ?? []).filter((line) =>
+          line.programId !== programId && !d.deletedPrograms.includes(line.programId) &&
+          (programs === undefined || programs.some((p) => p.id === line.programId))),
       };
     })
     .sort((a, b) => a.zoneNumber - b.zoneNumber);
@@ -160,7 +165,7 @@ export function typesSummary(zones: DocumentationZone[]): string {
 export function programsSummary(programs: DocumentationProgram[], zones: DocumentationZone[]): string {
   const lines = programs.map((p) => {
     const n = normalizeProgram(p);
-    const on = zones.filter((z) => z.programId === p.id);
+    const on = zones.flatMap(zoneProgramLines).filter((line) => line.programId === p.id);
     const off = on.filter((z) => z.runTimeMinutes === 0).length;
     const mins = on.reduce((s, z) => s + z.runTimeMinutes, 0);
     const days = n.wateringDays.join(" ") || "no days";
@@ -181,14 +186,22 @@ export async function saveZoneTypes(controllerId: number, h: Slice5Handle, baseZ
   }
 }
 
-export async function saveRunTimes(controllerId: number, h: Slice5Handle, baseZones: DocumentationZone[], onSent: () => void) {
-  const zones = mergeZones(baseZones, h.ref.current);
+export async function saveRunTimes(controllerId: number, h: Slice5Handle, baseZones: DocumentationZone[], onSent: () => void, programs?: DocumentationProgram[]) {
+  const zones = mergeZones(baseZones, h.ref.current, programs);
   // Rows without a program are still sent (programId: null) so partial minutes persist.
   for (const g of runGroups(zones, h.ref.current.runDirty)) {
     await apiRequest(`/api/irrigation-controllers/${controllerId}/zones/bulk`, "PUT", {
       zoneIds: g.ids, patch: { programId: g.programId, runTimeMinutes: g.minutes },
     });
     h.update((d) => ({ ...d, runDirty: without(d.runDirty, g.ids) }));
+    onSent();
+  }
+  const dirty = [...h.ref.current.extraDirty];
+  if (dirty.length) {
+    await apiRequest(`/api/irrigation-controllers/${controllerId}/zones/extra-programs`, "PUT", {
+      zones: dirty.map((id) => ({ zoneId: id, lines: zones.find((z) => z.id === id)?.extraPrograms ?? [] })),
+    });
+    h.update((d) => ({ ...d, extraDirty: without(d.extraDirty, dirty) }));
     onSent();
   }
 }
@@ -220,12 +233,43 @@ export function applyType(h: Slice5Handle, ids: number[], type: string) {
   });
 }
 
-export function applyRun(h: Slice5Handle, ids: number[], edit: { programId?: number; runTimeMinutes?: number }) {
+export function applyRun(h: Slice5Handle, zones: DocumentationZone[], edit: { programId?: number; runTimeMinutes?: number }) {
   h.update((d) => {
     const zoneEdits = { ...d.zoneEdits };
-    for (const id of ids) zoneEdits[id] = { ...zoneEdits[id], ...edit };
-    return { ...d, zoneEdits, runDirty: add(d.runDirty, ids) };
+    const removed: number[] = [];
+    // Callers pass the latest merged graph, including programs removed by a
+    // refetch. Re-overlaying zoneEdits here would resurrect those removed lines.
+    for (const zone of zones) {
+      zoneEdits[zone.id] = { ...zoneEdits[zone.id], ...edit };
+      if (typeof edit.programId === "number" && zone.extraPrograms.some((line) => line.programId === edit.programId)) {
+        zoneEdits[zone.id].extraPrograms = zone.extraPrograms.filter((line) => line.programId !== edit.programId);
+        removed.push(zone.id);
+      }
+    }
+    return { ...d, zoneEdits, runDirty: add(d.runDirty, zones.map((z) => z.id)), extraDirty: add(d.extraDirty, removed) };
   });
+}
+
+function editExtras(h: Slice5Handle, zone: DocumentationZone, edit: (lines: ZoneExtraProgram[]) => ZoneExtraProgram[]) {
+  h.update((d) => {
+    return {
+      ...d,
+      zoneEdits: { ...d.zoneEdits, [zone.id]: { ...d.zoneEdits[zone.id], extraPrograms: edit(zone.extraPrograms ?? []) } },
+      extraDirty: add(d.extraDirty, [zone.id]),
+    };
+  });
+}
+
+export function addExtra(h: Slice5Handle, zone: DocumentationZone, programId: number, minutes: number) {
+  editExtras(h, zone, (lines) => [...lines, { programId, runTimeMinutes: minutes }]);
+}
+
+export function setExtra(h: Slice5Handle, zone: DocumentationZone, index: number, patch: Partial<ZoneExtraProgram>) {
+  editExtras(h, zone, (lines) => lines.map((line, i) => i === index ? { ...line, ...patch } : line));
+}
+
+export function removeExtra(h: Slice5Handle, zone: DocumentationZone, index: number) {
+  editExtras(h, zone, (lines) => lines.filter((_, i) => i !== index));
 }
 
 export function editProgram(h: Slice5Handle, p: DocumentationProgram, fn: (draft: ProgramDraft) => ProgramDraft) {

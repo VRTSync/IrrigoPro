@@ -155,7 +155,7 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
   const baseZones = useMemo(() => base?.zones ?? [], [base]);
   const allPrograms = useMemo(() => mergePrograms(base?.programs ?? [], s5.draft), [base, s5.draft]);
   const programs = useMemo(() => activeSorted(allPrograms), [allPrograms]);
-  const zones = useMemo(() => mergeZones(baseZones, s5.draft), [baseZones, s5.draft]);
+  const zones = useMemo(() => mergeZones(baseZones, s5.draft, allPrograms), [baseZones, s5.draft, allPrograms]);
   // Zone tiles need real zone ids; after a fresh count they arrive with the refetch.
   const zonesReady = values.totalZones != null && zones.length === values.totalZones && zones.every((z) => Number.isFinite(z.id));
 
@@ -250,7 +250,7 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
       try {
         if (key === "zone_types") await saveZoneTypes(id, s5, baseZones, onSent);
         else if (key === "programs") await saveProgramsStep(s5, onSent);
-        else await saveRunTimes(id, s5, baseZones, onSent);
+        else await saveRunTimes(id, s5, baseZones, onSent, allPrograms);
       } finally {
         if (sent) void invalidate();
       }

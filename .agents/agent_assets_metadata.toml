@@ -893,3 +893,17 @@ mtime_ms = 1794338760144
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/6a87081f-fa74-4dab-a24e-9380de8f2c5d/b3984226-61fd-4d87-be86-8c0ddc665f39"
 storage_version_token = "1794338989090607"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "5cXEc3rRm1iajBWvZk7QY"
+uri = "file://generated-artifacts/extra-programs/acceptance-gallery.html"
+type = "html"
+title = "Extra-program wizard acceptance evidence"
+description = "Phone add/edit/remove/re-add/finish, persisted reload, read-only grid and downloaded PDF. Development evidence only."
+logical_id = "3ba19521-55ac-43bf-8822-92500de4323a"
+content_hash = "sha256:80bb3eaf059916a0b00f63e4d5f4ddc5df01b41a169cb57c94cb9d9233b16429"
+size = 632508
+mtime_ms = 1794343400323
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/3ba19521-55ac-43bf-8822-92500de4323a/48ded517-0310-4de5-bdf7-79040a08ade6"
+storage_version_token = "1794343411427015"
+content_type = "text/html"

@@ -67,6 +67,8 @@ import type {
 } from "@workspace/db/schema";
 import {
   computeRunSchedule,
+  zoneProgramLines,
+  type ZoneExtraProgram,
   isPlaceholderZone,
   minutesToTime,
   type ScheduleInputProgram,
@@ -97,6 +99,7 @@ type HistoryEntry = IrrigationProfileHistory & {
     controller: IrrigationController;
     programs: IrrigationProgram[];
     zones: IrrigationProfileZone[];
+    zoneExtraPrograms?: (ZoneExtraProgram & { zoneId: number })[];
   };
 };
 
@@ -367,6 +370,7 @@ function HistoryDrawer({ controllerId }: { controllerId: number }) {
               controller={snapshotEntry.snapshotJson.controller}
               programs={snapshotEntry.snapshotJson.programs ?? []}
               zones={snapshotEntry.snapshotJson.zones ?? []}
+              zoneExtraPrograms={snapshotEntry.snapshotJson.zoneExtraPrograms ?? []}
             />
           </div>
         ) : (
@@ -418,10 +422,12 @@ function SnapshotView({
   controller,
   programs,
   zones,
+  zoneExtraPrograms = [],
 }: {
   controller: IrrigationController;
   programs: IrrigationProgram[];
   zones: IrrigationProfileZone[];
+  zoneExtraPrograms?: (ZoneExtraProgram & { zoneId: number })[];
 }) {
   return (
     <div className="space-y-4 text-sm">
@@ -435,7 +441,11 @@ function SnapshotView({
         )}
       </div>
       {programs.map((prog) => {
-        const progZones = zones.filter((z) => z.programId === prog.id);
+        const progZones = zones.flatMap((z) => {
+          const line = zoneProgramLines({ ...z, extraPrograms: zoneExtraPrograms.filter((extra) => extra.zoneId === z.id) })
+            .find((line) => line.programId === prog.id);
+          return line ? [{ ...z, runTimeMinutes: line.runTimeMinutes, also: !line.main }] : [];
+        });
         return (
           <div key={prog.id} className="border rounded-lg p-3 bg-white space-y-2">
             <div className="flex items-center gap-2">
@@ -472,7 +482,7 @@ function SnapshotView({
                         <td className="px-2 py-1 border border-gray-200">{z.zoneNumber}</td>
                         <td className="px-2 py-1 border border-gray-200">{z.name}</td>
                         <td className="px-2 py-1 border border-gray-200 text-right">
-                          {z.runTimeMinutes} min
+                           {z.runTimeMinutes} min{z.also && <span className="text-gray-500"> (also)</span>}
                         </td>
                       </tr>
                     ))}
@@ -822,7 +832,7 @@ function ZoneSheetRow({
   focus,
   onFocusConsumed,
 }: {
-  zone: IrrigationProfileZone;
+  zone: IrrigationProfileZone & { extraPrograms?: ZoneExtraProgram[] };
   programs: IrrigationProgram[];
   controllerId: number;
   customerId: number;
@@ -976,7 +986,13 @@ function ZoneSheetRow({
     <td className={cell}>{canEditZone ? <Select value={draft.programId == null ? "none" : String(draft.programId)} disabled={disabled} onValueChange={v => { change("programId", v === "none" ? null : Number(v)); commit("programId"); }}>
       <SelectTrigger aria-label={`Zone ${zone.zoneNumber} Program`} className={`h-8 min-w-28 ${errors.programId ? "border-red-400" : ""}`}><SelectValue /></SelectTrigger>
       <SelectContent><SelectItem value="none">— None —</SelectItem>{programs.map(p => <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>)}</SelectContent>
-    </Select> : programs.find(p => p.id === zone.programId)?.name ?? "—"}</td>
+    </Select> : programs.find(p => p.id === zone.programId)?.name ?? "—"}
+      {(zone.extraPrograms ?? []).filter(line => line.programId !== draft.programId).map(line => (
+        <div key={line.programId} className="text-xs text-slate-600" data-testid={`text-extra-${zone.id}-${line.programId}`}>
+          Also {programs.find(p => p.id === line.programId)?.name ?? "—"} · {line.runTimeMinutes} min
+        </div>
+      ))}
+    </td>
     <td className={cell}>{canEditZone ? <Select value={draft.zoneType} disabled={disabled} onValueChange={v => { change("zoneType", v); commit("zoneType"); }}>
       <SelectTrigger aria-label={`Zone ${zone.zoneNumber} Type`} className={`h-8 min-w-32 ${errors.zoneType ? "border-red-400" : ""}`}><SelectValue /></SelectTrigger>
       <SelectContent>{ZONE_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
