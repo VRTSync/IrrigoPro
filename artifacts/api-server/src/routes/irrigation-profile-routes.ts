@@ -31,7 +31,7 @@ import { db } from "../db";
 import { customers, irrigationControllers, irrigationProfileZones } from "@workspace/db";
 import { storage, ZoneCountClearError, LetterError } from "../storage";
 import type { IrrigationImportRow, IrrigationImportRowError, IrrigationZoneTypeEnum } from "../storage";
-import { ZoneProgramError } from "../lib/controller-zone-records";
+import { ZoneProgramError, ProgramNameTakenError } from "../lib/controller-zone-records";
 import {
   hasCapability, CAN_READ_IRRIGATION_PROFILE, CAN_EDIT_IRRIGATION_ZONES,
   CAN_MANAGE_IRRIGATION_EQUIPMENT, CAN_DELETE_IRRIGATION_EQUIPMENT,
@@ -579,6 +579,7 @@ export function registerIrrigationProfileRoutes(
         if (!program) return notFound(res, "Controller");
         res.status(201).json(program);
       } catch (e: any) {
+        if (e instanceof ProgramNameTakenError) return res.status(409).json({ message: e.message });
         req.log?.error?.({ err: e, controllerId }, "createIrrigationProgram failed");
         res.status(500).json({ message: "Could not create program — please retry" });
       }
@@ -618,6 +619,7 @@ export function registerIrrigationProfileRoutes(
         if (!updated) return notFound(res, "Program");
         res.json(updated);
       } catch (e: any) {
+        if (e instanceof ProgramNameTakenError) return res.status(409).json({ message: e.message });
         req.log?.error?.({ err: e, id }, "updateIrrigationProgram failed");
         res.status(500).json({ message: "Could not update program — please retry" });
       }

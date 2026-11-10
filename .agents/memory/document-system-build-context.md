@@ -54,3 +54,9 @@ Read `attached_assets/Pasted--Document-System-Design-Context-Locked-Decisions-Re
 **Why:** Field testing exposed conflicting auto-assigned letters and typed clock names. The user explicitly approved letter identity and removal of manual reordering.
 
 **How to apply:** Build server/rules and UI/removal as two separate, ordered slices; publish only after both merge. Letters are chosen explicitly, names are server-derived as `Controller <letter>`, and active-letter conflicts require a confirmed atomic swap with history. Existing letters start unconfirmed; only on-site wizard confirmation satisfies verification and permits old-name normalization with meaningful names preserved in notes. Office changes and the other clock in a swap remain unconfirmed. Slice 2 removes reorder UI and its stored order column; lists sort by letter. Preserve frozen ticket letters, site maps, Expo, customer billing, and wet-check controller references. Ticket `(now P)` display is a later third slice. The context attachment alone is not an instruction to implement either slice.
+
+**Rule:** Program letters describe what is actually set on the clock, not a consecutive sequence. A clock using A and D must not require placeholder B or C programs.
+
+**Why:** Field testing on 2026-11-10 confirmed that A with D for drip is a normal real-world configuration. Empty intermediate programs create false documentation gaps.
+
+**How to apply:** Keep program selection explicit and independent of controller-letter identity. Preserve program ids when correcting letters so existing zone assignments and runtimes remain attached.

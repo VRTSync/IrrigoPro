@@ -220,6 +220,7 @@ import { LetterError, letterConflict, notesWithFormerName } from "./lib/controll
 import { bindTickets, chooseControllerId, normalizeControllerLetter } from "./lib/ticket-controller-binding";
 export { LetterError } from "./lib/controller-letters";
 import { DocumentationError } from "./lib/documentation-error";
+import { ProgramNameTakenError } from "./lib/controller-zone-records";
 export { ZoneCountClearError } from "./lib/controller-zone-records";
 
 
@@ -12332,8 +12333,15 @@ export class DatabaseStorage implements IStorage {
       // Verify controller exists and belongs to the caller's company.
       const ctrlConds = [eq(irrigationControllers.id, controllerId)];
       if (companyId !== null) ctrlConds.push(eq(irrigationControllers.companyId, companyId));
-      const [ctrl] = await tx.select().from(irrigationControllers).where(and(...ctrlConds));
+      const [ctrl] = await tx.select().from(irrigationControllers).where(and(...ctrlConds)).for("update");
       if (!ctrl) return null;
+
+      const [taken] = await tx.select({ id: irrigationPrograms.id }).from(irrigationPrograms).where(and(
+        eq(irrigationPrograms.controllerId, controllerId),
+        eq(irrigationPrograms.companyId, ctrl.companyId),
+        sql`upper(trim(${irrigationPrograms.name})) = upper(trim(${data.name}))`,
+      ));
+      if (taken) throw new ProgramNameTakenError(data.name.trim());
 
       const [program] = await tx
         .insert(irrigationPrograms)
@@ -12361,8 +12369,27 @@ export class DatabaseStorage implements IStorage {
       // Load the program and verify company scope.
       const progConds = [eq(irrigationPrograms.id, id)];
       if (companyId !== null) progConds.push(eq(irrigationPrograms.companyId, companyId));
+      const [candidate] = await tx.select().from(irrigationPrograms).where(and(...progConds));
+      if (!candidate) return null;
+      // Use the same parent lock as creates, before probing sibling names.
+      // Re-read after waiting so concurrent renames also retain truthful history.
+      const [ctrl] = await tx.select().from(irrigationControllers).where(and(
+        eq(irrigationControllers.id, candidate.controllerId),
+        eq(irrigationControllers.companyId, candidate.companyId),
+      )).for("update");
+      if (!ctrl) return null;
       const [existing] = await tx.select().from(irrigationPrograms).where(and(...progConds));
       if (!existing) return null;
+      const renamed = patch.name !== undefined && patch.name !== existing.name;
+      if (renamed) {
+        const [taken] = await tx.select({ id: irrigationPrograms.id }).from(irrigationPrograms).where(and(
+          eq(irrigationPrograms.controllerId, ctrl.id),
+          eq(irrigationPrograms.companyId, ctrl.companyId),
+          ne(irrigationPrograms.id, id),
+          sql`upper(trim(${irrigationPrograms.name})) = upper(trim(${patch.name!}))`,
+        ));
+        if (taken) throw new ProgramNameTakenError(patch.name!.trim());
+      }
 
       const [updated] = await tx
         .update(irrigationPrograms)
@@ -12370,17 +12397,13 @@ export class DatabaseStorage implements IStorage {
         .where(eq(irrigationPrograms.id, id))
         .returning();
 
-      const [ctrl] = await tx
-        .select()
-        .from(irrigationControllers)
-        .where(eq(irrigationControllers.id, existing.controllerId));
       if (ctrl) {
         const stampedCtrl = await this._stampControllerUpdated(tx, ctrl.id, actor);
         await this._appendIrrigationSnapshot(
           tx,
           stampedCtrl ?? ctrl,
           actor,
-          `Program "${updated.name}" updated`,
+          `Program "${updated.name}" updated${renamed ? ` (renamed from ${existing.name})` : ""}`,
         );
       }
       return updated;

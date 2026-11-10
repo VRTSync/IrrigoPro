@@ -16,7 +16,7 @@ import { DocPhotoField } from "./doc-photo-field";
 import { DocNotesField } from "./doc-notes-field";
 import { ProgramsStep, RunTimesStep, ZoneTypesStep } from "./slice5-steps";
 import {
-  activeSorted, mergePrograms, mergeZones, nextProgramName, programAdded, programDeleted, programsSummary,
+  activeSorted, mergePrograms, mergeZones, programSortOrder, programRenamed, programAdded, programDeleted, programsSummary,
   saveProgramsStep, saveRunTimes, saveZoneTypes, typesSummary, useSlice5Draft,
 } from "./slice5-model";
 import { CLOCK_LOCATIONS, CONTROLLER_BRANDS, CONTROLLER_MODELS, QUICK_ZONE_COUNTS, serverMessage } from "./constants";
@@ -50,7 +50,8 @@ type Action =
   | { kind: "exit" }
   | { kind: "verify" }
   | { kind: "inactive" }
-  | { kind: "add-program" }
+  | { kind: "add-program"; letter: string }
+  | { kind: "rename-program"; id: number; letter: string }
   | { kind: "delete-program"; id: number; name: string };
 
 type SaveResult = "ok" | "failed" | "needs-confirm";
@@ -285,13 +286,21 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
       }
       if (action.kind === "add-program") {
         const id = savedIdRef.current!;
-        const name = nextProgramName(mergePrograms(base?.programs ?? [], s5.ref.current));
-        if (!name) throw new Error("This clock already has programs A to F.");
+        const name = action.letter;
+        const sortOrder = programSortOrder(name);
         const created = await apiRequest(`/api/irrigation-controllers/${id}/programs`, "POST", {
-          name, wateringDays: [], startTimes: [], seasonalAdjustPct: 100,
+          name, sortOrder, wateringDays: [], startTimes: [], seasonalAdjustPct: 100,
         });
         if (!created || !Number.isFinite(Number(created.id))) throw new Error("The server did not return the new program.");
-        programAdded(s5, { isActive: true, sortOrder: 0, wateringDays: [], startTimes: [], seasonalAdjustPct: 100, ...created, name: created.name ?? name });
+        programAdded(s5, { isActive: true, wateringDays: [], startTimes: [], seasonalAdjustPct: 100, ...created, name: created.name ?? name, sortOrder });
+        changedRef.current = true;
+        void invalidate();
+        return;
+      }
+      if (action.kind === "rename-program") {
+        const sortOrder = programSortOrder(action.letter);
+        await apiRequest(`/api/irrigation-programs/${action.id}`, "PUT", { name: action.letter, sortOrder });
+        programRenamed(s5, action.id, action.letter, sortOrder);
         changedRef.current = true;
         void invalidate();
         return;
@@ -507,8 +516,9 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
 
         {stepKey === "zone_types" && <ZoneTypesStep zones={zones} ready={zonesReady} h={s5} onReload={() => void invalidate()} />}
         {stepKey === "programs" && (
-          <ProgramsStep programs={programs} h={s5} busy={busy}
-            onAdd={() => void run({ kind: "add-program" })}
+          <ProgramsStep programs={programs} allPrograms={allPrograms} h={s5} busy={busy}
+            onAdd={(letter) => void run({ kind: "add-program", letter })}
+            onRename={(id, letter) => void run({ kind: "rename-program", id, letter })}
             onRemove={(p) => setDialog({ type: "program", id: p.id, name: p.name })} />
         )}
         {stepKey === "run_times" && <RunTimesStep zones={zones} programs={programs} ready={zonesReady} h={s5} onReload={() => void invalidate()} />}

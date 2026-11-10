@@ -645,13 +645,86 @@ describe("Slice 5 — zone types", () => {
 describe("Slice 5 — programs", () => {
   const typed = (n: number, o: Partial<Z> = {}) => range(n, { zoneType: "rotor", zoneTypeConfirmed: true, ...o });
 
-  it("4. with A and inactive C, + Add program posts B and selects it", async () => {
+  it("4. explicitly adds D after A, reserving trimmed inactive letters, and keeps it selected through refetch", async () => {
     custom = (url, method, data) => (method === "POST" && url.endsWith("/programs") ? { ...p5(12, (data as { name: string }).name, { wateringDays: [], startTimes: [] }) } : undefined);
-    await open(ctrl(60, "A", { totalZones: 2, zones: typed(2), programs: [p5(9, "A"), p5(11, "C", { isActive: false })], gaps: gap("programs") }), "step-programs");
+    const { qc } = await open(ctrl(60, "A", { totalZones: 2, zones: typed(2), programs: [p5(9, "A"), p5(11, " c ", { isActive: false })], gaps: gap("programs") }), "step-programs");
     expect(screen.queryByTestId("tab-program-C")).toBeNull();
     fireEvent.click(screen.getByTestId("button-add-program"));
-    await waitFor(() => expect(screen.getByTestId("tab-program-B")).toHaveAttribute("aria-pressed", "true"));
-    expect(writes()).toEqual([["/api/irrigation-controllers/60/programs", "POST", { name: "B", wateringDays: [], startTimes: [], seasonalAdjustPct: 100 }]]);
+    expect(screen.getByText("Which program on the clock?")).toBeInTheDocument();
+    expect(screen.queryByTestId("chip-program-letter-A")).toBeNull();
+    expect(screen.queryByTestId("chip-program-letter-C")).toBeNull();
+    expect(writes()).toHaveLength(0);
+    fireEvent.click(screen.getByText("Cancel", { exact: true }));
+    expect(screen.queryByTestId("panel-program-letter")).toBeNull();
+    expect(writes()).toHaveLength(0);
+    fireEvent.click(screen.getByTestId("button-add-program"));
+    fireEvent.click(screen.getByTestId("chip-program-letter-D"));
+    await waitFor(() => expect(screen.getByTestId("tab-program-D")).toHaveAttribute("aria-pressed", "true"));
+    await act(async () => { await qc.refetchQueries(); });
+    expect(screen.getAllByTestId(/^tab-program-/).map((el) => el.textContent?.trim())).toEqual(["Program A", "Program D"]);
+    expect(screen.queryByTestId("tab-program-B")).toBeNull();
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    expect(screen.getByTestId("text-still-needed")).toHaveTextContent("Program D days");
+    fireEvent.click(screen.getByTestId("chip-day-Mon"));
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    fireEvent.change(screen.getByTestId("input-start-time-0"), { target: { value: "06:00" } });
+    expect(screen.getByTestId("button-next")).not.toBeDisabled();
+    expect(writes()).toEqual([["/api/irrigation-controllers/60/programs", "POST", { name: "D", sortOrder: 3, wateringDays: [], startTimes: [], seasonalAdjustPct: 100 }]]);
+  });
+
+  it("renames B to D without losing setting drafts, runtime links or the overlay on stale refetch", async () => {
+    const { qc } = await open(ctrl(60, "A", { totalZones: 2, zones: typed(2, { programId: 10, runTimeMinutes: 0 }), programs: [p5(9, "A"), p5(10, "B", { sortOrder: 1 })], gaps: gap("programs") }), "step-programs");
+    fireEvent.click(screen.getByTestId("tab-program-B"));
+    fireEvent.click(screen.getByTestId("chip-day-Wed"));
+    fireEvent.change(screen.getByTestId("input-start-time-0"), { target: { value: "06:30" } });
+    fireEvent.click(screen.getByTestId("button-seasonal-plus"));
+    fireEvent.click(screen.getByTestId("button-change-program-letter"));
+    expect(screen.getByText("Change Program B to")).toBeInTheDocument();
+    expect(screen.getAllByTestId(/^chip-program-letter-/).map((el) => el.textContent)).toEqual(["Program C", "Program D", "Program E", "Program F"]);
+    fireEvent.click(screen.getByTestId("chip-program-letter-D"));
+    await screen.findByTestId("card-program-D");
+    await act(async () => { await qc.refetchQueries(); });
+    expect(screen.getByTestId("tab-program-D")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("chip-day-Wed")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("input-start-time-0")).toHaveValue("06:30");
+    expect(screen.getByTestId("text-seasonal")).toHaveTextContent("110%");
+    expect(writes()).toEqual([["/api/irrigation-programs/10", "PUT", { name: "D", sortOrder: 3 }]]);
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-run-times");
+    expect(screen.getByLabelText("Zone 1 on program D")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("input-minutes-1")).toHaveValue("0");
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-review");
+    expect(screen.getByTestId("text-review-programs")).toHaveTextContent("Program D: Mon Wed at 6:30 AM, 110%, 2 zones (2 at 0 min), 0 min");
+    expect(writes()).toHaveLength(2);
+    expect(writes()[1]).toEqual(["/api/irrigation-programs/10", "PUT", { wateringDays: ["Mon", "Wed"], startTimes: ["06:30"], seasonalAdjustPct: 110 }]);
+  });
+
+  it("hides both actions when all letters are reserved including inactive programs", async () => {
+    await open(ctrl(60, "A", { totalZones: 2, zones: typed(2), programs: ["A", " b ", "C", "D", "E", "F"].map((name, i) => p5(9 + i, name, { isActive: i === 0 })), gaps: gap("programs") }), "step-programs");
+    expect(screen.queryByTestId("button-add-program")).toBeNull();
+    expect(screen.queryByTestId("button-change-program-letter")).toBeNull();
+    expect(screen.getAllByTestId(/^tab-program-/)).toHaveLength(1);
+  });
+
+  it.each(["add", "rename"])("shows the exact conflict and retries the chosen letter on %s", async (kind) => {
+    let conflict = true;
+    custom = (url, method) => {
+      if ((method === "POST" && url.endsWith("/programs")) || (method === "PUT" && url === "/api/irrigation-programs/10")) {
+        if (conflict) throw new Error('409: {"message":"Program D already exists on this clock"}');
+        return p5(kind === "add" ? 12 : 10, "D", { sortOrder: 3 });
+      }
+      return undefined;
+    };
+    await open(ctrl(60, "A", { totalZones: 2, zones: typed(2), programs: [p5(10, "B")], gaps: gap("programs") }), "step-programs");
+    fireEvent.click(screen.getByTestId(kind === "add" ? "button-add-program" : "button-change-program-letter"));
+    fireEvent.click(screen.getByTestId("chip-program-letter-D"));
+    expect(await screen.findByTestId("text-save-error")).toHaveTextContent("Couldn't save: Program D already exists on this clock");
+    conflict = false;
+    fireEvent.click(screen.getByTestId("button-retry"));
+    await screen.findByTestId("card-program-D");
+    expect(writes()).toHaveLength(2);
+    expect(writes()[0]).toEqual(writes()[1]);
   });
 
   it("no active programs shows the info box", async () => {
@@ -823,6 +896,7 @@ describe("Slice 5 — run times and review", () => {
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-programs");
     fireEvent.click(screen.getByTestId("button-add-program"));
+    fireEvent.click(screen.getByTestId("chip-program-letter-A"));
     await screen.findByTestId("card-program-A");
     fireEvent.click(screen.getByTestId("chip-day-Mon"));
     fireEvent.change(screen.getByTestId("input-start-time-0"), { target: { value: "05:00" } });
@@ -1094,8 +1168,9 @@ describe("Slice 5 — review fixes", () => {
     fireEvent.click(await screen.findByTestId("button-dialog-remove-program"));
     await screen.findByTestId("text-no-programs");
     fireEvent.click(screen.getByTestId("button-add-program"));
+    fireEvent.click(screen.getByTestId("chip-program-letter-A"));
     await screen.findByTestId("tab-program-A");
-    expect(writes().at(-1)).toEqual(["/api/irrigation-controllers/83/programs", "POST", { name: "A", wateringDays: [], startTimes: [], seasonalAdjustPct: 100 }]);
+    expect(writes().at(-1)).toEqual(["/api/irrigation-controllers/83/programs", "POST", { name: "A", sortOrder: 0, wateringDays: [], startTimes: [], seasonalAdjustPct: 100 }]);
   });
 
   it("sends only the selected controller's zone and program IDs across branch and customer navigation", async () => {

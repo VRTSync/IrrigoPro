@@ -31,6 +31,7 @@ import { makePropertyControllerGet } from "./property-controller-get";
 import { CLEAR_ZONE_COUNT_MESSAGE, compressZoneRanges, parseZoneRanges } from "../lib/controller-zone-records";
 import { createBindingFixture, cleanupBindingFixture } from "../lib/ticket-controller-binding.fixtures";
 import { billingSheets as clockSheets, wetChecks as clockWetChecks, wetCheckZoneRecords as clockZoneRecords } from "@workspace/db";
+import { isFieldVerified } from "@workspace/shared";
 
 describe("Clocks Own Their History Slice 1 — rename, edits and technician writes", () => {
   let f: Awaited<ReturnType<typeof createBindingFixture>>;
@@ -459,6 +460,91 @@ describe("Zone range inverse", () => {
     assert.deepEqual(parseZoneRanges(compressZoneRanges([7, 4, 3, 7, 8, 9, 12])), [3, 4, 7, 8, 9, 12]);
     for (const value of ["", "3-x", "5-3", "0", "1-9999999", "3, nope"]) assert.deepEqual(parseZoneRanges(value), []);
   });
+});
+
+describe("Document System — explicit program letters", () => {
+  let srv: ReturnType<typeof makeTestServer>;
+  before(async () => {
+    if (!companyAId) await setupCompanies();
+    srv = makeTestServer({ role: "irrigation_manager", companyId: companyAId, userId: managerAUserId });
+  });
+  after(async () => { await cleanupControllers(); await srv.close(); });
+  async function fixture(companyId = companyAId, customerId = customerAId) {
+    const ctrl = await storage.createIrrigationController({ companyId, customerId, name: "Program letter fixture", totalZones: 2 });
+    createdControllerIds.push(ctrl.id);
+    return ctrl;
+  }
+  const create = (controllerId: number, name: string, extra = {}) =>
+    hit(srv.base, "POST", `/api/irrigation-controllers/${controllerId}/programs`, { name, ...extra });
+  const rename = (id: number, name: string) =>
+    hit(srv.base, "PUT", `/api/irrigation-programs/${id}`, { name, sortOrder: 3 });
+
+  it("reserves active/inactive names using trim and case normalization for both mutations", async () => {
+    const ctrl = await fixture();
+    const d = await create(ctrl.id, " D ", { isActive: false });
+    const b = await create(ctrl.id, "B", { sortOrder: 1 });
+    assert.equal(d.status, 201); assert.equal(b.status, 201);
+    for (const name of ["d", " D ", "d "]) {
+      const expected = { status: 409, body: { message: `Program ${name.trim()} already exists on this clock` } };
+      assert.deepEqual(await create(ctrl.id, name), expected);
+      assert.deepEqual(await rename(b.body.id, name), expected);
+    }
+    assert.equal((await storage.getIrrigationController(companyAId, ctrl.id))!.programs.length, 2);
+    // The edited id is excluded; casing/whitespace alone may be corrected.
+    assert.equal((await rename(d.body.id, "D")).status, 200);
+    const other = await fixture();
+    assert.equal((await create(other.id, "D")).status, 201);
+  });
+
+  it("renames the same id, preserving settings, zones, zero runtime and truthful history while invalidating verification", async () => {
+    const ctrl = await fixture();
+    const a = await create(ctrl.id, "A", { sortOrder: 0 });
+    const b = await create(ctrl.id, "B", { sortOrder: 1, wateringDays: ["Mon", "Fri"], startTimes: ["05:00", "18:00"], seasonalAdjustPct: 80 });
+    assert.equal(a.status, 201); assert.equal(b.status, 201);
+    const before = (await storage.getIrrigationController(companyAId, ctrl.id))!;
+    await storage.updateIrrigationZone(companyAId, before.zones[0].id, { programId: b.body.id, runTimeMinutes: 0 });
+    await storage.updateIrrigationZone(companyAId, before.zones[1].id, { programId: b.body.id, runTimeMinutes: 17 });
+    await db.update(irrigationControllers).set({ letterConfirmed: true, fieldVerifiedAt: new Date(), fieldVerifiedByName: "Verifier" }).where(eq(irrigationControllers.id, ctrl.id));
+    const linked = (await storage.getIrrigationController(companyAId, ctrl.id))!;
+    assert.equal(isFieldVerified(linked), true);
+    const result = await rename(b.body.id, "D");
+    assert.equal(result.status, 200);
+    assert.deepEqual({ ...result.body, name: "B", sortOrder: 1, updatedAt: b.body.updatedAt }, b.body);
+    const after = (await storage.getIrrigationController(companyAId, ctrl.id))!;
+    assert.deepEqual(after.zones, linked.zones);
+    assert.deepEqual(after.programs.map(p => [p.name, p.sortOrder]), [["A", 0], ["D", 3]]);
+    assert.equal(isFieldVerified(after), false);
+    assert.deepEqual(after.fieldVerifiedAt, linked.fieldVerifiedAt);
+    assert.equal(after.lastUpdatedByUserId, managerAUserId);
+    const history = await storage.getIrrigationHistory(companyAId, ctrl.id);
+    assert.equal(history[0].summary, 'Program "D" updated (renamed from B)');
+    assert.deepEqual((history[0].snapshotJson as any).programs.map((p: any) => p.name), ["A", "D"]);
+  });
+
+  it("foreign program ids return 404 before any name conflict disclosure or mutation", async () => {
+    const foreign = await fixture(companyBId, customerBId);
+    const b = await storage.createIrrigationProgram(companyBId, foreign.id, { name: "B" });
+    await storage.createIrrigationProgram(companyBId, foreign.id, { name: "D" });
+    const before = await storage.getIrrigationController(companyBId, foreign.id);
+    assert.deepEqual(await rename(b!.id, "D"), { status: 404, body: { message: "Program not found" } });
+    assert.deepEqual(await create(foreign.id, "D"), { status: 404, body: { message: "Controller not found" } });
+    assert.deepEqual(await storage.getIrrigationController(companyBId, foreign.id), before);
+  });
+
+  for (const mode of ["create/create", "create/rename", "rename/rename"]) {
+    it(`serializes concurrent ${mode} through one controller lock`, async () => {
+      const ctrl = await fixture();
+      const b = await create(ctrl.id, "B");
+      const c = await create(ctrl.id, "C");
+      const results = await Promise.all([
+        mode === "rename/rename" ? rename(b.body.id, "D") : create(ctrl.id, "D", { sortOrder: 3 }),
+        mode === "create/create" ? create(ctrl.id, " d ", { sortOrder: 3 }) : rename(c.body.id, " d "),
+      ]);
+      assert.deepEqual(results.map(r => r.status).sort(), [mode === "rename/rename" ? 200 : 201, 409].sort());
+      const graph = (await storage.getIrrigationController(companyAId, ctrl.id))!;
+      assert.equal(graph.programs.filter(p => p.name.trim().toUpperCase() === "D").length, 1);
+    });
+  }
 });
 
 describe("Current zone summaries and additive property controller GET", () => {

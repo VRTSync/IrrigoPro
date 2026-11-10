@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { DocChip } from "./doc-chip";
 import { DOC_ZONE_TYPES, WEEK_DAYS } from "./constants";
 import {
-  applyRun, applyType, editProgram, programView, zoneTypeInfo,
+  applyRun, applyType, editProgram, freeProgramLetters, programView, zoneTypeInfo,
   type Slice5Handle,
 } from "./slice5-model";
 
@@ -83,14 +83,17 @@ export function ZoneTypesStep({ zones, ready, h, onReload }: { zones: Documentat
 // ── Programs ─────────────────────────────────────────────────────────────────
 
 export function ProgramsStep({
-  programs, h, busy, onAdd, onRemove,
+  programs, allPrograms, h, busy, onAdd, onRename, onRemove,
 }: {
-  programs: DocumentationProgram[]; h: Slice5Handle; busy: boolean;
-  onAdd: () => void; onRemove: (p: DocumentationProgram) => void;
+  programs: DocumentationProgram[]; allPrograms: DocumentationProgram[]; h: Slice5Handle; busy: boolean;
+  onAdd: (letter: string) => void; onRename: (id: number, letter: string) => void; onRemove: (p: DocumentationProgram) => void;
 }) {
+  const [picking, setPicking] = useState<null | "add" | "rename">(null);
   const d = h.draft;
   const selected = programs.find((p) => p.id === d.selectedProgram) ?? programs[0] ?? null;
   const view = selected ? (d.programDrafts[selected.id] ?? programView(selected)) : null;
+  const free = freeProgramLetters(allPrograms);
+  const alternatives = selected ? freeProgramLetters(allPrograms, selected.id).filter((l) => l !== selected.name.trim().toUpperCase()) : [];
   const edit = (fn: Parameters<typeof editProgram>[2]) => { if (selected) editProgram(h, selected, fn); };
   return (
     <section className="flex flex-col gap-4" data-testid="step-programs">
@@ -100,16 +103,31 @@ export function ProgramsStep({
       </div>
       <div className="flex flex-wrap gap-2" role="tablist">
         {programs.map((p) => (
-          <DocChip key={p.id} selected={selected?.id === p.id} onClick={() => h.update((x) => ({ ...x, selectedProgram: p.id }))} testId={`tab-program-${p.name}`}>
+          <DocChip key={p.id} selected={selected?.id === p.id} onClick={() => { setPicking(null); h.update((x) => ({ ...x, selectedProgram: p.id })); }} testId={`tab-program-${p.name}`}>
             Program {p.name}
           </DocChip>
         ))}
-        {programs.length < 6 && (
-          <button type="button" disabled={busy} onClick={onAdd} className="min-h-11 rounded-xl border border-dashed border-primary/50 px-3.5 text-[15px] font-semibold text-primary disabled:opacity-50" data-testid="button-add-program">
+        {free.length > 0 && (
+          <button type="button" disabled={busy} onClick={() => setPicking("add")} className="min-h-11 rounded-xl border border-dashed border-primary/50 px-3.5 text-[15px] font-semibold text-primary disabled:opacity-50" data-testid="button-add-program">
             + Add program
           </button>
         )}
       </div>
+      {picking && (
+        <div className="rounded-2xl border border-primary/25 bg-primary/5 p-4 flex flex-col gap-3" data-testid="panel-program-letter">
+          <h3 className="text-sm font-semibold">{picking === "add" ? "Which program on the clock?" : `Change Program ${selected?.name} to`}</h3>
+          <div className="flex flex-wrap gap-2">
+            {(picking === "add" ? free : alternatives).map((l) => (
+              <DocChip key={l} selected={false} disabled={busy} testId={`chip-program-letter-${l}`} onClick={() => {
+                if (picking === "add") onAdd(l);
+                else if (selected) onRename(selected.id, l);
+                setPicking(null);
+              }}>Program {l}</DocChip>
+            ))}
+          </div>
+          <button type="button" disabled={busy} className="min-h-11 text-sm font-semibold text-muted-foreground" onClick={() => setPicking(null)}>Cancel</button>
+        </div>
+      )}
       {!selected || !view ? (
         <p className="flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-3 text-sm text-blue-900" data-testid="text-no-programs">
           <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />No programs yet. Add the first one that's set on the clock.
@@ -167,9 +185,12 @@ export function ProgramsStep({
               </Button>
             </div>
           </div>
+          <div className="flex gap-4">
+          {alternatives.length > 0 && <button type="button" disabled={busy} className="min-h-11 self-start text-sm font-semibold text-primary disabled:opacity-50" onClick={() => setPicking("rename")} data-testid="button-change-program-letter">Change letter</button>}
           <button type="button" disabled={busy} className="min-h-11 self-start text-sm font-semibold text-red-700 disabled:opacity-50" onClick={() => onRemove(selected)} data-testid="button-remove-program">
             Remove Program {selected.name}
           </button>
+          </div>
         </div>
       )}
     </section>

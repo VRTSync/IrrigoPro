@@ -823,3 +823,31 @@ mtime_ms = 1794332624381
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/2f0bb165-d592-45c5-9244-b08c58c46122/5953db17-923d-424a-b512-de99f204129d"
 storage_version_token = "1794332637765941"
 content_type = "text/html"
+
+[[outputs]]
+id = "gyKUUpAoCoUoH4HGxyyui"
+uri = "file://generated-artifacts/program-letters/03-A-and-D-selected.jpg"
+type = "image"
+title = "Phone evidence: Programs A and D"
+description = "Authenticated development app at 390 × 844. D selected after A, with no empty B or C programs."
+logical_id = "05846c41-9f27-4bc9-bd7d-497bfc6950d8"
+content_hash = "sha256:e9615a616a55339b0ab533af8e12930ecb28393e38661f994d1bc91c1e357f8f"
+size = 46222
+mtime_ms = 1794336609533
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/05846c41-9f27-4bc9-bd7d-497bfc6950d8/4ac0fa05-919f-4c51-87bc-5536a8a6aae5"
+storage_version_token = "1794336700565392"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "AG8wiprouBSwBEx3yRmV_"
+uri = "file://generated-artifacts/program-letters/04-change-B-to-D.jpg"
+type = "image"
+title = "Phone evidence: Change Program B"
+description = "Letter picker excludes the current B. Separate fixture verified the same program id, zones, runtimes and unsaved settings survived renaming to D."
+logical_id = "25c28188-b23f-40a1-9541-b0ea9f2de054"
+content_hash = "sha256:2e9ae2960bcd4f311f4289b57a3e03cbe1fb7ee7612bac687c444c39f9bea6df"
+size = 53775
+mtime_ms = 1794336614193
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/25c28188-b23f-40a1-9541-b0ea9f2de054/0ec5d11f-cee1-4a9d-b5c2-1c8ea6c043c4"
+storage_version_token = "1794336701011992"
+content_type = "image/jpeg"

@@ -21,6 +21,7 @@ export type Slice5Draft = {
   programBaseline: Record<number, ProgramDraft>;
   programDirty: number[];
   addedPrograms: DocumentationProgram[];
+  renamedPrograms: Record<number, { name: string; sortOrder: number }>;
   deletedPrograms: number[];
   brush: string;
   selectedProgram: number | null;
@@ -31,7 +32,7 @@ export type Slice5Draft = {
 const EMPTY: Slice5Draft = {
   zoneEdits: {}, typed: [], typeDirty: [], runDirty: [],
   programDrafts: {}, programBaseline: {}, programDirty: [],
-  addedPrograms: [], deletedPrograms: [],
+  addedPrograms: [], renamedPrograms: {}, deletedPrograms: [],
   brush: "pop_up_spray", selectedProgram: null, setAllProgram: null, setAllMinutes: 10,
 };
 
@@ -55,7 +56,8 @@ export function mergePrograms(base: DocumentationProgram[], d: Slice5Draft): Doc
   const ids = new Set(base.map((p) => p.id));
   return [...base, ...d.addedPrograms.filter((p) => !ids.has(p.id))]
     .filter((p) => !d.deletedPrograms.includes(p.id))
-    .map((p) => (d.programDrafts[p.id] ? { ...p, ...d.programDrafts[p.id] } : p));
+    .map((p) => ({ ...p, ...d.renamedPrograms[p.id], ...d.programDrafts[p.id] }))
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
 }
 
 export function activeSorted(programs: DocumentationProgram[]): DocumentationProgram[] {
@@ -104,9 +106,14 @@ export function programPatch(draft: ProgramDraft, baseline: ProgramDraft): Parti
 }
 
 /** First letter A-F not used by a program currently on the controller (active or inactive). Deletes are hard, so a deleted letter is free again. */
-export function nextProgramName(all: { name: string }[]): string | null {
-  const used = new Set(all.map((p) => p.name.trim().toUpperCase()));
-  return ["A", "B", "C", "D", "E", "F"].find((l) => !used.has(l)) ?? null;
+export const PROGRAM_LETTERS = ["A", "B", "C", "D", "E", "F"] as const;
+export function freeProgramLetters(all: { id?: number; name: string }[], except?: number): string[] {
+  const used = new Set(all.filter((p) => except === undefined || p.id !== except).map((p) => p.name.trim().toUpperCase()));
+  return PROGRAM_LETTERS.filter((l) => !used.has(l));
+}
+export function programSortOrder(letter: string): number {
+  const index = PROGRAM_LETTERS.findIndex((l) => l === letter.trim().toUpperCase());
+  return index < 0 ? 99 : index;
 }
 
 export function typeGroups(zones: DocumentationZone[], dirty: number[]) {
@@ -244,6 +251,14 @@ export function programView(p: { wateringDays: string[] | null; startTimes: stri
 
 export function programAdded(h: Slice5Handle, p: DocumentationProgram) {
   h.update((d) => ({ ...d, addedPrograms: [...d.addedPrograms, p], selectedProgram: p.id }));
+}
+
+export function programRenamed(h: Slice5Handle, id: number, name: string, sortOrder: number) {
+  h.update((d) => ({
+    ...d,
+    addedPrograms: d.addedPrograms.map((p) => p.id === id ? { ...p, name, sortOrder } : p),
+    renamedPrograms: { ...d.renamedPrograms, [id]: { name, sortOrder } },
+  }));
 }
 
 export function programDeleted(h: Slice5Handle, id: number, baseZones: DocumentationZone[]) {

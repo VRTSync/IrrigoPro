@@ -52,6 +52,13 @@ export class ZoneProgramError extends Error {
   constructor() { super("Program not on this controller"); }
 }
 
+export class ProgramNameTakenError extends Error {
+  constructor(name: string) {
+    super(`Program ${name} already exists on this clock`);
+    this.name = "ProgramNameTakenError";
+  }
+}
+
 export function zoneCountSummary(old: number | null, target: number, changes: ZoneChanges): string {
   let summary = `Zone count ${old ?? "not set"} → ${target}`;
   if (changes.created.length) summary += `; added zones ${compressZoneRanges(changes.created)}`;
