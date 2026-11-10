@@ -104,6 +104,26 @@ function makeControllerWithDetail(
 // ─── buildIrrigationProfileReportHtml — 2 programs, 4 zones ──────────────────
 
 describe('buildIrrigationProfileReportHtml', () => {
+  it('counts extra lines once per program and prints their own scheduled runtime', () => {
+    const ctrl = makeControllerWithDetail({}, [
+      makeProgram({ id: 1, name: 'A' }), makeProgram({ id: 3, name: 'C', sortOrder: 2 }),
+    ]);
+    ctrl.zones = [
+      makeZone({ id: 2, zoneNumber: 2, name: 'Lawn', programId: 1, zoneOrder: 1, runTimeMinutes: 15 }),
+      { ...makeZone({ id: 6, zoneNumber: 6, name: 'Shared zone', programId: 3, zoneOrder: 2, runTimeMinutes: 30, overrideStartTime: '08:00' }),
+        extraPrograms: [{ programId: 1, runTimeMinutes: 10 }] },
+    ];
+    const html = buildIrrigationProfileReportHtml([ctrl], 'Extra lines');
+    const block = html.slice(html.indexOf('Program A</div>'), html.indexOf('Program C</div>'));
+    assert.match(block, /2 active zones/);
+    const scheduleA = html.slice(html.indexOf('Program A &mdash;'), html.indexOf('Program C &mdash;'));
+    assert.match(scheduleA, /Shared zone/);
+    assert.match(scheduleA, /10 min/);
+    assert.match(scheduleA, /06:15/);
+    const scheduleC = html.slice(html.indexOf('Program C &mdash;'));
+    assert.match(scheduleC, /30 min/);
+    assert.match(scheduleC, /08:00/);
+  });
   it('returns non-empty HTML containing controller name and program labels', () => {
     const prog1 = makeProgram({ id: 1, name: 'A', startTimes: ['06:00'] });
     const prog2 = makeProgram({ id: 2, name: 'B', startTimes: ['07:00'], sortOrder: 1 });

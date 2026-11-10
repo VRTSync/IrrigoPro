@@ -26,6 +26,7 @@ export interface ScheduleInputProgram {
 }
 
 export interface ScheduleInputZone {
+  extraPrograms?: { programId: number; runTimeMinutes: number }[] | null;
   id: number;
   programId?: number | null;
   zoneNumber: number;
@@ -97,7 +98,10 @@ export function computeRunSchedule(
 
   for (const program of activePrograms) {
     const programZones = zones
-      .filter((z) => z.isActive && z.programId === program.id)
+      .filter((z) => z.isActive)
+      .flatMap((z) => z.programId === program.id ? [z] :
+        (z.extraPrograms ?? []).filter(line => line.programId === program.id)
+          .map(line => ({ ...z, runTimeMinutes: line.runTimeMinutes, overrideStartTime: null, overrideDays: null })))
       .sort((a, b) => a.zoneOrder - b.zoneOrder || a.zoneNumber - b.zoneNumber);
 
     const rawStartTimes = program.startTimes ?? [];

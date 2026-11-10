@@ -88,7 +88,7 @@ export type ControllerWithZones = IrrigationController & { zones: ZoneSummary[];
 type ZoneFocus = { id: number; token: number };
 type ControllerWithDetail = IrrigationController & {
   programs: IrrigationProgram[];
-  zones: IrrigationProfileZone[];
+  zones: (IrrigationProfileZone & { extraPrograms?: { programId: number; runTimeMinutes: number }[] })[];
   retiredZones: IrrigationProfileZone[];
 };
 
@@ -220,7 +220,7 @@ function RunSchedulePanel({
   zones,
 }: {
   programs: IrrigationProgram[];
-  zones: IrrigationProfileZone[];
+  zones: (IrrigationProfileZone & { extraPrograms?: { programId: number; runTimeMinutes: number }[] })[];
 }) {
   const schedulePrograms: ScheduleInputProgram[] = programs.map((p) => ({
     id: p.id,
@@ -233,6 +233,7 @@ function RunSchedulePanel({
   }));
 
   const scheduleZones: ScheduleInputZone[] = zones.map((z) => ({
+    extraPrograms: z.extraPrograms ?? [],
     id: z.id,
     programId: z.programId,
     zoneNumber: z.zoneNumber,
@@ -903,7 +904,12 @@ function ZoneSheetRow({
       const [key, patch] = queued.current.entries().next().value!;
       queued.current.delete(key); running.current = patch;
       try {
-        const response = await saveMutation.mutateAsync(patch);
+        const updated = await saveMutation.mutateAsync(patch);
+        // A single-zone PUT returns main-line fields only. Preserve the detail
+        // read's extras, except the line removed when the new main wins.
+        const cached = queryClient.getQueryData<ControllerWithDetail>([`/api/irrigation-controllers/${controllerId}`]);
+        const response = { ...updated, extraPrograms: (cached?.zones.find(z => z.id === zone.id)?.extraPrograms ?? [])
+          .filter(line => line.programId !== updated.programId) };
         const next = { ...response };
         const nextErrors = { ...errorsRef.current };
         for (const field of Object.keys(patch) as (keyof IrrigationProfileZone)[]) {

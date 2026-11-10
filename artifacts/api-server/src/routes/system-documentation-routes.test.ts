@@ -352,7 +352,10 @@ describe("Document System reads and atomic verification (real DB/routes)", { con
   it("filters inactive equipment; projects the controller graph/current ordered zones and backflows", async () => {
     const c = await customer("Graph fixture");
     const active = await controller(c.id, true, { totalZones: 3 });
-    await storage.createIrrigationProgram(a, active.id, { name: "Inactive program", isActive: false });
+    const extra = await storage.createIrrigationProgram(a, active.id, { name: "Inactive program", isActive: false });
+    await storage.setZoneExtraPrograms(a, active.id, [{
+      zoneId: active.zones[0].id, lines: [{ programId: extra!.id, runTimeMinutes: 12 }],
+    }]);
     await storage.setControllerZoneCount(a, active.id, 2);
     await storage.updateIrrigationZone(a, active.zones[0].id, { zoneOrder: 9 });
     const bf = await backflow(c.id, true, { vrtSyncId: "private-sync" });
@@ -365,7 +368,9 @@ describe("Document System reads and atomic verification (real DB/routes)", { con
       "notes", "lastUpdatedAt", "fieldVerifiedAt", "fieldVerifiedByName", "programs", "zones", "gaps", "verified"].sort());
     assert.equal(ctrl.programs.length, 2); assert.equal(ctrl.programs[1].isActive, false);
     assert.deepEqual(ctrl.zones.map((z: any) => z.zoneNumber), [1, 2]);
-    assert.deepEqual(Object.keys(ctrl.zones[0]).sort(), ["id", "zoneNumber", "name", "zoneType", "zoneTypeConfirmed", "programId", "runTimeMinutes"].sort());
+    assert.deepEqual(Object.keys(ctrl.zones[0]).sort(), ["id", "zoneNumber", "name", "zoneType", "zoneTypeConfirmed", "programId", "runTimeMinutes", "extraPrograms"].sort());
+    assert.deepEqual(ctrl.zones[0].extraPrograms, [{ programId: extra!.id, runTimeMinutes: 12 }]);
+    assert.deepEqual(ctrl.zones[1].extraPrograms, []);
     assert.deepEqual(Object.keys(device).sort(), [...Object.keys(bf).filter(k => !["companyId", "customerId", "vrtSyncId"].includes(k)), "gaps", "verified"].sort());
     assert.deepEqual(ctrl.gaps, controllerDocumentationGaps((await storage.getIrrigationController(a, active.id))!));
     assert.deepEqual(device.gaps, backflowDocumentationGaps(bf));

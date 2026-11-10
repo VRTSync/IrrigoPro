@@ -2087,6 +2087,24 @@ export const irrigationProfileZones = pgTable("irrigation_profile_zones", {
 
 export const insertIrrigationProfileZoneSchema = createInsertSchema(irrigationProfileZones);
 export type IrrigationProfileZone = typeof irrigationProfileZones.$inferSelect;
+
+// Extra program lines leave the zone's main program and runtime untouched.
+export const irrigationZoneExtraPrograms = pgTable("irrigation_zone_extra_programs", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  zoneId: integer("zone_id").notNull(),
+  programId: integer("program_id").notNull(),
+  runTimeMinutes: integer("run_time_minutes").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, t => ({
+  zoneFk: foreignKey({ name: "irr_zone_extra_zone_fk", columns: [t.zoneId], foreignColumns: [irrigationProfileZones.id] }).onDelete("cascade"),
+  programFk: foreignKey({ name: "irr_zone_extra_program_fk", columns: [t.programId], foreignColumns: [irrigationPrograms.id] }).onDelete("cascade"),
+  uniqZoneProgram: uniqueIndex("uniq_irr_zone_extra_program").on(t.zoneId, t.programId),
+  companyZoneIdx: index("irr_zone_extra_company_zone_idx").on(t.companyId, t.zoneId),
+  validRuntime: check("irr_zone_extra_runtime_check", sql`${t.runTimeMinutes} BETWEEN 0 AND 120`),
+}));
+export type IrrigationZoneExtraProgram = typeof irrigationZoneExtraPrograms.$inferSelect;
 export type InsertIrrigationProfileZone = typeof irrigationProfileZones.$inferInsert;
 
 // Append-only snapshot log. Every controller save appends one row with the

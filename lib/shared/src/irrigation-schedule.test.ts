@@ -39,6 +39,24 @@ function makeZone(overrides: Partial<ScheduleInputZone> & { id: number; programI
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("computeRunSchedule", () => {
+  it("extra lines sequence by zone order with their own seasonal adjustment and no main overrides", () => {
+    const programs = [makeProgram({ id: 1, seasonalAdjustPct: 50 }), makeProgram({ id: 3, seasonalAdjustPct: 120 })];
+    const zones = [
+      makeZone({ id: 6, programId: 3, runTimeMinutes: 30, zoneOrder: 2, overrideStartTime: "08:00", overrideDays: ["Tue"],
+        extraPrograms: [{ programId: 1, runTimeMinutes: 10 }, { programId: 3, runTimeMinutes: 99 }] }),
+      makeZone({ id: 7, programId: 1, zoneOrder: 3 }),
+      makeZone({ id: 2, programId: 1, zoneOrder: 1 }),
+      makeZone({ id: 8, programId: 3, isActive: false, extraPrograms: [{ programId: 1, runTimeMinutes: 120 }] }),
+    ];
+    const result = computeRunSchedule(programs, zones);
+    assert.deepEqual(result[0].entries.map(e => [e.zoneId, e.adjustedRunTimeMinutes, e.expectedStartMinutes, e.isOverride, e.overrideDays]),
+      [[2, 5, 360, false, null], [6, 5, 365, false, null], [7, 5, 370, false, null]]);
+    assert.deepEqual(result[1].entries.map(e => [e.zoneId, e.adjustedRunTimeMinutes, e.expectedStartMinutes, e.isOverride, e.overrideDays]),
+      [[6, 36, 480, true, ["Tue"]]]);
+    const orphan = computeRunSchedule(programs, [{ ...zones[0], programId: null, extraPrograms: [{ programId: 1, runTimeMinutes: 10 }] }]);
+    assert.equal(orphan[0].entries[0].adjustedRunTimeMinutes, 5);
+    assert.equal(orphan[1].entries.length, 0);
+  });
   describe("(a) 2 programs × 4 zones each — sequential, seasonal-adjusted", () => {
     const programs: ScheduleInputProgram[] = [
       makeProgram({ id: 1, startTimes: ["06:00"], seasonalAdjustPct: 100 }),

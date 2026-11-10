@@ -120,7 +120,7 @@
     },
     {
       "name": "system-documenter-role-matrix",
-      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/routes/irrigation-profile-routes.test.ts src/routes/system-documenter-role-matrix.test.ts"
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/routes/irrigation-profile-routes.test.ts src/routes/system-documenter-role-matrix.test.ts src/irrigation-profile-pdf.test.ts"
     },
     {
       "name": "document-controller-stamp",

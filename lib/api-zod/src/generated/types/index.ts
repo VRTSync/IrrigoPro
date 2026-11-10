@@ -37,3 +37,4 @@ export * from "./documentationSiteSummary";
 export * from "./documentationZone";
 export * from "./getDocumentationSiteParams";
 export * from "./healthStatus";
+export * from "./zoneExtraProgram";

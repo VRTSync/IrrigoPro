@@ -160,7 +160,7 @@ export function registerSystemDocumentationRoutes(app: Express, deps: { requireA
         fieldVerifiedByName: graph.fieldVerifiedByName, programs,
         zones: [...graph.zones].sort((a, b) => a.zoneNumber - b.zoneNumber).map(z => ({
           id: z.id, zoneNumber: z.zoneNumber, name: z.name, zoneType: z.zoneType,
-          zoneTypeConfirmed: z.zoneTypeConfirmed, programId: z.programId, runTimeMinutes: z.runTimeMinutes,
+          zoneTypeConfirmed: z.zoneTypeConfirmed, programId: z.programId, runTimeMinutes: z.runTimeMinutes, extraPrograms: z.extraPrograms,
         })),
         gaps: controllerDocumentationGaps({ ...graph, programs }), verified: isFieldVerified(graph),
       });

@@ -74,6 +74,11 @@ export interface DocumentationSites {
   customers: DocumentationPickerCustomer[];
 }
 
+export interface ZoneExtraProgram {
+  programId: number;
+  runTimeMinutes: number;
+}
+
 export interface DocumentationZone {
   id: number;
   zoneNumber: number;
@@ -83,6 +88,7 @@ export interface DocumentationZone {
   /** @nullable */
   programId: number | null;
   runTimeMinutes: number;
+  extraPrograms: ZoneExtraProgram[];
 }
 
 export interface DocumentationProgram {

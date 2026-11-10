@@ -800,6 +800,36 @@ export function registerIrrigationProfileRoutes(
     }
   });
 
+  app.put("/api/irrigation-controllers/:id/zones/extra-programs", requireAuthentication, async (req: any, res: any) => {
+    const role = req.authenticatedUserRole;
+    if (!hasCapability(role, CAN_EDIT_IRRIGATION_ZONES)) return res.status(403).json({ message: "Forbidden" });
+    const companyId = getCallerCompanyId(req);
+    const rawCompanyId = req.authenticatedUserCompanyId;
+    const validContext = (typeof rawCompanyId === "number" || (typeof rawCompanyId === "string" && /^[1-9]\d*$/.test(rawCompanyId))) &&
+      Number.isSafeInteger(companyId) && companyId! > 0;
+    if (!isSuperAdmin(role) && !validContext) return res.status(401).json({ message: "Authentication required" });
+    const id = parseId(req.params.id);
+    if (!id) return badId(res, "controller");
+    const parsed = z.object({ zones: z.array(z.object({
+      zoneId: z.number().int().positive(),
+      lines: z.array(z.object({
+        programId: z.number().int().positive(),
+        runTimeMinutes: z.number().int().min(0).max(120),
+      }).strict()).max(25),
+    }).strict()).min(1).max(100) }).strict().safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    try {
+      const me = req.authenticatedUserId ? await storage.getUser(req.authenticatedUserId) : undefined;
+      const rows = await storage.setZoneExtraPrograms(isSuperAdmin(role) ? null : companyId, id, parsed.data.zones, me ? { id: me.id, name: me.name } : undefined);
+      if (!rows) return notFound(res, "Zones");
+      res.json(rows);
+    } catch (error) {
+      if (error instanceof ZoneProgramError) return res.status(400).json({ message: error.message });
+      req.log?.error?.({ err: error }, "setZoneExtraPrograms failed");
+      res.status(500).json({ message: "Could not save extra programs — please retry" });
+    }
+  });
+
   // ── GET /api/irrigation-controllers/:id/history ────────────────────────────
   app.get(
     "/api/irrigation-controllers/:id/history",

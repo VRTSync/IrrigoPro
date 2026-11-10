@@ -15,7 +15,7 @@ export const SYSTEM_DOCUMENTER_API: readonly ApiRule[] = [
   { method: "PUT", pattern: /^\/api\/irrigation-controllers\/\d+$/ },
   { method: "POST", pattern: /^\/api\/irrigation-controllers\/\d+\/letter$/ },
   { method: "POST", pattern: /^\/api\/irrigation-controllers\/\d+\/(programs|photo|field-verify)$/ },
-  { method: "PUT", pattern: /^\/api\/irrigation-controllers\/\d+\/(zone-count|zones\/bulk)$/ },
+  { method: "PUT", pattern: /^\/api\/irrigation-controllers\/\d+\/(zone-count|zones\/bulk|zones\/extra-programs)$/ },
   { method: "PUT", pattern: /^\/api\/irrigation-programs\/\d+$/ },
   { method: "DELETE", pattern: /^\/api\/irrigation-programs\/\d+$/ },
   { method: "POST", pattern: /^\/api\/customers\/\d+\/backflows$/ },

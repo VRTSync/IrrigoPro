@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ZoneExtraProgram } from "./zoneExtraProgram";
 
 export interface DocumentationZone {
   id: number;
@@ -15,4 +16,5 @@ export interface DocumentationZone {
   /** @nullable */
   programId: number | null;
   runTimeMinutes: number;
+  extraPrograms: ZoneExtraProgram[];
 }

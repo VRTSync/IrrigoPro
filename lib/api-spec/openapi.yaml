@@ -267,7 +267,7 @@ components:
         customers: { type: array, items: { $ref: "#/components/schemas/DocumentationPickerCustomer" } }
     DocumentationZone:
       type: object
-      required: [id, zoneNumber, name, zoneType, zoneTypeConfirmed, programId, runTimeMinutes]
+      required: [id, zoneNumber, name, zoneType, zoneTypeConfirmed, programId, runTimeMinutes, extraPrograms]
       properties:
         id: { type: integer }
         zoneNumber: { type: integer }
@@ -275,6 +275,15 @@ components:
         zoneType: { type: string }
         zoneTypeConfirmed: { type: boolean }
         programId: { type: [integer, "null"] }
+        runTimeMinutes: { type: integer }
+        extraPrograms:
+          type: array
+          items: { $ref: "#/components/schemas/ZoneExtraProgram" }
+    ZoneExtraProgram:
+      type: object
+      required: [programId, runTimeMinutes]
+      properties:
+        programId: { type: integer }
         runTimeMinutes: { type: integer }
     DocumentationProgram:
       type: object

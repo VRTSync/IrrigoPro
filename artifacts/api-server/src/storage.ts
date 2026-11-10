@@ -50,6 +50,7 @@ import {
   irrigationControllers,
   irrigationPrograms,
   irrigationProfileZones,
+  irrigationZoneExtraPrograms,
   irrigationProfileHistory,
   controllerLetterChanges,
   irrigationBackflows,
@@ -183,6 +184,7 @@ import {
   deriveLifecycleForWrite,
   ESTIMATE_EXPIRATION_DAYS,
   type LifecycleStatus,
+  type ZoneExtraProgram,
   sumCompletionLaborHours,
 } from "@workspace/shared";
 import { computeEstimateSummary } from "./estimate-summary";
@@ -245,6 +247,7 @@ export type { WetCheckBillingListItem };
 // transaction parameter type keeps callers honest while still accepting
 // the top-level db handle.
 type DbExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+type ZoneWithExtraPrograms = IrrigationProfileZone & { extraPrograms: ZoneExtraProgram[] };
 // Transient, parent-scoped edit hint; never a persisted database column.
 type ReplacementItem<T> = T & { sourceItemId?: number | null };
 
@@ -478,6 +481,7 @@ export interface IStorage {
   resolveControllerIdsByLetter(q: DbExecutor, scope: { companyId: number; customerId: number; branchName: string | null }, letters: (string | null | undefined)[]): Promise<Map<string, number | null>>;
   listCurrentZoneSummaries(controllers: { id: number; companyId: number }[]): Promise<Map<number, CurrentZoneSummary[]>>;
   bulkUpdateIrrigationZones(companyId: number | null, controllerId: number, zoneIds: number[], patch: BulkZonePatch, actor?: ZoneActor): Promise<IrrigationProfileZone[] | null>;
+  setZoneExtraPrograms(companyId: number | null, controllerId: number, zones: { zoneId: number; lines: ZoneExtraProgram[] }[], actor?: ZoneActor): Promise<{ zoneId: number; extraPrograms: ZoneExtraProgram[] }[] | null>;
   // Companies
   getCompanies(): Promise<Company[]>;
   getCompany(id: number): Promise<Company | undefined>;
@@ -1353,7 +1357,7 @@ export interface IStorage {
   getIrrigationController(
     companyId: number | null,
     id: number,
-  ): Promise<(IrrigationController & { programs: IrrigationProgram[]; zones: IrrigationProfileZone[]; retiredZones: IrrigationProfileZone[] }) | null>;
+  ): Promise<(IrrigationController & { programs: IrrigationProgram[]; zones: ZoneWithExtraPrograms[]; retiredZones: ZoneWithExtraPrograms[] }) | null>;
 
   createIrrigationController(
     data: InsertIrrigationController,
@@ -11644,6 +11648,26 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Called inside a transaction after any mutating save.
+  private async _loadExtraPrograms(q: DbExecutor, companyId: number, zoneIds: number[]): Promise<Map<number, ZoneExtraProgram[]>> {
+    const result = new Map<number, ZoneExtraProgram[]>();
+    if (!zoneIds.length) return result;
+    const rows = await q.select({
+      zoneId: irrigationZoneExtraPrograms.zoneId,
+      programId: irrigationZoneExtraPrograms.programId,
+      runTimeMinutes: irrigationZoneExtraPrograms.runTimeMinutes,
+    }).from(irrigationZoneExtraPrograms)
+      .innerJoin(irrigationPrograms, eq(irrigationPrograms.id, irrigationZoneExtraPrograms.programId))
+      .where(and(eq(irrigationZoneExtraPrograms.companyId, companyId), inArray(irrigationZoneExtraPrograms.zoneId, zoneIds)))
+      .orderBy(irrigationPrograms.sortOrder, irrigationPrograms.id);
+    for (const { zoneId, ...line } of rows) result.set(zoneId, [...(result.get(zoneId) ?? []), line]);
+    return result;
+  }
+
+  private async _snapshotExtraPrograms(q: DbExecutor, companyId: number, zones: IrrigationProfileZone[]) {
+    const extras = await this._loadExtraPrograms(q, companyId, zones.map(z => z.id));
+    return zones.flatMap(z => (extras.get(z.id) ?? []).map(line => ({ zoneId: z.id, ...line })));
+  }
+
   private async _appendIrrigationSnapshot(
     tx: DbExecutor,
     ctrl: IrrigationController,
@@ -11665,7 +11689,7 @@ export class DatabaseStorage implements IStorage {
     await (tx as typeof db).insert(irrigationProfileHistory).values({
       companyId: ctrl.companyId,
       controllerId: ctrl.id,
-      snapshotJson: { controller: ctrl, programs, zones } as any,
+      snapshotJson: { controller: ctrl, programs, zones, zoneExtraPrograms: await this._snapshotExtraPrograms(tx, ctrl.companyId, zones) } as any,
       changedByUserId: actor?.id ?? null,
       changedByName: actor?.name ?? null,
       summary,
@@ -11684,13 +11708,66 @@ export class DatabaseStorage implements IStorage {
       const programs = await tx.select().from(irrigationPrograms).where(and(eq(irrigationPrograms.controllerId, ctrl.id), eq(irrigationPrograms.companyId, ctrl.companyId))).orderBy(irrigationPrograms.sortOrder, irrigationPrograms.id);
       const zones = await tx.select().from(irrigationProfileZones).where(and(eq(irrigationProfileZones.controllerId, ctrl.id), eq(irrigationProfileZones.companyId, ctrl.companyId), isNull(irrigationProfileZones.retiredAt))).orderBy(irrigationProfileZones.zoneOrder, irrigationProfileZones.zoneNumber);
       await tx.update(irrigationProfileHistory).set({
-        snapshotJson: { controller: ctrl, programs, zones },
+        snapshotJson: { controller: ctrl, programs, zones, zoneExtraPrograms: await this._snapshotExtraPrograms(tx, ctrl.companyId, zones) },
         summary: zoneEditSummary([...parseZoneRanges(latest.summary.slice(ZONE_EDIT_SUMMARY_PREFIX.length)), ...numbers]),
         changedAt: now,
       }).where(eq(irrigationProfileHistory.id, latest.id));
     } else {
       await this._appendIrrigationSnapshot(tx, ctrl, actor, zoneEditSummary(numbers));
     }
+  }
+
+  async setZoneExtraPrograms(companyId: number | null, controllerId: number, submitted: { zoneId: number; lines: ZoneExtraProgram[] }[], actor?: ZoneActor): Promise<{ zoneId: number; extraPrograms: ZoneExtraProgram[] }[] | null> {
+    const zoneIds = submitted.map(z => z.zoneId);
+    if (!zoneIds.length || zoneIds.length > 100 || new Set(zoneIds).size !== zoneIds.length) return null;
+    if (companyId !== null && (!Number.isInteger(companyId) || companyId <= 0)) return null;
+    return db.transaction(async tx => {
+      const [ctrl] = await tx.select().from(irrigationControllers).where(and(
+        eq(irrigationControllers.id, controllerId), companyId === null ? undefined : eq(irrigationControllers.companyId, companyId),
+      )).for("update");
+      if (!ctrl) return null;
+      const zones = await tx.select().from(irrigationProfileZones).where(and(
+        inArray(irrigationProfileZones.id, zoneIds), eq(irrigationProfileZones.controllerId, ctrl.id),
+        eq(irrigationProfileZones.companyId, ctrl.companyId), isNull(irrigationProfileZones.retiredAt),
+      ));
+      if (zones.length !== zoneIds.length) return null;
+      const programs = await tx.select().from(irrigationPrograms).where(and(
+        eq(irrigationPrograms.controllerId, ctrl.id), eq(irrigationPrograms.companyId, ctrl.companyId),
+      )).orderBy(irrigationPrograms.sortOrder, irrigationPrograms.id);
+      const names = new Map(programs.map(p => [p.id, p.name]));
+      for (const entry of submitted) {
+        const zone = zones.find(z => z.id === entry.zoneId)!;
+        if (entry.lines.length > 25) throw new ZoneProgramError("A zone can have at most 25 extra programs");
+        if (entry.lines.length && zone.programId == null) throw new ZoneProgramError("Choose a main program before adding extra programs");
+        const seen = new Set<number>();
+        for (const line of entry.lines) {
+          if (!names.has(line.programId)) throw new ZoneProgramError();
+          if (seen.has(line.programId)) throw new ZoneProgramError("An extra program cannot be repeated");
+          if (line.programId === zone.programId) throw new ZoneProgramError("An extra program must differ from the main program");
+          if (!Number.isInteger(line.runTimeMinutes) || line.runTimeMinutes < 0 || line.runTimeMinutes > 120) throw new ZoneProgramError("Run time must be 0–120 minutes");
+          seen.add(line.programId);
+        }
+      }
+      for (const entry of submitted) {
+        const scope = and(eq(irrigationZoneExtraPrograms.companyId, ctrl.companyId), eq(irrigationZoneExtraPrograms.zoneId, entry.zoneId));
+        const existing = await tx.select().from(irrigationZoneExtraPrograms).where(scope);
+        const removed = existing.filter(row => !entry.lines.some(line => line.programId === row.programId));
+        if (removed.length) await tx.delete(irrigationZoneExtraPrograms).where(and(scope, inArray(irrigationZoneExtraPrograms.id, removed.map(r => r.id))));
+        for (const line of entry.lines) await tx.insert(irrigationZoneExtraPrograms).values({
+          companyId: ctrl.companyId, zoneId: entry.zoneId, ...line,
+        }).onConflictDoUpdate({
+          target: [irrigationZoneExtraPrograms.zoneId, irrigationZoneExtraPrograms.programId],
+          set: { runTimeMinutes: line.runTimeMinutes, updatedAt: new Date() },
+        });
+      }
+      const extras = await this._loadExtraPrograms(tx, ctrl.companyId, zoneIds);
+      const stamped = await this._stampControllerUpdated(tx, ctrl.id, actor?.id != null ? { id: actor.id, name: actor.name } : undefined);
+      const ordered = [...zones].sort((a, b) => a.zoneNumber - b.zoneNumber);
+      const summary = `Zones ${compressZoneRanges(ordered.map(z => z.zoneNumber))} extra programs: ` +
+        ordered.map(z => `${z.zoneNumber} → ${(extras.get(z.id) ?? []).map(line => `${names.get(line.programId)} ${line.runTimeMinutes} min`).join(", ") || "none"}`).join("; ");
+      await this._appendIrrigationSnapshot(tx, stamped ?? ctrl, actor, summary);
+      return submitted.map(z => ({ zoneId: z.zoneId, extraPrograms: extras.get(z.zoneId) ?? [] }));
+    });
   }
 
   async bulkUpdateIrrigationZones(companyId: number | null, controllerId: number, zoneIds: number[], patch: BulkZonePatch, actor?: ZoneActor): Promise<IrrigationProfileZone[] | null> {
@@ -11711,6 +11788,9 @@ export class DatabaseStorage implements IStorage {
         programName = program.name;
       }
       const fields: BulkZonePatch = {};
+      if (typeof patch.programId === "number") await tx.delete(irrigationZoneExtraPrograms).where(and(
+        eq(irrigationZoneExtraPrograms.companyId, ctrl.companyId), inArray(irrigationZoneExtraPrograms.zoneId, zoneIds), eq(irrigationZoneExtraPrograms.programId, patch.programId),
+      ));
       if (patch.zoneType !== undefined) fields.zoneType = patch.zoneType;
       if (patch.programId !== undefined) fields.programId = patch.programId;
       if (patch.runTimeMinutes !== undefined) fields.runTimeMinutes = patch.runTimeMinutes;
@@ -12113,7 +12193,7 @@ export class DatabaseStorage implements IStorage {
   async getIrrigationController(
     companyId: number | null,
     id: number,
-  ): Promise<(IrrigationController & { programs: IrrigationProgram[]; zones: IrrigationProfileZone[]; retiredZones: IrrigationProfileZone[] }) | null> {
+  ): Promise<(IrrigationController & { programs: IrrigationProgram[]; zones: ZoneWithExtraPrograms[]; retiredZones: ZoneWithExtraPrograms[] }) | null> {
     const conditions = [eq(irrigationControllers.id, id)];
     if (companyId !== null) conditions.push(eq(irrigationControllers.companyId, companyId));
 
@@ -12139,7 +12219,9 @@ export class DatabaseStorage implements IStorage {
         .orderBy(irrigationProfileZones.zoneNumber),
     ]);
 
-    return { ...ctrl, programs, zones, retiredZones };
+    const extras = await this._loadExtraPrograms(db, ctrl.companyId, [...zones, ...retiredZones].map(z => z.id));
+    const attach = (z: IrrigationProfileZone): ZoneWithExtraPrograms => ({ ...z, extraPrograms: extras.get(z.id) ?? [] });
+    return { ...ctrl, programs, zones: zones.map(attach), retiredZones: retiredZones.map(attach) };
   }
 
   async createIrrigationController(
@@ -12539,6 +12621,9 @@ export class DatabaseStorage implements IStorage {
       const [existing] = await tx.select().from(irrigationProfileZones).where(and(...zoneConds));
       if (!existing || existing.retiredAt) return null;
 
+      if (typeof patch.programId === "number") await tx.delete(irrigationZoneExtraPrograms).where(and(
+        eq(irrigationZoneExtraPrograms.companyId, existing.companyId), eq(irrigationZoneExtraPrograms.zoneId, id), eq(irrigationZoneExtraPrograms.programId, patch.programId),
+      ));
       const [updated] = await tx
         .update(irrigationProfileZones)
         .set({ ...patch, ...(patch.zoneType !== undefined ? { zoneTypeConfirmed: true } : {}), updatedAt: new Date() })
@@ -13014,6 +13099,12 @@ export class DatabaseStorage implements IStorage {
               .onConflictDoNothing();
           } else if (zd?.action === "update" || zd?.action === "create") {
             const resolvedName = resolveZoneName(row.zoneName, existingZone.name, zoneNum);
+            // CSV main-line writes follow the same precedence as office saves.
+            if (programId !== null) await q.delete(irrigationZoneExtraPrograms).where(and(
+              eq(irrigationZoneExtraPrograms.companyId, companyId),
+              eq(irrigationZoneExtraPrograms.zoneId, existingZone.id),
+              eq(irrigationZoneExtraPrograms.programId, programId),
+            ));
             await q
               .update(irrigationProfileZones)
               .set({
@@ -13055,6 +13146,9 @@ export class DatabaseStorage implements IStorage {
 
           const target = Math.max(0, ...group.zones.keys());
           for (const zone of removedZones) {
+            await q.delete(irrigationZoneExtraPrograms).where(and(
+              eq(irrigationZoneExtraPrograms.companyId, zone.companyId), eq(irrigationZoneExtraPrograms.zoneId, zone.id),
+            ));
             if (zone.zoneNumber <= target) {
               await q.update(irrigationProfileZones).set({
                 ...zonePlaceholder(zone.zoneNumber), programId: null, notes: null,
@@ -13098,7 +13192,10 @@ export class DatabaseStorage implements IStorage {
           .orderBy(irrigationProfileZones.zoneOrder, irrigationProfileZones.zoneNumber);
 
         if (updatedCtrl) {
-          const snapshotJson: Record<string, unknown> = { controller: updatedCtrl, programs, zones };
+          const snapshotJson: Record<string, unknown> = {
+            controller: updatedCtrl, programs, zones,
+            zoneExtraPrograms: await this._snapshotExtraPrograms(q, companyId, zones),
+          };
           if (removedSnapshot) {
             snapshotJson.removed = removedSnapshot;
           }

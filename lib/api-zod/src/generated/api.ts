@@ -132,6 +132,12 @@ export const GetDocumentationSiteResponse = zod.object({
               zoneTypeConfirmed: zod.boolean(),
               programId: zod.number().nullable(),
               runTimeMinutes: zod.number(),
+              extraPrograms: zod.array(
+                zod.object({
+                  programId: zod.number(),
+                  runTimeMinutes: zod.number(),
+                }),
+              ),
             }),
           ),
         }),

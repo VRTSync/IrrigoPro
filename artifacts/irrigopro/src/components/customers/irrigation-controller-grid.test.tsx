@@ -53,6 +53,26 @@ beforeEach(() => { auth.role = "company_admin"; request.mockReset(); toast.mockR
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("controller settings photos", () => {
+  it("feeds extra program runtimes into the real schedule without inheriting main overrides", async () => {
+    const programs = [
+      { id: 5, name: "A", startTimes: ["06:00"], wateringDays: ["Mon"], seasonalAdjustPct: 100, isActive: true, sortOrder: 0 },
+      { id: 6, name: "C", startTimes: ["07:00"], wateringDays: ["Tue"], seasonalAdjustPct: 100, isActive: true, sortOrder: 1 },
+    ] as IrrigationProgram[];
+    const ctrl = counted(1);
+    const detail = { ...ctrl, programs, retiredZones: [], zones: [{
+      ...zones[0], programId: 6, runTimeMinutes: 30, overrideStartTime: "08:00", overrideDays: ["Wed"],
+      extraPrograms: [{ programId: 5, runTimeMinutes: 10 }],
+    }] };
+    mount(ctrl, false, false, [], async () => detail, programs);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    const a = (await screen.findByText("Program A — Start 06:00")).parentElement!.parentElement!;
+    const c = screen.getByText("Program C — Start 07:00").parentElement!.parentElement!;
+    expect(within(a).getByText("10 min")).toBeInTheDocument();
+    expect(within(a).getByText("06:10")).toBeInTheDocument();
+    expect(within(a).queryByText("08:00")).toBeNull();
+    expect(within(c).getByText("30 min")).toBeInTheDocument();
+    expect(within(c).getByText("08:00")).toBeInTheDocument();
+  });
   function mockSignedUrls() {
     const fetchPhoto = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -237,6 +257,41 @@ async function selectOption(label: string, option: string) {
 }
 
 describe("fast zone sheet", () => {
+  it("retains extra schedule lines after inline saves and drops only a new main-program collision", async () => {
+    const programs = ["A", "B", "C"].map((name, i) => ({
+      id: i + 5, name, controllerId: 7, startTimes: ["06:00"], wateringDays: ["Mon"],
+      seasonalAdjustPct: 100, isActive: true, sortOrder: i,
+    })) as IrrigationProgram[];
+    const mainZone = { ...zones[0], programId: 5, runTimeMinutes: 20 };
+    const detail = { ...counted(1), programs, retiredZones: [], zones: [{
+      ...mainZone, extraPrograms: [{ programId: 6, runTimeMinutes: 12 }, { programId: 7, runTimeMinutes: 10 }],
+    }] };
+    const { qc } = mount(counted(1), true, true, [], async () => detail, programs);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    const note = await screen.findByRole("textbox", { name: "Zone 1 Notes" });
+    const schedule = () => screen.getByText("Auto Run-Time Schedule").parentElement!;
+    const cachedExtras = () => (qc.getQueryData([`/api/irrigation-controllers/7`]) as typeof detail).zones[0].extraPrograms;
+    request.mockResolvedValueOnce({ ...mainZone, notes: "Saved note" });
+    fireEvent.change(note, { target: { value: "Saved note" } }); fireEvent.blur(note);
+    await waitFor(() => expect(screen.getByLabelText("Saved")).toBeInTheDocument());
+    expect(cachedExtras()).toEqual(detail.zones[0].extraPrograms);
+    expect(within(schedule()).getByText("12 min")).toBeInTheDocument();
+    expect(within(schedule()).getByText("10 min")).toBeInTheDocument();
+
+    request.mockResolvedValueOnce({ ...mainZone, programId: 6, notes: "Saved note" });
+    await selectOption("Zone 1 Program", "B");
+    await waitFor(() => expect(cachedExtras()).toEqual([{ programId: 7, runTimeMinutes: 10 }]));
+    expect(within(schedule()).queryByText("12 min")).toBeNull();
+    expect(within(schedule()).getByText("20 min")).toBeInTheDocument();
+    expect(within(schedule()).getByText("10 min")).toBeInTheDocument();
+
+    request.mockResolvedValueOnce({ ...mainZone, programId: null, notes: "Saved note" });
+    await selectOption("Zone 1 Program", "— None —");
+    await waitFor(() => expect(within(schedule()).queryByText("20 min")).toBeNull());
+    expect(cachedExtras()).toEqual([{ programId: 7, runTimeMinutes: 10 }]);
+    expect(within(schedule()).getByText("10 min")).toBeInTheDocument();
+    expect(request).toHaveBeenCalledTimes(3);
+  });
   it("blur saves only name, shows a check, and never invalidates detail/list", async () => {
     const { invalidate } = await openSheet();
     request.mockResolvedValueOnce({ ...zones[0], name: "Garden" });

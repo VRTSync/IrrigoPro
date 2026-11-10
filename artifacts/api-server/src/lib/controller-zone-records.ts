@@ -49,7 +49,7 @@ export function parseZoneRanges(value: string): number[] {
 
 export type BulkZonePatch = { zoneType?: string; programId?: number | null; runTimeMinutes?: number };
 export class ZoneProgramError extends Error {
-  constructor() { super("Program not on this controller"); }
+  constructor(message = "Program not on this controller") { super(message); }
 }
 
 export class ProgramNameTakenError extends Error {

@@ -21,7 +21,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
 import { db } from "@workspace/db";
-import { irrigationControllers, irrigationProfileZones, irrigationProfileHistory, controllerLetterChanges } from "@workspace/db/schema";
+import { irrigationControllers, irrigationProfileZones, irrigationProfileHistory, controllerLetterChanges, irrigationZoneExtraPrograms } from "@workspace/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 
 import { registerIrrigationProfileRoutes } from "./irrigation-profile-routes";
@@ -32,6 +32,7 @@ import { CLEAR_ZONE_COUNT_MESSAGE, compressZoneRanges, parseZoneRanges } from ".
 import { createBindingFixture, cleanupBindingFixture } from "../lib/ticket-controller-binding.fixtures";
 import { billingSheets as clockSheets, wetChecks as clockWetChecks, wetCheckZoneRecords as clockZoneRecords } from "@workspace/db";
 import { isFieldVerified } from "@workspace/shared";
+import { enforceRoleApiAllowlist } from "./role-guards";
 
 describe("Clocks Own Their History Slice 1 — rename, edits and technician writes", () => {
   let f: Awaited<ReturnType<typeof createBindingFixture>>;
@@ -159,7 +160,7 @@ function makeTestServer(user: TestUser): { base: string; close: () => Promise<vo
     req.authenticatedUserRole = user.role;
     req.authenticatedUserId = user.userId;
     req.authenticatedUserCompanyId = user.companyId;
-    next();
+    if (enforceRoleApiAllowlist(req, _res)) next();
   };
 
   // Minimal getUser stub so handlers that call storage.getUser(userId) work
@@ -285,6 +286,196 @@ async function cleanupControllers() {
   }
   createdControllerIds.length = 0;
 }
+
+describe("Zone extra program lines", () => {
+  let f: Awaited<ReturnType<typeof createBindingFixture>>;
+  let servers: ReturnType<typeof makeTestServer>[];
+  let a: number, b: number, c: number, zoneId: number, secondId: number;
+  const ctrlId = () => f.controllers[0].id;
+  const actor = () => ({ id: f.user.id, name: f.user.name });
+  const serve = (role = "irrigation_manager", companyId: number | null = f.company.id) => {
+    const srv = makeTestServer({ role, companyId, userId: f.user.id }); servers.push(srv); return srv.base;
+  };
+  const path = () => `/api/irrigation-controllers/${ctrlId()}/zones/extra-programs`;
+  const body = (lines = [{ programId: b, runTimeMinutes: 12 }]) => ({ zones: [{ zoneId, lines }] });
+  const graph = () => storage.getIrrigationController(f.company.id, ctrlId());
+  const extras = async () => (await graph())!.zones.find(z => z.id === zoneId)!.extraPrograms;
+  beforeEach(async () => {
+    f = await createBindingFixture(db); servers = [];
+    await storage.setControllerZoneCount(f.company.id, ctrlId(), 6);
+    a = (await storage.createIrrigationProgram(f.company.id, ctrlId(), { name: "A", sortOrder: 0 }))!.id;
+    b = (await storage.createIrrigationProgram(f.company.id, ctrlId(), { name: "B", sortOrder: 2 }))!.id;
+    c = (await storage.createIrrigationProgram(f.company.id, ctrlId(), { name: "C", sortOrder: 1 }))!.id;
+    const zones = (await graph())!.zones;
+    zoneId = zones.find(z => z.zoneNumber === 3)!.id;
+    secondId = zones.find(z => z.zoneNumber === 6)!.id;
+    await storage.bulkUpdateIrrigationZones(f.company.id, ctrlId(), [zoneId, secondId], { programId: a, runTimeMinutes: 20 });
+  });
+  afterEach(async () => {
+    for (const srv of servers) await srv.close();
+    await cleanupBindingFixture(db, f.company.id);
+  });
+  it("saves, orders, re-reads and snapshots extras, stamps the actor and un-verifies the clock", async () => {
+    await db.update(irrigationControllers).set({
+      letterConfirmed: true, lastUpdatedAt: new Date("2026-01-01T00:00:00Z"),
+      fieldVerifiedAt: new Date("2026-01-01T00:00:00Z"), fieldVerifiedByUserId: f.user.id,
+    }).where(eq(irrigationControllers.id, ctrlId()));
+    const before = (await graph())!;
+    assert.equal(isFieldVerified(before), true);
+    const historyBefore = await storage.getIrrigationHistory(f.company.id, ctrlId());
+    const response = await hit(serve(), "PUT", path(), body([
+      { programId: b, runTimeMinutes: 12 }, { programId: c, runTimeMinutes: 0 },
+    ]));
+    assert.equal(response.status, 200);
+    const ordered = [{ programId: c, runTimeMinutes: 0 }, { programId: b, runTimeMinutes: 12 }];
+    assert.deepEqual(response.body, [{ zoneId, extraPrograms: ordered }]);
+    const read = await hit(serve(), "GET", `/api/irrigation-controllers/${ctrlId()}`);
+    assert.deepEqual(read.body.zones.find((z: any) => z.id === zoneId).extraPrograms, ordered);
+    assert.ok(read.body.zones.every((z: any) => Array.isArray(z.extraPrograms)));
+    const after = (await graph())!;
+    assert.ok(after.lastUpdatedAt!.getTime() >= before.lastUpdatedAt!.getTime());
+    assert.equal(after.lastUpdatedByUserId, f.user.id);
+    assert.equal(isFieldVerified(after), false);
+    const history = await storage.getIrrigationHistory(f.company.id, ctrlId());
+    assert.equal(history.length, historyBefore.length + 1);
+    assert.equal(history[0].summary, "Zones 3 extra programs: 3 → C 0 min, B 12 min");
+    assert.equal(history[0].changedByUserId, f.user.id);
+    assert.deepEqual((history[0].snapshotJson as any).zoneExtraPrograms,
+      ordered.map(line => ({ zoneId, ...line })));
+    const update = await hit(serve(), "PUT", path(), body([{ programId: b, runTimeMinutes: 120 }]));
+    assert.equal(update.status, 200);
+    assert.deepEqual(await extras(), [{ programId: b, runTimeMinutes: 120 }]);
+  });
+  it("rejects main duplicates, foreign-controller programs, repeated lines and invalid or non-strict input without partial writes", async () => {
+    const foreign = (await storage.createIrrigationProgram(f.company.id, f.controllers[1].id, { name: "Foreign" }))!.id;
+    const base = serve();
+    await hit(base, "PUT", path(), body());
+    const history = await storage.getIrrigationHistory(f.company.id, ctrlId());
+    for (const lines of [
+      [{ programId: a, runTimeMinutes: 10 }], [{ programId: foreign, runTimeMinutes: 10 }],
+      [{ programId: b, runTimeMinutes: 10 }, { programId: b, runTimeMinutes: 11 }],
+      [{ programId: b, runTimeMinutes: 121 }], [{ programId: b, runTimeMinutes: -1 }],
+      [{ programId: b, runTimeMinutes: 1.5 }], [{ programId: b, runTimeMinutes: 10, forged: true }],
+    ]) {
+      const response = await hit(base, "PUT", path(), { zones: [
+        { zoneId, lines: [{ programId: c, runTimeMinutes: 9 }] }, { zoneId: secondId, lines },
+      ] });
+      assert.equal(response.status, 400);
+      assert.deepEqual(await extras(), [{ programId: b, runTimeMinutes: 12 }]);
+    }
+    assert.equal((await hit(base, "PUT", path(), { ...body(), companyId: f.company.id })).status, 400);
+    assert.equal((await storage.getIrrigationHistory(f.company.id, ctrlId())).length, history.length);
+  });
+  it("rejects retired, missing, foreign zones, duplicate zone IDs and foreign tenants as not found", async () => {
+    await storage.setControllerZoneCount(f.company.id, f.controllers[1].id, 1);
+    const foreign = (await storage.getIrrigationController(f.company.id, f.controllers[1].id))!.zones[0];
+    await storage.setControllerZoneCount(f.company.id, ctrlId(), 3);
+    const base = serve();
+    for (const badId of [secondId, 2147483647, foreign!.id]) {
+      assert.equal((await hit(base, "PUT", path(), { zones: [{ zoneId: badId, lines: [] }] })).status, 404);
+    }
+    assert.equal((await hit(base, "PUT", path(), { zones: [...body().zones, ...body().zones] })).status, 404);
+    const other = await createBindingFixture(db);
+    try { assert.equal((await hit(serve("irrigation_manager", other.company.id), "PUT", path(), body())).status, 404); }
+    finally { await cleanupBindingFixture(db, other.company.id); }
+    assert.deepEqual(await extras(), []);
+  });
+  it("requires a main program for new nonempty lines but permits clearing orphan extras", async () => {
+    await storage.setZoneExtraPrograms(f.company.id, ctrlId(), body().zones);
+    await storage.updateIrrigationZone(f.company.id, zoneId, { programId: null });
+    assert.deepEqual(await extras(), [{ programId: b, runTimeMinutes: 12 }]);
+    assert.equal((await hit(serve(), "PUT", path(), body())).status, 400);
+    assert.equal((await hit(serve(), "PUT", path(), body([]))).status, 200);
+    assert.deepEqual(await extras(), []);
+    const history = await storage.getIrrigationHistory(f.company.id, ctrlId());
+    assert.equal(history[0].summary, "Zones 3 extra programs: 3 → none");
+  });
+  it("rolls all writes, stamps and snapshots back on a late failure", async () => {
+    const before = await graph();
+    const history = await storage.getIrrigationHistory(f.company.id, ctrlId());
+    const snapshot = mock.method(storage as any, "_appendIrrigationSnapshot", async () => { throw new Error("Snapshot failure"); });
+    try {
+      const response = await hit(serve(), "PUT", path(), body());
+      assert.equal(response.status, 500);
+      assert.equal(response.body.message, "Could not save extra programs — please retry");
+      assert.deepEqual(await graph(), before);
+      assert.deepEqual(await storage.getIrrigationHistory(f.company.id, ctrlId()), history);
+    } finally { snapshot.mock.restore(); }
+  });
+  it("main wins on bulk and single-zone saves, while clearing the main preserves extras and folded snapshots", async () => {
+    await storage.setZoneExtraPrograms(f.company.id, ctrlId(), body().zones, actor());
+    await storage.bulkUpdateIrrigationZones(f.company.id, ctrlId(), [zoneId], { programId: b });
+    assert.deepEqual(await extras(), []);
+    await storage.setZoneExtraPrograms(f.company.id, ctrlId(), body([{ programId: c, runTimeMinutes: 10 }]).zones, actor());
+    await storage.updateIrrigationZone(f.company.id, zoneId, { programId: null }, actor());
+    await storage.updateIrrigationZone(f.company.id, zoneId, { notes: "Fold this edit" }, actor());
+    assert.deepEqual(await extras(), [{ programId: c, runTimeMinutes: 10 }]);
+    const latest = (await storage.getIrrigationHistory(f.company.id, ctrlId()))[0];
+    assert.deepEqual((latest.snapshotJson as any).zoneExtraPrograms, [{ zoneId, programId: c, runTimeMinutes: 10 }]);
+    await storage.updateIrrigationZone(f.company.id, zoneId, { programId: c }, actor());
+    assert.deepEqual(await extras(), []);
+  });
+  it("retirement and restoration preserve extras, program delete cascades extras but main deletion preserves other extras", async () => {
+    await storage.setZoneExtraPrograms(f.company.id, ctrlId(), body().zones);
+    await storage.setControllerZoneCount(f.company.id, ctrlId(), 2);
+    assert.deepEqual((await graph())!.retiredZones.find(z => z.id === zoneId)!.extraPrograms, [{ programId: b, runTimeMinutes: 12 }]);
+    await storage.setControllerZoneCount(f.company.id, ctrlId(), 6);
+    assert.deepEqual(await extras(), [{ programId: b, runTimeMinutes: 12 }]);
+    await storage.deleteIrrigationProgram(f.company.id, a);
+    assert.equal((await graph())!.zones.find(z => z.id === zoneId)!.programId, null);
+    assert.deepEqual(await extras(), [{ programId: b, runTimeMinutes: 12 }]);
+    await storage.deleteIrrigationProgram(f.company.id, b);
+    assert.deepEqual(await extras(), []);
+  });
+  it("CSV replace clears extras on reset zones without adding CSV columns", async () => {
+    await storage.setZoneExtraPrograms(f.company.id, ctrlId(), body().zones);
+    const ctrl = (await graph())!;
+    await storage.importIrrigationProfile(f.company.id, f.customer.id, "", [{
+      controllerName: ctrl.name, zoneNumber: 6, zoneName: "Six", zoneType: "rotor", runTimeMinutes: 20,
+      location: null, brand: null, model: null, programName: "B", wateringDays: null, startTimes: null, seasonalAdjustPct: 100,
+    }], "commit", actor(), [ctrl.name]);
+    assert.deepEqual(await extras(), []);
+  });
+  it("CSV main changes remove only colliding extras and retain ordered extra lines in every CSV snapshot", async () => {
+    await storage.setZoneExtraPrograms(f.company.id, ctrlId(), body([
+      { programId: b, runTimeMinutes: 12 }, { programId: c, runTimeMinutes: 10 },
+    ]).zones);
+    const ctrl = (await graph())!;
+    const row = {
+      controllerName: ctrl.name, zoneNumber: 3, zoneName: "Three", zoneType: "rotor" as const, runTimeMinutes: 20,
+      location: null, brand: null, model: null, programName: "B", wateringDays: null, startTimes: null, seasonalAdjustPct: 100,
+    };
+    const before = await graph();
+    const historyBefore = await storage.getIrrigationHistory(f.company.id, ctrlId());
+    const snapshot = mock.method(storage as any, "_snapshotExtraPrograms", async () => { throw new Error("CSV snapshot failure"); });
+    try {
+      await assert.rejects(storage.importIrrigationProfile(f.company.id, f.customer.id, "", [row], "commit", actor()), /CSV snapshot failure/);
+      assert.deepEqual(await graph(), before, "collision cleanup rolls back with a late snapshot failure");
+      assert.deepEqual(await storage.getIrrigationHistory(f.company.id, ctrlId()), historyBefore);
+    } finally { snapshot.mock.restore(); }
+    await storage.importIrrigationProfile(f.company.id, f.customer.id, "", [row], "commit", actor());
+    assert.equal((await graph())!.zones.find(z => z.id === zoneId)!.programId, b);
+    assert.deepEqual(await extras(), [{ programId: c, runTimeMinutes: 10 }]);
+    const latest = (await storage.getIrrigationHistory(f.company.id, ctrlId()))[0];
+    assert.deepEqual((latest.snapshotJson as any).zoneExtraPrograms, [{ zoneId, programId: c, runTimeMinutes: 10 }]);
+    await storage.importIrrigationProfile(f.company.id, f.customer.id, "", [{ ...row, zoneName: "Three without main", programName: null }], "commit", actor());
+    assert.equal((await graph())!.zones.find(z => z.id === zoneId)!.programId, null);
+    assert.deepEqual(await extras(), [{ programId: c, runTimeMinutes: 10 }]);
+    assert.deepEqual(((await storage.getIrrigationHistory(f.company.id, ctrlId()))[0].snapshotJson as any).zoneExtraPrograms,
+      [{ zoneId, programId: c, runTimeMinutes: 10 }]);
+  });
+  it("allows system documenters through the real allowlist, denies billing and missing company context, permits super admins", async () => {
+    assert.equal((await hit(serve("system_documenter"), "PUT", path(), body())).status, 200);
+    assert.equal((await hit(serve("billing_manager"), "PUT", path(), body())).status, 403);
+    assert.equal((await hit(serve("irrigation_manager", null), "PUT", path(), body())).status, 401);
+    assert.equal((await hit(serve("super_admin", null), "PUT", path(), body([]))).status, 200);
+  });
+  it("database runtime check rejects invalid minutes even outside the route", async () => {
+    for (const runTimeMinutes of [-1, 121]) await assert.rejects(db.insert(irrigationZoneExtraPrograms).values({
+      companyId: f.company.id, zoneId, programId: b, runTimeMinutes,
+    }));
+  });
+});
 
 describe("Clocks Own Their History Slice 2 — location ledger", () => {
   let f: Awaited<ReturnType<typeof createBindingFixture>>;

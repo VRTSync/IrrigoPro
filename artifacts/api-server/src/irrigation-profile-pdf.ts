@@ -118,7 +118,7 @@ function formatZoneType(t: string): string {
 
 export type ControllerWithDetail = IrrigationController & {
   programs: IrrigationProgram[];
-  zones: IrrigationProfileZone[];
+  zones: (IrrigationProfileZone & { extraPrograms?: { programId: number; runTimeMinutes: number }[] })[];
 };
 
 export interface IrrigationProfilePdfOptions {
@@ -209,6 +209,7 @@ function renderControllerBlock(
     sortOrder: p.sortOrder,
   }));
   const scheduleZones: ScheduleInputZone[] = ctrl.zones.map((z: any) => ({
+    extraPrograms: z.extraPrograms ?? [],
     id: z.id,
     programId: z.programId,
     zoneNumber: z.zoneNumber,
@@ -279,7 +280,7 @@ function renderControllerBlock(
     <div class="section-label">Programs</div>
     ${activePrograms
       .map((prog: any) => {
-        const progZones = ctrl.zones.filter((z: any) => z.programId === prog.id && z.isActive);
+        const progZones = ctrl.zones.filter(z => z.isActive && (z.programId === prog.id || z.extraPrograms?.some(line => line.programId === prog.id)));
         return `
       <div class="program-block">
         <div class="program-header">Program ${esc(prog.name)}</div>
