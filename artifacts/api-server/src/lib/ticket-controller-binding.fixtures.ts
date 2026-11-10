@@ -44,6 +44,7 @@ export async function cleanupBindingFixture(q: DbExecutor, companyId: number) {
   await q.delete(s.estimates).where(eq(s.estimates.companyId, companyId));
   await q.delete(s.wetChecks).where(eq(s.wetChecks.companyId, companyId));
   const controllers = await q.select({ id: s.irrigationControllers.id }).from(s.irrigationControllers).where(eq(s.irrigationControllers.companyId, companyId));
+  await q.delete(s.controllerLetterChanges).where(eq(s.controllerLetterChanges.companyId, companyId));
   if (controllers.length) await q.delete(s.irrigationProfileHistory).where(inArray(s.irrigationProfileHistory.controllerId, controllers.map(row => row.id)));
   await q.delete(s.irrigationControllers).where(eq(s.irrigationControllers.companyId, companyId));
   await q.delete(s.users).where(eq(s.users.companyId, companyId));

@@ -14,14 +14,14 @@
 // Pattern mirrors admin-migrations-routes.test.ts: lightweight Express server,
 // stub requireAuthentication, real storage.
 
-import { describe, it, before, after, mock } from "node:test";
+import { describe, it, before, after, beforeEach, afterEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import express, { type RequestHandler } from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
 import { db } from "@workspace/db";
-import { irrigationControllers, irrigationProfileZones, irrigationProfileHistory } from "@workspace/db/schema";
+import { irrigationControllers, irrigationProfileZones, irrigationProfileHistory, controllerLetterChanges } from "@workspace/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 
 import { registerIrrigationProfileRoutes } from "./irrigation-profile-routes";
@@ -279,11 +279,185 @@ async function setupCompanies() {
 async function cleanupControllers() {
   for (const id of createdControllerIds) {
     try {
+      await db.delete(controllerLetterChanges).where(eq(controllerLetterChanges.controllerId, id));
       await storage.deleteIrrigationController(null, id);
     } catch { /* already cleaned */ }
   }
   createdControllerIds.length = 0;
 }
+
+describe("Clocks Own Their History Slice 2 — location ledger", () => {
+  let f: Awaited<ReturnType<typeof createBindingFixture>>;
+  let clocks: typeof f.controllers;
+  let servers: ReturnType<typeof makeTestServer>[];
+  const actor = () => ({ id: f.user.id, name: f.user.name });
+  const path = () => `/api/customers/${f.customer.id}/controllers/letters`;
+  const entries = (letters = ["C", "A", "B"]) => clocks.map((c, i) => ({ controllerId: c.id, letter: letters[i] }));
+  const serve = (role = "irrigation_manager", companyId: number | null = f.company.id) => {
+    const srv = makeTestServer({ role, companyId, userId: f.user.id }); servers.push(srv); return srv.base;
+  };
+  const ledger = () => db.select().from(controllerLetterChanges).where(eq(controllerLetterChanges.companyId, f.company.id));
+  const history = () => db.select().from(irrigationProfileHistory).where(eq(irrigationProfileHistory.companyId, f.company.id));
+  const stored = () => db.select().from(irrigationControllers).where(and(
+    eq(irrigationControllers.companyId, f.company.id), eq(irrigationControllers.branchName, ""),
+  )).orderBy(irrigationControllers.id);
+  beforeEach(async () => {
+    f = await createBindingFixture(db); servers = [];
+    clocks = [];
+    for (const [i, c] of f.controllers.entries()) {
+      const letter = "AB"[i];
+      const [row] = await db.update(irrigationControllers).set({
+        letter, name: `Controller ${letter}`, letterConfirmed: true,
+        lastUpdatedAt: new Date("2026-01-01T00:00:00Z"), lastUpdatedByName: "Original",
+      }).where(eq(irrigationControllers.id, c.id)).returning();
+      clocks.push(row);
+    }
+    const [c] = await db.insert(irrigationControllers).values({
+      companyId: f.company.id, customerId: f.customer.id, branchName: "", letter: "C", name: "Controller C",
+      letterConfirmed: true, lastUpdatedAt: new Date("2026-01-01T00:00:00Z"),
+    }).returning();
+    clocks.push(c);
+  });
+  afterEach(async () => {
+    for (const srv of servers) await srv.close();
+    await cleanupBindingFixture(db, f.company.id);
+  });
+  it("cycles A/B/C→C/A/B under both real unique indexes, with one final row/snapshot per clock and frozen billing", async () => {
+    const indexes = await db.execute(sql`SELECT indexname FROM pg_indexes WHERE tablename = 'irrigation_controllers'`);
+    for (const name of ["uniq_irr_ctrl_name_active", "uniq_irr_ctrl_letter_active"]) {
+      assert.ok(indexes.rows.some(r => r.indexname === name));
+    }
+    const sheet = await f.sheet({ controllerLetter: "B", zoneNumber: 2 });
+    const [zone] = await db.insert(irrigationProfileZones).values({
+      companyId: f.company.id, controllerId: clocks[1].id, zoneNumber: 2, name: "Original zone",
+    }).returning();
+    const response = await hit(serve(), "PUT", path(), { letters: entries() });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.changed, 3);
+    assert.deepEqual(response.body.controllers.map((c: any) => c.letter), ["A", "B", "C"]);
+    assert.deepEqual((await stored()).map(c => [c.id, c.letter, c.name, c.letterConfirmed, c.isActive]),
+      clocks.map((c, i) => [c.id, "CAB"[i], `Controller ${"CAB"[i]}`, false, true]));
+    const rows = await ledger();
+    assert.equal(rows.length, 3);
+    assert.equal(new Set(rows.map(r => r.batchId)).size, 1);
+    assert.match(rows[0].batchId!, /^[0-9a-f-]{36}$/);
+    assert.deepEqual(rows.map(r => [r.controllerId, r.fromLetter, r.toLetter, r.source, r.changedByUserId, r.changedByName]),
+      clocks.map((c, i) => [c.id, "ABC"[i], "CAB"[i], "reletter", f.user.id, f.user.name]));
+    const snapshots = await history();
+    assert.equal(snapshots.length, 3);
+    assert.ok(snapshots.every(r => r.summary?.includes("(location re-letter)") &&
+      (r.snapshotJson as any).controller.isActive && (r.snapshotJson as any).controller.letter !== null));
+    const [afterSheet] = await db.select().from(clockSheets).where(eq(clockSheets.id, sheet.id));
+    assert.equal(afterSheet.controllerId, clocks[1].id);
+    assert.equal(afterSheet.controllerLetter, "B");
+    const [afterZone] = await db.select().from(irrigationProfileZones).where(eq(irrigationProfileZones.id, zone.id));
+    assert.deepEqual(afterZone, zone);
+    await db.delete(irrigationProfileZones).where(eq(irrigationProfileZones.id, zone.id));
+  });
+  it("leaves unchanged clocks byte-for-byte intact, normalizes lower-case, and creates no rows for no changes", async () => {
+    const before = await stored();
+    const result = await storage.reletterLocation(f.company.id, f.customer.id, "", entries(["b", "a", "c"]), actor());
+    assert.equal(result?.changed, 2);
+    assert.deepEqual((await stored())[2], before[2]);
+    assert.equal((await ledger()).length, 2);
+    assert.equal((await history()).length, 2);
+    const current = await stored();
+    assert.equal((await storage.reletterLocation(f.company.id, f.customer.id, "", entries(["B", "A", "C"]), actor()))?.changed, 0);
+    assert.deepEqual(await stored(), current);
+    assert.equal((await ledger()).length, 2);
+    assert.equal((await history()).length, 2);
+  });
+  it("rejects missing/extra/duplicate IDs, inactive/other-location/foreign sets and malformed/duplicate letters without writes", async () => {
+    const [north] = await db.insert(irrigationControllers).values({
+      companyId: f.company.id, customerId: f.customer.id, branchName: "North", letter: "A", name: "Controller A",
+    }).returning();
+    const [inactive] = await db.insert(irrigationControllers).values({
+      companyId: f.company.id, customerId: f.customer.id, branchName: "", letter: "Z", name: "Controller Z", isActive: false,
+    }).returning();
+    const foreign = await createBindingFixture(db);
+    try {
+      const sheet = await f.sheet({ controllerLetter: "B" });
+      const before = await stored();
+      const requests = [
+        entries().slice(0, 2), [...entries(), { controllerId: north.id, letter: "D" }],
+        [entries()[0], entries()[0], entries()[2]],
+        entries().map((e, i) => i === 0 ? { ...e, controllerId: inactive.id } : e),
+        entries().map((e, i) => i === 0 ? { ...e, controllerId: north.id } : e),
+        entries().map((e, i) => i === 0 ? { ...e, controllerId: foreign.controllers[0].id } : e),
+        entries(["A", "A", "C"]), entries(["AA", "B", "C"]), entries(["1", "B", "C"]),
+        entries().map((e, i) => i === 0 ? { ...e, controllerId: -1 } : e),
+        entries().map((e, i) => i === 0 ? { ...e, extra: true } : e),
+      ];
+      const base = serve();
+      for (const letters of requests) {
+        assert.equal((await hit(base, "PUT", path(), { letters })).status, 400, JSON.stringify(letters));
+        assert.deepEqual(await stored(), before);
+        assert.equal((await ledger()).length, 0);
+        assert.equal((await history()).length, 0);
+        assert.equal((await db.select().from(clockSheets).where(eq(clockSheets.id, sheet.id)))[0].controllerId, null);
+      }
+      assert.equal((await hit(base, "PUT", path(), { letters: entries(), extra: true })).status, 400);
+    } finally { await cleanupBindingFixture(db, foreign.company.id); }
+  });
+  it("isolates North from the default empty branch and binds only tickets in the selected location", async () => {
+    const [north] = await db.insert(irrigationControllers).values({
+      companyId: f.company.id, customerId: f.customer.id, branchName: "North", letter: "B", name: "Controller B",
+    }).returning();
+    const sheet = await f.sheet({ controllerLetter: "B", branchName: "North" });
+    const northBefore = await db.select().from(irrigationControllers).where(eq(irrigationControllers.id, north.id));
+    assert.equal((await hit(serve(), "PUT", path(), { branchName: "", letters: entries() })).status, 200);
+    assert.deepEqual(await db.select().from(irrigationControllers).where(eq(irrigationControllers.id, north.id)), northBefore);
+    assert.equal((await db.select().from(clockSheets).where(eq(clockSheets.id, sheet.id)))[0].controllerId, null);
+    assert.equal((await storage.reletterLocation(f.company.id, f.customer.id, "North",
+      [{ controllerId: north.id, letter: "X" }], actor()))?.changed, 1);
+    assert.equal((await db.select().from(clockSheets).where(eq(clockSheets.id, sheet.id)))[0].controllerId, north.id);
+    assert.equal((await ledger()).filter(r => r.branchName === "North").length, 1);
+  });
+  it("checks office access and tenant existence before body validation, including super admins", async () => {
+    for (const role of ["field_tech", "system_documenter", "billing_manager", "bookkeeper"]) {
+      assert.equal((await hit(serve(role), "PUT", path(), {})).status, 403);
+    }
+    assert.equal((await hit(serve("company_admin", null), "PUT", path(), {})).status, 401);
+    assert.equal((await hit(serve("company_admin", f.company.id + 99999), "PUT", path(), {})).status, 404);
+    const admin = serve("super_admin", null);
+    assert.equal((await hit(admin, "PUT", "/api/customers/2147483647/controllers/letters", {})).status, 404);
+    for (const id of ["0", "-1", "1abc", "1.2", "9007199254740992"]) {
+      assert.equal((await hit(admin, "PUT", `/api/customers/${id}/controllers/letters`, {})).status, 400);
+    }
+    assert.equal((await hit(admin, "PUT", path(), { letters: entries() })).status, 200);
+  });
+  it("rolls back binding, staged controllers, ledger and snapshots after a mid-batch failure", async () => {
+    const sheet = await f.sheet({ controllerLetter: "B" });
+    const before = await stored();
+    const original = (storage as any)._appendIrrigationSnapshot;
+    let calls = 0;
+    const failure = mock.method(storage as any, "_appendIrrigationSnapshot", async function(this: any, ...args: any[]) {
+      if (++calls === 2) throw new Error("injected snapshot failure");
+      return original.apply(this, args);
+    });
+    try {
+      const response = await hit(serve(), "PUT", path(), { letters: entries() });
+      assert.equal(response.status, 500);
+      assert.equal(response.body.message, "Could not re-letter — please retry");
+    } finally { failure.mock.restore(); }
+    assert.equal(calls, 2);
+    assert.deepEqual(await stored(), before);
+    assert.equal((await ledger()).length, 0);
+    assert.equal((await history()).length, 0);
+    assert.equal((await db.select().from(clockSheets).where(eq(clockSheets.id, sheet.id)))[0].controllerId, null);
+  });
+  it("records single changes and two-sided swaps but not same-letter confirmations", async () => {
+    const base = serve();
+    const letterPath = `/api/irrigation-controllers/${clocks[0].id}/letter`;
+    assert.equal((await hit(base, "POST", letterPath, { letter: "X" })).status, 200);
+    assert.deepEqual((await ledger()).map(r => [r.fromLetter, r.toLetter, r.source, r.batchId]), [["A", "X", "change", null]]);
+    assert.equal((await hit(base, "POST", letterPath, { letter: "B", swap: true })).status, 200);
+    assert.deepEqual((await ledger()).filter(r => r.source === "swap").map(r => [r.fromLetter, r.toLetter]),
+      [["X", "B"], ["B", "X"]]);
+    assert.equal((await hit(base, "POST", letterPath, { letter: "B", confirm: true })).status, 200);
+    assert.equal((await ledger()).length, 3);
+  });
+});
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

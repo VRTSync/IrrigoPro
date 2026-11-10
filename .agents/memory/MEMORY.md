@@ -77,3 +77,4 @@
 - [Document System build context](document-system-build-context.md) — Seven ordered slices; web-only scope and confirmed verification/capture decisions.
 - [Orval path/query naming](orval-path-query-collision.md) — Combined path/query operations can collide across the generated validation and type barrels.
 - [Vite browser fixture context](vite-browser-fixture-context.md) — isolated browser harnesses must share the real component's versioned dependency URLs or provider contexts split.
+- [PostgreSQL identifier drift](postgres-identifier-drift.md) — long FK names can produce endless Drizzle diffs; filtered pushes can still propose unrelated sequence drops.

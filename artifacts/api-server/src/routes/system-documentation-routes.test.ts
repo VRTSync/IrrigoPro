@@ -7,6 +7,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   db, pool, companies, customers, users, irrigationControllers, irrigationBackflows,
   irrigationPrograms, irrigationProfileZones, irrigationProfileHistory, irrigationSiteDocumentation,
+  controllerLetterChanges,
 } from "@workspace/db";
 import { controllerDocumentationGaps, backflowDocumentationGaps } from "@workspace/shared";
 import { registerSystemDocumentationRoutes } from "./system-documentation-routes";
@@ -108,6 +109,7 @@ describe("Document System reads and atomic verification (real DB/routes)", { con
     if (server.listening) await new Promise<void>((resolve, reject) => server.close(e => e ? reject(e) : resolve()));
     // Only fixtures owned by these isolated tenants are removed.
     const scope = inArray(irrigationControllers.companyId, [a, b]);
+    await db.delete(controllerLetterChanges).where(inArray(controllerLetterChanges.companyId, [a, b]));
     await db.delete(irrigationSiteDocumentation).where(inArray(irrigationSiteDocumentation.companyId, [a, b]));
     await db.delete(irrigationProfileHistory).where(inArray(irrigationProfileHistory.companyId, [a, b]));
     await db.delete(irrigationProfileZones).where(inArray(irrigationProfileZones.companyId, [a, b]));

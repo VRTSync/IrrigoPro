@@ -18,13 +18,15 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+const { toast, route } = vi.hoisted(() => ({ toast: vi.fn(), route: { search: "" } }));
+vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast }) }));
 vi.mock("wouter", async () => {
   const actual = await vi.importActual<typeof import("wouter")>("wouter");
   return {
     ...actual,
     useParams: () => ({ customerId: "42" }),
     useLocation: () => ["/", vi.fn()],
+    useSearch: () => route.search,
   };
 });
 vi.mock("@/utils/safeStorage", () => ({ safeGet: vi.fn(), safeSet: vi.fn(), safeRemove: vi.fn() }));
@@ -49,6 +51,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import IrrigationProfile from "./IrrigationProfile";
 import { IrrigationControllerGrid } from "@/components/customers/irrigation-controller-grid";
 import { BackflowSection } from "@/components/customers/BackflowSection";
+import { apiRequest } from "@/lib/queryClient";
 
 const mockSafeGet = safeGet as ReturnType<typeof vi.fn>;
 
@@ -58,6 +61,8 @@ const makeController = (overrides: Record<string, unknown> = {}) => ({
   id: 1,
   customerId: 42,
   name: "Controller A",
+  letter: "A",
+  branchName: "",
   totalZones: 6,
   zones: Array.from({ length: Number(overrides.totalZones ?? 6) }, (_, i) => ({
     id: i + 1, zoneNumber: i + 1, name: `Zone ${i + 1}`, zoneType: "other", isActive: true, setUp: false,
@@ -80,14 +85,113 @@ function setup(role: string, controllers: unknown[] = [makeController()]) {
   qc.setQueryData(["/api/customers/42"], CUSTOMER);
   qc.setQueryData(["/api/customers/42/controllers-profile"], controllers);
 
-  return render(
+  const view = render(
     <QueryClientProvider client={qc}>
       <AuthProvider>
         <IrrigationProfile />
       </AuthProvider>
     </QueryClientProvider>,
   );
+  return { ...view, qc };
 }
+
+describe("IrrigationProfile — re-letter clocks", () => {
+  beforeEach(() => {
+    vi.mocked(apiRequest).mockReset().mockResolvedValue({});
+    toast.mockClear();
+    route.search = "";
+  });
+  const clocks = () => [
+    makeController(), makeController({ id: 2, letter: "B", name: "Controller B" }),
+    makeController({ id: 3, letter: "C", name: "Controller C" }),
+    makeController({ id: 4, letter: "A", branchName: "North" }),
+    makeController({ id: 5, letter: "Z", isActive: false }),
+  ];
+  it.each(["super_admin", "company_admin", "irrigation_manager"])("shows the action for %s", role => {
+    setup(role, clocks());
+    expect(screen.getByTestId("button-reletter")).toBeEnabled();
+  });
+  it.each(["field_tech", "system_documenter", "billing_manager", "bookkeeper"])("hides the action for %s", role => {
+    setup(role, clocks());
+    expect(screen.queryByTestId("button-reletter")).toBeNull();
+  });
+  it("requires at least two active clocks in the current location", () => {
+    setup("company_admin", [makeController(), makeController({ id: 2, branchName: "North" }), makeController({ id: 3, isActive: false })]);
+    expect(screen.getByTestId("button-reletter")).toBeDisabled();
+  });
+  it("shows arrows and count, sends the complete location once, invalidates caches and closes", async () => {
+    const { qc } = setup("irrigation_manager", clocks());
+    vi.mocked(apiRequest).mockResolvedValueOnce({ changed: 2, controllers: [] });
+    const invalidate = vi.spyOn(qc, "invalidateQueries").mockResolvedValue();
+    fireEvent.click(screen.getByTestId("button-reletter"));
+    expect(screen.getByTestId("button-save-letters")).toBeDisabled();
+    expect(screen.queryByTestId("select-letter-4")).toBeNull();
+    expect(screen.queryByTestId("select-letter-5")).toBeNull();
+    fireEvent.change(screen.getByTestId("select-letter-1"), { target: { value: "B" } });
+    fireEvent.change(screen.getByTestId("select-letter-2"), { target: { value: "A" } });
+    expect(screen.getByText("→ B")).toBeInTheDocument();
+    expect(screen.getByText("→ A")).toBeInTheDocument();
+    expect(screen.getByText("2 clocks will be renamed")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("button-save-letters"));
+    await waitFor(() => expect(apiRequest).toHaveBeenCalledWith("/api/customers/42/controllers/letters", "PUT", {
+      branchName: "", letters: [
+        { controllerId: 1, letter: "B" }, { controllerId: 2, letter: "A" }, { controllerId: 3, letter: "C" },
+      ],
+    }));
+    expect(apiRequest).toHaveBeenCalledTimes(1);
+    for (const queryKey of [
+      ["/api/customers/42/controllers-profile"], ["/api/properties", 42, "controllers"],
+      ["/api/irrigation-controllers/1/history"], ["/api/irrigation-controllers/2/history"],
+    ]) expect(invalidate).toHaveBeenCalledWith({ queryKey });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ["/api/irrigation-controllers/3/history"] });
+    await waitFor(() => expect(screen.queryByTestId("button-save-letters")).toBeNull());
+    expect(toast).toHaveBeenCalledWith({ title: "2 clocks re-lettered" });
+  });
+  it("flags both duplicate rows and disables saving", () => {
+    setup("company_admin", clocks());
+    fireEvent.click(screen.getByTestId("button-reletter"));
+    fireEvent.change(screen.getByTestId("select-letter-1"), { target: { value: "B" } });
+    expect(screen.getAllByText("Used twice")).toHaveLength(2);
+    expect(screen.getByTestId("button-save-letters")).toBeDisabled();
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+  it("sends only the selected named branch, never clocks from the default location", async () => {
+    route.search = "?branchName=North";
+    vi.mocked(apiRequest).mockResolvedValueOnce({ changed: 2 });
+    const { qc } = setup("company_admin", [...clocks(), makeController({ id: 6, letter: "B", branchName: "North" })]);
+    vi.spyOn(qc, "invalidateQueries").mockResolvedValue();
+    fireEvent.click(screen.getByTestId("button-reletter"));
+    expect(screen.queryByTestId("select-letter-1")).toBeNull();
+    fireEvent.change(screen.getByTestId("select-letter-4"), { target: { value: "B" } });
+    fireEvent.change(screen.getByTestId("select-letter-6"), { target: { value: "A" } });
+    fireEvent.click(screen.getByTestId("button-save-letters"));
+    await waitFor(() => expect(apiRequest).toHaveBeenCalledWith("/api/customers/42/controllers/letters", "PUT", {
+      branchName: "North", letters: [{ controllerId: 4, letter: "B" }, { controllerId: 6, letter: "A" }],
+    }));
+  });
+  it("locks saving while pending; server errors keep selections and expose the server message", async () => {
+    let reject!: (e: Error) => void;
+    vi.mocked(apiRequest).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    setup("company_admin", clocks());
+    fireEvent.click(screen.getByTestId("button-reletter"));
+    fireEvent.change(screen.getByTestId("select-letter-1"), { target: { value: "X" } });
+    fireEvent.click(screen.getByTestId("button-save-letters"));
+    await waitFor(() => expect(screen.getByTestId("button-save-letters")).toBeDisabled());
+    expect(screen.getByTestId("select-letter-1")).toBeDisabled();
+    reject(new Error('400: {"message":"Every active clock at this location needs a letter"}'));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Every active clock at this location needs a letter");
+    expect(screen.getByTestId("select-letter-1")).toHaveValue("X");
+    expect(screen.getByTestId("button-save-letters")).toBeEnabled();
+  });
+  it("reinitializes choices when cancelled and reopened", () => {
+    setup("company_admin", clocks());
+    fireEvent.click(screen.getByTestId("button-reletter"));
+    fireEvent.change(screen.getByTestId("select-letter-1"), { target: { value: "X" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    fireEvent.click(screen.getByTestId("button-reletter"));
+    expect(screen.getByTestId("select-letter-1")).toHaveValue("A");
+  });
+});
 
 describe("IrrigationProfile header — title block", () => {
   it("renders property name without '— Controllers & Zones' suffix", () => {

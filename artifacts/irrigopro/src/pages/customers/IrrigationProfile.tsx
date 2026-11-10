@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, useLocation } from "wouter";
+import { useParams, useLocation, useSearch } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, parseApiError } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth-context";
@@ -37,6 +37,8 @@ import { IrrigationControllerGrid, type ControllerWithZones } from "@/components
 import { IrrigationCsvImportModal } from "@/components/customers/IrrigationCsvImportModal";
 import { LetterPicker, type TakenLetter } from "@/components/customers/letter-picker";
 import { BackflowSection } from "@/components/customers/BackflowSection";
+import { ReletterDialog } from "@/components/customers/reletter-dialog";
+import { CAN_RELETTER_CONTROLLERS, hasCapability } from "@workspace/shared";
 
 // ── Add controller form ──────────────────────────────────────────────────────
 
@@ -200,6 +202,9 @@ export default function IrrigationProfile() {
   const { customerId } = useParams();
   const [, setLocation] = useLocation();
   const [showAddController, setShowAddController] = useState(false);
+  const [showReletter, setShowReletter] = useState(false);
+  const search = useSearch();
+  const branchName = new URLSearchParams(search).get("branchName") ?? "";
   const [showImportModal, setShowImportModal] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [sendLoading, setSendLoading] = useState(false);
@@ -223,10 +228,9 @@ export default function IrrigationProfile() {
   const { user } = useAuth();
   const userRole = user?.role ?? "";
 
-  const canManageControllers =
-    userRole === "company_admin" ||
-    userRole === "super_admin" ||
-    userRole === "irrigation_manager";
+  const canManageControllers = hasCapability(userRole, CAN_RELETTER_CONTROLLERS);
+  // Legacy profile reads can contain multiple branches. Never send those as one location.
+  const activeLocationControllers = controllers.filter(c => c.isActive && (c.branchName ?? "") === branchName);
 
   const canEditZones = canManageControllers || userRole === "field_tech";
 
@@ -367,6 +371,8 @@ export default function IrrigationProfile() {
 
   return (
     <div className="container mx-auto p-4 max-w-4xl space-y-4">
+      {showReletter && <ReletterDialog customerId={Number(customerId)} branchName={branchName}
+        controllers={activeLocationControllers} onClose={() => setShowReletter(false)} />}
       {/* Back button */}
       <Button
         variant="ghost"
@@ -402,7 +408,7 @@ export default function IrrigationProfile() {
                 )}
               </div>
             </div>
-            <div className="flex gap-2 shrink-0">
+            <div className="flex flex-wrap gap-2 shrink-0">
               {canManageControllers && (
                 <Button
                   size="sm"
@@ -413,6 +419,10 @@ export default function IrrigationProfile() {
                   <Plus className="w-4 h-4" /> Add Controller
                 </Button>
               )}
+              {canManageControllers && <Button size="sm" variant="outline" data-testid="button-reletter"
+                disabled={activeLocationControllers.length < 2} onClick={() => setShowReletter(true)}>
+                Re-letter clocks
+              </Button>}
               {canReport && <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button

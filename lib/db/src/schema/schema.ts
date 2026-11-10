@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, decimal, timestamp, uniqueIndex, jsonb, index, check } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, decimal, timestamp, uniqueIndex, jsonb, index, check, foreignKey } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -2111,6 +2111,35 @@ export const irrigationProfileHistory = pgTable("irrigation_profile_history", {
 export const insertIrrigationProfileHistorySchema = createInsertSchema(irrigationProfileHistory);
 export type IrrigationProfileHistory = typeof irrigationProfileHistory.$inferSelect;
 export type InsertIrrigationProfileHistory = typeof irrigationProfileHistory.$inferInsert;
+
+// One final-only entry per actual rename; historical snapshots are not backfilled.
+export const controllerLetterChanges = pgTable("controller_letter_changes", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  controllerId: integer("controller_id").notNull(),
+  customerId: integer("customer_id").references(() => customers.id).notNull(),
+  branchName: text("branch_name").notNull().default(""),
+  fromLetter: text("from_letter"),
+  toLetter: text("to_letter").notNull(),
+  source: text("source").notNull(),
+  batchId: text("batch_id"),
+  changedAt: timestamp("changed_at").defaultNow().notNull(),
+  changedByUserId: integer("changed_by_user_id").references(() => users.id),
+  changedByName: text("changed_by_name").notNull(),
+}, (t) => ({
+  byController: index("ctrl_letter_changes_ctrl_idx").on(t.companyId, t.controllerId, t.changedAt),
+  byLocation: index("ctrl_letter_changes_loc_idx").on(t.companyId, t.customerId, t.branchName),
+  allowedSource: check("ctrl_letter_changes_source_check", sql`${t.source} IN ('change','swap','reletter')`),
+  // PostgreSQL truncates identifiers at 63 bytes. Use a stable short name so
+  // Drizzle does not propose dropping/recreating this FK on every push.
+  controllerForeignKey: foreignKey({
+    name: "ctrl_letter_changes_controller_fk",
+    columns: [t.controllerId], foreignColumns: [irrigationControllers.id],
+  }),
+}));
+export const insertControllerLetterChangeSchema = createInsertSchema(controllerLetterChanges);
+export type ControllerLetterChange = typeof controllerLetterChanges.$inferSelect;
+export type InsertControllerLetterChange = typeof controllerLetterChanges.$inferInsert;
 
 // ─── Irrigation Backflow Preventers ──────────────────────────────────────────
 // Tracks each backflow preventer device per customer, including device

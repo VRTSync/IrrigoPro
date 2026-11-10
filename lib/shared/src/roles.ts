@@ -272,6 +272,9 @@ export const CAN_DELETE_IRRIGATION_EQUIPMENT = new Set<Role>(["super_admin", "co
  */
 export const CAN_DOCUMENT_IRRIGATION_SYSTEM = new Set<Role>(["super_admin", "company_admin", "irrigation_manager", "system_documenter"]);
 
+/** Re-letter a complete location atomically (office only). */
+export const CAN_RELETTER_CONTROLLERS = new Set<Role>(["super_admin", "company_admin", "irrigation_manager"]);
+
 /** A capability is just a role set from this module. */
 export type Capability = ReadonlySet<Role>;
 

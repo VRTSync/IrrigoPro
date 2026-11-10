@@ -36,6 +36,7 @@ import {
   hasCapability, CAN_READ_IRRIGATION_PROFILE, CAN_EDIT_IRRIGATION_ZONES,
   CAN_MANAGE_IRRIGATION_EQUIPMENT, CAN_DELETE_IRRIGATION_EQUIPMENT,
   CAN_DOCUMENT_IRRIGATION_SYSTEM,
+  CAN_RELETTER_CONTROLLERS,
 } from "@workspace/shared";
 
 /** Drizzle may wrap the PostgreSQL error in cause; only this tenant-scoped index is a serial conflict. */
@@ -81,6 +82,13 @@ export const createControllerBody = z.object({
 export const updateControllerBody = createControllerBody.omit({ letter: true, confirmLetter: true }).partial();
 export const controllerLetterBody = SetControllerLetterBody.extend({
   letter: SetControllerLetterBody.shape.letter.transform(letter => letter.toUpperCase()),
+}).strict();
+export const reletterLocationBody = z.object({
+  branchName: z.string().trim().max(200).default(""),
+  letters: z.array(z.object({
+    controllerId: z.number().int().positive(),
+    letter: z.string().length(1),
+  }).strict()).min(1).max(26),
 }).strict();
 
 export const createProgramBody = z.object({
@@ -493,6 +501,33 @@ export function registerIrrigationProfileRoutes(
       if (e instanceof LetterError) return res.status(e.status).json({ message: e.message, ...e.details });
       req.log?.error?.({ err: e, id }, "setControllerLetter failed");
       res.status(500).json({ message: "Could not save letter — please retry" });
+    }
+  });
+
+  app.put("/api/customers/:customerId/controllers/letters", requireAuthentication, async (req: any, res: any) => {
+    const raw = req.params.customerId;
+    const customerId = typeof raw === "string" && /^[1-9]\d*$/.test(raw) ? Number(raw) : NaN;
+    if (!Number.isSafeInteger(customerId)) return badId(res, "customer");
+    const role = req.authenticatedUserRole as string | undefined;
+    if (!hasCapability(role, CAN_RELETTER_CONTROLLERS)) return res.status(403).json({ message: "Forbidden" });
+    const companyId = getCallerCompanyId(req);
+    if (!companyId && !isSuperAdmin(role)) return res.status(401).json({ message: "Authentication required" });
+    try {
+      // Even super admins must resolve a real customer before inspecting the body.
+      const customer = await storage.getCustomer(customerId);
+      if (!customer || (!isSuperAdmin(role) && customer.companyId !== companyId)) return notFound(res, "Customer");
+      const parsed = reletterLocationBody.safeParse(req.body ?? {});
+      if (!parsed.success) return res.status(400).json({ message: "Invalid body" });
+      const actor = await storage.getUser(req.authenticatedUserId);
+      if (!actor) return res.status(401).json({ message: "Authentication required" });
+      const result = await storage.reletterLocation(isSuperAdmin(role) ? null : companyId,
+        customerId, parsed.data.branchName, parsed.data.letters, { id: actor.id, name: actor.name });
+      if (!result) return notFound(res, "Customer");
+      res.json(result);
+    } catch (e) {
+      if (e instanceof LetterError) return res.status(e.status).json({ message: e.message });
+      req.log?.error?.({ err: e, customerId }, "reletterLocation failed");
+      res.status(500).json({ message: "Could not re-letter — please retry" });
     }
   });
 

@@ -51,6 +51,7 @@ import {
   irrigationPrograms,
   irrigationProfileZones,
   irrigationProfileHistory,
+  controllerLetterChanges,
   irrigationBackflows,
   type IrrigationController,
   type InsertIrrigationController,
@@ -161,6 +162,7 @@ import {
   WET_CHECK_ISSUE_TYPE_SEED,
 } from "@workspace/db";
 import { db, pool } from "./db";
+import { randomUUID } from "node:crypto";
 // Task #1898 — used by the list readers below that otherwise degrade a failed
 // read into an empty array. A pool-acquisition failure must NOT degrade: it
 // has to reach the route so the client renders an error state.
@@ -468,6 +470,9 @@ export type CurrentZoneSummary = {
 };
 
 export interface IStorage {
+  reletterLocation(companyId: number | null, customerId: number, branchName: string,
+    letters: { controllerId: number; letter: string }[], actor: ZoneActor
+  ): Promise<{ controllers: IrrigationController[]; changed: number } | null>;
   fieldVerifyIrrigationController(companyId: number | null, id: number, actor: ZoneActor): Promise<IrrigationController | null>;
   fieldVerifyBackflow(companyId: number | null, id: number, actor: ZoneActor): Promise<IrrigationBackflow | null>;
   resolveControllerIdsByLetter(q: DbExecutor, scope: { companyId: number; customerId: number; branchName: string | null }, letters: (string | null | undefined)[]): Promise<Map<string, number | null>>;
@@ -12247,6 +12252,13 @@ export class DatabaseStorage implements IStorage {
         letter, name: controllerNameFor(letter), letterConfirmed: input.confirm === true,
         notes: notesWithFormerName(before.name, before.notes), ...stamp,
       }).where(scope).returning();
+      if (before.letter !== letter) {
+        await tx.insert(controllerLetterChanges).values({
+          companyId: before.companyId, customerId: before.customerId, branchName: before.branchName,
+          controllerId: before.id, fromLetter: before.letter, toLetter: letter,
+          source: holder ? "swap" : "change", changedByUserId: actor.id, changedByName: actor.name,
+        });
+      }
       let swappedWith: IrrigationController | null = null;
       if (holder) {
         [swappedWith] = await tx.update(irrigationControllers).set({
@@ -12254,6 +12266,11 @@ export class DatabaseStorage implements IStorage {
           letterConfirmed: false, notes: notesWithFormerName(holder.name, holder.notes), ...stamp,
         }).where(and(eq(irrigationControllers.id, holder.id),
           eq(irrigationControllers.companyId, before.companyId))).returning();
+        await tx.insert(controllerLetterChanges).values({
+          companyId: before.companyId, customerId: before.customerId, branchName: before.branchName,
+          controllerId: holder.id, fromLetter: holder.letter, toLetter: before.letter!,
+          source: "swap", changedByUserId: actor.id, changedByName: actor.name,
+        });
         await this._appendIrrigationSnapshot(tx, swappedWith, actor,
           `Letter ${holder.letter} → ${before.letter} (swapped with Controller ${letter}) by ${actor.name}`);
       }
@@ -12262,6 +12279,72 @@ export class DatabaseStorage implements IStorage {
         : `Letter ${before.letter ?? "unassigned"} → ${letter}${holder ? ` (swapped with Controller ${letter})` : ""} by ${actor.name}`;
       await this._appendIrrigationSnapshot(tx, controller, actor, summary);
       return { controller, swappedWith };
+    });
+  }
+
+  async reletterLocation(
+    companyId: number | null, customerId: number, branchName: string,
+    letters: { controllerId: number; letter: string }[], actor: ZoneActor,
+  ): Promise<{ controllers: IrrigationController[]; changed: number } | null> {
+    if (companyId !== null && (!Number.isInteger(companyId) || companyId <= 0)) return null;
+    return db.transaction(async tx => {
+      const [customer] = await tx.select().from(customers).where(and(
+        eq(customers.id, customerId), companyId === null ? undefined : eq(customers.companyId, companyId),
+      )).for("update");
+      if (!customer) return null;
+      await bindTickets(tx, { companyId: customer.companyId, customerId, branchName });
+      const scope = and(eq(irrigationControllers.companyId, customer.companyId),
+        eq(irrigationControllers.customerId, customerId), eq(irrigationControllers.branchName, branchName),
+        eq(irrigationControllers.isActive, true));
+      const controllers = await tx.select().from(irrigationControllers).where(scope)
+        .orderBy(irrigationControllers.letter, irrigationControllers.id).for("update");
+      const normalized = letters.map(entry => ({ ...entry, letter: entry.letter.toUpperCase() }));
+      if (normalized.some(entry => !/^[A-Z]$/.test(entry.letter))) {
+        throw new LetterError(400, "Each letter must be a single character A–Z");
+      }
+      const ids = new Set(normalized.map(entry => entry.controllerId));
+      if (ids.size !== normalized.length || normalized.length !== controllers.length ||
+          controllers.some(c => !ids.has(c.id))) {
+        throw new LetterError(400, "Every active clock at this location needs a letter");
+      }
+      const used = new Set<string>();
+      for (const { letter } of normalized) {
+        if (used.has(letter)) throw new LetterError(400, `Letter ${letter} is used twice`);
+        used.add(letter);
+      }
+      const requested = new Map(normalized.map(entry => [entry.controllerId, entry.letter]));
+      const changed = controllers.filter(c => c.letter !== requested.get(c.id));
+      if (!changed.length) return { controllers, changed: 0 };
+      const batchId = randomUUID();
+      const now = new Date();
+      // Both name AND letter have active unique indexes. Stage only changed
+      // clocks outside both predicates, invisible to readers until commit.
+      // Restore activity before snapshots; never record staging state/events.
+      await tx.update(irrigationControllers).set({ letter: null, isActive: false }).where(and(
+        eq(irrigationControllers.companyId, customer.companyId),
+        inArray(irrigationControllers.id, changed.map(c => c.id)),
+      ));
+      for (const before of changed) {
+        const letter = requested.get(before.id)!;
+        const [controller] = await tx.update(irrigationControllers).set({
+          letter, name: controllerNameFor(letter), isActive: true, letterConfirmed: false,
+          notes: notesWithFormerName(before.name, before.notes),
+          lastUpdatedAt: now, updatedAt: now, lastUpdatedByUserId: actor.id, lastUpdatedByName: actor.name,
+        }).where(and(eq(irrigationControllers.id, before.id),
+          eq(irrigationControllers.companyId, customer.companyId))).returning();
+        await tx.insert(controllerLetterChanges).values({
+          companyId: customer.companyId, customerId, branchName, controllerId: before.id,
+          fromLetter: before.letter, toLetter: letter, source: "reletter", batchId,
+          changedByUserId: actor.id, changedByName: actor.name,
+        });
+        await this._appendIrrigationSnapshot(tx, controller, actor,
+          `Re-lettered ${before.letter ?? "unassigned"} → ${letter} (location re-letter) by ${actor.name}`);
+      }
+      return {
+        controllers: await tx.select().from(irrigationControllers).where(scope)
+          .orderBy(irrigationControllers.letter, irrigationControllers.id),
+        changed: changed.length,
+      };
     });
   }
 

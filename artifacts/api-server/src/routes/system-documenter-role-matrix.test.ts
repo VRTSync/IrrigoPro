@@ -12,6 +12,7 @@ import {
   CAN_READ_IRRIGATION_PROFILE, CAN_EDIT_IRRIGATION_ZONES,
   CAN_MANAGE_IRRIGATION_EQUIPMENT, CAN_DELETE_IRRIGATION_EQUIPMENT,
   CAN_DOCUMENT_IRRIGATION_SYSTEM,
+  CAN_RELETTER_CONTROLLERS,
 } from "@workspace/shared";
 import { storage } from "../storage";
 import { registerIrrigationProfileRoutes } from "./irrigation-profile-routes";
@@ -47,6 +48,17 @@ const existingAccess: Record<string, readonly string[]> = {
   field_tech: ["read", "zones"],
   bookkeeper: [],
 };
+
+describe("Re-letter office-only capability", () => {
+  it("is limited to the three office roles and never enters the documenter allowlist", () => {
+    for (const role of ROLES) {
+      assert.equal(hasCapability(role, CAN_RELETTER_CONTROLLERS),
+        ["super_admin", "company_admin", "irrigation_manager"].includes(role));
+    }
+    assert.equal(hasCapability(null, CAN_RELETTER_CONTROLLERS), false);
+    assert.equal(isApiAllowedForRole("system_documenter", "PUT", "/api/customers/1/controllers/letters"), false);
+  });
+});
 
 let server: Server;
 let base: string;

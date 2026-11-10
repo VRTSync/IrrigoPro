@@ -851,3 +851,45 @@ mtime_ms = 1794336614193
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/25c28188-b23f-40a1-9541-b0ea9f2de054/0ec5d11f-cee1-4a9d-b5c2-1c8ea6c043c4"
 storage_version_token = "1794336701011992"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "P7HKsUMSbRgd59iyhGcmM"
+uri = "file://generated-artifacts/reletter-evidence/02-cycle-desktop.jpg"
+type = "image"
+title = "Re-letter clocks — desktop"
+description = "Three-clock cycle verified against the real authenticated app."
+logical_id = "81e2225c-19b3-4e95-9ab4-ab354ddf8ece"
+content_hash = "sha256:d9775629591eeed183c841d796d0f52bf7e2fdebf70c16b2d08df901cd63d71e"
+size = 49719
+mtime_ms = 1794338757732
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/81e2225c-19b3-4e95-9ab4-ab354ddf8ece/111e02fe-e3b7-40db-86ef-cbb373b47e27"
+storage_version_token = "1794338987995509"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "3BkMrt7PxlxKsir4cWYUQ"
+uri = "file://generated-artifacts/reletter-evidence/03-cycle-phone.jpg"
+type = "image"
+title = "Re-letter clocks — phone"
+description = "Verified phone-width native selects and save controls."
+logical_id = "f58ca93e-9cb6-4b91-aa4f-c1f866bfcb70"
+content_hash = "sha256:1bd8817607a67283f4725e54abb1affb3297948627b0d26153e45389a5c1b88e"
+size = 35455
+mtime_ms = 1794338758036
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/f58ca93e-9cb6-4b91-aa4f-c1f866bfcb70/b3f8fdd4-d7cc-43e2-a969-fb24e721d089"
+storage_version_token = "1794338988623782"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "zuhWQWREQeWRS4npsdtaw"
+uri = "file://generated-artifacts/reletter-evidence/05-original-billing.jpg"
+type = "image"
+title = "Original billing remained available"
+description = "Original B billing stayed on the same permanent clock, now A."
+logical_id = "6a87081f-fa74-4dab-a24e-9380de8f2c5d"
+content_hash = "sha256:e61ba31538e342010e4bd8f69659476d6a5a833f2dabffcbb57d21bec51dfd40"
+size = 89017
+mtime_ms = 1794338760144
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/6a87081f-fa74-4dab-a24e-9380de8f2c5d/b3984226-61fd-4d87-be86-8c0ddc665f39"
+storage_version_token = "1794338989090607"
+content_type = "image/jpeg"

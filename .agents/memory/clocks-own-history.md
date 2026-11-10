@@ -16,3 +16,9 @@ The billed zone-count guard is queue ordering, not a code dependency for history
 **Why:** The user explicitly clarified that the guard remains its own queued task and must not block this slice.
 
 **How to apply:** Do not implement the billed zone-count guard as part of history binding or stop binding for its absence.
+
+The supplied re-letter BUILD's null-letter-only staging algorithm is not sufficient: cyclic renames must also free active names. Retain both uniqueness protections and record only final changes.
+
+**Why:** The user explicitly corrected the BUILD after verifying separate active-name and active-letter constraints. Following its original staging step would reject ordinary cycles.
+
+**How to apply:** Treat this correction as part of the locked contract for all future rename work; transaction-private staging must never become history or a permanent activity change.
