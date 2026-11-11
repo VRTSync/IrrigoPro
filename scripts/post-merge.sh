@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 pnpm install --frozen-lockfile
+# Prepare referenced tenant keys before Drizzle adds composite foreign keys.
+# This only creates schema-declared unique indexes; it never seeds/reprices data.
+pnpm --filter @workspace/db exec node prepare-markup-keys.mjs
 # Never approve destructive changes in unattended setup. Drizzle can exit 0
 # at a confirmation prompt without applying anything, so require its explicit
 # completion message as well as a successful exit. Keep stdin closed and echo
