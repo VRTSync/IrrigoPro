@@ -60,3 +60,9 @@ Read `attached_assets/Pasted--Document-System-Design-Context-Locked-Decisions-Re
 **Why:** Field testing on 2026-11-10 confirmed that A with D for drip is a normal real-world configuration. Empty intermediate programs create false documentation gaps.
 
 **How to apply:** Keep program selection explicit and independent of controller-letter identity. Preserve program ids when correcting letters so existing zone assignments and runtimes remain attached.
+
+**Rule:** The offline extension uses one existing sync engine and three ordered tiers: offline reads, queued saves, then offline photos. The user requested one tiered task with one step per slice, superseding the offline attachments' separate-task packaging.
+
+**Why:** On 2026-11-11 the user supplied locked offline decisions because properties without service cannot currently be documented. This supersedes the original online-only save constraint for the offline extension, not for unrelated screens.
+
+**How to apply:** Read the four offline context/slice attachments dated 2026-11-11. Keep office screens, native Expo, site maps and wet-check behavior unchanged. Queued saves require the extra-program and Water Map second slices first; confirm prerequisites in current code rather than silently dropping a write family.
