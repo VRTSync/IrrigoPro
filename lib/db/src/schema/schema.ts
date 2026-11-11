@@ -165,7 +165,9 @@ export const customers = pgTable("customers", {
   // Task #532 — index company-scoped lookups (the customers list endpoint
   // and almost every join coming off a customer is filtered by companyId).
   companyIdx: index("customers_company_idx").on(table.companyId),
-  companyIdentity: uniqueIndex("customers_company_identity").on(table.companyId, table.id),
+  // UNIQUE constraints (not standalone indexes) survive FK introspection.
+  // Use physical column order to match Drizzle's constraint-column reader.
+  companyIdentity: unique("customers_company_identity").on(table.id, table.companyId),
   // Customer Records Slice 1 — one IrrigoPro customer per QuickBooks customer, per company.
   // QuickBooks ids repeat across QuickBooks companies, so uniqueness is per company.
   // Unlinked customers (null or '') are not covered.
@@ -185,7 +187,7 @@ export const materialMarkupSchedules = pgTable("material_markup_schedules", {
 }, t => ({
   companyActive: index("markup_schedule_company_active").on(t.companyId, t.isActive),
   oneActive: uniqueIndex("markup_schedule_one_active").on(t.companyId).where(sql`${t.isActive}`),
-  companyIdentity: uniqueIndex("markup_schedule_company_identity").on(t.companyId, t.id),
+  companyIdentity: unique("markup_schedule_company_identity").on(t.id, t.companyId),
 }));
 export const materialMarkupTiers = pgTable("material_markup_tiers", {
   id: serial("id").primaryKey(),
