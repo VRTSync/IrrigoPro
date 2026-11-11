@@ -14,3 +14,9 @@ Schedule edits create retained new versions rather than changing historical vers
 **Why:** The user explicitly selected both recommendations on 2026-11-11, resolving conflicting schedule editing and document-update examples in the supplied briefs.
 
 **How to apply:** Enforce existing-line identity and recorded prices server-side. Test an existing document with both retained and newly added lines after a schedule change; unrelated or quantity edits must not silently reprice retained lines.
+
+Editing a schedule automatically activates its new version and deactivates the previous one atomically; explicit new-schedule creation still requires separate activation. Catalog repricing uses the existing pricing audit fields and structured details, not new audit columns. New estimates, including wet-check conversions, use current applicable pricing rather than historical finding snapshots; existing estimate lines remain frozen.
+
+**Why:** The user's revised combined brief explicitly supplied these semantics and supersedes conflicting examples in the original slices.
+
+**How to apply:** Read `attached_assets/Pasted--2173-Tiered-Material-Markup-Engine-What-Why-Add-increm_1794432278680.txt` for the exact audit mapping and stored-line matching contract. Keep estimate pricing authoritative server-side, not just a client preview.
