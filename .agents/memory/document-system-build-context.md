@@ -65,4 +65,4 @@ Read `attached_assets/Pasted--Document-System-Design-Context-Locked-Decisions-Re
 
 **Why:** On 2026-11-11 the user supplied locked offline decisions because properties without service cannot currently be documented. This supersedes the original online-only save constraint for the offline extension, not for unrelated screens.
 
-**How to apply:** Read the four offline context/slice attachments dated 2026-11-11. Keep office screens, native Expo, site maps and wet-check behavior unchanged. Queued saves require the extra-program and Water Map second slices first; confirm prerequisites in current code rather than silently dropping a write family.
+**How to apply:** Read the four offline context/slice attachments dated 2026-11-11. Keep office screens, native Expo, site maps and wet-check behavior unchanged. Consume the merged extra-program second slice. The user explicitly removed Water Map as a prerequisite: complete all three offline tiers without its queue kind, endpoint zone-number change or local-apply cases. Water Map will be built later and route its writes through `docWrite` itself; this supersedes the attachments' Water Map dependency.
