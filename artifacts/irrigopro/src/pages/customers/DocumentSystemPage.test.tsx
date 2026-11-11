@@ -191,7 +191,7 @@ describe("DocumentSystemPage — Slice 4", () => {
     site = siteOf([complete(1, "P")]);
     renderPage();
     fireEvent.click(await screen.findByTestId("button-add-controller"));
-    expect(await screen.findByText("Tap to take photo")).toBeInTheDocument();
+    expect(await screen.findByText("Take a photo or choose one from your library")).toBeInTheDocument();
     const file = new File(["x"], "clock.jpg", { type: "image/jpeg" });
     await act(async () => { fireEvent.change(screen.getByTestId("doc-photo-input"), { target: { files: [file] } }); });
     await waitFor(() => expect(screen.getByTestId("button-next")).not.toBeDisabled());
@@ -1989,5 +1989,184 @@ describe("Slice 6 — no backflow and Finish", () => {
     expect(await screen.findByTestId("row-controller-1")).toBeInTheDocument();
     expect(screen.queryByTestId("step-review")).toBeNull();
     expect(writes()).toEqual([["/api/system-documentation/customers/7/site/verify", "POST", { branchName: "North" }]]);
+  });
+});
+
+describe("Photo steps — Take Photo or Choose from Library", () => {
+  const jpg = (name = "lib.jpg") => new File(["x"], name, { type: "image/jpeg" });
+  const pick = async (testId: string, files: File[]) => {
+    await act(async () => { fireEvent.change(screen.getByTestId(testId), { target: { files } }); });
+  };
+
+  type Flow = { name: string; step: string; openNew: () => Promise<void>; openExisting: () => Promise<void>; replaceWrite: [string, string, unknown]; savedSrc: string };
+  const flows: Flow[] = [
+    {
+      name: "clock",
+      step: "step-photo",
+      openNew: async () => {
+        renderPage();
+        fireEvent.click(await screen.findByTestId("button-add-controller"));
+        await screen.findByTestId("step-photo");
+      },
+      openExisting: async () => {
+        site = siteOf([ctrl(40, "P", { gaps: [{ step: "photo", code: "photo", label: "clock photo" }] })]);
+        renderPage();
+        fireEvent.click(await screen.findByTestId("row-controller-40"));
+        await screen.findByTestId("step-photo");
+      },
+      replaceWrite: ["/api/irrigation-controllers/40/photo", "POST", { url: "ph-lib" }],
+      savedSrc: "/api/photos/photo-40?variant=medium",
+    },
+    {
+      name: "backflow",
+      step: "step-bf-photo",
+      openNew: async () => {
+        site = withBf([], []);
+        renderPage();
+        fireEvent.click(await screen.findByTestId("button-add-backflow"));
+        await screen.findByTestId("step-bf-photo");
+      },
+      openExisting: async () => {
+        await openBf(bf(5, { gaps: [{ step: "photo", code: "photo", label: "device photo" }] }), "step-bf-photo");
+      },
+      replaceWrite: ["/api/backflows/5", "PUT", { photoUrl: "ph-lib" }],
+      savedSrc: "/api/photos/bfp-5?variant=medium",
+    },
+  ];
+
+  it.each(flows)("$name: offers a camera input and a separate library input, each opened by its own button", async (f) => {
+    await f.openNew();
+    const step = screen.getByTestId(f.step);
+    expect(within(step).getByText(/or choose a photo you already took/)).toBeInTheDocument();
+    const camera = screen.getByTestId("doc-photo-input");
+    const library = screen.getByTestId("doc-photo-library-input");
+    expect(camera).toHaveAttribute("type", "file");
+    expect(camera).toHaveAttribute("accept", "image/*");
+    expect(camera).toHaveAttribute("capture", "environment");
+    expect(library).toHaveAttribute("type", "file");
+    expect(library).toHaveAttribute("accept", "image/*");
+    expect(library).not.toHaveAttribute("capture");
+    const take = within(step).getByRole("button", { name: "Take Photo" });
+    const choose = within(step).getByRole("button", { name: "Choose from Library" });
+    const cameraClick = vi.spyOn(camera, "click").mockImplementation(() => {});
+    const libraryClick = vi.spyOn(library, "click").mockImplementation(() => {});
+    fireEvent.click(choose);
+    expect(libraryClick).toHaveBeenCalledTimes(1);
+    expect(cameraClick).not.toHaveBeenCalled();
+    fireEvent.click(take);
+    expect(cameraClick).toHaveBeenCalledTimes(1);
+    expect(libraryClick).toHaveBeenCalledTimes(1);
+    expect(uploadSpy).not.toHaveBeenCalled();
+  });
+
+  it("clock: a library photo on a new clock is sent in the create POST", async () => {
+    uploadSpy.mockResolvedValue("ph-lib");
+    site = siteOf([complete(1, "P")]);
+    await flows[0].openNew();
+    await pick("doc-photo-library-input", [jpg()]);
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("doc-photo-library-input")).toHaveValue("");
+    await waitFor(() => expect(screen.getByTestId("button-next")).not.toBeDisabled());
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-details");
+    fireEvent.click(screen.getByTestId("chip-location-Mech room"));
+    fireEvent.click(screen.getByTestId("chip-brand-Rain Bird"));
+    fireEvent.click(screen.getByTestId("chip-model-ESP-ME3"));
+    fireEvent.click(screen.getByTestId("letter-D"));
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-zone-count");
+    expect(writes()).toEqual([["/api/customers/7/controllers-profile", "POST", {
+      letter: "D", confirmLetter: true, location: "Mech room", brand: "Rain Bird", model: "ESP-ME3",
+      branchName: "", settingsPhotoUrl: "ph-lib", notes: null,
+    }]]);
+  });
+
+  it("backflow: a library photo on a new backflow is sent in the create POST", async () => {
+    uploadSpy.mockResolvedValue("ph-lib");
+    custom = (url, method) => (method === "POST" && url === "/api/customers/7/backflows" ? { id: 77 } : undefined);
+    await flows[1].openNew();
+    await pick("doc-photo-library-input", [jpg()]);
+    await waitFor(() => expect(screen.getByTestId("button-next")).not.toBeDisabled());
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-bf-device");
+    expect(writes()).toHaveLength(0);
+    fireEvent.click(screen.getByTestId("chip-type-rpz"));
+    fireEvent.click(screen.getByTestId('chip-size-1"'));
+    fireEvent.click(screen.getByTestId("chip-bf-brand-Febco"));
+    fireEvent.change(screen.getByTestId("input-serial"), { target: { value: "K81234" } });
+    fireEvent.click(screen.getByTestId("button-next"));
+    await screen.findByTestId("step-bf-location");
+    expect(writes()).toEqual([["/api/customers/7/backflows", "POST", {
+      name: "Backflow 1", branchName: "", deviceType: "rpz", size: '1"', brand: "Febco", model: null, serialNumber: "K81234", photoUrl: "ph-lib", notes: null,
+    }]]);
+  });
+
+  it.each(flows)("$name: choosing a library photo replaces the saved one through the existing save path", async (f) => {
+    uploadSpy.mockResolvedValue("ph-lib");
+    await f.openExisting();
+    expect(screen.getByTestId("doc-photo-preview")).toHaveAttribute("src", f.savedSrc);
+    expect(screen.getByRole("button", { name: "Take Photo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose from Library" })).toBeInTheDocument();
+    await pick("doc-photo-library-input", [jpg()]);
+    await waitFor(() => expect(screen.getByTestId("button-next")).not.toBeDisabled());
+    expect(screen.getByTestId("doc-photo-preview")).not.toHaveAttribute("src", f.savedSrc);
+    fireEvent.click(screen.getByTestId("button-next"));
+    await waitFor(() => expect(screen.queryByTestId(f.step)).toBeNull());
+    expect(writes()).toEqual([f.replaceWrite]);
+  });
+
+  it.each(flows)("$name: the same library file chosen twice uploads twice", async (f) => {
+    uploadSpy.mockResolvedValue("ph-lib");
+    await f.openNew();
+    const file = jpg("same.jpg");
+    await pick("doc-photo-library-input", [file]);
+    await waitFor(() => expect(screen.getByTestId("button-next")).not.toBeDisabled());
+    await pick("doc-photo-library-input", [file]);
+    await waitFor(() => expect(uploadSpy).toHaveBeenCalledTimes(2));
+  });
+
+  it.each(flows)("$name: a cancelled chooser uploads nothing, shows no error and keeps the saved photo", async (f) => {
+    await f.openExisting();
+    await pick("doc-photo-library-input", []);
+    await pick("doc-photo-input", []);
+    expect(uploadSpy).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("doc-photo-error")).toBeNull();
+    expect(screen.queryByTestId("doc-photo-uploading")).toBeNull();
+    expect(screen.getByTestId("doc-photo-preview")).toHaveAttribute("src", f.savedSrc);
+    expect(screen.getByTestId("button-next")).not.toBeDisabled();
+    expect(screen.getByTestId("button-save-exit")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("button-next"));
+    await waitFor(() => expect(screen.queryByTestId(f.step)).toBeNull());
+    expect(writes()).toHaveLength(0);
+  });
+
+  it.each(flows)("$name: both buttons lock while uploading; on failure Retry and Discard work and Discard keeps the saved photo", async (f) => {
+    let reject!: (e: Error) => void;
+    uploadSpy.mockImplementationOnce(() => new Promise((_, r) => { reject = r; }));
+    uploadSpy.mockImplementationOnce(() => Promise.reject(new Error("500: {\"message\":\"storage down\"}")));
+    await f.openExisting();
+    await pick("doc-photo-library-input", [jpg()]);
+    expect(screen.getByTestId("doc-photo-uploading")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Take Photo" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Choose from Library" })).toBeDisabled();
+    expect(screen.getByTestId("doc-photo-input")).toBeDisabled();
+    expect(screen.getByTestId("doc-photo-library-input")).toBeDisabled();
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    expect(screen.getByTestId("button-save-exit")).toBeDisabled();
+    expect(screen.getByTestId("button-doc-back")).toBeDisabled();
+    await act(async () => { reject(new Error("500: {\"message\":\"storage down\"}")); });
+    expect(await screen.findByTestId("doc-photo-error")).toHaveTextContent("storage down");
+    expect(screen.getByRole("button", { name: "Choose from Library" })).not.toBeDisabled();
+    expect(screen.getByTestId("button-next")).toBeDisabled();
+    await act(async () => { fireEvent.click(screen.getByTestId("doc-photo-retry")); });
+    expect(uploadSpy).toHaveBeenCalledTimes(2);
+    expect(await screen.findByTestId("doc-photo-error")).toHaveTextContent("storage down");
+    fireEvent.click(screen.getByTestId("doc-photo-discard"));
+    expect(screen.queryByTestId("doc-photo-error")).toBeNull();
+    expect(screen.getByTestId("doc-photo-preview")).toHaveAttribute("src", f.savedSrc);
+    expect(screen.getByTestId("button-next")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("button-next"));
+    await waitFor(() => expect(screen.queryByTestId(f.step)).toBeNull());
+    expect(writes()).toHaveLength(0);
   });
 });

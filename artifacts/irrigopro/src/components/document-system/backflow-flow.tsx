@@ -335,7 +335,7 @@ export function BackflowFlow({ customerId, branchName, site, backflow, draftName
         {stepKey === "photo" && (
           <section className="flex flex-col gap-3" data-testid="step-bf-photo">
             <h2 className="text-base font-semibold">Device photo</h2>
-            <p className="text-sm text-muted-foreground">Get the whole device and the serial plate. Clear dirt off the plate first if you can.</p>
+            <p className="text-sm text-muted-foreground">Get the whole device and the serial plate. Clear dirt off the plate first if you can, or choose a photo you already took.</p>
             <DocPhotoField photoId={values.photo} onUploaded={(id) => set("photo", id)} onStateChange={setPhotoState} label="Device photo" />
           </section>
         )}

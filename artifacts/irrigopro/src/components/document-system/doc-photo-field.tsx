@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Camera, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { Camera, Image as ImageIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { uploadPhotoToStorage } from "@/pages/wet-checks/helpers";
 import { serverMessage } from "./constants";
@@ -23,6 +23,8 @@ export function DocPhotoField({ photoId, onUploaded, onStateChange, label = "Clo
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<File | null>(null);
   const urlRef = useRef<string | null>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const libraryRef = useRef<HTMLInputElement>(null);
   const stateCb = useRef(onStateChange);
   stateCb.current = onStateChange;
 
@@ -73,39 +75,81 @@ export function DocPhotoField({ photoId, onUploaded, onStateChange, label = "Clo
       ? (preview?.url && preview.forId === photoId ? preview.url : `/api/photos/${photoId}?variant=medium`)
       : null;
 
+  const uploading = state === "uploading";
+  const onPick = (e: ChangeEvent<HTMLInputElement>) => {
+    // A cancelled chooser fires with no file (or not at all); select() ignores it.
+    select(e.target.files?.[0]);
+    e.target.value = "";
+  };
+
   return (
     <div className="flex flex-col gap-2">
-      <label
-        className="relative flex h-[320px] w-full cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 text-slate-600"
+      <div
+        role="group"
+        className="relative flex h-[320px] w-full flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 text-slate-600"
         data-testid={testId}
         aria-label={label}
       >
-        <input
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className="sr-only"
-          disabled={state === "uploading"}
-          data-testid={`${testId}-input`}
-          onChange={(e) => { select(e.target.files?.[0]); e.target.value = ""; }}
-        />
         {src && <img src={src} alt={label} className="absolute inset-0 h-full w-full object-cover" data-testid={`${testId}-preview`} />}
-        <span
-          className={
-            src
-              ? "absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-slate-900/70 px-4 py-2 text-sm font-medium text-white"
-              : "flex flex-col items-center gap-2 text-[15px] font-medium"
-          }
-        >
-          {!src && <Camera className="h-9 w-9 text-primary" aria-hidden />}
-          {src ? "Tap to retake" : "Tap to take photo"}
-        </span>
-        {state === "uploading" && (
+        {!src && (
+          <span className="flex flex-col items-center gap-2 px-6 text-center text-[15px] font-medium">
+            <ImageIcon className="h-9 w-9 text-primary" aria-hidden />
+            Take a photo or choose one from your library
+          </span>
+        )}
+        {uploading && (
           <div className="absolute inset-0 flex items-center justify-center bg-white/75" data-testid={`${testId}-uploading`}>
             <Loader2 className="h-8 w-8 animate-spin text-primary" aria-label="Uploading" />
           </div>
         )}
-      </label>
+      </div>
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden
+        disabled={uploading}
+        data-testid={`${testId}-input`}
+        onChange={onPick}
+      />
+      <input
+        ref={libraryRef}
+        type="file"
+        accept="image/*"
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden
+        disabled={uploading}
+        data-testid={`${testId}-library-input`}
+        onChange={onPick}
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          className="h-12 gap-2 text-[15px]"
+          disabled={uploading}
+          onClick={() => cameraRef.current?.click()}
+          data-testid={`${testId}-take`}
+        >
+          <Camera className="h-5 w-5" aria-hidden />
+          Take Photo
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-12 gap-2 text-[15px]"
+          disabled={uploading}
+          onClick={() => libraryRef.current?.click()}
+          data-testid={`${testId}-choose`}
+        >
+          <ImageIcon className="h-5 w-5" aria-hidden />
+          Choose from Library
+        </Button>
+      </div>
       {state === "failed" && (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-800" data-testid={`${testId}-error`}>
           <span className="min-w-0">{error}</span>

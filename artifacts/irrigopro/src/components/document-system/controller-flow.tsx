@@ -401,7 +401,7 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
         {stepKey === "photo" && (
           <section className="flex flex-col gap-3" data-testid="step-photo">
             <h2 className="text-base font-semibold">Clock photo</h2>
-            <p className="text-sm text-muted-foreground">Open the clock and photograph the face so the programs are readable.</p>
+            <p className="text-sm text-muted-foreground">Open the clock and photograph the face so the programs are readable, or choose a photo you already took.</p>
             <DocPhotoField photoId={values.photo} onUploaded={(id) => set("photo", id)} onStateChange={setPhotoState} />
           </section>
         )}
