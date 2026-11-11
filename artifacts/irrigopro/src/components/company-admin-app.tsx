@@ -68,6 +68,7 @@ import MissingLocationDataReportPage from "@/pages/missing-location-data-report"
 import MissingPhotosReport from "@/pages/missing-photos-report";
 import WorkOrdersMissingPhotosReport from "@/pages/work-orders-missing-photos-report";
 import PartsSettings from "@/pages/parts-settings";
+import MarkupSchedulePage from "@/pages/markup-schedule";
 import LaborRates from "@/pages/labor-rates";
 import AdminCustomers from "@/pages/admin-customers";
 import AdminControllers from "@/pages/admin-controllers";
@@ -185,6 +186,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/estimates/pending-approval" component={RedirectPendingApprovalToCC} />
           <Route path="/parts" component={PartsCatalog} />
           <Route path="/parts-settings" component={PartsSettings} />
+          <Route path="/admin/markup-schedule" component={MarkupSchedulePage} />
           <Route path="/labor-rates" component={LaborRates} />
           <Route path="/admin/customers" component={AdminCustomers} />
           <Route path="/admin/budget-goals" component={AdminBudgetGoalsPage} />

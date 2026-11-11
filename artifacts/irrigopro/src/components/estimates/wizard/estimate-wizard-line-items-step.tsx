@@ -64,6 +64,8 @@ export interface RunningTotals {
 }
 
 interface EstimateWizardLineItemsStepProps {
+  catalogPrice?: (part: Part) => number;
+  pricingError?: string;
   customerName: string;
   projectName: string;
   laborRate: number;
@@ -120,6 +122,8 @@ export function EstimateWizardLineItemsStep({
   laborRate,
   laborRateSource,
   customerMasterRate,
+  catalogPrice = (part) => Number(part.price),
+  pricingError,
   items,
   onItemsChange,
   onBack,
@@ -151,14 +155,12 @@ export function EstimateWizardLineItemsStep({
   };
 
   const handlePartPicked = (part: Part) => {
+    if (pricingError) return;
     if (pickerMode === "change" && changeRowId) {
       const existing = items.find((it) => it.rowId === changeRowId);
       // Task #1827 — no-clobber: only update price from catalog when the
       // manager has NOT yet typed a manual override on this row.
-      const catalogPrice = parseFloat(String(part.price ?? "0")) || 0;
-      const priceUpdate = existing?.priceManuallySet
-        ? {}
-        : { partPrice: catalogPrice };
+      const priceUpdate = { partPrice: catalogPrice(part), sourceItemId: undefined, priceManuallySet: false };
       updateItem(changeRowId, {
         partId: part.id,
         partName: part.name,
@@ -172,7 +174,7 @@ export function EstimateWizardLineItemsStep({
           rowId: makeRowId(),
           partId: part.id,
           partName: part.name,
-          partPrice: parseFloat(String(part.price ?? "0")) || 0,
+          partPrice: catalogPrice(part),
           priceManuallySet: false,
           quantity: 1,
           // Parts catalog has no per-part labor hours; tech enters labor inline.
@@ -666,11 +668,11 @@ export function EstimateWizardLineItemsStep({
           <Button
             type="button"
             onClick={onContinue}
-            disabled={empty}
+            disabled={empty || !!pricingError}
             className="bg-blue-600 hover:bg-blue-700 text-white"
             data-testid="wizard-continue-2"
           >
-            Continue to Review
+            {pricingError ?? "Continue to Review"}
           </Button>
         </div>
       </div>

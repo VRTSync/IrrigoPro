@@ -342,9 +342,12 @@ describe("document controller stamps (isolated real DB fixtures)", () => {
       });
       let editedEstimate = await storage.getEstimateItems(e.id);
       assert.deepEqual(editedEstimate.map(row => [row.controllerLetter, row.zoneNumber, row.controllerId]), [["B", 4, b], ["A", 3, a]]);
+      // A payload without stored line IDs is new for pricing, even though the
+      // independent location fallback still retains ordered zone snapshots.
+      const currentCatalogPrice = (await storage.getPart(part))!.price;
       await request("PUT", `/api/estimates/${e.id}`, {
         estimate: { ...e, workDescription: "legacy-client edit" },
-        items: editedEstimate.map(row => ({ partId: row.partId, partName: row.partName, partPrice: "3", quantity: 2 })),
+        items: editedEstimate.map(row => ({ partId: row.partId, partName: row.partName, partPrice: currentCatalogPrice, quantity: 2 })),
       });
       editedEstimate = await storage.getEstimateItems(e.id);
       assert.deepEqual(editedEstimate.map(row => [row.controllerLetter, row.zoneNumber, row.controllerId]), [["B", 4, b], ["A", 3, a]]);

@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, decimal, timestamp, uniqueIndex, jsonb, index, check, foreignKey } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, decimal, timestamp, date, unique, uniqueIndex, jsonb, index, check, foreignKey } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -165,6 +165,7 @@ export const customers = pgTable("customers", {
   // Task #532 — index company-scoped lookups (the customers list endpoint
   // and almost every join coming off a customer is filtered by companyId).
   companyIdx: index("customers_company_idx").on(table.companyId),
+  companyIdentity: uniqueIndex("customers_company_identity").on(table.companyId, table.id),
   // Customer Records Slice 1 — one IrrigoPro customer per QuickBooks customer, per company.
   // QuickBooks ids repeat across QuickBooks companies, so uniqueness is per company.
   // Unlinked customers (null or '') are not covered.
@@ -172,6 +173,52 @@ export const customers = pgTable("customers", {
     .on(table.companyId, table.quickbooksId)
     .where(sql`${table.quickbooksId} IS NOT NULL AND ${table.quickbooksId} <> ''`),
 }));
+
+export const materialMarkupSchedules = pgTable("material_markup_schedules", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  name: text("name").notNull(),
+  effectiveDate: date("effective_date", { mode: "string" }).notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().$onUpdateFn(() => new Date()),
+}, t => ({
+  companyActive: index("markup_schedule_company_active").on(t.companyId, t.isActive),
+  oneActive: uniqueIndex("markup_schedule_one_active").on(t.companyId).where(sql`${t.isActive}`),
+  companyIdentity: uniqueIndex("markup_schedule_company_identity").on(t.companyId, t.id),
+}));
+export const materialMarkupTiers = pgTable("material_markup_tiers", {
+  id: serial("id").primaryKey(),
+  scheduleId: integer("schedule_id").notNull().references(() => materialMarkupSchedules.id, { onDelete: "cascade" }),
+  tierOrder: integer("tier_order").notNull(),
+  minCost: decimal("min_cost", { precision: 10, scale: 2 }).notNull(),
+  maxCost: decimal("max_cost", { precision: 10, scale: 2 }),
+  markupPercent: decimal("markup_percent", { precision: 5, scale: 2 }).notNull(),
+}, t => ({
+  scheduleOrder: uniqueIndex("markup_tier_schedule_order").on(t.scheduleId, t.tierOrder),
+  valid: check("markup_tier_valid", sql`${t.tierOrder} > 0 AND ${t.minCost} >= 0.01 AND (${t.maxCost} IS NULL OR ${t.maxCost} > ${t.minCost}) AND ${t.markupPercent} >= 0`),
+}));
+export const customerMarkupScheduleOverrides = pgTable("customer_markup_schedule_overrides", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  customerId: integer("customer_id").notNull().references(() => customers.id),
+  scheduleId: integer("schedule_id").notNull().references(() => materialMarkupSchedules.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().$onUpdateFn(() => new Date()),
+}, t => ({
+  customer: uniqueIndex("markup_override_company_customer").on(t.companyId, t.customerId),
+  customerTenant: foreignKey({ name: "markup_override_customer_tenant_fk", columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
+  scheduleTenant: foreignKey({ name: "markup_override_schedule_tenant_fk", columns: [t.companyId, t.scheduleId], foreignColumns: [materialMarkupSchedules.companyId, materialMarkupSchedules.id] }),
+}));
+export const insertMarkupScheduleSchema = createInsertSchema(materialMarkupSchedules).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertMarkupTierSchema = createInsertSchema(materialMarkupTiers).omit({ id: true });
+export const insertCustomerMarkupOverrideSchema = createInsertSchema(customerMarkupScheduleOverrides).omit({ id: true, createdAt: true, updatedAt: true });
+export type MarkupSchedule = typeof materialMarkupSchedules.$inferSelect;
+export type InsertMarkupSchedule = z.infer<typeof insertMarkupScheduleSchema>;
+export type MaterialMarkupTier = typeof materialMarkupTiers.$inferSelect;
+export type InsertMarkupTier = z.infer<typeof insertMarkupTierSchema>;
+export type CustomerMarkupOverride = typeof customerMarkupScheduleOverrides.$inferSelect;
+export type InsertCustomerMarkupOverride = z.infer<typeof insertCustomerMarkupOverrideSchema>;
 
 export const customerSyncReview = pgTable("customer_sync_review", {
   id: serial("id").primaryKey(),

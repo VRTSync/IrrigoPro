@@ -37,6 +37,8 @@ import {
 import { shouldInvalidateAfterEstimateWrite, submitEstimate, type SubmitMode } from "./estimate-wizard-submit";
 import { isDraft, estimateSubmitStatusFields } from "@workspace/shared";
 import { getCurrentUser } from "@/lib/impersonation";
+import { useGetActiveMarkupSchedule } from "@workspace/api-client-react";
+import { computeCustomerPrice, isMaterialMarkupEligible } from "@workspace/shared";
 
 interface EstimateApiPayloadEstimate {
   customerId: number;
@@ -351,6 +353,12 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     workLocationGpsError: null,
   });
   const [items, setItems] = useState<WizardLineItem[]>([]);
+  const pricingCompanyId = customerStep.customer?.companyId;
+  const markup = useGetActiveMarkupSchedule({ companyId: pricingCompanyId, customerId: customerStep.customer?.id }, {
+    query: { queryKey: ["/api/markup-schedules/active", pricingCompanyId, customerStep.customer?.id], enabled: open && !!pricingCompanyId, retry: false, staleTime: 0 },
+  });
+  const markupError = markup.isLoading ? "Loading current material pricing…" :
+    markup.error && (markup.error as any).status !== 404 ? "Could not load material pricing. Please retry." : undefined;
   const [laborRate, setLaborRate] = useState<number>(45);
   // Task #657 — Labor is flat-only; the wizard owns a single
   // "Total labor hours" value at the estimate level.
@@ -1123,6 +1131,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
               />
             ) : step === 3 ? (
               <EstimateWizardLineItemsStep
+                pricingError={markupError}
+                catalogPrice={part => markup.data && isMaterialMarkupEligible(part) ? computeCustomerPrice(Number(part.cost), markup.data.tiers) : Number(part.price)}
                 customerName={customerStep.customer?.name ?? ""}
                 projectName={customerStep.projectName}
                 laborRate={laborRate}

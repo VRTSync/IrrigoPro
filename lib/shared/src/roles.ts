@@ -182,6 +182,8 @@ export const CAN_APPROVE_PARTS = new Set<Role>([
   "billing_manager",
   "irrigation_manager",
 ]);
+export const CAN_MANAGE_MARKUP_SCHEDULES = new Set<Role>(["super_admin", "company_admin"]);
+export const CAN_ASSIGN_MARKUP_SCHEDULES = new Set<Role>(["super_admin", "company_admin", "billing_manager"]);
 
 /**
  * See budget targets, budget usage, and budget alerts.

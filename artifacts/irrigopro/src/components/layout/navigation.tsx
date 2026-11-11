@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest, adaptiveRefetchInterval, clearSessionAndLogout } from "@/lib/queryClient";
 import irrigoProLogo from "@assets/IrrigoPro_2026-03_1780427958317.png";
 import { useMemo } from "react";
-import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, Receipt, Droplets, Cpu, Activity, type LucideIcon } from "lucide-react";
+import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, Receipt, Droplets, Cpu, Activity, Percent, type LucideIcon } from "lucide-react";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 import type { Part, ManualPartReview, Estimate } from "@workspace/db/schema";
 
@@ -155,6 +155,7 @@ export default function Navigation() {
             dropdownItems: [
               { path: "/parts", label: "Parts Catalog", icon: Package },
               { path: "/parts-settings", label: "Parts Settings", icon: Settings },
+              { path: "/admin/markup-schedule", label: "Material Markup", icon: Percent },
             ]
           },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },

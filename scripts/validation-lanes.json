@@ -107,6 +107,18 @@
   ],
   "api-field": [
     {
+      "name": "material-markup-recalculation",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 src/lib/markup-recalculation.test.ts src/routes/parts-material-pricing.test.ts"
+    },
+    {
+      "name": "material-markup-pricing-integration",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 src/lib/material-pricing.test.ts src/routes/markup-schedule-routes.test.ts"
+    },
+    {
+      "name": "material-markup-engine-storage",
+      "command": "pnpm --filter @workspace/shared exec node --import tsx --test src/tiered-markup.test.ts && pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 src/storage/markup-schedules.test.ts"
+    },
+    {
       "name": "system-documentation-routes",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/routes/system-documentation-routes.test.ts"
     },
@@ -307,6 +319,10 @@
     {
       "name": "document-system-page",
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/pages/customers/IrrigationProfile.test.tsx src/pages/customers/DocumentSystemPage.test.tsx src/components/customers/irrigation-controller-grid.test.tsx src/pages/wet-checks/CustomerPickerPage.test.tsx src/components/documenter-app.test.tsx src/pages/company-user-management.documenter.test.tsx src/App.unsupported-role.test.tsx --maxWorkers=1 --minWorkers=1"
+    },
+    {
+      "name": "tiered-markup-ui",
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run src/lib/markup-tier-form.test.ts src/pages/markup-schedule.test.tsx src/components/parts/part-form-dialog.test.tsx src/components/customer-markup-override.test.tsx src/components/markup/recalculate-prices.test.tsx src/pages/parts-pending-approval.test.tsx src/pages/parts-settings.test.tsx --maxWorkers=1 --minWorkers=1"
     }
   ],
   "types": [

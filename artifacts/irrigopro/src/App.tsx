@@ -56,6 +56,7 @@ const PrivacyPolicy = lazyPage(() => import("@/pages/privacy-policy"));
 const SwitchUser = lazyPage(() => import("@/pages/switch-user"));
 const CustomerProfile = lazyPage(() => import("@/pages/customer-profile"));
 const PartsSettings = lazyPage(() => import("@/pages/parts-settings"));
+const MarkupSchedulePage = lazyPage(() => import("@/pages/markup-schedule"));
 const PartsPendingApproval = lazyPage(() => import("@/pages/parts-pending-approval"));
 const EstimatesPendingApproval = lazyPage(() => import("@/pages/estimates-pending-approval"));
 const EstimateCommandCenter = lazyPage(() => import("@/pages/estimate-command-center"));
@@ -535,6 +536,7 @@ export function AppRoutes() {
                   <Route path="/admin/migrations" component={AdminMigrationsPage} />
                   <Route path="/admin/wc-labor-backfill" component={AdminWcLaborBackfillPage} />
                    <Route path="/admin/budget-goals" component={AdminBudgetGoalsPage} />
+                  <Route path="/admin/markup-schedule" component={MarkupSchedulePage} />
                   <Route path="/admin/wet-check-reconciliation" component={WetCheckReconciliationPage} />
                   <Route path="/reports/missing-location-data" component={MissingLocationDataReportPage} />
                   <Route path="/quickbooks" component={QuickBooksPage} />

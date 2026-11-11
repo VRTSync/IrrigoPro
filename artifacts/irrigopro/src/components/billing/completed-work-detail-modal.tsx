@@ -173,6 +173,7 @@ function SectionCard({
 
 // ─── Parts List Editor ────────────────────────────────────────────────────────
 interface PartsEditorRow {
+  id?: number;
   partId: number | null;
   partName: string;
   quantity: string;
@@ -205,6 +206,7 @@ export function PartsListEditorDialog({
 
   const toEditorRows = (items: (WorkOrderItem | BillingSheetItem)[]): PartsEditorRow[] =>
     items.map((item) => ({
+      id: item.id,
       partId: (item as any).partId ?? null,
       partName: item.partName ?? "",
       quantity: String((item as BillingSheetItem).quantity ?? (item as WorkOrderItem).quantity ?? "1"),
@@ -278,6 +280,7 @@ export function PartsListEditorDialog({
     mutationFn: async () => {
       const validRows = rows.filter((r) => r.partName.trim());
       const items = validRows.map((r) => ({
+        id: r.id,
         ...(r.partId != null ? { partId: r.partId } : {}),
         partName: r.partName.trim(),
         quantity: Math.max(0, parseFloat(r.quantity) || 0),

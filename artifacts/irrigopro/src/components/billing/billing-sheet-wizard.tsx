@@ -111,6 +111,7 @@ interface CustomerStepValue {
 }
 
 interface ItemValue {
+  id?: number;
   partId: number | null;
   partName: string;
   partDescription: string;
@@ -1335,6 +1336,7 @@ export function BillingSheetWizard({
       totalHours: existing.totalHours ? parseFloat(String(existing.totalHours)) : 0,
       items: Array.isArray(existing.items)
         ? existing.items.map((it: BillingSheetItem) => ({
+            id: it.id,
             partId: it.partId ?? null,
             partName: it.partName ?? "",
             partDescription: it.partDescription ?? "",
@@ -1419,6 +1421,7 @@ export function BillingSheetWizard({
       // pricing helper resolves catalog prices instead of any client values.
       const itemsForWire = partsLabor.items.map((it) => {
         const base: Record<string, unknown> = {
+          id: it.id,
           partId: it.partId ?? null,
           partName: it.partName,
           partDescription: it.partDescription || null,

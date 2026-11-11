@@ -209,6 +209,8 @@ type RawBillingItem = {
 async function resolveAuthoritativePartPricing(
   rawItems: RawBillingItem[] | undefined,
   companyId: number | null | undefined,
+  customerId?: number | null,
+  storedItems: any[] = [],
 ): Promise<{
   items?: RawBillingItem[];
   error?: { status: number; message: string };
@@ -219,65 +221,11 @@ async function resolveAuthoritativePartPricing(
     return { items: rawItems, auditedZeros };
   }
 
-  const out: RawBillingItem[] = [];
-  for (let i = 0; i < rawItems.length; i++) {
-    const item = rawItems[i] ?? {};
-    const partIdRaw = item.partId as unknown;
-    const partId =
-      partIdRaw == null || partIdRaw === '' ? null : Number(partIdRaw);
-
-    if (!partId || !Number.isFinite(partId)) {
-      // Manual / non-catalog line item — leave the client-supplied price alone.
-      out.push(item);
-      continue;
-    }
-
-    const part = await storage.getPart(partId);
-    const lineLabel = String(item.partName ?? `line ${i + 1}`);
-
-    if (!part) {
-      return {
-        error: {
-          status: 400,
-          message: `Catalog part with ID ${partId} (line item "${lineLabel}") was not found. Cannot save a $0 line item for an unknown catalog part.`,
-        },
-        auditedZeros,
-      };
-    }
-    if (companyId != null && part.companyId !== companyId) {
-      return {
-        error: {
-          status: 400,
-          message: `Catalog part "${part.name}" (ID ${partId}, line item "${lineLabel}") does not belong to your company. Cannot save the line item.`,
-        },
-        auditedZeros,
-      };
-    }
-
-    const catalogUnitPrice = parseFloat(String(part.price ?? 0));
-    const clientUnitPrice = parseFloat(String(item.unitPrice ?? 0));
-    if (catalogUnitPrice > 0 && Math.abs(clientUnitPrice - catalogUnitPrice) > 0.005) {
-      auditedZeros.push({
-        index: i,
-        partId,
-        partName: part.name,
-        clientUnitPrice,
-        catalogUnitPrice,
-      });
-    }
-
-    const qty = parseFloat(String(item.quantity ?? 0));
-    out.push({
-      ...item,
-      partId,
-      partName: item.partName || part.name,
-      partDescription: item.partDescription ?? part.description ?? null,
-      unitPrice: catalogUnitPrice,
-      totalPrice: (qty * catalogUnitPrice).toFixed(2),
-    } as RawBillingItem);
+  try {
+    return { items: await priceDocumentLines(rawItems, Number(companyId), customerId, storedItems, storage), auditedZeros };
+  } catch (error) {
+    return { error: { status: error instanceof Error && "status" in error ? Number(error.status) : 400, message: error instanceof Error ? error.message : "Could not resolve catalog pricing" }, auditedZeros };
   }
-
-  return { items: out, auditedZeros };
 }
 
 // Logs (and is the seam for future metrics/audit-row writes) any catalog line
@@ -384,6 +332,9 @@ import { recordAuditEvent } from "./audit-log";
 import { paginate } from "./pagination";
 import { registerSiteMapRoutes } from "./site-map-routes";
 import { registerPartRoutes } from "./parts-routes";
+import { registerMarkupScheduleRoutes } from "./markup-schedule-routes";
+import { registerMarkupRecalculationRoutes } from "./markup-recalculation-routes";
+import { priceDocumentLines } from "../lib/material-pricing";
 import { requireApiKey } from "./external-auth";
 import { registerExternalPartsRoute } from "./external-parts-route";
 import { registerBillingWorkspaceRoutes, ACTIVE_WCB, PENDING_REVIEW_WCB } from "./billing-workspace-routes";
@@ -7921,6 +7872,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Parts + Part Settings + Manual Part Reviews — extracted to ./parts-routes.ts
   registerPartRoutes(app, { requireAuthentication, applyPricingVisibility });
+  registerMarkupScheduleRoutes(app, requireAuthentication);
+  registerMarkupRecalculationRoutes(app, requireAuthentication);
 
   // Task #709 — Billing Workspace endpoints.
   registerBillingWorkspaceRoutes(app, { requireAuthentication });
@@ -9775,19 +9728,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
 
-          // Fallback: partId stack-map (legacy / offline payloads without sourceItemId).
-          if (!prior) {
-            const priorList = part.partId != null ? priorsByPartId.get(part.partId) : undefined;
-            // Skip any row already claimed by a sourceItemId match above.
-            while (priorList && priorList.length > 0 && consumedPriorIds.has(priorList[0].id)) {
-              priorList.shift();
-            }
-            const candidate = priorList?.shift();
-            if (candidate) {
-              prior = candidate;
-              consumedPriorIds.add(candidate.id);
-            }
-          }
+          // Only a stored parent-scoped database line ID establishes a frozen
+          // price. A newly added use of the same part is still a new line.
 
           if (prior) {
             // Preserve snapshotted price + lineage from the existing WO item.
@@ -9841,7 +9783,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
         if (finalItems.length > 0) {
-          await storage.replaceWorkOrderItemsWithResync(workOrderId, finalItems, callerCompanyIdComplete0);
+          const pricedCompletionItems = await priceDocumentLines(finalItems, existingWorkOrder.companyId, existingWorkOrder.customerId,
+            priorItemsForGuard, storage, "partPrice");
+          await storage.replaceWorkOrderItemsWithResync(workOrderId, pricedCompletionItems, callerCompanyIdComplete0);
         } else if (incomingParts.length > 0) {
           // All part catalog lookups resolved to nothing (e.g. every partId unknown).
           // Do NOT zero-out the existing items — preserve prior rows to avoid data
@@ -11235,6 +11179,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Task #1093 — item replacement for billing sheets.
   const itemsBody = z.object({
     items: z.array(z.object({
+      id: z.number().int().positive().optional(),
+      sourceItemId: z.number().int().positive().optional(),
       partId: z.number().int().positive().optional().nullable(),
       partName: z.string().min(1),
       quantity: z.number().min(0),
@@ -11254,7 +11200,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid id" }); return; }
     const companyId: number | null = role === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
     try {
-      const insertItems = parsed.data.items.map((i) => ({
+      const sheet = await storage.getBillingSheetById(id, companyId);
+      if (!sheet) { res.status(404).json({ message: "Billing sheet not found" }); return; }
+      const pricedItems = await priceDocumentLines(parsed.data.items, sheet.companyId, sheet.customerId, sheet.items, storage);
+      const insertItems = pricedItems.map((i) => ({
+        sourceItemId: i.sourceItemId ?? i.id,
         billingSheetId: id,
         partId: i.partId ?? null,
         partName: i.partName,
@@ -11442,7 +11392,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ?? (headerUserCompanyId(req)
           ? parseInt(headerUserCompanyId(req) as string)
           : (customerForRate.companyId ?? null));
-      const pricingResult = await resolveAuthoritativePartPricing(rawClientItems, postCompanyId);
+      const pricingResult = await resolveAuthoritativePartPricing(rawClientItems, postCompanyId, customerForRate.id);
       if (pricingResult.error) {
         res.status(pricingResult.error.status).json({ message: pricingResult.error.message });
         return;
@@ -11975,7 +11925,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ?? (headerUserCompanyId(req)
             ? parseInt(headerUserCompanyId(req) as string)
             : null);
-        const patchPricingResult = await resolveAuthoritativePartPricing(items as RawBillingItem[], patchCompanyIdForPricing);
+        const patchPricingResult = await resolveAuthoritativePartPricing(items as RawBillingItem[], existingBsForLockCheck!.companyId, existingBsForLockCheck!.customerId,
+          (await storage.getBillingSheetById(id, existingBsForLockCheck!.companyId))?.items ?? []);
         if (patchPricingResult.error) {
           res.status(patchPricingResult.error.status).json({ message: patchPricingResult.error.message });
           return;
@@ -12948,7 +12899,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid id" }); return; }
     const companyId: number | null = role === "super_admin" ? null : (req.authenticatedUserCompanyId ?? null);
     try {
-      const insertItems = parsed.data.items.map((i) => ({
+      const order = await storage.getWorkOrder(id, companyId);
+      if (!order) { res.status(404).json({ message: "Work order not found" }); return; }
+      const pricedItems = await priceDocumentLines(parsed.data.items, order.companyId, order.customerId,
+        (await storage.getWorkOrderItems(id)).map(it => ({ ...it, unitPrice: it.partPrice })), storage);
+      const insertItems = pricedItems.map((i) => ({
         workOrderId: id,
         sourceItemId: i.sourceItemId ?? i.id ?? undefined,
         ...(Object.hasOwn(i, "controllerLetter") ? { controllerLetter: i.controllerLetter } : {}),
@@ -13039,7 +12994,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ?? (headerUserCompanyId(req)
             ? parseInt(headerUserCompanyId(req) as string)
             : null);
-        const woCreatePricing = await resolveAuthoritativePartPricing(items as RawBillingItem[], woCreateCompanyId);
+        const pricingCustomer = workOrderData.customerId ? await storage.getCustomer(workOrderData.customerId) : null;
+        const woCreatePricing = await resolveAuthoritativePartPricing(items as RawBillingItem[], woCreateCompanyId ?? pricingCustomer?.companyId, workOrderData.customerId);
         if (woCreatePricing.error) {
           res.status(woCreatePricing.error.status).json({ message: woCreatePricing.error.message });
           return;
@@ -13338,7 +13294,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ?? (headerUserCompanyId(req)
             ? parseInt(headerUserCompanyId(req) as string)
             : null);
-        const woUpdatePricing = await resolveAuthoritativePartPricing(items as RawBillingItem[], woUpdateCompanyId);
+        const woUpdatePricing = await resolveAuthoritativePartPricing(items as RawBillingItem[], existingForLockCheck!.companyId, workOrderData.customerId ?? existingForLockCheck!.customerId,
+          (await storage.getWorkOrderItems(id)).map(it => ({ ...it, unitPrice: it.partPrice })));
         if (woUpdatePricing.error) {
           res.status(woUpdatePricing.error.status).json({ message: woUpdatePricing.error.message });
           return;
@@ -13567,7 +13524,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         quantity: req.body.quantity,
         unitPrice: req.body.unitPrice ?? req.body.partPrice ?? 0,
       };
-      const itemPricing = await resolveAuthoritativePartPricing([probeItem], woItemCompanyId);
+      const pricingOrder = req.tenantScopedWorkOrder ?? await storage.getWorkOrder(workOrderId, woItemCompanyId);
+      const itemPricing = await resolveAuthoritativePartPricing([probeItem], Number(pricingOrder?.companyId), Number(pricingOrder?.customerId) || null);
       if (itemPricing.error) {
         res.status(itemPricing.error.status).json({ message: itemPricing.error.message });
         return;
@@ -14304,7 +14262,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ?? (headerUserCompanyId(req)
           ? parseInt(headerUserCompanyId(req) as string)
           : (woCustomerForRate.companyId ?? null));
-      const woPricingResult = await resolveAuthoritativePartPricing(rawRequestItems as RawBillingItem[], woCompanyIdForPricing);
+      const woPricingResult = await resolveAuthoritativePartPricing(rawRequestItems as RawBillingItem[], workOrder.companyId, workOrder.customerId);
       if (woPricingResult.error) {
         res.status(woPricingResult.error.status).json({ message: woPricingResult.error.message });
         return;

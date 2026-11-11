@@ -65,6 +65,9 @@ import {
 } from "./estimate-role-guards";
 import { UnapproveEstimateConflictError } from "../storage";
 import { deriveLifecycleForWrite } from "@workspace/shared";
+import { priceDocumentLines, MaterialPricingError, resolveMaterialSchedule } from "../lib/material-pricing";
+import { MarkupNotFound } from "../storage/markup-schedules";
+import type { Part } from "@workspace/db";
 
 // Storage surface used by every estimate route. Methods used only by
 // routes that aren't exercised in the existing test suite are marked
@@ -73,6 +76,7 @@ import { deriveLifecycleForWrite } from "@workspace/shared";
 // continues to satisfy the interface without modification. The real
 // `DatabaseStorage` implements every method.
 export interface EstimateRoutesStorage {
+  getPart?(id: number): Promise<Part | undefined>;
   getCustomer(id: number): Promise<Customer | undefined>;
   getEstimate(
     id: number,
@@ -195,6 +199,7 @@ export const createEstimateWithItemsSchema = z.object({
   items: z
     .array(
       z.object({
+        id: z.number().int().positive().optional(),
         sourceItemId: z.number().int().positive().optional(),
         controllerLetter: z.string().nullable().optional(),
         zoneNumber: z.number().int().positive().nullable().optional(),
@@ -296,6 +301,7 @@ export class EstimateSendConflictError extends Error {
 // ─── Route registration ──────────────────────────────────────────────────────
 
 export type EstimateRouteDeps = {
+  loadMaterialSchedule?: typeof resolveMaterialSchedule;
   // Task #643 — pricing-strip helper. Wraps GET responses so the
   // field_tech role never sees prices. Defaults to identity for
   // tests that don't supply it.
@@ -581,10 +587,17 @@ export function registerEstimateRoutes(
       // Single sanctioned entry point — same service the wet-check
       // conversion engine calls — so the two flows can never drift in
       // pricing semantics or downstream side effects.
+      if (parsed.items.some(it => it.partId)) {
+        parsed.items = await priceDocumentLines(parsed.items, Number((parsed.estimate as any).companyId), customerId, [],
+          { getPart: (id) => storage.getPart!(id) }, "partPrice", true, deps.loadMaterialSchedule ?? resolveMaterialSchedule);
+      }
       const newEstimate = await storage.createEstimateFromPayload(parsed);
       res.status(201).json(newEstimate);
     } catch (error) {
       console.error("Estimate creation error:", error);
+      if (error instanceof MaterialPricingError || error instanceof MarkupNotFound) {
+        res.status(error.status).json({ message: error.message }); return;
+      }
       if (error instanceof z.ZodError) {
         res.status(400).json({
           message: "Invalid estimate data",
@@ -779,6 +792,8 @@ export function registerEstimateRoutes(
         // estimateNumber in the payload.
         delete (parsed.estimate as { estimateNumber?: string }).estimateNumber;
       }
+      parsed.items = await priceDocumentLines(parsed.items, existing.companyId, newCustomerId ?? existing.customerId, existing.items,
+        { getPart: (id) => storage.getPart!(id) }, "partPrice", true, deps.loadMaterialSchedule ?? resolveMaterialSchedule);
       const { estimate, items } = processEstimatePayload(parsed);
       // processEstimatePayload spreads `input.estimate` so it carries
       // the (validated) renamed number through into the InsertEstimate.
@@ -818,6 +833,9 @@ export function registerEstimateRoutes(
       return updatedEstimate;
     } catch (error) {
       console.error("Estimate update error:", error);
+      if (error instanceof MaterialPricingError || error instanceof MarkupNotFound) {
+        res.status(error.status).json({ message: error.message }); return null;
+      }
       if (error instanceof z.ZodError) {
         res.status(400).json({
           message: "Invalid estimate data",

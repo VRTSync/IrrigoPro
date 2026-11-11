@@ -17,10 +17,13 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  ActivateMarkupScheduleParams,
   ControllerLetterConflict,
   ControllerLetterInput,
   ControllerLetterResult,
+  CreateMarkupScheduleParams,
   CustomerPullStatus,
+  DeactivateMarkupScheduleParams,
   DocumentationBackflowVerification,
   DocumentationControllerVerification,
   DocumentationError,
@@ -29,8 +32,28 @@ import type {
   DocumentationSiteBlock,
   DocumentationSiteInput,
   DocumentationSites,
+  GetActiveMarkupScheduleParams,
+  GetCustomerMarkupOverrideParams,
   GetDocumentationSiteParams,
+  GetMarkupScheduleOptionsParams,
+  GetMarkupScheduleParams,
   HealthStatus,
+  ListMarkupSchedulesParams,
+  MarkupActionResult,
+  MarkupOverrideInput,
+  MarkupOverrideResult,
+  MarkupRecalculationInput,
+  MarkupRecalculationPreview,
+  MarkupRecalculationResult,
+  MarkupSchedule,
+  MarkupScheduleContext,
+  MarkupScheduleInput,
+  MarkupScheduleUpdate,
+  PreviewMarkupRecalculationParams,
+  RecalculateMarkupPricesParams,
+  RemoveCustomerMarkupOverrideParams,
+  SetCustomerMarkupOverrideParams,
+  UpdateMarkupScheduleParams,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -41,6 +64,1349 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+export const getPreviewMarkupRecalculationUrl = (
+  params?: PreviewMarkupRecalculationParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/markup-schedules/recalculate-prices/preview?${stringifiedParams}`
+    : `/api/markup-schedules/recalculate-prices/preview`;
+};
+
+export const previewMarkupRecalculation = async (
+  params?: PreviewMarkupRecalculationParams,
+  options?: RequestInit,
+): Promise<MarkupRecalculationPreview> => {
+  return customFetch<MarkupRecalculationPreview>(
+    getPreviewMarkupRecalculationUrl(params),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getPreviewMarkupRecalculationMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewMarkupRecalculation>>,
+    TError,
+    { params?: PreviewMarkupRecalculationParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof previewMarkupRecalculation>>,
+  TError,
+  { params?: PreviewMarkupRecalculationParams },
+  TContext
+> => {
+  const mutationKey = ["previewMarkupRecalculation"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof previewMarkupRecalculation>>,
+    { params?: PreviewMarkupRecalculationParams }
+  > = (props) => {
+    const { params } = props ?? {};
+
+    return previewMarkupRecalculation(params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreviewMarkupRecalculationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof previewMarkupRecalculation>>
+>;
+
+export type PreviewMarkupRecalculationMutationError = ErrorType<void>;
+
+export const usePreviewMarkupRecalculation = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewMarkupRecalculation>>,
+    TError,
+    { params?: PreviewMarkupRecalculationParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof previewMarkupRecalculation>>,
+  TError,
+  { params?: PreviewMarkupRecalculationParams },
+  TContext
+> => {
+  return useMutation(getPreviewMarkupRecalculationMutationOptions(options));
+};
+
+export const getRecalculateMarkupPricesUrl = (
+  params?: RecalculateMarkupPricesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/markup-schedules/recalculate-prices?${stringifiedParams}`
+    : `/api/markup-schedules/recalculate-prices`;
+};
+
+export const recalculateMarkupPrices = async (
+  markupRecalculationInput: MarkupRecalculationInput,
+  params?: RecalculateMarkupPricesParams,
+  options?: RequestInit,
+): Promise<MarkupRecalculationResult> => {
+  return customFetch<MarkupRecalculationResult>(
+    getRecalculateMarkupPricesUrl(params),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(markupRecalculationInput),
+    },
+  );
+};
+
+export const getRecalculateMarkupPricesMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recalculateMarkupPrices>>,
+    TError,
+    {
+      data: BodyType<MarkupRecalculationInput>;
+      params?: RecalculateMarkupPricesParams;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof recalculateMarkupPrices>>,
+  TError,
+  {
+    data: BodyType<MarkupRecalculationInput>;
+    params?: RecalculateMarkupPricesParams;
+  },
+  TContext
+> => {
+  const mutationKey = ["recalculateMarkupPrices"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof recalculateMarkupPrices>>,
+    {
+      data: BodyType<MarkupRecalculationInput>;
+      params?: RecalculateMarkupPricesParams;
+    }
+  > = (props) => {
+    const { data, params } = props ?? {};
+
+    return recalculateMarkupPrices(data, params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RecalculateMarkupPricesMutationResult = NonNullable<
+  Awaited<ReturnType<typeof recalculateMarkupPrices>>
+>;
+export type RecalculateMarkupPricesMutationBody =
+  BodyType<MarkupRecalculationInput>;
+export type RecalculateMarkupPricesMutationError = ErrorType<void>;
+
+export const useRecalculateMarkupPrices = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recalculateMarkupPrices>>,
+    TError,
+    {
+      data: BodyType<MarkupRecalculationInput>;
+      params?: RecalculateMarkupPricesParams;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof recalculateMarkupPrices>>,
+  TError,
+  {
+    data: BodyType<MarkupRecalculationInput>;
+    params?: RecalculateMarkupPricesParams;
+  },
+  TContext
+> => {
+  return useMutation(getRecalculateMarkupPricesMutationOptions(options));
+};
+
+export const getListMarkupSchedulesUrl = (
+  params?: ListMarkupSchedulesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/markup-schedules?${stringifiedParams}`
+    : `/api/markup-schedules`;
+};
+
+export const listMarkupSchedules = async (
+  params?: ListMarkupSchedulesParams,
+  options?: RequestInit,
+): Promise<MarkupSchedule[]> => {
+  return customFetch<MarkupSchedule[]>(getListMarkupSchedulesUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListMarkupSchedulesQueryKey = (
+  params?: ListMarkupSchedulesParams,
+) => {
+  return [`/api/markup-schedules`, ...(params ? [params] : [])] as const;
+};
+
+export const getListMarkupSchedulesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listMarkupSchedules>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListMarkupSchedulesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listMarkupSchedules>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListMarkupSchedulesQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listMarkupSchedules>>
+  > = ({ signal }) =>
+    listMarkupSchedules(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listMarkupSchedules>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListMarkupSchedulesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listMarkupSchedules>>
+>;
+export type ListMarkupSchedulesQueryError = ErrorType<unknown>;
+
+export function useListMarkupSchedules<
+  TData = Awaited<ReturnType<typeof listMarkupSchedules>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListMarkupSchedulesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listMarkupSchedules>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListMarkupSchedulesQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getCreateMarkupScheduleUrl = (
+  params?: CreateMarkupScheduleParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/markup-schedules?${stringifiedParams}`
+    : `/api/markup-schedules`;
+};
+
+export const createMarkupSchedule = async (
+  markupScheduleInput: MarkupScheduleInput,
+  params?: CreateMarkupScheduleParams,
+  options?: RequestInit,
+): Promise<MarkupSchedule> => {
+  return customFetch<MarkupSchedule>(getCreateMarkupScheduleUrl(params), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(markupScheduleInput),
+  });
+};
+
+export const getCreateMarkupScheduleMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createMarkupSchedule>>,
+    TError,
+    {
+      data: BodyType<MarkupScheduleInput>;
+      params?: CreateMarkupScheduleParams;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createMarkupSchedule>>,
+  TError,
+  { data: BodyType<MarkupScheduleInput>; params?: CreateMarkupScheduleParams },
+  TContext
+> => {
+  const mutationKey = ["createMarkupSchedule"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createMarkupSchedule>>,
+    { data: BodyType<MarkupScheduleInput>; params?: CreateMarkupScheduleParams }
+  > = (props) => {
+    const { data, params } = props ?? {};
+
+    return createMarkupSchedule(data, params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateMarkupScheduleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createMarkupSchedule>>
+>;
+export type CreateMarkupScheduleMutationBody = BodyType<MarkupScheduleInput>;
+export type CreateMarkupScheduleMutationError = ErrorType<unknown>;
+
+export const useCreateMarkupSchedule = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createMarkupSchedule>>,
+    TError,
+    {
+      data: BodyType<MarkupScheduleInput>;
+      params?: CreateMarkupScheduleParams;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createMarkupSchedule>>,
+  TError,
+  { data: BodyType<MarkupScheduleInput>; params?: CreateMarkupScheduleParams },
+  TContext
+> => {
+  return useMutation(getCreateMarkupScheduleMutationOptions(options));
+};
+
+export const getGetActiveMarkupScheduleUrl = (
+  params?: GetActiveMarkupScheduleParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/markup-schedules/active?${stringifiedParams}`
+    : `/api/markup-schedules/active`;
+};
+
+export const getActiveMarkupSchedule = async (
+  params?: GetActiveMarkupScheduleParams,
+  options?: RequestInit,
+): Promise<MarkupScheduleContext> => {
+  return customFetch<MarkupScheduleContext>(
+    getGetActiveMarkupScheduleUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetActiveMarkupScheduleQueryKey = (
+  params?: GetActiveMarkupScheduleParams,
+) => {
+  return [`/api/markup-schedules/active`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetActiveMarkupScheduleQueryOptions = <
+  TData = Awaited<ReturnType<typeof getActiveMarkupSchedule>>,
+  TError = ErrorType<void>,
+>(
+  params?: GetActiveMarkupScheduleParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getActiveMarkupSchedule>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetActiveMarkupScheduleQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getActiveMarkupSchedule>>
+  > = ({ signal }) =>
+    getActiveMarkupSchedule(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getActiveMarkupSchedule>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetActiveMarkupScheduleQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getActiveMarkupSchedule>>
+>;
+export type GetActiveMarkupScheduleQueryError = ErrorType<void>;
+
+export function useGetActiveMarkupSchedule<
+  TData = Awaited<ReturnType<typeof getActiveMarkupSchedule>>,
+  TError = ErrorType<void>,
+>(
+  params?: GetActiveMarkupScheduleParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getActiveMarkupSchedule>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetActiveMarkupScheduleQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getGetMarkupScheduleOptionsUrl = (
+  params?: GetMarkupScheduleOptionsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/markup-schedules/options?${stringifiedParams}`
+    : `/api/markup-schedules/options`;
+};
+
+export const getMarkupScheduleOptions = async (
+  params?: GetMarkupScheduleOptionsParams,
+  options?: RequestInit,
+): Promise<MarkupSchedule[]> => {
+  return customFetch<MarkupSchedule[]>(getGetMarkupScheduleOptionsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetMarkupScheduleOptionsQueryKey = (
+  params?: GetMarkupScheduleOptionsParams,
+) => {
+  return [
+    `/api/markup-schedules/options`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetMarkupScheduleOptionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMarkupScheduleOptions>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetMarkupScheduleOptionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getMarkupScheduleOptions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetMarkupScheduleOptionsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getMarkupScheduleOptions>>
+  > = ({ signal }) =>
+    getMarkupScheduleOptions(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMarkupScheduleOptions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetMarkupScheduleOptionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getMarkupScheduleOptions>>
+>;
+export type GetMarkupScheduleOptionsQueryError = ErrorType<unknown>;
+
+export function useGetMarkupScheduleOptions<
+  TData = Awaited<ReturnType<typeof getMarkupScheduleOptions>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetMarkupScheduleOptionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getMarkupScheduleOptions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetMarkupScheduleOptionsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getGetMarkupScheduleUrl = (
+  id: number,
+  params?: GetMarkupScheduleParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/markup-schedules/${id}?${stringifiedParams}`
+    : `/api/markup-schedules/${id}`;
+};
+
+export const getMarkupSchedule = async (
+  id: number,
+  params?: GetMarkupScheduleParams,
+  options?: RequestInit,
+): Promise<MarkupScheduleContext> => {
+  return customFetch<MarkupScheduleContext>(
+    getGetMarkupScheduleUrl(id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetMarkupScheduleQueryKey = (
+  id: number,
+  params?: GetMarkupScheduleParams,
+) => {
+  return [`/api/markup-schedules/${id}`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetMarkupScheduleQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMarkupSchedule>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  params?: GetMarkupScheduleParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getMarkupSchedule>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetMarkupScheduleQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getMarkupSchedule>>
+  > = ({ signal }) =>
+    getMarkupSchedule(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMarkupSchedule>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetMarkupScheduleQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getMarkupSchedule>>
+>;
+export type GetMarkupScheduleQueryError = ErrorType<unknown>;
+
+export function useGetMarkupSchedule<
+  TData = Awaited<ReturnType<typeof getMarkupSchedule>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  params?: GetMarkupScheduleParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getMarkupSchedule>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetMarkupScheduleQueryOptions(id, params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getUpdateMarkupScheduleUrl = (
+  id: number,
+  params?: UpdateMarkupScheduleParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/markup-schedules/${id}?${stringifiedParams}`
+    : `/api/markup-schedules/${id}`;
+};
+
+export const updateMarkupSchedule = async (
+  id: number,
+  markupScheduleUpdate: MarkupScheduleUpdate,
+  params?: UpdateMarkupScheduleParams,
+  options?: RequestInit,
+): Promise<MarkupSchedule> => {
+  return customFetch<MarkupSchedule>(getUpdateMarkupScheduleUrl(id, params), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(markupScheduleUpdate),
+  });
+};
+
+export const getUpdateMarkupScheduleMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMarkupSchedule>>,
+    TError,
+    {
+      id: number;
+      data: BodyType<MarkupScheduleUpdate>;
+      params?: UpdateMarkupScheduleParams;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateMarkupSchedule>>,
+  TError,
+  {
+    id: number;
+    data: BodyType<MarkupScheduleUpdate>;
+    params?: UpdateMarkupScheduleParams;
+  },
+  TContext
+> => {
+  const mutationKey = ["updateMarkupSchedule"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateMarkupSchedule>>,
+    {
+      id: number;
+      data: BodyType<MarkupScheduleUpdate>;
+      params?: UpdateMarkupScheduleParams;
+    }
+  > = (props) => {
+    const { id, data, params } = props ?? {};
+
+    return updateMarkupSchedule(id, data, params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateMarkupScheduleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateMarkupSchedule>>
+>;
+export type UpdateMarkupScheduleMutationBody = BodyType<MarkupScheduleUpdate>;
+export type UpdateMarkupScheduleMutationError = ErrorType<unknown>;
+
+export const useUpdateMarkupSchedule = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMarkupSchedule>>,
+    TError,
+    {
+      id: number;
+      data: BodyType<MarkupScheduleUpdate>;
+      params?: UpdateMarkupScheduleParams;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateMarkupSchedule>>,
+  TError,
+  {
+    id: number;
+    data: BodyType<MarkupScheduleUpdate>;
+    params?: UpdateMarkupScheduleParams;
+  },
+  TContext
+> => {
+  return useMutation(getUpdateMarkupScheduleMutationOptions(options));
+};
+
+export const getActivateMarkupScheduleUrl = (
+  id: number,
+  params?: ActivateMarkupScheduleParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/markup-schedules/${id}/activate?${stringifiedParams}`
+    : `/api/markup-schedules/${id}/activate`;
+};
+
+export const activateMarkupSchedule = async (
+  id: number,
+  params?: ActivateMarkupScheduleParams,
+  options?: RequestInit,
+): Promise<MarkupActionResult> => {
+  return customFetch<MarkupActionResult>(
+    getActivateMarkupScheduleUrl(id, params),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getActivateMarkupScheduleMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof activateMarkupSchedule>>,
+    TError,
+    { id: number; params?: ActivateMarkupScheduleParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof activateMarkupSchedule>>,
+  TError,
+  { id: number; params?: ActivateMarkupScheduleParams },
+  TContext
+> => {
+  const mutationKey = ["activateMarkupSchedule"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof activateMarkupSchedule>>,
+    { id: number; params?: ActivateMarkupScheduleParams }
+  > = (props) => {
+    const { id, params } = props ?? {};
+
+    return activateMarkupSchedule(id, params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ActivateMarkupScheduleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof activateMarkupSchedule>>
+>;
+
+export type ActivateMarkupScheduleMutationError = ErrorType<unknown>;
+
+export const useActivateMarkupSchedule = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof activateMarkupSchedule>>,
+    TError,
+    { id: number; params?: ActivateMarkupScheduleParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof activateMarkupSchedule>>,
+  TError,
+  { id: number; params?: ActivateMarkupScheduleParams },
+  TContext
+> => {
+  return useMutation(getActivateMarkupScheduleMutationOptions(options));
+};
+
+export const getDeactivateMarkupScheduleUrl = (
+  id: number,
+  params?: DeactivateMarkupScheduleParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/markup-schedules/${id}/deactivate?${stringifiedParams}`
+    : `/api/markup-schedules/${id}/deactivate`;
+};
+
+export const deactivateMarkupSchedule = async (
+  id: number,
+  params?: DeactivateMarkupScheduleParams,
+  options?: RequestInit,
+): Promise<MarkupActionResult> => {
+  return customFetch<MarkupActionResult>(
+    getDeactivateMarkupScheduleUrl(id, params),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getDeactivateMarkupScheduleMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deactivateMarkupSchedule>>,
+    TError,
+    { id: number; params?: DeactivateMarkupScheduleParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deactivateMarkupSchedule>>,
+  TError,
+  { id: number; params?: DeactivateMarkupScheduleParams },
+  TContext
+> => {
+  const mutationKey = ["deactivateMarkupSchedule"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deactivateMarkupSchedule>>,
+    { id: number; params?: DeactivateMarkupScheduleParams }
+  > = (props) => {
+    const { id, params } = props ?? {};
+
+    return deactivateMarkupSchedule(id, params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeactivateMarkupScheduleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deactivateMarkupSchedule>>
+>;
+
+export type DeactivateMarkupScheduleMutationError = ErrorType<unknown>;
+
+export const useDeactivateMarkupSchedule = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deactivateMarkupSchedule>>,
+    TError,
+    { id: number; params?: DeactivateMarkupScheduleParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deactivateMarkupSchedule>>,
+  TError,
+  { id: number; params?: DeactivateMarkupScheduleParams },
+  TContext
+> => {
+  return useMutation(getDeactivateMarkupScheduleMutationOptions(options));
+};
+
+export const getGetCustomerMarkupOverrideUrl = (
+  id: number,
+  params?: GetCustomerMarkupOverrideParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/customers/${id}/markup-override?${stringifiedParams}`
+    : `/api/customers/${id}/markup-override`;
+};
+
+export const getCustomerMarkupOverride = async (
+  id: number,
+  params?: GetCustomerMarkupOverrideParams,
+  options?: RequestInit,
+): Promise<MarkupOverrideResult> => {
+  return customFetch<MarkupOverrideResult>(
+    getGetCustomerMarkupOverrideUrl(id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetCustomerMarkupOverrideQueryKey = (
+  id: number,
+  params?: GetCustomerMarkupOverrideParams,
+) => {
+  return [
+    `/api/customers/${id}/markup-override`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetCustomerMarkupOverrideQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCustomerMarkupOverride>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  params?: GetCustomerMarkupOverrideParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCustomerMarkupOverride>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetCustomerMarkupOverrideQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCustomerMarkupOverride>>
+  > = ({ signal }) =>
+    getCustomerMarkupOverride(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCustomerMarkupOverride>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCustomerMarkupOverrideQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCustomerMarkupOverride>>
+>;
+export type GetCustomerMarkupOverrideQueryError = ErrorType<unknown>;
+
+export function useGetCustomerMarkupOverride<
+  TData = Awaited<ReturnType<typeof getCustomerMarkupOverride>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  params?: GetCustomerMarkupOverrideParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCustomerMarkupOverride>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCustomerMarkupOverrideQueryOptions(
+    id,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getSetCustomerMarkupOverrideUrl = (
+  id: number,
+  params?: SetCustomerMarkupOverrideParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/customers/${id}/markup-override?${stringifiedParams}`
+    : `/api/customers/${id}/markup-override`;
+};
+
+export const setCustomerMarkupOverride = async (
+  id: number,
+  markupOverrideInput: MarkupOverrideInput,
+  params?: SetCustomerMarkupOverrideParams,
+  options?: RequestInit,
+): Promise<MarkupOverrideResult> => {
+  return customFetch<MarkupOverrideResult>(
+    getSetCustomerMarkupOverrideUrl(id, params),
+    {
+      ...options,
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(markupOverrideInput),
+    },
+  );
+};
+
+export const getSetCustomerMarkupOverrideMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setCustomerMarkupOverride>>,
+    TError,
+    {
+      id: number;
+      data: BodyType<MarkupOverrideInput>;
+      params?: SetCustomerMarkupOverrideParams;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof setCustomerMarkupOverride>>,
+  TError,
+  {
+    id: number;
+    data: BodyType<MarkupOverrideInput>;
+    params?: SetCustomerMarkupOverrideParams;
+  },
+  TContext
+> => {
+  const mutationKey = ["setCustomerMarkupOverride"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof setCustomerMarkupOverride>>,
+    {
+      id: number;
+      data: BodyType<MarkupOverrideInput>;
+      params?: SetCustomerMarkupOverrideParams;
+    }
+  > = (props) => {
+    const { id, data, params } = props ?? {};
+
+    return setCustomerMarkupOverride(id, data, params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SetCustomerMarkupOverrideMutationResult = NonNullable<
+  Awaited<ReturnType<typeof setCustomerMarkupOverride>>
+>;
+export type SetCustomerMarkupOverrideMutationBody =
+  BodyType<MarkupOverrideInput>;
+export type SetCustomerMarkupOverrideMutationError = ErrorType<unknown>;
+
+export const useSetCustomerMarkupOverride = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setCustomerMarkupOverride>>,
+    TError,
+    {
+      id: number;
+      data: BodyType<MarkupOverrideInput>;
+      params?: SetCustomerMarkupOverrideParams;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof setCustomerMarkupOverride>>,
+  TError,
+  {
+    id: number;
+    data: BodyType<MarkupOverrideInput>;
+    params?: SetCustomerMarkupOverrideParams;
+  },
+  TContext
+> => {
+  return useMutation(getSetCustomerMarkupOverrideMutationOptions(options));
+};
+
+export const getRemoveCustomerMarkupOverrideUrl = (
+  id: number,
+  params?: RemoveCustomerMarkupOverrideParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/customers/${id}/markup-override?${stringifiedParams}`
+    : `/api/customers/${id}/markup-override`;
+};
+
+export const removeCustomerMarkupOverride = async (
+  id: number,
+  params?: RemoveCustomerMarkupOverrideParams,
+  options?: RequestInit,
+): Promise<MarkupActionResult> => {
+  return customFetch<MarkupActionResult>(
+    getRemoveCustomerMarkupOverrideUrl(id, params),
+    {
+      ...options,
+      method: "DELETE",
+    },
+  );
+};
+
+export const getRemoveCustomerMarkupOverrideMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof removeCustomerMarkupOverride>>,
+    TError,
+    { id: number; params?: RemoveCustomerMarkupOverrideParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof removeCustomerMarkupOverride>>,
+  TError,
+  { id: number; params?: RemoveCustomerMarkupOverrideParams },
+  TContext
+> => {
+  const mutationKey = ["removeCustomerMarkupOverride"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof removeCustomerMarkupOverride>>,
+    { id: number; params?: RemoveCustomerMarkupOverrideParams }
+  > = (props) => {
+    const { id, params } = props ?? {};
+
+    return removeCustomerMarkupOverride(id, params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RemoveCustomerMarkupOverrideMutationResult = NonNullable<
+  Awaited<ReturnType<typeof removeCustomerMarkupOverride>>
+>;
+
+export type RemoveCustomerMarkupOverrideMutationError = ErrorType<unknown>;
+
+export const useRemoveCustomerMarkupOverride = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof removeCustomerMarkupOverride>>,
+    TError,
+    { id: number; params?: RemoveCustomerMarkupOverrideParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof removeCustomerMarkupOverride>>,
+  TError,
+  { id: number; params?: RemoveCustomerMarkupOverrideParams },
+  TContext
+> => {
+  return useMutation(getRemoveCustomerMarkupOverrideMutationOptions(options));
+};
 
 /**
  * @summary Confirm, change or atomically swap an active controller letter

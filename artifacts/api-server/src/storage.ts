@@ -224,6 +224,8 @@ import { LetterError, letterConflict, notesWithFormerName } from "./lib/controll
 import { bindTickets, chooseControllerId, normalizeControllerLetter } from "./lib/ticket-controller-binding";
 export { LetterError } from "./lib/controller-letters";
 import { DocumentationError } from "./lib/documentation-error";
+import * as markupSchedules from "./storage/markup-schedules";
+import { priceDocumentLines, resolveMaterialSchedule, materialUnitPrice } from "./lib/material-pricing";
 import { ProgramNameTakenError } from "./lib/controller-zone-records";
 export { ZoneCountClearError } from "./lib/controller-zone-records";
 
@@ -473,6 +475,16 @@ export type CurrentZoneSummary = {
 };
 
 export interface IStorage {
+  getActiveMarkupSchedule: typeof markupSchedules.getActiveMarkupSchedule;
+  getMarkupSchedule: typeof markupSchedules.getMarkupSchedule;
+  getMarkupSchedules: typeof markupSchedules.getMarkupSchedules;
+  createMarkupSchedule: typeof markupSchedules.createMarkupSchedule;
+  updateMarkupSchedule: typeof markupSchedules.updateMarkupSchedule;
+  activateMarkupSchedule: typeof markupSchedules.activateMarkupSchedule;
+  deactivateMarkupSchedule: typeof markupSchedules.deactivateMarkupSchedule;
+  getCustomerMarkupOverride: typeof markupSchedules.getCustomerMarkupOverride;
+  setCustomerMarkupOverride: typeof markupSchedules.setCustomerMarkupOverride;
+  removeCustomerMarkupOverride: typeof markupSchedules.removeCustomerMarkupOverride;
   reletterLocation(companyId: number | null, customerId: number, branchName: string,
     letters: { controllerId: number; letter: string }[], actor: ZoneActor
   ): Promise<{ controllers: IrrigationController[]; changed: number } | null>;
@@ -994,7 +1006,7 @@ export interface IStorage {
 
   // Parts Pending Approval
   getPendingParts(companyId: number): Promise<Part[]>;
-  approvePart(id: number, price: string, cost?: string, companyId?: number): Promise<Part | undefined>;
+  approvePart(id: number, price: string, cost?: string | null, companyId?: number): Promise<Part | undefined>;
 
   // AI Generation Logs
   createAiGenerationLog(log: InsertAiGenerationLog): Promise<AiGenerationLog>;
@@ -1600,6 +1612,16 @@ export const WET_CHECK_ZONE_RECORD_SELECTION = {
 } as const;
 
 export class DatabaseStorage implements IStorage {
+  getActiveMarkupSchedule = markupSchedules.getActiveMarkupSchedule;
+  getMarkupSchedule = markupSchedules.getMarkupSchedule;
+  getMarkupSchedules = markupSchedules.getMarkupSchedules;
+  createMarkupSchedule = markupSchedules.createMarkupSchedule;
+  updateMarkupSchedule = markupSchedules.updateMarkupSchedule;
+  activateMarkupSchedule = markupSchedules.activateMarkupSchedule;
+  deactivateMarkupSchedule = markupSchedules.deactivateMarkupSchedule;
+  getCustomerMarkupOverride = markupSchedules.getCustomerMarkupOverride;
+  setCustomerMarkupOverride = markupSchedules.setCustomerMarkupOverride;
+  removeCustomerMarkupOverride = markupSchedules.removeCustomerMarkupOverride;
   private _billingCounterTableReady = false;
   private _billingCounterPrefixSeeded = new Set<string>();
   private _wetCheckCounterPrefixSeeded = new Set<string>();
@@ -3330,6 +3352,11 @@ export class DatabaseStorage implements IStorage {
     explicitEstimateNumber?: string,
     sourceLocations?: Array<{ controllerLetter: string | null; zoneNumber: number | null; controllerId: number | null }>,
   ): Promise<EstimateWithItems> {
+    const companyId = (payload.estimate as any).companyId ?? (payload.estimate.customerId ? (await this.getCustomer(payload.estimate.customerId))?.companyId : null);
+    if (companyId && payload.items.some(it => it.partId)) {
+      const priced = await priceDocumentLines(payload.items as any[], companyId, payload.estimate.customerId, [], this, "partPrice");
+      payload = { ...payload, items: priced };
+    }
     const { estimate, items } = processEstimatePayload(payload);
     if (executor) {
       return this._writeEstimateWithItems(executor, estimate, items, explicitEstimateNumber, sourceLocations);
@@ -8374,7 +8401,12 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(parts.createdAt));
   }
 
-  async approvePart(id: number, price: string, cost?: string, companyId?: number): Promise<Part | undefined> {
+  async approvePart(id: number, price: string, cost?: string | null, companyId?: number): Promise<Part | undefined> {
+    if (!companyId) throw new Error("Company context is required");
+    const existing = await this.getPart(id);
+    if (!existing || existing.companyId !== companyId) return undefined;
+    const context = await resolveMaterialSchedule(companyId);
+    price = materialUnitPrice({ ...existing, price, cost: cost === undefined ? existing.cost : cost }, context?.tiers).toFixed(2);
     // Update the part itself
     const updateFields: Partial<typeof parts.$inferInsert> = {
       approvalStatus: 'approved',
@@ -8386,47 +8418,12 @@ export class DatabaseStorage implements IStorage {
 
     const [updatedPart] = await db.update(parts)
       .set(updateFields)
-      .where(eq(parts.id, id))
+      .where(and(eq(parts.id, id), eq(parts.companyId, companyId)))
       .returning();
 
     if (!updatedPart) return undefined;
 
-    // Propagate the new price to all uninvoiced billing_sheet_items referencing this part.
-    // Parts are inherently company-scoped (each part belongs to one company), so filtering by
-    // partId alone prevents cross-tenant contamination without needing a companyId join.
-    const uninvoicedBillingSheets = await db.select({ id: billingSheets.id })
-      .from(billingSheets)
-      .where(isNull(billingSheets.invoiceId));
-
-    if (uninvoicedBillingSheets.length > 0) {
-      for (const bs of uninvoicedBillingSheets) {
-        // Fetch the affected items so we can recalculate total_price per-item (quantity varies)
-        const affectedItems = await db.select()
-          .from(billingSheetItems)
-          .where(and(eq(billingSheetItems.partId, id), eq(billingSheetItems.billingSheetId, bs.id)));
-        for (const item of affectedItems) {
-          const qty = parseFloat(item.quantity ?? '1');
-          const newTotal = (qty * parseFloat(price)).toFixed(2);
-          await db.update(billingSheetItems)
-            .set({ unitPrice: price, totalPrice: newTotal })
-            .where(eq(billingSheetItems.id, item.id));
-        }
-      }
-    }
-
-    // Propagate the new price to all uninvoiced work_order_items referencing this part.
-    const uninvoicedWorkOrders = await db.select({ id: workOrders.id })
-      .from(workOrders)
-      .where(isNull(workOrders.invoiceId));
-
-    if (uninvoicedWorkOrders.length > 0) {
-      for (const wo of uninvoicedWorkOrders) {
-        await db.update(workOrderItems)
-          .set({ partPrice: price })
-          .where(and(eq(workOrderItems.partId, id), eq(workOrderItems.workOrderId, wo.id)));
-      }
-    }
-
+    // Approval changes the catalog only. Every existing document is a frozen price snapshot.
     return updatedPart;
   }
 
@@ -10914,9 +10911,17 @@ export class DatabaseStorage implements IStorage {
       const deferred = eligible.filter(f => f.resolution === "deferred_to_work_order");
       const documented = eligible.filter(f => f.resolution === "documented_only");
 
+      const markupContext = await resolveMaterialSchedule(companyId, wc.customerId);
+      const currentMaterialPrices = new Map<number, number>();
+      const catalogIds = [...new Set(eligible.flatMap(f => f.partId ? [f.partId] : []))];
+      if (catalogIds.length) {
+        const catalog = await tx.select().from(parts).where(and(eq(parts.companyId, companyId), inArray(parts.id, catalogIds)));
+        for (const part of catalog) currentMaterialPrices.set(part.id, materialUnitPrice(part, markupContext?.tiers));
+        if (catalog.length !== catalogIds.length) throw new markupSchedules.MarkupNotFound();
+      }
       const calc = (f: typeof allFindings[number]) => {
         const qty = money(f.quantity);
-        const partPrice = money(f.partPrice ?? "0");
+        const partPrice = f.partId ? currentMaterialPrices.get(f.partId)! : money(f.partPrice ?? "0");
         const laborHours = money(f.laborHours ?? "0");
         const partsTotal = partPrice * qty;
         const laborTotal = laborHours * laborRate;
@@ -11330,7 +11335,7 @@ export class DatabaseStorage implements IStorage {
         zoneByRecordId,
       );
       const lineItems: (typeof estimateItems.$inferInsert)[] =
-        drafts as (typeof estimateItems.$inferInsert)[];
+        await priceDocumentLines(drafts, companyId, wc.customerId, [], this, "partPrice") as (typeof estimateItems.$inferInsert)[];
 
       const partsSubtotal = lineItems.reduce(
         (s, it) => s + parseFloat(String(it.totalPrice ?? "0")), 0,

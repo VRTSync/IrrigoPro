@@ -22,6 +22,7 @@ import {
   UserCog,
   Repeat,
   Database,
+  Percent,
   type LucideIcon,
 } from "lucide-react";
 
@@ -312,6 +313,7 @@ export const superAdminNav: NavConfig = {
         { type: "leaf", label: "Controllers & Zones", path: "/admin/controllers", icon: Cpu },
         { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
         { type: "leaf", label: "Budget Goals", path: "/admin/budget-goals", icon: DollarSign },
+        { type: "leaf", label: "Material Markup", path: "/admin/markup-schedule", icon: Percent },
         { type: "leaf", label: "Client Errors", path: "/admin/client-errors", icon: AlertTriangle },
         { type: "leaf", label: "QuickBooks", path: "/quickbooks", icon: Calculator },
       ],
@@ -394,6 +396,7 @@ export const companyAdminNav: NavConfig = {
           badgeKey: "partsPendingApproval",
         },
         { type: "leaf", label: "Parts Settings", path: "/parts-settings", icon: Settings },
+        { type: "leaf", label: "Material Markup", path: "/admin/markup-schedule", icon: Percent },
       ],
     },
     {

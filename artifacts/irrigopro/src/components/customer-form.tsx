@@ -23,6 +23,7 @@ import type { Customer, User } from "@workspace/db/schema";
 import { composeStructuredAddress } from "@/lib/customer-address";
 import { parseBudgetGoalInput, QB_OWNED_CUSTOMER_FIELDS, type BudgetStatus } from "@workspace/shared";
 import { useCustomerRecordsLock } from "@/hooks/use-customer-records-lock";
+import { CustomerMarkupOverride } from "@/components/customer-markup-override";
 
 const moneyOrBlank = z
   .string()
@@ -917,6 +918,10 @@ export function CustomerForm({ customer, trigger, defaultOpen = false, onOpenCha
                 />
               </CardContent>
             </Card>
+
+            {customer && customer.id > 0 && (
+              <CustomerMarkupOverride customerId={customer.id} companyId={customer.companyId} role={currentUser?.role} />
+            )}
 
             {/* Notes */}
             <Card>

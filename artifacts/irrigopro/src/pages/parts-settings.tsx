@@ -8,26 +8,28 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Edit, Trash2, Plus, Check, X, Download } from "lucide-react";
+import { Link } from "wouter";
+import { Edit, Trash2, Plus, Check, X, Download, Info } from "lucide-react";
+import { CAN_MANAGE_MARKUP_SCHEDULES, hasCapability } from "@workspace/shared";
+import { useAuth } from "@/lib/auth-context";
 
-type RefEntry = { id: number; name: string; companyId: number; markupPercent?: string };
-type CreatePayload = { name: string; markupPercent?: string };
-type UpdatePayload = { name?: string; markupPercent?: string };
+// Task #2173 Tier 3 — category markup is retired from the UI. The legacy
+// markupPercent column/API field stays, but is never shown, sent or exported.
+type RefEntry = { id: number; name: string; companyId: number };
+type CreatePayload = { name: string };
+type UpdatePayload = { name?: string };
 
 interface RefListSectionProps {
   title: string;
   queryKey: string;
   apiPath: string;
-  withMarkup?: boolean;
 }
 
-function RefListSection({ title, queryKey, apiPath, withMarkup = false }: RefListSectionProps) {
+function RefListSection({ title, queryKey, apiPath }: RefListSectionProps) {
   const { toast } = useToast();
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
-  const [editMarkup, setEditMarkup] = useState("");
   const [addName, setAddName] = useState("");
-  const [addMarkup, setAddMarkup] = useState("0.00");
   const [isAdding, setIsAdding] = useState(false);
 
   const { data: items = [], isLoading } = useArrayQuery<RefEntry>({
@@ -39,7 +41,6 @@ function RefListSection({ title, queryKey, apiPath, withMarkup = false }: RefLis
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [queryKey] });
       setAddName("");
-      setAddMarkup("0.00");
       setIsAdding(false);
       toast({ title: `${title} added` });
     },
@@ -68,20 +69,17 @@ function RefListSection({ title, queryKey, apiPath, withMarkup = false }: RefLis
   const startEdit = (item: RefEntry) => {
     setEditingId(item.id);
     setEditName(item.name);
-    setEditMarkup(item.markupPercent ?? "0.00");
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setEditName("");
-    setEditMarkup("");
   };
 
   const saveEdit = (id: number) => {
     const name = editName.trim();
     if (!name) return;
     const data: UpdatePayload = { name };
-    if (withMarkup) data.markupPercent = editMarkup || "0.00";
     updateMutation.mutate({ id, data });
   };
 
@@ -89,7 +87,6 @@ function RefListSection({ title, queryKey, apiPath, withMarkup = false }: RefLis
     const name = addName.trim();
     if (!name) return;
     const data: CreatePayload = { name };
-    if (withMarkup) data.markupPercent = addMarkup || "0.00";
     createMutation.mutate(data);
   };
 
@@ -106,20 +103,19 @@ function RefListSection({ title, queryKey, apiPath, withMarkup = false }: RefLis
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              {withMarkup && <TableHead className="w-32">Markup %</TableHead>}
               <TableHead className="w-24 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={withMarkup ? 3 : 2} className="text-center text-gray-500 py-4">
+                <TableCell colSpan={2} className="text-center text-gray-500 py-4">
                   Loading...
                 </TableCell>
               </TableRow>
             ) : items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={withMarkup ? 3 : 2} className="text-center text-gray-500 py-4">
+                <TableCell colSpan={2} className="text-center text-gray-500 py-4">
                   No entries yet
                 </TableCell>
               </TableRow>
@@ -139,22 +135,6 @@ function RefListSection({ title, queryKey, apiPath, withMarkup = false }: RefLis
                       <span className="font-medium">{item.name}</span>
                     )}
                   </TableCell>
-                  {withMarkup && (
-                    <TableCell>
-                      {editingId === item.id ? (
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={editMarkup}
-                          onChange={(e) => setEditMarkup(e.target.value)}
-                          className="h-8 w-24"
-                        />
-                      ) : (
-                        <span className="text-gray-600">{item.markupPercent ?? "0.00"}%</span>
-                      )}
-                    </TableCell>
-                  )}
                   <TableCell className="text-right">
                     {editingId === item.id ? (
                       <div className="flex gap-1 justify-end">
@@ -198,19 +178,6 @@ function RefListSection({ title, queryKey, apiPath, withMarkup = false }: RefLis
                     onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); if (e.key === "Escape") setIsAdding(false); }}
                   />
                 </TableCell>
-                {withMarkup && (
-                  <TableCell>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={addMarkup}
-                      onChange={(e) => setAddMarkup(e.target.value)}
-                      placeholder="0.00"
-                      className="h-8 w-24"
-                    />
-                  </TableCell>
-                )}
                 <TableCell className="text-right">
                   <div className="flex gap-1 justify-end">
                     <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={handleAdd} disabled={createMutation.isPending}>
@@ -241,6 +208,31 @@ function RefListSection({ title, queryKey, apiPath, withMarkup = false }: RefLis
   );
 }
 
+export function MarkupRetiredBanner() {
+  const { user } = useAuth();
+  const canManage = hasCapability(user?.role, CAN_MANAGE_MARKUP_SCHEDULES);
+  return (
+    <div
+      role="note"
+      data-testid="banner-markup-retired"
+      className="flex items-start gap-2 rounded-md border border-l-4 border-blue-100 border-l-[hsl(var(--primary-dark))] bg-blue-50 px-4 py-3 text-sm text-blue-950"
+    >
+      <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-[hsl(var(--primary-dark))]" aria-hidden />
+      <p>
+        Material markup is managed through the Tiered Markup Schedule
+        {canManage && (
+          <>
+            {" "}
+            <Link href="/admin/markup-schedule" className="font-medium underline" data-testid="link-markup-schedule">
+              Open Material Markup
+            </Link>
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
+
 function escapeCSVCell(value: string): string {
   if (/[",\n\r]/.test(value)) {
     return `"${value.replace(/"/g, '""')}"`;
@@ -258,9 +250,9 @@ function exportPartsSettingsCSV(
   const lines: string[] = [];
 
   lines.push("Categories");
-  lines.push("Name,Markup %");
+  lines.push("Name");
   for (const c of categories) {
-    lines.push(`${escapeCSVCell(c.name)},${escapeCSVCell(c.markupPercent ?? "0.00")}`);
+    lines.push(escapeCSVCell(c.name));
   }
 
   lines.push("");
@@ -340,12 +332,12 @@ export default function PartsSettings() {
           <TabsTrigger value="fitting-types">Fitting Types</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="categories">
+        <TabsContent value="categories" className="space-y-4">
+          <MarkupRetiredBanner />
           <RefListSection
             title="Category"
             queryKey="/api/part-settings/categories"
             apiPath="/api/part-settings/categories"
-            withMarkup
           />
         </TabsContent>
 

@@ -195,7 +195,7 @@ function buildBody(opts: {
   if (!opts.omitBranch) estimate.branchName = opts.branchName ?? null;
   return {
     estimate,
-    items: [{ partId: 10, partName: "Head", partPrice: 100, quantity: 1 }],
+    items: [{ partId: null, partName: "Head", partPrice: 100, quantity: 1 }],
   };
 }
 
@@ -338,6 +338,7 @@ async function startServer(
   };
   const auditEvents: AuditEventInput[] = [];
   registerEstimateRoutes(app, stub, stubAuth, {
+    loadMaterialSchedule: async () => null,
     recordAuditEvent: async (_req, evt) => {
       auditEvents.push(evt);
     },

@@ -7,6 +7,394 @@
  */
 import * as zod from "zod";
 
+export const PreviewMarkupRecalculationQueryParams = zod.object({
+  companyId: zod.coerce.number().min(1).optional(),
+});
+
+export const PreviewMarkupRecalculationResponse = zod.object({
+  confirmationToken: zod.string(),
+  eligible: zod.number(),
+  excluded: zod.number(),
+  scheduleId: zod.number(),
+  scheduleName: zod.string(),
+  expiresAt: zod.coerce.date(),
+});
+
+export const RecalculateMarkupPricesQueryParams = zod.object({
+  companyId: zod.coerce.number().min(1).optional(),
+});
+
+export const recalculateMarkupPricesBodyConfirmationTokenMax = 300;
+
+export const recalculateMarkupPricesBodyOffsetMin = 0;
+
+export const RecalculateMarkupPricesBody = zod.object({
+  confirmationToken: zod
+    .string()
+    .min(1)
+    .max(recalculateMarkupPricesBodyConfirmationTokenMax),
+  offset: zod.number().min(recalculateMarkupPricesBodyOffsetMin),
+});
+
+export const RecalculateMarkupPricesResponse = zod.object({
+  processed: zod.number(),
+  total: zod.number(),
+  updated: zod.number(),
+  unchanged: zod.number(),
+  excluded: zod.number(),
+  errors: zod.array(zod.string()),
+  done: zod.boolean(),
+});
+
+export const ListMarkupSchedulesQueryParams = zod.object({
+  companyId: zod.coerce
+    .number()
+    .min(1)
+    .optional()
+    .describe(
+      "Required explicit company context for an unscoped super administrator",
+    ),
+});
+
+export const ListMarkupSchedulesResponseItem = zod.object({
+  id: zod.number(),
+  companyId: zod.number(),
+  name: zod.string(),
+  effectiveDate: zod.string(),
+  isActive: zod.boolean(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const ListMarkupSchedulesResponse = zod.array(
+  ListMarkupSchedulesResponseItem,
+);
+
+export const CreateMarkupScheduleQueryParams = zod.object({
+  companyId: zod.coerce
+    .number()
+    .min(1)
+    .optional()
+    .describe(
+      "Required explicit company context for an unscoped super administrator",
+    ),
+});
+
+export const createMarkupScheduleBodyNameMax = 200;
+
+export const createMarkupScheduleBodyEffectiveDateRegExp = new RegExp(
+  "^\\d{4}-\\d{2}-\\d{2}$",
+);
+
+export const createMarkupScheduleBodyTiersItemMinCostMin = 0.01;
+export const createMarkupScheduleBodyTiersItemMinCostMax = 99999999.99;
+
+export const createMarkupScheduleBodyTiersItemMaxCostMin = 0.01;
+export const createMarkupScheduleBodyTiersItemMaxCostMax = 99999999.99;
+
+export const createMarkupScheduleBodyTiersItemMarkupPercentMin = 0;
+export const createMarkupScheduleBodyTiersItemMarkupPercentMax = 999.99;
+
+export const createMarkupScheduleBodyTiersMax = 100;
+
+export const CreateMarkupScheduleBody = zod.object({
+  name: zod.string().min(1).max(createMarkupScheduleBodyNameMax),
+  effectiveDate: zod
+    .string()
+    .regex(createMarkupScheduleBodyEffectiveDateRegExp),
+  tiers: zod
+    .array(
+      zod.object({
+        tierOrder: zod.number().min(1),
+        minCost: zod
+          .number()
+          .min(createMarkupScheduleBodyTiersItemMinCostMin)
+          .max(createMarkupScheduleBodyTiersItemMinCostMax),
+        maxCost: zod
+          .number()
+          .min(createMarkupScheduleBodyTiersItemMaxCostMin)
+          .max(createMarkupScheduleBodyTiersItemMaxCostMax)
+          .nullable(),
+        markupPercent: zod
+          .number()
+          .min(createMarkupScheduleBodyTiersItemMarkupPercentMin)
+          .max(createMarkupScheduleBodyTiersItemMarkupPercentMax),
+      }),
+    )
+    .min(1)
+    .max(createMarkupScheduleBodyTiersMax),
+});
+
+export const GetActiveMarkupScheduleQueryParams = zod.object({
+  companyId: zod.coerce
+    .number()
+    .min(1)
+    .optional()
+    .describe(
+      "Required explicit company context for an unscoped super administrator",
+    ),
+  customerId: zod.coerce.number().min(1).optional(),
+});
+
+export const getActiveMarkupScheduleResponseTiersItemMinCostMin = 0.01;
+export const getActiveMarkupScheduleResponseTiersItemMinCostMax = 99999999.99;
+
+export const getActiveMarkupScheduleResponseTiersItemMaxCostMin = 0.01;
+export const getActiveMarkupScheduleResponseTiersItemMaxCostMax = 99999999.99;
+
+export const getActiveMarkupScheduleResponseTiersItemMarkupPercentMin = 0;
+export const getActiveMarkupScheduleResponseTiersItemMarkupPercentMax = 999.99;
+
+export const GetActiveMarkupScheduleResponse = zod.object({
+  schedule: zod.object({
+    id: zod.number(),
+    companyId: zod.number(),
+    name: zod.string(),
+    effectiveDate: zod.string(),
+    isActive: zod.boolean(),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  }),
+  tiers: zod.array(
+    zod.object({
+      tierOrder: zod.number().min(1),
+      minCost: zod
+        .number()
+        .min(getActiveMarkupScheduleResponseTiersItemMinCostMin)
+        .max(getActiveMarkupScheduleResponseTiersItemMinCostMax),
+      maxCost: zod
+        .number()
+        .min(getActiveMarkupScheduleResponseTiersItemMaxCostMin)
+        .max(getActiveMarkupScheduleResponseTiersItemMaxCostMax)
+        .nullable(),
+      markupPercent: zod
+        .number()
+        .min(getActiveMarkupScheduleResponseTiersItemMarkupPercentMin)
+        .max(getActiveMarkupScheduleResponseTiersItemMarkupPercentMax),
+    }),
+  ),
+});
+
+export const GetMarkupScheduleOptionsQueryParams = zod.object({
+  companyId: zod.coerce
+    .number()
+    .min(1)
+    .optional()
+    .describe(
+      "Required explicit company context for an unscoped super administrator",
+    ),
+});
+
+export const GetMarkupScheduleOptionsResponseItem = zod.object({
+  id: zod.number(),
+  companyId: zod.number(),
+  name: zod.string(),
+  effectiveDate: zod.string(),
+  isActive: zod.boolean(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const GetMarkupScheduleOptionsResponse = zod.array(
+  GetMarkupScheduleOptionsResponseItem,
+);
+
+export const GetMarkupScheduleQueryParams = zod.object({
+  companyId: zod
+    .number()
+    .min(1)
+    .optional()
+    .describe(
+      "Required explicit company context for an unscoped super administrator",
+    ),
+});
+
+export const getMarkupScheduleResponseTiersItemMinCostMin = 0.01;
+export const getMarkupScheduleResponseTiersItemMinCostMax = 99999999.99;
+
+export const getMarkupScheduleResponseTiersItemMaxCostMin = 0.01;
+export const getMarkupScheduleResponseTiersItemMaxCostMax = 99999999.99;
+
+export const getMarkupScheduleResponseTiersItemMarkupPercentMin = 0;
+export const getMarkupScheduleResponseTiersItemMarkupPercentMax = 999.99;
+
+export const GetMarkupScheduleResponse = zod.object({
+  schedule: zod.object({
+    id: zod.number(),
+    companyId: zod.number(),
+    name: zod.string(),
+    effectiveDate: zod.string(),
+    isActive: zod.boolean(),
+    createdAt: zod.date(),
+    updatedAt: zod.date(),
+  }),
+  tiers: zod.array(
+    zod.object({
+      tierOrder: zod.number().min(1),
+      minCost: zod
+        .number()
+        .min(getMarkupScheduleResponseTiersItemMinCostMin)
+        .max(getMarkupScheduleResponseTiersItemMinCostMax),
+      maxCost: zod
+        .number()
+        .min(getMarkupScheduleResponseTiersItemMaxCostMin)
+        .max(getMarkupScheduleResponseTiersItemMaxCostMax)
+        .nullable(),
+      markupPercent: zod
+        .number()
+        .min(getMarkupScheduleResponseTiersItemMarkupPercentMin)
+        .max(getMarkupScheduleResponseTiersItemMarkupPercentMax),
+    }),
+  ),
+});
+
+export const UpdateMarkupScheduleQueryParams = zod.object({
+  companyId: zod
+    .number()
+    .min(1)
+    .optional()
+    .describe(
+      "Required explicit company context for an unscoped super administrator",
+    ),
+});
+
+export const updateMarkupScheduleBodyNameMax = 200;
+
+export const updateMarkupScheduleBodyTiersItemMinCostMin = 0.01;
+export const updateMarkupScheduleBodyTiersItemMinCostMax = 99999999.99;
+
+export const updateMarkupScheduleBodyTiersItemMaxCostMin = 0.01;
+export const updateMarkupScheduleBodyTiersItemMaxCostMax = 99999999.99;
+
+export const updateMarkupScheduleBodyTiersItemMarkupPercentMin = 0;
+export const updateMarkupScheduleBodyTiersItemMarkupPercentMax = 999.99;
+
+export const updateMarkupScheduleBodyTiersMax = 100;
+
+export const UpdateMarkupScheduleBody = zod.object({
+  name: zod.string().min(1).max(updateMarkupScheduleBodyNameMax).optional(),
+  tiers: zod
+    .array(
+      zod.object({
+        tierOrder: zod.number().min(1),
+        minCost: zod
+          .number()
+          .min(updateMarkupScheduleBodyTiersItemMinCostMin)
+          .max(updateMarkupScheduleBodyTiersItemMinCostMax),
+        maxCost: zod
+          .number()
+          .min(updateMarkupScheduleBodyTiersItemMaxCostMin)
+          .max(updateMarkupScheduleBodyTiersItemMaxCostMax)
+          .nullable(),
+        markupPercent: zod
+          .number()
+          .min(updateMarkupScheduleBodyTiersItemMarkupPercentMin)
+          .max(updateMarkupScheduleBodyTiersItemMarkupPercentMax),
+      }),
+    )
+    .min(1)
+    .max(updateMarkupScheduleBodyTiersMax)
+    .optional(),
+});
+
+export const UpdateMarkupScheduleResponse = zod.object({
+  id: zod.number(),
+  companyId: zod.number(),
+  name: zod.string(),
+  effectiveDate: zod.string(),
+  isActive: zod.boolean(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+
+export const ActivateMarkupScheduleQueryParams = zod.object({
+  companyId: zod
+    .number()
+    .min(1)
+    .optional()
+    .describe(
+      "Required explicit company context for an unscoped super administrator",
+    ),
+});
+
+export const ActivateMarkupScheduleResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+export const DeactivateMarkupScheduleQueryParams = zod.object({
+  companyId: zod
+    .number()
+    .min(1)
+    .optional()
+    .describe(
+      "Required explicit company context for an unscoped super administrator",
+    ),
+});
+
+export const DeactivateMarkupScheduleResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+export const GetCustomerMarkupOverrideQueryParams = zod.object({
+  companyId: zod
+    .number()
+    .min(1)
+    .optional()
+    .describe(
+      "Required explicit company context for an unscoped super administrator",
+    ),
+});
+
+export const GetCustomerMarkupOverrideResponse = zod.object({
+  override: zod.union([
+    zod.null(),
+    zod.object({
+      id: zod.number(),
+      companyId: zod.number(),
+      customerId: zod.number(),
+      scheduleId: zod.number(),
+    }),
+  ]),
+});
+
+export const SetCustomerMarkupOverrideQueryParams = zod.object({
+  companyId: zod
+    .number()
+    .min(1)
+    .optional()
+    .describe(
+      "Required explicit company context for an unscoped super administrator",
+    ),
+});
+
+export const SetCustomerMarkupOverrideBody = zod.object({
+  scheduleId: zod.number().min(1),
+});
+
+export const SetCustomerMarkupOverrideResponse = zod.object({
+  override: zod.union([
+    zod.null(),
+    zod.object({
+      id: zod.number(),
+      companyId: zod.number(),
+      customerId: zod.number(),
+      scheduleId: zod.number(),
+    }),
+  ]),
+});
+
+export const RemoveCustomerMarkupOverrideQueryParams = zod.object({
+  companyId: zod
+    .number()
+    .min(1)
+    .optional()
+    .describe(
+      "Required explicit company context for an unscoped super administrator",
+    ),
+});
+
+export const RemoveCustomerMarkupOverrideResponse = zod.object({
+  ok: zod.boolean(),
+});
+
 /**
  * @summary Confirm, change or atomically swap an active controller letter
  */

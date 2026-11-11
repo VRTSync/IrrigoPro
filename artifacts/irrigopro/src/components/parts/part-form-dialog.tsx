@@ -13,23 +13,26 @@ import { z } from "zod/v4";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { insertPartSchema } from "@workspace/db/schema";
+import { useGetActiveMarkupSchedule, getGetActiveMarkupScheduleQueryKey } from "@workspace/api-client-react";
+import { computeCustomerPrice, computeTieredMarkup, isMaterialMarkupEligible } from "@workspace/shared";
+import { useAuth } from "@/lib/auth-context";
+import { errorMessage, formatMoney, isNotFoundError } from "@/lib/markup-tier-form";
 import type { Part, PartCategory, PartBrand, PartSize, PartMaterial, PartFittingType } from "@workspace/db/schema";
 
 interface QuickAddPopoverProps {
   label: string;
   apiPath: string;
   queryKey: string;
-  withMarkup?: boolean;
   onAdded: (name: string) => void;
 }
 
-export function QuickAddPopover({ label, apiPath, queryKey, withMarkup = false, onAdded }: QuickAddPopoverProps) {
+export function QuickAddPopover({ label, apiPath, queryKey, onAdded }: QuickAddPopoverProps) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
-  const [markup, setMarkup] = useState("0.00");
 
-  type QuickAddPayload = { name: string; markupPercent?: string };
+  // Category markup is retired (Task #2173); the payload never carries it.
+  type QuickAddPayload = { name: string };
 
   const createMutation = useMutation({
     mutationFn: (data: QuickAddPayload) => apiRequest(apiPath, "POST", data),
@@ -37,7 +40,6 @@ export function QuickAddPopover({ label, apiPath, queryKey, withMarkup = false, 
       queryClient.invalidateQueries({ queryKey: [queryKey] });
       onAdded(result.name);
       setName("");
-      setMarkup("0.00");
       setOpen(false);
       toast({ title: `${label} added` });
     },
@@ -48,7 +50,6 @@ export function QuickAddPopover({ label, apiPath, queryKey, withMarkup = false, 
     const trimmed = name.trim();
     if (!trimmed) return;
     const data: QuickAddPayload = { name: trimmed };
-    if (withMarkup) data.markupPercent = markup || "0.00";
     createMutation.mutate(data);
   };
 
@@ -73,20 +74,6 @@ export function QuickAddPopover({ label, apiPath, queryKey, withMarkup = false, 
           autoFocus
           onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); if (e.key === "Escape") setOpen(false); }}
         />
-        {withMarkup && (
-          <div className="mb-2">
-            <label className="text-xs text-gray-500 mb-1 block">Markup % (optional)</label>
-            <Input
-              type="number"
-              step="0.01"
-              min="0"
-              value={markup}
-              onChange={(e) => setMarkup(e.target.value)}
-              placeholder="0.00"
-              className="h-8 text-sm"
-            />
-          </div>
-        )}
         <div className="flex gap-2">
           <Button size="sm" className="flex-1 h-7 text-xs" onClick={handleAdd} disabled={createMutation.isPending || !name.trim()}>
             Add
@@ -173,6 +160,48 @@ export function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps
     }
   }, [part, form]);
 
+  // Tier 2 — live shared-engine preview. The server recomputes eligible
+  // prices on save; this preview is cosmetic but mirrors the same math.
+  const { user } = useAuth();
+  const watchedCost = form.watch("cost");
+  const watchedCategory = form.watch("category");
+  const watchedCompanyId = form.watch("companyId");
+  const markupParams = user?.role === "super_admin"
+    ? { companyId: Number(part?.companyId ?? watchedCompanyId) || undefined }
+    : undefined;
+  const activeSchedule = useGetActiveMarkupSchedule(markupParams, {
+    query: {
+      enabled: open && (user?.role !== "super_admin" || !!markupParams?.companyId),
+      queryKey: getGetActiveMarkupScheduleQueryKey(markupParams),
+      retry: false,
+    },
+  });
+  const costNumber = watchedCost === null || watchedCost === undefined || String(watchedCost).trim() === "" ? NaN : Number(watchedCost);
+  const eligible = isMaterialMarkupEligible({ cost: Number.isFinite(costNumber) ? costNumber : null, category: watchedCategory ?? "" });
+  const excludedCategory = ["rental", "service", "labor"].includes(String(watchedCategory ?? "").trim().toLowerCase());
+  const noActiveSchedule = activeSchedule.isError && isNotFoundError(activeSchedule.error);
+  const scheduleError = activeSchedule.isError && !noActiveSchedule ? activeSchedule.error : null;
+  let pricing: { mode: "computed"; price: number; markup: number } | { mode: "manual"; reason: string } | { mode: "loading" } | { mode: "error"; message: string };
+  if (!eligible) {
+    pricing = { mode: "manual", reason: excludedCategory ? "This category is excluded from material markup." : "No positive cost recorded." };
+  } else if (activeSchedule.isLoading || (activeSchedule.isFetching && !activeSchedule.data && !activeSchedule.isError)) {
+    pricing = { mode: "loading" };
+  } else if (noActiveSchedule) {
+    pricing = { mode: "manual", reason: "No active markup schedule." };
+  } else if (scheduleError) {
+    pricing = { mode: "error", message: errorMessage(scheduleError, "Could not load the markup schedule.") };
+  } else if (activeSchedule.data) {
+    const tiers = activeSchedule.data.tiers;
+    pricing = { mode: "computed", price: computeCustomerPrice(costNumber, tiers), markup: computeTieredMarkup(costNumber, tiers) };
+  } else {
+    pricing = { mode: "loading" };
+  }
+  const computedPrice = pricing.mode === "computed" ? pricing.price : null;
+  useEffect(() => {
+    if (computedPrice !== null) form.setValue("price", computedPrice.toFixed(2), { shouldValidate: true });
+  }, [computedPrice, form]);
+  const saveBlocked = pricing.mode === "loading" || pricing.mode === "error";
+
   const createPartMutation = useMutation({
     mutationFn: async (data: PartFormInput) => {
       return await apiRequest("/api/parts", "POST", data);
@@ -217,6 +246,7 @@ export function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps
   });
 
   const onSubmit = (data: PartFormInput) => {
+    if (saveBlocked) return;
     const processedData = {
       ...data,
       material: data.material === "none" ? null : data.material,
@@ -285,7 +315,6 @@ export function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps
                         label="Category"
                         apiPath="/api/part-settings/categories"
                         queryKey="/api/part-settings/categories"
-                        withMarkup
                         onAdded={(name) => field.onChange(name)}
                       />
                     </div>
@@ -465,14 +494,56 @@ export function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps
                 name="price"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Price ($) *</FormLabel>
+                    <FormLabel>{pricing.mode === "computed" ? "Customer Price ($)" : "Price ($) *"}</FormLabel>
                     <FormControl>
-                      <Input {...field} type="number" step="any" min="0" max="99999999.99" />
+                      <Input
+                        {...field}
+                        type="number"
+                        step="any"
+                        min="0"
+                        max="99999999.99"
+                        readOnly={pricing.mode === "computed"}
+                        aria-readonly={pricing.mode === "computed"}
+                        aria-describedby="part-pricing-status"
+                        className={pricing.mode === "computed" ? "bg-gray-50" : undefined}
+                        data-testid="input-part-price"
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
+            </div>
+
+            <div
+              id="part-pricing-status"
+              role="status"
+              aria-live="polite"
+              data-testid="status-part-pricing"
+              className={
+                pricing.mode === "error"
+                  ? "rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+                  : pricing.mode === "computed"
+                    ? "rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900"
+                    : "rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700"
+              }
+            >
+              {pricing.mode === "computed" && (
+                <>
+                  Computed from {activeSchedule.data?.schedule.name}: {formatMoney(pricing.price)} (markup {formatMoney(pricing.markup)},{" "}
+                  {((pricing.markup / costNumber) * 100).toFixed(1)}% effective). Price is set by the schedule.
+                </>
+              )}
+              {pricing.mode === "manual" && <>Manual price. {pricing.reason}</>}
+              {pricing.mode === "loading" && <>Loading markup schedule...</>}
+              {pricing.mode === "error" && (
+                <>
+                  {pricing.message} Saving is disabled until pricing loads.{" "}
+                  <button type="button" className="underline" onClick={() => activeSchedule.refetch()} data-testid="button-retry-pricing">
+                    Retry
+                  </button>
+                </>
+              )}
             </div>
 
             <FormField
@@ -509,7 +580,8 @@ export function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps
               </Button>
               <Button
                 type="submit"
-                disabled={createPartMutation.isPending || updatePartMutation.isPending}
+                disabled={createPartMutation.isPending || updatePartMutation.isPending || saveBlocked}
+                data-testid="button-save-part"
               >
                 {createPartMutation.isPending || updatePartMutation.isPending ? "Saving..." : part ? "Update Part" : "Create Part"}
               </Button>

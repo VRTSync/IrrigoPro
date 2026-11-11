@@ -8,6 +8,18 @@ import { z } from "zod/v4";
 import { insertPartSchema } from "@workspace/db";
 import { storage } from "../storage";
 import { registerPartsExportRoute } from "./parts-export-route";
+import { resolveMaterialSchedule, materialUnitPrice } from "../lib/material-pricing";
+import { markupCompany } from "./markup-schedule-routes";
+
+function validatePartMoney(data: { price?: unknown; cost?: unknown }) {
+  for (const key of ["cost", "price"] as const) {
+    const value = data[key];
+    if (value === undefined || key === "cost" && (value === null || value === "")) continue;
+    const amount = Number(value);
+    if (!Number.isFinite(amount) || amount < 0 || amount > 99999999.99)
+      throw new z.ZodError([{ code: "custom", path: [key], input: value, message: `${key} must be between 0 and 99,999,999.99` }]);
+  }
+}
 
 export interface RegisterPartRoutesDeps {
   requireAuthentication: RequestHandler;
@@ -74,12 +86,11 @@ export function registerPartRoutes(
   app.get("/api/parts/pending-approval", requireAuthentication, async (req, res) => {
     try {
       const userRole = req.authenticatedUserRole;
-      if (userRole !== 'billing_manager' && userRole !== 'company_admin') {
+      if (userRole !== 'billing_manager' && userRole !== 'company_admin' && userRole !== 'super_admin') {
         res.status(403).json({ message: "Access denied." });
         return;
       }
-      const companyId = req.authenticatedUserCompanyId;
-      if (!companyId) { res.status(400).json({ message: "Company ID required" }); return; }
+      const companyId = markupCompany(req);
       const pendingParts = await storage.getPendingParts(companyId);
       res.json(pendingParts);
     } catch (error) {
@@ -152,6 +163,8 @@ export function registerPartRoutes(
         ...processedData,
         approvalStatus: 'pending',
       });
+      if (!await storage.getCompany(partData.companyId)) { res.status(404).json({ message: "Company not found" }); return; }
+      partData.price = materialUnitPrice({ ...partData, cost: partData.cost ?? null }, (await resolveMaterialSchedule(partData.companyId))?.tiers);
 
       const part = await storage.createPart(partData);
 
@@ -216,11 +229,14 @@ export function registerPartRoutes(
 
       const authenticatedCompanyId = req.authenticatedUserCompanyId;
       if (authenticatedCompanyId !== null && existingPart.companyId !== authenticatedCompanyId) {
-        res.status(403).json({ message: "Access denied. You can only update parts from your company." });
+        res.status(404).json({ message: "Part not found" });
         return;
       }
 
+      validatePartMoney(req.body);
       const partData = insertPartSchema.partial().parse(req.body);
+      partData.companyId = existingPart.companyId;
+      partData.price = materialUnitPrice({ ...existingPart, ...partData }, (await resolveMaterialSchedule(existingPart.companyId))?.tiers);
       const part = await storage.updatePart(id, partData);
       if (!part) {
         res.status(404).json({ message: "Part not found" });
@@ -287,7 +303,7 @@ export function registerPartRoutes(
       // Only check company ownership if the user has a company (not null)
       if (authenticatedCompanyId !== null && existingPart.companyId !== authenticatedCompanyId) {
         console.error(`PATCH /api/parts/:id - Access denied. User company ${authenticatedCompanyId} cannot update part from company ${existingPart.companyId}`);
-        res.status(403).json({ message: "Access denied. You can only update parts from your company." });
+        res.status(404).json({ message: "Part not found" });
         return;
       }
 
@@ -295,12 +311,13 @@ export function registerPartRoutes(
       let partData;
       try {
         const rawData = req.body;
+        validatePartMoney(rawData);
 
         // Convert numeric fields to strings for decimal database fields
         const processedData = {
           ...rawData,
           price: rawData.price !== undefined ? Number(rawData.price).toFixed(2) : undefined,
-          cost: rawData.cost !== undefined ? Number(rawData.cost).toFixed(2) : undefined,
+          cost: rawData.cost === "" || rawData.cost === null ? null : rawData.cost !== undefined ? Number(rawData.cost).toFixed(2) : undefined,
         };
 
         // Use the authenticated user's company ID instead of form data
@@ -319,6 +336,8 @@ export function registerPartRoutes(
       }
 
       // Perform the update with explicit error handling
+      partData.companyId = existingPart.companyId;
+      partData.price = materialUnitPrice({ ...existingPart, ...partData }, (await resolveMaterialSchedule(existingPart.companyId))?.tiers);
       let part;
       try {
         part = await storage.updatePart(id, partData);
@@ -371,6 +390,11 @@ export function registerPartRoutes(
   // Bulk import parts from CSV
   app.post("/api/parts/bulk-import", requireAuthentication, async (req, res) => {
     try {
+      if (!["company_admin", "super_admin", "billing_manager", "irrigation_manager"].includes(req.authenticatedUserRole as string)) {
+        res.status(403).json({ message: "Access denied" }); return;
+      }
+      const importCompanyId = markupCompany(req);
+      const importSchedule = await resolveMaterialSchedule(importCompanyId);
       const { csvData, columnMappings } = req.body;
       console.log('Bulk import request:', { hasCSV: !!csvData, mappingsLength: columnMappings?.length, mappings: columnMappings });
 
@@ -606,7 +630,10 @@ export function registerPartRoutes(
           }
 
           // Validate part data with better error handling
+          partData.companyId = importCompanyId;
+          validatePartMoney(partData);
           const validatedData = insertPartSchema.parse(partData);
+          validatedData.price = materialUnitPrice({ ...validatedData, cost: validatedData.cost ?? null }, importSchedule?.tiers);
 
           // Create part
           await storage.createPart(validatedData);
@@ -1031,19 +1058,22 @@ export function registerPartRoutes(
       if (!existingPart) { res.status(404).json({ message: "Part not found" }); return; }
       const companyId = req.authenticatedUserCompanyId;
       if (userRole !== 'super_admin' && companyId !== null && existingPart.companyId !== companyId) {
-        res.status(403).json({ message: "Access denied. You can only approve parts from your company." });
+        res.status(404).json({ message: "Part not found" });
         return;
       }
 
       const { price, cost } = req.body;
       if (!price) { res.status(400).json({ message: "price is required" }); return; }
 
-      const updatedPart = await storage.approvePart(id, String(price), cost ? String(cost) : undefined, existingPart.companyId);
+      validatePartMoney({ price, cost });
+      const parsedApproval = insertPartSchema.pick({ price: true, cost: true }).parse({ price, cost });
+      const updatedPart = await storage.approvePart(id, String(parsedApproval.price), parsedApproval.cost === undefined ? undefined : parsedApproval.cost === null ? null : String(parsedApproval.cost), existingPart.companyId);
       if (!updatedPart) { res.status(404).json({ message: "Part not found" }); return; }
 
       res.json(updatedPart);
     } catch (error) {
       console.error(error);
+      if (error instanceof z.ZodError) { res.status(400).json({ message: "Invalid price or cost" }); return; }
       res.status(500).json({ message: "Failed to approve part" });
     }
   });

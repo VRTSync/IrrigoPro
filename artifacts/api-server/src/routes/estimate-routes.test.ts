@@ -54,6 +54,9 @@ type StorageStub = EstimateRoutesStorage & {
 
 function makeStorageStub(): StorageStub {
   const stub: StorageStub = {
+    async getPart(id) {
+      return { id, companyId: 1, name: `Part ${id}`, category: "Fixture", cost: null, price: id < 3 ? "0.00" : "100.00" } as any;
+    },
     customers: new Map(),
     estimates: new Map(),
     async getCustomer(id) {
@@ -186,7 +189,9 @@ async function startServer(
     r.authenticatedUserRole = req.header("x-user-role") || role;
     next();
   };
-  registerEstimateRoutes(app, stub, stubAuth);
+  const originalGetPart = stub.getPart!;
+  stub.getPart = async id => ({ ...await originalGetPart(id), companyId: companyId ?? 1 } as any);
+  registerEstimateRoutes(app, stub, stubAuth, { loadMaterialSchedule: async () => null });
   const server: Server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const port = (server.address() as AddressInfo).port;

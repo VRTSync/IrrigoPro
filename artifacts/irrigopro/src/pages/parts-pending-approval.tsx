@@ -1,5 +1,4 @@
-import { safeGet } from "@/utils/safeStorage";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,19 +9,58 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { CheckCircle, Package, ClipboardList, DollarSign } from "lucide-react";
 import { useState } from "react";
 import type { Part, ManualPartReview } from "@workspace/db/schema";
+import { useGetActiveMarkupSchedule, getGetActiveMarkupScheduleQueryKey } from "@workspace/api-client-react";
+import { computeCustomerPrice, computeTieredMarkup, isMaterialMarkupEligible } from "@workspace/shared";
+import { useAuth } from "@/lib/auth-context";
+import { errorMessage, formatMoney, isNotFoundError } from "@/lib/markup-tier-form";
 
 interface PendingPartRowProps {
   part: Part;
-  onApprove: (id: number, price: string, cost: string) => void;
+  onApprove: (id: number, price: string, cost: string | null) => void;
   isApproving: boolean;
 }
 
-function PendingPartRow({ part, onApprove, isApproving }: PendingPartRowProps) {
-  const [price, setPrice] = useState(part.price?.toString() || "0.00");
+// Task #2173 Tier 3 — the reviewer edits cost; eligible parts show the
+// shared-engine customer price read-only (the server recomputes on approve).
+// Manual price only for excluded categories, no positive cost, or an explicit
+// 404 (no active schedule). Any other schedule failure blocks approval.
+export function PendingPartRow({ part, onApprove, isApproving }: PendingPartRowProps) {
+  const { user } = useAuth();
+  const [manualPrice, setManualPrice] = useState(part.price?.toString() || "0.00");
   const [cost, setCost] = useState(part.cost?.toString() || "");
+  const params = user?.role === "super_admin" ? { companyId: part.companyId } : undefined;
+  const schedule = useGetActiveMarkupSchedule(params, {
+    query: { queryKey: getGetActiveMarkupScheduleQueryKey(params), retry: false },
+  });
+  const costNumber = cost.trim() === "" ? NaN : Number(cost);
+  const eligible = isMaterialMarkupEligible({ cost: Number.isFinite(costNumber) ? costNumber : null, category: part.category });
+  const excluded = ["rental", "service", "labor"].includes((part.category ?? "").trim().toLowerCase());
+  const noSchedule = schedule.isError && isNotFoundError(schedule.error);
+
+  let mode: "computed" | "manual" | "loading" | "error" = "manual";
+  let note = "";
+  let computed: number | null = null;
+  if (!eligible) {
+    note = excluded ? "Excluded category: manual price" : "No positive cost: manual price";
+  } else if (noSchedule) {
+    note = "No active markup schedule: manual price";
+  } else if (schedule.isError) {
+    mode = "error";
+    note = errorMessage(schedule.error, "Could not load the markup schedule.");
+  } else if (schedule.data) {
+    mode = "computed";
+    computed = computeCustomerPrice(costNumber, schedule.data.tiers);
+    const markup = computeTieredMarkup(costNumber, schedule.data.tiers);
+    note = `${schedule.data.schedule.name}: +${formatMoney(markup)} (${((markup / costNumber) * 100).toFixed(1)}% effective)`;
+  } else {
+    mode = "loading";
+    note = "Loading markup schedule...";
+  }
+  const price = computed !== null ? computed.toFixed(2) : manualPrice;
+  const blocked = mode === "loading" || mode === "error";
 
   return (
-    <tr className="border-b border-gray-100 hover:bg-gray-50/50">
+    <tr className="border-b border-gray-100 hover:bg-gray-50/50" data-testid={`row-pending-part-${part.id}`}>
       <td className="px-4 py-3">
         <div className="font-medium text-gray-900 text-sm">{part.name}</div>
         <div className="text-xs text-gray-500">{part.sku} · {part.category}</div>
@@ -38,10 +76,12 @@ function PendingPartRow({ part, onApprove, isApproving }: PendingPartRowProps) {
             onChange={(e) => setCost(e.target.value)}
             placeholder="0.00"
             className="h-8 text-sm pl-6"
+            aria-label={`Cost for ${part.name}`}
+            data-testid={`input-pending-cost-${part.id}`}
           />
         </div>
       </td>
-      <td className="px-4 py-3 w-36">
+      <td className="px-4 py-3 w-44">
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
           <Input
@@ -49,18 +89,40 @@ function PendingPartRow({ part, onApprove, isApproving }: PendingPartRowProps) {
             step="0.01"
             min="0"
             value={price}
-            onChange={(e) => setPrice(e.target.value)}
+            readOnly={mode !== "manual"}
+            aria-readonly={mode !== "manual"}
+            onChange={(e) => setManualPrice(e.target.value)}
             placeholder="0.00"
-            className="h-8 text-sm pl-6"
+            className={`h-8 text-sm pl-6 ${mode !== "manual" ? "bg-gray-50" : ""}`}
+            aria-label={`Customer price for ${part.name}`}
+            aria-describedby={`pending-pricing-${part.id}`}
+            data-testid={`input-pending-price-${part.id}`}
           />
         </div>
+        <p
+          id={`pending-pricing-${part.id}`}
+          role="status"
+          className={`mt-1 text-xs ${mode === "error" ? "text-red-700" : "text-gray-500"}`}
+          data-testid={`status-pending-pricing-${part.id}`}
+        >
+          {note}
+          {mode === "error" && (
+            <>
+              {" "}
+              <button type="button" className="underline" onClick={() => schedule.refetch()} data-testid={`button-retry-pending-pricing-${part.id}`}>
+                Retry
+              </button>
+            </>
+          )}
+        </p>
       </td>
       <td className="px-4 py-3 w-32 text-right">
         <Button
           size="sm"
-          onClick={() => onApprove(part.id, price, cost)}
-          disabled={isApproving || !price}
+          onClick={() => onApprove(part.id, price, cost.trim() === "" ? null : cost)}
+          disabled={isApproving || !price || blocked}
           className="bg-green-600 hover:bg-green-700 text-white gap-1.5"
+          data-testid={`button-approve-part-${part.id}`}
         >
           <CheckCircle className="w-3.5 h-3.5" />
           Approve
@@ -129,10 +191,10 @@ export default function PartsPendingApproval() {
   });
 
   const approvePartMutation = useMutation({
-    mutationFn: ({ id, price, cost }: { id: number; price: string; cost: string }) =>
+    mutationFn: ({ id, price, cost }: { id: number; price: string; cost: string | null }) =>
       apiRequest(`/api/parts/${id}/approve`, "POST", { price, cost }),
     onSuccess: () => {
-      toast({ title: "Part approved", description: "Pricing has been confirmed and pushed to open billing sheets." });
+      toast({ title: "Part approved", description: "Catalog price approved. Existing documents are unchanged." });
       queryClient.invalidateQueries({ queryKey: ["/api/parts/pending-approval"] });
       queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
     },
@@ -200,7 +262,7 @@ export default function PartsPendingApproval() {
                   <tr className="bg-gray-50 border-b border-gray-100">
                     <th className="text-left px-4 py-2.5 font-medium text-gray-600">Part</th>
                     <th className="text-left px-4 py-2.5 font-medium text-gray-600 w-36">Cost ($)</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-gray-600 w-36">Price ($)</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-gray-600 w-44">Customer Price ($)</th>
                     <th className="w-32"></th>
                   </tr>
                 </thead>

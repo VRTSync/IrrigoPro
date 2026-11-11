@@ -5,6 +5,119 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export interface MarkupRecalculationPreview {
+  confirmationToken: string;
+  eligible: number;
+  excluded: number;
+  scheduleId: number;
+  scheduleName: string;
+  expiresAt: string;
+}
+
+export interface MarkupRecalculationInput {
+  /**
+   * @minLength 1
+   * @maxLength 300
+   */
+  confirmationToken: string;
+  /** @minimum 0 */
+  offset: number;
+}
+
+export interface MarkupRecalculationResult {
+  processed: number;
+  total: number;
+  updated: number;
+  unchanged: number;
+  excluded: number;
+  errors: string[];
+  done: boolean;
+}
+
+export interface MarkupTier {
+  /** @minimum 1 */
+  tierOrder: number;
+  /**
+   * @minimum 0.01
+   * @maximum 99999999.99
+   */
+  minCost: number;
+  /**
+   * @minimum 0.01
+   * @maximum 99999999.99
+   * @nullable
+   */
+  maxCost: number | null;
+  /**
+   * @minimum 0
+   * @maximum 999.99
+   */
+  markupPercent: number;
+}
+
+export interface MarkupSchedule {
+  id: number;
+  companyId: number;
+  name: string;
+  effectiveDate: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MarkupScheduleContext {
+  schedule: MarkupSchedule;
+  tiers: MarkupTier[];
+}
+
+export interface MarkupScheduleInput {
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
+  name: string;
+  /** @pattern ^\d{4}-\d{2}-\d{2}$ */
+  effectiveDate: string;
+  /**
+   * @minItems 1
+   * @maxItems 100
+   */
+  tiers: MarkupTier[];
+}
+
+export interface MarkupScheduleUpdate {
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
+  name?: string;
+  /**
+   * @minItems 1
+   * @maxItems 100
+   */
+  tiers?: MarkupTier[];
+}
+
+export interface MarkupActionResult {
+  ok: boolean;
+}
+
+export interface MarkupOverrideInput {
+  /** @minimum 1 */
+  scheduleId: number;
+}
+
+export type MarkupOverrideResultOverride = null | {
+  id: number;
+  companyId: number;
+  customerId: number;
+  scheduleId: number;
+};
+
+export interface MarkupOverrideResult {
+  override: MarkupOverrideResultOverride;
+}
+
 export interface DocumentationSiteInput {
   branchName?: string;
 }
@@ -295,6 +408,117 @@ export interface CustomerPullStatus {
 export interface HealthStatus {
   status: string;
 }
+
+/**
+ * Required explicit company context for an unscoped super administrator
+ */
+export type MarkupCompanyParameter = number;
+
+export type PreviewMarkupRecalculationParams = {
+  /**
+   * @minimum 1
+   */
+  companyId?: number;
+};
+
+export type RecalculateMarkupPricesParams = {
+  /**
+   * @minimum 1
+   */
+  companyId?: number;
+};
+
+export type ListMarkupSchedulesParams = {
+  /**
+   * Required explicit company context for an unscoped super administrator
+   * @minimum 1
+   */
+  companyId?: number;
+};
+
+export type CreateMarkupScheduleParams = {
+  /**
+   * Required explicit company context for an unscoped super administrator
+   * @minimum 1
+   */
+  companyId?: number;
+};
+
+export type GetActiveMarkupScheduleParams = {
+  /**
+   * Required explicit company context for an unscoped super administrator
+   * @minimum 1
+   */
+  companyId?: number;
+  /**
+   * @minimum 1
+   */
+  customerId?: number;
+};
+
+export type GetMarkupScheduleOptionsParams = {
+  /**
+   * Required explicit company context for an unscoped super administrator
+   * @minimum 1
+   */
+  companyId?: number;
+};
+
+export type GetMarkupScheduleParams = {
+  /**
+   * Required explicit company context for an unscoped super administrator
+   * @minimum 1
+   */
+  companyId?: number;
+};
+
+export type UpdateMarkupScheduleParams = {
+  /**
+   * Required explicit company context for an unscoped super administrator
+   * @minimum 1
+   */
+  companyId?: number;
+};
+
+export type ActivateMarkupScheduleParams = {
+  /**
+   * Required explicit company context for an unscoped super administrator
+   * @minimum 1
+   */
+  companyId?: number;
+};
+
+export type DeactivateMarkupScheduleParams = {
+  /**
+   * Required explicit company context for an unscoped super administrator
+   * @minimum 1
+   */
+  companyId?: number;
+};
+
+export type GetCustomerMarkupOverrideParams = {
+  /**
+   * Required explicit company context for an unscoped super administrator
+   * @minimum 1
+   */
+  companyId?: number;
+};
+
+export type SetCustomerMarkupOverrideParams = {
+  /**
+   * Required explicit company context for an unscoped super administrator
+   * @minimum 1
+   */
+  companyId?: number;
+};
+
+export type RemoveCustomerMarkupOverrideParams = {
+  /**
+   * Required explicit company context for an unscoped super administrator
+   * @minimum 1
+   */
+  companyId?: number;
+};
 
 export type GetDocumentationSiteParams = {
   branchName?: string;

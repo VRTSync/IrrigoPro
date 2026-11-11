@@ -32,17 +32,16 @@ interface QuickAddPopoverProps {
   label: string;
   apiPath: string;
   queryKey: string;
-  withMarkup?: boolean;
   onAdded: (name: string) => void;
 }
 
-function QuickAddPopover({ label, apiPath, queryKey, withMarkup = false, onAdded }: QuickAddPopoverProps) {
+function QuickAddPopover({ label, apiPath, queryKey, onAdded }: QuickAddPopoverProps) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
-  const [markup, setMarkup] = useState("0.00");
 
-  type QuickAddPayload = { name: string; markupPercent?: string };
+  // Category markup is retired (Task #2173); the payload never carries it.
+  type QuickAddPayload = { name: string };
 
   const createMutation = useMutation({
     mutationFn: (data: QuickAddPayload) => apiRequest(apiPath, "POST", data),
@@ -50,7 +49,6 @@ function QuickAddPopover({ label, apiPath, queryKey, withMarkup = false, onAdded
       queryClient.invalidateQueries({ queryKey: [queryKey] });
       onAdded(result.name);
       setName("");
-      setMarkup("0.00");
       setOpen(false);
       toast({ title: `${label} added` });
     },
@@ -61,7 +59,6 @@ function QuickAddPopover({ label, apiPath, queryKey, withMarkup = false, onAdded
     const trimmed = name.trim();
     if (!trimmed) return;
     const data: QuickAddPayload = { name: trimmed };
-    if (withMarkup) data.markupPercent = markup || "0.00";
     createMutation.mutate(data);
   };
 
@@ -86,20 +83,6 @@ function QuickAddPopover({ label, apiPath, queryKey, withMarkup = false, onAdded
           autoFocus
           onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); if (e.key === "Escape") setOpen(false); }}
         />
-        {withMarkup && (
-          <div className="mb-2">
-            <label className="text-xs text-gray-500 mb-1 block">Markup % (optional)</label>
-            <Input
-              type="number"
-              step="0.01"
-              min="0"
-              value={markup}
-              onChange={(e) => setMarkup(e.target.value)}
-              placeholder="0.00"
-              className="h-8 text-sm"
-            />
-          </div>
-        )}
         <div className="flex gap-2">
           <Button size="sm" className="flex-1 h-7 text-xs" onClick={handleAdd} disabled={createMutation.isPending || !name.trim()}>
             Add
@@ -323,7 +306,6 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                         label="Category"
                         apiPath="/api/part-settings/categories"
                         queryKey="/api/part-settings/categories"
-                        withMarkup
                         onAdded={(name) => field.onChange(name)}
                       />
                     </div>
