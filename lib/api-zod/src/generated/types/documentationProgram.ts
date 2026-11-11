@@ -7,6 +7,8 @@
  */
 
 export interface DocumentationProgram {
+  /** @nullable */
+  clientId?: string | null;
   id: number;
   companyId: number;
   controllerId: number;

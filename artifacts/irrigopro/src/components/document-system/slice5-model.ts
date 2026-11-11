@@ -177,36 +177,36 @@ export function programsSummary(programs: DocumentationProgram[], zones: Documen
 
 // ── Saving (sequential, stop at first failure, unsent groups stay dirty) ─────
 
-export async function saveZoneTypes(controllerId: number, h: Slice5Handle, baseZones: DocumentationZone[], onSent: () => void) {
+export async function saveZoneTypes(controllerId: number, h: Slice5Handle, baseZones: DocumentationZone[], onSent: () => void, request = apiRequest) {
   const zones = mergeZones(baseZones, h.ref.current);
   for (const g of typeGroups(zones, h.ref.current.typeDirty)) {
-    await apiRequest(`/api/irrigation-controllers/${controllerId}/zones/bulk`, "PUT", { zoneIds: g.ids, patch: { zoneType: g.type } });
+    await request(`/api/irrigation-controllers/${controllerId}/zones/bulk`, "PUT", { zoneNumbers: zones.filter(z => g.ids.includes(z.id)).map(z => z.zoneNumber), patch: { zoneType: g.type } });
     h.update((d) => ({ ...d, typeDirty: without(d.typeDirty, g.ids) }));
     onSent();
   }
 }
 
-export async function saveRunTimes(controllerId: number, h: Slice5Handle, baseZones: DocumentationZone[], onSent: () => void, programs?: DocumentationProgram[]) {
+export async function saveRunTimes(controllerId: number, h: Slice5Handle, baseZones: DocumentationZone[], onSent: () => void, programs?: DocumentationProgram[], request = apiRequest) {
   const zones = mergeZones(baseZones, h.ref.current, programs);
   // Rows without a program are still sent (programId: null) so partial minutes persist.
   for (const g of runGroups(zones, h.ref.current.runDirty)) {
-    await apiRequest(`/api/irrigation-controllers/${controllerId}/zones/bulk`, "PUT", {
-      zoneIds: g.ids, patch: { programId: g.programId, runTimeMinutes: g.minutes },
+    await request(`/api/irrigation-controllers/${controllerId}/zones/bulk`, "PUT", {
+      zoneNumbers: zones.filter(z => g.ids.includes(z.id)).map(z => z.zoneNumber), patch: { programId: g.programId, runTimeMinutes: g.minutes },
     });
     h.update((d) => ({ ...d, runDirty: without(d.runDirty, g.ids) }));
     onSent();
   }
   const dirty = [...h.ref.current.extraDirty];
   if (dirty.length) {
-    await apiRequest(`/api/irrigation-controllers/${controllerId}/zones/extra-programs`, "PUT", {
-      zones: dirty.map((id) => ({ zoneId: id, lines: zones.find((z) => z.id === id)?.extraPrograms ?? [] })),
+    await request(`/api/irrigation-controllers/${controllerId}/zones/extra-programs`, "PUT", {
+      zones: dirty.map((id) => ({ zoneNumber: zones.find((z) => z.id === id)!.zoneNumber, lines: zones.find((z) => z.id === id)?.extraPrograms ?? [] })),
     });
     h.update((d) => ({ ...d, extraDirty: without(d.extraDirty, dirty) }));
     onSent();
   }
 }
 
-export async function saveProgramsStep(h: Slice5Handle, onSent: () => void) {
+export async function saveProgramsStep(h: Slice5Handle, onSent: () => void, request = apiRequest) {
   for (const id of [...h.ref.current.programDirty]) {
     const d = h.ref.current;
     if (d.deletedPrograms.includes(id) || !d.programDrafts[id]) {
@@ -215,7 +215,7 @@ export async function saveProgramsStep(h: Slice5Handle, onSent: () => void) {
     }
     const patch = programPatch(d.programDrafts[id], d.programBaseline[id]);
     if (patch) {
-      await apiRequest(`/api/irrigation-programs/${id}`, "PUT", patch);
+      await request(`/api/irrigation-programs/${id}`, "PUT", patch);
       onSent();
     }
     const sent = normalizeProgram(d.programDrafts[id]);

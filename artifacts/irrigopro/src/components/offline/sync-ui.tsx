@@ -46,6 +46,7 @@ import type {
   QueuedMutation,
   QueuedMutationKind,
 } from "@/lib/offline/types";
+import { docOwner } from "@/lib/offline/doc-store";
 
 // ─── Hook: live engine snapshot ──────────────────────────────────────────────
 //
@@ -81,13 +82,13 @@ export function useSyncEngineState(enabled: boolean = true): SyncSnapshot {
 
     const refresh = async () => {
       try {
-        const mutations = await engine.listMutations();
+        const mutations = (await engine.listMutations()).filter(m => engine.canReplay(m));
         if (cancelled) return;
         let pending = 0, syncing = 0, failed = 0;
         for (const m of mutations) {
           if (m.status === "pending") pending++;
           else if (m.status === "syncing") syncing++;
-          else if (m.status === "failed") failed++;
+          else if (m.status === "failed" || m.docRefused) failed++;
         }
         // Trust engine.isOnline() as the source of truth — state events
         // emit it on every transition, and listMutations is only called
@@ -156,7 +157,7 @@ export function OfflineStrip() {
 
 function usePhotoProgress(mutations: QueuedMutation[]) {
   const photoMutations = useMemo(
-    () => mutations.filter((m) => m.kind === "photo.link"),
+    () => mutations.filter((m) => m.kind === "photo.link" || m.kind === "doc.controller.photo" || m.kind === "doc.backflow.photo"),
     [mutations],
   );
   const remaining = photoMutations.filter(
@@ -241,6 +242,15 @@ export function SyncBadge({
 // ─── Queue view (bottom sheet) ───────────────────────────────────────────────
 
 function kindLabel(kind: QueuedMutationKind): string {
+  const docLabels: Record<string, string> = {
+    "doc.controller.create": "Add clock", "doc.controller.update": "Save clock details", "doc.controller.letter": "Confirm clock letter",
+    "doc.controller.zone_count": "Set zone count", "doc.controller.zones": "Save zones", "doc.controller.extra_programs": "Save extra programs",
+    "doc.controller.verify": "Verify clock", "doc.program.create": "Add program", "doc.program.update": "Save program",
+    "doc.program.delete": "Remove program", "doc.backflow.create": "Add backflow", "doc.backflow.update": "Save backflow details",
+    "doc.backflow.log_test": "Save backflow test", "doc.backflow.verify": "Verify backflow",
+    "doc.site.no_backflow": "Confirm no backflow", "doc.site.verify": "Finish documentation",
+  };
+  if (docLabels[kind]) return docLabels[kind];
   switch (kind) {
     case "wet_check.create":   return "Create wet check";
     case "wet_check.update":   return "Update wet check";
@@ -252,6 +262,8 @@ function kindLabel(kind: QueuedMutationKind): string {
     case "finding.delete":     return "Remove finding";
     case "photo.link":         return "Attach photo";
     case "photo.upload":       return "Upload photo";
+    case "doc.controller.photo": return "Upload clock photo";
+    case "doc.backflow.photo": return "Upload backflow photo";
     case "photo.delete":       return "Remove photo";
     case "work_order.location_patch": return "Save work location";
     case "work_order.complete": return "Complete work order";
@@ -326,8 +338,8 @@ export function MutationRow({
   onRetry: (id: string) => void;
 }) {
   const now = Date.now();
-  const isFailed = m.status === "failed";
-  const isCompleted = m.status === "completed";
+  const isFailed = m.status === "failed" || m.docRefused;
+  const isCompleted = m.status === "completed" && !m.docRefused;
   const isSyncing = m.status === "syncing";
   return (
     <div
@@ -360,6 +372,8 @@ export function MutationRow({
             </span>
           )}
         </div>
+        {m.siteKey && <div className="text-xs text-slate-700">{m.subjectLabel ?? "Location"} · {m.siteKey}</div>}
+        {m.kind.endsWith(".photo") && !isCompleted && <div className="text-xs text-muted-foreground" role="status">Upload progress: {m.progress ?? 0}%</div>}
         <div className="text-[11px] text-gray-500">
           {m.method} {m.urlTemplate}
           {" · "}
@@ -435,7 +449,7 @@ export function QueueView({
     const inflight: QueuedMutation[] = [];
     const completed: QueuedMutation[] = [];
     for (const m of snap.mutations) {
-      if (m.status === "failed") failed.push(m);
+      if (m.status === "failed" || m.docRefused) failed.push(m);
       else if (m.status === "completed") completed.push(m);
       else inflight.push(m);
     }

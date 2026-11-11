@@ -1,4 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { formatDistanceToNow } from "date-fns";
+import { downloadAllDocSites, observeDocDownloads } from "@/lib/offline/doc-download";
+import { listDocSites, docOwner } from "@/lib/offline/doc-store";
+import { QueueView, useSyncEngineState } from "@/components/offline/sync-ui";
 import { useLocation } from "wouter";
 import { AlertCircle, Info } from "lucide-react";
 import type { DocumentationPickerCustomer } from "@workspace/api-client-react";
@@ -26,11 +30,32 @@ export function badgeFor(c: DocumentationPickerCustomer): { label: string; cls: 
 }
 
 export default function DocPropertyPickerPage() {
+  const sync = useSyncEngineState();
+  const [queueOpen, setQueueOpen] = useState(false);
   const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("not_verified");
   const unauthenticated = useUnauthenticatedReads();
   const sites = useDocSites();
+  const [saved, setSaved] = useState<Set<string>>(new Set());
+  const [progress, setProgress] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState(false);
+  const refreshSaved = () => listDocSites().then((rows) => setSaved(new Set(rows.map((row) => row.key))));
+  useEffect(() => observeDocDownloads((done, total) => {
+    setProgress(total ? `Saving ${done} of ${total}…` : null);
+    if (!total) void refreshSaved().catch(() => {});
+  }), []);
+  useEffect(() => { void refreshSaved().catch(() => {}); }, [sites.data, progress]);
+  const update = async () => {
+    setDownloadError(false);
+    setProgress("Saving 0 of 0…");
+    try {
+      await downloadAllDocSites({ onProgress: (done, total) => setProgress(`Saving ${done} of ${total}…`) });
+      await sites.refetch();
+      await refreshSaved();
+    } catch { setDownloadError(true); }
+    finally { setProgress(null); }
+  };
 
   const sorted = useMemo(
     () => [...(sites.data?.customers ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
@@ -69,6 +94,11 @@ export default function DocPropertyPickerPage() {
           All ({sorted.length})
         </DocChip>
       </div>
+      <div className="text-xs text-muted-foreground" role="status">
+        {progress ?? (sites.savedAt ? `${sites.fromCopy ? "Offline — showing the copy saved" : "Offline copy updated"} ${formatDistanceToNow(sites.savedAt, { addSuffix: true })}` : "Offline copy not downloaded")}
+        {!sites.fromCopy && <button className="ml-2 min-h-11 font-semibold text-primary" disabled={!!progress} onClick={() => void update()}>Update now</button>}
+        {downloadError && <p role="alert">Couldn't update the offline copy. Try again.</p>}
+      </div>
 
       {sites.isLoading ? (
         <div className="flex flex-col gap-3" data-testid="picker-skeleton" aria-busy="true">
@@ -90,20 +120,28 @@ export default function DocPropertyPickerPage() {
         <div className="flex flex-col gap-3" data-testid="picker-list">
           {shown.map((c) => {
             const b = badgeFor(c);
+            const hasCopy = (c.branches.length ? c.branches : [""]).some((branch) => saved.has(`${c.customerId}:${branch}`));
+            const failures = sync.mutations.filter(m => m.docOwner === docOwner() && m.siteKey?.startsWith(`${c.customerId}:`) && (m.status === "failed" || m.docRefused)).length;
             return (
+              <div key={c.customerId}>
               <CustomerCard
                 key={c.customerId}
                 name={c.name}
+                disabled={(sites.fromCopy || navigator.onLine === false) && !hasCopy}
+                footer={hasCopy ? <p className="mt-2 text-xs text-muted-foreground" data-testid={`text-offline-saved-${c.customerId}`}>Saved for offline</p> : sites.fromCopy ? <p className="mt-2 text-xs text-muted-foreground">Not saved — connect to download</p> : null}
                 address={c.address}
                 branchCount={c.branches.length}
                 badge={<span className={cn("rounded-full px-2.5 py-0.5 text-xs font-semibold", b.cls)} data-testid={`badge-property-${c.customerId}`}>{b.label}</span>}
                 onClick={() => setLocation(`/customers/${c.customerId}/document-system`)}
                 testId={`card-property-${c.customerId}`}
               />
+              {failures > 0 && <button className="min-h-11 text-sm text-red-700 underline" onClick={() => setQueueOpen(true)}>{failures} change{failures === 1 ? "" : "s"} didn't sync</button>}
+              </div>
             );
           })}
         </div>
       )}
+      <QueueView open={queueOpen} onOpenChange={setQueueOpen} />
     </div>
   );
 }

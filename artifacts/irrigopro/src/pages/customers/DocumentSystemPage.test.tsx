@@ -3,6 +3,7 @@
  * Wouter harness per .agents/memory/wouter-jsdom-page-tests.md: memoryLocation
  * with BOTH hook and searchHook so `?branch=` is real.
  */
+import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -89,7 +90,16 @@ function installApi() {
 }
 
 function writes() {
-  return apiRequestSpy.mock.calls.filter(([, m]) => m && m !== "GET");
+  return apiRequestSpy.mock.calls.filter(([, m]) => m && m !== "GET").map(([url, method, body]) => {
+    // Existing form tests compare edited fields. The separate offline tests
+    // assert the UUID create contract itself.
+    if (body && "clientId" in body) {
+      expect(body.clientId).toMatch(/^[0-9a-f-]{36}$/);
+      const { clientId, ...fields } = body;
+      return [url, method, fields];
+    }
+    return body === undefined ? [url, method] : [url, method, body];
+  });
 }
 
 function renderPage(path = "/customers/7/document-system") {
@@ -147,7 +157,7 @@ describe("DocumentSystemPage — Slice 4", () => {
     fireEvent.click(screen.getByTestId("branch-option-South Lot"));
     await waitFor(() => expect(nav.history.at(-1)).toBe("/customers/7/document-system?branch=South%20Lot"));
     expect(await screen.findByTestId("text-doc-subtitle")).toHaveTextContent("Harbor Pines HOA, South Lot");
-    expect(apiRequestSpy).toHaveBeenCalledWith("/api/system-documentation/customers/7/site?branchName=South%20Lot", "GET");
+    expect(apiRequestSpy).toHaveBeenCalledWith("/api/system-documentation/customers/7/site?branchName=South%20Lot", "GET", undefined, expect.any(AbortSignal));
   });
 
   it("3. opening a controller whose first gap is zone_count lands on Zone count", async () => {
@@ -546,7 +556,7 @@ describe("Zones on more than one program — wizard", () => {
   const extra = { programId: b.id, runTimeMinutes: 12 };
   const endpoint = "/api/irrigation-controllers/160/zones/extra-programs";
   const replacement = (lines: { programId: number; runTimeMinutes: number }[]) => ({
-    zones: [{ zoneId: 3, lines }],
+    zones: [{ zoneNumber: 3, lines }],
   });
   async function start(extras: Z["extraPrograms"] = [], programs = [a, b, c], main: number | null = a.id) {
     return open(complete(160, "D", {
@@ -570,7 +580,7 @@ describe("Zones on more than one program — wizard", () => {
     fireEvent.change(screen.getByTestId("input-minutes-3"), { target: { value: "21" } });
     await next();
     expect(writes()).toEqual([
-      ["/api/irrigation-controllers/160/zones/bulk", "PUT", { zoneIds: [3], patch: { programId: a.id, runTimeMinutes: 21 } }],
+      ["/api/irrigation-controllers/160/zones/bulk", "PUT", { zoneNumbers: [3], patch: { programId: a.id, runTimeMinutes: 21 } }],
       [endpoint, "PUT", replacement([extra])],
     ]);
     expect(screen.getByTestId("text-review-programs")).toHaveTextContent("Program A: Mon at 5:00 AM, 100%, 3 zones (2 at 0 min), 21 min");
@@ -613,7 +623,7 @@ describe("Zones on more than one program — wizard", () => {
     expect(screen.getByTestId("input-extra-minutes-3-C")).toHaveValue("7");
     await next();
     expect(writes()).toEqual([
-      ["/api/irrigation-controllers/160/zones/bulk", "PUT", { zoneIds: [101, 102, 3], patch: { programId: b.id, runTimeMinutes: 10 } }],
+      ["/api/irrigation-controllers/160/zones/bulk", "PUT", { zoneNumbers: [1, 2, 3], patch: { programId: b.id, runTimeMinutes: 10 } }],
       [endpoint, "PUT", replacement([{ programId: c.id, runTimeMinutes: 7 }])],
     ]);
   });
@@ -636,7 +646,7 @@ describe("Zones on more than one program — wizard", () => {
     fireEvent.click(screen.getByTestId("button-retry"));
     await screen.findByTestId("step-review");
     expect(writes()).toEqual([
-      ["/api/irrigation-controllers/160/zones/bulk", "PUT", { zoneIds: [3], patch: { programId: a.id, runTimeMinutes: 21 } }],
+      ["/api/irrigation-controllers/160/zones/bulk", "PUT", { zoneNumbers: [3], patch: { programId: a.id, runTimeMinutes: 21 } }],
       [endpoint, "PUT", replacement([extra])],
       [endpoint, "PUT", replacement([extra])],
     ]);
@@ -677,7 +687,7 @@ describe("Zones on more than one program — wizard", () => {
     fireEvent.click(screen.getByLabelText("Zone 3 on program A"));
     expect(screen.getByTestId("input-extra-minutes-3-B")).toHaveValue("12");
     await next();
-    expect(writes()).toEqual([["/api/irrigation-controllers/160/zones/bulk", "PUT", { zoneIds: [3], patch: { programId: a.id, runTimeMinutes: 20 } }]]);
+    expect(writes()).toEqual([["/api/irrigation-controllers/160/zones/bulk", "PUT", { zoneNumbers: [3], patch: { programId: a.id, runTimeMinutes: 20 } }]]);
   });
 
   it("drops remotely deleted programs from an edited list without losing other unsaved minutes", async () => {
@@ -726,8 +736,8 @@ describe("Slice 5 — zone types", () => {
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-programs");
     expect(writes()).toEqual([
-      ["/api/irrigation-controllers/51/zones/bulk", "PUT", { zoneIds: [103, 104], patch: { zoneType: "rotor" } }],
-      ["/api/irrigation-controllers/51/zones/bulk", "PUT", { zoneIds: [107], patch: { zoneType: "other" } }],
+      ["/api/irrigation-controllers/51/zones/bulk", "PUT", { zoneNumbers: [3, 4], patch: { zoneType: "rotor" } }],
+      ["/api/irrigation-controllers/51/zones/bulk", "PUT", { zoneNumbers: [7], patch: { zoneType: "other" } }],
     ]);
   });
 
@@ -742,7 +752,7 @@ describe("Slice 5 — zone types", () => {
     expect(screen.getByTestId("button-next")).not.toBeDisabled();
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-programs");
-    expect(writes()).toEqual([["/api/irrigation-controllers/52/zones/bulk", "PUT", { zoneIds: [103, 104, 105, 106, 107], patch: { zoneType: "pop_up_spray" } }]]);
+    expect(writes()).toEqual([["/api/irrigation-controllers/52/zones/bulk", "PUT", { zoneNumbers: [3, 4, 5, 6, 7], patch: { zoneType: "pop_up_spray" } }]]);
   });
 
   it("the fill button label counts untyped zones", async () => {
@@ -773,7 +783,7 @@ describe("Slice 5 — zone types", () => {
     fireEvent.click(screen.getByTestId("row-controller-57"));
     await screen.findByTestId("step-zone-types");
     expect(screen.getByLabelText("Zone 1, no type")).toBeInTheDocument();
-    expect(writes()).toEqual([["/api/irrigation-controllers/56/zones/bulk", "PUT", { zoneIds: [101], patch: { zoneType: "pop_up_spray" } }]]);
+    expect(writes()).toEqual([["/api/irrigation-controllers/56/zones/bulk", "PUT", { zoneNumbers: [1], patch: { zoneType: "pop_up_spray" } }]]);
   });
 
   it("an audited controller with an unknown count gets real zone ids after Zone count", async () => {
@@ -794,7 +804,7 @@ describe("Slice 5 — zone types", () => {
     fireEvent.click(await screen.findByTestId("button-fill-untyped"));
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-programs");
-    expect(bulk()).toEqual([["/api/irrigation-controllers/55/zones/bulk", "PUT", { zoneIds: [551, 552, 553], patch: { zoneType: "pop_up_spray" } }]]);
+    expect(bulk()).toEqual([["/api/irrigation-controllers/55/zones/bulk", "PUT", { zoneNumbers: [1, 2, 3], patch: { zoneType: "pop_up_spray" } }]]);
   });
 });
 
@@ -956,8 +966,8 @@ describe("Slice 5 — run times and review", () => {
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-review");
     expect(bulk()).toEqual([
-      ["/api/irrigation-controllers/70/zones/bulk", "PUT", { zoneIds: [101, 102, 103, 104], patch: { programId: 9, runTimeMinutes: 12 } }],
-      ["/api/irrigation-controllers/70/zones/bulk", "PUT", { zoneIds: [105], patch: { programId: 9, runTimeMinutes: 15 } }],
+      ["/api/irrigation-controllers/70/zones/bulk", "PUT", { zoneNumbers: [1, 2, 3, 4], patch: { programId: 9, runTimeMinutes: 12 } }],
+      ["/api/irrigation-controllers/70/zones/bulk", "PUT", { zoneNumbers: [5], patch: { programId: 9, runTimeMinutes: 15 } }],
     ]);
   });
 
@@ -983,7 +993,7 @@ describe("Slice 5 — run times and review", () => {
     expect(screen.getByTestId("button-next")).not.toBeDisabled();
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-review");
-    expect(bulk()).toEqual([["/api/irrigation-controllers/79/zones/bulk", "PUT", { zoneIds: [108], patch: { programId: 9, runTimeMinutes: 0 } }]]);
+    expect(bulk()).toEqual([["/api/irrigation-controllers/79/zones/bulk", "PUT", { zoneNumbers: [8], patch: { programId: 9, runTimeMinutes: 0 } }]]);
     expect(screen.getByTestId("text-review-programs")).toHaveTextContent("Program A: Mon at 5:00 AM, 100%, 8 zones (1 at 0 min), 70 min");
     expect(screen.getByTestId("button-verify")).not.toBeDisabled();
     fireEvent.click(screen.getByTestId("button-verify"));
@@ -1032,8 +1042,8 @@ describe("Slice 5 — run times and review", () => {
     expect(screen.getByTestId("input-minutes-2")).toHaveValue("11");
     fireEvent.click(screen.getByTestId("button-retry"));
     await screen.findByTestId("step-review");
-    const g1 = ["/api/irrigation-controllers/72/zones/bulk", "PUT", { zoneIds: [101], patch: { programId: 9, runTimeMinutes: 10 } }];
-    const g2 = ["/api/irrigation-controllers/72/zones/bulk", "PUT", { zoneIds: [102], patch: { programId: 9, runTimeMinutes: 11 } }];
+    const g1 = ["/api/irrigation-controllers/72/zones/bulk", "PUT", { zoneNumbers: [1], patch: { programId: 9, runTimeMinutes: 10 } }];
+    const g2 = ["/api/irrigation-controllers/72/zones/bulk", "PUT", { zoneNumbers: [2], patch: { programId: 9, runTimeMinutes: 11 } }];
     expect(bulk()).toEqual([g1, g2, g2]);
   });
 
@@ -1105,7 +1115,7 @@ describe("Run times — typed minutes", () => {
     expect(screen.getByTestId("button-next")).not.toBeDisabled();
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-review");
-    expect(bulk()).toEqual([["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneIds: [101], patch: { programId: 9, runTimeMinutes: 32 } }]]);
+    expect(bulk()).toEqual([["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneNumbers: [1], patch: { programId: 9, runTimeMinutes: 32 } }]]);
   });
 
   it("keeps overflow text red across rerenders, commits 120, and normalizes on blur", async () => {
@@ -1121,7 +1131,7 @@ describe("Run times — typed minutes", () => {
     expect(el).not.toHaveClass("border-red-400");
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-review");
-    expect(bulk()[0][2]).toEqual({ zoneIds: [101], patch: { programId: 9, runTimeMinutes: 120 } });
+    expect(bulk()[0][2]).toEqual({ zoneNumbers: [1], patch: { programId: 9, runTimeMinutes: 120 } });
   });
 
   it("restores a blank without a new edit, even after a refetch or an earlier commit", async () => {
@@ -1142,7 +1152,7 @@ describe("Run times — typed minutes", () => {
     expect(input()).toHaveValue("32");
     fireEvent.click(screen.getByTestId("button-save-exit"));
     await screen.findByTestId("status-doc-flash");
-    expect(bulk()).toEqual([["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneIds: [101], patch: { programId: 9, runTimeMinutes: 32 } }]]);
+    expect(bulk()).toEqual([["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneNumbers: [1], patch: { programId: 9, runTimeMinutes: 32 } }]]);
   });
 
   it("drops letters and limits the raw text to three digits", async () => {
@@ -1193,7 +1203,7 @@ describe("Run times — typed minutes", () => {
     expect(input()).toHaveValue("32");
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-review");
-    expect(bulk()).toEqual([["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneIds: [101, 102, 103, 104], patch: { programId: 9, runTimeMinutes: 32 } }]]);
+    expect(bulk()).toEqual([["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneNumbers: [1, 2, 3, 4], patch: { programId: 9, runTimeMinutes: 32 } }]]);
   });
 
   it("Set all enforces 1–120, restores blanks, and supplies program defaults", async () => {
@@ -1227,14 +1237,14 @@ describe("Run times — typed minutes", () => {
     expect(writes()).toEqual([]);
     fireEvent.click(screen.getByTestId("button-doc-back"));
     await screen.findByTestId("step-programs");
-    expect(bulk()).toEqual([["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneIds: [101], patch: { programId: null, runTimeMinutes: 32 } }]]);
+    expect(bulk()).toEqual([["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneNumbers: [1], patch: { programId: null, runTimeMinutes: 32 } }]]);
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-run-times");
     expect(input()).toHaveValue("32");
     typeMinutes(2, "15");
     fireEvent.click(screen.getByTestId("button-save-exit"));
     await screen.findByTestId("status-doc-flash");
-    expect(bulk().at(-1)?.[2]).toEqual({ zoneIds: [102], patch: { programId: null, runTimeMinutes: 15 } });
+    expect(bulk().at(-1)?.[2]).toEqual({ zoneNumbers: [2], patch: { programId: null, runTimeMinutes: 15 } });
   });
 
   it("typed values survive a failed group and Retry sends only the unsent group", async () => {
@@ -1252,8 +1262,8 @@ describe("Run times — typed minutes", () => {
     expect(input(2)).toHaveValue("15");
     fireEvent.click(screen.getByTestId("button-retry"));
     await screen.findByTestId("step-review");
-    const first = ["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneIds: [101], patch: { programId: 9, runTimeMinutes: 32 } }];
-    const second = ["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneIds: [102], patch: { programId: 9, runTimeMinutes: 15 } }];
+    const first = ["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneNumbers: [1], patch: { programId: 9, runTimeMinutes: 32 } }];
+    const second = ["/api/irrigation-controllers/90/zones/bulk", "PUT", { zoneNumbers: [2], patch: { programId: 9, runTimeMinutes: 15 } }];
     expect(bulk()).toEqual([first, second, second]);
   });
 });
@@ -1266,14 +1276,14 @@ describe("Slice 5 — review fixes", () => {
     fireEvent.click(screen.getByLabelText("Zone 1 more minutes"));
     fireEvent.click(screen.getByTestId("button-doc-back"));
     await screen.findByTestId("step-programs");
-    expect(bulk()).toEqual([["/api/irrigation-controllers/80/zones/bulk", "PUT", { zoneIds: [101], patch: { programId: null, runTimeMinutes: 1 } }]]);
+    expect(bulk()).toEqual([["/api/irrigation-controllers/80/zones/bulk", "PUT", { zoneNumbers: [1], patch: { programId: null, runTimeMinutes: 1 } }]]);
     fireEvent.click(screen.getByTestId("button-next"));
     await screen.findByTestId("step-run-times");
     expect(screen.getByTestId("input-minutes-1")).toHaveValue("1");
     fireEvent.click(screen.getByLabelText("Zone 2 more minutes"));
     fireEvent.click(screen.getByTestId("button-save-exit"));
     await screen.findByTestId("status-doc-flash");
-    expect(bulk().at(-1)).toEqual(["/api/irrigation-controllers/80/zones/bulk", "PUT", { zoneIds: [102], patch: { programId: null, runTimeMinutes: 1 } }]);
+    expect(bulk().at(-1)).toEqual(["/api/irrigation-controllers/80/zones/bulk", "PUT", { zoneNumbers: [2], patch: { programId: null, runTimeMinutes: 1 } }]);
   });
 
   it("controls are disabled while a save is pending", async () => {
@@ -1292,6 +1302,7 @@ describe("Slice 5 — review fixes", () => {
     await waitFor(() => expect(screen.getByTestId("input-start-time-0")).toBeDisabled());
     expect(screen.getByTestId("chip-day-Wed")).toBeDisabled();
     expect(screen.getByTestId("button-remove-program")).toBeDisabled();
+    await waitFor(() => expect(apiRequestSpy).toHaveBeenCalledWith("/api/irrigation-programs/9", "PUT", expect.any(Object)));
     await act(async () => { release(); });
     await screen.findByTestId("step-run-times");
   });
@@ -1371,11 +1382,11 @@ describe("Slice 5 — review fixes", () => {
       await screen.findByTestId("step-review");
     }
     expect(writes()).toEqual([
-      ["/api/irrigation-controllers/101/zones/bulk", "PUT", { zoneIds: [1001, 1002], patch: { zoneType: "pop_up_spray" } }],
+      ["/api/irrigation-controllers/101/zones/bulk", "PUT", { zoneNumbers: [1, 2], patch: { zoneType: "pop_up_spray" } }],
       ["/api/irrigation-programs/501", "PUT", { wateringDays: ["Mon", "Tue"] }],
-      ["/api/irrigation-controllers/101/zones/bulk", "PUT", { zoneIds: [1001, 1002], patch: { programId: 501, runTimeMinutes: 10 } }],
-      ["/api/irrigation-controllers/201/zones/bulk", "PUT", { zoneIds: [2001, 2002], patch: { programId: 601, runTimeMinutes: 10 } }],
-      ["/api/irrigation-controllers/301/zones/bulk", "PUT", { zoneIds: [3001, 3002], patch: { programId: 701, runTimeMinutes: 10 } }],
+      ["/api/irrigation-controllers/101/zones/bulk", "PUT", { zoneNumbers: [1, 2], patch: { programId: 501, runTimeMinutes: 10 } }],
+      ["/api/irrigation-controllers/201/zones/bulk", "PUT", { zoneNumbers: [1, 2], patch: { programId: 601, runTimeMinutes: 10 } }],
+      ["/api/irrigation-controllers/301/zones/bulk", "PUT", { zoneNumbers: [1, 2], patch: { programId: 701, runTimeMinutes: 10 } }],
     ]);
   });
 });
@@ -1486,7 +1497,7 @@ describe("optional equipment notes", () => {
       };
       fireEvent.click(screen.getByTestId("button-verify"));
       await screen.findByTestId("status-doc-flash");
-      expect(screen.getByTestId("button-finish")).not.toBeDisabled();
+      await waitFor(() => expect(screen.getByTestId("button-finish")).not.toBeDisabled());
     });
   }
 
@@ -1852,6 +1863,7 @@ describe("Slice 6 — backflow flow", () => {
     fireEvent.click(screen.getByTestId("button-next"));
     await waitFor(() => expect(screen.getByTestId("doc-frame-content")).toBeDisabled());
     expect(screen.getByTestId("button-save-exit")).toBeDisabled();
+    await waitFor(() => expect(apiRequestSpy).toHaveBeenCalledWith("/api/backflows/19", "PUT", expect.any(Object)));
     await act(async () => { release(); });
     await screen.findByTestId("step-bf-last-test");
   });

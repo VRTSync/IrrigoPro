@@ -4,6 +4,7 @@
  * apiRequest is the real implementation wrapped in a recorder; fetch is stubbed
  * at the network edge only, so the wizard flows run unmodified.
  */
+import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -38,6 +39,8 @@ import { AuthProvider } from "@/lib/auth-context";
 import { apiRequest, clearSessionAndLogout, queryClient } from "@/lib/queryClient";
 import { isApiAllowedForRole } from "@workspace/shared";
 import SwitchUser from "@/pages/switch-user";
+import { downloadAllDocSites } from "@/lib/offline/doc-download";
+import { openOfflineDB } from "@/lib/offline/db";
 
 // Radix pointer shim (copied from invoices-ar-collections.test.tsx).
 const proto = window.HTMLElement.prototype as unknown as Record<string, unknown>;
@@ -147,6 +150,30 @@ const atHome = async (nav: ReturnType<typeof memoryLocation>) => {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("System Documenter app (Slice 7)", () => {
+  it("offline picker opens a saved property and disables an unavailable property", async () => {
+    localStorage.setItem("user", JSON.stringify({ id: 31, companyId: 1 }));
+    await downloadAllDocSites();
+    const db = await openOfflineDB();
+    await db.delete("docSites", "3:");
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    mount("/");
+    expect(await screen.findByTestId("text-offline-saved-5")).toHaveTextContent("Saved for offline");
+    expect(screen.getByTestId("card-property-3")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("card-property-5"));
+    expect(await screen.findByTestId("strip-doc-offline")).toHaveTextContent("Changes are saved on this phone");
+    expect(screen.getByTestId("button-finish")).not.toBeDisabled();
+    vi.restoreAllMocks();
+  });
+  it("offline wizard enables non-photo writes", async () => {
+    localStorage.setItem("user", JSON.stringify({ id: 31, companyId: 1 }));
+    await downloadAllDocSites();
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    mount("/customers/3/document-system");
+    fireEvent.click(await screen.findByTestId("row-controller-4"));
+    expect(await screen.findByTestId("button-save-exit")).not.toBeDisabled();
+    expect(screen.getByTestId("letter-A")).not.toBeDisabled();
+    vi.restoreAllMocks();
+  });
   it("1. / shows Which property? with no staff links, navigation, notifications or footer", async () => {
     mount("/");
     expect(await screen.findByRole("heading", { name: "Which property?" })).toBeInTheDocument();

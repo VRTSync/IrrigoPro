@@ -907,3 +907,59 @@ mtime_ms = 1794343400323
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/3ba19521-55ac-43bf-8822-92500de4323a/48ded517-0310-4de5-bdf7-79040a08ade6"
 storage_version_token = "1794343411427015"
 content_type = "text/html"
+
+[[outputs]]
+id = "HelWcUt9a0fdwNhgbb3Th"
+uri = "file://generated-artifacts/document-offline/offline-finished.jpg"
+type = "image"
+title = "Offline Finish — browser fixture"
+description = "Synthetic headless Chromium fixture: photos and verification saved locally. Not physical-device or published-environment evidence."
+logical_id = "6a45c4e2-3f54-42c5-a6d8-fd3843b06dab"
+content_hash = "sha256:3de9b1146ef8194ef878d297d6669ff6ddf7b0681456ca8e1deeb8f54c6ce599"
+size = 35713
+mtime_ms = 1794435415497
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/6a45c4e2-3f54-42c5-a6d8-fd3843b06dab/b7843268-1c1a-45a0-8b5c-6b35195a1cd0"
+storage_version_token = "1794435500147770"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "tcvoDC3P2uqUXgLDrPfif"
+uri = "file://generated-artifacts/document-offline/synced-desktop-viewport.jpg"
+type = "image"
+title = "Synced result — browser fixture"
+description = "The same synthetic property after ordered photo attachment and verification. Desktop viewport, not a separately signed-in live desktop."
+logical_id = "d63fb68e-aced-4ac0-aecd-3f3ae054d905"
+content_hash = "sha256:339fc6e7eb9ead443a71ee07f6a39c9f4f9e11efe7e2d79188cd0fb1de230051"
+size = 50777
+mtime_ms = 1794435416757
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/d63fb68e-aced-4ac0-aecd-3f3ae054d905/dfd3c541-0b7b-497b-9868-4b055042a512"
+storage_version_token = "1794435500870917"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "93awd3DmzsLqyZlzg6oI6"
+uri = "file://generated-artifacts/document-offline/interrupted-upload-reopened.jpg"
+type = "image"
+title = "Interrupted photo restored after reload"
+description = "Synthetic production-bundle Chromium fixture: browser still reports online, storage connection dropped, photo was durably queued and reopened from IndexedDB. Not physical-device or live-environment evidence."
+logical_id = "f7dc142b-0d5f-4784-9436-0602b5a2f4c6"
+content_hash = "sha256:1ba0de103b49e792b0c214fff0b0d5a81f2910dd5dfe85cfd6f3932f069cf84c"
+size = 45409
+mtime_ms = 1794436580202
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/f7dc142b-0d5f-4784-9436-0602b5a2f4c6/f6c0b56d-1a0a-400e-ae74-a115f574df2b"
+storage_version_token = "1794436914678817"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "AsZBV_hXqlD1JHCbL9tp9"
+uri = "file://generated-artifacts/document-offline/http-503-upload-reopened.jpg"
+type = "image"
+title = "Storage 503 capture restored after reload"
+description = "Synthetic Chromium production-bundle fixture: a storage PUT returned HTTP 503, the photo survived reload in IndexedDB, then replay attached it successfully. Not physical-device or production evidence."
+logical_id = "9d8ba916-25ae-44c0-84da-ba014b59691d"
+content_hash = "sha256:7a64fbf4ccc21c098132cf126af1b00440205a6d9dbab1b19c4670d7e42735bb"
+size = 45313
+mtime_ms = 1794438923658
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/9d8ba916-25ae-44c0-84da-ba014b59691d/8e4a89f4-df3a-4f74-a340-7856e027814b"
+storage_version_token = "1794439033321977"
+content_type = "image/jpeg"

@@ -2,7 +2,9 @@ import { useMemo, useRef, useState } from "react";
 import { CalendarClock, Info, Loader2, ShieldCheck } from "lucide-react";
 import type { DocumentationBackflow, DocumentationSite } from "@workspace/api-client-react";
 import { backflowDocumentationGaps, type DocGap } from "@workspace/shared";
-import { apiRequest } from "@/lib/queryClient";
+import { createDocRequest } from "@/lib/offline/doc-api";
+import { docRecordMatches } from "@/lib/offline/doc-apply";
+import { DocPhotoPreview, useResolvedDocPhoto } from "./doc-photo-preview";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -54,6 +56,7 @@ export interface BackflowFlowProps {
 }
 
 export function BackflowFlow({ customerId, branchName, site, backflow, draftName, onExit, footerOffsetClass }: BackflowFlowProps) {
+  const apiRequest = createDocRequest(customerId, branchName);
   const invalidateSite = useInvalidateDocSite(customerId, branchName);
   const savedIdRef = useRef<number | null>(backflow?.id ?? null);
   const invalidate = () => invalidateSite(null, savedIdRef.current);
@@ -73,8 +76,12 @@ export function BackflowFlow({ customerId, branchName, site, backflow, draftName
   const photoBlocked = photoState !== "idle";
   const [brandOther, setBrandOther] = useState(() => !!backflow?.brand && !BACKFLOW_BRANDS.includes(backflow.brand));
 
-  const live = useMemo(() => (savedId == null ? null : site.backflows.find((b) => b.id === savedId) ?? null), [site, savedId]);
+  const live = useMemo(() => (savedId == null ? null : site.backflows.find((b) => docRecordMatches(b, savedId)) ?? null), [site, savedId]);
   const base = live ?? backflow;
+  useResolvedDocPhoto(values.photo, live?.photoUrl, photo => {
+    setValues(v => ({ ...v, photo }));
+    savedRef.current = { ...savedRef.current, photo };
+  });
   const onFile = hasTestOnFile(base);
   const stepKey: BackflowStepKey = BACKFLOW_FLOW_STEPS[step].key;
   const displayName = values.name.trim() || savedRef.current.name.trim() || draftName;
@@ -336,7 +343,8 @@ export function BackflowFlow({ customerId, branchName, site, backflow, draftName
           <section className="flex flex-col gap-3" data-testid="step-bf-photo">
             <h2 className="text-base font-semibold">Device photo</h2>
             <p className="text-sm text-muted-foreground">Get the whole device and the serial plate. Clear dirt off the plate first if you can, or choose a photo you already took.</p>
-            <DocPhotoField photoId={values.photo} onUploaded={(id) => set("photo", id)} onStateChange={setPhotoState} label="Device photo" />
+            <DocPhotoField photoId={values.photo} subjectKind="backflow" subjectId={savedId}
+              onUploaded={(id) => { set("photo", id || null); if (savedId != null) void invalidate(); }} onStateChange={setPhotoState} label="Device photo" />
           </section>
         )}
 
@@ -444,7 +452,7 @@ export function BackflowFlow({ customerId, branchName, site, backflow, draftName
         {isReview && (
           <section className="flex flex-col gap-3" data-testid="step-review">
             {values.photo ? (
-              <img src={`/api/photos/${values.photo}?variant=medium`} alt="Device photo" className="h-[140px] w-full rounded-xl object-cover" />
+              <DocPhotoPreview photoId={values.photo} alt="Device photo" className="h-[140px] w-full rounded-xl object-cover" />
             ) : (
               <div className="flex h-[140px] w-full items-center justify-center rounded-xl bg-slate-100 text-sm text-slate-500">No photo yet</div>
             )}

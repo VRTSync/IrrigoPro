@@ -1,4 +1,6 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { autoDownloadDocSites } from "@/lib/offline/doc-download";
+import { QueueView, SyncBadge } from "@/components/offline/sync-ui";
 import { Redirect, Route, Switch, useLocation } from "wouter";
 import { User } from "lucide-react";
 import {
@@ -7,6 +9,10 @@ import {
 import { clearSessionAndLogout } from "@/lib/queryClient";
 import DocPropertyPickerPage from "@/pages/document-system/DocPropertyPickerPage";
 import DocumentSystemPage from "@/pages/customers/DocumentSystemPage";
+import { ServiceWorkerUpdatePrompt } from "@/components/offline/service-worker-update-prompt";
+import { useQueryClient } from "@tanstack/react-query";
+import { getSyncEngine } from "@/lib/offline/engine";
+import { getGetDocumentationSitesQueryKey } from "@workspace/api-client-react";
 
 // SwitchUser signs restricted accounts out before mounting its staff user list.
 const SwitchUser = lazy(() => import("@/pages/switch-user"));
@@ -21,9 +27,21 @@ export interface DocumenterAppProps {
  * fetches data or links to screens this role cannot use.
  */
 export default function DocumenterApp({ user }: DocumenterAppProps) {
+  const queryClient = useQueryClient();
+  useEffect(() => getSyncEngine().on(event => {
+    if (event.type === "doc-refresh") void queryClient.invalidateQueries({ queryKey: getGetDocumentationSitesQueryKey() });
+  }), [queryClient]);
   const [, setLocation] = useLocation();
+  const [queueOpen, setQueueOpen] = useState(false);
+  useEffect(() => {
+    const download = () => { void autoDownloadDocSites().catch((error) => console.warn("Offline download failed", error)); };
+    download();
+    window.addEventListener("online", download);
+    return () => window.removeEventListener("online", download);
+  }, []);
   return (
     <div className="min-h-screen bg-background" data-testid="documenter-app">
+      <ServiceWorkerUpdatePrompt />
       <header
         className="h-[68px] px-3 flex items-center gap-2.5 bg-gradient-to-r from-primary-dark to-primary text-white"
         // primary-dark is a CSS token but not a registered Tailwind colour.
@@ -31,6 +49,7 @@ export default function DocumenterApp({ user }: DocumenterAppProps) {
         style={{ backgroundImage: "linear-gradient(to right, hsl(var(--primary-dark)), hsl(var(--primary)))" }}
       >
         <h1 className="flex-1 min-w-0 truncate text-[17px] font-semibold" data-testid="text-documenter-title">System Documenter</h1>
+        <SyncBadge onOpenQueue={() => setQueueOpen(true)} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -50,6 +69,7 @@ export default function DocumenterApp({ user }: DocumenterAppProps) {
           </DropdownMenuContent>
         </DropdownMenu>
       </header>
+      <QueueView open={queueOpen} onOpenChange={setQueueOpen} />
       <main>
         <Suspense fallback={<div className="mx-auto w-full max-w-[480px] p-4"><div className="h-[84px] rounded-xl skeleton-shimmer" /></div>}>
           <Switch>

@@ -25,8 +25,10 @@ import type {
   CustomerPullStatus,
   DeactivateMarkupScheduleParams,
   DocumentationBackflowVerification,
+  DocumentationBulkZoneInput,
   DocumentationControllerVerification,
   DocumentationError,
+  DocumentationExtraZoneInput,
   DocumentationNoBackflowInput,
   DocumentationSite,
   DocumentationSiteBlock,
@@ -49,6 +51,9 @@ import type {
   MarkupScheduleContext,
   MarkupScheduleInput,
   MarkupScheduleUpdate,
+  OfflineBackflowInput,
+  OfflineControllerInput,
+  OfflineProgramInput,
   PreviewMarkupRecalculationParams,
   RecalculateMarkupPricesParams,
   RemoveCustomerMarkupOverrideParams,
@@ -1406,6 +1411,436 @@ export const useRemoveCustomerMarkupOverride = <
   TContext
 > => {
   return useMutation(getRemoveCustomerMarkupOverrideMutationOptions(options));
+};
+
+export const getCreateOfflineDocumentationControllerUrl = (
+  customerId: number,
+) => {
+  return `/api/customers/${customerId}/controllers-profile`;
+};
+
+export const createOfflineDocumentationController = async (
+  customerId: number,
+  offlineControllerInput: OfflineControllerInput,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(
+    getCreateOfflineDocumentationControllerUrl(customerId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(offlineControllerInput),
+    },
+  );
+};
+
+export const getCreateOfflineDocumentationControllerMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createOfflineDocumentationController>>,
+    TError,
+    { customerId: number; data: BodyType<OfflineControllerInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createOfflineDocumentationController>>,
+  TError,
+  { customerId: number; data: BodyType<OfflineControllerInput> },
+  TContext
+> => {
+  const mutationKey = ["createOfflineDocumentationController"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createOfflineDocumentationController>>,
+    { customerId: number; data: BodyType<OfflineControllerInput> }
+  > = (props) => {
+    const { customerId, data } = props ?? {};
+
+    return createOfflineDocumentationController(
+      customerId,
+      data,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateOfflineDocumentationControllerMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createOfflineDocumentationController>>
+>;
+export type CreateOfflineDocumentationControllerMutationBody =
+  BodyType<OfflineControllerInput>;
+export type CreateOfflineDocumentationControllerMutationError = ErrorType<void>;
+
+export const useCreateOfflineDocumentationController = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createOfflineDocumentationController>>,
+    TError,
+    { customerId: number; data: BodyType<OfflineControllerInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createOfflineDocumentationController>>,
+  TError,
+  { customerId: number; data: BodyType<OfflineControllerInput> },
+  TContext
+> => {
+  return useMutation(
+    getCreateOfflineDocumentationControllerMutationOptions(options),
+  );
+};
+
+export const getCreateOfflineDocumentationBackflowUrl = (
+  customerId: number,
+) => {
+  return `/api/customers/${customerId}/backflows`;
+};
+
+export const createOfflineDocumentationBackflow = async (
+  customerId: number,
+  offlineBackflowInput: OfflineBackflowInput,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(
+    getCreateOfflineDocumentationBackflowUrl(customerId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(offlineBackflowInput),
+    },
+  );
+};
+
+export const getCreateOfflineDocumentationBackflowMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createOfflineDocumentationBackflow>>,
+    TError,
+    { customerId: number; data: BodyType<OfflineBackflowInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createOfflineDocumentationBackflow>>,
+  TError,
+  { customerId: number; data: BodyType<OfflineBackflowInput> },
+  TContext
+> => {
+  const mutationKey = ["createOfflineDocumentationBackflow"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createOfflineDocumentationBackflow>>,
+    { customerId: number; data: BodyType<OfflineBackflowInput> }
+  > = (props) => {
+    const { customerId, data } = props ?? {};
+
+    return createOfflineDocumentationBackflow(customerId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateOfflineDocumentationBackflowMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createOfflineDocumentationBackflow>>
+>;
+export type CreateOfflineDocumentationBackflowMutationBody =
+  BodyType<OfflineBackflowInput>;
+export type CreateOfflineDocumentationBackflowMutationError = ErrorType<void>;
+
+export const useCreateOfflineDocumentationBackflow = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createOfflineDocumentationBackflow>>,
+    TError,
+    { customerId: number; data: BodyType<OfflineBackflowInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createOfflineDocumentationBackflow>>,
+  TError,
+  { customerId: number; data: BodyType<OfflineBackflowInput> },
+  TContext
+> => {
+  return useMutation(
+    getCreateOfflineDocumentationBackflowMutationOptions(options),
+  );
+};
+
+export const getCreateOfflineDocumentationProgramUrl = (id: number) => {
+  return `/api/irrigation-controllers/${id}/programs`;
+};
+
+export const createOfflineDocumentationProgram = async (
+  id: number,
+  offlineProgramInput: OfflineProgramInput,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getCreateOfflineDocumentationProgramUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(offlineProgramInput),
+  });
+};
+
+export const getCreateOfflineDocumentationProgramMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createOfflineDocumentationProgram>>,
+    TError,
+    { id: number; data: BodyType<OfflineProgramInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createOfflineDocumentationProgram>>,
+  TError,
+  { id: number; data: BodyType<OfflineProgramInput> },
+  TContext
+> => {
+  const mutationKey = ["createOfflineDocumentationProgram"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createOfflineDocumentationProgram>>,
+    { id: number; data: BodyType<OfflineProgramInput> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return createOfflineDocumentationProgram(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateOfflineDocumentationProgramMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createOfflineDocumentationProgram>>
+>;
+export type CreateOfflineDocumentationProgramMutationBody =
+  BodyType<OfflineProgramInput>;
+export type CreateOfflineDocumentationProgramMutationError = ErrorType<void>;
+
+export const useCreateOfflineDocumentationProgram = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createOfflineDocumentationProgram>>,
+    TError,
+    { id: number; data: BodyType<OfflineProgramInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createOfflineDocumentationProgram>>,
+  TError,
+  { id: number; data: BodyType<OfflineProgramInput> },
+  TContext
+> => {
+  return useMutation(
+    getCreateOfflineDocumentationProgramMutationOptions(options),
+  );
+};
+
+export const getSaveDocumentationZonesUrl = (id: number) => {
+  return `/api/irrigation-controllers/${id}/zones/bulk`;
+};
+
+export const saveDocumentationZones = async (
+  id: number,
+  documentationBulkZoneInput: DocumentationBulkZoneInput,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getSaveDocumentationZonesUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(documentationBulkZoneInput),
+  });
+};
+
+export const getSaveDocumentationZonesMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof saveDocumentationZones>>,
+    TError,
+    { id: number; data: BodyType<DocumentationBulkZoneInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof saveDocumentationZones>>,
+  TError,
+  { id: number; data: BodyType<DocumentationBulkZoneInput> },
+  TContext
+> => {
+  const mutationKey = ["saveDocumentationZones"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof saveDocumentationZones>>,
+    { id: number; data: BodyType<DocumentationBulkZoneInput> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return saveDocumentationZones(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SaveDocumentationZonesMutationResult = NonNullable<
+  Awaited<ReturnType<typeof saveDocumentationZones>>
+>;
+export type SaveDocumentationZonesMutationBody =
+  BodyType<DocumentationBulkZoneInput>;
+export type SaveDocumentationZonesMutationError = ErrorType<void>;
+
+export const useSaveDocumentationZones = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof saveDocumentationZones>>,
+    TError,
+    { id: number; data: BodyType<DocumentationBulkZoneInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof saveDocumentationZones>>,
+  TError,
+  { id: number; data: BodyType<DocumentationBulkZoneInput> },
+  TContext
+> => {
+  return useMutation(getSaveDocumentationZonesMutationOptions(options));
+};
+
+export const getSaveDocumentationZoneExtrasUrl = (id: number) => {
+  return `/api/irrigation-controllers/${id}/zones/extra-programs`;
+};
+
+export const saveDocumentationZoneExtras = async (
+  id: number,
+  documentationExtraZoneInput: DocumentationExtraZoneInput,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getSaveDocumentationZoneExtrasUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(documentationExtraZoneInput),
+  });
+};
+
+export const getSaveDocumentationZoneExtrasMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof saveDocumentationZoneExtras>>,
+    TError,
+    { id: number; data: BodyType<DocumentationExtraZoneInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof saveDocumentationZoneExtras>>,
+  TError,
+  { id: number; data: BodyType<DocumentationExtraZoneInput> },
+  TContext
+> => {
+  const mutationKey = ["saveDocumentationZoneExtras"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof saveDocumentationZoneExtras>>,
+    { id: number; data: BodyType<DocumentationExtraZoneInput> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return saveDocumentationZoneExtras(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SaveDocumentationZoneExtrasMutationResult = NonNullable<
+  Awaited<ReturnType<typeof saveDocumentationZoneExtras>>
+>;
+export type SaveDocumentationZoneExtrasMutationBody =
+  BodyType<DocumentationExtraZoneInput>;
+export type SaveDocumentationZoneExtrasMutationError = ErrorType<void>;
+
+export const useSaveDocumentationZoneExtras = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof saveDocumentationZoneExtras>>,
+    TError,
+    { id: number; data: BodyType<DocumentationExtraZoneInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof saveDocumentationZoneExtras>>,
+  TError,
+  { id: number; data: BodyType<DocumentationExtraZoneInput> },
+  TContext
+> => {
+  return useMutation(getSaveDocumentationZoneExtrasMutationOptions(options));
 };
 
 /**

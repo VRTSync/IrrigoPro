@@ -2,7 +2,10 @@ import { useMemo, useRef, useState } from "react";
 import { AlertTriangle, Info, Loader2, Minus, Plus } from "lucide-react";
 import type { DocumentationControllerGraph, DocumentationSite } from "@workspace/api-client-react";
 import { controllerDocumentationGaps, controllerNameFor, type ControllerDocInput, type DocGap } from "@workspace/shared";
-import { apiRequest } from "@/lib/queryClient";
+import { createDocRequest } from "@/lib/offline/doc-api";
+import { docRecordMatches } from "@/lib/offline/doc-apply";
+import { docDraftRecords } from "./doc-draft-identities";
+import { DocPhotoPreview, useResolvedDocPhoto } from "./doc-photo-preview";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LetterPicker, type TakenLetter } from "@/components/customers/letter-picker";
@@ -97,6 +100,7 @@ export interface ControllerFlowProps {
 }
 
 export function ControllerFlow({ customerId, branchName, site, controller, onExit, footerOffsetClass }: ControllerFlowProps) {
+  const apiRequest = createDocRequest(customerId, branchName);
   const invalidateSite = useInvalidateDocSite(customerId, branchName);
   const invalidate = () => invalidateSite(savedIdRef.current);
   const [step, setStep] = useState(() => initialStepFor(controller));
@@ -128,14 +132,18 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
   const [brandOther, setBrandOther] = useState(() => !!controller?.brand && !CONTROLLER_BRANDS.includes(controller.brand));
 
   const live = useMemo(
-    () => (savedId == null ? null : site.controllers.find((c) => c.id === savedId) ?? null),
+    () => (savedId == null ? null : site.controllers.find((c) => docRecordMatches(c, savedId)) ?? null),
     [site, savedId],
   );
   const base = live ?? controller;
+  useResolvedDocPhoto(values.photo, live?.settingsPhotoUrl, photo => {
+    setValues(v => ({ ...v, photo }));
+    savedRef.current = { ...savedRef.current, photo };
+  });
   const letter = live?.letter ?? controller?.letter ?? createdLetter ?? "";
   const stepKey: StepKey = FLOW_STEPS[step].key;
   const takenLetters: TakenLetter[] = useMemo(() => site.controllers
-    .filter((c) => c.id !== savedId && c.letter)
+    .filter((c) => (savedId == null || !docRecordMatches(c, savedId)) && c.letter)
     .map((c) => ({ letter: c.letter as string, controllerId: c.id, label: `Controller ${c.letter}${c.location ? ` · ${c.location}` : ""}` })),
   [site, savedId]);
   const confirmedLetter = base?.letterConfirmed ? base.letter : null;
@@ -152,8 +160,9 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
     setDialog(savedId != null ? { type: "swap", letter: l, holder } : { type: "taken-new", holder });
   }
 
-  const baseZones = useMemo(() => base?.zones ?? [], [base]);
-  const allPrograms = useMemo(() => mergePrograms(base?.programs ?? [], s5.draft), [base, s5.draft]);
+  const draftRecords = useMemo(() => docDraftRecords(base, savedId, s5.draft.addedPrograms), [base, savedId, s5.draft.addedPrograms]);
+  const baseZones = draftRecords.zones;
+  const allPrograms = useMemo(() => mergePrograms(draftRecords.programs, s5.draft), [draftRecords.programs, s5.draft]);
   const programs = useMemo(() => activeSorted(allPrograms), [allPrograms]);
   const zones = useMemo(() => mergeZones(baseZones, s5.draft, allPrograms), [baseZones, s5.draft, allPrograms]);
   // Zone tiles need real zone ids; after a fresh count they arrive with the refetch.
@@ -248,9 +257,9 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
       let sent = false;
       const onSent = () => { sent = true; changedRef.current = true; };
       try {
-        if (key === "zone_types") await saveZoneTypes(id, s5, baseZones, onSent);
-        else if (key === "programs") await saveProgramsStep(s5, onSent);
-        else await saveRunTimes(id, s5, baseZones, onSent, allPrograms);
+        if (key === "zone_types") await saveZoneTypes(id, s5, baseZones, onSent, apiRequest);
+        else if (key === "programs") await saveProgramsStep(s5, onSent, apiRequest);
+        else await saveRunTimes(id, s5, baseZones, onSent, allPrograms, apiRequest);
       } finally {
         if (sent) void invalidate();
       }
@@ -402,7 +411,8 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
           <section className="flex flex-col gap-3" data-testid="step-photo">
             <h2 className="text-base font-semibold">Clock photo</h2>
             <p className="text-sm text-muted-foreground">Open the clock and photograph the face so the programs are readable, or choose a photo you already took.</p>
-            <DocPhotoField photoId={values.photo} onUploaded={(id) => set("photo", id)} onStateChange={setPhotoState} />
+            <DocPhotoField photoId={values.photo} subjectKind="controller" subjectId={savedId}
+              onUploaded={(id) => { set("photo", id || null); if (savedId != null) void invalidate(); }} onStateChange={setPhotoState} />
           </section>
         )}
 
@@ -526,7 +536,7 @@ export function ControllerFlow({ customerId, branchName, site, controller, onExi
         {isReview && (
           <section className="flex flex-col gap-3" data-testid="step-review">
             {values.photo ? (
-              <img src={`/api/photos/${values.photo}?variant=medium`} alt="Clock photo" className="h-[140px] w-full object-cover rounded-xl" />
+              <DocPhotoPreview photoId={values.photo} alt="Clock photo" className="h-[140px] w-full object-cover rounded-xl" />
             ) : (
               <div className="flex h-[140px] w-full items-center justify-center rounded-xl bg-slate-100 text-sm text-slate-500">No photo yet</div>
             )}

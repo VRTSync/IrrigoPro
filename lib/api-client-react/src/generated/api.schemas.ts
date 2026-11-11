@@ -118,6 +118,191 @@ export interface MarkupOverrideResult {
   override: MarkupOverrideResultOverride;
 }
 
+export interface OfflineControllerInput {
+  clientId?: string;
+  /** @pattern ^[A-Za-z]$ */
+  letter: string;
+  confirmLetter?: boolean;
+  branchName?: string;
+  /** @nullable */
+  location?: string | null;
+  /** @nullable */
+  brand?: string | null;
+  /** @nullable */
+  model?: string | null;
+  /**
+   * @minimum 1
+   * @maximum 100
+   * @nullable
+   */
+  totalZones?: number | null;
+  /** @nullable */
+  settingsPhotoUrl?: string | null;
+  /** @nullable */
+  notes?: string | null;
+  isActive?: boolean;
+}
+
+export interface OfflineProgramInput {
+  clientId?: string;
+  /**
+   * @minLength 1
+   * @maxLength 100
+   */
+  name: string;
+  /** @nullable */
+  wateringDays?: string[] | null;
+  /** @nullable */
+  startTimes?: string[] | null;
+  /**
+   * @minimum 0
+   * @maximum 500
+   */
+  seasonalAdjustPct?: number;
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
+export type OfflineBackflowInputDeviceType =
+  (typeof OfflineBackflowInputDeviceType)[keyof typeof OfflineBackflowInputDeviceType];
+
+export const OfflineBackflowInputDeviceType = {
+  rpz: "rpz",
+  double_check: "double_check",
+  pvb: "pvb",
+  spill_resistant_pvb: "spill_resistant_pvb",
+  other: "other",
+} as const;
+
+/**
+ * @nullable
+ */
+export type OfflineBackflowInputLastTestResult =
+  | (typeof OfflineBackflowInputLastTestResult)[keyof typeof OfflineBackflowInputLastTestResult]
+  | null;
+
+export const OfflineBackflowInputLastTestResult = {
+  pass: "pass",
+  fail: "fail",
+} as const;
+
+/**
+ * @nullable
+ */
+export type OfflineBackflowInputTestUnknownReason =
+  | (typeof OfflineBackflowInputTestUnknownReason)[keyof typeof OfflineBackflowInputTestUnknownReason]
+  | null;
+
+export const OfflineBackflowInputTestUnknownReason = {
+  never_tested: "never_tested",
+  no_tag: "no_tag",
+} as const;
+
+export interface OfflineBackflowInput {
+  clientId?: string;
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
+  name: string;
+  branchName?: string;
+  /** @nullable */
+  brand?: string | null;
+  /** @nullable */
+  model?: string | null;
+  /** @nullable */
+  size?: string | null;
+  deviceType?: OfflineBackflowInputDeviceType;
+  /** @nullable */
+  serialNumber?: string | null;
+  /** @nullable */
+  location?: string | null;
+  /** @nullable */
+  installDate?: string | null;
+  /** @nullable */
+  photoUrl?: string | null;
+  /** @nullable */
+  notes?: string | null;
+  /** @nullable */
+  lastTestedDate?: string | null;
+  /** @nullable */
+  nextTestDueDate?: string | null;
+  /** @nullable */
+  lastTestResult?: OfflineBackflowInputLastTestResult;
+  /** @nullable */
+  testUnknownReason?: OfflineBackflowInputTestUnknownReason;
+  /** @nullable */
+  lastTestedBy?: string | null;
+  isActive?: boolean;
+}
+
+export type DocumentationZonePatchZoneType =
+  (typeof DocumentationZonePatchZoneType)[keyof typeof DocumentationZonePatchZoneType];
+
+export const DocumentationZonePatchZoneType = {
+  pop_up_spray: "pop_up_spray",
+  rotor: "rotor",
+  drip: "drip",
+  netafim: "netafim",
+  bubbler: "bubbler",
+  other: "other",
+} as const;
+
+export interface DocumentationZonePatch {
+  zoneType?: DocumentationZonePatchZoneType;
+  /**
+   * @minimum 1
+   * @nullable
+   */
+  programId?: number | null;
+  /**
+   * @minimum 0
+   * @maximum 999
+   */
+  runTimeMinutes?: number;
+}
+
+export type DocumentationBulkZoneInput = unknown & {
+  /**
+   * @minItems 1
+   * @maxItems 100
+   */
+  zoneIds?: number[];
+  /**
+   * @minItems 1
+   * @maxItems 100
+   */
+  zoneNumbers?: number[];
+  patch: DocumentationZonePatch;
+};
+
+export type DocumentationExtraZoneInputZonesItemLinesItem = {
+  /** @minimum 1 */
+  programId: number;
+  /**
+   * @minimum 0
+   * @maximum 120
+   */
+  runTimeMinutes: number;
+};
+
+export type DocumentationExtraZoneInputZonesItem = unknown & {
+  /** @minimum 1 */
+  zoneId?: number;
+  /** @minimum 1 */
+  zoneNumber?: number;
+  /** @maxItems 25 */
+  lines: DocumentationExtraZoneInputZonesItemLinesItem[];
+};
+
+export interface DocumentationExtraZoneInput {
+  /**
+   * @minItems 1
+   * @maxItems 100
+   */
+  zones: DocumentationExtraZoneInputZonesItem[];
+}
+
 export interface DocumentationSiteInput {
   branchName?: string;
 }
@@ -205,6 +390,8 @@ export interface DocumentationZone {
 }
 
 export interface DocumentationProgram {
+  /** @nullable */
+  clientId?: string | null;
   id: number;
   companyId: number;
   controllerId: number;
@@ -285,6 +472,8 @@ export interface DocumentationController {
 }
 
 export type DocumentationControllerGraph = DocumentationController & {
+  /** @nullable */
+  clientId?: string | null;
   programs: DocumentationProgram[];
   zones: DocumentationZone[];
 };
@@ -318,6 +507,8 @@ export type DocumentationControllerVerification = DocumentationController &
   DocumentationEquipmentOwner;
 
 export type DocumentationBackflow = DocumentationEquipmentAudit & {
+  /** @nullable */
+  clientId?: string | null;
   id: number;
   branchName: string;
   name: string;

@@ -3,6 +3,7 @@ import { ArrowLeft, Droplets, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WizardHeader } from "@/components/wizard-shared/wizard-header";
 import { cn } from "@/lib/utils";
+import { DocSyncStatus } from "./doc-sync-status";
 
 export interface DocFrameFlow {
   mode: "new" | "edit";
@@ -62,6 +63,7 @@ export function DocFrame({ title, subtitle, onBack, flow, children, contentDisab
           </Button>
         )}
       </div>
+      <DocSyncStatus />
       {flow && (
         <WizardHeader
           icon={flow.icon ?? Droplets}
@@ -77,9 +79,9 @@ export function DocFrame({ title, subtitle, onBack, flow, children, contentDisab
       {/* Disabled while a save runs so nothing can change under a pending request. */}
       <fieldset disabled={!!contentDisabled} className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0" data-testid="doc-frame-content">{children}</fieldset>
       {footer && (
-        <div className={cn("sticky z-20 lg:bottom-0 bg-white border-t -mx-4 px-4 pt-3 pb-4 flex flex-col gap-2", footerOffsetClass)}>
+        <fieldset className={cn("min-w-0 sticky z-20 lg:bottom-0 bg-white border-t -mx-4 px-4 pt-3 pb-4 flex flex-col gap-2", footerOffsetClass)}>
           {footer}
-        </div>
+        </fieldset>
       )}
     </div>
   );

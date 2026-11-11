@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 import { execSync } from "child_process";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
+import { VitePWA } from "vite-plugin-pwa";
 
 // Task #544 — short build hash injected into the client bundle so the
 // /api/client-errors trail can tell us exactly which deployed bundle a
@@ -69,7 +70,21 @@ export default defineConfig({
   plugins: [
     react(),
     runtimeErrorOverlay(),
-    virtualPwaRegisterPlugin(),
+    ...(process.env.NODE_ENV === "production" ? [VitePWA({
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
+      // Registration remains manual so the existing feature flag and
+      // upload-aware update prompt retain control.
+      injectRegister: null,
+      registerType: "prompt",
+      manifest: false,
+      injectManifest: {
+        globPatterns: ["index.html", "assets/**/*.{js,css,woff,woff2}", "favicon*.{png,svg,ico}"],
+        globIgnores: ["**/*.map"],
+        maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
+      },
+    })] : [virtualPwaRegisterPlugin()]),
     ...(process.env.NODE_ENV !== "production" &&
     process.env.REPL_ID !== undefined
       ? [

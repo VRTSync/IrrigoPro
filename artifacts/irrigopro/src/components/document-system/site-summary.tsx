@@ -3,7 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { AlertTriangle, BadgeCheck, CheckCircle2, Info, Loader2, Plus } from "lucide-react";
 import type { DocumentationSite, DocumentationGap } from "@workspace/api-client-react";
-import { apiRequest } from "@/lib/queryClient";
+import { createDocRequest } from "@/lib/offline/doc-api";
+import { useDocOffline } from "./doc-offline-context";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DocFrame } from "./doc-frame";
@@ -90,6 +91,8 @@ export function SiteSummary({
   customerId, branchName, site, subtitle, flash, onBack, onDone, onOpenController, onAddController,
   onOpenBackflow, onAddBackflow, onFinished, footerOffsetClass,
 }: SiteSummaryProps) {
+  const { fromCopy } = useDocOffline();
+  const apiRequest = createDocRequest(customerId, branchName);
   const qc = useQueryClient();
   const invalidate = useInvalidateDocSite(customerId, branchName);
   const empty = site.controllers.length === 0 && site.backflows.length === 0;

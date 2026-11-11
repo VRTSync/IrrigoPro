@@ -32,6 +32,7 @@ import { customers, irrigationControllers, irrigationProfileZones } from "@works
 import { storage, ZoneCountClearError, LetterError } from "../storage";
 import type { IrrigationImportRow, IrrigationImportRowError, IrrigationZoneTypeEnum } from "../storage";
 import { ZoneProgramError, ProgramNameTakenError } from "../lib/controller-zone-records";
+import { DocClientIdConflict, idempotentDocCreate } from "../lib/doc-idempotency";
 import {
   hasCapability, CAN_READ_IRRIGATION_PROFILE, CAN_EDIT_IRRIGATION_ZONES,
   CAN_MANAGE_IRRIGATION_EQUIPMENT, CAN_DELETE_IRRIGATION_EQUIPMENT,
@@ -67,6 +68,7 @@ function isSuperAdmin(role: string | undefined): boolean {
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
 export const createControllerBody = z.object({
+  clientId: z.string().uuid().optional(),
   letter: z.string().regex(/^[A-Za-z]$/).transform(letter => letter.toUpperCase()),
   confirmLetter: z.boolean().optional(),
   branchName: z.string().optional(),
@@ -79,7 +81,7 @@ export const createControllerBody = z.object({
   isActive: z.boolean().optional(),
 });
 
-export const updateControllerBody = createControllerBody.omit({ letter: true, confirmLetter: true }).partial();
+export const updateControllerBody = createControllerBody.omit({ letter: true, confirmLetter: true, clientId: true }).partial();
 export const controllerLetterBody = SetControllerLetterBody.extend({
   letter: SetControllerLetterBody.shape.letter.transform(letter => letter.toUpperCase()),
 }).strict();
@@ -92,6 +94,7 @@ export const reletterLocationBody = z.object({
 }).strict();
 
 export const createProgramBody = z.object({
+  clientId: z.string().uuid().optional(),
   name: z.string().min(1).max(100),
   wateringDays: z.array(z.string()).nullish(),
   startTimes: z.array(z.string()).nullish(),
@@ -100,7 +103,7 @@ export const createProgramBody = z.object({
   sortOrder: z.coerce.number().int().optional(),
 });
 
-export const updateProgramBody = createProgramBody.partial();
+export const updateProgramBody = createProgramBody.omit({ clientId: true }).partial();
 
 export const updateZoneBody = z.object({
   name: z.string().min(1).max(200),
@@ -121,13 +124,14 @@ export const attachPhotoBody = z.object({
 });
 
 export const bulkZoneBody = z.object({
-  zoneIds: z.array(z.number().int().positive()).min(1).max(100).refine(ids => new Set(ids).size === ids.length, "Duplicate zone IDs"),
+  zoneIds: z.array(z.number().int().positive()).min(1).max(100).refine(ids => new Set(ids).size === ids.length, "Duplicate zone IDs").optional(),
+  zoneNumbers: z.array(z.number().int().positive()).min(1).max(100).refine(ids => new Set(ids).size === ids.length, "Duplicate zone numbers").optional(),
   patch: z.object({
     zoneType: z.enum(["pop_up_spray", "rotor", "drip", "netafim", "bubbler", "other"]).optional(),
     programId: z.number().int().positive().nullable().optional(),
     runTimeMinutes: z.coerce.number().int().min(0).max(999).optional(),
   }).strict().refine(p => Object.values(p).some(v => v !== undefined), "Nothing to apply"),
-});
+}).refine(body => (body.zoneIds !== undefined) !== (body.zoneNumbers !== undefined), "Send exactly one of zoneIds or zoneNumbers");
 
 // ── Deps interface (injected so tests can swap requireAuthentication) ─────────
 
@@ -364,7 +368,9 @@ export function registerIrrigationProfileRoutes(
           : callerCompanyId!;
 
         const effectiveBranch = parsed.data.branchName ?? "";
-        const controller = await storage.createIrrigationController({
+        const { row: controller, replayed } = await idempotentDocCreate("controller", companyIdForCreate, parsed.data.clientId,
+          { customerId, branchName: effectiveBranch.trim() }, () => storage.createIrrigationController({
+          clientId: parsed.data.clientId,
           companyId: companyIdForCreate,
           customerId,
           branchName: effectiveBranch,
@@ -381,13 +387,14 @@ export function registerIrrigationProfileRoutes(
           lastUpdatedByUserId: me?.id ?? null,
           lastUpdatedByName: me?.name ?? null,
           lastUpdatedAt: new Date(),
-        });
+        }));
 
         // Task #1857: stop syncing customers.totalControllers — count is now
         // derived from COUNT(*) on irrigation_controllers.
 
-        res.status(201).json(controller);
+        res.status(replayed ? 200 : 201).json(controller);
       } catch (e: any) {
+        if (e instanceof DocClientIdConflict) return res.status(409).json({ message: e.message });
         if (e instanceof LetterError) return res.status(e.status).json({ message: e.message, ...e.details });
         req.log?.error?.({ err: e, customerId }, "createIrrigationController failed");
         res.status(500).json({ message: "Could not create controller — please retry" });
@@ -598,10 +605,13 @@ export function registerIrrigationProfileRoutes(
       const me = userId ? await storage.getUser(userId) : undefined;
 
       try {
-        const program = await storage.createIrrigationProgram(
+        const parent = await storage.getIrrigationController(isSuperAdmin(role) ? null : callerCompanyId, controllerId);
+        if (!parent) return notFound(res, "Controller");
+        const { row: program, replayed } = await idempotentDocCreate("program", parent.companyId, parsed.data.clientId, { controllerId }, () => storage.createIrrigationProgram(
           isSuperAdmin(role) ? null : callerCompanyId,
           controllerId,
           {
+            clientId: parsed.data.clientId,
             name: parsed.data.name,
             wateringDays: parsed.data.wateringDays ?? null,
             startTimes: parsed.data.startTimes ?? null,
@@ -610,10 +620,11 @@ export function registerIrrigationProfileRoutes(
             sortOrder: parsed.data.sortOrder ?? 0,
           },
           me ? { id: me.id, name: me.name } : undefined,
-        );
+        ));
         if (!program) return notFound(res, "Controller");
-        res.status(201).json(program);
+        res.status(replayed ? 200 : 201).json(program);
       } catch (e: any) {
+        if (e instanceof DocClientIdConflict) return res.status(409).json({ message: e.message });
         if (e instanceof ProgramNameTakenError) return res.status(409).json({ message: e.message });
         req.log?.error?.({ err: e, controllerId }, "createIrrigationProgram failed");
         res.status(500).json({ message: "Could not create program — please retry" });
@@ -790,7 +801,19 @@ export function registerIrrigationProfileRoutes(
     if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
     try {
       const me = req.authenticatedUserId ? await storage.getUser(req.authenticatedUserId) : undefined;
-      const rows = await storage.bulkUpdateIrrigationZones(isSuperAdmin(role) ? null : companyId, id, parsed.data.zoneIds, parsed.data.patch, me ? { id: me.id, name: me.name } : undefined);
+      let zoneIds = parsed.data.zoneIds;
+      if (parsed.data.zoneNumbers) {
+        const controller = await storage.getIrrigationController(isSuperAdmin(role) ? null : companyId, id);
+        if (!controller) return notFound(res, "Controller");
+        const current = await db.select().from(irrigationProfileZones).where(and(eq(irrigationProfileZones.controllerId, id), eq(irrigationProfileZones.companyId, controller.companyId), isNull(irrigationProfileZones.retiredAt)));
+        zoneIds = [];
+        for (const n of parsed.data.zoneNumbers) {
+          const zone = current.find(z => z.zoneNumber === n);
+          if (!zone) return res.status(400).json({ message: `Zone ${n} isn't on Controller ${controller.letter}` });
+          zoneIds.push(zone.id);
+        }
+      }
+      const rows = await storage.bulkUpdateIrrigationZones(isSuperAdmin(role) ? null : companyId, id, zoneIds!, parsed.data.patch, me ? { id: me.id, name: me.name } : undefined);
       if (!rows) return notFound(res, "Zones");
       res.json(rows);
     } catch (error) {
@@ -811,16 +834,26 @@ export function registerIrrigationProfileRoutes(
     const id = parseId(req.params.id);
     if (!id) return badId(res, "controller");
     const parsed = z.object({ zones: z.array(z.object({
-      zoneId: z.number().int().positive(),
+      zoneId: z.number().int().positive().optional(),
+      zoneNumber: z.number().int().positive().optional(),
       lines: z.array(z.object({
         programId: z.number().int().positive(),
         runTimeMinutes: z.number().int().min(0).max(120),
       }).strict()).max(25),
-    }).strict()).min(1).max(100) }).strict().safeParse(req.body);
+    }).strict().refine(z => (z.zoneId !== undefined) !== (z.zoneNumber !== undefined), "Send exactly one of zoneId or zoneNumber")).min(1).max(100) }).strict().safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
     try {
       const me = req.authenticatedUserId ? await storage.getUser(req.authenticatedUserId) : undefined;
-      const rows = await storage.setZoneExtraPrograms(isSuperAdmin(role) ? null : companyId, id, parsed.data.zones, me ? { id: me.id, name: me.name } : undefined);
+      const controller = await storage.getIrrigationController(isSuperAdmin(role) ? null : companyId, id);
+      if (!controller) return notFound(res, "Controller");
+      const current = await db.select().from(irrigationProfileZones).where(and(eq(irrigationProfileZones.controllerId, id), eq(irrigationProfileZones.companyId, controller.companyId), isNull(irrigationProfileZones.retiredAt)));
+      const zones: { zoneId: number; lines: { programId: number; runTimeMinutes: number }[] }[] = [];
+      for (const entry of parsed.data.zones) {
+        const zoneId = entry.zoneId ?? current.find(z => z.zoneNumber === entry.zoneNumber)?.id;
+        if (zoneId === undefined) return res.status(400).json({ message: `Zone ${entry.zoneNumber} isn't on Controller ${controller.letter}` });
+        zones.push({ zoneId, lines: entry.lines });
+      }
+      const rows = await storage.setZoneExtraPrograms(isSuperAdmin(role) ? null : companyId, id, zones, me ? { id: me.id, name: me.name } : undefined);
       if (!rows) return notFound(res, "Zones");
       res.json(rows);
     } catch (error) {
@@ -1386,6 +1419,7 @@ export function registerIrrigationProfileRoutes(
   // POST   /api/backflows/:id/log-test
 
   const backflowCreateBody = z.object({
+    clientId: z.string().uuid().optional(),
     name: z.string().min(1).max(200),
     branchName: z.string().optional(),
     brand: z.string().nullish(),
@@ -1405,7 +1439,7 @@ export function registerIrrigationProfileRoutes(
     isActive: z.boolean().optional(),
   });
 
-  const backflowUpdateBody = backflowCreateBody.partial();
+  const backflowUpdateBody = backflowCreateBody.omit({ clientId: true }).partial();
 
   const logTestBody = z.object({
     lastTestedDate: z.string().min(1),
@@ -1496,7 +1530,9 @@ export function registerIrrigationProfileRoutes(
           ? (callerCompanyId ?? (await storage.getCustomer(customerId))?.companyId!)
           : callerCompanyId!;
 
-        const row = await storage.createBackflow({
+        const { row, replayed } = await idempotentDocCreate("backflow", companyIdForCreate, parsed.data.clientId,
+          { customerId, branchName: parsed.data.branchName ?? "" }, () => storage.createBackflow({
+          clientId: parsed.data.clientId,
           companyId: companyIdForCreate,
           customerId,
           branchName: parsed.data.branchName ?? "",
@@ -1519,9 +1555,10 @@ export function registerIrrigationProfileRoutes(
           lastUpdatedByUserId: me?.id ?? null,
           lastUpdatedByName: me?.name ?? null,
           lastUpdatedAt: new Date(),
-        });
-        res.status(201).json(row);
+        }));
+        res.status(replayed ? 200 : 201).json(row);
       } catch (e: any) {
+        if (e instanceof DocClientIdConflict) return res.status(409).json({ message: e.message });
         req.log?.error?.({ err: e, customerId }, "createBackflow failed");
         if (isBackflowSerialConflict(e)) {
           return res.status(409).json({ message: `Another backflow already has serial ${parsed.data.serialNumber}` });

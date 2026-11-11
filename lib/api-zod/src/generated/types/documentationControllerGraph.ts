@@ -10,6 +10,8 @@ import type { DocumentationProgram } from "./documentationProgram";
 import type { DocumentationZone } from "./documentationZone";
 
 export type DocumentationControllerGraph = DocumentationController & {
+  /** @nullable */
+  clientId?: string | null;
   programs: DocumentationProgram[];
   zones: DocumentationZone[];
 };

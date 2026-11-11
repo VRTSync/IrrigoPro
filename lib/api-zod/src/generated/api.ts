@@ -395,6 +395,181 @@ export const RemoveCustomerMarkupOverrideResponse = zod.object({
   ok: zod.boolean(),
 });
 
+export const CreateOfflineDocumentationControllerParams = zod.object({
+  customerId: zod.coerce.number().min(1),
+});
+
+export const createOfflineDocumentationControllerBodyLetterRegExp = new RegExp(
+  "^[A-Za-z]$",
+);
+export const createOfflineDocumentationControllerBodyTotalZonesMax = 100;
+
+export const CreateOfflineDocumentationControllerBody = zod.object({
+  clientId: zod.string().uuid().optional(),
+  letter: zod
+    .string()
+    .regex(createOfflineDocumentationControllerBodyLetterRegExp),
+  confirmLetter: zod.boolean().optional(),
+  branchName: zod.string().optional(),
+  location: zod.string().nullish(),
+  brand: zod.string().nullish(),
+  model: zod.string().nullish(),
+  totalZones: zod
+    .number()
+    .min(1)
+    .max(createOfflineDocumentationControllerBodyTotalZonesMax)
+    .nullish(),
+  settingsPhotoUrl: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  isActive: zod.boolean().optional(),
+});
+
+export const CreateOfflineDocumentationBackflowParams = zod.object({
+  customerId: zod.coerce.number().min(1),
+});
+
+export const createOfflineDocumentationBackflowBodyNameMax = 200;
+
+export const CreateOfflineDocumentationBackflowBody = zod.object({
+  clientId: zod.string().uuid().optional(),
+  name: zod.string().min(1).max(createOfflineDocumentationBackflowBodyNameMax),
+  branchName: zod.string().optional(),
+  brand: zod.string().nullish(),
+  model: zod.string().nullish(),
+  size: zod.string().nullish(),
+  deviceType: zod
+    .enum(["rpz", "double_check", "pvb", "spill_resistant_pvb", "other"])
+    .optional(),
+  serialNumber: zod.string().nullish(),
+  location: zod.string().nullish(),
+  installDate: zod.string().nullish(),
+  photoUrl: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  lastTestedDate: zod.string().nullish(),
+  nextTestDueDate: zod.string().nullish(),
+  lastTestResult: zod
+    .union([zod.literal("pass"), zod.literal("fail"), zod.literal(null)])
+    .nullish(),
+  testUnknownReason: zod
+    .union([
+      zod.literal("never_tested"),
+      zod.literal("no_tag"),
+      zod.literal(null),
+    ])
+    .nullish(),
+  lastTestedBy: zod.string().nullish(),
+  isActive: zod.boolean().optional(),
+});
+
+export const CreateOfflineDocumentationProgramParams = zod.object({
+  id: zod.coerce.number().min(1),
+});
+
+export const createOfflineDocumentationProgramBodyNameMax = 100;
+
+export const createOfflineDocumentationProgramBodySeasonalAdjustPctMin = 0;
+export const createOfflineDocumentationProgramBodySeasonalAdjustPctMax = 500;
+
+export const CreateOfflineDocumentationProgramBody = zod.object({
+  clientId: zod.string().uuid().optional(),
+  name: zod.string().min(1).max(createOfflineDocumentationProgramBodyNameMax),
+  wateringDays: zod.array(zod.string()).nullish(),
+  startTimes: zod.array(zod.string()).nullish(),
+  seasonalAdjustPct: zod
+    .number()
+    .min(createOfflineDocumentationProgramBodySeasonalAdjustPctMin)
+    .max(createOfflineDocumentationProgramBodySeasonalAdjustPctMax)
+    .optional(),
+  sortOrder: zod.number().optional(),
+  isActive: zod.boolean().optional(),
+});
+
+export const SaveDocumentationZonesParams = zod.object({
+  id: zod.coerce.number().min(1),
+});
+
+export const saveDocumentationZonesBodyThreeZoneIdsMax = 100;
+
+export const saveDocumentationZonesBodyThreeZoneNumbersMax = 100;
+
+export const saveDocumentationZonesBodyThreePatchRunTimeMinutesMin = 0;
+export const saveDocumentationZonesBodyThreePatchRunTimeMinutesMax = 999;
+
+export const SaveDocumentationZonesBody = zod
+  .union([zod.unknown(), zod.unknown()])
+  .and(
+    zod.object({
+      zoneIds: zod
+        .array(zod.number().min(1))
+        .min(1)
+        .max(saveDocumentationZonesBodyThreeZoneIdsMax)
+        .optional(),
+      zoneNumbers: zod
+        .array(zod.number().min(1))
+        .min(1)
+        .max(saveDocumentationZonesBodyThreeZoneNumbersMax)
+        .optional(),
+      patch: zod.object({
+        zoneType: zod
+          .enum([
+            "pop_up_spray",
+            "rotor",
+            "drip",
+            "netafim",
+            "bubbler",
+            "other",
+          ])
+          .optional(),
+        programId: zod.number().min(1).nullish(),
+        runTimeMinutes: zod
+          .number()
+          .min(saveDocumentationZonesBodyThreePatchRunTimeMinutesMin)
+          .max(saveDocumentationZonesBodyThreePatchRunTimeMinutesMax)
+          .optional(),
+      }),
+    }),
+  );
+
+export const SaveDocumentationZoneExtrasParams = zod.object({
+  id: zod.coerce.number().min(1),
+});
+
+export const saveDocumentationZoneExtrasBodyZonesItemThreeLinesItemRunTimeMinutesMin = 0;
+export const saveDocumentationZoneExtrasBodyZonesItemThreeLinesItemRunTimeMinutesMax = 120;
+
+export const saveDocumentationZoneExtrasBodyZonesItemThreeLinesMax = 25;
+
+export const saveDocumentationZoneExtrasBodyZonesMax = 100;
+
+export const SaveDocumentationZoneExtrasBody = zod.object({
+  zones: zod
+    .array(
+      zod.union([zod.unknown(), zod.unknown()]).and(
+        zod.object({
+          zoneId: zod.number().min(1).optional(),
+          zoneNumber: zod.number().min(1).optional(),
+          lines: zod
+            .array(
+              zod.object({
+                programId: zod.number().min(1),
+                runTimeMinutes: zod
+                  .number()
+                  .min(
+                    saveDocumentationZoneExtrasBodyZonesItemThreeLinesItemRunTimeMinutesMin,
+                  )
+                  .max(
+                    saveDocumentationZoneExtrasBodyZonesItemThreeLinesItemRunTimeMinutesMax,
+                  ),
+              }),
+            )
+            .max(saveDocumentationZoneExtrasBodyZonesItemThreeLinesMax),
+        }),
+      ),
+    )
+    .min(1)
+    .max(saveDocumentationZoneExtrasBodyZonesMax),
+});
+
 /**
  * @summary Confirm, change or atomically swap an active controller letter
  */
@@ -496,8 +671,10 @@ export const GetDocumentationSiteResponse = zod.object({
       })
       .and(
         zod.object({
+          clientId: zod.string().nullish(),
           programs: zod.array(
             zod.object({
+              clientId: zod.string().nullish(),
               id: zod.number(),
               companyId: zod.number(),
               controllerId: zod.number(),
@@ -546,6 +723,7 @@ export const GetDocumentationSiteResponse = zod.object({
       })
       .and(
         zod.object({
+          clientId: zod.string().nullish(),
           id: zod.number(),
           branchName: zod.string(),
           name: zod.string(),
@@ -657,6 +835,7 @@ export const FieldVerifyBackflowResponse = zod
   })
   .and(
     zod.object({
+      clientId: zod.string().nullish(),
       id: zod.number(),
       branchName: zod.string(),
       name: zod.string(),

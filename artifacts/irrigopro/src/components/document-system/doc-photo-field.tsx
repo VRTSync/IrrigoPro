@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Camera, Image as ImageIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { uploadPhotoToStorage } from "@/pages/wet-checks/helpers";
+import { PhotoUploadHttpError, uploadPhotoToStorage } from "@/pages/wet-checks/helpers";
 import { serverMessage } from "./constants";
+import { useDocOffline } from "./doc-offline-context";
+import { captureDocPhoto, discardDocPhoto, shouldQueueDocPhoto } from "@/lib/offline/doc-photos";
+import { useDocPhotoSrc } from "./doc-photo-preview";
+import { useToast } from "@/hooks/use-toast";
+import { isDocNetworkError } from "@/lib/offline/doc-read";
+import { getSyncEngine } from "@/lib/offline/engine";
+import { docSession } from "@/lib/offline/doc-store";
 
 export type PhotoUploadState = "idle" | "uploading" | "failed";
 
@@ -14,9 +21,16 @@ export interface DocPhotoFieldProps {
   onStateChange?: (state: PhotoUploadState) => void;
   label?: string;
   testId?: string;
+  subjectKind?: "controller" | "backflow";
+  subjectId?: number | null;
 }
 
-export function DocPhotoField({ photoId, onUploaded, onStateChange, label = "Clock photo", testId = "doc-photo" }: DocPhotoFieldProps) {
+export function DocPhotoField({ photoId, onUploaded, onStateChange, label = "Clock photo", testId = "doc-photo", subjectKind = "controller", subjectId = null }: DocPhotoFieldProps) {
+  const { siteKey } = useDocOffline();
+  const { toast } = useToast();
+  const resolvedSrc = useDocPhotoSrc(photoId);
+  const previousPhoto = useRef(photoId?.startsWith("local:") ? null : photoId);
+  useEffect(() => { if (photoId && !photoId.startsWith("local:")) previousPhoto.current = photoId; }, [photoId]);
   // Local preview of the latest capture; forId is set once its upload succeeds.
   const [preview, setPreview] = useState<{ url: string | null; forId: string | null } | null>(null);
   const [state, setState] = useState<PhotoUploadState>("idle");
@@ -36,11 +50,38 @@ export function DocPhotoField({ photoId, onUploaded, onStateChange, label = "Clo
     if (!file) return;
     setError(null);
     setState("uploading");
+    const session = docSession();
+    const checkSession = () => {
+      if (docSession() !== session) throw new Error("Your account changed. Nothing was saved.");
+    };
+    const saveLocally = () => {
+      checkSession();
+      return captureDocPhoto({ file, siteKey, kind: subjectKind, subjectId, subjectLabel: label,
+        warn: () => toast({ title: "Keep this app open until photos finish uploading." }) });
+    };
     try {
-      const id = await uploadPhotoToStorage(file);
+      const queue = await shouldQueueDocPhoto(siteKey);
+      checkSession();
+      let id: string;
+      if (queue) id = await saveLocally();
+      else {
+        try { id = await uploadPhotoToStorage(file); }
+        catch (error) {
+          // navigator.onLine can remain true when any upload hop loses its
+          // connection. Keep that capture through navigation and reload too.
+          const transientHttp = error instanceof PhotoUploadHttpError &&
+            (error.uploadStatus === 408 || error.uploadStatus === 429 || (error.uploadStatus >= 500 && error.uploadStatus <= 599));
+          if (!isDocNetworkError(error) && !transientHttp) throw error;
+          checkSession();
+          getSyncEngine().setOnline(false);
+          id = await saveLocally();
+        }
+      }
+      checkSession();
       setPreview((p) => (p ? { ...p, forId: id } : p));
       fileRef.current = null;
       setState("idle");
+      if (id.startsWith("local:")) previousPhoto.current = photoId;
       onUploaded(id);
     } catch (e) {
       setError(`Couldn't upload: ${serverMessage(e)}`);
@@ -72,7 +113,7 @@ export function DocPhotoField({ photoId, onUploaded, onStateChange, label = "Clo
   const src = pending && preview?.url
     ? preview.url
     : photoId
-      ? (preview?.url && preview.forId === photoId ? preview.url : `/api/photos/${photoId}?variant=medium`)
+      ? (preview?.url && preview.forId === photoId ? preview.url : resolvedSrc)
       : null;
 
   const uploading = state === "uploading";
@@ -150,6 +191,13 @@ export function DocPhotoField({ photoId, onUploaded, onStateChange, label = "Clo
           Choose from Library
         </Button>
       </div>
+      {photoId?.startsWith("local:") && <div className="flex items-center justify-between text-sm text-amber-800">
+        <span>Waiting to upload</span>
+        <Button type="button" size="sm" variant="outline" disabled={uploading}
+          onClick={() => void discardDocPhoto(photoId).then(() => { discard(); onUploaded(previousPhoto.current ?? ""); }).catch(e => {
+            setError(serverMessage(e)); setState("failed");
+          })}>Discard photo</Button>
+      </div>}
       {state === "failed" && (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-800" data-testid={`${testId}-error`}>
           <span className="min-w-0">{error}</span>

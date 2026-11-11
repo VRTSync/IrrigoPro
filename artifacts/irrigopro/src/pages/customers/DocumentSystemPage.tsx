@@ -1,4 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
+import { getSyncEngine } from "@/lib/offline/engine";
+import { docQueueForSite } from "@/lib/offline/doc-api";
+import { listDocSites } from "@/lib/offline/doc-store";
+import { useSyncEngineState } from "@/components/offline/sync-ui";
+import { docSiteKey } from "@/components/document-system/use-doc-site";
 import { useLocation, useParams, useSearch } from "wouter";
 import { AlertCircle, Check } from "lucide-react";
 import { format } from "date-fns";
@@ -11,6 +18,7 @@ import { SiteSummary, type DoneCounts } from "@/components/document-system/site-
 import { BackflowFlow } from "@/components/document-system/backflow-flow";
 import { ControllerFlow } from "@/components/document-system/controller-flow";
 import { useDocSite, useDocSites } from "@/components/document-system/use-doc-site";
+import { DocOfflineContext, useDocOffline } from "@/components/document-system/doc-offline-context";
 
 const SITE_PILL: Record<DocumentationSiteStatus, { label: string; cls: string }> = {
   verified: { label: "Verified", cls: "bg-green-100 text-green-800" },
@@ -37,10 +45,37 @@ export default function DocumentSystemPage({ variant = "staff" }: { variant?: Do
   const customerId = Number(params.customerId);
   const branchParam = new URLSearchParams(useSearch()).get("branch");
   // Keyed so flow/flash state can never outlive a customer or branch change.
-  return <DocumentSystemScreen key={`${customerId}|${branchParam ?? ""}`} customerId={customerId} branchParam={branchParam} variant={variant} />;
+  return <DocumentSystemOfflineScreen key={`${customerId}|${branchParam ?? ""}`} customerId={customerId} branchParam={branchParam} variant={variant} />;
 }
 
+function DocumentSystemOfflineScreen(props: { customerId: number; branchParam: string | null; variant: DocumentSystemVariant }) {
+  const sites = useDocSites();
+  const branches = sites.data?.customers.find((c) => c.customerId === props.customerId)?.branches ?? [];
+  // A shared query key means this observer and the screen share one read.
+  const site = useDocSite(props.customerId, props.branchParam ?? "", props.branchParam !== null || (sites.isSuccess && branches.length === 0));
+  const siteKey = `${props.customerId}:${props.branchParam ?? ""}`;
+  const snap = useSyncEngineState();
+  const queue = docQueueForSite(snap.mutations, siteKey);
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  useEffect(() => getSyncEngine().on(event => {
+    if (event.type !== "doc-refresh" || event.siteKey !== siteKey) return;
+    void qc.invalidateQueries({ queryKey: docSiteKey(props.customerId, props.branchParam ?? "") });
+    if (event.message) toast({ title: "A change didn't sync.", description: event.message, variant: "destructive" });
+  }), [siteKey, props.customerId, props.branchParam, qc, toast]);
+  return <DocOfflineContext.Provider value={{ fromCopy: site.fromCopy, savedAt: site.savedAt, siteKey,
+    online: snap.online && navigator.onLine !== false,
+    queuedCount: queue.filter(m => m.status === "pending" || m.status === "syncing").length,
+    failedCount: queue.filter(m => m.status === "failed" || m.docRefused).length }}>
+    <DocumentSystemScreen {...props} />
+  </DocOfflineContext.Provider>;
+}
 function DocumentSystemScreen({ customerId, branchParam, variant }: { customerId: number; branchParam: string | null; variant: DocumentSystemVariant }) {
+  const offline = useDocOffline();
+  const [savedBranches, setSavedBranches] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    void listDocSites().then(rows => setSavedBranches(new Set(rows.filter(row => row.customerId === customerId).map(row => row.branchName)))).catch(() => {});
+  }, [customerId]);
   const [, setLocation] = useLocation();
   const documenter = variant === "documenter";
   // Staff exits go to the customer profile; the documenter app has no profile screen.
@@ -81,6 +116,8 @@ function DocumentSystemScreen({ customerId, branchParam, variant }: { customerId
           title="Which location?"
           intro={`${name} has ${branches.length} locations. Each one is documented and verified on its own.`}
           branches={branches}
+          disabledFor={b => (sites.fromCopy || navigator.onLine === false) && !savedBranches.has(b)}
+          footerFor={b => sites.fromCopy || navigator.onLine === false ? <p className="text-xs text-amber-800">{savedBranches.has(b) ? "Saved for offline" : "Not saved — connect to download"}</p> : null}
           customerName={name}
           customerAddress={entry?.address ?? site.data?.customer.address ?? null}
           backLabel={documenter ? "Back to properties" : "Back to customer"}
@@ -149,7 +186,11 @@ function DocumentSystemScreen({ customerId, branchParam, variant }: { customerId
             </div>
           ))}
         </dl>
-        <p className="text-sm text-muted-foreground">The office now sees this location as verified, and billing can tie every line to a controller and zone.</p>
+        <p className="text-sm text-muted-foreground">{offline.failedCount
+          ? "A change didn't sync. Review the failed changes before this location can be verified."
+          : offline.queuedCount || !offline.online
+            ? "Saved on this phone. The office will see this location as verified after its changes sync."
+            : "The office now sees this location as verified, and billing can tie every line to a controller and zone."}</p>
       </DocFrame>
     );
   }

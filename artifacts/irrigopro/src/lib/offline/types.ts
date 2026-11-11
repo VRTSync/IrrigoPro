@@ -9,6 +9,12 @@
 export type QueuedMutationStatus = "pending" | "syncing" | "failed" | "completed";
 
 export type QueuedMutationKind =
+  | "doc.controller.create" | "doc.controller.update" | "doc.controller.letter"
+  | "doc.controller.zone_count" | "doc.controller.zones" | "doc.controller.extra_programs" | "doc.controller.verify"
+  | "doc.program.create" | "doc.program.update" | "doc.program.delete"
+  | "doc.backflow.create" | "doc.backflow.update" | "doc.backflow.log_test" | "doc.backflow.verify"
+  | "doc.site.no_backflow" | "doc.site.verify"
+  | "doc.controller.photo" | "doc.backflow.photo"
   | "wet_check.create"
   | "wet_check.update"
   | "wet_check.submit"
@@ -52,7 +58,16 @@ export interface WorkOrderCompletionPayload {
 export interface QueuedMutation {
   id: string; // local UUID
   kind: QueuedMutationKind;
-  method: "POST" | "PATCH" | "DELETE";
+  method: "POST" | "PATCH" | "PUT" | "DELETE";
+  siteKey?: string;
+  subjectClientId?: string;
+  docOwner?: string;
+  subjectLabel?: string;
+  localSubjectId?: number;
+  docOrderAfter?: string[];
+  docRequiresSuccess?: string[];
+  docRefused?: boolean;
+  docLocalBody?: unknown;
   // URL is rendered at dispatch time by the engine so server-assigned ids
   // (resolved via parent's clientId → id map) can be substituted.
   urlTemplate: string;
@@ -114,6 +129,6 @@ export interface SyncStateEvent {
   syncing: number;
   failed: number;
 }
-export type EngineEvent = ConflictEvent | ErrorEvent | SyncStateEvent;
+export type EngineEvent = ConflictEvent | ErrorEvent | SyncStateEvent | { type: "doc-refresh"; siteKey: string; message?: string };
 
 export type EngineListener = (e: EngineEvent) => void;

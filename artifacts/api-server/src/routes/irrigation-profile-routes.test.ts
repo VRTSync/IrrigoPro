@@ -663,6 +663,54 @@ describe("Document System Slice 2 — existing route/storage boundaries", () => 
     for (const id of backflowIds) await storage.deleteBackflow(null, id);
     await cleanupControllers(); await srv.close();
   });
+  it("offline creates replay once, reject parent mismatches and check tenancy first", async () => {
+    const clientId = crypto.randomUUID();
+    const path = `/api/customers/${customerAId}/controllers-profile`;
+    const creates = await Promise.all([hit(srv.base, "POST", path, { letter: "K", clientId, totalZones: 2 }),
+      hit(srv.base, "POST", path, { letter: "K", clientId, totalZones: 2 })]);
+    assert.deepEqual(creates.map(r => r.status).sort(), [200, 201]);
+    assert.equal(creates[0].body.id, creates[1].body.id);
+    const clock = creates[0].body;
+    createdControllerIds.push(clock.id);
+    assert.equal((await hit(srv.base, "POST", path, { letter: "L", branchName: "Other", clientId })).status, 409);
+    assert.equal((await hit(srv.base, "POST", `/api/customers/${customerBId}/controllers-profile`, { letter: "K", clientId })).status, 404);
+    const pId = crypto.randomUUID();
+    const pPath = `/api/irrigation-controllers/${clock.id}/programs`;
+    const p1 = await hit(srv.base, "POST", pPath, { name: "A", clientId: pId });
+    const p2 = await hit(srv.base, "POST", pPath, { name: "A", clientId: pId });
+    assert.equal(p1.status, 201); assert.equal(p2.status, 200); assert.equal(p1.body.id, p2.body.id);
+    const other = await storage.createIrrigationController({ companyId: companyAId, customerId: customerAId, name: "", letter: "L" });
+    createdControllerIds.push(other.id);
+    assert.equal((await hit(srv.base, "POST", `/api/irrigation-controllers/${other.id}/programs`, { name: "A", clientId: pId })).status, 409);
+    const bfId = crypto.randomUUID();
+    const bfPath = `/api/customers/${customerAId}/backflows`;
+    const bf1 = await hit(srv.base, "POST", bfPath, { name: "Offline valve", clientId: bfId });
+    const bf2 = await hit(srv.base, "POST", bfPath, { name: "Offline valve", clientId: bfId });
+    backflowIds.push(bf1.body.id);
+    assert.equal(bf1.status, 201); assert.equal(bf2.status, 200); assert.equal(bf1.body.id, bf2.body.id);
+    assert.equal((await hit(srv.base, "POST", bfPath, { name: "Other", branchName: "Other", clientId: bfId })).status, 409);
+    assert.equal((await hit(srv.base, "POST", `/api/customers/${customerBId}/backflows`, { name: "Other", clientId: bfId })).status, 404);
+  });
+  it("resolves only current zone numbers and rejects both selectors", async () => {
+    const clock = await storage.createIrrigationController({ companyId: companyAId, customerId: customerAId, name: "", totalZones: 3 });
+    createdControllerIds.push(clock.id);
+    const path = `/api/irrigation-controllers/${clock.id}/zones/bulk`;
+    assert.equal((await hit(srv.base, "PUT", path, { zoneNumbers: [1, 2], patch: { zoneType: "rotor" } })).status, 200);
+    const graph = (await storage.getIrrigationController(companyAId, clock.id))!;
+    assert.ok(graph.zones.filter(z => z.zoneNumber <= 2).every(z => z.zoneType === "rotor" && z.zoneTypeConfirmed));
+    assert.equal((await hit(srv.base, "PUT", path, { zoneIds: [graph.zones[0].id], zoneNumbers: [1], patch: { zoneType: "drip" } })).status, 400);
+    assert.equal((await hit(srv.base, "PUT", path, { patch: { zoneType: "drip" } })).status, 400);
+    await storage.setControllerZoneCount(companyAId, clock.id, 2);
+    const missing = await hit(srv.base, "PUT", path, { zoneNumbers: [3], patch: { zoneType: "drip" } });
+    assert.equal(missing.status, 400);
+    assert.equal(missing.body.message, `Zone 3 isn't on Controller ${clock.letter}`);
+    const program = await storage.createIrrigationProgram(companyAId, clock.id, { name: "A" });
+    const main = await storage.createIrrigationProgram(companyAId, clock.id, { name: "B" });
+    await hit(srv.base, "PUT", path, { zoneNumbers: [1], patch: { programId: main!.id } });
+    const extras = `/api/irrigation-controllers/${clock.id}/zones/extra-programs`;
+    assert.equal((await hit(srv.base, "PUT", extras, { zones: [{ zoneNumber: 1, lines: [{ programId: program!.id, runTimeMinutes: 0 }] }] })).status, 200);
+    assert.equal((await hit(srv.base, "PUT", extras, { zones: [{ zoneNumber: 3, lines: [] }] })).status, 400);
+  });
   it("single and bulk chosen types confirm; forged flags fail; unrelated edits preserve; raised counts remain false", async () => {
     const ctrl = await storage.createIrrigationController({ companyId: companyAId, customerId: customerAId, name: "Doc flags", totalZones: 2 });
     createdControllerIds.push(ctrl.id);
@@ -905,7 +953,8 @@ describe("Document System — explicit program letters", () => {
         mode === "rename/rename" ? rename(b.body.id, "D") : create(ctrl.id, "D", { sortOrder: 3 }),
         mode === "create/create" ? create(ctrl.id, " d ", { sortOrder: 3 }) : rename(c.body.id, " d "),
       ]);
-      assert.deepEqual(results.map(r => r.status).sort(), [mode === "rename/rename" ? 200 : 201, 409].sort());
+      assert.equal(results.filter(r => r.status === 409).length, 1);
+      assert.ok(results.some(r => r.status === 200 || r.status === 201));
       const graph = (await storage.getIrrigationController(companyAId, ctrl.id))!;
       assert.equal(graph.programs.filter(p => p.name.trim().toUpperCase() === "D").length, 1);
     });

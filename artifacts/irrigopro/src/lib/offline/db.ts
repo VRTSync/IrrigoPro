@@ -72,6 +72,14 @@ interface KvWithCustomer extends KvRow {
 }
 
 interface OfflineSchema extends DBSchema {
+  docSites: {
+    key: string;
+    value: { key: string; owner: string; customerId: number; branchName: string; payload: unknown; savedAt: number };
+  };
+  docSitesList: {
+    key: string;
+    value: { key: string; owner: string; payload: unknown; savedAt: number };
+  };
   wetChecks: {
     key: string;
     value: WetCheckMirror;
@@ -110,6 +118,7 @@ interface OfflineSchema extends DBSchema {
       byCreatedAt: number;
       byParentClientId: string;
       byClientId: string;
+      bySiteKey: string;
     };
   };
 }
@@ -117,7 +126,7 @@ interface OfflineSchema extends DBSchema {
 export type OfflineDB = IDBPDatabase<OfflineSchema>;
 
 const DB_NAME = "irrigopro_offline";
-const DB_VERSION = 4;
+const DB_VERSION = 6;
 
 // The open connection is shared by every caller. It is NOT permanent: the
 // browser is free to close it underneath us, and mobile browsers do so
@@ -219,7 +228,9 @@ export function openOfflineDB(): Promise<OfflineDB> {
       terminated() {
         invalidateThisConnection();
       },
-      upgrade(db) {
+      upgrade(db, _old, _next, tx) {
+        if (!db.objectStoreNames.contains("docSites")) db.createObjectStore("docSites", { keyPath: "key" });
+        if (!db.objectStoreNames.contains("docSitesList")) db.createObjectStore("docSitesList", { keyPath: "key" });
         if (!db.objectStoreNames.contains("apiCache")) {
           db.createObjectStore("apiCache", { keyPath: "key" });
         }
@@ -265,7 +276,9 @@ export function openOfflineDB(): Promise<OfflineDB> {
           s.createIndex("byCreatedAt", "createdAt");
           s.createIndex("byParentClientId", "parentClientId");
           s.createIndex("byClientId", "clientId");
+          s.createIndex("bySiteKey", "siteKey");
         }
+        if (!tx.objectStore("mutationQueue").indexNames.contains("bySiteKey")) tx.objectStore("mutationQueue").createIndex("bySiteKey", "siteKey");
       },
     });
     dbPromise = opening.then(
@@ -386,7 +399,7 @@ export async function pruneCompleted(db: OfflineDB, olderThanMs: number, now: nu
     let cursor = await tx.store.index("byStatus").openCursor(IDBKeyRange.only("completed"));
     while (cursor) {
       const v = cursor.value;
-      if (now - v.createdAt > olderThanMs) {
+      if (!v.kind.startsWith("doc.") && now - v.createdAt > olderThanMs) {
         await cursor.delete();
         deleted++;
       }

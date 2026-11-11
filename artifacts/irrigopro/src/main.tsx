@@ -38,12 +38,16 @@ mount();
 // thrown IndexedDB / dynamic-import / notification error cannot strand the
 // page on a blank shell. Each side-effect is independently guarded.
 function deferredBoot() {
-  // Restricted accounts have no operational screens/queue. Do not replay a
-  // previous user's field mutations or start background API polling here.
+  let documentationOnly = false;
+  // Restricted accounts must not replay the field queue or poll staff APIs.
+  // The documenter is the one exception: it has its own scoped doc kinds.
   // Login reloads the document, so the effective saved role is available now.
   try {
     const saved = safeGet("user");
-    if (saved && hasRoleApiAllowlist(JSON.parse(saved)?.role)) return;
+    if (saved && hasRoleApiAllowlist(JSON.parse(saved)?.role)) {
+      if (JSON.parse(saved)?.role !== "system_documenter") return;
+      documentationOnly = true;
+    }
   } catch { /* AuthProvider handles malformed saved user data. */ }
 
   // Offline mutation queue replay engine (Slice 4B / Task #298). Behind the
@@ -56,12 +60,16 @@ function deferredBoot() {
       const { setApiHeartbeat } = await import("./lib/queryClient");
       if (!isOfflineQueueEnabled()) return;
       const engine = getSyncEngine();
+      engine.setDocumentationOnly(documentationOnly);
       setApiHeartbeat((ok) => engine.setOnline(ok));
       await engine.start();
     } catch (err) {
       console.warn("[boot] offline sync engine failed to start:", err);
     }
   })();
+  // This role now owns a documentation queue, not the field queue or any
+  // staff-only notification/version polling.
+  if (documentationOnly) return;
 
   // Push-notification service registration — purely opportunistic; failures
   // here must never block app render.

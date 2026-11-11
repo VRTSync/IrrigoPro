@@ -66,13 +66,18 @@ export function getAuthHeaders(): Record<string, string> {
 // Mirrors the billing-sheet upload path: shared `preparePhotoForUpload`
 // (HEIC→JPEG, ~1600px / ~0.35MB / q=0.80) + mandatory finalize so the
 // server generates `thumb` / `medium` variants for galleries / lightbox.
+/** Preserve existing error copy while exposing the failed HTTP hop's status. */
+export class PhotoUploadHttpError extends Error {
+  constructor(readonly uploadStatus: number, message: string) { super(message); }
+}
+
 export async function uploadPhotoToStorage(file: File): Promise<string> {
   const signRes = await fetch(`/api/upload/photo?originalName=${encodeURIComponent(file.name)}`, {
     method: "POST",
     headers: getAuthHeaders(),
     credentials: "include",
   });
-  if (!signRes.ok) throw new Error(`Failed to get upload URL (${signRes.status})`);
+  if (!signRes.ok) throw new PhotoUploadHttpError(signRes.status, `Failed to get upload URL (${signRes.status})`);
   const { signedUrl, url } = await signRes.json();
 
   const { displayFile } = await preparePhotoForUpload(file);
@@ -82,7 +87,7 @@ export async function uploadPhotoToStorage(file: File): Promise<string> {
     body: displayFile,
     headers: { "Content-Type": displayFile.type || "application/octet-stream" },
   });
-  if (!putRes.ok) throw new Error(`Upload to storage failed (${putRes.status})`);
+  if (!putRes.ok) throw new PhotoUploadHttpError(putRes.status, `Upload to storage failed (${putRes.status})`);
 
   const finalizeRes = await fetch("/api/upload/photo/finalize", {
     method: "POST",
@@ -93,7 +98,7 @@ export async function uploadPhotoToStorage(file: File): Promise<string> {
   if (!finalizeRes.ok) {
     let detail = `${finalizeRes.status}`;
     try { const body = await finalizeRes.json(); if (body?.message) detail = body.message; } catch {}
-    throw new Error(`Photo finalize failed (${detail})`);
+    throw new PhotoUploadHttpError(finalizeRes.status, `Photo finalize failed (${detail})`);
   }
   return url as string;
 }

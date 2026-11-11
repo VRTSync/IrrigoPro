@@ -9,6 +9,8 @@ import type { DocumentationEquipmentAudit } from "./documentationEquipmentAudit"
 import type { DocumentationGap } from "./documentationGap";
 
 export type DocumentationBackflow = DocumentationEquipmentAudit & {
+  /** @nullable */
+  clientId?: string | null;
   id: number;
   branchName: string;
   name: string;

@@ -78,6 +78,13 @@ export function readySet(
   const ready: QueuedMutation[] = [];
   for (const m of queue) {
     if (m.status !== "pending") continue;
+    if (m.kind.startsWith("doc.")) {
+      if (m.docOrderAfter?.some(cid => otherRows(cid, m).some(p => p.status === "pending" || p.status === "syncing"))) continue;
+      if (m.docRequiresSuccess?.some(cid => {
+        const rows = otherRows(cid, m);
+        return !rows.length || rows.some(p => p.status !== "completed" || p.docRefused);
+      })) continue;
+    }
     // Backoff gate.
     if (m.attemptCount > 0 && m.lastAttemptAt != null) {
       const wait = backoffMs(m.attemptCount);

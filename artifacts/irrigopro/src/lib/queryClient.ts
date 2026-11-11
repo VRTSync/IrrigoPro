@@ -8,6 +8,7 @@ import {
 import { useSyncExternalStore } from "react";
 import { safeGet, safeRemove } from "@/utils/safeStorage";
 import { getImpersonationToken } from "@/lib/impersonation";
+import { clearDocCopies } from "@/lib/offline/doc-store";
 
 // Task #556 — global "read-auth lost" signal.
 //
@@ -88,6 +89,7 @@ export async function apiRequest(
   url: string,
   method: string = "GET",
   data?: unknown | undefined,
+  signal?: AbortSignal,
 ): Promise<any> {
   const headers: Record<string, string> = data ? { "Content-Type": "application/json" } : {};
 
@@ -101,6 +103,7 @@ export async function apiRequest(
   try {
     res = await fetch(url, {
       method,
+      signal,
       headers,
       body: data ? JSON.stringify(data) : undefined,
       credentials: "include",
@@ -319,10 +322,12 @@ export function adaptiveRefetchInterval(baseMs: number): number | false {
 // `replace` instead of `href` keeps the login page out of browser history
 // so the back button can't return to a stale dashboard.
 export function clearSessionAndLogout(): void {
+  const cleared = clearDocCopies();
   try { queryClient.clear(); } catch { /* non-browser / test context */ }
   try { safeRemove("user"); } catch { /* ignore */ }
   void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
-  try { window.location.replace("/login"); } catch { /* non-browser context */ }
+  void cleared.catch((error) => console.warn("Couldn't clear offline document copies", error))
+    .finally(() => { try { window.location.replace("/login"); } catch { /* non-browser context */ } });
 }
 
 export const queryClient = new QueryClient({

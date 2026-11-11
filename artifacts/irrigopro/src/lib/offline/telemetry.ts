@@ -72,6 +72,9 @@ function getAuthHeaders(u: CachedUser | null): Record<string, string> {
 export function postTelemetry(evt: TelemetryEventInput): void {
   try {
     const cachedUser = getCachedUser();
+    // Restricted documentation accounts cannot call the staff telemetry
+    // endpoint. Starting their queue must not introduce forbidden polling.
+    if (cachedUser?.role === "system_documenter") return;
     const payload = {
       name: evt.name,
       message: evt.message ?? "",

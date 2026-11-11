@@ -20,3 +20,16 @@ or cannot repair a failed predecessor.
 transaction) around predecessor lookup and enqueue. Distinguish ordering-only
 edges from placeholder/server-ID edges, which still require successful parent
 resolution.
+
+Verification and Finish need a separate success dependency: a refused or
+discarded prerequisite must fail verification visibly, even though later
+ordinary patches may proceed. Do not treat a conflict's terminal engine status
+as proof that its optimistic edit succeeded.
+
+**Why:** Server-wins conflicts can be terminal/completed for the engine while
+still representing a refused edit. Reapplying that edit or releasing verification
+would show a false successful result.
+
+**How to apply:** Keep authoritative snapshots separate from ordered optimistic
+overlays, exclude refused edits, and retain success prerequisites independently
+of ordering prerequisites.

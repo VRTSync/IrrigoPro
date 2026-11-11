@@ -364,7 +364,7 @@ describe("Document System reads and atomic verification (real DB/routes)", { con
     const r = await hit("GET", site(c.id));
     assert.equal(r.status, 200); assert.equal(r.body.controllers.length, 1); assert.equal(r.body.backflows.length, 1);
     const ctrl = r.body.controllers[0], device = r.body.backflows[0];
-    assert.deepEqual(Object.keys(ctrl).sort(), ["id", "letter", "letterConfirmed", "name", "location", "brand", "model", "totalZones", "settingsPhotoUrl",
+    assert.deepEqual(Object.keys(ctrl).sort(), ["id", "clientId", "letter", "letterConfirmed", "name", "location", "brand", "model", "totalZones", "settingsPhotoUrl",
       "notes", "lastUpdatedAt", "fieldVerifiedAt", "fieldVerifiedByName", "programs", "zones", "gaps", "verified"].sort());
     assert.equal(ctrl.programs.length, 2); assert.equal(ctrl.programs[1].isActive, false);
     assert.deepEqual(ctrl.zones.map((z: any) => z.zoneNumber), [1, 2]);

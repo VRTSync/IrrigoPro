@@ -2021,6 +2021,7 @@ export type InsertMobileToken = z.infer<typeof insertMobileTokenSchema>;
 
 export const irrigationControllers = pgTable("irrigation_controllers", {
   id: serial("id").primaryKey(),
+  clientId: text("client_id"),
   companyId: integer("company_id").references(() => companies.id).notNull(),
   customerId: integer("customer_id").references(() => customers.id).notNull(),
   // Multi-location parity with property_controllers. Empty string means
@@ -2056,6 +2057,7 @@ export const irrigationControllers = pgTable("irrigation_controllers", {
     .on(table.companyId, table.customerId, table.branchName, table.name).where(sql`${table.isActive}`),
   uniqCtrlLetterActive: uniqueIndex("uniq_irr_ctrl_letter_active")
     .on(table.companyId, table.customerId, table.branchName, table.letter).where(sql`${table.isActive} AND ${table.letter} IS NOT NULL`),
+  clientIdUniq: uniqueIndex("uniq_irr_ctrl_client_id").on(table.companyId, table.clientId).where(sql`${table.clientId} IS NOT NULL`),
 }));
 
 export const insertIrrigationControllerSchema = createInsertSchema(irrigationControllers);
@@ -2064,6 +2066,7 @@ export type InsertIrrigationController = typeof irrigationControllers.$inferInse
 
 export const irrigationPrograms = pgTable("irrigation_programs", {
   id: serial("id").primaryKey(),
+  clientId: text("client_id"),
   companyId: integer("company_id").references(() => companies.id).notNull(),
   controllerId: integer("controller_id")
     .references(() => irrigationControllers.id, { onDelete: "cascade" })
@@ -2083,6 +2086,7 @@ export const irrigationPrograms = pgTable("irrigation_programs", {
 }, (table) => ({
   companyControllerIdx: index("irr_prog_company_controller_idx")
     .on(table.companyId, table.controllerId),
+  clientIdUniq: uniqueIndex("uniq_irr_prog_client_id").on(table.companyId, table.clientId).where(sql`${table.clientId} IS NOT NULL`),
 }));
 
 export const insertIrrigationProgramSchema = createInsertSchema(irrigationPrograms);
@@ -2213,6 +2217,7 @@ export type InsertControllerLetterChange = typeof controllerLetterChanges.$infer
 
 export const irrigationBackflows = pgTable("irrigation_backflows", {
   id: serial("id").primaryKey(),
+  clientId: text("client_id"),
   companyId: integer("company_id").references(() => companies.id).notNull(),
   customerId: integer("customer_id").references(() => customers.id).notNull(),
   branchName: text("branch_name").notNull().default(""),
@@ -2254,6 +2259,7 @@ export const irrigationBackflows = pgTable("irrigation_backflows", {
   uniqSerial: uniqueIndex("uniq_irr_backflow_serial")
     .on(table.companyId, table.serialNumber)
     .where(sql`${table.serialNumber} IS NOT NULL AND ${table.serialNumber} <> ''`),
+  clientIdUniq: uniqueIndex("uniq_irr_backflow_client_id").on(table.companyId, table.clientId).where(sql`${table.clientId} IS NOT NULL`),
 }));
 
 export const insertIrrigationBackflowSchema = createInsertSchema(irrigationBackflows);

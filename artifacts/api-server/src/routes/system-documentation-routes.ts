@@ -154,7 +154,7 @@ export function registerSystemDocumentationRoutes(app: Express, deps: { requireA
       // Do not expose retired zones, tenancy, audit IDs, or future controller fields.
       const programs = graph.programs.filter(p => p.companyId === c.companyId);
       controllers.push({
-        id: graph.id, letter: graph.letter, letterConfirmed: graph.letterConfirmed, name: graph.name, location: graph.location,
+        id: graph.id, clientId: graph.clientId, letter: graph.letter, letterConfirmed: graph.letterConfirmed, name: graph.name, location: graph.location,
         brand: graph.brand, model: graph.model, totalZones: graph.totalZones, settingsPhotoUrl: graph.settingsPhotoUrl,
         notes: graph.notes, lastUpdatedAt: graph.lastUpdatedAt, fieldVerifiedAt: graph.fieldVerifiedAt,
         fieldVerifiedByName: graph.fieldVerifiedByName, programs,

@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 /* eslint-disable no-restricted-globals */
 
-import { precacheAndRoute, cleanupOutdatedCaches } from "workbox-precaching";
+import { precacheAndRoute, cleanupOutdatedCaches, createHandlerBoundToURL } from "workbox-precaching";
 import { registerRoute, setDefaultHandler } from "workbox-routing";
 import { NetworkFirst, NetworkOnly } from "workbox-strategies";
 import { ExpirationPlugin } from "workbox-expiration";
@@ -13,6 +13,11 @@ declare const self: ServiceWorkerGlobalScope & {
 
 precacheAndRoute(self.__WB_MANIFEST || []);
 cleanupOutdatedCaches();
+registerRoute(
+  ({ url, request }) => request.mode === "navigate" && url.origin === self.location.origin &&
+    (url.pathname === "/" || url.pathname === "/document-system" || /^\/customers\/\d+\/document-system$/.test(url.pathname)),
+  createHandlerBoundToURL("/index.html"),
+);
 
 // Default: pass everything not matched below straight to the network.
 setDefaultHandler(new NetworkOnly());

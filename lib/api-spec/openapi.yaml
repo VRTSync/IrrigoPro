@@ -171,6 +171,79 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/MarkupActionResult" }
+  /customers/{customerId}/controllers-profile:
+    post:
+      operationId: createOfflineDocumentationController
+      parameters:
+        - { name: customerId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OfflineControllerInput" }
+      responses:
+        "201": { description: Created controller }
+        "200": { description: Existing controller for this client id and parent }
+        "409": { description: That client id belongs to another record }
+        "404": { description: Customer not found }
+  /customers/{customerId}/backflows:
+    post:
+      operationId: createOfflineDocumentationBackflow
+      parameters:
+        - { name: customerId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OfflineBackflowInput" }
+      responses:
+        "201": { description: Created backflow }
+        "200": { description: Existing backflow for this client id and parent }
+        "409": { description: That client id belongs to another record }
+        "404": { description: Customer not found }
+  /irrigation-controllers/{id}/programs:
+    post:
+      operationId: createOfflineDocumentationProgram
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OfflineProgramInput" }
+      responses:
+        "201": { description: Created program }
+        "200": { description: Existing program for this client id and controller }
+        "409": { description: That client id belongs to another record }
+        "404": { description: Controller not found }
+  /irrigation-controllers/{id}/zones/bulk:
+    put:
+      operationId: saveDocumentationZones
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DocumentationBulkZoneInput" }
+      responses:
+        "200": { description: Updated current zones }
+        "400": { description: "Send exactly one selector; Zone <n> isn't on Controller <letter>" }
+        "404": { description: Controller or zones not found }
+  /irrigation-controllers/{id}/zones/extra-programs:
+    put:
+      operationId: saveDocumentationZoneExtras
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DocumentationExtraZoneInput" }
+      responses:
+        "200": { description: Updated current zone program lines }
+        "400": { description: "Send exactly one selector; Zone <n> isn't on Controller <letter>" }
+        "404": { description: Controller or zones not found }
   /irrigation-controllers/{id}/letter:
     post:
       operationId: setControllerLetter
@@ -456,6 +529,105 @@ components:
                 companyId: { type: integer }
                 customerId: { type: integer }
                 scheduleId: { type: integer }
+    OfflineControllerInput:
+      type: object
+      required: [letter]
+      properties:
+        clientId: { type: string, format: uuid }
+        letter: { type: string, pattern: "^[A-Za-z]$" }
+        confirmLetter: { type: boolean }
+        branchName: { type: string }
+        location: { type: [string, "null"] }
+        brand: { type: [string, "null"] }
+        model: { type: [string, "null"] }
+        totalZones: { type: [integer, "null"], minimum: 1, maximum: 100 }
+        settingsPhotoUrl: { type: [string, "null"] }
+        notes: { type: [string, "null"] }
+        isActive: { type: boolean }
+    OfflineProgramInput:
+      type: object
+      required: [name]
+      properties:
+        clientId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        wateringDays: { type: [array, "null"], items: { type: string } }
+        startTimes: { type: [array, "null"], items: { type: string } }
+        seasonalAdjustPct: { type: integer, minimum: 0, maximum: 500 }
+        sortOrder: { type: integer }
+        isActive: { type: boolean }
+    OfflineBackflowInput:
+      type: object
+      required: [name]
+      properties:
+        clientId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        branchName: { type: string }
+        brand: { type: [string, "null"] }
+        model: { type: [string, "null"] }
+        size: { type: [string, "null"] }
+        deviceType: { type: string, enum: [rpz, double_check, pvb, spill_resistant_pvb, other] }
+        serialNumber: { type: [string, "null"] }
+        location: { type: [string, "null"] }
+        installDate: { type: [string, "null"] }
+        photoUrl: { type: [string, "null"] }
+        notes: { type: [string, "null"] }
+        lastTestedDate: { type: [string, "null"] }
+        nextTestDueDate: { type: [string, "null"] }
+        lastTestResult: { type: [string, "null"], enum: [pass, fail, null] }
+        testUnknownReason: { type: [string, "null"], enum: [never_tested, no_tag, null] }
+        lastTestedBy: { type: [string, "null"] }
+        isActive: { type: boolean }
+    DocumentationZonePatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        zoneType: { type: string, enum: [pop_up_spray, rotor, drip, netafim, bubbler, other] }
+        programId: { type: [integer, "null"], minimum: 1 }
+        runTimeMinutes: { type: integer, minimum: 0, maximum: 999 }
+    DocumentationBulkZoneInput:
+      type: object
+      required: [patch]
+      oneOf:
+        - required: [zoneIds]
+          not: { required: [zoneNumbers] }
+        - required: [zoneNumbers]
+          not: { required: [zoneIds] }
+      properties:
+        zoneIds: { type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: { type: integer, minimum: 1 } }
+        zoneNumbers: { type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: { type: integer, minimum: 1 } }
+        patch: { $ref: "#/components/schemas/DocumentationZonePatch" }
+    DocumentationExtraZoneInput:
+      type: object
+      additionalProperties: false
+      required: [zones]
+      properties:
+        zones:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [lines]
+            oneOf:
+              - required: [zoneId]
+                not: { required: [zoneNumber] }
+              - required: [zoneNumber]
+                not: { required: [zoneId] }
+            properties:
+              zoneId: { type: integer, minimum: 1 }
+              zoneNumber: { type: integer, minimum: 1 }
+              lines:
+                type: array
+                maxItems: 25
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [programId, runTimeMinutes]
+                  properties:
+                    programId: { type: integer, minimum: 1 }
+                    runTimeMinutes: { type: integer, minimum: 0, maximum: 120 }
     DocumentationSiteInput:
       type: object
       additionalProperties: false
@@ -548,6 +720,7 @@ components:
       type: object
       required: [id, companyId, controllerId, name, wateringDays, startTimes, seasonalAdjustPct, isActive, sortOrder, createdAt, updatedAt]
       properties:
+        clientId: { type: [string, "null"] }
         id: { type: integer }
         companyId: { type: integer }
         controllerId: { type: integer }
@@ -623,6 +796,7 @@ components:
         - type: object
           required: [programs, zones]
           properties:
+            clientId: { type: [string, "null"] }
             programs: { type: array, items: { $ref: "#/components/schemas/DocumentationProgram" } }
             zones: { type: array, items: { $ref: "#/components/schemas/DocumentationZone" } }
     DocumentationEquipmentAudit:
@@ -656,6 +830,7 @@ components:
         - type: object
           required: [id, branchName, name, brand, model, size, deviceType, serialNumber, location, installDate, photoUrl, notes, lastTestedDate, nextTestDueDate, lastTestResult, lastTestedBy, testUnknownReason, gaps, verified]
           properties:
+            clientId: { type: [string, "null"] }
             id: { type: integer }
             branchName: { type: string }
             name: { type: string }

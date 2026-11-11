@@ -5,6 +5,7 @@ import { Droplets, GitBranch, ArrowLeft } from "lucide-react";
 // the Document System location step (and later the documenter picker).
 
 export interface CustomerCardProps {
+  disabled?: boolean;
   name: string;
   address: string | null | undefined;
   branchCount: number;
@@ -21,16 +22,18 @@ export interface CustomerCardProps {
 }
 
 export function CustomerCard({
-  name, address, branchCount, badge, highlighted, onClick, testId, trailing, footer,
+  name, address, branchCount, badge, highlighted, onClick, testId, trailing, footer, disabled,
 }: CustomerCardProps) {
   return (
     <button
+      disabled={disabled}
       onClick={onClick}
       className={[
         "w-full max-w-full text-left rounded-xl border bg-white p-4 shadow-sm transition-all",
         "hover:shadow-md hover:-translate-y-px active:translate-y-0 active:shadow-sm",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
         highlighted ? "border-blue-400 ring-2 ring-blue-200" : "border-gray-200",
+        disabled ? "opacity-50" : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -66,6 +69,8 @@ export interface BranchPickerProps {
   badgeFor?: (branch: string) => ReactNode;
   /** Branches that get the highlighted ring. */
   highlightFor?: (branch: string) => boolean;
+  disabledFor?: (branch: string) => boolean;
+  footerFor?: (branch: string) => ReactNode;
   onSelect: (branchName: string) => void;
   onBack: () => void;
   backLabel?: string;
@@ -75,7 +80,7 @@ export interface BranchPickerProps {
 }
 
 export function BranchPicker({
-  title, intro, branches, badgeFor, highlightFor, onSelect, onBack,
+  title, intro, branches, badgeFor, highlightFor, disabledFor, footerFor, onSelect, onBack,
   backLabel = "Back to Customers", customerName, customerAddress,
 }: BranchPickerProps) {
   return (
@@ -110,6 +115,7 @@ export function BranchPicker({
             <button
               key={branch}
               onClick={() => onSelect(branch)}
+              disabled={disabledFor?.(branch)}
               className={[
                 "w-full text-left rounded-xl border-2 bg-white p-4 shadow-sm transition-all",
                 "hover:border-blue-400 hover:bg-blue-50",
@@ -118,6 +124,7 @@ export function BranchPicker({
               ].join(" ")}
               data-testid={`branch-option-${branch}`}
             >
+              {footerFor?.(branch)}
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="flex-shrink-0 w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center">

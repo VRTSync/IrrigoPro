@@ -27,6 +27,7 @@ import {
 } from "./db";
 import { backoffMs, readySet, resolveBody, resolveTemplate } from "./sortQueue";
 import { postTelemetry } from "./telemetry";
+import { docOwner, docSession, putDocSite } from "./doc-store";
 import type {
   EngineEvent,
   EngineListener,
@@ -129,6 +130,7 @@ export class SyncEngine {
   private online = true;
   private heartbeatTimer: any = null;
   private started = false;
+  private documentationOnly = false;
   private tickScheduled = false;
 
   constructor(opts: EngineOptions = {}) {
@@ -210,6 +212,7 @@ export class SyncEngine {
   }
 
   setOnline(next: boolean) {
+    if (next && this.documentationOnly && typeof navigator !== "undefined" && navigator.onLine === false) next = false;
     if (this.online === next) return;
     this.online = next;
     this.broadcastState().catch(() => {});
@@ -217,16 +220,21 @@ export class SyncEngine {
   }
 
   isOnline(): boolean { return this.online; }
+  setDocumentationOnly(value: boolean): void { this.documentationOnly = value; }
+  canReplay(m: QueuedMutation): boolean {
+    return (!this.documentationOnly || m.kind.startsWith("doc.")) &&
+      (!m.kind.startsWith("doc.") || m.docOwner === docOwner());
+  }
 
   private async broadcastState() {
     try {
       const db = await this.ensureDB();
-      const all = await listAllMutations(db);
+      const all = (await listAllMutations(db)).filter(m => this.canReplay(m));
       let pending = 0, syncing = 0, failed = 0;
       for (const m of all) {
         if (m.status === "pending") pending++;
         else if (m.status === "syncing") syncing++;
-        else if (m.status === "failed") failed++;
+        else if (m.status === "failed" || m.docRefused) failed++;
       }
       this.emit({ type: "state", online: this.online, pending, syncing, failed });
     } catch {
@@ -260,6 +268,7 @@ export class SyncEngine {
     try {
       const db = await this.ensureDB();
       for (const m of await listAllMutations(db)) {
+        if (!this.canReplay(m)) continue;
         if (m.status !== "syncing") continue;
         const capped = this.capExceededReason(m, m.attemptCount);
         await updateMutation(db, m.id, capped
@@ -278,7 +287,7 @@ export class SyncEngine {
     // accompanying `photo.upload` rows with valid bytes stay intact —
     // the photo still ends up on the server, just not auto-attached.
     try {
-      await this.cleanupLegacyPhotoLinks();
+      if (!this.documentationOnly) await this.cleanupLegacyPhotoLinks();
     } catch (err) {
       console.warn("[offline-engine] legacy photo.link cleanup failed:", err);
     }
@@ -378,7 +387,7 @@ export class SyncEngine {
 
   private async heartbeat(): Promise<void> {
     try {
-      const res = await this.fetchImpl("/api/health", { method: "GET" });
+      const res = await this.fetchImpl(this.documentationOnly ? "/api/system-documentation/sites" : "/api/health", { method: "GET" });
       this.setOnline(res.ok);
     } catch {
       this.setOnline(false);
@@ -389,6 +398,16 @@ export class SyncEngine {
   async enqueue(m: QueuedMutation): Promise<void> {
     const db = await this.ensureDB();
     await enqueueMutation(db, m);
+    await this.broadcastState();
+    this.scheduleTick();
+  }
+  async enqueueMany(mutations: QueuedMutation[]): Promise<void> {
+    const db = await this.ensureDB();
+    await withDB(db, async d => {
+      const tx = d.transaction("mutationQueue", "readwrite");
+      for (const m of mutations) await tx.store.put(m);
+      await tx.done;
+    });
     await this.broadcastState();
     this.scheduleTick();
   }
@@ -406,13 +425,16 @@ export class SyncEngine {
   // up. Safe to call on any mutation; only failed entries are useful.
   async retryMutation(id: string): Promise<void> {
     const db = await this.ensureDB();
+    const mutation = (await listAllMutations(db)).find(m => m.id === id);
     await updateMutation(db, id, {
       status: "pending",
       attemptCount: 0,
       lastError: null,
       lastAttemptAt: null,
+      docRefused: false,
     });
     await this.broadcastState();
+    if (mutation?.siteKey) this.emit({ type: "doc-refresh", siteKey: mutation.siteKey });
     this.scheduleTick();
   }
 
@@ -421,6 +443,7 @@ export class SyncEngine {
   // updateMutation against the deleted row is a no-op.
   async cancelMutation(id: string): Promise<void> {
     const db = await this.ensureDB();
+    const mutation = (await listAllMutations(db)).find(m => m.id === id);
     const ac = this.aborts.get(id);
     if (ac) {
       try { ac.abort(); } catch { /* ignore */ }
@@ -428,7 +451,12 @@ export class SyncEngine {
     await deleteMutation(db, id);
     this.inFlight.delete(id);
     this.aborts.delete(id);
+    if (mutation?.kind === "doc.controller.photo" || mutation?.kind === "doc.backflow.photo") {
+      await deletePhotoBlob(db, mutation.clientId);
+    }
+    if (mutation?.siteKey) await this.refreshDocSite(mutation);
     await this.broadcastState();
+    this.scheduleTick();
   }
 
   private scheduleTick(): void {
@@ -464,14 +492,38 @@ export class SyncEngine {
   async tick(): Promise<void> {
     if (!this.online) return;
     const db = await this.ensureDB();
-    const all = await listAllMutations(db);
+    const all = (await listAllMutations(db)).filter(m => this.canReplay(m));
+    // Ordering edges may release after refusal. Success/identity edges may
+    // not: make blocked Verify/Finish visible rather than deadlocking silently.
+    for (const m of all) {
+      if (!m.kind.startsWith("doc.") || m.status !== "pending") continue;
+      const required = [...(m.docRequiresSuccess ?? []), ...Object.values(m.placeholders)];
+      const blocked = required.some(cid => {
+        const parent = all.find(p => p.clientId === cid);
+        return !parent || parent.status === "failed" || parent.docRefused;
+      });
+      if (blocked) {
+        const message = `${m.subjectLabel ?? "Location"}: An earlier change didn't sync. Review the failed changes before verifying.`;
+        await updateMutation(db, m.id, { status: "failed", lastError: message, docRefused: true });
+        m.status = "failed";
+        m.docRefused = true;
+        if (m.siteKey) this.emit({ type: "doc-refresh", siteKey: m.siteKey, message });
+        await this.broadcastState();
+      }
+    }
     const resolver = await this.buildResolver(db, all);
     const candidates = readySet(all, this.now(), resolver).filter((m) => !this.inFlight.has(m.id));
     const slots = Math.max(0, this.maxConcurrent - this.inFlight.size);
-    const next = candidates.slice(0, slots);
+    const sites = new Set<string>();
+    const next = candidates.filter(m => {
+      if (!m.siteKey) return true;
+      if (sites.has(m.siteKey)) return false;
+      sites.add(m.siteKey);
+      return true;
+    }).slice(0, slots);
     await Promise.all(next.map((m) => this.dispatch(m)));
     // Prune old completed entries each cycle.
-    try { await pruneCompleted(db, this.pruneOlderThanMs, this.now()); } catch {}
+    try { if (!this.documentationOnly) await pruneCompleted(db, this.pruneOlderThanMs, this.now()); } catch {}
   }
 
   // Drain the queue until empty or all remaining mutations are blocked
@@ -555,12 +607,12 @@ export class SyncEngine {
     if (ac) this.aborts.set(m.id, ac);
     try {
       let res: Response;
-      if (m.kind === "photo.upload") {
+      if (m.kind === "photo.upload" || m.kind === "doc.controller.photo" || m.kind === "doc.backflow.photo") {
         // Specialized path: pull the captured Blob from IndexedDB and run
         // the existing sign → PUT → finalize → POST flow against the
         // injected fetchImpl. The Blob row is only deleted from IDB after
         // the metadata POST succeeds — the spec's storage-hygiene rule.
-        res = await this.dispatchPhotoUpload(db, m, url, body);
+        res = await this.dispatchPhotoUpload(db, m, url, body, m.siteKey ? ac?.signal : undefined);
       } else {
         const headers: Record<string, string> = {
           ...this.authHeaders(),
@@ -594,13 +646,13 @@ export class SyncEngine {
           status: "completed",
           lastError: null,
           resolvedId,
-          progress: m.kind === "photo.upload" ? 100 : m.progress,
+          progress: m.kind === "photo.upload" || m.kind.endsWith(".photo") ? 100 : m.progress,
         });
         // Mirror server-assigned id back into the matching mirror row so
         // future reads can find it by server id, not just clientId.
         await this.applyServerIdToMirror(db, m, resolvedId);
         // 4C — only NOW is the captured Blob safe to drop from IDB.
-        if (m.kind === "photo.upload") {
+        if (m.kind === "photo.upload" || m.kind === "doc.controller.photo" || m.kind === "doc.backflow.photo") {
           try { await deletePhotoBlob(db, m.clientId); } catch {}
           // Old browser-cached code (pre-Task-#510) creates photo.link
           // mutations with baked-in negative photo IDs AFTER engine
@@ -608,7 +660,7 @@ export class SyncEngine {
           // cleanupLegacyPhotoLinks here catches any such link that was
           // just unblocked by this upload completing and rewrites/cancels
           // it before the next tick can dispatch it.
-          void this.cleanupLegacyPhotoLinks().catch(() => {});
+          if (m.kind === "photo.upload") void this.cleanupLegacyPhotoLinks().catch(() => {});
         }
         // Task #552 — telemetry: photo upload + wet check sync success.
         if (m.kind === "photo.upload") {
@@ -629,13 +681,19 @@ export class SyncEngine {
           });
         }
         await this.broadcastState();
+        if (m.siteKey) {
+          const remaining = (await listAllMutations(db)).some(x => x.siteKey === m.siteKey && x.docOwner === m.docOwner && (x.status === "pending" || x.status === "syncing"));
+          if (!remaining) await this.refreshDocSite(m);
+        }
       } else if (res.status === 409) {
         // Conflict — server wins.
         let message = "Conflict";
         try { message = (await res.text()) || message; } catch {}
+        if (m.siteKey) message = `${m.subjectLabel ?? "Location"}: ${extractApiErrorMessage(message, 409)}`;
         await updateMutation(db, m.id, {
           status: "completed",
           lastError: `409: ${message}`,
+          ...(m.siteKey ? { docRefused: true } : {}),
         });
         const wetCheckId = await this.findWetCheckIdForMutation(db, m);
         if (wetCheckId) {
@@ -659,6 +717,7 @@ export class SyncEngine {
           wetCheckId: wetCheckId ?? null,
           message,
         });
+        if (m.siteKey) await this.refreshDocSite(m, message);
         await this.broadcastState();
       } else if (res.status >= 400 && res.status < 500) {
         // Other 4xx. Two flavors:
@@ -672,10 +731,11 @@ export class SyncEngine {
         let body = "";
         try { body = await res.text(); } catch {}
         const ctype = (res.headers.get("content-type") ?? "").toLowerCase();
-        const looksLikeEdge = isLikelyEdgeError(ctype, body);
-        const message = looksLikeEdge
+        const looksLikeEdge = !(m.siteKey && res.status === 400) && isLikelyEdgeError(ctype, body);
+        let message = looksLikeEdge
           ? (body || `${res.status}`)
           : extractApiErrorMessage(body, res.status);
+        if (m.siteKey && !looksLikeEdge) message = `${m.subjectLabel ?? "Location"}: ${message}`;
         if (looksLikeEdge) {
           this.setOnline(false);
           const nextAttempt = m.attemptCount + 1;
@@ -710,6 +770,7 @@ export class SyncEngine {
             status: "failed",
             lastError: message,
             attemptCount: m.attemptCount + 1,
+            ...(m.siteKey ? { docRefused: true } : {}),
           });
           this.emit({
             type: "error",
@@ -719,6 +780,7 @@ export class SyncEngine {
             message,
             workOrderId: m.workOrderId,
           });
+          if (m.siteKey) await this.refreshDocSite(m, message);
           await this.broadcastState();
         }
       } else {
@@ -870,6 +932,7 @@ export class SyncEngine {
     m: QueuedMutation,
     metadataUrl: string,
     metadataBody: any,
+    signal?: AbortSignal,
   ): Promise<Response> {
     const blobRow = await getPhotoBlob(db, m.clientId);
     if (!blobRow) {
@@ -905,7 +968,7 @@ export class SyncEngine {
     const t1 = Date.now();
     const signRes = await this.fetchImpl(
       `/api/upload/photo?originalName=${encodeURIComponent(blobRow.name)}`,
-      { method: "POST", headers: auth, credentials: "include" },
+      { method: "POST", headers: auth, credentials: "include", signal },
     );
     if (!signRes.ok) {
       let body = "";
@@ -916,11 +979,13 @@ export class SyncEngine {
     emitStep("sign", true, signRes.status);
     const signed = await signRes.json();
     await updateMutation(db, m.id, { progress: 25 });
+    if (m.siteKey) await this.broadcastState();
     // 2) PUT bytes to signed URL — this is the S3 hop.
     const putRes = await this.fetchImpl(signed.signedUrl, {
       method: "PUT",
       body: blobRow.blob,
       headers: { "Content-Type": blobRow.contentType },
+      signal,
     });
     if (!putRes.ok) {
       emitStep("put", false, putRes.status, `s3_${putRes.status}`);
@@ -930,12 +995,14 @@ export class SyncEngine {
     }
     emitStep("put", true, putRes.status);
     await updateMutation(db, m.id, { progress: 60 });
+    if (m.siteKey) await this.broadcastState();
     // 3) Finalize — server-side CDN handoff / EXIF strip.
     const finRes = await this.fetchImpl("/api/upload/photo/finalize", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...auth },
       credentials: "include",
       body: JSON.stringify({ photoId: signed.url }),
+      signal,
     });
     if (!finRes.ok) {
       let body = "";
@@ -945,14 +1012,17 @@ export class SyncEngine {
     }
     emitStep("finalize", true, finRes.status);
     await updateMutation(db, m.id, { progress: 80 });
+    if (m.siteKey) await this.broadcastState();
     // 4) POST metadata to /api/wet-checks/:id/photos. The placeholder-
     // resolved body from the queue is merged with the dynamic url field.
-    const finalBody = { ...(metadataBody as object | null ?? {}), url: signed.url };
+    const finalBody = m.kind === "doc.backflow.photo" ? { photoUrl: signed.url }
+      : { ...(metadataBody as object | null ?? {}), url: signed.url };
     const metaRes = await this.fetchImpl(metadataUrl, {
-      method: "POST",
+      method: m.kind === "doc.backflow.photo" ? "PUT" : "POST",
       headers: { "Content-Type": "application/json", ...auth },
       credentials: "include",
       body: JSON.stringify(finalBody),
+      signal,
     });
     if (metaRes.ok) {
       emitStep("metadata", true, metaRes.status);
@@ -979,6 +1049,21 @@ export class SyncEngine {
       if (cur) await tx.store.put({ ...cur, id } as any);
       await tx.done;
     });
+  }
+
+  private async refreshDocSite(m: QueuedMutation, message?: string) {
+    const session = docSession();
+    if (m.docOwner !== docOwner()) return;
+    if (!m.siteKey || m.docOwner !== docOwner()) return;
+    const [customer, ...branchParts] = m.siteKey.split(":");
+    const branch = branchParts.join(":");
+    try {
+      const res = await this.fetchImpl(`/api/system-documentation/customers/${customer}/site?branchName=${encodeURIComponent(branch)}`, {
+        credentials: "include", headers: this.authHeaders(), cache: "no-store", signal: AbortSignal.timeout(6000),
+      });
+      if (res.ok) await putDocSite(Number(customer), branch, await res.json(), session);
+    } catch { /* Keep the last authoritative snapshot and report refusal regardless. */ }
+    this.emit({ type: "doc-refresh", siteKey: m.siteKey, message });
   }
 
   private async findWetCheckIdForMutation(db: OfflineDB, m: QueuedMutation): Promise<number | null> {
@@ -1131,6 +1216,7 @@ export function getSyncEngine(): SyncEngine {
         } catch { return {}; }
       },
     });
+    try { singleton.setDocumentationOnly(JSON.parse(localStorage.getItem("user") ?? "null")?.role === "system_documenter"); } catch { /* no saved account */ }
   }
   return singleton;
 }
