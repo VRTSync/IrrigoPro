@@ -13,3 +13,9 @@ Use named UNIQUE constraints, rather than standalone unique indexes, for these r
 **Why:** Drizzle excludes any index referenced by a constraint, including a foreign key, from its index snapshot. A standalone referenced index consequently disappears from introspection and the next push tries to recreate it. Its UNIQUE-constraint reader also returns columns in physical order, so a different declared order causes repeated constraint replacement.
 
 **How to apply:** Attach an existing unique index as a UNIQUE constraint without dropping its foreign keys, keep the schema declaration aligned, and verify a repeated push succeeds. A single successful push does not establish repeatability.
+
+Development setup success does not prove that the Publish migration is dependency-ordered.
+
+**Why:** Publish recomputes its own development-to-production diff. It can add a foreign key to a new table before adding the required UNIQUE constraint to an existing production table, even when development already contains both validated constraints.
+
+**How to apply:** Inspect production read-only and recompute the Publish diff. Do not use production DDL or deploy hooks to reorder it. If staged publishing requires temporarily removing a development constraint, explain the reduced protection and obtain approval first.
