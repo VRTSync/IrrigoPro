@@ -235,6 +235,7 @@ function DocumentSystemScreen({ customerId, branchParam, variant }: { customerId
       site={data}
       subtitle={subtitle}
       flash={flash}
+      showOfflineStatus={documenter}
       onBack={() => setLocation(summaryExitUrl)}
       onDone={() => setLocation(summaryExitUrl)}
       footerOffsetClass={footerOffsetClass}

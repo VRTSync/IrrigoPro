@@ -155,12 +155,23 @@ describe("System Documenter app (Slice 7)", () => {
     await downloadAllDocSites();
     const db = await openOfflineDB();
     await db.delete("docSites", "3:");
+    await db.delete("docSites", "2:South");
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
     mount("/");
-    expect(await screen.findByTestId("text-offline-saved-5")).toHaveTextContent("Saved for offline");
+    await waitFor(() => expect(screen.getByTestId("icon-offline-status-5"))
+      .toHaveAccessibleName("Offline ready — saved on this phone"));
+    expect(screen.getByTestId("icon-offline-status-2"))
+      .toHaveAccessibleName("Partly offline — 1 of 2 branches saved on this phone");
+    expect(screen.getByTestId("icon-offline-status-3"))
+      .toHaveAccessibleName("Not saved offline — connect to download");
+    expect(screen.getByTestId("icon-offline-status-5")).toHaveAttribute("title", "Offline ready — saved on this phone");
+    expect(screen.getByTestId("icon-offline-status-5")).toHaveTextContent("");
+    expect(screen.getByTestId("card-property-2")).not.toBeDisabled();
     expect(screen.getByTestId("card-property-3")).toBeDisabled();
     fireEvent.click(screen.getByTestId("card-property-5"));
     expect(await screen.findByTestId("strip-doc-offline")).toHaveTextContent("Changes are saved on this phone");
+    expect(screen.getByTestId("icon-property-offline-status"))
+      .toHaveAccessibleName("Offline ready — saved on this phone");
     expect(screen.getByTestId("button-finish")).not.toBeDisabled();
     vi.restoreAllMocks();
   });

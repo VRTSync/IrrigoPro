@@ -13,6 +13,7 @@ import { SessionExpiredEmptyState } from "@/components/auth/session-expired-bann
 import { CustomerCard } from "@/components/customers/property-picker";
 import { DocChip } from "@/components/document-system/doc-chip";
 import { useDocSites } from "@/components/document-system/use-doc-site";
+import { OfflineReadyIcon } from "@/components/document-system/offline-ready-icon";
 
 type Filter = "not_verified" | "all";
 
@@ -37,7 +38,7 @@ export default function DocPropertyPickerPage() {
   const [filter, setFilter] = useState<Filter>("not_verified");
   const unauthenticated = useUnauthenticatedReads();
   const sites = useDocSites();
-  const [saved, setSaved] = useState<Set<string>>(new Set());
+  const [saved, setSaved] = useState<Set<string> | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState(false);
   const refreshSaved = () => listDocSites().then((rows) => setSaved(new Set(rows.map((row) => row.key))));
@@ -120,7 +121,9 @@ export default function DocPropertyPickerPage() {
         <div className="flex flex-col gap-3" data-testid="picker-list">
           {shown.map((c) => {
             const b = badgeFor(c);
-            const hasCopy = (c.branches.length ? c.branches : [""]).some((branch) => saved.has(`${c.customerId}:${branch}`));
+            const branches = c.branches.length ? c.branches : [""];
+            const savedCount = branches.filter((branch) => saved?.has(`${c.customerId}:${branch}`)).length;
+            const hasCopy = savedCount > 0;
             const failures = sync.mutations.filter(m => m.docOwner === docOwner() && m.siteKey?.startsWith(`${c.customerId}:`) && (m.status === "failed" || m.docRefused)).length;
             return (
               <div key={c.customerId}>
@@ -128,7 +131,9 @@ export default function DocPropertyPickerPage() {
                 key={c.customerId}
                 name={c.name}
                 disabled={(sites.fromCopy || navigator.onLine === false) && !hasCopy}
-                footer={hasCopy ? <p className="mt-2 text-xs text-muted-foreground" data-testid={`text-offline-saved-${c.customerId}`}>Saved for offline</p> : sites.fromCopy ? <p className="mt-2 text-xs text-muted-foreground">Not saved — connect to download</p> : null}
+                trailing={
+                  <OfflineReadyIcon savedCount={saved === null ? null : savedCount} total={branches.length} testId={`icon-offline-status-${c.customerId}`} />
+                }
                 address={c.address}
                 branchCount={c.branches.length}
                 badge={<span className={cn("rounded-full px-2.5 py-0.5 text-xs font-semibold", b.cls)} data-testid={`badge-property-${c.customerId}`}>{b.label}</span>}

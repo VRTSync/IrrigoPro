@@ -26,11 +26,13 @@ export interface DocFrameProps {
   /** Disables every control in the content while a save is in flight. */
   contentDisabled?: boolean;
   footer?: ReactNode;
+  /** Optional compact status beside the property's heading. */
+  headerStatus?: ReactNode;
   /** Clears the fixed mobile bottom nav. Slice 7 passes `bottom-0`. */
   footerOffsetClass?: string;
 }
 
-export function DocFrame({ title, subtitle, onBack, flow, children, contentDisabled, footer, footerOffsetClass = "bottom-20" }: DocFrameProps) {
+export function DocFrame({ title, subtitle, onBack, flow, children, contentDisabled, footer, headerStatus, footerOffsetClass = "bottom-20" }: DocFrameProps) {
   return (
     <div className="mx-auto w-full max-w-[480px] px-4 pt-3 pb-4 flex flex-col gap-4" data-testid="doc-frame">
       <div className="flex items-center gap-3">
@@ -50,6 +52,7 @@ export function DocFrame({ title, subtitle, onBack, flow, children, contentDisab
           <h1 className="text-lg font-semibold leading-tight text-slate-900 truncate" data-testid="text-doc-title">{title}</h1>
           {subtitle && <p className="text-sm text-muted-foreground truncate" data-testid="text-doc-subtitle">{subtitle}</p>}
         </div>
+        {headerStatus}
         {flow && (
           <Button
             type="button"

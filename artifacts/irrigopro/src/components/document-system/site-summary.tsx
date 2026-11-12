@@ -8,6 +8,7 @@ import { useDocOffline } from "./doc-offline-context";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DocFrame } from "./doc-frame";
+import { OfflineReadyIcon } from "./offline-ready-icon";
 import { DocChip } from "./doc-chip";
 import { backflowTypeLabel, serverMessage } from "./constants";
 import { docSiteKey, useInvalidateDocSite } from "./use-doc-site";
@@ -85,13 +86,14 @@ export interface SiteSummaryProps {
   /** Called only after the server accepted Finish. */
   onFinished: (counts: DoneCounts) => void;
   footerOffsetClass?: string;
+  showOfflineStatus?: boolean;
 }
 
 export function SiteSummary({
   customerId, branchName, site, subtitle, flash, onBack, onDone, onOpenController, onAddController,
-  onOpenBackflow, onAddBackflow, onFinished, footerOffsetClass,
+  onOpenBackflow, onAddBackflow, onFinished, footerOffsetClass, showOfflineStatus,
 }: SiteSummaryProps) {
-  const { fromCopy } = useDocOffline();
+  const { fromCopy, savedAt } = useDocOffline();
   const apiRequest = createDocRequest(customerId, branchName);
   const qc = useQueryClient();
   const invalidate = useInvalidateDocSite(customerId, branchName);
@@ -132,6 +134,7 @@ export function SiteSummary({
     <DocFrame
       title="Document System"
       subtitle={subtitle}
+      headerStatus={showOfflineStatus ? <OfflineReadyIcon savedCount={savedAt > 0 ? 1 : null} testId="icon-property-offline-status" /> : undefined}
       onBack={onBack}
       footerOffsetClass={footerOffsetClass}
       footer={
