@@ -209,7 +209,9 @@ export const customerMarkupScheduleOverrides = pgTable("customer_markup_schedule
   updatedAt: timestamp("updated_at").notNull().defaultNow().$onUpdateFn(() => new Date()),
 }, t => ({
   customer: uniqueIndex("markup_override_company_customer").on(t.companyId, t.customerId),
-  customerTenant: foreignKey({ name: "markup_override_customer_tenant_fk", columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
+  // Approved staged Publish: restore customerTenant after the first Publish
+  // creates customers_company_identity in production. See
+  // docs/material-markup-staged-publish.md. App ownership checks stay enforced.
   scheduleTenant: foreignKey({ name: "markup_override_schedule_tenant_fk", columns: [t.companyId, t.scheduleId], foreignColumns: [materialMarkupSchedules.companyId, materialMarkupSchedules.id] }),
 }));
 export const insertMarkupScheduleSchema = createInsertSchema(materialMarkupSchedules).omit({ id: true, createdAt: true, updatedAt: true });

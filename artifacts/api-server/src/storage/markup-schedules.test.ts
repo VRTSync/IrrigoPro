@@ -7,7 +7,7 @@ import { DEFAULT_MARKUP_TIERS } from "@workspace/shared";
 import * as store from "./markup-schedules";
 import { seedDefaultMarkupScheduleMigration as seed } from "../lib/migrations/seed-default-markup-schedule";
 
-test("tenant isolation, concurrent activation, immutable versions and same-company override FKs", async () => {
+test("tenant isolation, concurrent activation, immutable versions and schedule tenant FK", async () => {
   const cs = await db.insert(companies).values([{ name: "Markup fixture A" }, { name: "Markup fixture B" }]).returning();
   const ids = cs.map(c => c.id);
   try {
@@ -27,7 +27,11 @@ test("tenant isolation, concurrent activation, immutable versions and same-compa
     assert.equal(await store.getMarkupSchedule(a.id, ids[1]), null);
     await assert.rejects(store.activateMarkupSchedule(a.id, ids[1]), store.MarkupNotFound);
     await assert.rejects(store.setCustomerMarkupOverride(customer.id, ids[0], foreign.id), store.MarkupNotFound);
-    await assert.rejects(db.insert(customerMarkupScheduleOverrides).values({ companyId: ids[1], customerId: customer.id, scheduleId: foreign.id }));
+    // During the approved staged Publish, the customer composite FK is
+    // intentionally deferred. The write boundary must still reject it.
+    await assert.rejects(store.setCustomerMarkupOverride(customer.id, ids[1], foreign.id), store.MarkupNotFound);
+    // The schedule composite FK remains a database-enforced tenant boundary.
+    await assert.rejects(db.insert(customerMarkupScheduleOverrides).values({ companyId: ids[0], customerId: customer.id, scheduleId: foreign.id }));
     await store.setCustomerMarkupOverride(customer.id, ids[0], a.id);
     await store.setCustomerMarkupOverride(customer.id, ids[0], b.id);
     assert.equal((await store.getCustomerMarkupOverride(customer.id, ids[0]))?.scheduleId, b.id);
