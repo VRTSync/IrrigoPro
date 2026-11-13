@@ -663,6 +663,37 @@ describe("Document System Slice 2 — existing route/storage boundaries", () => 
     for (const id of backflowIds) await storage.deleteBackflow(null, id);
     await cleanupControllers(); await srv.close();
   });
+  it("Not Wired persists through single and bulk APIs with confirmed type and unchanged identity and schedules", async () => {
+    const clock = await storage.createIrrigationController({
+      companyId: companyAId, customerId: customerAId, name: "", totalZones: 3,
+    });
+    createdControllerIds.push(clock.id);
+    const program = await storage.createIrrigationProgram(companyAId, clock.id, { name: "A" });
+    const initial = (await storage.getIrrigationController(companyAId, clock.id))!;
+    await storage.bulkUpdateIrrigationZones(companyAId, clock.id, initial.zones.map(z => z.id),
+      { programId: program!.id, runTimeMinutes: 12 });
+    const bulkPath = `/api/irrigation-controllers/${clock.id}/zones/bulk`;
+    assert.equal((await hit(srv.base, "PUT", `/api/irrigation-zones/${initial.zones[0].id}`,
+      { zoneType: "not_wired" })).status, 200);
+    assert.equal((await hit(srv.base, "PUT", bulkPath,
+      { zoneNumbers: [2, 3], patch: { zoneType: "not_wired" } })).status, 200);
+    const read = await hit(srv.base, "GET", `/api/irrigation-controllers/${clock.id}`);
+    assert.equal(read.status, 200);
+    assert.deepEqual(read.body.zones.map((z: any) => [z.id, z.zoneNumber]), initial.zones.map(z => [z.id, z.zoneNumber]));
+    assert.ok(read.body.zones.every((z: any) => z.zoneType === "not_wired" && z.zoneTypeConfirmed &&
+      z.programId === program!.id && z.runTimeMinutes === 12));
+    const history = await storage.getIrrigationHistory(companyAId, clock.id);
+    assert.match(history[0].summary ?? "", /Type Not Wired/);
+    assert.equal((await hit(srv.base, "PUT", bulkPath,
+      { zoneNumbers: [1], patch: { zoneType: "rotor" } })).status, 200);
+    const again = (await storage.getIrrigationController(companyAId, clock.id))!;
+    assert.equal(again.zones[0].id, initial.zones[0].id);
+    assert.equal(again.zones[0].zoneType, "rotor");
+    assert.equal(again.zones[0].zoneTypeConfirmed, true);
+    assert.ok(again.zones.slice(1).every(z => z.zoneType === "not_wired"));
+    assert.equal((await hit(srv.base, "PUT", bulkPath,
+      { zoneNumbers: [1], patch: { zoneType: "invalid_type" } })).status, 400);
+  });
   it("offline creates replay once, reject parent mismatches and check tenancy first", async () => {
     const clientId = crypto.randomUUID();
     const path = `/api/customers/${customerAId}/controllers-profile`;

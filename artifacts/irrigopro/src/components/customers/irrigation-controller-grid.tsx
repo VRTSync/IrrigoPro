@@ -110,6 +110,7 @@ const ZONE_TYPES = [
   { value: "netafim", label: "Netafim" },
   { value: "bubbler", label: "Bubbler" },
   { value: "other", label: "Other" },
+  { value: "not_wired", label: "Not Wired" },
 ];
 
 const DAYS_OF_WEEK = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];

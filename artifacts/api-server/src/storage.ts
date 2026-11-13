@@ -1482,6 +1482,7 @@ export type IrrigationZoneTypeEnum =
   | "drip"
   | "netafim"
   | "bubbler"
+  | "not_wired"
   | "other";
 
 export interface IrrigationImportRow {
@@ -11801,7 +11802,7 @@ export class DatabaseStorage implements IStorage {
       if (patch.runTimeMinutes !== undefined) fields.runTimeMinutes = patch.runTimeMinutes;
       const updated = await tx.update(irrigationProfileZones).set({ ...fields, ...(patch.zoneType !== undefined ? { zoneTypeConfirmed: true } : {}), updatedAt: new Date() }).where(scope).returning();
       const stamped = await this._stampControllerUpdated(tx, ctrl.id, actor?.id != null ? { id: actor.id, name: actor.name } : undefined);
-      const labels: Record<string, string> = { pop_up_spray: "Pop-up Spray", rotor: "Rotor", drip: "Drip", netafim: "Netafim", bubbler: "Bubbler", other: "Other" };
+      const labels: Record<string, string> = { pop_up_spray: "Pop-up Spray", rotor: "Rotor", drip: "Drip", netafim: "Netafim", bubbler: "Bubbler", other: "Other", not_wired: "Not Wired" };
       const descriptions = [
         patch.zoneType === undefined ? null : `Type ${labels[patch.zoneType]}`,
         patch.programId === undefined ? null : `Program ${programName}`,

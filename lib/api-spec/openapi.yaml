@@ -582,7 +582,7 @@ components:
       additionalProperties: false
       minProperties: 1
       properties:
-        zoneType: { type: string, enum: [pop_up_spray, rotor, drip, netafim, bubbler, other] }
+        zoneType: { type: string, enum: [pop_up_spray, rotor, drip, netafim, bubbler, other, not_wired] }
         programId: { type: [integer, "null"], minimum: 1 }
         runTimeMinutes: { type: integer, minimum: 0, maximum: 999 }
     DocumentationBulkZoneInput:

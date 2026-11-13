@@ -109,6 +109,7 @@ function formatZoneType(t: string): string {
     drip: 'Drip',
     netafim: 'Netafim',
     bubbler: 'Bubbler',
+    not_wired: 'Not Wired',
     other: 'Other',
   };
   return map[t] ?? t;

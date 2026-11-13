@@ -518,6 +518,7 @@ export const SaveDocumentationZonesBody = zod
             "netafim",
             "bubbler",
             "other",
+            "not_wired",
           ])
           .optional(),
         programId: zod.number().min(1).nullish(),

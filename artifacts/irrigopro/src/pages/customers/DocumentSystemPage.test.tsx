@@ -714,6 +714,48 @@ async function open(c: DocumentationControllerGraph, testId: string) {
 }
 
 describe("Slice 5 — zone types", () => {
+  it("Not Wired supports individual and fill-untyped assignment, Save & exit, reopening, Review, and changing back", async () => {
+    custom = (url, method, data) => {
+      if (url !== "/api/irrigation-controllers/58/zones/bulk" || method !== "PUT") return;
+      const body = data as { zoneNumbers: number[]; patch: { zoneType: string } };
+      const c = site.controllers[0];
+      c.zones = c.zones.map(z => body.zoneNumbers.includes(z.zoneNumber)
+        ? { ...z, zoneType: body.patch.zoneType, zoneTypeConfirmed: true } : z);
+      c.gaps = c.zones.every(z => z.zoneTypeConfirmed) ? [] : gap("zone_types");
+      return c.zones;
+    };
+    await open(ctrl(58, "A", {
+      totalZones: 3, programs: [p5(9, "A")],
+      zones: range(3, { programId: 9, runTimeMinutes: 12 }), gaps: gap("zone_types"),
+    }), "step-zone-types");
+    fireEvent.click(screen.getByTestId("chip-brush-not_wired"));
+    expect(screen.getByTestId("chip-brush-not_wired")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByTestId("tile-zone-1"));
+    expect(screen.getByLabelText("Zone 1, Not Wired")).toHaveTextContent("Not Wired");
+    expect(screen.getByTestId("text-typed-counter")).toHaveTextContent("1 of 3 zones typed");
+    expect(screen.getByTestId("button-fill-untyped")).toHaveTextContent("Set the 2 untyped zones to Not Wired");
+    fireEvent.click(screen.getByTestId("button-fill-untyped"));
+    expect(screen.getByTestId("text-typed-counter")).toHaveTextContent("3 of 3 zones typed");
+    expect(screen.getByTestId("button-next")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("button-save-exit"));
+    await screen.findByText("What's on file");
+    expect(bulk()).toEqual([["/api/irrigation-controllers/58/zones/bulk", "PUT",
+      { zoneNumbers: [1, 2, 3], patch: { zoneType: "not_wired" } }]]);
+    fireEvent.click(screen.getByTestId("row-controller-58"));
+    await screen.findByTestId("step-review");
+    expect(screen.getByTestId("text-review-types")).toHaveTextContent("Not Wired 3");
+    fireEvent.click(screen.getByTestId("button-edit-types"));
+    await screen.findByTestId("step-zone-types");
+    expect(screen.getByLabelText("Zone 1, Not Wired")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("chip-brush-rotor"));
+    fireEvent.click(screen.getByTestId("tile-zone-1"));
+    expect(screen.getByLabelText("Zone 1, Rotor")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("button-save-exit"));
+    await screen.findByText("What's on file");
+    expect(site.controllers[0].zones.map(z => [z.id, z.zoneNumber, z.zoneType, z.programId, z.runTimeMinutes]))
+      .toEqual([[101, 1, "rotor", 9, 12], [102, 2, "not_wired", 9, 12], [103, 3, "not_wired", 9, 12]]);
+  });
+
   it("1. brush Rotor on zones 3 and 4 shows Rotor and the counter goes up by 2", async () => {
     await open(ctrl(50, "A", { totalZones: 4, zones: range(4), gaps: gap("zone_types") }), "step-zone-types");
     expect(screen.getByTestId("text-typed-counter")).toHaveTextContent("0 of 4 zones typed");
@@ -1295,6 +1337,9 @@ describe("Slice 5 — review fixes", () => {
     fireEvent.click(screen.getByTestId("button-next"));
     await waitFor(() => expect(screen.getByTestId("tile-zone-1")).toBeDisabled());
     expect(screen.getByTestId("chip-brush-rotor")).toBeDisabled();
+    // Offline persistence precedes the HTTP write; disabled UI alone doesn't
+    // mean the request stub has installed its release callback yet.
+    await waitFor(() => expect(release).toBeTypeOf("function"));
     await act(async () => { release(); });
     await screen.findByTestId("step-programs");
     fireEvent.click(screen.getByTestId("chip-day-Tue"));

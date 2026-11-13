@@ -30,6 +30,7 @@ export const DOC_ZONE_TYPES = [
   { value: "netafim",      label: "Netafim", tile: "bg-orange-100 border-orange-300" },
   { value: "bubbler",      label: "Bubbler", tile: "bg-violet-100 border-violet-300" },
   { value: "other",        label: "Other",   tile: "bg-slate-200 border-slate-400" },
+  { value: "not_wired",    label: "Not Wired", tile: "bg-rose-100 border-rose-300" },
 ] as const;
 
 /** Stored day format, same values and order as DAYS_OF_WEEK in irrigation-controller-grid.tsx. */

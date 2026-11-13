@@ -81,3 +81,4 @@
 - [PostgreSQL identifier drift](postgres-identifier-drift.md) — long FK names can produce endless Drizzle diffs; filtered pushes can still propose unrelated sequence drops.
 - [Material markup decisions](material-markup-decisions.md) — incremental pricing, exclusions, frozen documents and the three-tier addition scope.
 - [Composite tenant FK rollout](composite-fk-schema-order.md) — schema push may add a foreign key before its required unique index; preserve tenant constraints and prepare indexes first.
+- [Unwired controller slots](unwired-controller-slots.md) — physical unused slots need Not Wired, distinct from Other or a wired zone at zero minutes; preserve numbering.

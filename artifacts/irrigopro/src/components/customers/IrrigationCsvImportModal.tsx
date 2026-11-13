@@ -167,6 +167,8 @@ const ZONE_TYPE_ALIASES: Record<string, string> = {
   netafim: "netafim",
   bubbler: "bubbler",
   other: "other",
+  "not wired": "not_wired",
+  not_wired: "not_wired",
 };
 
 const VALID_ZONE_TYPES = new Set([
@@ -176,6 +178,7 @@ const VALID_ZONE_TYPES = new Set([
   "netafim",
   "bubbler",
   "other",
+  "not_wired",
 ]);
 
 const DAY_ABBR: Record<string, string> = {
@@ -346,7 +349,7 @@ function parseCsv(text: string): ParseResult {
       errors.push({
         row: rowNum,
         field: "Zone Type",
-        message: `Unknown zone type "${rawZoneType}". Valid values: pop-up spray, rotor, drip, netafim, bubbler, other`,
+        message: `Unknown zone type "${rawZoneType}". Valid values: pop-up spray, rotor, drip, netafim, bubbler, other, not wired`,
       });
       return;
     }
@@ -900,7 +903,7 @@ export function IrrigationCsvImportModal({
 
             <div className="text-xs text-gray-400 space-y-0.5">
               <p className="font-medium text-gray-500">Zone Type values:</p>
-              <p>pop-up spray · rotor · drip · netafim · bubbler · other</p>
+              <p>pop-up spray · rotor · drip · netafim · bubbler · other · not wired</p>
               <p className="mt-1 font-medium text-gray-500">Watering Days examples:</p>
               <p>Mon,Wed,Fri · MWF · Mon Wed Fri</p>
             </div>

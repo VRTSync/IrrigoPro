@@ -246,6 +246,7 @@ export const DocumentationZonePatchZoneType = {
   netafim: "netafim",
   bubbler: "bubbler",
   other: "other",
+  not_wired: "not_wired",
 } as const;
 
 export interface DocumentationZonePatch {

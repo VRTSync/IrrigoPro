@@ -108,7 +108,7 @@ export const updateProgramBody = createProgramBody.omit({ clientId: true }).part
 export const updateZoneBody = z.object({
   name: z.string().min(1).max(200),
   zoneType: z
-    .enum(["pop_up_spray", "rotor", "drip", "netafim", "bubbler", "other"])
+    .enum(["pop_up_spray", "rotor", "drip", "netafim", "bubbler", "other", "not_wired"])
     .optional(),
   runTimeMinutes: z.coerce.number().int().nonnegative().optional(),
   zoneOrder: z.coerce.number().int().optional(),
@@ -127,7 +127,7 @@ export const bulkZoneBody = z.object({
   zoneIds: z.array(z.number().int().positive()).min(1).max(100).refine(ids => new Set(ids).size === ids.length, "Duplicate zone IDs").optional(),
   zoneNumbers: z.array(z.number().int().positive()).min(1).max(100).refine(ids => new Set(ids).size === ids.length, "Duplicate zone numbers").optional(),
   patch: z.object({
-    zoneType: z.enum(["pop_up_spray", "rotor", "drip", "netafim", "bubbler", "other"]).optional(),
+    zoneType: z.enum(["pop_up_spray", "rotor", "drip", "netafim", "bubbler", "other", "not_wired"]).optional(),
     programId: z.number().int().positive().nullable().optional(),
     runTimeMinutes: z.coerce.number().int().min(0).max(999).optional(),
   }).strict().refine(p => Object.values(p).some(v => v !== undefined), "Nothing to apply"),
@@ -1143,7 +1143,7 @@ export function registerIrrigationProfileRoutes(
 
       // ── Server-side row validation ─────────────────────────────────────────
       const VALID_ZONE_TYPES = new Set([
-        "pop_up_spray", "rotor", "drip", "netafim", "bubbler", "other",
+        "pop_up_spray", "rotor", "drip", "netafim", "bubbler", "other", "not_wired",
       ]);
       const VALID_DAYS = new Set(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
       const TIME_RE = /^\d{1,2}:\d{2}$/;
@@ -1167,7 +1167,7 @@ export function registerIrrigationProfileRoutes(
           rowErrors.push({
             row: rowNum,
             field: "Zone Type",
-            message: `Unknown zone type "${raw.zoneType}". Valid: pop_up_spray, rotor, drip, netafim, bubbler, other`,
+            message: `Unknown zone type "${raw.zoneType}". Valid: pop_up_spray, rotor, drip, netafim, bubbler, other, not_wired`,
           });
           continue;
         }
